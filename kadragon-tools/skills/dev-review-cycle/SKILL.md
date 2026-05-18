@@ -119,7 +119,7 @@ Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr`
 ```
 Agent tool parameters:
   description: "Comprehensive PR review against ${BASE_BRANCH}"
-  model: "sonnet"
+  model: "opus"
   prompt: |
     Run a comprehensive PR review using the /pr-review-toolkit:review-pr skill on the changes
     introduced by branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
