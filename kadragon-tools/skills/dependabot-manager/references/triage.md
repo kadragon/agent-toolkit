@@ -26,6 +26,24 @@ gh pr view {number} -R {owner}/{repo} --json number,title,mergeable,mergeStateSt
 | ⏳ | CI pending | Checks still running |
 | ⚪ | No CI | No status checks configured |
 
-## 2c. Triage Report
+## 2c. Auto-Merge Readiness Audit
 
-Present categorized results per repo with emoji prefix. For failed/rebase/no-CI items, include a detail line explaining the issue.
+Run after PR triage — one call covers all repos discovered in Phase 1:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/audit-automerge.sh \
+  "owner/repo1" "owner/repo2" ...
+```
+
+Output fields per repo: `allow_auto_merge`, `has_protection`, `required_checks`, `ready_for_auto_merge`, `missing`.
+
+Report with emoji:
+| Emoji | Status | Condition |
+|---|---|---|
+| 🟢 | Ready | `ready_for_auto_merge: true` |
+| 🟡 | Partial | `allow_auto_merge` missing only |
+| 🟠 | Not ready | `branch_protection` or `required_checks` missing |
+
+## 2d. Triage Report
+
+Present categorized results per repo with emoji prefix. For failed/rebase/no-CI items, include a detail line explaining the issue. Append auto-merge readiness after each repo block.

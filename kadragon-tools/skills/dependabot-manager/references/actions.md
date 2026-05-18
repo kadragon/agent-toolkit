@@ -10,14 +10,57 @@ Offer to merge all ready PRs in one shot:
 gh pr merge {number} -R {owner}/{repo} --squash
 ```
 
-## 3b. Handle Multiple Major PRs
+## 3b. Enable Auto-Merge
+
+**When:** any repo has `ci_pending` PRs AND `ready_for_auto_merge: false` from the Phase 2 audit.
+
+### Step 1: Confirm once
+
+Show the user the affected repos and their `missing` items. One confirmation covers all repos — then proceed autonomously.
+
+### Step 2: Enable per repo (parallel)
+
+For each repo needing activation, run:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/enable-automerge.sh "owner/repo"
+```
+
+Interpret `protection_action`:
+- `created` — branch protection added with detected CI check names; report contexts.
+- `already_present` — protection exists; `allow_auto_merge` toggled, nothing else changed.
+- `skipped` — no CI signal found. Warn: "auto-merge may fire immediately without required checks — consider adding branch protection manually."
+
+### Step 3: Apply `--auto` to ci_pending PRs
+
+For each `ci_pending` dependabot PR in repos that now have auto-merge enabled:
+
+```bash
+gh pr merge {number} -R {owner}/{repo} --auto --squash
+```
+
+Skip: `ci_failed`, `needs_rebase`, `no_ci` (unsafe — would merge without checks or needs rebase first).
+
+### Step 4: Report
+
+```
+✅ Auto-merge enabled: N repos
+🔀 --auto set on: M PRs (will merge when CI passes)
+⚠️  Skipped (skipped protection): repo-a — add branch protection to avoid immediate merge
+```
+
+No further polling needed for these PRs — they will merge on their own when CI finishes.
+
+---
+
+## 3c. Handle Multiple Major PRs
 
 Detect major PRs by title (major version number differs). Merging one makes others go behind, creating a serial bottleneck.
 
 - **2 or fewer major PRs** — sequential merge + `@dependabot rebase` on remaining
 - **3+ major PRs** — offer consolidated branch (`chore/major-dependency-updates`): apply all bumps together, create single PR, close originals with `gh pr close --comment "Included in #{consolidated_pr}"`
 
-## 3c. Handle Rebase-Needed PRs (non-major)
+## 3d. Handle Rebase-Needed PRs (non-major)
 
 Comment `@dependabot rebase` on each:
 
@@ -25,7 +68,7 @@ Comment `@dependabot rebase` on each:
 gh pr comment {number} --repo {owner}/{repo} --body "@dependabot rebase"
 ```
 
-## 3d. CI Failure Analysis + Fix Pipeline
+## 3e. CI Failure Analysis + Fix Pipeline
 
 ### Step 1: Analyze
 
@@ -75,14 +118,14 @@ After the user confirms the fix strategy, execute this pipeline autonomously wit
    bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/poll-ci.sh \
      --timeout 600 "owner/repo1:{new-dep-pr}" ...
    ```
-7. **Merge dependabot PRs** — once all show `ready`
+7. **Merge dependabot PRs** — once all show `ready`. If auto-merge is enabled for the repo (see 3b), apply `gh pr merge --auto --squash` and skip the polling step; the merge fires automatically when CI passes.
 8. **Report completion**
 
-## 3e. Handle No-CI PRs
+## 3f. Handle No-CI PRs
 
 Warn that merging without CI is risky. If user proceeds, confirm per PR (not batch).
 
-## 3f. Configure Grouped Updates
+## 3g. Configure Grouped Updates
 
 For repos missing grouped updates or `github-actions` ecosystem, offer to configure. Create branch `chore/configure-dependabot-grouped-updates`, add config:
 
@@ -106,7 +149,7 @@ If repo uses Actions but lacks `github-actions` ecosystem, also add:
         update-types: ["minor", "patch"]
 ```
 
-## 3g. Consolidate Ungrouped PRs (Fallback)
+## 3h. Consolidate Ungrouped PRs (Fallback)
 
 For repos with 3+ individual PRs and no grouped updates, offer consolidation using bundled scripts:
 

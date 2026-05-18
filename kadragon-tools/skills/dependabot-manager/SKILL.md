@@ -42,7 +42,7 @@ The script returns a JSON array with `category` for each PR:
 | ⏳ | `ci_pending` | Checks still running |
 | ⚪ | `no_ci` | No status checks configured |
 
-Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. See **`references/triage.md`** for details.
+Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Run `audit-automerge.sh` to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks). See **`references/triage.md`** for details.
 
 Present categorized results per repo with emoji prefix.
 
@@ -53,12 +53,13 @@ Present all applicable actions at once after triage — don't offer them seriall
 | Priority | Action | When |
 |----------|--------|------|
 | 1 | Batch merge ready PRs | CI passed + mergeable |
-| 2 | Handle major PRs | Major version bumps detected |
-| 3 | Rebase stale PRs | CI passed but conflicting/behind |
-| 4 | Analyze CI failures → fix pipeline | Any check failed |
-| 5 | Warn about no-CI PRs | No status checks configured |
-| 6 | Configure grouped updates | Missing or partial config |
-| 7 | Consolidate ungrouped PRs | 3+ individual PRs, no groups |
+| 2 | Enable auto-merge | `ci_pending` PRs exist + repo not auto-merge ready |
+| 3 | Handle major PRs | Major version bumps detected |
+| 4 | Rebase stale PRs | CI passed but conflicting/behind |
+| 5 | Analyze CI failures → fix pipeline | Any check failed |
+| 6 | Warn about no-CI PRs | No status checks configured |
+| 7 | Configure grouped updates | Missing or partial config |
+| 8 | Consolidate ungrouped PRs | 3+ individual PRs, no groups |
 
 ## Autonomy Rules
 
@@ -74,6 +75,7 @@ Never pause for:
 - Polling CI status
 - Triggering `@dependabot rebase` after merging a CI infra fix
 - Merging a PR that CI just passed as part of an already-approved pipeline
+- Running `enable-automerge.sh` on individual repos after initial batch is confirmed
 
 ## Known Gotchas
 
@@ -93,8 +95,10 @@ Spawn subagents only for tasks that require reading and reasoning (CI log analys
 ## Scripts
 
 ```
-scripts/triage.sh           — batch triage; replaces per-repo triage agents
-scripts/poll-ci.sh          — poll until all PRs reach terminal CI state
+scripts/triage.sh            — batch triage; replaces per-repo triage agents
+scripts/audit-automerge.sh   — check allow_auto_merge + branch protection per repo
+scripts/enable-automerge.sh  — enable allow_auto_merge + create branch protection if missing
+scripts/poll-ci.sh           — poll until all PRs reach terminal CI state (fallback)
 scripts/consolidate-deps.cjs — consolidate npm/Node.js dependabot PRs
 scripts/consolidate-deps.py  — consolidate Python dependabot PRs
 ```
