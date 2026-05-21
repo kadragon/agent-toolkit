@@ -4,7 +4,7 @@ Detailed procedure for consolidating multi-reviewer feedback (Step 3 of dev-revi
 
 ## Consolidation Procedure
 
-All three reviewers (Claude Code, Gemini, Codex) use the same P0-P3 priority scheme, making deduplication straightforward.
+All three reviewers (Claude Code, Antigravity, Codex) use the same P0-P3 priority scheme, making deduplication straightforward.
 
 ### 1. Deduplicate
 
@@ -34,7 +34,7 @@ For each remaining suggestion, determine whether it falls within the current PR'
 Present the consolidated list as a table with:
 - Priority (P0-P3)
 - Title
-- Source attribution (Claude / Gemini / Codex)
+- Source attribution (Claude / Antigravity / Codex)
 - Scope column (In / Out)
 - Recommendation (apply / skip with reason)
 

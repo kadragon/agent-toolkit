@@ -1,6 +1,6 @@
 ---
 name: dev-review-cycle
-description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Gemini, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "PR review", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review.
+description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Antigravity, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "PR review", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review.
 ---
 
 # Dev Review Cycle
@@ -24,11 +24,11 @@ Run the bundled preflight script to detect available tools and repository metada
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hub]
 ```
 
-The script detects: `gh` auth status, Gemini CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, and merge strategy. In `--no-hub` mode it skips all remote/GitHub checks and detects the base branch purely from local state.
+The script detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, and merge strategy. In `--no-hub` mode it skips all remote/GitHub checks and detects the base branch purely from local state.
 
 If `has_errors` is `true` in the output, stop the workflow and report the errors to the user.
 
-Use the returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `gemini_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`) in all subsequent steps instead of hardcoding. Prefer squash > merge > rebase for merge strategy, in that order of availability.
+Use the returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`) in all subsequent steps instead of hardcoding. Prefer squash > merge > rebase for merge strategy, in that order of availability.
 
 ## CRITICAL: Execution Model
 
@@ -131,13 +131,13 @@ Agent tool parameters:
   run_in_background: true
 ```
 
-#### 2-2: Gemini CLI Review
+#### 2-2: Antigravity (agy) Review
 
-Skip if `gemini_available` is false from pre-flight. Launch in background:
+Skip if `agy_available` is false from pre-flight. Launch in background:
 
 ```bash
 # run_in_background: true, timeout: 600000
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/gemini-review.sh ${BASE_BRANCH}
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH}
 ```
 
 If the command fails, proceed without this review.
@@ -252,7 +252,7 @@ When `--no-hub` is set, re-running simply means committing new changes locally a
 |---------|--------|
 | Pre-flight `has_errors: true` | Stop. Report errors (e.g., suggest `gh auth login`). |
 | Step 1 (commit/PR) fails | Stop. Report the error. |
-| Gemini/Codex unavailable or fails | Inform user, proceed with available reviews. |
+| Antigravity/Codex unavailable or fails | Inform user, proceed with available reviews. |
 | No actionable suggestions | Report no issues. Skip Steps 4-5, proceed to Step 6. |
 | Push fails (Step 5) | Report error. Suggest manual resolution. |
 | CI fails 3 times | Stop. Ask user for guidance. |
@@ -270,7 +270,7 @@ For detailed procedures, consult:
 ### Scripts
 
 - **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with tool availability and repo metadata
-- **`scripts/gemini-review.sh`** — Gemini CLI review launcher
+- **`scripts/agy-review.sh`** — Antigravity (agy) review launcher
 - **`scripts/codex-review.sh`** — Codex review launcher (plugin or CLI mode)
 - **`scripts/ci-failure-logs.sh`** — Fetches failed CI check logs as JSON
 - **`scripts/merge-and-cleanup.sh`** `<pr_number> <base_branch> <feature_branch> '<merge_strategy_json>'` — Merges PR and cleans up local/remote branches. All 4 args required; merge_strategy is a JSON object (e.g. `'{"squash":true}'`), not a bare word.

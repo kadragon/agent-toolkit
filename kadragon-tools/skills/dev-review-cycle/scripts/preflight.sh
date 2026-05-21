@@ -29,9 +29,9 @@ if [ "$NO_HUB" = "false" ]; then
   fi
 fi
 
-# --- Gemini CLI ---
-GEMINI_AVAILABLE=false
-command -v gemini >/dev/null 2>&1 && GEMINI_AVAILABLE=true
+# --- Antigravity (agy) CLI ---
+AGY_AVAILABLE=false
+command -v agy >/dev/null 2>&1 && AGY_AVAILABLE=true
 
 # --- Codex ---
 CODEX_AVAILABLE=false
@@ -86,7 +86,7 @@ fi
 jq -n \
   --argjson no_hub "$NO_HUB" \
   --argjson gh_authenticated "$GH_AUTHENTICATED" \
-  --argjson gemini_available "$GEMINI_AVAILABLE" \
+  --argjson agy_available "$AGY_AVAILABLE" \
   --argjson codex_available "$CODEX_AVAILABLE" \
   --arg codex_mode "$CODEX_MODE" \
   --arg codex_companion_path "$CODEX_COMPANION_PATH" \
@@ -98,7 +98,7 @@ jq -n \
   '{
     no_hub: $no_hub,
     gh_authenticated: $gh_authenticated,
-    gemini_available: $gemini_available,
+    agy_available: $agy_available,
     codex_available: $codex_available,
     codex_mode: $codex_mode,
     codex_companion_path: $codex_companion_path,
