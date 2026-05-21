@@ -4,14 +4,15 @@ Detailed procedure for handling CI failures (Step 6 of dev-review-cycle).
 
 ## Wait for CI
 
-Poll the CI status for the PR using `--watch`:
+Run the CI wait script and check the result:
 
 ```bash
 # timeout: 900000
-gh pr checks <PR_NUMBER> --watch --fail-fast
+RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/ci-wait.sh <PR_NUMBER>)
+PASSED=$(echo "$RESULT" | jq -r '.passed')
 ```
 
-Allow up to 15 minutes (900000ms).
+If `PASSED` is `true`, proceed to merge. If `false`, handle CI failure below. Allow up to 15 minutes (900000ms).
 
 ## Handle CI Failure
 

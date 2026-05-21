@@ -55,58 +55,37 @@ If already on a non-base branch, skip this step.
 
 ### Step 1: Commit (and Create PR unless `--no-hub`)
 
-Before delegating, **determine the commit message and file list yourself**:
+Determine the commit message yourself:
 
-- If you have context from recent development or from Step 0's `git diff` read, use it directly.
-- Otherwise (cold invocation), run `git diff --stat HEAD` to understand what changed.
-- Run `git log --oneline -5` to match the project's commit style.
-- Collect the list of changed files: `git diff --name-only HEAD` (for tracked changes) combined with `git ls-files --others --exclude-standard` (for untracked new files). Merge into a single space-separated list.
+- If you have context from recent development or Step 0's diff, use it directly.
+- Otherwise run `git diff --stat HEAD` to understand scope, and `git log --oneline -5` to match the project's commit style.
 
-Write the commit message and the file list, then **replace `${COMMIT_MESSAGE}` and `${FILES_TO_STAGE}` with the actual values** before passing the prompt to the Agent tool. Do NOT ask the subagent to analyze the diff or figure out which files to stage.
-
-Delegate only the mechanical git operations to a **subagent**.
+The file list is auto-detected by the commit script — no need to collect it yourself.
 
 **When `--no-hub` is set:**
 
-```
-Agent tool parameters:
-  description: "Commit changes locally"
-  model: "sonnet"
-  prompt: |
-    Commit the following files using this exact message:
-    Files: ${FILES_TO_STAGE}
-    ---
-    ${COMMIT_MESSAGE}
-    ---
-    1. Stage exactly the listed files: `git add ${FILES_TO_STAGE}`
-    2. Create the commit with the message above (do NOT rewrite it).
-    Report the commit hash when done.
+```bash
+RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
+  --no-push \
+  --message "${COMMIT_MESSAGE}")
+echo "$RESULT"
 ```
 
-Immediately proceed to Step 2 after the subagent returns.
+Immediately proceed to Step 2 after the script succeeds.
 
 **When `--no-hub` is NOT set:**
 
-```
-Agent tool parameters:
-  description: "Commit, push, and create PR"
-  model: "sonnet"
-  prompt: |
-    Commit, push, and create a PR using this exact commit message:
-    Files: ${FILES_TO_STAGE}
-    ---
-    ${COMMIT_MESSAGE}
-    ---
-    1. Stage exactly the listed files: `git add ${FILES_TO_STAGE}`
-    2. Create the commit with the message above (do NOT rewrite it).
-    3. Push the branch to origin.
-    4. Create a pull request using `gh pr create`.
-    Report the PR number and URL when done.
+```bash
+RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
+  --pr \
+  --base "${BASE_BRANCH}" \
+  --message "${COMMIT_MESSAGE}")
+echo "$RESULT"
 ```
 
-Extract the PR number and URL from the subagent's result. If the subagent reports failure, stop the workflow and report the error.
+Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If the script exits non-zero or `pr_number` is null, stop and report the error.
 
-**Do NOT pause or ask the user after PR creation.** Extract the PR number and URL from the subagent result and immediately proceed to Step 2.
+**Do NOT pause or ask the user after PR creation.** Immediately proceed to Step 2.
 
 ### Step 2: Collect Reviews
 
@@ -177,48 +156,30 @@ After improvements are applied and tests pass, immediately proceed to Step 5.
 
 ### Step 5: Commit (and Push unless `--no-hub`)
 
-**Determine the commit message and file list yourself** based on which improvements you just applied — you have full context from Step 4. You already know which files you edited. Write a concise commit message and compile the exact file list. **Replace `${COMMIT_MESSAGE}` and `${FILES_TO_STAGE}` with the actual values** before passing the prompt to the Agent tool. Do NOT ask the subagent to re-analyze the diff or discover modified files.
-
-Delegate only the mechanical git operations to a **subagent**.
+Determine the commit message yourself — you have full context from Step 4. List the exact files you modified in that step; pass them explicitly via `--files` to avoid accidentally staging unrelated changes.
 
 **When `--no-hub` is set:**
 
-```
-Agent tool parameters:
-  description: "Commit review improvements locally"
-  model: "sonnet"
-  prompt: |
-    Commit the following files locally (do NOT push) using this exact message:
-    Files: ${FILES_TO_STAGE}
-    ---
-    ${COMMIT_MESSAGE}
-    ---
-    1. Stage exactly the listed files: `git add ${FILES_TO_STAGE}`
-    2. Create the commit with the message above (do NOT rewrite it).
-    Do NOT push. Report the commit hash when done.
+```bash
+RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
+  --no-push \
+  --files "${FILES_TO_STAGE}" \
+  --message "${COMMIT_MESSAGE}")
+echo "$RESULT"
 ```
 
-After the subagent returns, skip Step 6 entirely. Report the review summary and applied improvements to the user. The workflow ends here.
+After the script returns, skip Step 6 entirely. Report the review summary and applied improvements to the user. The workflow ends here.
 
 **When `--no-hub` is NOT set:**
 
-```
-Agent tool parameters:
-  description: "Commit and push review improvements"
-  model: "sonnet"
-  prompt: |
-    Commit and push the following files using this exact message:
-    Files: ${FILES_TO_STAGE}
-    ---
-    ${COMMIT_MESSAGE}
-    ---
-    1. Stage exactly the listed files: `git add ${FILES_TO_STAGE}`
-    2. Create the commit with the message above (do NOT rewrite it).
-    3. Push to origin (same branch). Do NOT create a new PR.
-    Report the commit hash when done.
+```bash
+RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
+  --files "${FILES_TO_STAGE}" \
+  --message "${COMMIT_MESSAGE}")
+echo "$RESULT"
 ```
 
-After the subagent returns, immediately proceed to Step 6.
+After the script returns, immediately proceed to Step 6.
 
 ### Step 6: Wait for CI and Merge (skip when `--no-hub`)
 
@@ -226,7 +187,7 @@ Follow the detailed procedure in **`references/ci-failure-handling.md`** for CI 
 
 Summary:
 
-1. **Wait for CI** — `gh pr checks <PR_NUMBER> --watch --fail-fast` (timeout 15 min).
+1. **Wait for CI** — run `scripts/ci-wait.sh` and check `passed` in the JSON output (timeout 15 min).
 2. **On failure** — Fetch logs via `scripts/ci-failure-logs.sh`, classify fix (trivial → apply directly; logic change → re-run Steps 2-3). Hard stop after 3 consecutive failures.
 3. **Merge and clean up** — Run the merge script with all 4 required positional args (5th is optional):
    ```
@@ -270,6 +231,9 @@ For detailed procedures, consult:
 ### Scripts
 
 - **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with tool availability and repo metadata
+- **`scripts/changed-files.sh`** — Detects tracked changes + untracked new files; one path per line
+- **`scripts/commit-and-push.sh`** `--message <msg> [--files "f1 f2"] [--no-push] [--pr] [--base <branch>]` — Stage, commit, push, and optionally create a PR; outputs JSON `{commit_hash, pushed, pr_number, pr_url}`
+- **`scripts/ci-wait.sh`** `<pr_number>` — Waits for all CI checks to complete; outputs JSON `{passed: bool}`
 - **`scripts/agy-review.sh`** — Antigravity (agy) review launcher
 - **`scripts/codex-review.sh`** — Codex review launcher (plugin or CLI mode)
 - **`scripts/ci-failure-logs.sh`** — Fetches failed CI check logs as JSON
