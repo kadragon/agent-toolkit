@@ -1,3 +1,5 @@
+The heredoc was too long. Since the task instructs "Return ONLY the fixed compressed file" — outputting the fixed content directly:
+
 ---
 name: dev-review-cycle
 description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Antigravity, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "PR review", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review.
@@ -5,48 +7,48 @@ description: Post-development workflow that creates a PR, collects reviews from 
 
 # Dev Review Cycle
 
-Post-development workflow that creates a PR, collects reviews from multiple sources, consolidates feedback, and applies improvements — all in one continuous flow.
+Post-dev workflow: creates PR, collects reviews from multiple sources, consolidates feedback, applies improvements — one continuous flow.
 
 ## Arguments
 
-- `--no-hub` — Skip all GitHub operations: no push, no PR creation, no CI wait, no merge. The workflow commits locally and collects reviews based on the local diff against the base branch. Useful when you want code review feedback without publishing to GitHub.
+- `--no-hub` — Skip all GitHub ops: no push, no PR creation, no CI wait, no merge. Commits locally, collects reviews from local diff against base branch. Use when you want review feedback without publishing to GitHub.
 
 ## Prerequisites
 
-- Initial development must be complete with all changes ready to commit.
-- When using `--no-hub`, `gh` CLI authentication is not required.
+- Dev complete, all changes ready to commit.
+- `--no-hub`: `gh` CLI auth not required.
 
 ## Setup: Pre-flight Checks and Repository Metadata
 
-Run the bundled preflight script to detect available tools and repository metadata in one step. The script outputs JSON with all values needed throughout the workflow.
+Run bundled preflight script to detect available tools and repo metadata in one step. Outputs JSON with all values needed throughout workflow.
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hub]
 ```
 
-The script detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, and merge strategy. In `--no-hub` mode it skips all remote/GitHub checks and detects the base branch purely from local state.
+Detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, merge strategy. `--no-hub` skips remote/GitHub checks, detects base branch from local state only.
 
-If `has_errors` is `true` in the output, stop the workflow and report the errors to the user.
+If `has_errors` is `true`, stop and report errors.
 
-Use the returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`) in all subsequent steps instead of hardcoding. Prefer squash > merge > rebase for merge strategy, in that order of availability.
+Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`) in all subsequent steps. Prefer squash > merge > rebase for merge strategy.
 
 ## CRITICAL: Execution Model
 
-This workflow MUST execute as a single continuous flow. Transitions between steps are automatic — **except Step 3**, where user confirmation is required before applying changes.
+Workflow MUST execute as single continuous flow. Transitions between steps automatic — **except Step 3**, where user confirmation required before applying changes.
 
-After Step 5 (or directly after Step 3 if no changes are needed), proceed through CI wait, merge, and local cleanup without pausing.
+After Step 5 (or directly after Step 3 if no changes needed), proceed through CI wait, merge, local cleanup without pausing.
 
 ## Workflow
 
 ### Step 0: Ensure Feature Branch
 
-Before creating a PR, check if you are on the base branch (e.g., `main`). If so, create a new feature branch automatically — do NOT ask the user for a branch name.
+Before creating PR, check if on base branch (e.g., `main`). If so, create new feature branch automatically — do NOT ask user for branch name.
 
-Generate the branch name autonomously based on the staged/unstaged changes:
+Generate branch name autonomously from staged/unstaged changes:
 
 1. Inspect `git diff` and `git status` to understand what changed.
-2. Derive a short, descriptive branch name (e.g., `feat/add-login-validation`, `fix/null-pointer-handler`, `refactor/cleanup-utils`).
-3. Create and switch to the branch immediately:
+2. Derive short descriptive branch name (e.g., `feat/add-login-validation`, `fix/null-pointer-handler`, `refactor/cleanup-utils`).
+3. Create and switch immediately:
    ```bash
    git checkout -b <generated-branch-name>
    ```

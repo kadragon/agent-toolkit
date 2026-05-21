@@ -5,9 +5,9 @@ description: Scan all GitHub security alerts (Dependabot, Code Scanning, Secret 
 
 # Security Overview
 
-Scan all GitHub security alerts across the authenticated user's repos, ensure affected repos are cloned locally, and produce per-repo `plan.md` files with prioritized fix tasks.
+Scan all GitHub security alerts across authenticated user's repos, ensure affected repos cloned locally, produce per-repo `plan.md` with prioritized fix tasks.
 
-Respond in the user's language; keep technical artifacts (commits, branches, file paths) in English.
+Respond in user's language; technical artifacts (commits, branches, file paths) in English.
 
 ## Execution Model
 
@@ -17,7 +17,7 @@ Single continuous flow: **Discover → Ensure Local → Generate Plans**.
 
 ### 1-1. Authenticate and list repos
 
-Verify `gh` is authenticated. If not, stop and suggest `gh auth login`.
+Verify `gh` authenticated. If not, stop and suggest `gh auth login`.
 
 ```bash
 GH_USER=$(gh api user --jq '.login')
@@ -26,25 +26,25 @@ gh repo list "${GH_USER}" --json name,url --limit 300 -q '.[] | "\(.name) \(.url
 
 ### 1-2. Collect Dependabot alerts
 
-Fetch all Dependabot vulnerability alerts in a single paginated GraphQL call. Either execute `scripts/fetch-alerts.sh` directly, or extract the query pattern from it for manual use.
+Fetch all Dependabot vulnerability alerts in single paginated GraphQL call. Execute `scripts/fetch-alerts.sh` directly, or extract query pattern for manual use.
 
-For query structure, field reference, and pagination details, consult **`references/api-patterns.md`** § Dependabot.
+For query structure, field reference, pagination details → **`references/api-patterns.md`** § Dependabot.
 
 ### 1-3. Collect Code Scanning and Secret Scanning alerts
 
-For each repo, fetch alerts via REST. Handle expected errors gracefully:
+Fetch alerts per repo via REST. Handle expected errors:
 
 | HTTP Status | Meaning | Action |
 |-------------|---------|--------|
 | 403/404 | Feature not enabled | Record as "not enabled", skip |
 
-For endpoint details and response fields, consult **`references/api-patterns.md`** § Code Scanning / Secret Scanning.
+Endpoint details, response fields → **`references/api-patterns.md`** § Code Scanning / Secret Scanning.
 
-**Critical**: Always strip the `.secret` field from secret scanning responses to prevent leaking credentials into context.
+**Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context.
 
 ### 1-4. Present summary
 
-Show a consolidated table of repos with alerts:
+Show consolidated table of repos with alerts:
 
 | Repo | Dependabot | Code Scanning | Secret Scanning | Total |
 |------|-----------|--------------|----------------|-------|
@@ -52,15 +52,15 @@ Show a consolidated table of repos with alerts:
 
 Sort by total descending. Include severity breakdown. Skip repos with zero alerts.
 
-After the table, show overall stats: total repos scanned, repos with/without alerts, breakdown by type and severity.
+After table: total repos scanned, repos with/without alerts, breakdown by type and severity.
 
 ## Phase 2: Ensure Local Repos
 
-For each repo with alerts, ensure a local clone exists.
+For each repo with alerts, ensure local clone exists.
 
 ### 2-1. Determine workspace directory
 
-Default to the **parent** of the current working directory. If the current directory is not a typical workspace child (e.g., running from home), confirm the target directory with the user before cloning.
+Default to **parent** of current working directory. If current directory not typical workspace child (e.g., running from home), confirm target with user before cloning.
 
 ```bash
 WORKSPACE_DIR=$(dirname "$(pwd)")
@@ -72,33 +72,33 @@ For each affected repo:
 1. Check if `${WORKSPACE_DIR}/${REPO_NAME}` exists.
 2. If missing, clone: `gh repo clone ${GH_USER}/${REPO_NAME} "${WORKSPACE_DIR}/${REPO_NAME}"`
 
-Report status: already-local repos vs newly-cloned repos.
+Report status: already-local vs newly-cloned repos.
 
 ## Phase 3: Generate plan.md
 
-Write a **separate** `plan.md` into **each affected repo's root directory**. Do NOT create a single consolidated file.
+Write **separate** `plan.md` into **each affected repo's root**. Do NOT create single consolidated file.
 
 ### 3-1. Read code context
 
-Before writing fix plans, read relevant files in each repo:
+Before writing fix plans, read relevant files per repo:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files.
-- **Code Scanning**: Read the flagged file at reported line range (+-5 lines). If file is deleted, mark alert as stale.
+- **Code Scanning**: Read flagged file at reported line range (+-5 lines). If file deleted, mark alert stale.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
 ### 3-2. Write plan.md
 
-For the complete template, formatting rules, severity ordering, and idempotency behavior, consult **`references/plan-template.md`**.
+Template, formatting rules, severity ordering, idempotency → **`references/plan-template.md`**.
 
 Key rules:
-- Each `- [ ]` is one atomic, actionable fix.
+- Each `- [ ]` = one atomic, actionable fix.
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
-- If plan.md exists with a `## Security Fixes` section, **replace** that section only (preserve other content).
+- If plan.md exists with `## Security Fixes` section, **replace** that section only (preserve other content).
 
 ### 3-3. Present result
 
-After generating all files, show a summary table with repo, path, and item count. Include total items and suggest a next step.
+After generating all files, show summary table with repo, path, item count. Include total items and suggest next step.
 
 ## Error Handling
 
@@ -113,9 +113,9 @@ After generating all files, show a summary table with repo, path, and item count
 
 ### Scripts
 
-- **`scripts/fetch-alerts.sh`** — Standalone script to collect all three alert types. Outputs structured JSON to a scan directory. Execute directly or read for query patterns.
+- **`scripts/fetch-alerts.sh`** — Standalone script collecting all three alert types. Outputs structured JSON to scan directory. Execute directly or read for query patterns.
 
 ### Reference Files
 
-- **`references/api-patterns.md`** — GraphQL/REST query details, response field reference, error handling patterns, rate limiting guidance.
-- **`references/plan-template.md`** — plan.md template, formatting rules, severity ordering, idempotency, and example output.
+- **`references/api-patterns.md`** — GraphQL/REST query details, response field reference, error handling, rate limiting.
+- **`references/plan-template.md`** — plan.md template, formatting rules, severity ordering, idempotency, example output.

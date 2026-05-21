@@ -11,9 +11,9 @@ description: >
 
 # Dependabot Manager
 
-Manage dependabot PRs across all repos owned by the authenticated GitHub user in three phases: **Discovery → Triage → Action**.
+Manage dependabot PRs across all repos owned by authenticated GitHub user. Three phases: **Discovery → Triage → Action**.
 
-Phases 1–2 operate entirely via `gh` CLI (no clone). Phase 3 actions may require local clone for config edits and consolidation.
+Phases 1–2: `gh` CLI only (no clone). Phase 3 may need local clone for config edits and consolidation.
 
 ## Phase 1: Discovery
 
@@ -21,18 +21,18 @@ Phases 1–2 operate entirely via `gh` CLI (no clone). Phase 3 actions may requi
 gh search prs --author app/dependabot --state open --owner @me --json repository,number,title,url --limit 200
 ```
 
-Group by repo, present count summary. If none found, exit early.
+Group by repo, show count summary. None found → exit early.
 
 ## Phase 2: Triage
 
-Use the bundled script to triage all PRs in one pass — no per-repo agents needed:
+Triage all PRs in one pass — no per-repo agents needed:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/triage.sh \
   "owner/repo1:123" "owner/repo2:456" ...
 ```
 
-The script returns a JSON array with `category` for each PR:
+Script returns JSON array with `category` per PR:
 
 | Emoji | Category | Condition |
 |---|---|---|
@@ -44,11 +44,11 @@ The script returns a JSON array with `category` for each PR:
 
 Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Run `audit-automerge.sh` to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks). See **`references/triage.md`** for details.
 
-Present categorized results per repo with emoji prefix.
+Show categorized results per repo with emoji prefix.
 
 ## Phase 3: Action
 
-Present all applicable actions at once after triage — don't offer them serially one-by-one. See **`references/actions.md`** for each action's procedure.
+Present all applicable actions at once after triage — don't offer serially. See **`references/actions.md`** per action procedure.
 
 | Priority | Action | When |
 |----------|--------|------|
@@ -63,28 +63,28 @@ Present all applicable actions at once after triage — don't offer them seriall
 
 ## Autonomy Rules
 
-**One confirmation per action class, then chain autonomously.** Once the user approves an action, complete the full pipeline without re-asking at each step.
+**One confirmation per action class, then chain autonomously.** User approves action → complete full pipeline without re-asking.
 
-Pause and confirm only:
-- First merge of a session (e.g., "merge these N ready PRs?")
+Pause only:
+- First merge of session (e.g., "merge these N ready PRs?")
 - First PR creation (e.g., "create fix PRs for these N repos?")
-- Unexpected CI failure in a PR that was previously passing
-- Dependabot replaced a PR with a new one (report the new PR number/scope and confirm merge)
+- Unexpected CI failure on previously-passing PR
+- Dependabot replaced PR (report new PR number/scope, confirm merge)
 
 Never pause for:
 - Polling CI status
-- Triggering `@dependabot rebase` after merging a CI infra fix
-- Merging a PR that CI just passed as part of an already-approved pipeline
-- Running `enable-automerge.sh` on individual repos after initial batch is confirmed
+- Triggering `@dependabot rebase` after merging CI infra fix
+- Merging PR that CI just passed in already-approved pipeline
+- Running `enable-automerge.sh` on individual repos after initial batch confirmed
 
 ## Known Gotchas
 
-- **Rebase is not automatic**: After merging a CI infra fix (e.g., Node.js version bump), Dependabot does NOT automatically rebase blocked PRs — always send `@dependabot rebase` explicitly.
-- **Dependabot may replace PRs**: After a rebase, check `--author app/dependabot --state open` rather than querying original PR numbers — Dependabot sometimes closes a stale PR and creates a new one with different number and updated scope.
+- **Rebase not automatic**: After merging CI infra fix (e.g., Node.js version bump), Dependabot does NOT auto-rebase blocked PRs — always send `@dependabot rebase` explicitly.
+- **Dependabot may replace PRs**: After rebase, check `--author app/dependabot --state open` not original PR numbers — Dependabot sometimes closes stale PR and creates new one with different number and updated scope.
 
 ## Subagent Model Selection
 
-Spawn subagents only for tasks that require reading and reasoning (CI log analysis, multi-step git workflows). Scripts handle the rest.
+Spawn subagents only for tasks needing read + reasoning (CI log analysis, multi-step git workflows). Scripts handle rest.
 
 | Task | Model |
 |------|-------|
@@ -107,5 +107,5 @@ Invoke via `${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/<name>`.
 
 ## Interaction
 
-- Respond in the user's language; keep technical artifacts (commits, PRs, branches) in English.
+- Respond in user's language; keep technical artifacts (commits, PRs, branches) in English.
 - Errors: unauthenticated → suggest `gh auth login`; rate-limited → reduce scope; permission denied → report which repos.
