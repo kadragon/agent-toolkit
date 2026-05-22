@@ -49,9 +49,9 @@ Look up `charPrIDRef` / `paraPrIDRef` / `borderFillIDRef` when writing section0.
 | borderFill 4 | Border | SOLID 0.12mm + #DAEEF3 background |
 | borderFill 5 | Border | top 0.4mm thick line + bottom 0.12mm thin line (section header) |
 
-**Indentation rule**: never use space characters — always use paraPr left margin. □ items use paraPr 24, sub ①②③ use paraPr 25, deep - items use paraPr 26.
+**Indentation rule**: no space chars — use paraPr left margin. □ → paraPr 24, ①②③ → paraPr 25, deep - → paraPr 26.
 
-**Section header rule**: paraPr 27 + charPr 13 combo. The paragraph border (borderFillIDRef="5") auto-shows a top thick line + bottom thin line.
+**Section header rule**: paraPr 27 + charPr 13. `borderFillIDRef="5"` auto-shows top thick + bottom thin line.
 
 ## minutes (회의록, meeting minutes) — base + additions
 
@@ -66,7 +66,7 @@ Look up `charPrIDRef` / `paraPrIDRef` / `borderFillIDRef` when writing section0.
 
 ## proposal (제안서/사업개요) — base + additions
 
-For formal documents needing visual separation. Color-background header bars and number badges, implemented as table-based layout.
+Formal docs with visual separation. Color-background header bars + number badges via table layout.
 
 | ID | Type | Description |
 |----|------|------|

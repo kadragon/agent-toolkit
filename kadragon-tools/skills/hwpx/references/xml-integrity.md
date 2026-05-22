@@ -1,16 +1,16 @@
 # HWPX XML Integrity — Prevent HWP Parser Crashes
 
-The HWP parser is sensitive to XML serialization. Violating the patterns below makes the file **exit immediately (crash)** in Hancom.
+HWP parser sensitive to XML serialization. Violating patterns below → **immediate crash** in Hancom.
 
 ## No lxml re-serialization (fatal risk)
 
-Parsing an existing `section0.xml` or `header.xml` with lxml and **re-serializing the whole thing** breaks the file.
+Parsing existing `section0.xml` or `header.xml` with lxml and **re-serializing whole thing** breaks file.
 
-Side effects of `etree.tostring()`:
+`etree.tostring()` side effects:
 - Inserts line breaks/whitespace between tags (pretty-print) → HWP parser failure
-- Removes the `standalone="yes"` XML declaration
+- Removes `standalone="yes"` XML declaration
 - Deletes `<hp:t></hp:t>` empty-run content
-- Standalone serialization adds all namespace declarations to that element → conflict on document insertion
+- Standalone serialization adds all namespace declarations to element → conflict on document insertion
 
 ```python
 # ❌ 금지: 기존 문서 파싱 후 전체 재직렬화
@@ -27,13 +27,13 @@ xml_str = raw.decode("utf-8")
 xml_str = xml_str.replace('기존 텍스트', '새 텍스트', 1)
 ```
 
-> **Run-split caution**: a sentence that looks like one on screen is often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If the replace target crosses a run boundary, `str.replace()`/`patch_section.py` **silently fails with 0 matches**. If count is 0, suspect run splitting — extract the element with `locate.py`, check the structure, then replace only a **substring that fits within a single `<hp:t>`**.
+> **Run-split caution**: sentence visible as one on screen often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If replace target crosses run boundary, `str.replace()`/`patch_section.py` **silently fails with 0 matches**. Count 0 → suspect run splitting — extract element with `locate.py`, check structure, replace only **substring fitting within single `<hp:t>`**.
 
-> **Substring-collision caution**: if the replace target is part of a longer string, it replaces unintended places too (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**, and when the target is the full text of a paragraph/cell, match with the tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
+> **Substring-collision caution**: replace target inside longer string hits unintended places (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**; when target is full text of paragraph/cell, match with tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
 
 ## Safe new-paragraph insertion — compact then string-insert
 
-When extracting a new paragraph from a modified copy and inserting it into the original as a string:
+Extracting new paragraph from modified copy and inserting into original as string:
 
 ```python
 import re
@@ -55,7 +55,7 @@ final_xml = orig_str[:insert_pos] + raw_new + orig_str[insert_pos:]
 
 ## Compute insertion position after all str.replace() are done
 
-`str.replace()` changes string offsets. An `insert_pos` computed before modification points to the wrong place after.
+`str.replace()` changes string offsets. `insert_pos` computed before modification points wrong place after.
 
 ```python
 # ❌ 잘못된 순서
@@ -72,31 +72,31 @@ insert_pos = orig_str.find('</hp:p>', anchor_pos) + len('</hp:p>')
 
 ## No duplicate `hp:p` IDs
 
-Every `<hp:p id="...">` value in the document must be unique. Duplicate ID → HWP crash.
+Every `<hp:p id="...">` in document must be unique. Duplicate ID → HWP crash.
 
 - Exceptions: `id="0"`, `id="2147483648"` (placeholders)
-- When copying/inserting a paragraph from a modified copy, check for ID collision
+- When copying/inserting paragraph from modified copy, check for ID collision
 - Verify: `re.findall(r'<hp:p\s[^>]*\bid="(\d+)"', xml_str)` then check with `Counter`
 
 ## linesegarray removal
 
-When modifying text in an existing section0.xml, remove `<hp:linesegarray>` elements.
-`linesegarray` is the layout engine's line-break cache; stale values after a text edit trigger a "document corrupted or modified" warning.
+When modifying text in existing `section0.xml`, remove `<hp:linesegarray>` elements.
+`linesegarray` = layout engine's line-break cache; stale values after text edit trigger "document corrupted or modified" warning.
 
 ```python
 import re
 xml_str = re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', '', xml_str, flags=re.DOTALL)
 ```
 
-HWP automatically recalculates linesegarray on open. Documents with no `<hp:linesegarray>` at all are also valid — removal is a no-op.
+HWP auto-recalculates linesegarray on open. Documents with no `<hp:linesegarray>` also valid — removal is no-op.
 
 ## Workflow 2 (unpack → Edit → pack) caution
 
-`unpack.py` extracts raw bytes as-is (no lxml re-serialization). Editing must be done by direct text modification:
+`unpack.py` extracts raw bytes as-is (no lxml re-serialization). Editing must be direct text modification:
 
 ```
 ✅ unpack.py → Read/Edit 도구로 텍스트 직접 수정 → pack.py
 ❌ unpack.py → lxml parse → etree.tostring() → pack.py  (크래시)
 ```
 
-**Same rule applies to `content.hpf`** — it contains 14 Hancom namespace declarations; lxml re-serialization corrupts it.
+**Same rule applies to `content.hpf`** — contains 14 Hancom namespace declarations; lxml re-serialization corrupts it.

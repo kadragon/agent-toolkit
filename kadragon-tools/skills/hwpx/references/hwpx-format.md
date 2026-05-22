@@ -2,7 +2,7 @@
 
 ## Overview
 
-HWPX is Hancom Office's next-generation document format, following the **OWPML** (Open Word-Processor Markup Language) standard (KS X 6101:2024). It is a ZIP-based XML container, using an OPC (Open Packaging Conventions) structure similar to DOCX/XLSX.
+HWPX = Hancom Office next-gen doc format, follows **OWPML** (Open Word-Processor Markup Language) standard (KS X 6101:2024). ZIP-based XML container, OPC (Open Packaging Conventions) structure similar to DOCX/XLSX.
 
 ## Internal file structure
 
@@ -28,9 +28,9 @@ document.hwpx (ZIP archive)
 
 ### Core rules
 
-- **mimetype**: must be the **first entry** of the ZIP archive, stored as **ZIP_STORED** (uncompressed)
+- **mimetype**: must be **first entry** of ZIP archive, stored as **ZIP_STORED** (uncompressed)
 - **content.hpf**: OPF-format manifest. References all content files
-- **header.xml**: document-global style definitions (CharShape, ParaShape, BorderFill, etc.)
+- **header.xml**: doc-global style definitions (CharShape, ParaShape, BorderFill, etc.)
 - **section*.xml**: actual document content
 
 ## XML namespaces
@@ -79,8 +79,8 @@ document.hwpx (ZIP archive)
 </hp:run>
 ```
 
-- One paragraph can hold multiple runs (text with different formatting)
-- `charPrIDRef` references the character format
+- One paragraph holds multiple runs (text with different formatting)
+- `charPrIDRef` references character format
 
 ### Table
 
@@ -107,7 +107,7 @@ document.hwpx (ZIP archive)
 
 ### Section properties
 
-Held in the first run of the first paragraph:
+Held in first run of first paragraph:
 
 ```xml
 <hp:secPr textDirection="HORIZONTAL" ...>
@@ -168,7 +168,7 @@ Held in the first run of the first paragraph:
 
 - `height`: font size (HWPUNIT, 1000 = 10pt)
 - `textColor`: font color (#RRGGBB)
-- Bold/italic: determined by presence of the element
+- Bold/italic: determined by presence of element
 
 ### ParaShape (paragraph format)
 
@@ -227,10 +227,10 @@ Held in the first run of the first paragraph:
 
 ## Low-level XML access
 
-When python-hwpx's high-level API can't handle it:
+When python-hwpx high-level API insufficient:
 
-1. Use the **unpack** → edit XML directly → **pack** workflow
-2. Access the low-level XML tree via the `doc.oxml` property
+1. Use **unpack** → edit XML directly → **pack** workflow
+2. Access low-level XML tree via `doc.oxml` property
 3. Manipulate lxml Element directly via `doc.sections[0].element`
 
 ### Example: change paper size (A4 → B5)
@@ -255,7 +255,7 @@ When python-hwpx's high-level API can't handle it:
 ### How to add a custom style
 
 1. Copy `templates/base/Contents/header.xml`
-2. Add the needed charPr/paraPr/borderFill
+2. Add needed charPr/paraPr/borderFill
 3. Update each group's `itemCnt` attribute
 
 ### charPr addition example (bold 14pt)
@@ -285,6 +285,6 @@ When python-hwpx's high-level API can't handle it:
 
 ### Caution when adding paraPr
 
-- Must include the `hp:switch` structure (`hp:case` + `hp:default`)
-- `hp:case` and `hp:default` values are usually identical (or default is 2×)
+- Must include `hp:switch` structure (`hp:case` + `hp:default`)
+- `hp:case` and `hp:default` values usually identical (or default is 2×)
 - Keep `borderFillIDRef="2"`
