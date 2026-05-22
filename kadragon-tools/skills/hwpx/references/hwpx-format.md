@@ -247,3 +247,44 @@ When python-hwpx's high-level API can't handle it:
 # <hh:charPr id="0"> 의 <hh:fontRef> 속성 변경
 # hangul="맑은 고딕" latin="Arial"
 ```
+
+---
+
+## header.xml Editing Guide
+
+### How to add a custom style
+
+1. Copy `templates/base/Contents/header.xml`
+2. Add the needed charPr/paraPr/borderFill
+3. Update each group's `itemCnt` attribute
+
+### charPr addition example (bold 14pt)
+
+```xml
+<hh:charPr id="8" height="1400" textColor="#000000" shadeColor="none"
+           useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">
+  <hh:fontRef hangul="1" latin="1" hanja="1" japanese="1" other="1" symbol="1" user="1"/>
+  <hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/>
+  <hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+  <hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/>
+  <hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+  <hh:bold/>
+  <hh:underline type="NONE" shape="SOLID" color="#000000"/>
+  <hh:strikeout shape="NONE" color="#000000"/>
+  <hh:outline type="NONE"/>
+  <hh:shadow type="NONE" color="#C0C0C0" offsetX="10" offsetY="10"/>
+</hh:charPr>
+```
+
+### Font reference system
+
+- `fontRef` values are font ids defined in `fontfaces`
+- `hangul="0"` → 함초롬돋움 (gothic / sans-serif)
+- `hangul="1"` → 함초롬바탕 (myeongjo / serif)
+- Set all 7 languages identically
+
+### Caution when adding paraPr
+
+- Must include the `hp:switch` structure (`hp:case` + `hp:default`)
+- `hp:case` and `hp:default` values are usually identical (or default is 2×)
+- Keep `borderFillIDRef="2"`

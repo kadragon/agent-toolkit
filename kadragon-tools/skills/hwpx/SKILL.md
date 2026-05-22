@@ -1,6 +1,7 @@
 ---
 name: hwpx
-description: "한글(HWPX) 문서 생성/읽기/편집 스킬. .hwpx 파일, 한글 문서, Hancom, OWPML 관련 요청 시 사용."
+description: |
+  This skill should be used when the user asks to "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "한글 파일 수정", "create hwpx", "make a hancom document", "edit hwp file", "generate hwpx", or describes creating, editing, or reading a Korean government or business document. Also trigger when the user attaches a .hwpx file, asks to extract text from hwpx, mentions OWPML, or mentions "Hancom" in any context involving document creation or editing — even without saying "hwpx" explicitly.
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -45,7 +46,7 @@ The only required package is **`lxml`**. Any Python that can import `lxml` works
 
 - venv is optional. If `python -c "import lxml"` succeeds, use it as-is. Otherwise `pip install lxml`.
 - Examples in this doc use `python3` / `source "$VENV"`. **On Windows, use `python` and omit the `source` line.**
-- `SKILL_DIR` is the absolute path of the directory holding this SKILL.md (`.../skills/hwpxskill`).
+- `SKILL_DIR` is the absolute path of the directory holding this SKILL.md (`.../skills/hwpx`).
 - **Windows console Korean output**: `print`ing Korean in a diagnostic `python -c "..."` or heredoc produces cp949 mojibake. To print Korean, put `import sys, io; sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")` as the script's first line. (Always specify `encoding="utf-8"` for file I/O — unrelated to mojibake.) Bundled scripts in `scripts/` apply UTF-8 stdout/stderr themselves, so no extra step is needed.
 - **Match special characters by codepoint**: quote variants (`ʹ` U+02B9 vs U+0374), PUA (U+F0E8), dash/middle-dot variants, etc. — typing visually similar characters as **literals in a script/heredoc is encoding-unstable**: the same glyph can be interpreted as a different codepoint each run. Always specify special characters to match/replace via `'\uXXXX'` escapes.
 - **No `python -c` for non-ASCII matching logic**: putting non-ASCII like `■`, `○`, Korean into `python -c "..."` source and running via Bash can corrupt it in transit through the shell/encoding — leading to silent failure where `str.index()`/`rfind()` returns `-1`. Write check/replace code containing non-ASCII matching to a `.py` file with `Write` and run via `python script.py`.
@@ -54,7 +55,7 @@ The only required package is **`lxml`**. Any Python that can import `lxml` works
 ## Directory structure
 
 ```
-.claude/skills/hwpxskill/
+.../skills/hwpx/
 ├── SKILL.md                              # 이 파일
 ├── scripts/
 │   ├── office/
@@ -87,9 +88,9 @@ The only required package is **`lxml`**. Any Python that can import `lxml` works
 
 ### Flow
 
-1. **Pick template** (base/gonmun/report/minutes/proposal)
+1. **Pick template** (base/gonmun/report/minutes/proposal) → look up its style IDs in `$SKILL_DIR/references/style-maps.md`
 2. **Write section0.xml** (body content)
-3. **(Optional) edit header.xml** (when new styles needed)
+3. **(Optional) edit header.xml** (when new styles needed) → see `$SKILL_DIR/references/hwpx-format.md` § "header.xml Editing Guide"
 4. **Build with build_hwpx.py**
 5. **Validate with validate.py**
 
@@ -249,143 +250,19 @@ The first paragraph (`<hp:p>`) of section0.xml — its first run (`<hp:run>`) mu
 
 ## header.xml editing guide
 
-### How to add a custom style
+> Full guide (charPr/paraPr/borderFill addition, font reference system, paraPr caution) — read `$SKILL_DIR/references/hwpx-format.md` § "header.xml Editing Guide".
 
-1. Copy `templates/base/Contents/header.xml`
-2. Add the needed charPr/paraPr/borderFill
-3. Update each group's `itemCnt` attribute
-
-### charPr addition example (bold 14pt)
-
-```xml
-<hh:charPr id="8" height="1400" textColor="#000000" shadeColor="none"
-           useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">
-  <hh:fontRef hangul="1" latin="1" hanja="1" japanese="1" other="1" symbol="1" user="1"/>
-  <hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/>
-  <hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
-  <hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/>
-  <hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
-  <hh:bold/>
-  <hh:underline type="NONE" shape="SOLID" color="#000000"/>
-  <hh:strikeout shape="NONE" color="#000000"/>
-  <hh:outline type="NONE"/>
-  <hh:shadow type="NONE" color="#C0C0C0" offsetX="10" offsetY="10"/>
-</hh:charPr>
-```
-
-### Font reference system
-
-- `fontRef` values are font ids defined in `fontfaces`
-- `hangul="0"` → 함초롬돋움 (gothic / sans-serif)
-- `hangul="1"` → 함초롬바탕 (myeongjo / serif)
-- Set all 7 languages identically
-
-### Caution when adding paraPr
-
-- Must include the `hp:switch` structure (`hp:case` + `hp:default`)
-- `hp:case` and `hp:default` values are usually identical (or default is 2×)
-- Keep `borderFillIDRef="2"`
+**Key rules:**
+- Copy `templates/base/Contents/header.xml`, add the needed charPr/paraPr/borderFill, update `itemCnt`
+- paraPr requires the `hp:switch` structure (`hp:case` + `hp:default`); keep `borderFillIDRef="2"`
 
 ---
 
 ## Per-template style ID map
 
-### base
+> Full style ID tables for all templates — read `$SKILL_DIR/references/style-maps.md`.
 
-| ID | Type | Description |
-|----|------|------|
-| charPr 0 | Char | 10pt 함초롬바탕, default |
-| charPr 1 | Char | 10pt 함초롬돋움 |
-| charPr 2~6 | Char | Skeleton default styles |
-| paraPr 0 | Para | JUSTIFY, 160% line spacing |
-| paraPr 1~19 | Para | Skeleton defaults (outline, footnote, etc.) |
-| borderFill 1 | Border | None (page border) |
-| borderFill 2 | Border | None + transparent background (reference use) |
-
-### gonmun (공문, official document) — base + additions
-
-| ID | Type | Description |
-|----|------|------|
-| charPr 7 | Char | 22pt bold 함초롬바탕 (org name/title) |
-| charPr 8 | Char | 16pt bold 함초롬바탕 (signer) |
-| charPr 9 | Char | 8pt 함초롬바탕 (footer contact) |
-| charPr 10 | Char | 10pt bold 함초롬바탕 (table header) |
-| paraPr 20 | Para | CENTER, 160% line spacing |
-| paraPr 21 | Para | CENTER, 130% (table cell) |
-| paraPr 22 | Para | JUSTIFY, 130% (table cell) |
-| borderFill 3 | Border | SOLID 0.12mm 4 sides |
-| borderFill 4 | Border | SOLID 0.12mm + #D6DCE4 background |
-
-### report (보고서) — base + additions
-
-| ID | Type | Description |
-|----|------|------|
-| charPr 7 | Char | 20pt bold (document title) |
-| charPr 8 | Char | 14pt bold (subtitle) |
-| charPr 9 | Char | 10pt bold (table header) |
-| charPr 10 | Char | 10pt bold+underline (emphasis text) |
-| charPr 11 | Char | 9pt 함초롬바탕 (small/footnote) |
-| charPr 12 | Char | 16pt bold 함초롬바탕 (single-line title) |
-| charPr 13 | Char | 12pt bold 함초롬돋움 (section header) |
-| paraPr 20~22 | Para | CENTER/JUSTIFY variants |
-| paraPr 23 | Para | RIGHT align, 160% line spacing |
-| paraPr 24 | Para | JUSTIFY, left 600 (□ checklist indent) |
-| paraPr 25 | Para | JUSTIFY, left 1200 (sub-item ①②③ indent) |
-| paraPr 26 | Para | JUSTIFY, left 1800 (deep sub-item - indent) |
-| paraPr 27 | Para | LEFT, top/bottom border lines (for section header), prev 400 |
-| borderFill 3 | Border | SOLID 0.12mm 4 sides |
-| borderFill 4 | Border | SOLID 0.12mm + #DAEEF3 background |
-| borderFill 5 | Border | top 0.4mm thick line + bottom 0.12mm thin line (section header) |
-
-**Indentation rule**: never use space characters — always use paraPr left margin. □ items use paraPr 24, sub ①②③ use paraPr 25, deep - items use paraPr 26.
-
-**Section header rule**: paraPr 27 + charPr 13 combo. The paragraph border (borderFillIDRef="5") auto-shows a top thick line + bottom thin line.
-
-### minutes (회의록, meeting minutes) — base + additions
-
-| ID | Type | Description |
-|----|------|------|
-| charPr 7 | Char | 18pt bold (title) |
-| charPr 8 | Char | 12pt bold (section label) |
-| charPr 9 | Char | 10pt bold (table header) |
-| paraPr 20~22 | Para | CENTER/JUSTIFY variants |
-| borderFill 3 | Border | SOLID 0.12mm 4 sides |
-| borderFill 4 | Border | SOLID 0.12mm + #E2EFDA background |
-
-### proposal (제안서/사업개요) — base + additions
-
-For formal documents needing visual separation. Color-background header bars and number badges, implemented as table-based layout.
-
-| ID | Type | Description |
-|----|------|------|
-| charPr 7 | Char | 20pt bold 함초롬바탕 (document title) |
-| charPr 8 | Char | 14pt bold 함초롬바탕 (subtitle) |
-| charPr 9 | Char | 10pt bold 함초롬바탕 (table header) |
-| charPr 10 | Char | 14pt bold white 함초롬돋움 (major-item number, green background) |
-| charPr 11 | Char | 11pt bold white 함초롬돋움 (sub-item number, blue background) |
-| paraPr 20 | Para | CENTER, 160% line spacing |
-| paraPr 21 | Para | CENTER, 130% (table cell) |
-| paraPr 22 | Para | JUSTIFY, 130% (table cell) |
-| borderFill 3 | Border | SOLID 0.12mm 4 sides |
-| borderFill 4 | Border | SOLID 0.12mm + #DAEEF3 background |
-| borderFill 5 | Border | olive-green background #7B8B3D (major-item number cell) |
-| borderFill 6 | Border | light gray background #F2F2F2 + gray border (major-item title cell) |
-| borderFill 7 | Border | blue background #4472C4 (sub-item number badge) |
-| borderFill 8 | Border | bottom border only #D0D0D0 (sub-item title area) |
-
-#### proposal layout pattern
-
-**Major-item header** (2-cell table: number + title):
-```xml
-<!-- borderFillIDRef="5" + charPrIDRef="10" → 녹색배경 흰색 로마숫자 -->
-<!-- borderFillIDRef="6" + charPrIDRef="8"  → 회색배경 검정 볼드 제목 -->
-```
-
-**Sub-item header** (2-cell table: number badge + title):
-```xml
-<!-- borderFillIDRef="7" + charPrIDRef="11" → 파란배경 흰색 아라비아숫자 -->
-<!-- borderFillIDRef="8" + charPrIDRef="8"  → 하단선만 검정 볼드 제목 -->
-```
+Pick a template → look up its `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef` in style-maps.md before writing section0.xml.
 
 ---
 
@@ -688,106 +565,17 @@ python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id 1274564310 --ce
 
 ## XML integrity — prevent HWP parser crashes
 
-The HWP parser is sensitive to XML serialization. Violating the patterns below makes the file **exit immediately (crash)** in Hancom.
+> Full code examples — read `$SKILL_DIR/references/xml-integrity.md`.
 
-### No lxml re-serialization (fatal risk)
+Key invariants (violating any of these crashes Hancom):
 
-Parsing an existing `section0.xml` or `header.xml` with lxml and **re-serializing the whole thing** breaks the file.
-
-Side effects of `etree.tostring()`:
-- Inserts line breaks/whitespace between tags (pretty-print) → HWP parser failure
-- Removes the `standalone="yes"` XML declaration
-- Deletes `<hp:t></hp:t>` empty-run content
-- Standalone serialization adds all namespace declarations to that element → conflict on document insertion
-
-```python
-# ❌ 금지: 기존 문서 파싱 후 전체 재직렬화
-root = etree.fromstring(section_raw)
-# 수정 ...
-result = etree.tostring(root, encoding="unicode")  # 크래시 유발
-```
-
-### Safe text modification — use `str.replace()`
-
-```python
-# ✅ 안전
-xml_str = raw.decode("utf-8")
-xml_str = xml_str.replace('기존 텍스트', '새 텍스트', 1)
-```
-
-> **Run-split caution**: a sentence that looks like one on screen is often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If the replace target crosses a run boundary, `str.replace()`/`patch_section.py` **silently fails with 0 matches**. If count is 0, suspect run splitting — extract the element with `locate.py`, check the structure, then replace only a **substring that fits within a single `<hp:t>`**.
-
-> **Substring-collision caution**: conversely, if the replace target is part of a longer string, it replaces unintended places too (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**, and when the target is the full text of a paragraph/cell, match with the tags like `<hp:t>X</hp:t>`. Detail — `references/editing-gotchas.md` §2·§3.
-
-### Safe new-paragraph insertion — compact then string-insert
-
-When extracting a new paragraph from a modified copy and inserting it into the original as a string:
-
-```python
-import re
-from lxml import etree
-
-# 1. lxml으로 새 요소 추출 (기존 문서 재직렬화 아님)
-new_el = mod_root.find(...)
-raw_new = etree.tostring(new_el, encoding="unicode")
-
-# 2. compact 필수 (태그 간 공백 제거)
-raw_new = re.sub(r'>[ \t\r\n]+<', '><', raw_new)
-
-# 3. linesegarray 제거 (캐시 데이터 — HWP이 열 때 재계산)
-raw_new = re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', '', raw_new, flags=re.DOTALL)
-
-# 4. 문자열로 직접 삽입
-final_xml = orig_str[:insert_pos] + raw_new + orig_str[insert_pos:]
-```
-
-### Compute insertion position after text modification is done
-
-`str.replace()` changes string offsets. An `insert_pos` computed before modification points to the wrong place after.
-
-```python
-# ❌ 잘못된 순서
-anchor_pos = orig_str.find(anchor_text)   # 수정 전 위치
-orig_str = orig_str.replace('old', 'new')  # offset shift
-# insert_pos now wrong
-
-# ✅ 올바른 순서: 모든 str.replace() 완료 후 위치 계산
-orig_str = orig_str.replace('old1', 'new1')
-orig_str = orig_str.replace('old2', 'new2')
-anchor_pos = orig_str.find(anchor_text)   # 수정 후 재계산
-insert_pos = orig_str.find('</hp:p>', anchor_pos) + len('</hp:p>')
-```
-
-### No duplicate `hp:p` IDs
-
-Every `<hp:p id="...">` value in the document must be unique. Duplicate ID → HWP crash.
-
-- Exceptions: `id="0"`, `id="2147483648"` (placeholders)
-- When copying/inserting a paragraph from a modified copy, must check for ID collision
-- Verify: `re.findall(r'<hp:p\s[^>]*\bid="(\d+)"', xml_str)` then check with `Counter`
-
-### linesegarray removal (when modifying an existing section)
-
-When you modify text in an existing section0.xml, you must remove `<hp:linesegarray>` elements.
-`linesegarray` is the layout engine's line-break cache; if its values don't match after a text edit, HWP shows a "document corrupted or modified" warning.
-
-```python
-import re
-xml_str = re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', '', xml_str, flags=re.DOTALL)
-```
-
-HWP automatically recalculates linesegarray when opening the file.
-
-> Some documents have no `<hp:linesegarray>` at all (varies by Hancom version/save method). Here removal is a no-op and normal — absence is not an error.
-
-### Workflow 2 (unpack → Edit → pack) caution
-
-`unpack.py` extracts raw bytes as-is (no lxml re-serialization). Editing must be done by direct text modification:
-
-```
-✅ unpack.py → Read/Edit 도구로 텍스트 직접 수정 → pack.py
-❌ unpack.py → lxml parse → etree.tostring() → pack.py  (크래시)
-```
+- **No lxml re-serialization**: never `etree.fromstring()` + `etree.tostring()` an existing section0.xml, header.xml, or content.hpf — pretty-print/standalone-removal/xmlns-injection corrupt the file
+- **str.replace() for text edits**: modify raw XML string directly; no lxml needed
+- **Compact new paragraphs**: after `etree.tostring()` on a new element, run `re.sub(r'>[ \t\r\n]+<', '><', xml)` before string-inserting
+- **Insertion position last**: compute `insert_pos` only after all `str.replace()` calls are done (earlier positions shift on replace)
+- **No duplicate hp:p IDs**: check with `Counter(re.findall(r'<hp:p\s[^>]*\bid="(\d+)"', xml_str))`
+- **linesegarray removal**: after any text edit in an existing section, strip `<hp:linesegarray>` (HWP recalculates on open)
+- **Workflow 2**: `unpack.py` guarantees raw bytes — edit via Read/Edit tools, never via lxml re-serialize
 
 ---
 
@@ -801,7 +589,7 @@ HWP automatically recalculates linesegarray when opening the file.
 6. **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
 7. **Use venv**: the project's `.venv/bin/python3` (lxml package required)
 8. **Validation**: always confirm integrity with `validate.py` after creation
-9. **References**: detailed XML structure → `$SKILL_DIR/references/hwpx-format.md`; existing-document editing traps → `$SKILL_DIR/references/editing-gotchas.md`
+9. **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`
 10. **build_hwpx.py first**: use build_hwpx.py for new document creation (avoid calling the python-hwpx API directly)
 11. **Empty line**: use `<hp:t/>` (self-closing tag)
 12. **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see the "Handling attached HWPX — judge intent first" table above). Only when classified as restore, do `analyze_template.py` + extracted-XML-based restore/rewrite
@@ -816,6 +604,9 @@ HWP automatically recalculates linesegarray when opening the file.
 21. **No duplicate hp:p IDs**: when copying a paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
 22. **linesegarray removal required**: when modifying text in an existing section, remove that paragraph's `<hp:linesegarray>` — a stale line-break cache makes HWP show a "document corrupted/modified" warning (HWP auto-recalculates on open)
 23. **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no lxml re-serialization. When modifying the script directly, this invariant must be kept
+
+> Rules 17–23 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.
+
 24. **FORMULA field caution**: if a table's sum/calculation cell is a `type="FORMULA"` field, modifying the cached `<hp:t>` value is a no-op — Hancom recalculates and overwrites it on open. Replace the whole `fieldBegin`~`fieldEnd` span with static text, or fix the formula input cell (`references/editing-gotchas.md` §1)
 25. **Assert a count on every replacement**: when editing an existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
 26. **Content-edit completion gate**: after `validate.py --baseline` passes, confirm it actually opens in Hancom. Fully close Hancom before repackaging (with multiple windows, `CloseMainWindow` closes only the main window), and after applying to the real file verify copy success via md5 or similar (see Workflow 2)
