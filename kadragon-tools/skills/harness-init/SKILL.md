@@ -2,7 +2,7 @@
 name: harness-init
 version: 0.4.1
 description: |
-  This skill should be used when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, sweep automation, .claudeignore, .agents/skills symlink, and optional enforcement hooks. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
+  This skill should be used when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, sweep automation, .claudeignore, .agents/skills symlink, and optional enforcement hooks. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init
@@ -21,20 +21,15 @@ Key insight: **if agent struggles, that's harness defect**, not agent defect. Fi
 
 **Simplification principle:** Find simplest solution, increase complexity only when needed. Every harness component encodes assumption about what model can't do alone — start minimal, add scaffolding only on concrete failures. Harness built for weakest model slows stronger model.
 
-## When to Use
-
-- Setting up new repo for AI-assisted development
-- Retrofitting existing codebase with agent infrastructure
-- After cloning repo with no AGENTS.md or docs/ structure
-- When user reports agents keep making mistakes or forgetting context
+> Trigger conditions are in the frontmatter description above.
 
 ## Prerequisites
 
-Before starting, gather project info (ask user if not obvious from repo):
+Before starting, gather project info. **Scan repo first (Step 1: read existing files, git log, package.json). Ask user only for answers that code doesn't reveal** (e.g., team size, sprint cadence, external integrations).
 
 1. **Tech stack** — Language(s), framework(s), database, frontend
 2. **Project type** — Greenfield, legacy, monorepo, library
-3. **Team size** — Solo dev, small team, large org
+3. **Team size** — Solo dev, small team, large org *(ask user — not in code)*
 4. **Existing tooling** — Linters, CI, test frameworks, build tools
 5. **Pain points** — What goes wrong when agents work on this repo?
 
@@ -74,7 +69,7 @@ Ask user: "What rules, if broken, cause most pain in this codebase?" Answer seed
 
 ### Step 3: Create AGENTS.md
 
-AGENTS.md is **map, not encyclopedia**. See `references/harness-invariants.md` → "AGENTS.md Size Policy" for thresholds (target ≤100, hard warn >200). Must fit in agent's context window without crowding actual work.
+AGENTS.md is **map, not encyclopedia** (target ≤100 lines; hard warn at >200 — keeps harness within agent context window). Must fit in agent's context window without crowding actual work.
 
 See `examples/agents-md-example.md` for complete reference.
 
@@ -111,10 +106,55 @@ See `examples/agents-md-example.md` for complete reference.
 {embed the AGENTS.md Edit Policy — see below}
 ```
 
-**Three embedded blocks mandatory in AGENTS.md**, all shown verbatim in `examples/agents-md-example.md`:
-1. `## Maintenance` — 4-rule edit policy from `references/harness-invariants.md` → "AGENTS.md Edit Policy"
-2. `## Token Economy` — 5-rule block (biggest lever for long-session context)
-3. Context-anxiety note — prefer context resets over compaction; write `handoff-{feature}.md` at start of multi-session work, not after context degrades. See `references/workflows-template.md` → "Context Anxiety".
+**Three embedded blocks mandatory in AGENTS.md.** Copy them verbatim — do not paraphrase:
+
+<!-- COPY VERBATIM INTO AGENTS.md -->
+**Block 1: `## Maintenance`**
+
+```markdown
+## Maintenance
+
+Update this file **only** when ALL of the following are true:
+
+1. Information is not directly discoverable from code / config / manifests / docs
+2. It is operationally significant — affects build, test, deploy, or runtime safety
+3. It would likely cause mistakes if left undocumented
+4. It is stable and not task-specific
+
+**Never add:** architecture summaries, directory overviews, style conventions
+already enforced by tooling, anything already visible in the repo, or
+temporary / task-specific instructions.
+
+Prefer modifying or removing outdated entries over appending. When unsure, add
+a short inline `TODO:` comment rather than inventing guidance.
+
+Size budget: target ≤100 lines, hard warn >200. Move long content to
+`docs/*.md` and leave a pointer line here.
+```
+
+<!-- COPY VERBATIM INTO AGENTS.md -->
+**Block 2: `## Token Economy`**
+
+```markdown
+## Token Economy
+
+Rules that apply every message — keep the context window lean.
+
+1. Do not re-read a file already read in this session. If you need to check a change, read only the diff/region.
+2. Do not call tools just to confirm information you already have. Simple questions deserve direct answers.
+3. Run independent tool calls in parallel (multiple reads, grep + glob, etc.) — not sequentially.
+4. Delegate any analysis that would produce >20 lines of output to a sub-agent; return only the conclusion to this context.
+5. Do not restate what the user just said. They can read their own message.
+```
+
+<!-- COPY VERBATIM INTO AGENTS.md -->
+**Block 3: Context Anxiety note** (add as a closing paragraph in `## Token Economy` or as a standalone note):
+
+```markdown
+**Context anxiety:** when context fills, prefer a full reset with a handoff file over in-place compaction.
+Write `handoff-{feature}.md` at the **start** of multi-session work (when context is fresh), not after context degrades.
+Delete when the feature is complete.
+```
 
 **What NOT to put in AGENTS.md:** workflow details, delegation details, evaluation criteria, architecture deep dives, API references. These belong in `docs/`.
 
@@ -133,7 +173,20 @@ Create these files. Each read **on demand**, not loaded every session. Each temp
 
 **Non-negotiable for `docs/delegation.md`:** triggers in routing table must be objective and measurable — never subjective conditions ("unfamiliar module") agent can rationalize away.
 
-### Step 4c: Define Reusable Roles (if multi-agent)
+**Complete Step 4a first. If this is a multi-agent project: also complete Step 4b after Step 4a.**
+
+### Step 4a: Create Sprint / Backlog Files
+
+Required so `harness-sync` C (reconciliation) is no-op on first run. Without these, sync silently reports `Backlog clear.` forever (harmless but wasteful) or warns about missing schema.
+
+Create at repo root:
+
+- **`backlog.md`** — queue of work not yet in flight. Copy minimal template from `references/backlog-template.md`. Empty sections fine.
+- **`tasks.md`** — DO NOT create at init time. Exists only during active sprint. Include template path (`references/tasks-template.md`) as reference in `docs/workflows.md` so first sprint starter knows schema.
+
+Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
+
+### Step 4b: Define Reusable Roles (if multi-agent)
 
 Skip if project uses only single session. Otherwise create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
 
@@ -145,17 +198,6 @@ Read `references/teammate-role-template.md` for schema and starter pack (impleme
 Routing table in `docs/delegation.md` cites roles by name — role file body appended to spawn prompt automatically.
 
 Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for multi-session work. Handoff files are deferred Spawn Prompt Contracts.
-
-### Step 4b: Create Sprint / Backlog Files
-
-Required so `harness-sync` C (reconciliation) is no-op on first run. Without these, sync silently reports `Backlog clear.` forever (harmless but wasteful) or warns about missing schema.
-
-Create at repo root:
-
-- **`backlog.md`** — queue of work not yet in flight. Copy minimal template from `references/backlog-template.md`. Empty sections fine.
-- **`tasks.md`** — DO NOT create at init time. Exists only during active sprint. Include template path (`references/tasks-template.md`) as reference in `docs/workflows.md` so first sprint starter knows schema.
-
-Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
 
 ### Step 5: Set Up Sweep Automation
 
@@ -225,6 +267,12 @@ Tooling looks up project-local skills via `.agents/` while files live under `.cl
 bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-sync/scripts/symlink-guard.sh
 ```
 
+If cc-plugins is not cloned or `CLAUDE_PLUGIN_ROOT` is unset, run directly:
+
+```bash
+mkdir -p .agents && ln -s ../.claude/skills .agents/skills
+```
+
 Accepted forms (POSIX symlink or Windows text-file fallback) documented in `references/harness-invariants.md` → File Layout Invariants.
 
 ### Step 8b: Agent Teams Onboarding (optional)
@@ -237,7 +285,9 @@ Skip for solo workloads and most CRUD apps. Agent Teams carries 3-5× token cost
 
 ### Step 9: Validate
 
-Run `scripts/validate-harness.sh` against target project to verify all artifacts complete and consistent. Script checks:
+Run `scripts/validate-harness.sh` against target project to verify all artifacts complete and consistent. **If validation exits non-zero, halt immediately. Show the full validation report to the user. Do NOT auto-fix — user must review and decide. Re-run validation after user addresses issues.**
+
+Script checks:
 
 - Required files exist (`AGENTS.md`, `CLAUDE.md`, `docs/*`, `backlog.md`)
 - AGENTS.md size within policy band (see `references/harness-invariants.md`)
@@ -258,13 +308,12 @@ Manual checklist for items script cannot verify:
 
 ### Step 10: Explain to the User
 
-After setup, walk user through what was created. Key points:
+After setup, show the user all four of the following — this is the exit criterion for Step 10:
 
-- AGENTS.md is entry point — keep short, point to docs/
-- `## Maintenance` section in AGENTS.md carries edit-policy rules; apply whenever touching AGENTS.md
-- Run sweep per chosen trigger (manual / hook / cron)
-- Update docs/ after implementing features — stale docs worse than no docs
-- Golden principles should evolve — add when new pain points emerge, remove when model capability makes them unnecessary
+1. **Full AGENTS.md content** — paste or display the entire file so the user can confirm it looks right.
+2. **List of all created files with one-line purpose each** — every file produced during init, so nothing is invisible.
+3. **How to trigger sweep** — exact command or trigger method chosen in Step 5 (e.g., `bash tools/sweep.sh`).
+4. **How to update AGENTS.md when tasks change** — point to the `## Maintenance` rules embedded in AGENTS.md; emphasize: only add when all 4 conditions are met.
 
 **Handoff to `harness-sync`:** from this point, `harness-sync` runs silently at session start to keep harness tidy. Maintains these exact invariants (CLAUDE.md pointer, `.agents/skills` symlink, backlog/tasks schemas, AGENTS.md size warnings). If sync reports unexpected drift on first run, treat as init bug — not sync false positive — fix template here.
 

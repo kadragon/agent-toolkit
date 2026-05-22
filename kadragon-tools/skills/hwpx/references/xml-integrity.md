@@ -28,6 +28,8 @@ xml_str = xml_str.replace('기존 텍스트', '새 텍스트', 1)
 ```
 
 > **Run-split caution**: sentence visible as one on screen often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If replace target crosses run boundary, `str.replace()`/`patch_section.py` **silently fails with 0 matches**. Count 0 → suspect run splitting — extract element with `locate.py`, check structure, replace only **substring fitting within single `<hp:t>`**.
+>
+> **Fixing a run-split**: after `locate.py --extract-dir ./_work`, open the extracted file to see the `<hp:run>` structure. Find the `<hp:t>` within a single `<hp:run>` that contains the target text, replace only that element's text. If the target text spans multiple runs, edit each run's `<hp:t>` separately — never merge or reorder runs.
 
 > **Substring-collision caution**: replace target inside longer string hits unintended places (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**; when target is full text of paragraph/cell, match with tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
 

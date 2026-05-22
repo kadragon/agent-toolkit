@@ -1,8 +1,6 @@
-The heredoc was too long. Since the task instructs "Return ONLY the fixed compressed file" — outputting the fixed content directly:
-
 ---
 name: dev-review-cycle
-description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Antigravity, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "PR review", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review.
+description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Antigravity, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "full PR review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review. NOT for: reviewing only with no implementation intent, code review discussions without write intent, or one-off review requests that don't involve committing and merging.
 ---
 
 # Dev Review Cycle
@@ -46,8 +44,8 @@ Before creating PR, check if on base branch (e.g., `main`). If so, create new fe
 
 Generate branch name autonomously from staged/unstaged changes:
 
-1. Inspect `git diff` and `git status` to understand what changed.
-2. Derive short descriptive branch name (e.g., `feat/add-login-validation`, `fix/null-pointer-handler`, `refactor/cleanup-utils`).
+1. Inspect `git diff` and `git status` to understand what changed. If both return empty (clean working tree, all changes already committed), derive the slug from `git log --oneline -3` — use the most recent commit message as the source.
+2. Derive short slug branch name (e.g., `feat/login-validation`, `fix/null-handler`, `refactor/cleanup-utils`). Keep the slug short — 2–4 words max, no verbose descriptions.
 3. Create and switch immediately:
    ```bash
    git checkout -b <generated-branch-name>
@@ -85,7 +83,7 @@ RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-p
 echo "$RESULT"
 ```
 
-Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If the script exits non-zero or `pr_number` is null, stop and report the error.
+Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If the script exits non-zero, stop and report the error. If `pr_number` is null but `pr_url` is non-null, extract the number from the URL: `basename $pr_url`. If both are null, halt with error — do not proceed.
 
 **Do NOT pause or ask the user after PR creation.** Immediately proceed to Step 2.
 
@@ -95,7 +93,7 @@ Collect reviews from up to three sources. Launch all available sources in parall
 
 #### 2-1: Claude Code Review (review-pr)
 
-Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr` skill on the changed files.
+Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr` skill on the changed files. If the skill is unavailable, perform an inline review instead: check for obvious issues (naming conventions, error handling, test coverage) directly from the diff. Note in the consolidation output that full multi-agent review was skipped.
 
 ```
 Agent tool parameters:
@@ -118,10 +116,11 @@ Skip if `agy_available` is false from pre-flight. Launch in background:
 
 ```bash
 # run_in_background: true, timeout: 600000
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH}
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH} \
+  || echo '{"agy_review":"failed"}' >&2
 ```
 
-If the command fails, proceed without this review.
+Wrap each background script invocation so failure is caught and logged, not silently dropped. If the command fails, proceed without this review.
 
 #### 2-3: Codex Review
 
@@ -129,10 +128,11 @@ Skip if `codex_available` is false from pre-flight. Launch in background:
 
 ```bash
 # run_in_background: true, timeout: 600000
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH}
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
+  || echo '{"codex_review":"failed"}' >&2
 ```
 
-If the command fails, proceed without this review.
+Wrap each background script invocation so failure is caught and logged, not silently dropped. If the command fails, proceed without this review.
 
 #### Collecting Results
 
@@ -146,11 +146,11 @@ Deduplicate, resolve conflicts, classify scope (in/out), and present a consolida
 
 After confirmation, record any out-of-scope items in `tasks.md` per the format in `references/consolidation-guide.md`.
 
-If no actionable in-scope suggestions exist, report that reviews found no in-scope issues and skip directly to Step 6.
+If no actionable in-scope suggestions exist, report that reviews found no in-scope issues and skip Steps 4–5 (apply fixes and commit). Step 6 (merge/push) still executes unless `--no-hub` is set, in which case the workflow ends after this step.
 
 ### Step 4: Apply Improvements
 
-Apply accepted improvements to the codebase. Run tests after changes to verify nothing is broken.
+Apply accepted improvements to the codebase. Run tests after changes to verify nothing is broken. To find the test command: check `package.json` `scripts.test`, then look for `Makefile` targets, `pytest.ini`, or `go.mod`. If no test command is found, skip tests and note the omission in the Step 6 summary.
 
 If tests fail after applying improvements, revert the broken change (`git checkout -- <files>`), report which suggestion caused the failure, and ask the user whether to skip it or attempt a different approach. Do not proceed to Step 5 with failing tests.
 
@@ -158,7 +158,7 @@ After improvements are applied and tests pass, immediately proceed to Step 5.
 
 ### Step 5: Commit (and Push unless `--no-hub`)
 
-Determine the commit message yourself — you have full context from Step 4. List the exact files you modified in that step; pass them explicitly via `--files` to avoid accidentally staging unrelated changes.
+Determine the commit message yourself — you have full context from Step 4. List the exact files you modified in that step; pass them explicitly via `--files` to avoid accidentally staging unrelated changes. Before passing `--files`, run `git status --short` and confirm the list matches files you actually modified. Silent omission of a file means uncommitted changes.
 
 **When `--no-hub` is set:**
 
@@ -203,7 +203,7 @@ Summary:
 To run a subsequent review cycle on the same PR (e.g., after applying changes and wanting fresh reviews):
 
 1. Skip Step 1 — the PR already exists.
-2. Push the latest changes to the PR branch.
+2. Push the latest changes to the PR branch. Use `commit-and-push.sh` without the `--pr` flag to push to the existing branch.
 3. Start from Step 2 with the existing PR number.
 4. Continue through Steps 3–6 as normal.
 
@@ -216,7 +216,7 @@ When `--no-hub` is set, re-running simply means committing new changes locally a
 | Pre-flight `has_errors: true` | Stop. Report errors (e.g., suggest `gh auth login`). |
 | Step 1 (commit/PR) fails | Stop. Report the error. |
 | Antigravity/Codex unavailable or fails | Inform user, proceed with available reviews. |
-| No actionable suggestions | Report no issues. Skip Steps 4-5, proceed to Step 6. |
+| No actionable suggestions | Report no issues. Skip Steps 4–5 only. Step 6 still executes (unless `--no-hub`). |
 | Push fails (Step 5) | Report error. Suggest manual resolution. |
 | CI fails 3 times | Stop. Ask user for guidance. |
 | CI fix requires logic change | Re-run Steps 2-3 before pushing. |
@@ -233,7 +233,7 @@ For detailed procedures, consult:
 ### Scripts
 
 - **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with tool availability and repo metadata
-- **`scripts/changed-files.sh`** — Detects tracked changes + untracked new files; one path per line
+- **`scripts/changed-files.sh`** — Detects tracked changes + untracked new files; one path per line. Called automatically by commit-and-push.sh — do not invoke directly.
 - **`scripts/commit-and-push.sh`** `--message <msg> [--files "f1 f2"] [--no-push] [--pr] [--base <branch>]` — Stage, commit, push, and optionally create a PR; outputs JSON `{commit_hash, pushed, pr_number, pr_url}`
 - **`scripts/ci-wait.sh`** `<pr_number>` — Waits for all CI checks to complete; outputs JSON `{passed: bool}`
 - **`scripts/agy-review.sh`** — Antigravity (agy) review launcher

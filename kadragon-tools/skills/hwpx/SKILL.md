@@ -1,7 +1,7 @@
 ---
 name: hwpx
 description: |
-  This skill should be used when the user asks to "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "한글 파일 수정", "create hwpx", "make a hancom document", "edit hwp file", "generate hwpx", or describes creating, editing, or reading a Korean government or business document. Also trigger when the user attaches a .hwpx file, asks to extract text from hwpx, mentions OWPML, or mentions "Hancom" in any context involving document creation or editing — even without saying "hwpx" explicitly.
+  This skill should be used when the user asks to "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "한글 파일 수정", "create hwpx", "make a hancom document", "edit hwp file", "generate hwpx", or describes creating, editing, or reading a Korean government or business document. Also trigger when the user attaches a .hwpx file, asks to extract text from hwpx, mentions OWPML, or mentions Hancom document creation, editing, or conversion — even without saying "hwpx" explicitly. NOT when: discussing Hancom as a product/company without a document task (e.g. "Hancom is slow", "Hancom pricing").
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -33,7 +33,7 @@ Intent unclear → ask user, do not assume restore.
 
 "Same page count", `page_guard.py`, "compress/summarize text" rules apply **only to reference restore mode**. In content edit mode, do not revert work on page count change. For restore-mode steps and checklist, see **Workflow 5**.
 
-> **`validate.py --baseline` required**: real-world HWPX originals often contain duplicate `hp:p` IDs that HWP allows. Validating without `--baseline` flags these pre-existing duplicates as `INVALID` (false positive). **When editing/restoring attached document, always pass `--baseline original.hwpx`.** Omit `--baseline` only for new documents from scratch.
+> **`validate.py --baseline` scope**: real-world HWPX originals often contain duplicate `hp:p` IDs that HWP allows. Validating without `--baseline` flags these pre-existing duplicates as `INVALID` (false positive). **`--baseline` is required when validating against an original attached document (Workflows 2, 5); omit for new documents (Workflow 1).**
 
 ## Environment
 
@@ -68,6 +68,11 @@ Only required package: **`lxml`**. Any Python that can import `lxml` works, rega
 │   ├── locate.py                         # 텍스트 포함 요소(hp:tbl/tr/p) span 탐색
 │   ├── insert_table_row.py               # 표 행 삽입 + rowAddr/rowCnt/rowSpan 정정
 │   ├── replace_cell.py                   # 표 셀 내용 교체 + linesegarray 제거
+│   ├── strip_linesegarray.py             # 표 셀의 LineSeg 배열 제거 (렌더링 오류 수정)
+│   ├── patch_section.py                  # section XML의 지정 섹션을 원자적으로 패치
+│   ├── calc_col_widths.py                # 콘텐츠 기반 표 열 너비 계산
+│   ├── next_id.py                        # 문서 내 다음 사용 가능한 고유 요소 ID 생성
+│   ├── delete_table_rows.py              # 표 요소에서 지정 행 삭제
 │   └── text_extract.py                   # 텍스트 추출
 ├── templates/
 │   ├── base/                             # 베이스 템플릿 (Skeleton 기반)
@@ -91,6 +96,16 @@ Only required package: **`lxml`**. Any Python that can import `lxml` works, rega
 ## Workflow 1: XML-first new document creation (no attached reference)
 
 ### Flow
+
+**Template selection matrix:**
+
+| Template | Use for |
+|----------|---------|
+| `gonmun` | Official correspondence (공문) |
+| `report` | Multi-section reports with figures |
+| `minutes` | Meeting records |
+| `proposal` | Proposals with approval signatures |
+| `base` | Everything else |
 
 1. **Pick template** (base/gonmun/report/minutes/proposal) → look up style IDs in `$SKILL_DIR/references/style-maps.md`
 2. **Write section0.xml** (body content)
@@ -126,7 +141,8 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report --section my.xml \
 
 ```bash
 # 1. section0.xml을 임시파일로 작성
-SECTION=$(mktemp /tmp/section0_XXXX.xml)
+mkdir -p ./_work
+SECTION=$(mktemp ./_work/section0_XXXX.xml)
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
 <hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -182,6 +198,8 @@ Pick template → look up `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef` in style
 
 ## Workflow 2: edit existing document (unpack → Edit → pack)
 
+> **Prerequisite**: read `$SKILL_DIR/references/editing-gotchas.md` before any edits — covers FORMULA fields, substring collision, count verification, paragraph deletion, and other silent-failure traps.
+
 ```bash
 source "$VENV"
 
@@ -199,8 +217,6 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ edited.hwpx
 # 4. 검증 (원본 대비)
 python3 "$SKILL_DIR/scripts/validate.py" edited.hwpx --baseline document.hwpx
 ```
-
-> Before editing text/tables, **read `references/editing-gotchas.md`** — FORMULA fields, substring collision, count verification, paragraph deletion, other silent-failure traps.
 
 ### Bulk / multi-stage edits
 
@@ -293,9 +309,10 @@ source "$VENV"
 python3 "$SKILL_DIR/scripts/analyze_template.py" reference.hwpx
 
 # 2. header.xml과 section0.xml을 추출하여 참고용으로 보관
+mkdir -p ./_work
 python3 "$SKILL_DIR/scripts/analyze_template.py" reference.hwpx \
-  --extract-header /tmp/ref_header.xml \
-  --extract-section /tmp/ref_section.xml
+  --extract-header ./_work/ref_header.xml \
+  --extract-section ./_work/ref_section.xml
 
 # 3. 분석 결과를 보고 새 section0.xml 작성
 #    - 동일한 charPrIDRef, paraPrIDRef 사용
@@ -304,8 +321,8 @@ python3 "$SKILL_DIR/scripts/analyze_template.py" reference.hwpx \
 
 # 4. 추출한 header.xml + 새 section0.xml로 빌드
 python3 "$SKILL_DIR/scripts/build_hwpx.py" \
-  --header /tmp/ref_header.xml \
-  --section /tmp/new_section0.xml \
+  --header ./_work/ref_header.xml \
+  --section ./_work/new_section0.xml \
   --output result.hwpx
 
 # 5. 검증 (원본 대비 — 기존 중복 ID 오탐 방지)
@@ -401,32 +418,34 @@ Key invariants (violating any crashes Hancom):
 
 ## Critical Rules
 
-1. **HWPX only**: `.hwp` (binary) files not supported. If user provides `.hwp`, guide them to **re-save as `.hwpx` from Hancom Office**. (File → Save As → File type: HWPX)
-2. **secPr required**: first run of section0.xml's first paragraph must contain secPr + colPr
-3. **mimetype order**: when packaging HWPX, mimetype = first ZIP entry, ZIP_STORED
-4. **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
-5. **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
-6. **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
-7. **Use venv**: project's `.venv/bin/python3` (lxml package required)
-8. **Validation**: always confirm integrity with `validate.py` after creation
-9. **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`
-10. **build_hwpx.py first**: use build_hwpx.py for new document creation (avoid calling python-hwpx API directly)
-11. **Empty line**: use `<hp:t/>` (self-closing tag)
-12. **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `analyze_template.py` + extracted-XML-based restore/rewrite
-13. **Same page count required (reference restore mode only)**: in restore mode, keep final result's page count identical to reference. Does not apply to content-edit / new-creation modes
-14. **No unauthorized page increase (reference restore mode only)**: in restore mode, no structure changes causing page increase without explicit user request/approval
-15. **Limit structure changes**: no adding/deleting/splitting/merging of paragraphs/tables unless user requests it (replace-centered editing)
-16. **page_guard must pass (reference restore mode only)**: in restore mode, `page_guard.py` must also pass — separate from `validate.py` — to mark complete. In content-edit mode, `page_guard.py` is reference info, and `validate.py --baseline` + actually opening in Hancom is completion gate
-17. **No lxml re-serialization**: do not `etree.fromstring()` then `etree.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
-18. **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed)
-19. **Compact required on new-paragraph insertion**: after serializing lxml-extracted element, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
-20. **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
-21. **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
-22. **linesegarray removal required**: when modifying text in existing section, remove that paragraph's `<hp:linesegarray>` — stale line-break cache makes HWP show "document corrupted/modified" warning (HWP auto-recalculates on open)
-23. **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no lxml re-serialization. When modifying script directly, this invariant must be kept
+Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 style/consistency
+
+1. 🔵 **HWPX only**: `.hwp` (binary) files not supported. If user provides `.hwp`, guide them to **re-save as `.hwpx` from Hancom Office**. (File → Save As → File type: HWPX)
+2. 🔴 **secPr required**: first run of section0.xml's first paragraph must contain secPr + colPr
+3. 🔴 **mimetype order**: when packaging HWPX, mimetype = first ZIP entry, ZIP_STORED
+4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
+5. 🟡 **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
+6. 🟡 **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
+7. 🔵 **Use venv**: project's `.venv/bin/python3` (lxml package required)
+8. 🔵 **Validation**: always confirm integrity with `validate.py` after creation
+9. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`
+10. 🔵 **build_hwpx.py first**: use build_hwpx.py for new document creation (avoid calling python-hwpx API directly)
+11. 🔵 **Empty line**: use `<hp:t/>` (self-closing tag)
+12. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `analyze_template.py` + extracted-XML-based restore/rewrite
+13. 🟡 **Same page count required (reference restore mode only)**: in restore mode, keep final result's page count identical to reference. Does not apply to content-edit / new-creation modes
+14. 🟡 **No unauthorized page increase (reference restore mode only)**: in restore mode, no structure changes causing page increase without explicit user request/approval
+15. 🔵 **Limit structure changes**: no adding/deleting/splitting/merging of paragraphs/tables unless user requests it (replace-centered editing)
+16. 🟡 **page_guard must pass (reference restore mode only)**: in restore mode, `page_guard.py` must also pass — separate from `validate.py` — to mark complete. In content-edit mode, `page_guard.py` is reference info, and `validate.py --baseline` + actually opening in Hancom is completion gate
+17. 🔴 **No lxml re-serialization**: do not `etree.fromstring()` then `etree.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
+18. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed)
+19. 🔴 **Compact required on new-paragraph insertion**: after serializing lxml-extracted element, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
+20. 🟡 **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
+21. 🔴 **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
+22. 🟡 **linesegarray removal required**: when modifying text in existing section, remove that paragraph's `<hp:linesegarray>` — stale line-break cache makes HWP show "document corrupted/modified" warning (HWP auto-recalculates on open)
+23. 🔵 **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no lxml re-serialization. When modifying script directly, this invariant must be kept
 
 > Rules 17–23 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.
 
-24. **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
-25. **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
-26. **Content-edit completion gate**: after `validate.py --baseline` passes, confirm actually opens in Hancom. Fully close Hancom before repackaging (multiple windows: `CloseMainWindow` closes only main window), after applying to real file verify copy success via md5 or similar (see Workflow 2)
+24. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
+25. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
+26. 🔵 **Content-edit completion gate**: after `validate.py --baseline` passes, confirm actually opens in Hancom. Fully close Hancom before repackaging (multiple windows: `CloseMainWindow` closes only main window), after applying to real file verify copy success via md5 or similar (see Workflow 2)

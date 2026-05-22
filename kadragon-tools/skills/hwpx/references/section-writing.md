@@ -96,6 +96,6 @@ First `<hp:p>` of section0.xml — first `<hp:run>` must contain `<hp:secPr>` an
 ## ID rules
 
 - Paragraph id: sequential from `1000000001`
-- Table id: separate range recommended, e.g. `1000000099`
+- Table id: same sequential namespace as paragraphs — use `next_id.py` to get the next available ID. No two elements (paragraph or table) may share an ID.
 - Every id unique within document
-- Use `next_id.py` to get next safe ID before inserting paragraphs
+- Use `next_id.py` to get next safe ID before inserting paragraphs or tables

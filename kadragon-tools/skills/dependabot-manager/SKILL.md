@@ -7,13 +7,14 @@ description: >
   "audit dependabot config", "review dependency PRs", "check dependabot status",
   "dependabot rebase", or describes multiple open dependency-update PRs across repos
   — even without saying "dependabot" explicitly.
+  NOT when: user asks only to rebase a single PR (use `@dependabot rebase` directly without invoking this skill) unless full triage is explicitly requested.
 ---
 
 # Dependabot Manager
 
 Manage dependabot PRs across all repos owned by authenticated GitHub user. Three phases: **Discovery → Triage → Action**.
 
-Phases 1–2: `gh` CLI only (no clone). Phase 3 may need local clone for config edits and consolidation.
+Phases 1–2: `gh` CLI only (no clone). Only Phase 3 actions **3g (configure grouped updates)** and **3h (consolidate ungrouped PRs)** require a local clone; all other Phase 3 actions (merge, rebase, CI-fix, auto-merge) use `gh` CLI only.
 
 ## Phase 1: Discovery
 
@@ -41,14 +42,24 @@ Script returns JSON array with `category` per PR:
 | ❌ | `ci_failed` | Any check `FAILURE` |
 | ⏳ | `ci_pending` | Checks still running |
 | ⚪ | `no_ci` | No status checks configured |
+| — | `closed` | PR already merged/closed — skip silently |
+| — | `error` | `gh pr view` call failed — report repo:number and continue |
+| — | `unknown` | `mergeStateStatus` not CLEAN/CONFLICTING/BEHIND — treat as `needs_rebase` for safety |
 
-Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Run `audit-automerge.sh` to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks). See **`references/triage.md`** for details.
+Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Then run `audit-automerge.sh` **after** `triage.sh` completes to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks):
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/audit-automerge.sh \
+  "owner/repo1" "owner/repo2" ...
+```
+
+See **`references/triage.md`** for details.
 
 Show categorized results per repo with emoji prefix.
 
 ## Phase 3: Action
 
-Present all applicable actions at once after triage — don't offer serially. See **`references/actions.md`** per action procedure.
+Present applicable actions at once after triage — don't offer serially. Only present actions for which triage found relevant PRs (e.g., skip "rebase stale PRs" if triage found no `needs_rebase` PRs). See **`references/actions.md`** per action procedure.
 
 | Priority | Action | When |
 |----------|--------|------|
@@ -79,18 +90,14 @@ Never pause for:
 
 ## Known Gotchas
 
-- **Rebase not automatic**: After merging CI infra fix (e.g., Node.js version bump), Dependabot does NOT auto-rebase blocked PRs — always send `@dependabot rebase` explicitly.
-- **Dependabot may replace PRs**: After rebase, check `--author app/dependabot --state open` not original PR numbers — Dependabot sometimes closes stale PR and creates new one with different number and updated scope.
+- **Rebase not automatic**: After merging CI infra fix (e.g., Node.js version bump), Dependabot does NOT auto-rebase blocked PRs — always send `@dependabot rebase` explicitly. After sending the rebase command, wait and re-list PRs (`gh pr list --author app/dependabot --state open`) until the rebased PR appears before proceeding to Phase 3 actions.
+- **Dependabot may replace PRs**: After rebase, Dependabot sometimes closes the stale PR and opens a new one with a different number and updated scope. Re-list with `--author app/dependabot --state open` after rebase and confirm new PR numbers before any merge or further action — never use original PR numbers from pre-rebase triage.
 
 ## Subagent Model Selection
 
 Spawn subagents only for tasks needing read + reasoning (CI log analysis, multi-step git workflows). Scripts handle rest.
 
-| Task | Model |
-|------|-------|
-| CI failure log analysis | `sonnet` |
-| Config fix PR creation (clone + edit + push) | `sonnet` |
-| PR consolidation / major bump handling | `sonnet` |
+Spawn `sonnet` subagents for CI log analysis, config fix PR creation, and PR consolidation.
 
 ## Scripts
 
@@ -107,5 +114,5 @@ Invoke via `${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/<name>`.
 
 ## Interaction
 
-- Respond in user's language; keep technical artifacts (commits, PRs, branches) in English.
+- Prose output (summaries, questions, status reports) → user's language. Technical artifacts (branch names, commit messages, PR titles, code, CLI commands) → English always.
 - Errors: unauthenticated → suggest `gh auth login`; rate-limited → reduce scope; permission denied → report which repos.

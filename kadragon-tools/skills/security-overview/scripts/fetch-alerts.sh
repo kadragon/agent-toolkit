@@ -35,6 +35,10 @@ gh repo list "${GH_USER}" --json name,url --limit 300 -q '.[] | "\(.name) \(.url
 REPO_COUNT=$(wc -l < "${OUTPUT_DIR}/repos.txt" | tr -d ' ')
 echo "Found ${REPO_COUNT} repos."
 
+if [[ $REPO_COUNT -eq 300 ]]; then
+  echo "WARNING: repo list may be truncated at 300 — accounts with 300+ repos may have missing results" >&2
+fi
+
 # --- Step 2: Dependabot alerts via GraphQL (paginated) ---
 echo "Fetching Dependabot alerts via GraphQL..."
 gh api graphql --paginate -f query='
@@ -66,15 +70,41 @@ gh api graphql --paginate -f query='
 echo "Fetching Code Scanning and Secret Scanning alerts..."
 
 while read -r REPO _URL; do
-  # Code Scanning (403 = not enabled, skip gracefully)
-  HTTP_CODE=$(gh api "repos/${GH_USER}/${REPO}/code-scanning/alerts?state=open&per_page=100" \
-    2>/dev/null) && echo "${HTTP_CODE}" > "${OUTPUT_DIR}/code-scanning/${REPO}.json" \
-    || echo "[]" > "${OUTPUT_DIR}/code-scanning/${REPO}.json"
+  # Code Scanning (403/404 = not enabled, skip gracefully)
+  # NOTE: API errors (e.g. 503) fall through to "[]" — treat zero results as potentially
+  # incomplete if combined with network issues. Check ${OUTPUT_DIR}/.fetch-errors for details.
+  if CS_RESP=$(gh api "repos/${GH_USER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
+    echo "${CS_RESP}" > "${OUTPUT_DIR}/code-scanning/${REPO}.json"
+  else
+    HTTP_STATUS=$(echo "${CS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1)
+    if [[ "${HTTP_STATUS}" == "403" || "${HTTP_STATUS}" == "404" ]]; then
+      echo "[]" > "${OUTPUT_DIR}/code-scanning/${REPO}.json"
+    else
+      echo "ERROR: code-scanning fetch failed for ${REPO} (status=${HTTP_STATUS:-unknown}): ${CS_RESP}" \
+        >> "${OUTPUT_DIR}/.fetch-errors"
+      echo "[]" > "${OUTPUT_DIR}/code-scanning/${REPO}.json"
+    fi
+  fi
 
   # Secret Scanning (404 = disabled, skip gracefully; strip secret values)
-  HTTP_CODE=$(gh api "repos/${GH_USER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
-    --jq '[.[] | del(.secret)]' 2>/dev/null) && echo "${HTTP_CODE}" > "${OUTPUT_DIR}/secret-scanning/${REPO}.json" \
-    || echo "[]" > "${OUTPUT_DIR}/secret-scanning/${REPO}.json"
+  # NOTE: API errors (e.g. 503) fall through to "[]" — check ${OUTPUT_DIR}/.fetch-errors.
+  if SS_RESP=$(gh api "repos/${GH_USER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
+      --jq '[.[] | del(.secret)]' 2>&1); then
+    echo "${SS_RESP}" > "${OUTPUT_DIR}/secret-scanning/${REPO}.json"
+  else
+    HTTP_STATUS=$(echo "${SS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1)
+    if [[ "${HTTP_STATUS}" == "404" ]]; then
+      echo "[]" > "${OUTPUT_DIR}/secret-scanning/${REPO}.json"
+    else
+      echo "ERROR: secret-scanning fetch failed for ${REPO} (status=${HTTP_STATUS:-unknown}): ${SS_RESP}" \
+        >> "${OUTPUT_DIR}/.fetch-errors"
+      echo "[]" > "${OUTPUT_DIR}/secret-scanning/${REPO}.json"
+    fi
+  fi
 done < "${OUTPUT_DIR}/repos.txt"
+
+if [[ -f "${OUTPUT_DIR}/.fetch-errors" ]]; then
+  echo "WARNING: Some fetches failed. See ${OUTPUT_DIR}/.fetch-errors for details." >&2
+fi
 
 echo "Done. Results in ${OUTPUT_DIR}/"

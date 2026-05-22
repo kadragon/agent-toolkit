@@ -64,6 +64,10 @@ Do NOT create a single consolidated file.
 ### Idempotency
 
 If `plan.md` already exists and contains a `## Security Fixes` section:
+
+Before replacing: run `git log -1 --format=%ai plan.md`. If the file was modified by a human after last scan, prompt: "plan.md has manual edits — overwrite? [y/N]". Proceed only on "y".
+
+On confirmation (or if no human edit detected):
 - **Replace** that section with fresh scan results.
 - **Preserve** all other content in the file.
 
@@ -100,5 +104,5 @@ After generating all plan.md files, present:
 
 Total: 7 fix items across 2 repos.
 
-Suggested next step: Run `go` in each repo directory to start fixing, or pick a specific repo to begin.
+Suggested next step: Open each repo directory and begin fixing the highest-severity items, or ask to work through a specific repo.
 ```

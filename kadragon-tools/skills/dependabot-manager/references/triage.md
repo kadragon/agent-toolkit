@@ -20,11 +20,14 @@ gh pr view {number} -R {owner}/{repo} --json number,title,mergeable,mergeStateSt
 
 | Emoji | Category | Condition |
 |---|---|---|
-| ✅ | Ready to merge | CI passed + `mergeable: MERGEABLE` |
-| 🔄 | Needs rebase | CI passed + `CONFLICTING` or `BEHIND` |
+| ✅ | Ready to merge | CI passed + `mergeStateStatus: CLEAN` |
+| 🔄 | Needs rebase | `CONFLICTING` or `BEHIND` |
 | ❌ | CI failed | Any check failed |
 | ⏳ | CI pending | Checks still running |
 | ⚪ | No CI | No status checks configured |
+| — | Closed | PR already merged/closed — skip silently |
+| — | Error | `gh pr view` call failed — report repo:number and continue |
+| — | Unknown | `mergeStateStatus` not CLEAN/CONFLICTING/BEHIND — treat as `needs_rebase` for safety |
 
 ## 2c. Auto-Merge Readiness Audit
 

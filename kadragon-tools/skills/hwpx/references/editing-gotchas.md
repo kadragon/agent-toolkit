@@ -38,15 +38,15 @@ Table sum/calc cell may be **FORMULA field**, not plain text. Structure:
   assert len(re.findall(pat, s, re.DOTALL)) == 1
   s = re.sub(pat, "<hp:t>새 값</hp:t>", s, flags=re.DOTALL)
   ```
-- **Edit input cell**: if sum is SUM of other cells, fix input cell → Hancom recalculates. Verify formula range (`?2:?N` etc.) points at input cell — wrong range = wrong sum even with correct input.
+- **Edit the input cell**: if the sum is a SUM of other cells, fixing the input cell value makes Hancom recalculate the sum. Verify the formula range (`?2:?N` etc.) points exactly at the input cell — a wrong range gives a wrong sum even with a correct input.
 
 ## 2. Substring collision
 
-`str.replace()` target is **part of longer string** → replaced in unintended places.
+If a `str.replace()` target is **part of a longer string**, it gets replaced in unintended places too.
 
-Example: changing `"조직"` to `"조직의 구성"`, document already has `"조직의 구성"` 3 places → `s.replace("조직", "조직의 구성")` → `"조직의 구성의 구성"`.
+Example: changing `"조직"` to `"조직의 구성"`, but the document already has `"조직의 구성"` in 3 places — `s.replace("조직", "조직의 구성")` turns those 3 into `"조직의 구성의 구성"`.
 
-**Fix — match full `<hp:t>` element**:
+**Avoid — match the full `<hp:t>` element**: if the target is the entire content of one hp:t, match including the tags.
 
 ```python
 # ❌ 위험: 부분 문자열
@@ -55,11 +55,13 @@ s = s.replace("조직", "조직의 구성")
 s = s.replace("<hp:t>조직</hp:t>", "<hp:t>조직의 구성</hp:t>")
 ```
 
-`<hp:t>X</hp:t>` matches only when X is exactly full text of one paragraph/cell → no substring collision.
+`<hp:t>X</hp:t>` form matches only when X is exactly the full text of one paragraph/cell, so there is no substring collision.
 
-## 3. Assert count on every replacement
+**Run-split case**: visible text may be split across multiple `<hp:run>` elements (format boundaries, standalone punctuation runs, etc.). If the target text spans runs, `locate.py` output will show multiple `<hp:t>` elements inside separate `<hp:run>` blocks. Fix each run separately — do not concatenate runs. Example: "홍길동 과장" stored as `<hp:run><hp:t>홍길동 </hp:t></hp:run><hp:run charPrIDRef="1"><hp:t>과장</hp:t></hp:run>` — replace each `<hp:t>` independently.
 
-`str.replace()` passes silently on 0 matches. Splitting, substring collision, encoding corruption → silent failure. **Always assert expected count before replacing.**
+## 3. Assert a count on every replacement
+
+`str.replace()` passes silently with no exception even on 0 matches. Run splitting, substring collision, and encoding corruption all lead to silent failure. **Always assert the expected count before replacing.**
 
 ```python
 def rep(s, old, new, n):
@@ -68,15 +70,15 @@ def rep(s, old, new, n):
     return s.replace(old, new)
 ```
 
-Count differs → abort immediately. Essential for bulk edits.
+If the count differs from expected, abort immediately — stop before a corrupted file is produced. Essential for bulk edits.
 
 ## 4. Documents without linesegarray
 
-Some HWPX have no `<hp:linesegarray>` cache (varies by Hancom version/save method). Strip is no-op — normal. Removing linesegarray = idempotent "remove if present, leave if absent". Absence not error.
+Some HWPX documents have no `<hp:linesegarray>` cache at all (varies by Hancom version and save method). Here strip is a no-op and that is normal — removing linesegarray is an idempotent "remove if present, leave if absent" operation. Absence is not an error.
 
-## 5. Non-ASCII match strings go in script file
+## 5. Non-ASCII match strings go in a script file
 
-Non-ASCII like `■`, `○`, Korean in `python -c "..."` via Bash → corrupt in transit through shell/encoding. Corruption → `str.index()`/`rfind()` can't find target, returns `-1` → silent failure. Any check/replace with non-ASCII must be written to `.py` file via `Write`, run via `python script.py` (file is UTF-8, no corruption).
+Putting non-ASCII like `■`, `○`, or Korean into `python -c "..."` source and running it via the Bash tool can corrupt characters in transit through the shell and encoding. On corruption, `str.index()`/`rfind()` can't find the target and returns `-1` — a silent failure. Any check/replace logic containing non-ASCII must be written to a `.py` file with `Write` and run via `python script.py` (file is UTF-8, so no corruption).
 
 ## 6. Deleting paragraphs/spans — dump and verify
 

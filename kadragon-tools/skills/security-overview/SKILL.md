@@ -1,6 +1,6 @@
 ---
 name: security-overview
-description: Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across every repo owned by the authenticated user, ensure each repo is cloned locally, and generate a per-repo plan.md with prioritized fix tasks. This skill should be used when the user mentions "security alerts", "vulnerability scanning", "dependabot overview", "code scanning", "secret scanning", "check my repos for vulnerabilities", or "security overview". Trigger even if only one alert type is mentioned — the skill covers all three.
+description: This skill should be used when the user mentions "security alerts", "vulnerability scanning", "dependabot overview", "code scanning", "secret scanning", "check my repos for vulnerabilities", "security overview", "found a secret in code", "review dependabot security findings", "show security vulnerabilities", or "any exposed credentials". Scans all GitHub security alert types (Dependabot, Code Scanning, Secret Scanning) across all owned repos and writes a per-repo plan.md with prioritized fix tasks.
 ---
 
 # Security Overview
@@ -19,6 +19,8 @@ Single continuous flow: **Discover → Ensure Local → Generate Plans**.
 
 Verify `gh` authenticated. If not, stop and suggest `gh auth login`.
 
+Note: `fetch-alerts.sh` caps repo discovery at 300 — accounts with more repos will see incomplete results.
+
 ```bash
 GH_USER=$(gh api user --jq '.login')
 gh repo list "${GH_USER}" --json name,url --limit 300 -q '.[] | "\(.name) \(.url)"'
@@ -26,7 +28,9 @@ gh repo list "${GH_USER}" --json name,url --limit 300 -q '.[] | "\(.name) \(.url
 
 ### 1-2. Collect Dependabot alerts
 
-Fetch all Dependabot vulnerability alerts in single paginated GraphQL call. Execute `scripts/fetch-alerts.sh` directly, or extract query pattern for manual use.
+Fetch all Dependabot vulnerability alerts in single paginated GraphQL call.
+
+**Default: use `scripts/fetch-alerts.sh`.** Use manual query only when: (a) script unavailable, (b) user requests specific API exploration, (c) script fails. Never mix both in the same run.
 
 For query structure, field reference, pagination details → **`references/api-patterns.md`** § Dependabot.
 
@@ -40,7 +44,7 @@ Fetch alerts per repo via REST. Handle expected errors:
 
 Endpoint details, response fields → **`references/api-patterns.md`** § Code Scanning / Secret Scanning.
 
-**Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context.
+**Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context. `fetch-alerts.sh` strips secret fields automatically. If using manual queries, pipe through `jq 'del(.[] | .secret)'` before processing.
 
 ### 1-4. Present summary
 
@@ -56,11 +60,11 @@ After table: total repos scanned, repos with/without alerts, breakdown by type a
 
 ## Phase 2: Ensure Local Repos
 
-For each repo with alerts, ensure local clone exists.
+Clone only repos that Phase 1 identified as having active alerts. Do not clone repos with zero alert count.
 
 ### 2-1. Determine workspace directory
 
-Default to **parent** of current working directory. If current directory not typical workspace child (e.g., running from home), confirm target with user before cloning.
+Default to **parent** of current working directory. If `pwd` is home directory, `/tmp`, or contains fewer than 2 path components after `$HOME`, confirm target directory with user before cloning.
 
 ```bash
 WORKSPACE_DIR=$(dirname "$(pwd)")
@@ -72,7 +76,7 @@ For each affected repo:
 1. Check if `${WORKSPACE_DIR}/${REPO_NAME}` exists.
 2. If missing, clone: `gh repo clone ${GH_USER}/${REPO_NAME} "${WORKSPACE_DIR}/${REPO_NAME}"`
 
-Report status: already-local vs newly-cloned repos.
+Report status: already-local vs newly-cloned repos. If clone fails for one repo, log the error, continue with remaining repos. Report all failures in final summary. Do NOT abort the entire run.
 
 ## Phase 3: Generate plan.md
 
@@ -83,7 +87,7 @@ Write **separate** `plan.md` into **each affected repo's root**. Do NOT create s
 Before writing fix plans, read relevant files per repo:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files.
-- **Code Scanning**: Read flagged file at reported line range (+-5 lines). If file deleted, mark alert stale.
+- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in plan.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
 ### 3-2. Write plan.md
@@ -94,7 +98,7 @@ Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
-- If plan.md exists with `## Security Fixes` section, **replace** that section only (preserve other content).
+- Idempotency rules → `references/plan-template.md`.
 
 ### 3-3. Present result
 

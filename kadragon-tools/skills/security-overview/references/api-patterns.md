@@ -68,6 +68,19 @@ gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 | `most_recent_instance.location.start_line` | Line number |
 | `tool.name` | Scanner tool (CodeQL, etc.) |
 
+### Severity Mapping
+
+CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to plan.md severity labels as follows:
+
+| `rule.severity` | plan.md severity | Notes |
+|-----------------|-----------------|-------|
+| `error` | CRITICAL | Code injection, auth bypass, or similar high-impact issues |
+| `error` | HIGH | All other `error`-level rules not matching CRITICAL criteria |
+| `warning` | MODERATE | |
+| `note` | LOW | |
+
+Use CRITICAL for `error`-severity rules whose `rule.id` or `rule.description` relates to injection, authentication, authorization, or remote code execution. Use HIGH for all other `error`-severity rules.
+
 ### Error Handling
 
 | HTTP Status | Meaning | Action |

@@ -14,7 +14,7 @@ for entry in "$@"; do
   number="${entry##*:}"
 
   data=$(gh pr view "$number" --repo "$repo" \
-    --json number,title,state,mergeable,mergeStateStatus,statusCheckRollup 2>/dev/null) || {
+    --json number,title,state,mergeStateStatus,statusCheckRollup 2>/dev/null) || {
     results+=("{\"repo\":\"$repo\",\"number\":$number,\"category\":\"error\",\"error\":\"gh pr view failed\"}")
     continue
   }

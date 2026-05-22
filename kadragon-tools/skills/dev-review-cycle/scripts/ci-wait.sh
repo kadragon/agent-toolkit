@@ -11,8 +11,13 @@ set -euo pipefail
 
 PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
 
-if gh pr checks "$PR_NUMBER" --watch --fail-fast; then
+timeout 870 gh pr checks "$PR_NUMBER" --watch --fail-fast || GH_EXIT=$?
+GH_EXIT="${GH_EXIT:-0}"
+
+if [ "$GH_EXIT" -eq 0 ]; then
   jq -n '{passed: true}'
+elif [ "$GH_EXIT" -eq 124 ]; then
+  jq -n --argjson pr "$PR_NUMBER" '{"passed": false, "reason": "timeout", "pr_number": $pr}'
 else
   jq -n '{passed: false}'
 fi

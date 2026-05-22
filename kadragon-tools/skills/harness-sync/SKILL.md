@@ -1,20 +1,14 @@
 ---
 name: harness-sync
 version: 0.2.0
-description: |
-  This skill should be used when the user asks to "sync harness", "harness sync", "harness 동기화",
-  "AGENTS.md 정리", "AGENTS.md 업데이트", "CLAUDE.md 동기화", "backlog 정리", "tasks 정리",
-  "세션 시작 루틴", "하네스 유지보수", or when starting work in a repo that has AGENTS.md,
-  backlog.md, or tasks.md. Also use proactively and silently at the start of any session in a repo
-  with agent infrastructure (any of: AGENTS.md, CLAUDE.md pointing to AGENTS.md, backlog.md,
-  tasks.md) — execute sections C through E before the user's first task and report only if
-  something changed or errored.
+description: "This skill should be used when the user says: \"sync harness\", \"harness sync\", \"harness 동기화\", \"AGENTS.md 정리\", \"AGENTS.md 업데이트\", \"CLAUDE.md 동기화\", \"backlog 정리\", \"tasks 정리\", \"세션 시작 루틴\", \"하네스 유지보수\"."
 ---
 
 # Harness Sync
 
 Maintain repo agent instruction files under **minimal-noise policy**.
-Run at session start (silently) or on explicit request.
+
+> **Session-start recommendation:** Add an explicit call to this skill in your `/init` command or session-start hook to enable automatic sync.
 
 **Paired skill:** `harness-init` bootstraps invariants this skill maintains. First-run sync shows unexpected drift in init-bootstrapped repo → treat as init bug, fix template — not sync false positive.
 
@@ -73,9 +67,10 @@ Exit codes:
 
 **If exit code 2:**
 1. Read extracted content from stdout.
-2. Filter each instruction using A) acceptance criteria.
-3. Merge qualifying items into `AGENTS.md`.
-4. Rewrite `CLAUDE.md` to contain exactly (no extra text, no blank lines):
+2. **Validate before proceeding:** if extracted content is empty or unparseable (no lines, binary garbage, or unmatched structure), halt immediately — do not proceed to step 3. Show user the raw extract and ask for manual review.
+3. Filter each instruction using A) acceptance criteria.
+4. Merge qualifying items into `AGENTS.md`: insert under the existing matching heading. If no matching heading exists, append a new section at the end of the file. Deduplicate: skip any item already present verbatim. If structural conflict exists (e.g., two `## Maintenance` sections), merge their content under one heading and note the consolidation in the sync summary.
+5. Rewrite `CLAUDE.md` to contain exactly (no extra text, no blank lines):
    ```
    @AGENTS.md
    ```
@@ -120,7 +115,7 @@ find .claude/skills -name "SKILL.md" 2>/dev/null
 
 For each `SKILL.md` found:
 - Verify frontmatter parseable (must have `name` and `description` fields)
-- Flag stale skills: not referenced in `backlog.md` or `tasks.md` for 5+ sprints
+- Flag stale skills: run `git log --follow -1 --format='%ci' <skill-path>/SKILL.md` for each skill. Flag skills with no commit in 60+ days. If git is unavailable, skip and note in summary.
 
 Print stale list to stdout if any. Do **not** auto-delete — human decides.
 
@@ -160,6 +155,8 @@ Two heuristics catch most common bloat causes:
 - **Fenced code blocks > 20% of total** — AGENTS.md = map, not cookbook. Long examples → `docs/*.md`.
 - **Duplicate `##` headings** — stale appends instead of edits; merge or subdivide with `###`.
 
+**Caveat:** fenced code block detection uses a toggle counter on ` ``` ` lines. If `AGENTS.md` contains unclosed triple-backtick blocks (malformed markdown), the context size estimate may be inaccurate. Fix malformed markdown before relying on this check.
+
 **Do not auto-trim.** 200+ line file may be load-bearing. Surface warning, let human decide what moves into `docs/*.md` with pointer line in `AGENTS.md` (pattern: `See docs/conventions.md for naming rules.`).
 
 Override threshold via env var: `CONTEXT_SIZE_LIMIT=300 bash ...`.
@@ -177,8 +174,18 @@ Override threshold via env var: `CONTEXT_SIZE_LIMIT=300 bash ...`.
 
 All scripts run from repo root, operate on files in current working directory.
 
+## Post-sync: sweep
+
+After all sections complete, run:
+
+```bash
+bash tools/sweep.sh
+```
+
+If `tools/sweep.sh` does not exist, skip this step and note the omission in the sync summary. This archives stale content per the minimal-noise policy.
+
 ## What sync does NOT do
 
-- **sweep** — `tools/sweep.sh` (installed by `harness-init` Step 5) deliberately out of session-start loop. Too heavy per session. Trigger policy (manual / SessionStart hook / cron) chosen at init time, recorded in `docs/runbook.md`.
+- **auto-sweep without check** — `tools/sweep.sh` (installed by `harness-init` Step 5) runs as a post-sync step but only if the file exists. Trigger policy beyond that (manual / SessionStart hook / cron) chosen at init time, recorded in `docs/runbook.md`.
 - **full validation** — `harness-init`'s `scripts/validate-harness.sh` does deeper structural checks (golden principle count, reference integrity, enforcement layer detection). Run after intentional harness change; sync only catches mechanically fixable drift.
 - **content rewriting** — sync never rewrites body of `backlog.md`, `tasks.md`, or `AGENTS.md`. Fixes schemas, moves state through reconciliation contract; everything else is human's call.
