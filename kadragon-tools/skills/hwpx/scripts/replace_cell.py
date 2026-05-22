@@ -17,12 +17,12 @@ New paragraphs use placeholder id="0". Any non-placeholder hp:p id in
 --content-file that collides with the rest of the document aborts the script.
 
 Usage:
-    python replace_cell.py doc.hwpx --table-id 1274564310 --list
-    python replace_cell.py doc.hwpx --table-id 1274564310 --cell 2,4 \
-        --para 1 186 "■ 서버 이중화 구성 목표" \
-        --para 20 186 "물리 서버 2대를 운영하여 무중단 서비스를 보장하여야 함" \
+    python replace_cell.py doc.hwpx --table-id TABLE_ID --list
+    python replace_cell.py doc.hwpx --table-id TABLE_ID --cell 1,0 \
+        --para 0 0 "셀 첫 번째 줄" \
+        --para 0 0 "셀 두 번째 줄" \
         -o result.hwpx
-    python replace_cell.py doc.hwpx --table-id 1274564310 --cell 2,4 \
+    python replace_cell.py doc.hwpx --table-id TABLE_ID --cell 1,0 \
         --content-file paras.xml -o result.hwpx
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)

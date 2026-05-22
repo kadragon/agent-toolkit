@@ -22,13 +22,13 @@ Best-effort (HWP recomputes table layout on open anyway):
   - table <hp:sz> height and spanned-cell <hp:cellSz> height are left as-is
 
 Usage:
-    python insert_table_row.py doc.hwpx --table-id 1277099271 --list
-    python insert_table_row.py doc.hwpx --table-id 1277099271 \
-        --at 15 --row-file newrow.xml -o result.hwpx
-    # append after row 14 (same as --at 15); grow the rowSpan group anchored
-    # at rowAddr=11 in columns 0 and 3:
-    python insert_table_row.py doc.hwpx --table-id 1277099271 \
-        --after-row 14 --row-file newrow.xml --grow 11,0 --grow 11,3 -o result.hwpx
+    python insert_table_row.py doc.hwpx --table-id TABLE_ID --list
+    python insert_table_row.py doc.hwpx --table-id TABLE_ID \
+        --at 4 --row-file newrow.xml -o result.hwpx
+    # append after row 3 (same as --at 4); grow the rowSpan group anchored
+    # at rowAddr=2 in columns 0 and 3:
+    python insert_table_row.py doc.hwpx --table-id TABLE_ID \
+        --after-row 3 --row-file newrow.xml --grow 2,0 --grow 2,3 -o result.hwpx
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys

@@ -7,50 +7,52 @@ Traps that cause silent failures and no-op edits when editing an existing HWPX. 
 A table's sum/calculation cell may be a **FORMULA field**, not plain text. Structure:
 
 ```xml
-<hp:run charPrIDRef="7">
-  <hp:ctrl><hp:fieldBegin id="1277099272" type="FORMULA" ... fieldid="627469685">
+<hp:run charPrIDRef="0">
+  <hp:ctrl><hp:fieldBegin id="1000000099" type="FORMULA" ... fieldid="2000000001">
     <hp:parameters cnt="5" name="">
-      <hp:stringParam name="Command">=SUM(?2:?23)??%g,;;23</hp:stringParam>
-      <hp:stringParam name="Formula">=SUM(?2:?23)</hp:stringParam>
-      <hp:stringParam name="LastResult">23</hp:stringParam>
+      <hp:stringParam name="Command">=SUM(?2:?N)??%g,;;N</hp:stringParam>
+      <hp:stringParam name="Formula">=SUM(?2:?N)</hp:stringParam>
+      <hp:stringParam name="LastResult">N</hp:stringParam>
     </hp:parameters>
   </hp:fieldBegin></hp:ctrl>
-  <hp:t>24</hp:t>                                          <!-- 표시값 (캐시) -->
-  <hp:ctrl><hp:fieldEnd beginIDRef="1277099272" fieldid="627469685"/></hp:ctrl>
+  <hp:t>N+1</hp:t>                                        <!-- 표시값 (캐시) -->
+  <hp:ctrl><hp:fieldEnd beginIDRef="1000000099" fieldid="2000000001"/></hp:ctrl>
   <hp:t/>
 </hp:run>
 ```
 
-`<hp:t>24</hp:t>` is the **cached formula result**. Changing only this text — Hancom recalculates the formula on open and **overwrites** it → edit is a no-op.
+`<hp:t>N+1</hp:t>` is the **cached formula result**. Changing only this text — Hancom recalculates the formula on open and **overwrites** it → edit is a no-op.
 
-**Detection**: if you want to change a cell value and `type="FORMULA"` is nearby, it's a field. `Command`/`Formula`/`LastResult` params are the clue. Display value ≠ `LastResult` (e.g. display 24, LastResult 23) signals the formula/range is already broken.
+**Detection**: if you want to change a cell value and `type="FORMULA"` is nearby, it's a field. `Command`/`Formula`/`LastResult` params are the clue. Display value ≠ `LastResult` signals the formula/range is already broken.
 
 **Two fixes**:
 
 - **Convert to static value (recommended when the answer is fixed)**: replace the whole span from the `fieldBegin` ctrl through the `fieldEnd` ctrl + cached `<hp:t>` with static text. Use `id`/`fieldid` as regex anchors to guarantee uniqueness.
   ```python
   import re
-  pat = (r'<hp:ctrl><hp:fieldBegin id="1277099272".*?'
-         r'<hp:fieldEnd beginIDRef="1277099272" fieldid="627469685"/></hp:ctrl><hp:t/>')
+  # actual id/fieldid values — read from the document
+  FIELD_ID = "1000000099"
+  FIELDID  = "2000000001"
+  pat = (rf'<hp:ctrl><hp:fieldBegin id="{FIELD_ID}".*?'
+         rf'<hp:fieldEnd beginIDRef="{FIELD_ID}" fieldid="{FIELDID}"/></hp:ctrl><hp:t/>')
   assert len(re.findall(pat, s, re.DOTALL)) == 1
-  s = re.sub(pat, "<hp:t>49</hp:t>", s, flags=re.DOTALL)
-  # 결과: <hp:run charPrIDRef="7"><hp:t>49</hp:t></hp:run>
+  s = re.sub(pat, "<hp:t>새 값</hp:t>", s, flags=re.DOTALL)
   ```
-- **Edit the input cell**: if the sum is a SUM of other cells, fixing the input cell value makes Hancom recalculate the sum. Verify the formula range (`?2:?23` etc.) points exactly at the input cell — a wrong range gives a wrong sum even with a correct input.
+- **Edit the input cell**: if the sum is a SUM of other cells, fixing the input cell value makes Hancom recalculate the sum. Verify the formula range (`?2:?N` etc.) points exactly at the input cell — a wrong range gives a wrong sum even with a correct input.
 
 ## 2. Substring collision
 
 If a `str.replace()` target is **part of a longer string**, it gets replaced in unintended places too.
 
-Example: changing `"사업 수행 조직"` to `"사업 수행 조직의 구성"`, but the document already has `"사업 수행 조직의 구성"` in 3 places — `s.replace("사업 수행 조직", "사업 수행 조직의 구성")` turns those 3 into `"사업 수행 조직의 구성의 구성"`.
+Example: changing `"조직"` to `"조직의 구성"`, but the document already has `"조직의 구성"` in 3 places — `s.replace("조직", "조직의 구성")` turns those 3 into `"조직의 구성의 구성"`.
 
 **Avoid — match the full `<hp:t>` element**: if the target is the entire content of one hp:t, match including the tags.
 
 ```python
 # ❌ 위험: 부분 문자열
-s = s.replace("사업 수행 조직", "사업 수행 조직의 구성")
+s = s.replace("조직", "조직의 구성")
 # ✅ 안전: hp:t 전체 요소 — "...조직의 구성" 안의 부분 매칭 회피
-s = s.replace("<hp:t>사업 수행 조직</hp:t>", "<hp:t>사업 수행 조직의 구성</hp:t>")
+s = s.replace("<hp:t>조직</hp:t>", "<hp:t>조직의 구성</hp:t>")
 ```
 
 `<hp:t>X</hp:t>` form matches only when X is exactly the full text of one paragraph/cell, so there is no substring collision.

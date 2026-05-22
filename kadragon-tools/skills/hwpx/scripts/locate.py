@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Locate XML elements in an HWPX section by the text they contain.
 
-section0.xml is one long line; finding "the <hp:tbl> that contains ECR-001"
+section0.xml is one long line; finding "the <hp:tbl> that contains '항목명'"
 by hand means writing a nesting-aware tag matcher every time. This does it.
 
 Usage:
-    python locate.py doc.hwpx --tag hp:tbl --contains "ECR-001"
-    python locate.py doc.hwpx --tag hp:tbl --contains "ECR-001" --contains "산출정보"
-    python locate.py doc.hwpx --tag hp:p  --contains "헬스체크" --section 0
+    python locate.py doc.hwpx --tag hp:tbl --contains "항목명"
+    python locate.py doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
+    python locate.py doc.hwpx --tag hp:p  --contains "특정텍스트" --section 0
     python locate.py doc.hwpx --tag hp:tbl --contains "합계" --extract-dir ./out --pretty
 
 --contains may be repeated; an element must contain ALL given strings (AND).

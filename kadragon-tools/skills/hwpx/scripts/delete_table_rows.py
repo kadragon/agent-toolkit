@@ -17,8 +17,8 @@ row). Deleting such a row would orphan the merged cell — the script aborts.
 Restructure that case manually.
 
 Usage:
-    python delete_table_rows.py doc.hwpx --table-id 1277099271 --list
-    python delete_table_rows.py doc.hwpx --table-id 1277099271 --rows 8,9 -o result.hwpx
+    python delete_table_rows.py doc.hwpx --table-id TABLE_ID --list
+    python delete_table_rows.py doc.hwpx --table-id TABLE_ID --rows 3,4 -o result.hwpx
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys

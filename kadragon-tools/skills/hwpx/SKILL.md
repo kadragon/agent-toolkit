@@ -508,39 +508,39 @@ Handle table structure changes (add/delete rows, replace cell content) with the 
 **1) Find element position (locate.py)** — search table/row/paragraph spans by text:
 
 ```bash
-# 'ECR-001' 포함하는 hp:tbl 모두 (총괄표 + 상세표)
-python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "ECR-001"
-# 여러 --contains는 AND — 상세표만 특정
-python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "ECR-001" --contains "산출정보"
+# '항목명' 포함하는 hp:tbl 모두
+python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명"
+# 여러 --contains는 AND — 특정 표만 좁히기
+python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
 # 매치 요소를 파일로 추출 (clone 원본 확보용)
-python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tr --contains "INR-004" --extract-dir ./_work --pretty
+python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tr --contains "항목코드" --extract-dir ./_work --pretty
 ```
 
 **2) Insert table row (insert_table_row.py)** — add row + fix metadata:
 
 ```bash
 # 행 목록 확인 (table id는 delete_table_rows.py --list 또는 locate로 확보)
-python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id 1277099271 --list
-# rowAddr 14 다음에 삽입. 새 행이 rowSpan 그룹의 '끝'이면 그룹 앵커 셀을 --grow로 확장
-python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id 1277099271 \
-  --after-row 14 --row-file new_tr.xml --grow 11,0 --grow 11,3 -o result.hwpx
+python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id TABLE_ID --list
+# rowAddr 3 다음에 삽입. 새 행이 rowSpan 그룹의 '끝'이면 그룹 앵커 셀을 --grow로 확장
+python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id TABLE_ID \
+  --after-row 3 --row-file new_tr.xml --grow 2,0 --grow 2,3 -o result.hwpx
 ```
 
 - `--row-file`: the `<hp:tr>...</hp:tr>` to insert (extract an existing row with locate and edit only the text)
 - rowSpan cells that **pass through** the insertion point auto-increment by +1. When adding at a group **end**, auto-detection is impossible → specify the anchor cell with `--grow rowAddr,colAddr`
-- In-cell text like a `요구사항 수` count ("4"→"5") is separate — handle with `patch_section.py`
+- In-cell text like a count cell (`"3"→"4"`) is separate — handle with `patch_section.py`
 - Only `rowAddr`/`rowCnt`/`rowSpan` are auto-fixed. **borderFill is not handled** — for a zebra pattern where section first/middle/last rows use different border IDs, manually check `borderFillIDRef` of the inserted row and adjacent rows (e.g. when adding at a group end, change the old last row to a 'middle' border and apply an 'end' border to the new row)
 
 **3) Replace table cell content (replace_cell.py)** — replace the cell's paragraphs wholesale:
 
 ```bash
 # 셀 목록 (colAddr,rowAddr 확인)
-python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id 1274564310 --list
+python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --list
 # --para PARAPR CHARPR TEXT 반복 — 간단 텍스트 문단
-python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id 1274564310 --cell 2,4 \
-  --para 1 186 "■ 헤더" --para 20 186 "본문 항목" -o result.hwpx
+python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
+  --para 1 0 "헤더 텍스트" --para 0 0 "본문 내용" -o result.hwpx
 # 또는 raw <hp:p> XML 파일
-python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id 1274564310 --cell 2,4 \
+python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --content-file paras.xml -o result.hwpx
 ```
 
