@@ -38,11 +38,14 @@ if [[ $sync_code -eq 1 ]]; then
   WARNINGS+="[harness:B] CLAUDE.md was missing — created with @AGENTS.md\n"
 elif [[ $sync_code -eq 2 ]]; then
   WARNINGS+="[harness:B] CLAUDE.md content drift — expected @AGENTS.md. Run harness sync to fix.\n"
+elif [[ $sync_code -ne 0 ]]; then
+  WARNINGS+="[harness:B] sync-claude-md.sh failed (exit $sync_code): $sync_out\n"
 fi
 
 # E) Symlink guard
-symlink_out=$(bash "$SCRIPTS/symlink-guard.sh" 2>&1) || true
-[[ -n "$symlink_out" ]] && WARNINGS+="[harness:E] $symlink_out\n"
+symlink_out=$(bash "$SCRIPTS/symlink-guard.sh" 2>&1)
+symlink_code=$?
+[[ $symlink_code -ne 0 ]] && WARNINGS+="[harness:E] $symlink_out\n"
 
 # F) Context size check
 size_out=$(bash "$SCRIPTS/check-context-size.sh" 2>&1) || true

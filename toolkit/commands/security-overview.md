@@ -30,13 +30,13 @@ gh repo list "${GH_USER}" --json name,url --limit 300 -q '.[] | "\(.name) \(.url
 
 Fetch all Dependabot vulnerability alerts in single paginated GraphQL call.
 
-**Default: use `scripts/fetch-alerts.sh`.** Use manual query only when: (a) script unavailable, (b) user requests specific API exploration, (c) script fails. Never mix both in the same run.
+**Default: use `fetch-alerts.sh`.** Use manual query only when: (a) script unavailable, (b) user requests specific API exploration, (c) script fails. Never mix both in the same run.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/commands/security-overview/fetch-alerts.sh"
 ```
 
-For query structure, field reference, pagination details → **`${CLAUDE_PLUGIN_ROOT}/commands/security-overview/api-patterns.md`** § Dependabot.
+For query structure, field reference, pagination details → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`** § Dependabot.
 
 ### 1-3. Collect Code Scanning and Secret Scanning alerts
 
@@ -94,7 +94,7 @@ Before writing fix plans, read relevant files per repo:
 
 ### 3-2. Write plan.md
 
-Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/commands/security-overview/plan-template.md`**.
+Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/plan-template.md`**.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
