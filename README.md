@@ -1,39 +1,38 @@
-# skills
+# kadragon/toolkit
 
-Personal Claude Code plugins by kadragon.
+Personal Claude Code plugin marketplace by kadragon.
 
-## Plugins
+## Skills
 
-### kadragon-tools
-
-| Skill | Claude Code | Codex | Description |
+| Skill | Description | Claude Code | Codex |
 |---|---|---|---|
-| `security-overview` | ✅ | ✅ | GitHub security alert aggregator across owned repos |
-| `hwpx` | ✅ | ✅ | Korean HWPX document creation/editing |
-| `dependabot-manager` | ✅ | ⚠️ | Dependabot bulk PR ops. Codex: subagent steps degrade (no Claude sonnet subagents) |
-| `dev-review-cycle` | ✅ | ❌ | Orchestrates Claude/Antigravity/Codex reviewers — Claude-only host |
-| `harness-init` | ✅ | ❌ | Bootstraps `.agents/skills` symlink + Claude-shaped harness |
+| `harness-init` | Bootstraps agent infrastructure (AGENTS.md, docs/, hooks) | ✅ | ❌ |
+| `dev-review-cycle` | Orchestrates Claude/Antigravity/Codex reviewers, merges | ✅ | ❌ |
+| `security-overview` | Aggregates GitHub security alerts across owned repos | ✅ | ✅ |
+| `dependabot-manager` | Bulk Dependabot PR operations | ✅ | ⚠️ |
+| `hwpx` | Korean HWPX document creation and editing | ✅ | ✅ |
 
 ## Installation
 
 ### Claude Code
 
 ```bash
-claude plugins:add kadragon-tools --marketplace kadragon/skills
+claude plugin marketplace add kadragon/toolkit
+claude plugin install toolkit@kadragon
 ```
 
-Or add manually to `~/.claude/settings.json`:
+Via `~/.claude/settings.json`:
 
 ```json
 {
   "enabledPlugins": {
-    "kadragon-tools@skills": true
+    "toolkit@kadragon": true
   },
   "extraKnownMarketplaces": {
-    "skills": {
+    "kadragon": {
       "source": {
         "source": "github",
-        "repo": "kadragon/skills"
+        "repo": "kadragon/toolkit"
       },
       "autoUpdate": true
     }
@@ -43,27 +42,20 @@ Or add manually to `~/.claude/settings.json`:
 
 ### Codex
 
-Codex ignores Claude marketplaces. Install skills via Codex's built-in `skill-installer`:
-
-```text
-# In Codex
-> install skill from github kadragon/skills path kadragon-tools/skills/<name>
-```
-
-Or run the installer script directly:
+Codex ignores Claude marketplaces. Install skills via `skill-installer`:
 
 ```bash
 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo kadragon/skills \
-  --path kadragon-tools/skills/<name>
+  --repo kadragon/toolkit \
+  --path toolkit/skills/<name>
 ```
 
-Then restart Codex. Install only ✅/⚠️ skills from the table above.
+Install only ✅/⚠️ skills from table above.
 
 ## Prerequisites
 
-- [GitHub CLI (`gh`)](https://cli.github.com/) — authenticated via `gh auth login`
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [GitHub CLI (`gh`)](https://cli.github.com/) — `gh auth login`
+- [Claude Code](https://claude.ai/code)
 
 ## License
 

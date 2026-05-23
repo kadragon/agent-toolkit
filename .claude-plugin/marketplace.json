@@ -1,17 +1,14 @@
 {
-  "name": "skills",
+  "name": "kadragon",
+  "description": "Personal Claude Code plugins by kadragon",
   "owner": {
     "name": "kadragon"
   },
-  "metadata": {
-    "description": "Personal Claude Code plugins by kadragon"
-  },
   "plugins": [
     {
-      "name": "kadragon-tools",
-      "source": "./kadragon-tools",
-      "description": "Personal Claude Code skills and agents by kadragon",
-      "version": "1.0.0"
+      "name": "toolkit",
+      "source": "./toolkit",
+      "description": "Personal Claude Code skills and agents by kadragon"
     }
   ]
 }
