@@ -1,4 +1,4 @@
-# cc-plugins
+# skills
 
 Personal Claude Code plugins by kadragon.
 
@@ -6,16 +6,20 @@ Personal Claude Code plugins by kadragon.
 
 ### kadragon-tools
 
-| Skill | Description |
-|---|---|
-| `dependabot-manager` | Dependabot PR 일괄 관리 — 탐색, 분류, 병합, 실패 분석, Grouped Updates 설정 |
-| `dev-review-cycle` | PR 생성 → 리뷰 수집(Claude Code, Antigravity, Codex) → 피드백 통합 → CI 대기 → 머지까지 원스톱 워크플로우 |
-| `harness-init` | 레포에 하네스 시스템 구축 — AGENTS.md(맵), docs/ 지식 기반, delegation routing, 평가 기준, golden principles, sweep 자동화. Anthropic + OpenAI harness engineering 원칙 기반 |
+| Skill | Claude Code | Codex | Description |
+|---|---|---|---|
+| `security-overview` | ✅ | ✅ | GitHub security alert aggregator across owned repos |
+| `hwpx` | ✅ | ✅ | Korean HWPX document creation/editing |
+| `dependabot-manager` | ✅ | ⚠️ | Dependabot bulk PR ops. Codex: subagent steps degrade (no Claude sonnet subagents) |
+| `dev-review-cycle` | ✅ | ❌ | Orchestrates Claude/Antigravity/Codex reviewers — Claude-only host |
+| `harness-init` | ✅ | ❌ | Bootstraps `.agents/skills` symlink + Claude-shaped harness |
 
 ## Installation
 
+### Claude Code
+
 ```bash
-claude plugins:add kadragon-tools --marketplace kadragon/cc-plugins
+claude plugins:add kadragon-tools --marketplace kadragon/skills
 ```
 
 Or add manually to `~/.claude/settings.json`:
@@ -23,19 +27,38 @@ Or add manually to `~/.claude/settings.json`:
 ```json
 {
   "enabledPlugins": {
-    "kadragon-tools@cc-plugins": true
+    "kadragon-tools@skills": true
   },
   "extraKnownMarketplaces": {
-    "cc-plugins": {
+    "skills": {
       "source": {
         "source": "github",
-        "repo": "kadragon/cc-plugins"
+        "repo": "kadragon/skills"
       },
       "autoUpdate": true
     }
   }
 }
 ```
+
+### Codex
+
+Codex ignores Claude marketplaces. Install skills via Codex's built-in `skill-installer`:
+
+```text
+# In Codex
+> install skill from github kadragon/skills path kadragon-tools/skills/<name>
+```
+
+Or run the installer script directly:
+
+```bash
+~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo kadragon/skills \
+  --path kadragon-tools/skills/<name>
+```
+
+Then restart Codex. Install only ✅/⚠️ skills from the table above.
 
 ## Prerequisites
 

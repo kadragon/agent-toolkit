@@ -1,4 +1,4 @@
-# cc-plugins
+# skills
 
 ## Release
 

@@ -184,7 +184,7 @@ Tooling looks up project-local skills via `.agents/` while files live under `.cl
 bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/symlink-guard.sh
 ```
 
-If cc-plugins is not cloned or `CLAUDE_PLUGIN_ROOT` is unset, run directly:
+If skills repo is not cloned or `CLAUDE_PLUGIN_ROOT` is unset, run directly:
 
 ```bash
 mkdir -p .agents && ln -s ../.claude/skills .agents/skills
