@@ -13,11 +13,9 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 PLUGINS_CACHE="${HOME}/.claude/plugins/cache"
-# Temp file tracks seen IDs for deduplication (bash 3-compatible, no assoc arrays)
 SEEN_FILE=$(mktemp)
-trap 'rm -f "$SEEN_FILE"' EXIT
-
-candidates_json="[]"
+ENTRIES_FILE=$(mktemp)
+trap 'rm -f "$SEEN_FILE" "$ENTRIES_FILE"' EXIT
 
 # ──────────────────────────────────────────────
 # Helper: check if id already seen; if not, mark it and return 0 (ok to add)
@@ -72,12 +70,8 @@ extract_description() {
 add_candidate() {
   local id="$1" kind="$2" desc="$3"
   is_new "$id" || return 0
-  local entry
-  entry=$(jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
-    '{id: $id, kind: $kind, description: $description}') || return 0
-  local updated
-  updated=$(printf '%s' "$candidates_json" | jq --argjson e "$entry" '. + [$e]') || return 0
-  candidates_json="$updated"
+  jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
+    '{id: $id, kind: $kind, description: $description}' >> "$ENTRIES_FILE" || return 0
 }
 
 # ──────────────────────────────────────────────
@@ -136,5 +130,4 @@ if [[ -d "$PLUGINS_CACHE" ]]; then
   done < <(find "$PLUGINS_CACHE" -maxdepth 7 -name "*.md" -path "*/commands/*" 2>/dev/null | sort -rV 2>/dev/null || find "$PLUGINS_CACHE" -maxdepth 7 -name "*.md" -path "*/commands/*" 2>/dev/null | sort -r)
 fi
 
-count=$(printf '%s' "$candidates_json" | jq 'length')
-printf '%s' "$candidates_json" | jq -c --argjson count "$count" '{candidates: ., count: $count}'
+jq -cs '{candidates: ., count: length}' "$ENTRIES_FILE"

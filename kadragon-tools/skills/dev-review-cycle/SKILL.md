@@ -99,15 +99,14 @@ Use `review_candidates` from preflight output to dynamically select and launch r
 
 1. Get diff context: `git diff ${BASE_BRANCH}...HEAD --name-only --stat`
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
-3. If `review_candidates.count == 0`, fall back to inline review: check naming, error handling, test coverage from the diff. Note in consolidation that file-based detection found no review skills.
-4. Otherwise, apply these selection rules:
+3. Apply these selection rules:
    - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
    - For any remaining candidates not selected, note the reason (e.g., "out of scope for this diff", "exceeds cap").
 
-5. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model: "opus"` for best review quality. Prompt structure for all kinds:
+4. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model: "opus"` for best review quality. Prompt structure for all kinds:
 
 ```
 Agent tool parameters:
@@ -153,6 +152,8 @@ Wrap each background script invocation so failure is caught and logged, not sile
 #### Collecting Results
 
 Launch all available sources in parallel. Allow up to 10 minutes (600000ms) per source. After all reviews are collected, immediately proceed to Step 3.
+
+If all launched sources failed or returned no findings, fall back to inline review: check naming, error handling, and test coverage from the diff. Note in consolidation that all automated review sources failed.
 
 ### Step 3: Consolidate Reviews and Get User Approval
 

@@ -43,6 +43,11 @@ if [ ! -e "$LINK" ]; then
   rm -rf "$LINK"
   printf '%s' "$TARGET" > "$LINK"
   echo "symlink-guard: wrote text-form pointer at $LINK (Windows without symlink support)"
+  _git_mode=$(git ls-files -s "$LINK" 2>/dev/null | awk '{print $1}')
+  if [ "$_git_mode" != "120000" ]; then
+    echo "  WARNING: $LINK is not tracked as git mode 120000 — POSIX peers will see a plain text file, not a symlink."
+    echo "  To fix after staging: sha=\$(git hash-object '$LINK') && git update-index --cacheinfo 120000,\$sha,'$LINK'"
+  fi
   exit 0
 fi
 
