@@ -28,7 +28,7 @@ Detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), cu
 
 If `has_errors` is `true`, stop and report errors.
 
-Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`) in all subsequent steps. Prefer squash > merge > rebase for merge strategy.
+Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`, `review_candidates`) in all subsequent steps. Prefer squash > merge > rebase for merge strategy.
 
 ## CRITICAL: Execution Model
 
@@ -95,44 +95,35 @@ Collect reviews from multiple sources. Launch all available sources in parallel 
 
 Use `review_candidates` from preflight output to dynamically select and launch relevant review skills.
 
-**Selection procedure (do this inline — no extra tool call):**
+**Selection procedure (do this inline — no extra Agent tool call):**
 
 1. Get diff context: `git diff ${BASE_BRANCH}...HEAD --name-only --stat`
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
 3. If `review_candidates.count == 0`, fall back to inline review: check naming, error handling, test coverage from the diff. Note in consolidation that file-based detection found no review skills.
 4. Otherwise, apply these selection rules:
-   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `code-review` > `review`.
+   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
    - For any remaining candidates not selected, note the reason (e.g., "out of scope for this diff", "exceeds cap").
 
-5. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Tailor the prompt based on `kind`:
+5. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model: "opus"` for best review quality. Prompt structure for all kinds:
 
 ```
-For kind == "skill" (e.g., caveman:caveman-review):
-  Agent tool parameters:
-    description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
-    run_in_background: true
-    prompt: |
-      Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH} using the
-      /${SKILL_ID} skill.
-      1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
-      2. Invoke the Skill tool with skill="${SKILL_ID}".
-      3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
-         Tag each finding with source="${SKILL_ID}".
-
-For kind == "command" or "builtin" (e.g., pr-review-toolkit:review-pr, code-review, review):
-  Agent tool parameters:
-    description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
-    run_in_background: true
-    prompt: |
-      Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
-      1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
-      2. Invoke the Skill tool with skill="${SKILL_ID}" to perform the review.
-         Note: ${SKILL_ID} is a command-type skill. Pass it to Skill tool the same way.
-      3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
-         Tag each finding with source="${SKILL_ID}".
+Agent tool parameters:
+  description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
+  model: "opus"
+  run_in_background: true
+  prompt: |
+    Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
+    1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
+    2. Invoke the Skill tool with skill="${SKILL_ID}" to perform the review.
+       - For kind="skill": the skill accepts a git diff context; pass it directly.
+       - For kind="command" with id="code-review": also pass ${PR_NUMBER} as args
+         (code-review uses gh pr commands internally and requires a PR number).
+       - For kind="builtin": invoke exactly like any other skill.
+    3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
+       Tag each finding with source="${SKILL_ID}".
 ```
 
 #### 2-2: Antigravity (agy) Review

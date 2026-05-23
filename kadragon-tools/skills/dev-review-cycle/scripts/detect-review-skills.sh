@@ -47,8 +47,8 @@ extract_description() {
     in_front && /^description:/ {
       found=1
       sub(/^description:[[:space:]]*/, "")
-      # strip leading > or | (YAML block scalars)
       sub(/^[>|][[:space:]]*/, "")
+      sub(/^[[:space:]]+/, "")
       text=$0
       next
     }
@@ -58,7 +58,11 @@ extract_description() {
       next
     }
     found { exit }
-    END { print substr(text, 1, 500) }
+    END {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+      gsub(/^["'"'"']|["'"'"']$/, "", text)
+      print substr(text, 1, 500)
+    }
   ' "$file" 2>/dev/null | tr -s ' '
 }
 
@@ -70,8 +74,10 @@ add_candidate() {
   is_new "$id" || return 0
   local entry
   entry=$(jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
-    '{id: $id, kind: $kind, description: $description}')
-  candidates_json=$(printf '%s' "$candidates_json" | jq --argjson e "$entry" '. + [$e]')
+    '{id: $id, kind: $kind, description: $description}') || return 0
+  local updated
+  updated=$(printf '%s' "$candidates_json" | jq --argjson e "$entry" '. + [$e]') || return 0
+  candidates_json="$updated"
 }
 
 # ──────────────────────────────────────────────
@@ -85,9 +91,10 @@ add_candidate "security-review" "builtin" \
 
 # ──────────────────────────────────────────────
 # 2. Scan plugin cache for skills (dir name contains "review")
+# Path: $PLUGINS_CACHE/<source>/<plugin>/<version>/skills/<skill>/SKILL.md
+# plugin_name = component just before /version/ = $(NF-1) of path up to /skills/
 # ──────────────────────────────────────────────
 if [[ -d "$PLUGINS_CACHE" ]]; then
-  # sort -r so newer (alphabetically later) versions appear first; dedup keeps first
   while IFS= read -r skill_md; do
     skill_dir=$(dirname "$skill_md")
     skill_name=$(basename "$skill_dir")
@@ -96,18 +103,17 @@ if [[ -d "$PLUGINS_CACHE" ]]; then
     [[ "$skill_md" =~ /codex/ ]]  && continue
     [[ "$skill_name" == "dev-review-cycle" ]] && continue
 
-    # Path: $PLUGINS_CACHE/<source>/<plugin>/<version>/skills/<skill>/SKILL.md
-    rel="${skill_md#${PLUGINS_CACHE}/}"
-    plugin_name=$(echo "$rel" | cut -d'/' -f2)
+    plugin_name=$(echo "$skill_md" | awk -F'/skills/' '{print $1}' | awk -F'/' '{print $(NF-1)}')
     [[ -z "$plugin_name" ]] && continue
 
     local_id="${plugin_name}:${skill_name}"
-    desc=$(extract_description "$skill_md")
+    desc=$(extract_description "$skill_md" 2>/dev/null || echo "")
     add_candidate "$local_id" "skill" "$desc"
-  done < <(find "$PLUGINS_CACHE" -maxdepth 7 -name "SKILL.md" -path "*/skills/*" 2>/dev/null | sort -r)
+  done < <(find "$PLUGINS_CACHE" -maxdepth 7 -name "SKILL.md" -path "*/skills/*" 2>/dev/null | sort -rV 2>/dev/null || find "$PLUGINS_CACHE" -maxdepth 7 -name "SKILL.md" -path "*/skills/*" 2>/dev/null | sort -r)
 
   # ──────────────────────────────────────────────
   # 3. Scan plugin cache for commands (file stem contains "review")
+  # plugin_name = component just before /version/ = $(NF-1) of path up to /commands/
   # ──────────────────────────────────────────────
   while IFS= read -r cmd_md; do
     cmd_stem=$(basename "$cmd_md" .md)
@@ -115,8 +121,7 @@ if [[ -d "$PLUGINS_CACHE" ]]; then
     [[ "$cmd_stem" =~ review ]] || continue
     [[ "$cmd_md" =~ /codex/ ]]  && continue
 
-    rel="${cmd_md#${PLUGINS_CACHE}/}"
-    plugin_name=$(echo "$rel" | cut -d'/' -f2)
+    plugin_name=$(echo "$cmd_md" | awk -F'/commands/' '{print $1}' | awk -F'/' '{print $(NF-1)}')
     [[ -z "$plugin_name" ]] && continue
 
     # id: bare if cmd_stem == plugin_name, else plugin:cmd
@@ -126,9 +131,9 @@ if [[ -d "$PLUGINS_CACHE" ]]; then
       local_id="${plugin_name}:${cmd_stem}"
     fi
 
-    desc=$(extract_description "$cmd_md")
+    desc=$(extract_description "$cmd_md" 2>/dev/null || echo "")
     add_candidate "$local_id" "command" "$desc"
-  done < <(find "$PLUGINS_CACHE" -maxdepth 7 -name "*.md" -path "*/commands/*" 2>/dev/null | sort -r)
+  done < <(find "$PLUGINS_CACHE" -maxdepth 7 -name "*.md" -path "*/commands/*" 2>/dev/null | sort -rV 2>/dev/null || find "$PLUGINS_CACHE" -maxdepth 7 -name "*.md" -path "*/commands/*" 2>/dev/null | sort -r)
 fi
 
 count=$(printf '%s' "$candidates_json" | jq 'length')

@@ -80,8 +80,9 @@ fi
 # --- Detect installed review skills ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEW_CANDIDATES='{"candidates":[],"count":0}'
-if [[ -x "${SCRIPT_DIR}/detect-review-skills.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/detect-review-skills.sh" ]]; then
   REVIEW_CANDIDATES=$(bash "${SCRIPT_DIR}/detect-review-skills.sh" 2>/dev/null) || REVIEW_CANDIDATES='{"candidates":[],"count":0}'
+  jq -e . <<< "$REVIEW_CANDIDATES" >/dev/null 2>&1 || REVIEW_CANDIDATES='{"candidates":[],"count":0}'
 fi
 
 # --- Build JSON safely with jq ---
