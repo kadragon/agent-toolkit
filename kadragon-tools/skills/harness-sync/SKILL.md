@@ -20,6 +20,16 @@ Maintain repo agent instruction files under **minimal-noise policy**.
 
 All thresholds, paths, contracts live in `harness-init`'s `references/harness-invariants.md`. Update there, not here, when values change.
 
+## When to run
+
+- Session start (recommended: wire into `/init` or SessionStart hook)
+- After intentional harness edit (AGENTS.md/docs/ touched)
+- Drift suspected (mismatched CLAUDE.md, orphaned `[>]` markers, broken symlink)
+
+NOT for: rewriting AGENTS.md body, enforcing golden principles (→ sweep), bootstrap (→ harness-init).
+
+---
+
 ## Execution Order
 
 A requires human judgment. B/C/D/E/F independent, may parallelize.
@@ -183,6 +193,16 @@ bash tools/sweep.sh
 ```
 
 If `tools/sweep.sh` does not exist, skip this step and note the omission in the sync summary. This archives stale content per the minimal-noise policy.
+
+## G) Post-sync validate
+
+Run `harness-init/scripts/validate-harness.sh` to confirm invariants still hold after sync.
+
+- exit 0 (pass) or warn-only → continue
+- hard fail → report to user, do NOT auto-fix (treat as init bug per pairing contract)
+- script absent (legacy bootstrap) → emit one-line warning, exit 0 (parallel-safe)
+
+---
 
 ## What sync does NOT do
 
