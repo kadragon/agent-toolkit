@@ -1,6 +1,6 @@
 ---
 name: dev-review-cycle
-description: Post-development workflow that creates a PR, collects reviews from multiple sources (Claude Code, Antigravity, Codex), consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "full PR review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review. NOT for: reviewing only with no implementation intent, code review discussions without write intent, or one-off review requests that don't involve committing and merging.
+description: Post-development workflow that creates a PR, collects reviews from dynamically detected Claude skills (1–N in parallel) plus Antigravity and Codex, consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "full PR review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review. NOT for: reviewing only with no implementation intent, code review discussions without write intent, or one-off review requests that don't involve committing and merging.
 ---
 
 # Dev Review Cycle
@@ -89,26 +89,50 @@ Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq
 
 ### Step 2: Collect Reviews
 
-Collect reviews from up to three sources. Launch all available sources in parallel using background tasks.
+Collect reviews from multiple sources. Launch all available sources in parallel using background tasks.
 
-#### 2-1: Claude Code Review (review-pr)
+#### 2-1: Claude Skill Reviewers (1–N parallel sub-agents)
 
-Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr` skill on the changed files. Do NOT pass `subagent_type` — `pr-review-toolkit:review-pr` is a skill, not an agent type; passing it as `subagent_type` will error. If the skill is unavailable, perform an inline review instead: check for obvious issues (naming conventions, error handling, test coverage) directly from the diff. Note in the consolidation output that full multi-agent review was skipped.
+Use `review_candidates` from preflight output to dynamically select and launch relevant review skills.
+
+**Selection procedure (do this inline — no extra tool call):**
+
+1. Get diff context: `git diff ${BASE_BRANCH}...HEAD --name-only --stat`
+2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
+3. If `review_candidates.count == 0`, fall back to inline review: check naming, error handling, test coverage from the diff. Note in consolidation that file-based detection found no review skills.
+4. Otherwise, apply these selection rules:
+   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `code-review` > `review`.
+   - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
+   - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
+   - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
+   - For any remaining candidates not selected, note the reason (e.g., "out of scope for this diff", "exceeds cap").
+
+5. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Tailor the prompt based on `kind`:
 
 ```
-Agent tool parameters:
-  description: "Comprehensive PR review against ${BASE_BRANCH}"
-  model: "opus"
-  prompt: |
-    Run a comprehensive PR review using the /pr-review-toolkit:review-pr skill on the changes
-    introduced by branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
-    1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to identify all changed files.
-    2. Invoke the Skill tool with skill="pr-review-toolkit:review-pr" to run all applicable
-       review agents (code, errors, tests, comments, types, simplify) on the diff.
-    3. Return the full aggregated review summary including Critical Issues, Important Issues,
-       Suggestions, and Strengths.
-  run_in_background: true
-  (no subagent_type — use default claude agent)
+For kind == "skill" (e.g., caveman:caveman-review):
+  Agent tool parameters:
+    description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
+    run_in_background: true
+    prompt: |
+      Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH} using the
+      /${SKILL_ID} skill.
+      1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
+      2. Invoke the Skill tool with skill="${SKILL_ID}".
+      3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
+         Tag each finding with source="${SKILL_ID}".
+
+For kind == "command" or "builtin" (e.g., pr-review-toolkit:review-pr, code-review, review):
+  Agent tool parameters:
+    description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
+    run_in_background: true
+    prompt: |
+      Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
+      1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
+      2. Invoke the Skill tool with skill="${SKILL_ID}" to perform the review.
+         Note: ${SKILL_ID} is a command-type skill. Pass it to Skill tool the same way.
+      3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
+         Tag each finding with source="${SKILL_ID}".
 ```
 
 #### 2-2: Antigravity (agy) Review
@@ -216,6 +240,7 @@ When `--no-hub` is set, re-running simply means committing new changes locally a
 |---------|--------|
 | Pre-flight `has_errors: true` | Stop. Report errors (e.g., suggest `gh auth login`). |
 | Step 1 (commit/PR) fails | Stop. Report the error. |
+| Review skill sub-agent fails | Log the failed skill id, proceed with remaining reviewers. |
 | Antigravity/Codex unavailable or fails | Inform user, proceed with available reviews. |
 | No actionable suggestions | Report no issues. Skip Steps 4–5 only. Step 6 still executes (unless `--no-hub`). |
 | Push fails (Step 5) | Report error. Suggest manual resolution. |

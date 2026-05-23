@@ -2,13 +2,19 @@
 
 Detailed procedure for consolidating multi-reviewer feedback (Step 3 of dev-review-cycle).
 
+## Source Attribution
+
+Step 2-1 now launches 1–N skill-based reviewers in parallel. Each sub-agent tags its findings with a `source` field (the skill `id`, e.g., `pr-review-toolkit:review-pr`, `code-review`, `security-review`). Antigravity uses source `agy`; Codex uses source `codex`.
+
+When consolidating, preserve the source tags in the table's **Source** column. If multiple reviewers flag the same issue, merge them into one row and list all sources (e.g., `pr-review-toolkit:review-pr, codex`).
+
 ## Consolidation Procedure
 
-All three reviewers (Claude Code, Antigravity, Codex) use the same P0-P3 priority scheme, making deduplication straightforward.
+All reviewers use the same P0-P3 priority scheme, making deduplication straightforward.
 
 ### 1. Deduplicate
 
-Merge identical issues flagged by multiple reviewers into a single entry, listing all sources (e.g., "Claude, Codex").
+Merge identical issues flagged by multiple reviewers into a single entry, listing all source skill ids (e.g., `pr-review-toolkit:review-pr, codex`).
 
 ### 2. Resolve Conflicts
 
@@ -34,7 +40,7 @@ For each remaining suggestion, determine whether it falls within the current PR'
 Present the consolidated list as a table with:
 - Priority (P0-P3)
 - Title
-- Source attribution (Claude / Antigravity / Codex)
+- Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
 - Scope column (In / Out)
 - Recommendation (apply / skip with reason)
 
@@ -54,8 +60,8 @@ After user confirmation, if any suggestions were classified as out-of-scope:
 
 ### PR #<PR_NUMBER> — <PR title> (<date>)
 
-- [ ] [debt] <suggestion summary> (source: <reviewer>) — <file:line if applicable>
-- [ ] [doc] <suggestion summary> (source: <reviewer>) — <file:line if applicable>
+- [ ] [debt] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
+- [ ] [doc] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
 ```
 
 ### Format When `--no-hub` (No PR)
@@ -65,7 +71,7 @@ After user confirmation, if any suggestions were classified as out-of-scope:
 
 ### <FEATURE_BRANCH> — <commit summary> (<date>)
 
-- [ ] [debt] <suggestion summary> (source: <reviewer>) — <file:line if applicable>
+- [ ] [debt] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
 ```
 
 ### Tag Guide
