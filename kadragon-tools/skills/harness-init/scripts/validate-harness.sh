@@ -99,6 +99,10 @@ if [[ -f "AGENTS.md" ]]; then
         if [[ "$line" =~ ^##[[:space:]]+Maintenance ]]; then
             has_maintenance=true; in_maintenance_section=true; in_golden_section=false; continue
         fi
+        # Detect Delegation section header (must precede section-exit logic to avoid continue skipping it)
+        if [[ "$line" =~ ^##[[:space:]].*Delegation ]]; then
+            has_delegation=true; in_golden_section=false; in_maintenance_section=false; continue
+        fi
         if $in_golden_section; then
             [[ "$line" =~ ^## ]] && { in_golden_section=false; continue; }
             [[ "$line" =~ ^[0-9]+\. ]] && principle_count=$((principle_count + 1))
@@ -107,9 +111,6 @@ if [[ -f "AGENTS.md" ]]; then
             [[ "$line" =~ ^## ]] && { in_maintenance_section=false; continue; }
             [[ "$line" =~ ^[0-9]+\. ]] && maint_rule_count=$((maint_rule_count + 1))
         fi
-
-        # Detect Delegation section
-        [[ "$line" =~ Delegation ]] && has_delegation=true
     done < AGENTS.md
     referenced_docs="${referenced_docs%$'\n'}"
 fi

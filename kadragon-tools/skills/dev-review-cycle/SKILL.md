@@ -93,7 +93,7 @@ Collect reviews from up to three sources. Launch all available sources in parall
 
 #### 2-1: Claude Code Review (review-pr)
 
-Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr` skill on the changed files. If the skill is unavailable, perform an inline review instead: check for obvious issues (naming conventions, error handling, test coverage) directly from the diff. Note in the consolidation output that full multi-agent review was skipped.
+Launch a subagent via the Agent tool that runs the `pr-review-toolkit:review-pr` skill on the changed files. Do NOT pass `subagent_type` — `pr-review-toolkit:review-pr` is a skill, not an agent type; passing it as `subagent_type` will error. If the skill is unavailable, perform an inline review instead: check for obvious issues (naming conventions, error handling, test coverage) directly from the diff. Note in the consolidation output that full multi-agent review was skipped.
 
 ```
 Agent tool parameters:
@@ -108,6 +108,7 @@ Agent tool parameters:
     3. Return the full aggregated review summary including Critical Issues, Important Issues,
        Suggestions, and Strengths.
   run_in_background: true
+  (no subagent_type — use default claude agent)
 ```
 
 #### 2-2: Antigravity (agy) Review
