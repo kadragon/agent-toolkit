@@ -3,7 +3,7 @@ name: harness-init
 version: 0.5.0
 description: |
   This skill should be used when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, sweep automation, .claudeignore, .agents/skills symlink, and optional enforcement hooks. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
-  Also use when the user asks to "sync harness", "harness sync", "harness 동기화", "AGENTS.md 정리", "AGENTS.md 업데이트", "CLAUDE.md 동기화", "backlog 정리", "tasks 정리", "세션 시작 루틴", "하네스 유지보수" — load references/maintenance.md for the full A–G routine.
+  Also use when the user asks to "sync harness", "harness sync", "harness 동기화", "AGENTS.md 정리", "AGENTS.md 업데이트", "backlog 정리", "tasks 정리", "하네스 유지보수" — load references/maintenance.md for the full A–G routine. Note: B (CLAUDE.md sync), E (symlink guard), F (context size check) run automatically via SessionStart hook — manual sync is primarily for C (reconcile tasks→backlog) and G (validate).
 ---
 
 # Harness Init
@@ -236,18 +236,18 @@ After setup, the maintenance routine (`references/maintenance.md`) runs silently
 
 ## Ongoing Maintenance
 
-After init completes, trigger the maintenance routine at session start or on explicit request ("sync harness", "harness 동기화", etc.). Full A–G procedure in **`references/maintenance.md`** — load only when explicitly needed.
+After init completes, B/E/F run automatically via the `toolkit:harness-maintenance` SessionStart hook (daily debounce). Manual sync is for C (reconcile tasks→backlog) and G (validate) — trigger on explicit request ("sync harness", "harness 동기화", etc.). Full A–G procedure in **`references/maintenance.md`** — load only when explicitly needed.
 
 **Scripts (all run from repo root):**
 
-| Script | Maintenance section | Purpose |
-|--------|---------------------|---------|
-| `scripts/sync-claude-md.sh` | B | Check/fix CLAUDE.md → @AGENTS.md |
-| `scripts/reconcile-harness.py` | C | Sync tasks.md status into backlog.md |
-| `scripts/symlink-guard.sh` | E | Ensure .agents/skills symlink |
-| `scripts/check-context-size.sh` | F | Warn when AGENTS.md > 200 lines |
-| `scripts/sweep.sh` | post-sync | Archive stale content |
-| `scripts/validate-harness.sh` | G / Step 9 | Full structural validation |
+| Script | Maintenance section | Auto? | Purpose |
+|--------|---------------------|-------|---------|
+| `scripts/sync-claude-md.sh` | B | ✅ hook | Check/fix CLAUDE.md → @AGENTS.md |
+| `scripts/reconcile-harness.py` | C | manual | Sync tasks.md status into backlog.md |
+| `scripts/symlink-guard.sh` | E | ✅ hook | Ensure .agents/skills symlink |
+| `scripts/check-context-size.sh` | F | ✅ hook | Warn when AGENTS.md > 200 lines |
+| `scripts/sweep.sh` | post-sync | manual | Archive stale content |
+| `scripts/validate-harness.sh` | G / Step 9 | manual | Full structural validation |
 
 ## Additional Resources
 

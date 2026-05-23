@@ -1,0 +1,17 @@
+{
+  "description": "Auto-runs harness maintenance (B/E/F steps) at session start in repos with AGENTS.md. Daily debounce via .agents/.maintenance-stamp.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/harness-maintenance/run.sh\"",
+            "timeout": 15,
+            "statusMessage": "Checking harness..."
+          }
+        ]
+      }
+    ]
+  }
+}

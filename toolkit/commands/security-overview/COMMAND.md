@@ -1,6 +1,6 @@
 ---
-name: security-overview
-description: This skill should be used when the user mentions "security alerts", "vulnerability scanning", "dependabot overview", "code scanning", "secret scanning", "check my repos for vulnerabilities", "security overview", "found a secret in code", "review dependabot security findings", "show security vulnerabilities", or "any exposed credentials". Scans all GitHub security alert types (Dependabot, Code Scanning, Secret Scanning) across all owned repos and writes a per-repo plan.md with prioritized fix tasks.
+description: "Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos and write per-repo plan.md with prioritized fix tasks"
+allowed-tools: ["Bash", "Read", "Write"]
 ---
 
 # Security Overview
@@ -32,7 +32,11 @@ Fetch all Dependabot vulnerability alerts in single paginated GraphQL call.
 
 **Default: use `scripts/fetch-alerts.sh`.** Use manual query only when: (a) script unavailable, (b) user requests specific API exploration, (c) script fails. Never mix both in the same run.
 
-For query structure, field reference, pagination details → **`references/api-patterns.md`** § Dependabot.
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/commands/security-overview/fetch-alerts.sh"
+```
+
+For query structure, field reference, pagination details → **`${CLAUDE_PLUGIN_ROOT}/commands/security-overview/api-patterns.md`** § Dependabot.
 
 ### 1-3. Collect Code Scanning and Secret Scanning alerts
 
@@ -41,8 +45,6 @@ Fetch alerts per repo via REST. Handle expected errors:
 | HTTP Status | Meaning | Action |
 |-------------|---------|--------|
 | 403/404 | Feature not enabled | Record as "not enabled", skip |
-
-Endpoint details, response fields → **`references/api-patterns.md`** § Code Scanning / Secret Scanning.
 
 **Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context. `fetch-alerts.sh` strips secret fields automatically. If using manual queries, pipe through `jq 'del(.[] | .secret)'` before processing.
 
@@ -92,13 +94,12 @@ Before writing fix plans, read relevant files per repo:
 
 ### 3-2. Write plan.md
 
-Template, formatting rules, severity ordering, idempotency → **`references/plan-template.md`**.
+Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/commands/security-overview/plan-template.md`**.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
-- Idempotency rules → `references/plan-template.md`.
 
 ### 3-3. Present result
 
@@ -112,14 +113,3 @@ After generating all files, show summary table with repo, path, item count. Incl
 | Rate limited | Report progress, suggest waiting or reducing scope |
 | Permission denied on repos | Report skipped repos, continue |
 | Clone fails | Report error, continue with other repos |
-
-## Resources
-
-### Scripts
-
-- **`scripts/fetch-alerts.sh`** — Standalone script collecting all three alert types. Outputs structured JSON to scan directory. Execute directly or read for query patterns.
-
-### Reference Files
-
-- **`references/api-patterns.md`** — GraphQL/REST query details, response field reference, error handling, rate limiting.
-- **`references/plan-template.md`** — plan.md template, formatting rules, severity ordering, idempotency, example output.
