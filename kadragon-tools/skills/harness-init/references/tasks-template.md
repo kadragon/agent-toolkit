@@ -4,7 +4,7 @@
 flight. It exists only between sprint start and sprint close; the rest of the
 time the file is absent (that's the idle state).
 
-`harness-sync` C reads `status:` every session to decide whether to archive,
+The maintenance routine section C reads `status:` every session to decide whether to archive,
 revert, or leave the sprint intact.
 
 ## Required Schema

@@ -49,5 +49,5 @@ fi
 # Case 5: unexpected state (wrong-content file, directory, etc.) — do not destroy, report
 echo "symlink-guard: .agents/skills is in an unexpected state (not a symlink or git text-symlink)."
 echo "  Current: $(ls -ld "$LINK" 2>&1 || true)"
-echo "  Manual fix: rm -rf .agents/skills && bash \$CLAUDE_PLUGIN_ROOT/skills/harness-sync/scripts/symlink-guard.sh"
+echo "  Manual fix: rm -rf .agents/skills && bash \$CLAUDE_PLUGIN_ROOT/skills/harness-init/scripts/symlink-guard.sh"
 exit 1

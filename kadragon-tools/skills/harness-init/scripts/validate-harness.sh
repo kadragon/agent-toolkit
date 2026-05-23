@@ -14,7 +14,7 @@
 #   9. backlog.md schema (checkbox items under ## headings; sync D-1)
 #  10. AGENTS.md ## Maintenance section embeds edit-policy rules
 #
-# A clean run means harness-sync will be a no-op on first invocation.
+# A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Uses [[ =~ ]] bash builtins instead of grep subprocesses.
 # AGENTS.md is read in a single pass — no repeated file scans.
 
@@ -187,7 +187,7 @@ if [[ -f "CLAUDE.md" ]]; then
     if [[ "$claude_trimmed" == "@AGENTS.md" ]]; then
         pass "CLAUDE.md is exactly '@AGENTS.md'"
     else
-        fail "CLAUDE.md is not a pure '@AGENTS.md' pointer — harness-sync B will flag drift"
+        fail "CLAUDE.md is not a pure '@AGENTS.md' pointer — maintenance routine B will flag drift"
     fi
 fi
 
@@ -211,7 +211,7 @@ elif [[ -f ".agents/skills" && ! -L ".agents/skills" ]]; then
 elif [[ -e ".agents/skills" ]]; then
     fail ".agents/skills exists but is not a symlink or git text-symlink"
 else
-    warn ".agents/skills missing — harness-sync E will create it on next run"
+    warn ".agents/skills missing — maintenance routine E will create it on next run"
 fi
 
 # ── 9. backlog.md schema (sync D-1) ────────────────────────

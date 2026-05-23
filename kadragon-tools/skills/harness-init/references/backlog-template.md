@@ -1,6 +1,6 @@
 # backlog.md Template
 
-`backlog.md` is the queue of work **not yet in flight**. `harness-sync` C
+`backlog.md` is the queue of work **not yet in flight**. The maintenance routine section C
 reconciles it against `tasks.md` every session.
 
 ## Required Schema

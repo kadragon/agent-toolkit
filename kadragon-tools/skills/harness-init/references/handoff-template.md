@@ -105,5 +105,5 @@ For judgment calls that future agents might second-guess:
    replace Current Phase.
 3. **Delete** when the feature ships. Stale handoffs confuse future sessions.
 
-`harness-sync` does not manage handoff files. Garbage-collect manually during
+The maintenance routine does not manage handoff files. Garbage-collect manually during
 `sweep`.
