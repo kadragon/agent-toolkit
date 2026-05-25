@@ -159,9 +159,12 @@ If all launched sources failed or returned no findings, fall back to inline revi
 
 Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table to the user. Follow the detailed procedure in **`references/consolidation-guide.md`**.
 
-**STOP here and ask the user for confirmation.** Proceed to Step 4 only after user approval.
+**STOP here and ask the user for confirmation.**
 
-After confirmation, record any out-of-scope items in `tasks.md` per the format in `references/consolidation-guide.md`.
+After user approves, complete these two steps in order before proceeding:
+
+1. **Record out-of-scope items** — If any suggestions are classified out-of-scope, write them to `tasks.md` now (format in `references/consolidation-guide.md`). Do this before touching any code. Do not skip even if only one item is out-of-scope.
+2. **Proceed to Step 4** — Apply only in-scope, user-approved items.
 
 If no actionable in-scope suggestions exist, report that reviews found no in-scope issues and skip Steps 4–5 (apply fixes and commit). Step 6 (merge/push) still executes unless `--no-hub` is set, in which case the workflow ends after this step.
 
