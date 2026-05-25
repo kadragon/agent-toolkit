@@ -26,6 +26,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hu
 
 Detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, merge strategy. `--no-hub` skips remote/GitHub checks, detects base branch from local state only.
 
+If `CLAUDE_PLUGIN_ROOT` is unset, stop immediately and report — all scripts depend on this variable.
+
 If `has_errors` is `true`, stop and report errors.
 
 Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`, `review_candidates`) in all subsequent steps. Prefer squash > merge > rebase for merge strategy.
@@ -60,7 +62,7 @@ Determine the commit message yourself:
 - If you have context from recent development or Step 0's diff, use it directly.
 - Otherwise run `git diff --stat HEAD` to understand scope, and `git log --oneline -5` to match the project's commit style.
 
-The file list is auto-detected by the commit script — no need to collect it yourself.
+The file list is auto-detected by the commit script — no need to collect it yourself. (Step 5 uses explicit `--files` instead: by then, unrelated files may be staged from review application and auto-detection would include them.)
 
 **When `--no-hub` is set:**
 
@@ -104,7 +106,7 @@ Use `review_candidates` from preflight output to dynamically select and launch r
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
-   - For any remaining candidates not selected, note the reason (e.g., "out of scope for this diff", "exceeds cap").
+   - For any remaining candidates not selected, record the reason. Surface them to the user in Step 3 under a "Reviewers Skipped" note in the consolidation output (e.g., "out of scope for this diff", "exceeds cap").
 
 4. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model: "opus"` for best review quality. Prompt structure for all kinds:
 
@@ -127,10 +129,9 @@ Agent tool parameters:
 
 #### 2-2: Antigravity (agy) Review
 
-Skip if `agy_available` is false from pre-flight. Launch in background:
+Skip if `agy_available` is false from pre-flight. Invoke via Bash tool with `run_in_background: true` and `timeout: 600000`:
 
 ```bash
-# run_in_background: true, timeout: 600000
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH} \
   || echo '{"agy_review":"failed"}' >&2
 ```
@@ -139,10 +140,9 @@ Wrap each background script invocation so failure is caught and logged, not sile
 
 #### 2-3: Codex Review
 
-Skip if `codex_available` is false from pre-flight. Launch in background:
+Skip if `codex_available` is false from pre-flight. Invoke via Bash tool with `run_in_background: true` and `timeout: 600000`:
 
 ```bash
-# run_in_background: true, timeout: 600000
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
   || echo '{"codex_review":"failed"}' >&2
 ```
@@ -157,7 +157,7 @@ If all launched sources failed or returned no findings, fall back to inline revi
 
 ### Step 3: Consolidate Reviews and Get User Approval
 
-Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table to the user. Follow the detailed procedure in **`references/consolidation-guide.md`**.
+Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
 
 **STOP here and ask the user for confirmation.**
 
@@ -170,9 +170,9 @@ If no actionable in-scope suggestions exist, report that reviews found no in-sco
 
 ### Step 4: Apply Improvements
 
-Apply accepted improvements to the codebase. Run tests after changes to verify nothing is broken. To find the test command: check `package.json` `scripts.test`, then look for `Makefile` targets, `pytest.ini`, or `go.mod`. If no test command is found, skip tests and note the omission in the Step 6 summary.
+Apply accepted improvements to the codebase. Run tests after changes to verify nothing is broken. To find the test command: check `package.json` `scripts.test`, `Makefile` targets, `pytest.ini`, `pyproject.toml` (`[tool.pytest]` or `[tool.hatch]`), `go.mod`, `Cargo.toml`, or `build.gradle` / `./gradlew test`. If no test command is found, skip tests and note the omission in the Step 6 summary.
 
-If tests fail after applying improvements, revert the broken change (`git checkout -- <files>`), report which suggestion caused the failure, and ask the user whether to skip it or attempt a different approach. Do not proceed to Step 5 with failing tests.
+If tests fail after applying improvements, revert the broken change — use `git restore <files>` for unstaged changes; if already staged, run `git restore --staged <files> && git restore <files>`. Report which suggestion caused the failure and ask the user whether to skip it or attempt a different approach. Do not proceed to Step 5 with failing tests.
 
 After improvements are applied and tests pass, immediately proceed to Step 5.
 
@@ -205,7 +205,9 @@ After the script returns, immediately proceed to Step 6.
 
 ### Step 6: Wait for CI and Merge (skip when `--no-hub`)
 
-Follow the detailed procedure in **`references/ci-failure-handling.md`** for CI wait, failure triage, and merge/cleanup.
+Before proceeding, confirm `PR_NUMBER`, `BASE_BRANCH`, `FEATURE_BRANCH`, and `MERGE_STRATEGY` are still in context. If the session is long and any value is unclear, recover via `gh pr view` (for PR number/branch) or re-run preflight.
+
+Read **`references/ci-failure-handling.md`** now. Follow its procedure for CI wait, failure triage, and merge/cleanup.
 
 Summary:
 
@@ -223,7 +225,7 @@ Summary:
 To run a subsequent review cycle on the same PR (e.g., after applying changes and wanting fresh reviews):
 
 1. Skip Step 1 — the PR already exists.
-2. Push the latest changes to the PR branch. Use `commit-and-push.sh` without the `--pr` flag to push to the existing branch.
+2. Push the latest changes to the PR branch. Run `commit-and-push.sh` with `--message` only (no `--pr`, no `--no-push`) — this pushes to the existing remote branch without creating a new PR.
 3. Start from Step 2 with the existing PR number.
 4. Continue through Steps 3–6 as normal.
 

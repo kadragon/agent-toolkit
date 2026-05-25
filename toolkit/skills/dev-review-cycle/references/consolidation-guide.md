@@ -44,6 +44,8 @@ Present the consolidated list as a table with:
 - Scope column (In / Out)
 - Recommendation (apply / skip with reason)
 
+After the findings table, add a "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "out of scope for this diff", "exceeds 4-agent cap").
+
 **STOP and ask the user for confirmation.** The user may approve all, reject some, change scope classifications, or request modifications.
 
 ## Recording Out-of-Scope Items in tasks.md
