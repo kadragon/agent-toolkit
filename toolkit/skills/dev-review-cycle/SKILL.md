@@ -175,13 +175,13 @@ If no actionable in-scope suggestions exist, report that reviews found no in-sco
 
 Apply accepted improvements to the codebase. Run tests after changes to verify nothing is broken. To find the test command: check `package.json` `scripts.test`, `Makefile` targets, `pytest.ini`, `pyproject.toml` (`[tool.pytest]` or `[tool.hatch]`), `go.mod`, `Cargo.toml`, or `build.gradle` / `./gradlew test`. If no test command is found, skip tests and note the omission in the Step 6 summary.
 
-If tests fail after applying improvements, revert the broken change — use `git restore <files>` for unstaged changes; if already staged, run `git restore --staged <files> && git restore <files>`. Report which suggestion caused the failure and ask the user whether to skip it or attempt a different approach. Do not proceed to Step 5 with failing tests.
+If tests fail after applying improvements, revert the broken change — use `git restore <files>` for unstaged changes; if already staged, run `git restore --staged <files> && git restore <files>`. Manually delete any newly created untracked files. Report which suggestion caused the failure and ask the user whether to skip it or attempt a different approach. Do not proceed to Step 5 with failing tests.
 
 After improvements are applied and tests pass, immediately proceed to Step 5.
 
 ### Step 5: Commit (and Push unless `--no-hub`)
 
-Determine the commit message yourself — you have full context from Step 4. List the exact files you modified in that step; pass them explicitly via `--files` to avoid accidentally staging unrelated changes. Before passing `--files`, run `git status --short` and confirm the list matches files you actually modified. Silent omission of a file means uncommitted changes.
+Determine the commit message yourself — you have full context from Step 4. List the exact files you modified in that step; pass them explicitly via `--files` to avoid accidentally staging unrelated changes. Before passing `--files`, run `git status --short` and confirm the list matches files you actually modified (including `tasks.md` if modified in Step 3). Silent omission of a file means uncommitted changes.
 
 **When `--no-hub` is set:**
 
