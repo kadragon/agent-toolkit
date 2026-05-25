@@ -70,8 +70,10 @@ extract_description() {
 add_candidate() {
   local id="$1" kind="$2" desc="$3"
   is_new "$id" || return 0
-  jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
-    '{id: $id, kind: $kind, description: $description}' >> "$ENTRIES_FILE" || return 0
+  local model="sonnet"
+  [[ "$id" == *security* ]] && model="opus"
+  jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" --arg model "$model" \
+    '{id: $id, kind: $kind, description: $description, model: $model}' >> "$ENTRIES_FILE" || return 0
 }
 
 # ──────────────────────────────────────────────
