@@ -10,6 +10,7 @@ Post-dev workflow: creates PR, collects reviews from multiple sources, consolida
 ## Arguments
 
 - `--no-hub` — Skip all GitHub ops: no push, no PR creation, no CI wait, no merge. Commits locally, collects reviews from local diff against base branch. Use when you want review feedback without publishing to GitHub.
+- `--auto` — Skip user confirmation in Step 3. Apply all in-scope suggestions automatically and continue the workflow without pausing. Out-of-scope items are still recorded in `tasks.md`.
 
 ## Prerequisites
 
@@ -34,7 +35,7 @@ Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo
 
 ## CRITICAL: Execution Model
 
-Workflow MUST execute as single continuous flow. Transitions between steps automatic — **except Step 3**, where user confirmation required before applying changes.
+Workflow MUST execute as single continuous flow. Transitions between steps automatic — **except Step 3**, where user confirmation required before applying changes (skipped when `--auto` is set).
 
 After Step 5 (or directly after Step 3 if no changes needed), proceed through CI wait, merge, local cleanup without pausing.
 
@@ -159,12 +160,14 @@ If all launched sources failed or returned no findings, fall back to inline revi
 
 Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
 
-**STOP here and ask the user for confirmation.**
+**If `--auto` is NOT set:** STOP here and ask the user for confirmation. The user may approve all, reject some, or change scope classifications before proceeding.
 
-After user approves, complete these two steps in order before proceeding:
+**If `--auto` is set:** Skip confirmation. Treat all in-scope suggestions as approved.
+
+In both cases, complete these two steps in order before proceeding:
 
 1. **Record out-of-scope items** — If any suggestions are classified out-of-scope, write them to `tasks.md` now (format in `references/consolidation-guide.md`). Do this before touching any code. Do not skip even if only one item is out-of-scope.
-2. **Proceed to Step 4** — Apply only in-scope, user-approved items.
+2. **Proceed to Step 4** — Apply only in-scope items.
 
 If no actionable in-scope suggestions exist, report that reviews found no in-scope issues and skip Steps 4–5 (apply fixes and commit). Step 6 (merge/push) still executes unless `--no-hub` is set, in which case the workflow ends after this step.
 
