@@ -41,7 +41,7 @@ Determine the commit message yourself based on the fix just applied (you have fu
 
 ### 5. Re-check CI
 
-Return to the CI wait step. If CI fails **3 consecutive times**, stop the workflow and ask the user for guidance.
+Return to the CI wait step. If CI fails **3 consecutive times** (no passing run in between — counter resets on any pass), stop the workflow and ask the user for guidance.
 
 ## Merge and Clean Up
 

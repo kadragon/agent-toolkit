@@ -44,7 +44,9 @@ Present the consolidated list as a table with:
 - Scope column (In / Out)
 - Recommendation (apply / skip with reason)
 
-**STOP and ask the user for confirmation.** The user may approve all, reject some, change scope classifications, or request modifications.
+After the findings table, add a "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "out of scope for this diff", "exceeds 4-agent cap").
+
+**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
 ## Recording Out-of-Scope Items in tasks.md
 
