@@ -109,12 +109,12 @@ Use `review_candidates` from preflight output to dynamically select and launch r
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
    - For any remaining candidates not selected, record the reason. Surface them to the user in Step 3 under a "Reviewers Skipped" note in the consolidation output (e.g., "out of scope for this diff", "exceeds cap").
 
-4. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model: "opus"` for best review quality. Prompt structure for all kinds:
+4. For each selected candidate, launch one Agent tool call with `run_in_background: true`. Do NOT pass `subagent_type`. Use `model` from the candidate's metadata (`candidate.model`): `opus` for security-related reviewers, `sonnet` for all others. Prompt structure for all kinds:
 
 ```
 Agent tool parameters:
   description: "Review via ${SKILL_ID} against ${BASE_BRANCH}"
-  model: "opus"
+  model: "${CANDIDATE_MODEL}"  # from candidate.model in preflight output
   run_in_background: true
   prompt: |
     Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
