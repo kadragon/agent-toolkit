@@ -206,10 +206,13 @@ source "$VENV"
 # 1. HWPX → 디렉토리 (raw bytes 추출, .hwpx_pack_order manifest 기록)
 python3 "$SKILL_DIR/scripts/office/unpack.py" document.hwpx ./unpacked/
 
-# 2. XML 직접 편집 (Claude가 Read/Edit 도구로, 또는 표 헬퍼 스크립트로)
+# 2. XML 편집 — 편집 유형별 도구 선택:
+#    - 표 셀 내용 수정 → replace_cell.py 필수 (lineseg + ID 충돌 자동 처리)
+#      str.replace()로 셀 직접 수정 금지 — linesegarray 미제거로 "문서 변경됨" 경고 발생
+#    - 일반 텍스트 (표 外) → patch_section.py (safe str.replace + lineseg strip)
+#    - 행 삽입/삭제 → insert_table_row.py / delete_table_rows.py
 #    본문: ./unpacked/Contents/section0.xml
 #    스타일: ./unpacked/Contents/header.xml
-#    표 편집은 아래 "표 편집 헬퍼" 참조 (locate / insert_table_row / replace_cell)
 
 # 3. 다시 HWPX로 패키징
 python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ edited.hwpx
@@ -239,6 +242,12 @@ Many items → split into stages to catch silent failures early, verify each sta
 
 ## Workflow 3: read / text extraction
 
+**스킬 인수로 filepath 전달 시** (예: `read path/to/file.hwpx`, `path/to/file.hwpx` 단독, 또는 사용자가 "read file.hwpx" / "file.hwpx 읽어줘" 요청): `read` 키워드 유무 관계없이 filepath만 있으면 텍스트 추출 요청으로 해석 → `text_extract.py` 실행. 스킬은 invoke 시 자동 실행하지 않음 — 아래 명령을 직접 실행할 것.
+
+```bash
+python3 "$SKILL_DIR/scripts/text_extract.py" path/to/file.hwpx --format markdown
+```
+
 ```bash
 source "$VENV"
 
@@ -250,6 +259,32 @@ python3 "$SKILL_DIR/scripts/text_extract.py" document.hwpx --include-tables
 
 # 마크다운 형식
 python3 "$SKILL_DIR/scripts/text_extract.py" document.hwpx --format markdown
+```
+
+### 다건 일괄 추출 (여러 폴더 × 여러 파일)
+
+```bash
+# 폴더 목록에서 일괄 추출 (bash)
+for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
+  echo "=== $f ==="
+  python3 "$SKILL_DIR/scripts/text_extract.py" "$f" --format markdown
+done
+
+# 재귀 탐색 + 결과 파일 저장
+find . -name "*.hwpx" | while IFS= read -r f; do
+  out="${f%.hwpx}.txt"
+  python3 "$SKILL_DIR/scripts/text_extract.py" "$f" > "$out"
+  echo "→ $out"
+done
+```
+
+**Windows PowerShell** (`$SKILL_DIR`는 bash 변수 — PowerShell에서 직접 사용 불가. 절대경로 또는 상대경로로 대체):
+```powershell
+$skillScripts = "C:\path\to\skills\hwpx\scripts"  # SKILL_DIR\scripts 절대경로로 교체
+Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
+    Write-Host "=== $($_.FullName) ==="
+    python "$skillScripts\text_extract.py" $_.FullName --format markdown
+}
 ```
 
 ---
@@ -437,7 +472,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 15. 🔵 **Limit structure changes**: no adding/deleting/splitting/merging of paragraphs/tables unless user requests it (replace-centered editing)
 16. 🟡 **page_guard must pass (reference restore mode only)**: in restore mode, `page_guard.py` must also pass — separate from `validate.py` — to mark complete. In content-edit mode, `page_guard.py` is reference info, and `validate.py --baseline` + actually opening in Hancom is completion gate
 17. 🔴 **No lxml re-serialization**: do not `etree.fromstring()` then `etree.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
-18. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed)
+18. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed) — **except table cell text: use `replace_cell.py` instead (see rule 27)**
 19. 🔴 **Compact required on new-paragraph insertion**: after serializing lxml-extracted element, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
 20. 🟡 **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
 21. 🔴 **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
@@ -449,3 +484,4 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 24. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
 25. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
 26. 🔵 **Content-edit completion gate**: after `validate.py --baseline` passes, confirm actually opens in Hancom. Fully close Hancom before repackaging (multiple windows: `CloseMainWindow` closes only main window), after applying to real file verify copy success via md5 or similar (see Workflow 2)
+27. 🟡 **Table cell text edit → replace_cell.py only**: for any text change inside a table cell (`<hp:tc>`), use `replace_cell.py` — not `str.replace()` or `patch_section.py`. Table cells have per-subList `<hp:linesegarray>`; `replace_cell.py` strips it and checks ID collisions automatically. Raw `str.replace()` on cell content leaves stale lineseg → "문서가 변경됨" warning in Hancom.
