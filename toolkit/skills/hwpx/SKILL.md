@@ -242,7 +242,11 @@ Many items → split into stages to catch silent failures early, verify each sta
 
 ## Workflow 3: read / text extraction
 
-**스킬 인수로 filepath 전달 시** (예: `/hwpx read path/to/file.hwpx`, 또는 사용자가 "read file.hwpx" 요청): 텍스트 추출 요청으로 해석 → 해당 경로에 `text_extract.py` 실행. 스킬은 invoke 시 자동 실행하지 않으므로 filepath 인수 = 이 동작이 의도.
+**스킬 인수로 filepath 전달 시** (예: `read path/to/file.hwpx`, `path/to/file.hwpx` 단독, 또는 사용자가 "read file.hwpx" / "file.hwpx 읽어줘" 요청): `read` 키워드 유무 관계없이 filepath만 있으면 텍스트 추출 요청으로 해석 → `text_extract.py` 실행. 스킬은 invoke 시 자동 실행하지 않음 — 아래 명령을 직접 실행할 것.
+
+```bash
+python3 "$SKILL_DIR/scripts/text_extract.py" path/to/file.hwpx --format markdown
+```
 
 ```bash
 source "$VENV"
@@ -267,18 +271,19 @@ for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
 done
 
 # 재귀 탐색 + 결과 파일 저장
-find . -name "*.hwpx" | while read f; do
+find . -name "*.hwpx" | while IFS= read -r f; do
   out="${f%.hwpx}.txt"
   python3 "$SKILL_DIR/scripts/text_extract.py" "$f" > "$out"
   echo "→ $out"
 done
 ```
 
-**Windows PowerShell:**
+**Windows PowerShell** (`$SKILL_DIR`는 bash 변수 — PowerShell에서 직접 사용 불가. 절대경로 또는 상대경로로 대체):
 ```powershell
+$skillScripts = "C:\path\to\skills\hwpx\scripts"  # SKILL_DIR\scripts 절대경로로 교체
 Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
     Write-Host "=== $($_.FullName) ==="
-    python "$env:SKILL_DIR/scripts/text_extract.py" $_.FullName --format markdown
+    python "$skillScripts\text_extract.py" $_.FullName --format markdown
 }
 ```
 
@@ -467,7 +472,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 15. 🔵 **Limit structure changes**: no adding/deleting/splitting/merging of paragraphs/tables unless user requests it (replace-centered editing)
 16. 🟡 **page_guard must pass (reference restore mode only)**: in restore mode, `page_guard.py` must also pass — separate from `validate.py` — to mark complete. In content-edit mode, `page_guard.py` is reference info, and `validate.py --baseline` + actually opening in Hancom is completion gate
 17. 🔴 **No lxml re-serialization**: do not `etree.fromstring()` then `etree.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
-18. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed)
+18. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed) — **except table cell text: use `replace_cell.py` instead (see rule 27)**
 19. 🔴 **Compact required on new-paragraph insertion**: after serializing lxml-extracted element, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
 20. 🟡 **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
 21. 🔴 **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
