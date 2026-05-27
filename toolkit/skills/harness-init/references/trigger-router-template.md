@@ -1,10 +1,12 @@
 # Trigger Router Template (UserPromptSubmit hook)
 
-**Problem this solves.** Skill auto-discovery and subagent auto-delegation rely on the model reading every skill/agent description and choosing correctly. Anthropic's own docs say this is the mechanism; field testing (Scott Spence, Anthropic Skill Creator guidance) shows it works ~50% of the time even with well-written descriptions. The model often does the work inline instead of routing.
+**Problem this solves.** Skill auto-discovery and subagent auto-delegation rely on the model reading every skill/agent description and choosing correctly. Anthropic's own docs say this is the mechanism; field testing ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate); Anthropic Skill Creator guidance) shows it works ~50% of the time even with well-written descriptions. The model often does the work inline instead of routing.
 
 **Fix.** A `UserPromptSubmit` hook that pattern-matches the prompt and emits an explicit `Use Skill(name)` / `Use Agent(subagent_type=name)` instruction. Explicit instructions outperform description-based discovery — "use this skill" beats "consider this skill."
 
-Source: Anthropic Claude Code docs → "Create custom subagents" (auto-delegation is description-driven), Anthropic Skills authoring docs ("directive descriptions improved triggering on 5 of 6 public skills"), Scott Spence "Claude Code Skills Don't Auto-Activate" (2026).
+**Localization note.** Example route patterns below include Korean alternates (e.g. `리뷰.*pr`, `배포`) because this harness is authored for a bilingual KO/EN user. For **English-only repos, drop the Korean alternates** when copying routes — they add regex overhead and never fire. For other-language repos, translate the alternates to the target language. Keep the English alternates in every case.
+
+Source: Anthropic Claude Code docs → "Create custom subagents" (auto-delegation is description-driven), Anthropic Skills authoring docs ("directive descriptions improved triggering on 5 of 6 public skills"), [Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate).
 
 ---
 
@@ -205,7 +207,7 @@ Record changes in `references/harness-invariants.md` → "Trigger Router Routes"
 
 Descriptions are the *default* discovery mechanism and they should still be written directively (`ALWAYS invoke when ...`). The router is the **belt** to the description's *suspenders*:
 
-- **Description-only**: ~50% trigger rate reported in Scott Spence's testing (2026).
+- **Description-only**: ~50% trigger rate reported in [Scott Spence's testing (2025-11-06)](https://scottspence.com/posts/claude-code-skills-dont-auto-activate).
 - **Description + router**: deterministic for prompts that match a route pattern (the model still has to honor the instruction, but the instruction is now in the prompt context rather than buried in a skill description). Exact lift depends on route specificity; descriptions still handle the long tail.
 
 The cost is small — one hook script, one JSON file, runs once per turn in <50ms.

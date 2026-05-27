@@ -24,7 +24,9 @@ Cost note: Team mode carries 3–5× token overhead vs a single session. Default
 
 ## Description writing rule (applies to all three templates)
 
-The `description:` field is the **primary discovery mechanism** for skill auto-invocation. Anthropic's own skill-creator testing reports directive phrasing ("ALWAYS invoke when …") improves trigger rate on 5 of 6 public skills compared to descriptive phrasing ("Triggers on …"). Combined with the UserPromptSubmit router (`references/trigger-router-template.md`), this raises observed auto-invocation from the ~50% baseline (Scott Spence 2026) toward deterministic on matched prompts.
+The `description:` field is the **primary discovery mechanism** for skill auto-invocation. Anthropic's own skill-creator testing reports directive phrasing ("ALWAYS invoke when …") improves trigger rate on 5 of 6 public skills compared to descriptive phrasing ("Triggers on …"). Combined with the UserPromptSubmit router (`references/trigger-router-template.md`), this raises observed auto-invocation from the ~50% baseline ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts.
+
+**Localization note.** Templates below include Korean trigger phrases (e.g. `"{domain} 실행해줘"`) because this harness is authored for a bilingual KO/EN user. For **English-only repos, drop the Korean lines** when copying the template — leaving them in pollutes the description with unused tokens and may confuse the model's matcher. For other-language repos, translate the trigger phrases to the target language. Keep the English lines in every case (they're the lingua franca for Claude's auto-invocation).
 
 **Required pattern for orchestrator descriptions:**
 

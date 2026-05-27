@@ -2,8 +2,8 @@
 
 ### PR #13 — [FEAT] harness-init: mechanical auto-delegation routing (2026-05-27)
 
-- [ ] [docs] Add citation URL/title for "Scott Spence 2026 — ~50% trigger rate" referenced in `SKILL.md`, `references/orchestrator-template.md`, `references/trigger-router-template.md`. Currently unsourced — harness Agent Integrity Principle requires verifiable refs (source: pr-review-toolkit:review-pr).
-- [ ] [docs] Decide template-wide bilingual policy. Korean placeholders inside English description templates in `references/orchestrator-template.md` may break monolingual repos; either drop or add explicit "translate or remove for English-only repos" note across all templates that use the pattern (source: pr-review-toolkit:review-pr).
+- [x] [docs] Citation added for "~50% trigger rate" — Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)" (2025-11-06), https://scottspence.com/posts/claude-code-skills-dont-auto-activate. Year corrected from 2026 → 2025. Applied to `SKILL.md` (×2), `references/orchestrator-template.md`, `references/trigger-router-template.md` (×3) (source: pr-review-toolkit:review-pr).
+- [x] [docs] Bilingual policy: keep KO+EN as defaults (harness authored for bilingual KO/EN user); added "Localization note" to `references/orchestrator-template.md` and `references/trigger-router-template.md` instructing English-only repos to drop Korean lines, other-language repos to translate. EN lines always kept (source: pr-review-toolkit:review-pr).
 
 ### main — [FEAT] dev-review-cycle: dynamic 1–N review skill selection (2026-05-23)
 
