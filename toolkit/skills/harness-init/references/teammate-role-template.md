@@ -195,7 +195,7 @@ Grade an implementation against its Sprint Contract. Return pass/fail per
 criterion with evidence.
 
 ## Spawn Prompt Contract
-- Objective: which PR/diff + which Sprint Contract
+- Objective: which PR/diff + which Sprint Contract + pass number (1st or 2nd)
 - Output format: table {criterion | pass/fail | evidence path}
 - Tools to use: Bash for running tests/lint; Read/Grep for verification
 - Boundaries: do not edit production code; may suggest fixes in the report
@@ -205,8 +205,26 @@ criterion with evidence.
 Default **simple**. If fails > pass, stop at 3 failures and return — do
 not attempt to grade every criterion once systemic failure is clear.
 
+## Multi-pass Rule
+
+High-stakes features (auth, billing, migrations, data pipelines) require
+**two independent QA passes**:
+
+- **1st pass:** Acceptance criteria from Sprint Contract — did implementation
+  match the spec?
+- **2nd pass:** Edge cases + regression risks + integration surface — what
+  could break that the spec didn't anticipate?
+
+The same agent instance is allowed for 2nd pass (it now has 1st-pass output
+as context, which sharpens edge-case reasoning). The orchestrator must
+explicitly spawn the 2nd pass with `pass: 2` in the prompt and the 1st-pass
+report path.
+
+Non-high-stakes features: single pass is sufficient.
+
 ## Exit Criteria
 - All criteria graded OR early-stop threshold hit
+- 2nd pass completed (if high-stakes feature)
 ```
 
 ### `product-evaluator.md`

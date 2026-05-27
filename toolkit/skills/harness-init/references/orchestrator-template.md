@@ -35,11 +35,17 @@ description: |
 
 ## Phase 0: Context Detection
 
-Check `_workspace/` before anything else.
+Check `_workspace/campaign-state.json` before anything else.
 
-- `_workspace/` missing → **Initial run** — proceed to Phase 1
-- `_workspace/` exists + user gave new input → **New run** — clear `_workspace/`, proceed to Phase 1
-- `_workspace/` exists + user asked to revise/fix → **Partial re-run** — skip completed phases, re-run only requested scope
+```
+campaign-state.json missing → Initial run — proceed to Phase 1
+campaign-state.json exists + user gave new input → New run — archive old _workspace/ to
+  _workspace/_archive-{timestamp}/, write fresh campaign-state.json, proceed to Phase 1
+campaign-state.json exists + user asked to revise/fix → Resume — read next_entry_point,
+  skip completed_phases, continue from current_phase
+```
+
+Read `current_phase` and `tasks` from the state file. Report to user: "Resuming {domain} campaign from Phase {N} — tasks {completed} done, {in_progress} in progress."
 
 ## Phase 1: Preparation
 
@@ -111,7 +117,7 @@ description: |
 
 ## Phase 0: Context Detection
 
-(Same as Template A)
+Same as Template A — read `_workspace/campaign-state.json`.
 
 ## Phase 1: Spawn Sub-agents
 
@@ -175,6 +181,7 @@ TeamDelete(...)
 
 ```
 _workspace/
+  campaign-state.json          ← session-persistent campaign state
   {phase:02d}_{agent}_{artifact}.{ext}
   01_analyst_requirements.md
   02_architect_design.json
@@ -186,6 +193,64 @@ Rules:
 - Never use relative paths without `_workspace/` prefix
 - Final deliverables go to user-specified path; intermediates stay in `_workspace/`
 - Preserve across sessions for partial re-run support
+
+### Campaign State File (`_workspace/campaign-state.json`)
+
+Write this file at the end of every phase. Phase 0 reads it to determine resume point.
+
+```json
+{
+  "domain": "{domain}",
+  "started_at": "{ISO-8601}",
+  "last_updated": "{ISO-8601}",
+  "current_phase": 3,
+  "completed_phases": [1, 2],
+  "tasks": {
+    "task-1": "completed",
+    "task-2": "completed",
+    "task-3": "in_progress"
+  },
+  "next_entry_point": "Phase 3 — resume from task-3",
+  "artifacts": [
+    "_workspace/01_analyst_requirements.md",
+    "_workspace/02_architect_design.json"
+  ],
+  "notes": "{anything blocking or worth preserving across sessions}"
+}
+```
+
+**Phase 0 reads this file.** If `campaign-state.json` exists and `current_phase > 0`, it's a resume — skip completed phases, jump to `next_entry_point`. If the file is absent or malformed, treat as initial run.
+
+Update `campaign-state.json` atomically at the end of each phase (write to a temp file, rename). Never update mid-phase — a partial write corrupts resume state.
+
+---
+
+## Task Claim Protocol
+
+For team mode with multiple agents that could race to claim tasks, use an explicit claim step to prevent duplicate work.
+
+**Agent-side claim sequence:**
+
+```
+1. TaskGet(task_id) → check status
+2. If status != "pending": skip — claimed by another agent
+3. TaskUpdate(task_id, status: "in_progress", claimed_by: "{this-agent}")
+4. Do the work
+5. TaskUpdate(task_id, status: "completed")
+6. Write artifact to _workspace/
+7. SendMessage to orchestrator: "task-{id} done, artifact: _workspace/..."
+```
+
+**If agent stops unexpectedly:**
+
+```
+TaskUpdate(task_id, status: "blocked", notes: "{last known state}")
+SendMessage to orchestrator: "task-{id} blocked — {reason}"
+```
+
+This prevents the second most common multi-agent failure: two agents writing to the same artifact path simultaneously. The orchestrator should not assign the same task to multiple agents, but the claim check is a safety net.
+
+**In the orchestrator, after TaskCreate:** monitor via `TaskGet` in a polling loop or wait for `SendMessage` notifications. Don't assume tasks complete in order.
 
 ---
 

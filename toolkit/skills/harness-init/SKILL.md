@@ -162,10 +162,11 @@ Read `references/orchestrator-template.md` and choose one of:
 - **Template C (hybrid)** — phase-dependent: different modes per phase
 
 The orchestrator must include:
-1. Phase 0 context detection (`_workspace/` present? → initial / partial / new run)
+1. Phase 0 context detection — read `_workspace/campaign-state.json`; resume from `next_entry_point` if present
 2. Explicit data transfer strategy (see `references/delegation-template.md` → Data Transfer Protocols)
 3. Error policy (1 retry, graceful degradation, report omissions)
-4. `_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}`
+4. `_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}` + `campaign-state.json`
+5. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
 
 After creation, register in CLAUDE.md: add `## Harness: {Domain}` pointer block with trigger rule and change history table. Keep CLAUDE.md thin — pointer + history only (no agent list, no skill list).
 

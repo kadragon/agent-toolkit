@@ -70,6 +70,20 @@ Rules that apply every message — keep the context window lean.
 - Code, commits, docs: English
 - User-facing strings: i18n via `next-intl` (English + Korean)
 
+## Platform Pointers (optional — include only in multi-agent-tool environments)
+
+If the team uses more than one AI coding tool, add this section so each tool's agent finds the canonical rules:
+
+```markdown
+## Platform Pointers
+- Claude Code / Codex: `AGENTS.md` (this file)
+- Cursor: `.cursorrules` (add `@AGENTS.md` inside it)
+- Gemini CLI: `GEMINI.md` (add `@AGENTS.md` pointer)
+- GitHub Copilot: `.github/copilot-instructions.md` (copy key sections)
+```
+
+**Skip this section** on single-tool repos — it adds noise with no benefit.
+
 ## Maintenance
 
 Update this file **only** when ALL of the following are true:
