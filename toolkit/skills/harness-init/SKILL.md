@@ -1,9 +1,9 @@
 ---
 name: harness-init
-version: 0.6.0
+version: 0.7.0
 description: |
-  This skill should be used when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, sweep automation, .claudeignore, .agents/skills symlink, and optional enforcement hooks. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
-  Also use when the user asks to "sync harness", "harness sync", "harness 동기화", "AGENTS.md 정리", "AGENTS.md 업데이트", "backlog 정리", "tasks 정리", "하네스 유지보수" — load references/maintenance.md for the full A–G routine. Note: B (CLAUDE.md sync), E (symlink guard), F (context size check) run automatically via SessionStart hook — manual sync is primarily for C (reconcile tasks→backlog) and G (validate).
+  Use when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, orchestrator skill (if multi-agent), enforcement chain, .claudeignore. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
+  Also use for: "하네스 점검", "validate harness", "harness audit" — run scripts/validate-harness.sh and report maturity level. For harness evolution after usage feedback, see references/harness-evolution.md.
 ---
 
 # Harness Init
@@ -48,7 +48,7 @@ Before acting, determine mode AND maturity level.
 |-----------|------|--------|
 | No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Steps 1–10 |
 | Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
-| User asks "sync harness", "harness 점검", "update AGENTS.md" | **Maintain** | Load `references/maintenance.md` |
+| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop |
 
 **Maturity assessment (for New setup and Extend mode):**
 
@@ -132,7 +132,7 @@ Create these files. Each read **on demand**, not loaded every session. Each temp
 
 ### Step 4a: Create Sprint / Backlog Files
 
-Required so the maintenance routine section C (reconciliation) is no-op on first run. Without these, it silently reports `Backlog clear.` forever (harmless but wasteful) or warns about missing schema.
+Required so `scripts/reconcile-harness.py` has valid files to operate on. Without these, reconciliation has nothing to process and warns about missing schema.
 
 Create at repo root:
 
@@ -246,7 +246,7 @@ Three items at repo root. All mechanical wins — "create once, benefits every s
 @AGENTS.md
 ```
 
-Keeps loading chain clean: Claude loads `CLAUDE.md` → `AGENTS.md` (map) → `docs/` (on demand). Invariant enforced by maintenance routine B (`sync-claude-md.sh`).
+Keeps loading chain clean: Claude loads `CLAUDE.md` → `AGENTS.md` (map) → `docs/` (on demand). If drifts, repair with `scripts/sync-claude-md.sh`.
 
 #### `.claudeignore` (scan exclusions)
 
@@ -254,7 +254,7 @@ Prevents token burn on vendored deps, build outputs, generated artifacts. Compos
 
 #### `.agents/skills` symlink
 
-Tooling looks up project-local skills via `.agents/` while files live under `.claude/skills/`. Invariant enforced by maintenance routine E (`symlink-guard.sh`). Create once at init:
+Tooling looks up project-local skills via `.agents/` while files live under `.claude/skills/`. Create once at init; repair with `scripts/symlink-guard.sh` if broken:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/symlink-guard.sh
@@ -294,7 +294,7 @@ Script checks:
 - AGENTS.md `## Maintenance` section contains edit-policy rules
 - Golden Principles, Delegation, enforcement layers present
 
-Clean validate run means the maintenance routine is a no-op on first invocation.
+Clean validate run at Level 2+ means enforcement is active and drift is mechanically prevented.
 
 Manual checklist for items script cannot verify:
 - [ ] Golden principles enforceable (each has lint rule, test, or hook)
@@ -312,7 +312,7 @@ After setup, show the user all four of the following — this is the exit criter
 3. **How to trigger sweep** — exact command or trigger method chosen in Step 5 (e.g., `bash tools/sweep.sh`).
 4. **How to update AGENTS.md when tasks change** — point to the `## Maintenance` rules embedded in AGENTS.md; emphasize: only add when all 4 conditions are met.
 
-After setup, the maintenance routine (`references/maintenance.md`) runs silently at session start to keep harness tidy. Maintains these exact invariants (CLAUDE.md pointer, `.agents/skills` symlink, backlog/tasks schemas, AGENTS.md size warnings). Unexpected drift on first run → treat as init bug — not maintenance false positive — fix template here.
+After setup, Level 3 enforcement mechanically prevents drift (hooks + CI). Unexpected violations after a clean init → treat as enforcement gap, not operator error — trace to the missing hook or CI check and fix the template.
 
 ## Harness Evolution
 
@@ -325,18 +325,28 @@ Read `references/harness-evolution.md` for feedback → fix target mapping and c
 
 ## Ongoing Maintenance
 
-After init completes, B/E/F run automatically via the `toolkit:harness-maintenance` SessionStart hook (daily debounce). Manual sync is for C (reconcile tasks→backlog) and G (validate) — trigger on explicit request ("sync harness", "harness 동기화", etc.). Full A–G procedure in **`references/maintenance.md`** — load only when explicitly needed.
+With Level 3 enforcement active, no manual sync routine is needed — hooks and CI prevent drift mechanically.
 
-**Scripts (all run from repo root):**
+**Regular actions:**
 
-| Script | Maintenance section | Auto? | Purpose |
-|--------|---------------------|-------|---------|
-| `scripts/sync-claude-md.sh` | B | ✅ hook | Check/fix CLAUDE.md → @AGENTS.md |
-| `scripts/reconcile-harness.py` | C | manual | Sync tasks.md status into backlog.md |
-| `scripts/symlink-guard.sh` | E | ✅ hook | Ensure .agents/skills symlink |
-| `scripts/check-context-size.sh` | F | ✅ hook | Warn when AGENTS.md > 200 lines |
-| `scripts/sweep.sh` | post-sync | manual | Archive stale content |
-| `scripts/validate-harness.sh` | G / Step 9 | manual | Full structural validation |
+| When | Action |
+|------|--------|
+| Periodically or on "harness 점검" | `bash scripts/validate-harness.sh` — check maturity level |
+| Sprint tasks complete | `python scripts/reconcile-harness.py` — sync tasks.md → backlog.md |
+| Feedback from harness usage | Read `references/harness-evolution.md` |
+
+**Scripts (utilities, run from repo root):**
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/validate-harness.sh` | Full structural validation + maturity level report |
+| `scripts/reconcile-harness.py` | Sync completed tasks.md items into backlog.md |
+| `scripts/sweep.sh` | Archive stale content (copy and adapt per project in Step 5) |
+| `scripts/sync-claude-md.sh` | Repair CLAUDE.md → @AGENTS.md (if manually broken) |
+| `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
+| `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
+
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs B/E/F daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 
@@ -345,15 +355,6 @@ All `references/*.md` files cited inline at point of use — consult there. File
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
 - **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.
-
-### Scripts
-
-- **`scripts/sweep.sh`** — Base sweep script to copy and adapt per project (Step 5)
-- **`scripts/validate-harness.sh`** — Validates harness completeness (Step 9)
-- **`scripts/sync-claude-md.sh`** — Maintenance B: check/fix CLAUDE.md pointer
-- **`scripts/reconcile-harness.py`** — Maintenance C: sync tasks.md → backlog.md
-- **`scripts/symlink-guard.sh`** — Maintenance E: ensure .agents/skills symlink
-- **`scripts/check-context-size.sh`** — Maintenance F: warn on AGENTS.md size overflow
 
 ### Examples
 
