@@ -25,18 +25,27 @@ Invariants enforced mechanically. Violations block commits.
 
 ## Delegation (Hard Stop)
 
-Delegation is a golden principle — skipping a mandatory gate is a violation. Read `docs/delegation.md` for full routing table and context manifests. All triggers are objective and measurable.
+Delegation is a golden principle — skipping a mandatory gate is a violation. Read `docs/delegation.md` for full routing table, context manifests, and orchestrator patterns. All triggers are objective and measurable.
 
-| Trigger (objective) | Delegate | Gate |
-|---------------------|----------|------|
-| Target module has >5 files or >500 LOC | Explore agent (sonnet) | Mandatory, blocking |
-| Change touches ≥3 directories | Architecture analysis (opus) | Mandatory, blocking |
-| First edit in a directory this session | Explore agent (sonnet) | Mandatory, blocking |
-| File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent (sonnet) | Mandatory, blocking |
-| After implementation (always) | QA verification (sonnet) | Mandatory, blocking |
-| Feature complete | Product evaluator (opus) | Mandatory, blocking |
-| Every commit | Code reviewer (sonnet) | Background |
-| Same failure x2 | Deep investigation (opus) | Escalation, blocking |
+**Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
+- Sub-agents share findings mid-flight → Agent Team (`TeamCreate` + `SendMessage`)
+- Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
+- Phase-dependent → Hybrid (see `references/orchestrator-template.md`)
+
+| Trigger (objective) | Delegate | Mode | Gate |
+|---------------------|----------|------|------|
+| Target module has >5 files or >500 LOC | Explore agent (sonnet) | sub-agent | Mandatory, blocking |
+| Change touches ≥3 directories | Architecture analysis (opus) | sub-agent | Mandatory, blocking |
+| First edit in a directory this session | Explore agent (sonnet) | sub-agent | Mandatory, blocking |
+| File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent (sonnet) | sub-agent | Mandatory, blocking |
+| After implementation (always) | QA verification (sonnet) | sub-agent | Mandatory, blocking |
+| Feature complete | Product evaluator (opus) | sub-agent | Mandatory, blocking |
+| Multi-perspective review needed | Review team (sonnet × N) | **agent team** | Optional |
+| Cross-layer refactor (≥3 modules) | Refactor team (opus lead + sonnet) | **agent team** | Escalation |
+| Every commit | Code reviewer (sonnet) | background | Background |
+| Same failure x2 | Deep investigation (opus) | sub-agent | Escalation, blocking |
+
+**Intermediate artifacts:** `_workspace/{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
 
 ## Token Economy
 
@@ -60,6 +69,20 @@ Rules that apply every message — keep the context window lean.
 
 - Code, commits, docs: English
 - User-facing strings: i18n via `next-intl` (English + Korean)
+
+## Platform Pointers (optional — include only in multi-agent-tool environments)
+
+If the team uses more than one AI coding tool, add this section so each tool's agent finds the canonical rules:
+
+```markdown
+## Platform Pointers
+- Claude Code / Codex: `AGENTS.md` (this file)
+- Cursor: `.cursorrules` (add `@AGENTS.md` inside it)
+- Gemini CLI: `GEMINI.md` (add `@AGENTS.md` pointer)
+- GitHub Copilot: `.github/copilot-instructions.md` (copy key sections)
+```
+
+**Skip this section** on single-tool repos — it adds noise with no benefit.
 
 ## Maintenance
 

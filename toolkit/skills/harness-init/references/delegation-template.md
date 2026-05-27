@@ -4,22 +4,34 @@ The orchestrator plans, routes, and verifies. It does NOT do the heavy lifting i
 
 ## Pattern Selection (before routing)
 
-Before picking a delegation target, pick a coordination **pattern**. The routing table below assumes Orchestrator-Subagent by default; other patterns live in `references/coordination-patterns.md`.
+Before picking a delegation target, pick a coordination **pattern**.
 
 ```
 Q1. Does the task decompose into >1 genuinely parallel subtask?
     No  → single session. No delegation. Stop.
     Yes → Q2.
 Q2. Do subtasks need to share findings mid-flight (not just report at end)?
-    No  → Orchestrator-Subagent (this doc's default).
-    Yes → Q3.
+    Yes → Q3 (Agent Teams path).
+    No  → Q4.
 Q3. Is there an objective written pass/fail criterion?
-    Yes → Generator-Verifier (wrap Q2's answer with a verifier gate).
-    No  → Agent Teams (see references/agent-teams-onboarding.md) if parallel
-          exploration genuinely helps — otherwise reconsider multi-agent.
+    Yes → Generator-Verifier (Team mode with verifier gate).
+    No  → Agent Team (TeamCreate + SendMessage + TaskCreate).
+          See references/orchestrator-template.md — Template A.
+Q4. Are subtasks truly independent (results returned at end only)?
+    Yes → Orchestrator-Subagent. See orchestrator-template.md — Template B.
+    No  → reconsider: heavy inter-agent deps → single session is cheaper.
 ```
 
-**When NOT to delegate at all:** all agents need identical context, heavy inter-agent dependencies, real-time turn-taking, or <3 files / <200 LOC change. Most coding work falls here.
+**Hybrid:** if the workflow has phases where Q2 answer differs, use Template C
+(orchestrator-template.md) — sub-agent for gathering, team for synthesis.
+
+**When NOT to delegate at all:** all agents need identical context, heavy
+inter-agent dependencies, real-time turn-taking, or <3 files / <200 LOC change.
+Most coding work falls here.
+
+**Cost rule:** Team mode carries 3–5× token overhead. Default to team only
+when inter-agent communication pays for itself (shared discoveries, contradiction
+resolution, incremental QA). For simple fan-out, sub-agents are cheaper.
 
 ## Spawn Prompt Contract (all 4 fields mandatory)
 
@@ -92,6 +104,26 @@ When the orchestrator gets stuck.
 | Large refactor needed | Refactor agent (background) |
 | Design decision needed | Design exploration agent (blocking) |
 ```
+
+## Data Transfer Protocols
+
+Choose the right data transfer strategy based on execution mode and data size.
+
+| Strategy | Mechanism | Use when |
+|----------|-----------|----------|
+| **Message-based** | `SendMessage` between teammates | Real-time coordination, mid-flight findings |
+| **Task-based** | `TaskCreate`/`TaskUpdate` | Progress tracking, dependency gates |
+| **File-based** | `_workspace/{phase}_{agent}_{artifact}.{ext}` | Large artifacts, structured output, cross-phase handoff |
+| **Return-value** | `Agent(...)` tool return message | Sub-agent results reported to orchestrator |
+
+**Recommended combinations:**
+- Team mode → task-based (coordination) + file-based (artifacts) + message-based (real-time)
+- Sub-agent mode → return-value (results) + file-based (large data)
+
+File-based rules:
+- All paths under `_workspace/` (never ad-hoc temp paths)
+- Naming: `{phase:02d}_{agent}_{artifact}.{ext}` — `01_explorer_map.md`, `02_implementer_diff.patch`
+- Preserve `_workspace/` across sessions for partial re-run support
 
 ## Context Manifest
 

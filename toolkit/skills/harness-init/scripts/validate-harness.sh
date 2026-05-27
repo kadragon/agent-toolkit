@@ -259,6 +259,61 @@ if [[ -f "AGENTS.md" ]]; then
     fi
 fi
 
+# ── Maturity Level Assessment ─────────────────────────────────
+echo ""
+echo "--- Maturity Level ---"
+
+# Level 1: docs exist + CLAUDE.md pointer + backlog schema
+level1=true
+[[ -f "AGENTS.md" && -f "CLAUDE.md" ]] || level1=false
+[[ -f "docs/architecture.md" && -f "docs/runbook.md" ]] || level1=false
+[[ -f "backlog.md" ]] || level1=false
+if [[ -f "CLAUDE.md" ]]; then
+    claude_trimmed2=$(tr -d '[:space:]' < CLAUDE.md)
+    [[ "$claude_trimmed2" == "@AGENTS.md" ]] || level1=false
+fi
+
+# Level 2: Level 1 + CI + reference integrity + delegation has objective triggers
+level2=false
+if $level1; then
+    has_ci=false
+    [[ -d ".github/workflows" || -f ".gitlab-ci.yml" || -f ".circleci/config.yml" ]] && has_ci=true
+    has_refs=true
+    [[ -f "docs/delegation.md" ]] || has_refs=false
+    $has_ci && $has_refs && level2=true
+fi
+
+# Level 3: Level 2 + PostToolUse hooks + pre-commit or git hooks + drift detection
+level3=false
+if $level2; then
+    has_hooks=false
+    has_precommit=false
+    if [[ -f ".claude/settings.json" ]]; then
+        jq -e '.hooks | (has("PostToolUse") or has("PreToolUse"))' .claude/settings.json >/dev/null 2>&1 && has_hooks=true
+    fi
+    [[ -f ".pre-commit-config.yaml" \
+       || ( -f ".husky/pre-commit" && -x ".husky/pre-commit" ) \
+       || ( -f ".git/hooks/pre-commit" && -x ".git/hooks/pre-commit" ) ]] && has_precommit=true
+    $has_hooks && $has_precommit && level3=true
+fi
+
+# Downgrade all levels if hard failures found
+[[ $FAIL -gt 0 ]] && { level1=false; level2=false; level3=false; }
+
+if $level3; then
+    echo -e "  ${GREEN}LEVEL 3 — Enforced${NC}  (hooks + CI + drift detection active)"
+    echo -e "  ${GREEN}✓${NC} Upgrade path: complete"
+elif $level2; then
+    echo -e "  ${YELLOW}LEVEL 2 — Verified${NC}  (CI active, hooks missing)"
+    echo -e "  ${YELLOW}→${NC} To reach Level 3: add PostToolUse hooks + pre-commit hooks"
+elif $level1; then
+    echo -e "  ${YELLOW}LEVEL 1 — Basic${NC}  (docs present, no CI enforcement)"
+    echo -e "  ${YELLOW}→${NC} To reach Level 2: add CI workflow + docs/delegation.md with objective triggers"
+else
+    echo -e "  ${RED}LEVEL 0 — Not initialized${NC}"
+    echo -e "  ${RED}→${NC} Run harness-init to reach Level 1"
+fi
+
 # ── Summary ─────────────────────────────────────────────────
 echo ""
 echo "=== Summary ==="

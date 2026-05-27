@@ -303,7 +303,7 @@ When a teammate goes idle with open tasks in its assigned scope, send a nudge in
 set -euo pipefail
 payload=$(cat)
 teammate=$(jq -r '.teammate.name // empty' <<<"$payload")
-open_count=$(jq -r '[.tasks[] | select(.owner == "'"$teammate"'" and .status != "completed")] | length' <<<"$payload")
+open_count=$(jq -r --arg tm "$teammate" '[.tasks[] | select(.owner == $tm and .status != "completed")] | length' <<<"$payload")
 
 if (( open_count > 0 )); then
     echo "$teammate going idle with $open_count open task(s). Continue or explicitly handoff via SendMessage." >&2
@@ -313,6 +313,121 @@ exit 0
 ```
 
 **Skip these hooks if Agent Teams is not enabled** — the events never fire and the scripts are inert, but keep the `.claude/settings.json` clean.
+
+## Circuit Breaker (Layer 1 Extension)
+
+A circuit breaker stops failure cascades before they burn the context window on futile retries. Without it, an agent that encounters the same error type repeatedly will keep attempting fixes — often making the same mistake each time — until the context fills with noise.
+
+**Pattern:** Track consecutive failures of the same error type in a session state file. After N consecutive failures, halt and escalate — don't retry.
+
+```bash
+#!/usr/bin/env bash
+# .claude/hooks/circuit-breaker.sh
+# PostToolUse: Bash — fires after every command run.
+# Counts consecutive non-zero exits. Halts at threshold.
+
+set -euo pipefail
+
+payload=$(cat)
+exit_code=$(jq -r '.tool_response.exit_code // 0' <<<"$payload")
+session=$(jq -r '.session_id // "default"' <<<"$payload")
+
+STATE="/tmp/claude-circuit-${session}.txt"
+THRESHOLD="${CIRCUIT_BREAKER_THRESHOLD:-3}"
+
+if [[ "$exit_code" -ne 0 ]]; then
+    count=$(cat "$STATE" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$STATE"
+    if (( count >= THRESHOLD )); then
+        echo "CIRCUIT BREAKER: $count consecutive failures. Stop retrying. Call advisor or report to user." >&2
+        echo "Last exit code: $exit_code. Reset by running a successful command." >&2
+        # Exit 2 sends blocking feedback to agent via PostToolUse stderr
+        exit 2
+    fi
+else
+    # Reset on success
+    rm -f "$STATE"
+fi
+exit 0
+```
+
+**Wire it in `.claude/settings.json`:**
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "bash .claude/hooks/circuit-breaker.sh"}]
+      }
+    ]
+  }
+}
+```
+
+**Tune `CIRCUIT_BREAKER_THRESHOLD`:**
+- `3` (default) — catches most loops without interrupting legitimate multi-step builds
+- `2` — aggressive; good for high-stakes repos where token budget is tight
+- `5` — lenient; for repos where flaky tests occasionally fail 2–3× in a row
+
+**Reset condition:** Any successful Bash exit (exit 0) resets the counter. This means a partial fix that lets a different command succeed will reset the breaker — which is the right behavior.
+
+**Escalation path:** When the breaker fires, the agent should:
+1. Call `advisor` (strong reviewer)
+2. If still stuck: report to user and stop (do NOT self-continue)
+
+This maps to the existing "same failure x2 → call advisor" rule in AGENTS.md's delegation table, now mechanically enforced instead of relying on the agent's judgment.
+
+## Consent Gates for External Actions (Layer 1 Extension)
+
+Some actions are irreversible or outward-facing: git push, PR creation, deploy, secret rotation. An agent that auto-pushes can expose work-in-progress; one that auto-creates PRs can pollute review queues.
+
+**Pattern:** PreToolUse hook on `Bash` checks if the command matches a high-risk pattern. On first encounter, emits a warning and halts — the agent must confirm before proceeding.
+
+```bash
+#!/usr/bin/env bash
+# .claude/hooks/consent-gate.sh
+# Warns before irreversible external actions.
+
+set -euo pipefail
+
+payload=$(cat)
+cmd=$(jq -r '.tool_input.command // empty' <<<"$payload")
+session=$(jq -r '.session_id // "default"' <<<"$payload")
+
+CONSENT_FILE="/tmp/claude-consent-${session}.txt"
+touch "$CONSENT_FILE"
+
+# ADAPT: adjust patterns for your project's risky commands
+RISKY_PATTERNS=(
+    "git push"
+    "gh pr create"
+    "kubectl apply"
+    "terraform apply"
+    "npm publish"
+    "docker push"
+)
+
+for pattern in "${RISKY_PATTERNS[@]}"; do
+    if [[ "$cmd" == *"$pattern"* ]]; then
+        # Check if already consented this session
+        grep -Fxq "$pattern" "$CONSENT_FILE" && exit 0
+
+        echo "CONSENT REQUIRED: About to run: $cmd" >&2
+        echo "This is an external/irreversible action. Confirm with user before proceeding." >&2
+        echo "After user confirms, run: echo '$pattern' >> $CONSENT_FILE" >&2
+        exit 2  # Block this attempt; agent must get explicit user confirmation then record consent
+    fi
+done
+exit 0
+```
+
+**Session consent modes** (adapt `CONSENT_FILE` logic to implement):
+- **always-ask** (default): block every external action, require explicit confirmation
+- **session-allow**: after first confirmation, allow same pattern for the rest of the session
+- **auto-allow**: skip the gate (for fully trusted automation contexts)
 
 ## Layer 2: Pre-commit Checks
 

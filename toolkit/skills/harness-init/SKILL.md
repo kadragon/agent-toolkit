@@ -1,9 +1,8 @@
 ---
 name: harness-init
-version: 0.5.0
+version: 0.7.0
 description: |
-  This skill should be used when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, sweep automation, .claudeignore, .agents/skills symlink, and optional enforcement hooks. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
-  Also use when the user asks to "sync harness", "harness sync", "harness 동기화", "AGENTS.md 정리", "AGENTS.md 업데이트", "backlog 정리", "tasks 정리", "하네스 유지보수" — load references/maintenance.md for the full A–G routine. Note: B (CLAUDE.md sync), E (symlink guard), F (context size check) run automatically via SessionStart hook — manual sync is primarily for C (reconcile tasks→backlog) and G (validate).
+  Use when user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or repo has no AGENTS.md/docs/ structure. Also for "validate harness", "harness audit", "하네스 점검". Repo-scoped — does NOT modify ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init
@@ -38,6 +37,37 @@ Before starting, gather project info. **Scan repo first (Step 1: read existing f
 
 Work through steps in order. Each produces concrete artifacts.
 
+### Step 0: Classify the Request
+
+Before acting, determine mode AND maturity level.
+
+**Mode selection:**
+
+| Condition | Mode | Action |
+|-----------|------|--------|
+| No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Steps 1–10 |
+| Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
+| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop |
+
+**Maturity assessment (for New setup and Extend mode):**
+
+Run `scripts/validate-harness.sh` against the target repo (if it exists). Classify as Level 1 / 2 / 3 per `references/maturity-levels.md`. Report the current level and which level to target.
+
+- **Default target:** Level 2 (CI-verified). Propose Level 3 only for multi-agent or high-risk repos.
+- **Solo dev / greenfield:** Level 1 suffices; offer Level 2 upgrade path.
+- **Existing repo, partial harness:** Start from current level, advance one level per session.
+
+**Extend mode — step selection matrix:**
+
+| Change type | Steps to run |
+|-------------|-------------|
+| Add agent role | 4b (new role file) → 4c (update orchestrator) → 9 (validate) |
+| Add/modify skill | 4c (skill update) → 9 |
+| Add new domain with orchestrator | 4b + 4c + 4d → 9 |
+| Architecture change | Affected docs → 4b (impacted roles) → 4c → 9 |
+
+Report mode + current maturity level + target level before proceeding.
+
 ### Step 1: Analyze the Repository
 
 Before creating anything, understand what exists.
@@ -67,6 +97,8 @@ Read `references/golden-principles-guide.md` for examples across tech stacks.
 **Delegation is golden principle candidate.** Agents overestimate understanding, skip delegation when "merely recommended." If project uses sub-agents, include delegation discipline principle with objective, measurable triggers — not subjective ones like "unfamiliar module." See "Delegation Discipline" section in `references/golden-principles-guide.md`.
 
 Ask user: "What rules, if broken, cause most pain in this codebase?" Answer seeds golden principles.
+
+**Add the Agent Integrity Principle universally** — include it in every project's golden principles (see `references/golden-principles-guide.md` → "Agent Integrity Principle"). Prevents agents fabricating values not directly observed. Mark unverified values as `[unknown — read {source} to verify]` instead of guessing.
 
 ### Step 3: Create AGENTS.md
 
@@ -99,7 +131,7 @@ Create these files. Each read **on demand**, not loaded every session. Each temp
 
 ### Step 4a: Create Sprint / Backlog Files
 
-Required so the maintenance routine section C (reconciliation) is no-op on first run. Without these, it silently reports `Backlog clear.` forever (harmless but wasteful) or warns about missing schema.
+Required so `scripts/reconcile-harness.py` has valid files to operate on. Without these, reconciliation has nothing to process and warns about missing schema.
 
 Create at repo root:
 
@@ -108,13 +140,54 @@ Create at repo root:
 
 Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
 
-### Step 4b: Define Reusable Roles (if multi-agent)
+### Step 4b: Define Reusable Roles
 
-Skip if project uses only single session. Otherwise create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
+**Skip if single-session only project** — don't create role files unless at least one delegation trigger will use them (i.e., Step 4c will create an orchestrator).
 
-Read `references/teammate-role-template.md` for full schema and starter pack (implementer, explorer, qa-verifier, product-evaluator). Routing table in `docs/delegation.md` cites roles by name — role file body appended to spawn prompt automatically.
+Create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
+
+Read `references/teammate-role-template.md` for full schema and starter pack (implementer, explorer, qa-verifier, product-evaluator).
+
+**Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and `_workspace/` artifact path. Without it, inter-agent coordination degrades to guessing.
 
 Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for multi-session work. Handoff files are deferred Spawn Prompt Contracts.
+
+### Step 4c: Create Orchestrator Skill
+
+For any domain with ≥2 coordinating agents, create an orchestrator skill at:
+`.claude/skills/{domain}-orchestrator/SKILL.md`
+
+Read `references/orchestrator-template.md` and choose one of:
+- **Template A (team)** — agents share findings mid-flight via SendMessage
+- **Template B (sub-agent)** — agents return results independently
+- **Template C (hybrid)** — phase-dependent: different modes per phase
+
+The orchestrator must include:
+1. Phase 0 context detection — read `_workspace/campaign-state.json`; resume from `next_entry_point` if present
+2. Explicit data transfer strategy (see `references/delegation-template.md` → Data Transfer Protocols)
+3. Error policy (1 retry, graceful degradation, report omissions)
+4. `_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}` + `campaign-state.json`
+5. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
+
+After creation, register in CLAUDE.md: add `## Harness: {Domain}` pointer block with trigger rule and change history table. Keep CLAUDE.md thin — pointer + history only (no agent list, no skill list).
+
+**Skip if:** project is truly single-agent. The orchestrator is overhead without payoff there.
+
+### Step 4d: _workspace Pattern
+
+If Step 4c created an orchestrator, add a `_workspace/` section to `docs/runbook.md`:
+
+```markdown
+## _workspace/ Convention
+
+Intermediate artifacts live under `_workspace/` at repo root.
+Naming: `{phase:02d}_{agent}_{artifact}.{ext}`
+
+Preserve across sessions — enables partial re-run without full restart.
+Remove only on explicit "reset" request.
+```
+
+This makes the convention discoverable to future sessions and new contributors.
 
 ### Step 5: Set Up Sweep Automation
 
@@ -158,7 +231,11 @@ Build multi-layer enforcement chain so golden principles are mechanically guaran
 3. **CI gate** — Block merges on failure
 4. **PR template** (optional) — Checklist derived from golden principles
 
-Match enforcement depth to team size and risk tolerance. Read `references/enforcement-template.md` for per-layer templates, Agent Teams hook wiring, and performance rules.
+**Two Layer 1 extensions (add when appropriate):**
+- **Circuit Breaker** — stops failure cascades before token spiral; fires after N consecutive Bash failures (default: 3). See `references/enforcement-template.md` → "Circuit Breaker".
+- **Consent Gates** — halts before irreversible external actions (push, PR, deploy) until user confirms. See `references/enforcement-template.md` → "Consent Gates".
+
+Match enforcement depth to maturity level target: Level 1 → no hooks required; Level 2 → Layer 1 + 3; Level 3 → all layers + circuit breaker. Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
 
 ### Step 8: Create Repo Root Configs
 
@@ -170,7 +247,7 @@ Three items at repo root. All mechanical wins — "create once, benefits every s
 @AGENTS.md
 ```
 
-Keeps loading chain clean: Claude loads `CLAUDE.md` → `AGENTS.md` (map) → `docs/` (on demand). Invariant enforced by maintenance routine B (`sync-claude-md.sh`).
+Keeps loading chain clean: Claude loads `CLAUDE.md` → `AGENTS.md` (map) → `docs/` (on demand). If drifts, repair with `scripts/sync-claude-md.sh`.
 
 #### `.claudeignore` (scan exclusions)
 
@@ -178,7 +255,7 @@ Prevents token burn on vendored deps, build outputs, generated artifacts. Compos
 
 #### `.agents/skills` symlink
 
-Tooling looks up project-local skills via `.agents/` while files live under `.claude/skills/`. Invariant enforced by maintenance routine E (`symlink-guard.sh`). Create once at init:
+Tooling looks up project-local skills via `.agents/` while files live under `.claude/skills/`. Create once at init; repair with `scripts/symlink-guard.sh` if broken:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/symlink-guard.sh
@@ -192,13 +269,17 @@ mkdir -p .agents && ln -s ../.claude/skills .agents/skills
 
 Accepted forms (POSIX symlink or Windows text-file fallback) documented in `references/harness-invariants.md` → File Layout Invariants.
 
-### Step 8b: Agent Teams Onboarding (optional)
+### Step 8b: Agent Teams Setup (when Step 4c used Template A or C)
 
-Enable Claude Code's experimental Agent Teams only if project has real parallel workloads (cross-layer refactors, multi-lens code review, adversarial debugging). Read `references/agent-teams-onboarding.md` for decision checklist and full setup.
+If Step 4c created a team-mode orchestrator, complete Agent Teams setup:
 
-If enabled, also add adversarial debugging playbook as on-demand workflow: `references/competing-hypotheses-playbook.md`. Maps to `debate` workflow in `docs/workflows.md` — invoked rarely, high value when stakes justify token cost.
+Read `references/agent-teams-onboarding.md` for tooling prerequisites and environment check.
 
-Skip for solo workloads and most CRUD apps. Agent Teams carries 3-5× token cost and meaningful coordination overhead.
+Add adversarial debugging playbook as on-demand workflow: `references/competing-hypotheses-playbook.md`. Maps to `debate` workflow in `docs/workflows.md`.
+
+**Skip entirely if:** Step 4c chose Template B (sub-agent only). Agent Teams carries 3–5× token cost — don't enable it without an orchestrator that uses `TeamCreate`.
+
+Token cost note: Team mode is not free. The orchestrator template enforces the decision gate (Q2 in Pattern Selection) so teams only activate when mid-flight coordination genuinely pays off.
 
 ### Step 9: Validate
 
@@ -214,7 +295,7 @@ Script checks:
 - AGENTS.md `## Maintenance` section contains edit-policy rules
 - Golden Principles, Delegation, enforcement layers present
 
-Clean validate run means the maintenance routine is a no-op on first invocation.
+Clean validate run at Level 2+ means enforcement is active and drift is mechanically prevented.
 
 Manual checklist for items script cannot verify:
 - [ ] Golden principles enforceable (each has lint rule, test, or hook)
@@ -232,36 +313,49 @@ After setup, show the user all four of the following — this is the exit criter
 3. **How to trigger sweep** — exact command or trigger method chosen in Step 5 (e.g., `bash tools/sweep.sh`).
 4. **How to update AGENTS.md when tasks change** — point to the `## Maintenance` rules embedded in AGENTS.md; emphasize: only add when all 4 conditions are met.
 
-After setup, the maintenance routine (`references/maintenance.md`) runs silently at session start to keep harness tidy. Maintains these exact invariants (CLAUDE.md pointer, `.agents/skills` symlink, backlog/tasks schemas, AGENTS.md size warnings). Unexpected drift on first run → treat as init bug — not maintenance false positive — fix template here.
+After setup, Level 3 enforcement mechanically prevents drift (hooks + CI). Unexpected violations after a clean init → treat as enforcement gap, not operator error — trace to the missing hook or CI check and fix the template.
+
+## Harness Evolution
+
+After a harness is in use, it should evolve based on feedback. Trigger evolution when:
+- Same feedback appears ≥2× (structural gap signal)
+- Agent bypasses orchestrator (description trigger missing)
+- Repeated agent failure pattern (definition defect)
+
+Read `references/harness-evolution.md` for feedback → fix target mapping and change history protocol. Record every change in the orchestrator's CLAUDE.md pointer block.
 
 ## Ongoing Maintenance
 
-After init completes, B/E/F run automatically via the `toolkit:harness-maintenance` SessionStart hook (daily debounce). Manual sync is for C (reconcile tasks→backlog) and G (validate) — trigger on explicit request ("sync harness", "harness 동기화", etc.). Full A–G procedure in **`references/maintenance.md`** — load only when explicitly needed.
+With Level 3 enforcement active, no manual sync routine is needed — hooks and CI prevent drift mechanically.
 
-**Scripts (all run from repo root):**
+**Regular actions:**
 
-| Script | Maintenance section | Auto? | Purpose |
-|--------|---------------------|-------|---------|
-| `scripts/sync-claude-md.sh` | B | ✅ hook | Check/fix CLAUDE.md → @AGENTS.md |
-| `scripts/reconcile-harness.py` | C | manual | Sync tasks.md status into backlog.md |
-| `scripts/symlink-guard.sh` | E | ✅ hook | Ensure .agents/skills symlink |
-| `scripts/check-context-size.sh` | F | ✅ hook | Warn when AGENTS.md > 200 lines |
-| `scripts/sweep.sh` | post-sync | manual | Archive stale content |
-| `scripts/validate-harness.sh` | G / Step 9 | manual | Full structural validation |
+| When | Action |
+|------|--------|
+| Periodically or on "harness 점검" | `bash scripts/validate-harness.sh` — check maturity level |
+| Sprint tasks complete | `python scripts/reconcile-harness.py` — sync tasks.md → backlog.md |
+| Feedback from harness usage | Read `references/harness-evolution.md` |
+
+**Scripts (utilities, run from repo root):**
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/validate-harness.sh` | Full structural validation + maturity level report |
+| `scripts/reconcile-harness.py` | Sync completed tasks.md items into backlog.md |
+| `scripts/sweep.sh` | Archive stale content (copy and adapt per project in Step 5) |
+| `scripts/sync-claude-md.sh` | Repair CLAUDE.md → @AGENTS.md (if manually broken) |
+| `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
+| `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
+
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 
-All `references/*.md` files cited inline at point of use — consult there. One file optional, not cited inline:
-- **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational, not auto-applied; surface to user after Step 10 if they ask for further tuning.
-
-### Scripts
-
-- **`scripts/sweep.sh`** — Base sweep script to copy and adapt per project (Step 5)
-- **`scripts/validate-harness.sh`** — Validates harness completeness (Step 9)
-- **`scripts/sync-claude-md.sh`** — Maintenance B: check/fix CLAUDE.md pointer
-- **`scripts/reconcile-harness.py`** — Maintenance C: sync tasks.md → backlog.md
-- **`scripts/symlink-guard.sh`** — Maintenance E: ensure .agents/skills symlink
-- **`scripts/check-context-size.sh`** — Maintenance F: warn on AGENTS.md size overflow
+All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
+- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, CLAUDE.md pointer block. **Read at Step 4c.**
+- **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
+- **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
+- **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.
 
 ### Examples
 
