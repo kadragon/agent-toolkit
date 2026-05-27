@@ -332,23 +332,43 @@ file=$(jq -r '.tool_input.file_path // empty' <<<"$payload")
 session=$(jq -r '.session_id // "default"' <<<"$payload")
 [[ -z "$file" ]] && exit 0
 
-# ADAPT: critical path patterns from AGENTS.md delegation table
+# Lowercase the path: macOS HFS+ is case-insensitive, so "src/Auth/Login.ts"
+# must match the same pattern as "src/auth/login.ts". Do this before any glob check.
+file_lc=$(printf '%s' "$file" | tr '[:upper:]' '[:lower:]')
+
+# ADAPT: critical path patterns from AGENTS.md delegation table.
+# IMPORTANT — these are shell globs in a `case` statement, NOT gitignore syntax.
+# `**` is treated as `*` by `case`; it does NOT recurse. Include both root and
+# nested variants per area, or substring-match with `*auth*` style.
 CRITICAL_PATTERNS=(
-    "**/auth/**"
-    "**/billing/**"
-    "**/migrations/**"
-    "**/security/**"
+    "auth/*"        "*/auth/*"
+    "billing/*"     "*/billing/*"
+    "migrations/*"  "*/migrations/*"
+    "security/*"    "*/security/*"
 )
 
 is_critical=0
 for pattern in "${CRITICAL_PATTERNS[@]}"; do
-    case "$file" in $pattern) is_critical=1; break ;; esac
+    case "$file_lc" in $pattern) is_critical=1; break ;; esac
 done
 (( is_critical == 0 )) && exit 0
 
-# Look for evidence: any _workspace/ file naming this critical area + session
-area=$(printf '%s' "$file" | grep -oE '(auth|billing|migrations|security)' | head -1)
-evidence_glob="_workspace/*_${area}_*.md"
+# Extract area name with bash builtin =~ (no grep fork; matches the
+# "[[ =~ ]] instead of grep" guidance earlier in this file).
+area=""
+if [[ "$file_lc" =~ (auth|billing|migrations|security) ]]; then
+    area="${BASH_REMATCH[1]}"
+fi
+[[ -z "$area" ]] && exit 0
+
+# Evidence must be FROM THIS SESSION — old _workspace/ files from prior sessions
+# would otherwise permanently unblock the gate. The orchestrator MUST stamp the
+# session_id into the evidence filename (convention:
+#   _workspace/{NN}_{agent}_{area}_{session_id}_{artifact}.md
+# ).
+#
+# Unquoted on purpose — needs glob expansion. Do NOT add quotes.
+evidence_glob="_workspace/*_${area}_${session}_*.md"
 shopt -s nullglob
 evidence=( $evidence_glob )
 
@@ -357,10 +377,10 @@ if (( ${#evidence[@]} == 0 )); then
 DELEGATION GATE: edit to $file blocked.
 This path matches a critical pattern in AGENTS.md → Delegation table.
 Required: spawn the analysis/explore agent for "$area" first.
-Evidence file must exist at: _workspace/{NN}_{agent}_${area}_*.md
+Evidence file must exist at: _workspace/{NN}_{agent}_${area}_${session}_*.md
 After the agent runs and writes evidence, retry the edit.
 
-To bypass intentionally (audited): touch _workspace/99_manual_override_${area}_$(date +%s).md
+To bypass intentionally (audited): touch _workspace/99_manual_override_${area}_${session}_$(date +%s).md
 EOF
     exit 2
 fi
@@ -384,9 +404,9 @@ Wire in `.claude/settings.json`:
 
 **Tuning:**
 
-- **Critical path list** comes directly from AGENTS.md → Delegation table rows with "File matches `**/...**`" triggers. Keep the two in sync; the gate is meaningless if its pattern list drifts from the table.
-- **Evidence file naming** must match the orchestrator's `_workspace/` convention from `references/orchestrator-template.md` (`{phase:02d}_{agent}_{artifact}.{ext}`). The gate's glob assumes that convention.
-- **Manual override** is allowed by touching a sentinel file — audited via git history of `_workspace/`. Don't make it impossible; agents will copy-paste workarounds. Make it visible.
+- **Critical path list** comes directly from AGENTS.md → Delegation table. Use shell glob syntax (`*/auth/*`, `auth/*`), NOT gitignore `**`. `case` does not recurse — include both root and nested variants explicitly per area.
+- **Evidence file naming** must encode the session_id so prior-session evidence does not permanently unblock the gate. Required form: `{NN}_{agent}_{area}_{session_id}_{artifact}.md`. Update `references/orchestrator-template.md` consumers if the convention drifts.
+- **Manual override** is allowed by touching a session-tagged sentinel file — audited via git history of `_workspace/`. Don't make it impossible; agents will copy-paste workarounds. Make it visible.
 
 **Skip this hook if:** the delegation table has no path-based critical patterns, or the orchestrator pattern isn't used (single-agent repo).
 

@@ -61,6 +61,8 @@ The hook does **not** invoke the skill itself. It injects an instruction the mod
 
 If `.claude/settings.json` already exists from Step 7 (golden-principle enforcement), merge this entry into the existing `hooks` object — don't overwrite.
 
+> **Note.** `UserPromptSubmit` has no `matcher` field, unlike `PreToolUse`/`PostToolUse`. The shape above is correct as-is.
+
 ### 2. `.claude/hooks/trigger-router.sh`
 
 ```bash
@@ -69,43 +71,55 @@ If `.claude/settings.json` already exists from Step 7 (golden-principle enforcem
 #
 # stdin: JSON payload {"prompt": "...", "session_id": "..."}
 # stdout: instruction appended to prompt context (or empty)
-# exit 0 always — never block
+# Contract: exit 0 always — never block. Avoid `set -e` so a malformed
+# payload or bad route regex cannot turn a parser slip into a blocked prompt.
 
-set -euo pipefail
+set -u
 
 ROUTES_FILE=".claude/trigger-routes.json"
 [[ -f "$ROUTES_FILE" ]] || exit 0
 
 payload=$(cat)
-prompt=$(jq -r '.prompt // empty' <<<"$payload")
+prompt=$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null || true)
 [[ -z "$prompt" ]] && exit 0
 
-# Match against each route. First match wins (route order = priority).
-# Routes file schema:
-# [
-#   {
-#     "pattern": "regex (case-insensitive)",
-#     "instruction": "Use Skill(domain-orchestrator) — trigger phrase matched.",
-#     "skip_if_prompt_matches": "optional regex; skip route if prompt also matches this"
-#   }
-# ]
+# Parse all routes in one jq fork — avoids 3N forks per prompt.
+# Schema per route:
+#   .pattern                  — extended regex, matched case-insensitively
+#   .instruction              — directive injected on match
+#   .skip_if_prompt_matches   — optional regex; abort route if prompt also matches
+#
+# Fields are joined with ASCII Unit Separator (). Do NOT use TAB —
+# `IFS=$'\t' read` collapses consecutive tabs (whitespace IFS rule), which
+# eats empty `.skip_if_prompt_matches` values and shifts later columns left.
+US=$'\x1f'
+routes=$(jq -r --arg us "$US" '
+    .[] | [
+      (.pattern // ""),
+      (.skip_if_prompt_matches // ""),
+      (.instruction // "")
+    ] | join($us)
+' "$ROUTES_FILE" 2>/dev/null || true)
+[[ -z "$routes" ]] && exit 0
 
-matched=$(jq -c '.[]' "$ROUTES_FILE" | while IFS= read -r route; do
-    pattern=$(jq -r '.pattern' <<<"$route")
-    skip=$(jq -r '.skip_if_prompt_matches // empty' <<<"$route")
-    instr=$(jq -r '.instruction' <<<"$route")
-
-    # Use bash builtin =~ for performance (no fork per check)
-    shopt -s nocasematch
-    if [[ "$prompt" =~ $pattern ]]; then
-        if [[ -n "$skip" && "$prompt" =~ $skip ]]; then
+# First match wins (route order = priority). nocasematch set once, outside loop —
+# the heredoc `done <<< "$routes"` runs the loop body in the current shell,
+# so shopt scope and `break` semantics are meaningful.
+shopt -s nocasematch
+matched=""
+while IFS="$US" read -r pattern skip instr; do
+    [[ -z "$pattern" ]] && continue
+    # Untrusted regex from JSON: a malformed pattern fails the test silently.
+    # No `set -e`, so a single bad route never blocks the prompt.
+    if [[ "$prompt" =~ $pattern ]] 2>/dev/null; then
+        if [[ -n "$skip" ]] && [[ "$prompt" =~ $skip ]] 2>/dev/null; then
             continue
         fi
-        printf '%s\n' "$instr"
+        matched="$instr"
         break
     fi
-    shopt -u nocasematch
-done)
+done <<< "$routes"
+shopt -u nocasematch
 
 [[ -n "$matched" ]] && echo "INSTRUCTION (auto-delegation router): $matched"
 exit 0
@@ -145,6 +159,7 @@ For each route ask:
 2. **What false-positive prompts share that phrase?** (List in `skip_if_prompt_matches`.)
 3. **Is the instruction directive?** ("Use Skill(X) — do NOT inline" beats "consider Skill(X)".)
 4. **Does the route name a single concrete target?** Routes that say "use one of A, B, C" defeat the purpose; the model picks A every time. Add three routes instead.
+5. **Did you run the test command below before merging the route?** Required, not optional — an untested pattern with a bash-regex syntax error will silently never match. The hook handles bad regex defensively but a route that never fires is still dead weight.
 
 **Anti-patterns:**
 

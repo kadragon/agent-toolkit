@@ -210,11 +210,11 @@ TeamDelete(...)
 
 ```
 _workspace/
-  campaign-state.json          ← session-persistent campaign state
-  {phase:02d}_{agent}_{artifact}.{ext}
-  01_analyst_requirements.md
-  02_architect_design.json
-  03_implementer_diff.patch
+  campaign-state.json                                  ← session-persistent campaign state
+  {phase:02d}_{agent}_{area}_{session_id}_{artifact}.{ext}
+  01_analyst_auth_sess-abc123_requirements.md
+  02_architect_auth_sess-abc123_design.json
+  03_implementer_billing_sess-abc123_diff.patch
 ```
 
 Rules:
@@ -222,6 +222,7 @@ Rules:
 - Never use relative paths without `_workspace/` prefix
 - Final deliverables go to user-specified path; intermediates stay in `_workspace/`
 - Preserve across sessions for partial re-run support
+- **Include `{area}` and `{session_id}` in the filename** when the delegation gate (`references/enforcement-template.md`) is installed. The gate's evidence glob is `_workspace/*_{area}_{session_id}_*.md`; omitting either field will leave the gate unable to verify your delegation and block the next edit. If you omit them deliberately, also relax the gate's glob.
 
 ### Campaign State File (`_workspace/campaign-state.json`)
 

@@ -262,9 +262,9 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
-**Required when:** Step 4b created any `.claude/agents/{role}.md` OR Step 4c created any orchestrator skill OR AGENTS.md delegation table has any "Mandatory, blocking" row.
+**Default: install** — matches the Step 4b/4c default-on policy. With those two defaults on, the router has targets to fire at; skipping 7b leaves the routing surface empty.
 
-**Skip when:** truly single-agent, single-session repo with no specialized roles.
+**Skip only when** both Step 4b and Step 4c were skipped (i.e., truly trivial single-script / docs-only / one-file library repos). For everything else, install — even with one orchestrator and one agent role, the router earns its keep.
 
 **Validation:** test each route after creation:
 

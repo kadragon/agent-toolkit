@@ -179,14 +179,26 @@ has_enforcement=false
 $has_enforcement || warn "No enforcement layer detected (hooks, pre-commit, or CI)"
 
 # ── 6b. Auto-Delegation Router (Step 7b) ──────────────────
-# If orchestrator skill or specialized agents exist but no UserPromptSubmit
-# router hook → warn. Auto-invocation via descriptions is ~50% reliable in
-# the field; router makes it ~95%+.
+# Warn only when there is something worth routing to:
+#   - any .claude/agents/{role}.md, OR
+#   - any .claude/skills/*/SKILL.md whose description directs delegation
+#     (mentions an orchestrator or carries an ALWAYS-invoke directive).
+# A trivial single-skill repo (e.g. a doc formatter) should NOT warn.
+# Uses `find` instead of bash-builtin `compgen` so this block runs under
+# `sh`/`zsh` invocation as well as `bash`.
 has_orchestrator=false
 has_agents=false
-# Any project-local skill counts as a routing target; -orchestrator suffix is a convention, not required.
-[[ -d ".claude/skills" ]] && compgen -G ".claude/skills/*/SKILL.md" >/dev/null 2>&1 && has_orchestrator=true
-[[ -d ".claude/agents" ]] && compgen -G ".claude/agents/*.md" >/dev/null 2>&1 && has_agents=true
+if [[ -d ".claude/agents" ]]; then
+    find ".claude/agents" -maxdepth 1 -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
+fi
+if [[ -d ".claude/skills" ]]; then
+    while IFS= read -r -d '' skill; do
+        if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
+            has_orchestrator=true
+            break
+        fi
+    done < <(find ".claude/skills" -maxdepth 2 -name "SKILL.md" -print0 2>/dev/null)
+fi
 
 if $has_orchestrator || $has_agents; then
     has_router=false
