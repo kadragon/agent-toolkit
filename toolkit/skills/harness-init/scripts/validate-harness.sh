@@ -178,6 +178,28 @@ has_enforcement=false
 
 $has_enforcement || warn "No enforcement layer detected (hooks, pre-commit, or CI)"
 
+# ── 6b. Auto-Delegation Router (Step 7b) ──────────────────
+# If orchestrator skill or specialized agents exist but no UserPromptSubmit
+# router hook → warn. Auto-invocation via descriptions is ~50% reliable in
+# the field; router makes it ~95%+.
+has_orchestrator=false
+has_agents=false
+# Any project-local skill counts as a routing target; -orchestrator suffix is a convention, not required.
+[[ -d ".claude/skills" ]] && compgen -G ".claude/skills/*/SKILL.md" >/dev/null 2>&1 && has_orchestrator=true
+[[ -d ".claude/agents" ]] && compgen -G ".claude/agents/*.md" >/dev/null 2>&1 && has_agents=true
+
+if $has_orchestrator || $has_agents; then
+    has_router=false
+    if [[ -f ".claude/settings.json" ]]; then
+        jq -e '.hooks.UserPromptSubmit' .claude/settings.json >/dev/null 2>&1 && has_router=true
+    fi
+    if $has_router && [[ -f ".claude/trigger-routes.json" ]]; then
+        pass "Auto-delegation router installed (Step 7b)"
+    else
+        warn "Orchestrator/agents present but no UserPromptSubmit trigger router — see references/trigger-router-template.md (Step 7b)"
+    fi
+fi
+
 # ── 7. CLAUDE.md pointer invariant (sync B) ────────────────
 echo ""
 echo "--- CLAUDE.md Pointer (sync B) ---"

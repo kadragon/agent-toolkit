@@ -27,6 +27,12 @@ Invariants enforced mechanically. Violations block commits.
 
 Delegation is a golden principle — skipping a mandatory gate is a violation. Read `docs/delegation.md` for full routing table, context manifests, and orchestrator patterns. All triggers are objective and measurable.
 
+**Mechanical enforcement.** This table is not advisory — two hooks back it up:
+- `.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions.
+- `.claude/hooks/delegation-gate.sh` (PreToolUse on Edit|Write) blocks edits to critical paths without prior delegation evidence in `_workspace/`.
+
+If a mandatory row fires for your task and the agent attempts to edit anyway, the gate halts the edit. To extend coverage, update both the table here and `.claude/trigger-routes.json` in the same commit.
+
 **Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
 - Sub-agents share findings mid-flight → Agent Team (`TeamCreate` + `SendMessage`)
 - Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)

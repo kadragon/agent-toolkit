@@ -314,6 +314,84 @@ exit 0
 
 **Skip these hooks if Agent Teams is not enabled** — the events never fire and the scripts are inert, but keep the `.claude/settings.json` clean.
 
+## Delegation Gate (Layer 1 Extension)
+
+The AGENTS.md delegation table marks rows as "Mandatory, blocking" — but without a hook, the agent decides whether the rule applies and routinely rationalizes skipping it ("I already understand this module"). This gate makes delegation mechanically required for high-risk path edits, modeled on the Default-FAIL pattern in [`anthropics/cwc-long-running-agents`](https://github.com/anthropics/cwc-long-running-agents).
+
+**Pattern.** PreToolUse on `Edit|Write` denies the edit when the target file path matches a critical pattern (auth, billing, migrations, etc.) **and** no delegation evidence file exists in `_workspace/` for this session. To unblock, the agent must first spawn the required delegate agent, which writes its evidence file to `_workspace/`.
+
+```bash
+#!/usr/bin/env bash
+# .claude/hooks/delegation-gate.sh
+# PreToolUse on Edit|Write — require delegation evidence for critical paths.
+
+set -euo pipefail
+
+payload=$(cat)
+file=$(jq -r '.tool_input.file_path // empty' <<<"$payload")
+session=$(jq -r '.session_id // "default"' <<<"$payload")
+[[ -z "$file" ]] && exit 0
+
+# ADAPT: critical path patterns from AGENTS.md delegation table
+CRITICAL_PATTERNS=(
+    "**/auth/**"
+    "**/billing/**"
+    "**/migrations/**"
+    "**/security/**"
+)
+
+is_critical=0
+for pattern in "${CRITICAL_PATTERNS[@]}"; do
+    case "$file" in $pattern) is_critical=1; break ;; esac
+done
+(( is_critical == 0 )) && exit 0
+
+# Look for evidence: any _workspace/ file naming this critical area + session
+area=$(printf '%s' "$file" | grep -oE '(auth|billing|migrations|security)' | head -1)
+evidence_glob="_workspace/*_${area}_*.md"
+shopt -s nullglob
+evidence=( $evidence_glob )
+
+if (( ${#evidence[@]} == 0 )); then
+    cat >&2 <<EOF
+DELEGATION GATE: edit to $file blocked.
+This path matches a critical pattern in AGENTS.md → Delegation table.
+Required: spawn the analysis/explore agent for "$area" first.
+Evidence file must exist at: _workspace/{NN}_{agent}_${area}_*.md
+After the agent runs and writes evidence, retry the edit.
+
+To bypass intentionally (audited): touch _workspace/99_manual_override_${area}_$(date +%s).md
+EOF
+    exit 2
+fi
+exit 0
+```
+
+Wire in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{"type": "command", "command": "bash .claude/hooks/delegation-gate.sh"}]
+      }
+    ]
+  }
+}
+```
+
+**Tuning:**
+
+- **Critical path list** comes directly from AGENTS.md → Delegation table rows with "File matches `**/...**`" triggers. Keep the two in sync; the gate is meaningless if its pattern list drifts from the table.
+- **Evidence file naming** must match the orchestrator's `_workspace/` convention from `references/orchestrator-template.md` (`{phase:02d}_{agent}_{artifact}.{ext}`). The gate's glob assumes that convention.
+- **Manual override** is allowed by touching a sentinel file — audited via git history of `_workspace/`. Don't make it impossible; agents will copy-paste workarounds. Make it visible.
+
+**Skip this hook if:** the delegation table has no path-based critical patterns, or the orchestrator pattern isn't used (single-agent repo).
+
+**Layer composition.** This gate is the *blocking* enforcement; the UserPromptSubmit trigger router (`references/trigger-router-template.md`) is the *discovery* enforcement. Use both: the router gets the agent to spawn the delegate; the gate prevents skipping the delegation entirely if the router missed.
+
 ## Circuit Breaker (Layer 1 Extension)
 
 A circuit breaker stops failure cascades before they burn the context window on futile retries. Without it, an agent that encounters the same error type repeatedly will keep attempting fixes — often making the same mistake each time — until the context fills with noise.
