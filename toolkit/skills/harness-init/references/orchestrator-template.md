@@ -22,16 +22,40 @@ Cost note: Team mode carries 3–5× token overhead vs a single session. Default
 
 ---
 
+## Description writing rule (applies to all three templates)
+
+The `description:` field is the **primary discovery mechanism** for skill auto-invocation. Anthropic's own skill-creator testing reports directive phrasing ("ALWAYS invoke when …") improves trigger rate on 5 of 6 public skills compared to descriptive phrasing ("Triggers on …"). Combined with the UserPromptSubmit router (`references/trigger-router-template.md`), this raises observed auto-invocation from the ~50% baseline (Scott Spence 2026) toward deterministic on matched prompts.
+
+**Required pattern for orchestrator descriptions:**
+
+```yaml
+description: |
+  ALWAYS invoke this skill when the user asks for {domain} work. Do NOT inline-execute {domain} tasks.
+  Trigger phrases (Korean + English):
+  - "{domain} 실행해줘", "{domain} 시작", "{domain} 다시 실행"
+  - "run {domain}", "start {domain}", "{domain} again"
+  Resume / partial: "{domain}의 {부분} 수정", "based on previous results, redo {부분}"
+  Validation: "{domain} 검증", "{domain} 상태", "validate {domain}"
+  Skip only if user explicitly says "inline" / "직접" / "without orchestrator".
+```
+
+Also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match — descriptions handle the long tail, the router handles the high-leverage phrases.
+
+---
+
 ## Template A — Agent Team Mode (default for ≥2 collaborative agents)
 
 ```markdown
 ---
 name: {domain}-orchestrator
 description: |
-  Orchestrates {domain} workflow using an agent team. Trigger when:
+  ALWAYS invoke this skill when the user asks for {domain} work. Do NOT inline-execute {domain} tasks.
+  Trigger phrases (Korean + English):
   - "{domain} 실행해줘", "{domain} 시작", "{domain} 다시 실행"
-  - 부분 수정: "{domain}의 {부분} 수정", "이전 결과 기반으로 {수정}"
-  - 점검: "{domain} 검증", "{domain} 상태 확인"
+  - "run {domain}", "start {domain}", "{domain} again"
+  Resume / partial: "{domain}의 {부분} 수정", "based on previous results, redo {부분}"
+  Validation: "{domain} 검증", "{domain} 상태", "validate {domain}"
+  Skip only if user says "inline" / "직접" / "without orchestrator".
 ---
 
 ## Phase 0: Context Detection
@@ -115,7 +139,9 @@ Preserve `_workspace/` for partial re-run support. Remove only on explicit "rese
 ---
 name: {domain}-orchestrator
 description: |
-  Orchestrates {domain} via parallel sub-agents. Trigger on: "{domain} 실행".
+  ALWAYS invoke this skill when the user asks for {domain} work — coordinates parallel sub-agents.
+  Trigger phrases: "{domain} 실행", "{domain} 시작", "run {domain}", "start {domain}".
+  Skip only if user says "inline" / "직접" / "without orchestrator".
 ---
 
 ## Phase 0: Context Detection
@@ -184,11 +210,11 @@ TeamDelete(...)
 
 ```
 _workspace/
-  campaign-state.json          ← session-persistent campaign state
-  {phase:02d}_{agent}_{artifact}.{ext}
-  01_analyst_requirements.md
-  02_architect_design.json
-  03_implementer_diff.patch
+  campaign-state.json                                  ← session-persistent campaign state
+  {phase:02d}_{agent}_{area}_{session_id}_{artifact}.{ext}
+  01_analyst_auth_sess-abc123_requirements.md
+  02_architect_auth_sess-abc123_design.json
+  03_implementer_billing_sess-abc123_diff.patch
 ```
 
 Rules:
@@ -196,6 +222,7 @@ Rules:
 - Never use relative paths without `_workspace/` prefix
 - Final deliverables go to user-specified path; intermediates stay in `_workspace/`
 - Preserve across sessions for partial re-run support
+- **Include `{area}` and `{session_id}` in the filename** when the delegation gate (`references/enforcement-template.md`) is installed. The gate's evidence glob is `_workspace/*_{area}_{session_id}_*.md`; omitting either field will leave the gate unable to verify your delegation and block the next edit. If you omit them deliberately, also relax the gate's glob.
 
 ### Campaign State File (`_workspace/campaign-state.json`)
 

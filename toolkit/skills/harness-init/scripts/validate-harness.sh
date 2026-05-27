@@ -178,6 +178,40 @@ has_enforcement=false
 
 $has_enforcement || warn "No enforcement layer detected (hooks, pre-commit, or CI)"
 
+# ── 6b. Auto-Delegation Router (Step 7b) ──────────────────
+# Warn only when there is something worth routing to:
+#   - any .claude/agents/{role}.md, OR
+#   - any .claude/skills/*/SKILL.md whose description directs delegation
+#     (mentions an orchestrator or carries an ALWAYS-invoke directive).
+# A trivial single-skill repo (e.g. a doc formatter) should NOT warn.
+# Uses `find` instead of bash-builtin `compgen` so this block runs under
+# `sh`/`zsh` invocation as well as `bash`.
+has_orchestrator=false
+has_agents=false
+if [[ -d ".claude/agents" ]]; then
+    find ".claude/agents" -maxdepth 1 -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
+fi
+if [[ -d ".claude/skills" ]]; then
+    while IFS= read -r -d '' skill; do
+        if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
+            has_orchestrator=true
+            break
+        fi
+    done < <(find ".claude/skills" -maxdepth 2 -name "SKILL.md" -print0 2>/dev/null)
+fi
+
+if $has_orchestrator || $has_agents; then
+    has_router=false
+    if [[ -f ".claude/settings.json" ]]; then
+        jq -e '.hooks.UserPromptSubmit' .claude/settings.json >/dev/null 2>&1 && has_router=true
+    fi
+    if $has_router && [[ -f ".claude/trigger-routes.json" ]]; then
+        pass "Auto-delegation router installed (Step 7b)"
+    else
+        warn "Orchestrator/agents present but no UserPromptSubmit trigger router — see references/trigger-router-template.md (Step 7b)"
+    fi
+fi
+
 # ── 7. CLAUDE.md pointer invariant (sync B) ────────────────
 echo ""
 echo "--- CLAUDE.md Pointer (sync B) ---"

@@ -30,14 +30,32 @@ plugin's `agents/` directory.
 ---
 name: {role-slug}
 description: |
-  {When to trigger this role. Include measurable triggers only — the
-  delegation router reads this verbatim to decide when to spawn.}
+  {Directive. Start with "Use this agent when ..." or "ALWAYS invoke when ...".
+  Include measurable triggers only — the delegation router reads this verbatim
+  to decide when to spawn. Source for directive phrasing: Anthropic
+  skill-creator docs — directive descriptions improved auto-trigger rate on
+  5 of 6 public skills vs descriptive ("triggers on …") phrasing.}
 tools: {comma-separated allowlist or omit for all tools}
 model: {haiku | sonnet | opus}
 ---
 
 {Role system prompt — goes here as markdown body.}
 ```
+
+**Description anti-patterns** (rejected at validate time once the harness lint
+catches them):
+
+| Bad | Good |
+|---|---|
+| `description: Reviews code for issues.` | `description: Use this agent when reviewing diffs, PRs, or pre-commit changes. ALWAYS invoke for code review — do NOT inline-review.` |
+| `description: Triggered on explore commands.` | `description: Use this agent for first-touch exploration of a module — when (a) target module has >5 files OR >500 LOC, OR (b) first edit in that directory this session. Spawn before editing.` |
+| `description: Considers test verification.` | `description: ALWAYS invoke after any source edit to verify tests still pass. Do NOT skip — this is a mandatory gate.` |
+
+If a role appears in the AGENTS.md delegation table as "Mandatory, blocking",
+its description MUST contain `ALWAYS` and an explicit "do NOT inline" or
+"do NOT skip" clause. Register the role in `.claude/trigger-routes.json` too
+(see `references/trigger-router-template.md`) so the UserPromptSubmit hook
+emits an explicit `Spawn Agent(subagent_type={role}) ...` instruction on match.
 
 **Notes:**
 
