@@ -249,7 +249,7 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
 
 ### Step 7b: Auto-Delegation Routing (when orchestrator or specialized agents exist)
 
-**Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Official Anthropic docs say auto-invocation is description-driven; field testing (Scott Spence 2026) reports it works ~50% of the time even with well-written descriptions. The result: init produces a beautiful delegation harness, then the agent does the work inline anyway.
+**Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Official Anthropic docs say auto-invocation is description-driven; field testing ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) reports it works ~50% of the time even with well-written descriptions. The result: init produces a beautiful delegation harness, then the agent does the work inline anyway.
 
 **Fix.** Two mechanical mechanisms that make delegation non-optional:
 
@@ -391,7 +391,7 @@ The last three scripts are repair tools, not routine ops. At Level 3, they shoul
 
 All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
 - **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, CLAUDE.md pointer block, directive-description rule. **Read at Step 4c.**
-- **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from ~50% to ~95%+. **Read at Step 7b.**
+- **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
 - **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.
