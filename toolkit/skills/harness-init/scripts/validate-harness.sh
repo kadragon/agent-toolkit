@@ -267,6 +267,7 @@ echo "--- Maturity Level ---"
 level1=true
 [[ -f "AGENTS.md" && -f "CLAUDE.md" ]] || level1=false
 [[ -f "docs/architecture.md" && -f "docs/runbook.md" ]] || level1=false
+[[ -f "backlog.md" ]] || level1=false
 if [[ -f "CLAUDE.md" ]]; then
     claude_trimmed2=$(tr -d '[:space:]' < CLAUDE.md)
     [[ "$claude_trimmed2" == "@AGENTS.md" ]] || level1=false
@@ -276,7 +277,7 @@ fi
 level2=false
 if $level1; then
     has_ci=false
-    [[ -d ".github/workflows" || -d ".gitlab-ci.yml" || -f ".circleci/config.yml" ]] && has_ci=true
+    [[ -d ".github/workflows" || -f ".gitlab-ci.yml" || -f ".circleci/config.yml" ]] && has_ci=true
     has_refs=true
     [[ -f "docs/delegation.md" ]] || has_refs=false
     $has_ci && $has_refs && level2=true
@@ -287,10 +288,17 @@ level3=false
 if $level2; then
     has_hooks=false
     has_precommit=false
-    [[ -f ".claude/settings.json" ]] && has_hooks=true
-    [[ -f ".pre-commit-config.yaml" || -f ".husky/pre-commit" || -f ".git/hooks/pre-commit" ]] && has_precommit=true
+    if [[ -f ".claude/settings.json" ]]; then
+        jq -e '.hooks | (has("PostToolUse") or has("PreToolUse"))' .claude/settings.json >/dev/null 2>&1 && has_hooks=true
+    fi
+    [[ -f ".pre-commit-config.yaml" \
+       || ( -f ".husky/pre-commit" && -x ".husky/pre-commit" ) \
+       || ( -f ".git/hooks/pre-commit" && -x ".git/hooks/pre-commit" ) ]] && has_precommit=true
     $has_hooks && $has_precommit && level3=true
 fi
+
+# Downgrade all levels if hard failures found
+[[ $FAIL -gt 0 ]] && { level1=false; level2=false; level3=false; }
 
 if $level3; then
     echo -e "  ${GREEN}LEVEL 3 — Enforced${NC}  (hooks + CI + drift detection active)"

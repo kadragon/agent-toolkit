@@ -11,10 +11,11 @@ Q1. Are there ≥2 agents that need to share findings mid-flight?
     Yes → Team Mode (Template A)
     No  → Q2
 Q2. Are subtasks truly independent (results reported at the end only)?
-    Yes → Sub-agent Mode (Template B)
-    No  → reconsider whether multi-agent is needed
+    Yes → Q3
+    No  → reconsider: heavy inter-agent deps → single session is cheaper
 Q3. Does the workflow have phases with fundamentally different coordination needs?
     Yes → Hybrid Mode (Template C)
+    No  → Sub-agent Mode (Template B)
 ```
 
 Cost note: Team mode carries 3–5× token overhead vs a single session. Default to team only when the inter-agent communication pays for itself — shared discoveries, contradiction resolution, incremental QA.
@@ -39,9 +40,11 @@ Check `_workspace/campaign-state.json` before anything else.
 
 ```
 campaign-state.json missing → Initial run — proceed to Phase 1
-campaign-state.json exists + user gave new input → New run — archive old _workspace/ to
-  _workspace/_archive-{timestamp}/, write fresh campaign-state.json, proceed to Phase 1
-campaign-state.json exists + user asked to revise/fix → Resume — read next_entry_point,
+campaign-state.json exists + new-run signal (--new flag OR input hash changed) →
+  New run — rename _workspace/ to _workspace_archive-{timestamp}/ (outside _workspace/
+  to avoid "cannot move to a subdirectory of itself"), write fresh campaign-state.json,
+  proceed to Phase 1
+campaign-state.json exists + no new-run signal → Resume — read next_entry_point,
   skip completed_phases, continue from current_phase
 ```
 
@@ -154,11 +157,11 @@ Error policy: (same as Template A Phase 4)
 
 Use when phases have distinct coordination needs. Common combinations:
 
-| Pattern | Phase A | Phase B |
-|---------|---------|---------|
-| Gather → Decide | Sub-agent (parallel collection) | Team (consensus synthesis) |
-| Design → Verify | Team (collaborative design) | Sub-agent (independent verification) |
-| Explore → Build → QA | Sub-agent | Sub-agent | Sub-agent |
+| Pattern | Phase A | Phase B | Phase C |
+|---------|---------|---------|---------|
+| Gather → Decide | Sub-agent (parallel collection) | Team (consensus synthesis) | — |
+| Design → Verify | Team (collaborative design) | Sub-agent (independent verification) | — |
+| Explore → Build → QA | Sub-agent (explore) | Sub-agent (build) | Sub-agent (QA) |
 
 Between phases, save artifacts to `_workspace/`, then switch mode:
 

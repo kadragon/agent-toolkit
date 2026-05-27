@@ -32,7 +32,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] Delegation routing table triggers are objective and measurable (no subjective conditions)
 - [ ] `docs/workflows.md` embeds delegation gates as named steps (not footnotes)
 - [ ] Lint/test infrastructure exists and passes
-- [ ] AGENTS.md size check wired as SessionStart hook (F in maintenance routine)
+- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or `toolkit:harness-maintenance` SessionStart hook)
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
 
@@ -55,7 +55,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 
 **CI / Hook Parity Principle:** Local git hooks must check only a *subset* of what CI validates. If hooks match CI exactly, contributors can bypass CI by disabling hooks. CI is authoritative; hooks are fast-feedback.
 
-**Passes Level 3 when:** A new contributor can clone the repo and run `scripts/validate-harness.sh --full` with zero manual setup.
+**Passes Level 3 when:** A new contributor can clone the repo and run `scripts/validate-harness.sh` with zero manual setup.
 
 **Time to reach:** 1–4 hours.
 

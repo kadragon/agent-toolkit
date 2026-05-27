@@ -2,8 +2,7 @@
 name: harness-init
 version: 0.7.0
 description: |
-  Use when the user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "bootstrap a repo without a harness", "create agent rules", "set up Claude Code for a new repo", "make this repo agent-ready", "하네스 초기화", "에이전트 인프라 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or when a repo has no AGENTS.md / docs/ structure and needs one. Also trigger when the user mentions wanting consistent AI-assisted development, delegation to sub-agents, automated code quality checks, or structured agent workflows. Produces: AGENTS.md (map), CLAUDE.md pointer, docs/ knowledge base, backlog.md, orchestrator skill (if multi-agent), enforcement chain, .claudeignore. Repo-scoped — does NOT modify global ~/.claude/CLAUDE.md.
-  Also use for: "하네스 점검", "validate harness", "harness audit" — run scripts/validate-harness.sh and report maturity level. For harness evolution after usage feedback, see references/harness-evolution.md.
+  Use when user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or repo has no AGENTS.md/docs/ structure. Also for "validate harness", "harness audit", "하네스 점검". Repo-scoped — does NOT modify ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init
@@ -142,6 +141,8 @@ Create at repo root:
 Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
 
 ### Step 4b: Define Reusable Roles
+
+**Skip if single-session only project** — don't create role files unless at least one delegation trigger will use them (i.e., Step 4c will create an orchestrator).
 
 Create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
 
@@ -346,7 +347,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
 
-The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs B/E/F daily as a lightweight safety net; at Level 3 it should always be silent.
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 

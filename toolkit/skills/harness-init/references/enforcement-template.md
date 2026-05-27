@@ -303,7 +303,7 @@ When a teammate goes idle with open tasks in its assigned scope, send a nudge in
 set -euo pipefail
 payload=$(cat)
 teammate=$(jq -r '.teammate.name // empty' <<<"$payload")
-open_count=$(jq -r '[.tasks[] | select(.owner == "'"$teammate"'" and .status != "completed")] | length' <<<"$payload")
+open_count=$(jq -r --arg tm "$teammate" '[.tasks[] | select(.owner == $tm and .status != "completed")] | length' <<<"$payload")
 
 if (( open_count > 0 )); then
     echo "$teammate going idle with $open_count open task(s). Continue or explicitly handoff via SendMessage." >&2
@@ -342,7 +342,7 @@ if [[ "$exit_code" -ne 0 ]]; then
     if (( count >= THRESHOLD )); then
         echo "CIRCUIT BREAKER: $count consecutive failures. Stop retrying. Call advisor or report to user." >&2
         echo "Last exit code: $exit_code. Reset by running a successful command." >&2
-        # Exit 2 to send feedback to agent (does not block the tool, just adds context)
+        # Exit 2 sends blocking feedback to agent via PostToolUse stderr
         exit 2
     fi
 else
@@ -417,10 +417,8 @@ for pattern in "${RISKY_PATTERNS[@]}"; do
 
         echo "CONSENT REQUIRED: About to run: $cmd" >&2
         echo "This is an external/irreversible action. Confirm with user before proceeding." >&2
-        echo "Once confirmed, this pattern is auto-allowed for the rest of this session." >&2
-        # Record consent for session (agent will re-attempt after user confirms)
-        echo "$pattern" >> "$CONSENT_FILE"
-        exit 2  # Block this attempt; agent must confirm and retry
+        echo "After user confirms, run: echo '$pattern' >> $CONSENT_FILE" >&2
+        exit 2  # Block this attempt; agent must get explicit user confirmation then record consent
     fi
 done
 exit 0
