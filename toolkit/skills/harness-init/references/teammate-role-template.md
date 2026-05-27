@@ -84,6 +84,27 @@ Role stops when ANY of:
 - {explicit handoff to another role}
 ```
 
+## Team Communication Protocol (add when role runs in Agent Teams)
+
+When a role participates in a team, add this section to the body:
+
+```markdown
+## Team Communication Protocol
+
+**Receives from:** {agent name(s)} via SendMessage — {what data/signal to expect}
+**Sends to:** {agent name(s)} via SendMessage — {what data/signal to emit}
+**Task updates:** Call `TaskUpdate(task_id, status: "in_progress")` when starting;
+  `TaskUpdate(task_id, status: "completed")` when done.
+**Artifact path:** Write output to `_workspace/{phase:02d}_{this-role}_{artifact}.{ext}`
+
+Block on input from {upstream agent} before proceeding. If no message within
+{N} tool calls, write partial output to `_workspace/` and notify orchestrator.
+```
+
+**When to include:** Step 4b creates this section for every role that participates
+in a `TeamCreate`-based orchestration. Omit for purely sub-agent roles that
+only return values to the orchestrator.
+
 ## Starter Pack (create these on `harness-init`)
 
 ### `implementer.md`

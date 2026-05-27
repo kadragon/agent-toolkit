@@ -101,6 +101,29 @@ Delegation principles can be enforced via:
 - **Workflow checkpoint** — Delegation is a named step in the `code` workflow, not a footnote
 - **Session log audit** — Sweep checks whether delegation actually happened for qualifying changes
 
+## Agent Integrity Principle (Universal)
+
+Add this principle to **every** project that uses AI agents. It prevents the single most common silent failure: agents fabricating values they haven't directly observed.
+
+**The principle:** `not_observed != absent`. Missing local proof means unverified — not impossible, not default, not inferred from general knowledge.
+
+**Concrete rule to include in AGENTS.md:**
+
+> **Fabrication ban:** If you have not directly read the value from a file, command output, or tool result in this session, you must not state it as fact. Write `[unknown — read {source} to verify]` instead. Applies to: port numbers, API endpoints, schema fields, config values, version numbers, feature flags.
+
+**Why this matters:** Language models have strong priors from training data. An agent asked "what port does this service run on?" will often answer `3000` or `8080` from training — even when the actual `docker-compose.yml` says `4000`. The agent doesn't lie intentionally; it pattern-matches. The integrity principle forces a Read before a claim.
+
+**Enforcement:** PreToolUse hook that warns when an agent's message contains a port, URL, or version string that doesn't appear in any file read during this session. Hard to implement perfectly — even a soft advisory version (log the warning, don't block) reduces fabrications significantly.
+
+**High-risk domains for fabrication:**
+- Port numbers, connection strings, database names
+- API endpoint paths and HTTP methods
+- Schema field names and types
+- Feature flag names and default values
+- Dependency versions and package names
+
+**In spec/plan files:** When generating `spec.md`, `backlog.md`, or task descriptions, mark any value not directly read as `[unknown]`. Future sessions that read the spec see a concrete work item: "resolve `[unknown]`", not a silent lie.
+
 ## From Principle to Enforcement
 
 Each principle needs at least one enforcement mechanism:
