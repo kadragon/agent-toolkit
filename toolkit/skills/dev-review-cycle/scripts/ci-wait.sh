@@ -5,31 +5,41 @@
 # Output: JSON to stdout — {passed: bool}
 #
 # The orchestrator enforces a 15-minute background timeout externally.
-# This script waits for gh to report a final result and returns structured JSON.
 
 set -euo pipefail
 
 PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
 TIMEOUT_SECS=870
+POLL_INTERVAL=20
+DEADLINE=$(( $(date +%s) + TIMEOUT_SECS ))
 
-# Portable timeout: background job + sleep killer (GNU timeout not available on macOS)
-gh pr checks "$PR_NUMBER" --watch --fail-fast &
-GH_PID=$!
+while true; do
+  EXIT=0
+  STATUS=$(gh pr checks "$PR_NUMBER" --json bucket 2>/dev/null) || EXIT=$?
 
-( sleep "$TIMEOUT_SECS" && kill "$GH_PID" 2>/dev/null ) &
-KILLER_PID=$!
+  if [ "$EXIT" -eq 8 ]; then
+    : # pending — fall through to sleep
+  elif [ "$EXIT" -ne 0 ]; then
+    jq -n --arg reason "gh exit $EXIT" '{"passed": false, "reason": $reason}'
+    exit 0
+  else
+    PENDING=$(printf '%s' "$STATUS" | jq '[.[] | select(.bucket == "pending")] | length' 2>/dev/null || echo 1)
+    if [ "$PENDING" -eq 0 ]; then
+      FAILED=$(printf '%s' "$STATUS" | jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length')
+      if [ "$FAILED" -eq 0 ]; then
+        jq -n '{passed: true}'
+      else
+        jq -n '{passed: false}'
+      fi
+      exit 0
+    fi
+  fi
 
-wait "$GH_PID" 2>/dev/null || GH_EXIT=$?
-GH_EXIT="${GH_EXIT:-0}"
+  NOW=$(date +%s)
+  if [ "$NOW" -ge "$DEADLINE" ]; then
+    jq -n --argjson pr "$PR_NUMBER" '{"passed": false, "reason": "timeout", "pr_number": $pr}'
+    exit 0
+  fi
 
-kill "$KILLER_PID" 2>/dev/null
-wait "$KILLER_PID" 2>/dev/null || true
-
-# kill sends SIGTERM (exit 143) or SIGKILL (137); treat as timeout
-if [ "$GH_EXIT" -eq 0 ]; then
-  jq -n '{passed: true}'
-elif [ "$GH_EXIT" -eq 143 ] || [ "$GH_EXIT" -eq 137 ]; then
-  jq -n --argjson pr "$PR_NUMBER" '{"passed": false, "reason": "timeout", "pr_number": $pr}'
-else
-  jq -n '{passed: false}'
-fi
+  sleep "$POLL_INTERVAL"
+done
