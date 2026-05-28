@@ -66,6 +66,7 @@ Only required package: **`lxml`**. Any Python that can import `lxml` works, rega
 │   ├── analyze_template.py               # HWPX 심층 분석 (레퍼런스 기반 생성용)
 │   ├── validate.py                       # HWPX 구조 검증
 │   ├── page_guard.py                     # 레퍼런스 대비 페이지 드리프트 위험 검사
+│   ├── dump_table.py                     # 표 셀 맵 덤프 (rowAddr/colAddr/span/text 일람)
 │   ├── locate.py                         # 텍스트 포함 요소(hp:tbl/tr/p) span 탐색
 │   ├── insert_table_row.py               # 표 행 삽입 + rowAddr/rowCnt/rowSpan 정정
 │   ├── replace_cell.py                   # 표 셀 내용 교체 + linesegarray 제거
@@ -445,7 +446,8 @@ python3 "$SKILL_DIR/scripts/page_guard.py" \
 | `scripts/validate.py` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate ID. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors |
 | `scripts/page_guard.py` | page-drift risk check vs. reference (restore-mode gate / edit-mode reference) |
 | `scripts/text_extract.py` | HWPX text extraction — self-implemented, no external `hwpx` package needed |
-| `scripts/locate.py` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`) |
+| `scripts/dump_table.py` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; use before `replace_cell.py` to identify target cell addresses |
+| `scripts/locate.py` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`); accepts `.hwpx` or unpacked directory |
 | `scripts/delete_table_rows.py` | delete table rows — remove `<hp:tr>` + auto-fix rowCnt/rowSpan/rowAddr (`--list` to view rows) |
 | `scripts/insert_table_row.py` | insert table row — insert `<hp:tr>` + auto-fix rowCnt/rowAddr/rowSpan (`--grow` to extend group-end rowSpan) |
 | `scripts/replace_cell.py` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check |
