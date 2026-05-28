@@ -229,7 +229,13 @@ Pattern for editing N template-based files simultaneously:
 
 ```python
 import shutil
+import subprocess
 from pathlib import Path
+
+SKILL_DIR = Path("/path/to/skills/hwpx")  # set to absolute path of this skill
+UNPACK_PY = str(SKILL_DIR / "scripts/office/unpack.py")
+PACK_PY = str(SKILL_DIR / "scripts/office/pack.py")
+VALIDATE_PY = str(SKILL_DIR / "scripts/validate.py")
 
 # 파일별 데이터를 설정으로 분리
 FILES = [
@@ -479,7 +485,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
 5. 🟡 **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
 6. 🟡 **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
-7. 🔵 **Use venv**: project's `.venv/bin/python3` (lxml package required)
+7. 🔵 **Use venv when available**: prefer project's `.venv/bin/python3` if it exists; any Python with lxml importable works (see `environment.md`)
 8. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`; environment/encoding → `environment.md`
 9. 🔵 **build_hwpx.py first**: use build_hwpx.py for new document creation (avoid calling python-hwpx API directly)
 10. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `analyze_template.py` + extracted-XML-based restore/rewrite

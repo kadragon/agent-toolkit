@@ -46,7 +46,7 @@ def _find_all_table_spans(xml: str) -> list[tuple[str, int, int]]:
     start = None
     table_id = None
     out = []
-    for m in re.finditer(r'<hp:tbl\b[^>]*>|</hp:tbl>', xml):
+    for m in re.finditer(r'<hp:tbl\b[^>]*(?<!/)>|</hp:tbl>', xml):
         if m.group().startswith("</"):
             depth -= 1
             if depth == 0 and start is not None:
@@ -59,6 +59,21 @@ def _find_all_table_spans(xml: str) -> list[tuple[str, int, int]]:
                 start = m.start()
                 id_m = re.search(r'\bid="(\d+)"', m.group())
                 table_id = id_m.group(1) if id_m else "?"
+    return out
+
+
+def _find_all_table_spans_deep(xml: str) -> list[tuple[str, int, int]]:
+    """Return (table_id, start, end) for all hp:tbl at any nesting depth."""
+    stack: list[tuple[str, int]] = []
+    out = []
+    for m in re.finditer(r'<hp:tbl\b[^>]*(?<!/)>|</hp:tbl>', xml):
+        if m.group().startswith("</"):
+            if stack:
+                t_id, t_start = stack.pop()
+                out.append((t_id, t_start, m.end()))
+        else:
+            id_m = re.search(r'\bid="(\d+)"', m.group())
+            stack.append((id_m.group(1) if id_m else "?", m.start()))
     return out
 
 
@@ -187,12 +202,19 @@ def main() -> None:
     all_tables = _find_all_table_spans(xml)
 
     if args.contains:
+        candidates = _find_all_table_spans_deep(xml)
         matches = [
-            (tid, s, e) for tid, s, e in all_tables
+            (tid, s, e) for tid, s, e in candidates
             if all(c in xml[s:e] for c in args.contains)
         ]
+        # Keep only innermost: drop any match whose span contains another match
+        matches = [
+            (tid, s, e) for tid, s, e in matches
+            if not any(s <= s2 and e2 <= e and (s, e) != (s2, e2)
+                       for _, s2, e2 in matches)
+        ]
         if not matches:
-            print("No table found containing: %s" % args.contains, file=sys.stderr)
+            print("No table found containing: %s" % ", ".join(args.contains), file=sys.stderr)
             sys.exit(2)
         for tid, s, e in matches:
             dump_table(xml[s:e], tid)

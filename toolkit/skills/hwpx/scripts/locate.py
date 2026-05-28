@@ -65,7 +65,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Locate HWPX elements by contained text (nesting-aware)"
     )
-    ap.add_argument("input", help="Input .hwpx file")
+    ap.add_argument("input", help="Input .hwpx file or unpacked directory")
     ap.add_argument("--tag", required=True,
                     help="Element tag, e.g. hp:tbl, hp:tr, hp:p, hp:tc")
     ap.add_argument("--contains", action="append", default=[],
