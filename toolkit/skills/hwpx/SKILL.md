@@ -48,6 +48,7 @@ Only required package: **`lxml`**. Any Python that can import `lxml` works, rega
 - Examples use `python3` / `source "$VENV"`. **On Windows, use `python` and omit `source` line.**
 - `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`).
 - **Windows console Korean output**: `print`ing Korean in diagnostic `python -c "..."` or heredoc produces cp949 mojibake. To print Korean, put `import sys, io; sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")` as first line. (Always specify `encoding="utf-8"` for file I/O — unrelated to mojibake.) Bundled scripts in `scripts/` apply UTF-8 stdout/stderr themselves, no extra step needed.
+- **Windows subprocess Korean output**: `subprocess.run(capture_output=True, text=True)` defaults to cp949 on Windows → `UnicodeDecodeError` on Korean stdout/stderr. Always pass `encoding="utf-8", errors="replace"` explicitly: `subprocess.run([...], capture_output=True, text=True, encoding="utf-8", errors="replace")`.
 - **Match special characters by codepoint**: quote variants (`ʹ` U+02B9 vs U+0374), PUA (U+F0E8), dash/middle-dot variants, etc. — typing visually similar characters as **literals in script/heredoc is encoding-unstable**: same glyph can be interpreted as different codepoint each run. Always specify special characters via `'\uXXXX'` escapes.
 - **No `python -c` for non-ASCII matching logic**: putting non-ASCII like `■`, `○`, Korean into `python -c "..."` source and running via Bash can corrupt in transit through shell/encoding — leading to silent failure where `str.index()`/`rfind()` returns `-1`. Write check/replace code with non-ASCII matching to `.py` file with `Write`, run via `python script.py`.
 - Temp files **under working document's folder** (e.g. `./_work/`), not `/tmp`. Windows `python` interprets `/tmp` as drive-relative path, diverges from Bash tool's `/tmp`.
@@ -221,6 +222,8 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ edited.hwpx
 python3 "$SKILL_DIR/scripts/validate.py" edited.hwpx --baseline document.hwpx
 ```
 
+> **원본 덮어쓰기 시 validate 타이밍**: 편집 결과를 원본 파일명으로 덮어쓸 계획이라면 `validate --baseline` **먼저** 실행. 순서: `pack to temp → validate --baseline original → copy to final`. 원본을 먼저 덮어쓰면 baseline이 사라져 `--baseline` 없이 검증할 수밖에 없고, 기존 중복 ID 오탐이 발생할 수 있음.
+
 ### Bulk / multi-stage edits
 
 Many items → split into stages to catch silent failures early, verify each stage in Hancom.
@@ -229,6 +232,45 @@ Many items → split into stages to catch silent failures early, verify each sta
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `_work_stepN.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file.
+
+### N개 파일 동시 편집 (bulk file edit)
+
+동일 템플릿 기반 N개 파일 동시 편집 패턴:
+
+```python
+import shutil
+from pathlib import Path
+
+# 파일별 데이터를 설정으로 분리
+FILES = [
+    {"src": "template_A.hwpx", "out": "result_A.hwpx", "name": "홍길동", "dept": "총무과"},
+    {"src": "template_B.hwpx", "out": "result_B.hwpx", "name": "이순신", "dept": "인사과"},
+]
+
+for cfg in FILES:
+    slug = Path(cfg["out"]).stem
+    unpack_dir = Path(f"./_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
+
+    subprocess.run(["python", UNPACK_PY, cfg["src"], str(unpack_dir)], check=True)
+    section_path = unpack_dir / "Contents/section0.xml"
+    s = section_path.read_text(encoding="utf-8")
+
+    # 파일별 값 치환
+    assert s.count("<hp:t>이름</hp:t>") == 1
+    s = s.replace("<hp:t>이름</hp:t>", f'<hp:t>{cfg["name"]}</hp:t>')
+
+    section_path.write_text(s, encoding="utf-8")
+
+    tmp_out = Path(f"./_work/{slug}_tmp.hwpx")
+    subprocess.run(["python", PACK_PY, str(unpack_dir), str(tmp_out)], check=True)
+    subprocess.run(["python", VALIDATE_PY, str(tmp_out), "--baseline", cfg["src"]], check=True)
+    shutil.copy(tmp_out, cfg["out"])
+    print(f"✓ {cfg['out']}")
+```
+
+- `unpack_dir`에 슬러그 포함 — N개 병렬 작업 시 디렉토리 충돌 방지
+- `validate --baseline` 먼저, 덮어쓰기 나중 순서 유지 (§"원본 덮어쓰기 시 validate 타이밍" 참조)
+- 각 스테이지 완료 후 **최소 1개 파일은 Hancom에서 열어 확인** — `validate.py`는 구조만 검사
 
 ### Hancom-open verification (content-edit completion gate)
 

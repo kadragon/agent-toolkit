@@ -63,11 +63,14 @@ python3 "$SKILL_DIR/scripts/next_id.py" document.hwpx --count 5
 
 ### 1) Find element position (locate.py)
 
-Search table/row/paragraph spans by text:
+Search table/row/paragraph spans by text. Accepts `.hwpx` file **or** already-unpacked directory (avoids re-unpack cycle when probing repeatedly):
 
 ```bash
 # '항목명' 포함하는 hp:tbl 모두
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명"
+
+# unpack된 디렉토리 직접 사용 (반복 probe 시 re-unpack 불필요)
+python3 "$SKILL_DIR/scripts/locate.py" ./unpacked/ --tag hp:tc --contains "이름"
 
 # 여러 --contains는 AND — 특정 표만 좁히기
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"

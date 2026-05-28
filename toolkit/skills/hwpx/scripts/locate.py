@@ -9,6 +9,7 @@ Usage:
     python locate.py doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
     python locate.py doc.hwpx --tag hp:p  --contains "특정텍스트" --section 0
     python locate.py doc.hwpx --tag hp:tbl --contains "합계" --extract-dir ./out --pretty
+    python locate.py ./unpacked/ --tag hp:tc --contains "이름"   # unpack 디렉토리 직접
 
 --contains may be repeated; an element must contain ALL given strings (AND).
 Reports the byte span (start:end into the section XML), nesting depth, char
@@ -80,16 +81,23 @@ def main() -> None:
     args = ap.parse_args()
 
     inp = Path(args.input)
-    if not inp.is_file():
-        print("Error: file not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
-
     target = "Contents/section%d.xml" % args.section
-    with zipfile.ZipFile(inp, "r") as zin:
-        if target not in zin.namelist():
-            print("Error: %s not in archive" % target, file=sys.stderr)
+
+    if inp.is_dir():
+        section_file = inp / target
+        if not section_file.is_file():
+            print("Error: %s not found in directory %s" % (target, inp), file=sys.stderr)
             sys.exit(1)
-        xml = zin.read(target).decode("utf-8")
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print("Error: %s not in archive" % target, file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print("Error: not found (file or directory): %s" % args.input, file=sys.stderr)
+        sys.exit(1)
 
     try:
         spans = matched_spans(xml, args.tag)

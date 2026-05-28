@@ -93,3 +93,128 @@ s = s[:a] + s[b:]
 ```
 
 Deleting paragraph inside cell → confirm at least 1 paragraph remains — empty cell needs 1 `<hp:p>` (empty run).
+
+## 7. 빈 셀 self-closing run → full run 패턴
+
+템플릿의 빈 셀은 종종 self-closing `<hp:run>` 형태:
+
+```xml
+<!-- 빈 셀 (텍스트 없음) -->
+<hp:run charPrIDRef="3"/>
+```
+
+이 형태에 텍스트를 직접 str.replace로 넣을 수 없음. 먼저 full run으로 전개한 뒤 `<hp:t>` 삽입:
+
+```xml
+<!-- 전환 후 -->
+<hp:run charPrIDRef="3"><hp:t>채울 텍스트</hp:t></hp:run>
+```
+
+```python
+old = '<hp:run charPrIDRef="3"/>'
+new = '<hp:run charPrIDRef="3"><hp:t>채울 텍스트</hp:t></hp:run>'
+assert s.count(old) == 1
+s = s.replace(old, new)
+```
+
+**Detection**: `locate.py --tag hp:tc --contains ""` 또는 `--extract-dir`로 추출 후 self-closing run 확인. `replace_cell.py` 사용 시에는 이 변환이 자동 처리됨.
+
+## 8. `<hp:t>` 정규식 — `<hp:t[^>]*>` 오매칭 함정
+
+`<hp:t[^>]*>` 패턴은 `<hp:tc>`, `<hp:tbl>`, `<hp:tr>` 도 매칭됨:
+
+```python
+# ❌ 위험: hp:tc, hp:tbl, hp:tr 모두 매칭
+re.findall(r"<hp:t[^>]*>", xml)
+
+# ✅ 안전: hp:t 단독 (속성 없는 형태)
+re.findall(r"<hp:t>", xml)
+
+# ✅ 안전: hp:t 뒤에 공백/속성이 올 수 있는 경우
+re.findall(r"<hp:t(?:\s[^>]*)?>", xml)
+
+# ✅ 텍스트 추출용
+re.findall(r"<hp:t>(.*?)</hp:t>", xml, re.DOTALL)
+```
+
+closing 태그도 동일: `</hp:t>` 는 안전, `</hp:t[^>]*>` 불필요.
+
+## 9. paraPrIDRef로 빈 셀 타겟팅
+
+템플릿에서 빈 셀이 여러 개일 때 `<hp:t>` 내용이 모두 비어 있어 텍스트 기반 식별 불가. `paraPrIDRef`를 고유 식별자로 활용:
+
+```python
+# 1. 문서 내 유일성 먼저 확인
+target = 'paraPrIDRef="42"'
+assert s.count(target) == 1, f"not unique: {s.count(target)} occurrences"
+
+# 2. paraPrIDRef 포함 run 교체
+old = '<hp:p id="1000000005" paraPrIDRef="42" ...'
+# → locate.py --tag hp:p 로 exact 스팬 추출 후 교체
+```
+
+`paraPrIDRef`는 단락 스타일 ID — 같은 스타일을 공유하는 단락이 여러 개면 유일하지 않음. **count 확인 선행 필수**. 불유일 시 위치 기반(rfind/index 앵커) 또는 `locate.py --tag hp:tc` 로 상위 셀 먼저 특정 후 내부 탐색.
+
+## 10. 단일 빈 paragraph → 복수 paragraph 교체
+
+`replace_cell.py` 대신 raw str.replace로 빈 paragraph 1개를 2개로 늘려야 할 때:
+
+```python
+# 원본: 빈 단락 1개 (paraPrIDRef="5"로 특정)
+old = '<hp:p id="1000000010" paraPrIDRef="5" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:t/></hp:run></hp:p>'
+
+# 교체: 2개 단락 (두 번째 id는 next_id.py로 확보)
+new = (
+    '<hp:p id="1000000010" paraPrIDRef="5" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">'
+    '<hp:run charPrIDRef="0"><hp:t>첫 번째 내용</hp:t></hp:run></hp:p>'
+    '<hp:p id="1000000099" paraPrIDRef="5" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">'
+    '<hp:run charPrIDRef="0"><hp:t>두 번째 내용</hp:t></hp:run></hp:p>'
+)
+
+assert s.count(old) == 1
+s = s.replace(old, new)
+```
+
+**주의**: 새 ID(`1000000099`)는 `next_id.py`로 충돌 없는 값 확보. 표 셀 내부라면 `replace_cell.py --content-file`로 처리하는 것이 더 안전 (linesegarray 자동 처리).
+
+## 11. 스크립트 재실행 안전성 (idempotency)
+
+`assert s.count(old) == N` 패턴은 재실행 시 AssertionError 발생 — 이미 채워진 셀에서 empty run 패턴 0개.
+
+**옵션 A: skip 패턴** (이미 적용됨 → 스킵):
+
+```python
+count = s.count(old)
+if count == 0:
+    print(f"SKIP: already applied or pattern changed — {old!r}")
+elif count == expected:
+    s = s.replace(old, new)
+else:
+    raise AssertionError(f"unexpected count {count} (expected 0 or {expected})")
+```
+
+**옵션 B: 상태 기반 old 패턴** (재실행 시 현재 상태를 old로):
+
+```python
+# 첫 실행: empty → filled
+old_empty = '<hp:run charPrIDRef="3"/>'
+old_filled = '<hp:run charPrIDRef="3"><hp:t>값</hp:t></hp:run>'
+assert s.count(old_empty) + s.count(old_filled) == 1  # 어느 상태든 정확히 1개
+```
+
+배치 처리 스크립트에서는 옵션 A를 기본으로 사용 — 부분 실패 후 재실행 가능.
+
+## 12. linesegarray 스트립 타이밍
+
+`<hp:linesegarray>` 제거는 **편집 완료 후 파일 전체에 한 번** 실행이 원칙:
+
+```bash
+# 편집 완료 후 pack → strip
+python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ tmp.hwpx
+python3 "$SKILL_DIR/scripts/strip_linesegarray.py" tmp.hwpx --output result.hwpx
+python3 "$SKILL_DIR/scripts/validate.py" result.hwpx --baseline original.hwpx
+```
+
+셀 단위로 수동 제거하면 다른 셀의 stale lineseg가 남을 수 있음. `replace_cell.py` 사용 시에는 해당 셀만 자동 처리 — 다른 셀에 직접 str.replace 편집이 있다면 마지막에 `strip_linesegarray.py` 한 번 더 실행.
+
+**strip은 idempotent** — 여러 번 실행해도 안전. `<hp:linesegarray>` 없는 문서에 실행해도 no-op.
