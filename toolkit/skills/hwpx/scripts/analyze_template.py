@@ -435,7 +435,14 @@ def main():
         print()
 
         if args.table_id:
-            print(analyze_section(section_root, table_id_filter=args.table_id))
+            result = analyze_section(section_root, table_id_filter=args.table_id)
+            print(result)
+            if "TABLE id=" not in result:
+                print(
+                    f"Warning: table id={args.table_id} not found "
+                    "(only top-level tables are searched; nested tables are not traversed)",
+                    file=sys.stderr,
+                )
         else:
             for line in analyze_fonts(header_root):
                 print(line)

@@ -256,7 +256,7 @@ for cfg in FILES:
     slug = Path(cfg["out"]).stem
     unpack_dir = Path(f"./_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
 
-    subprocess.run(["python", UNPACK_PY, cfg["src"], str(unpack_dir)], check=True)
+    subprocess.run(["python3", UNPACK_PY, cfg["src"], str(unpack_dir)], check=True)
     section_path = unpack_dir / "Contents/section0.xml"
     s = section_path.read_text(encoding="utf-8")
 
@@ -267,8 +267,8 @@ for cfg in FILES:
     section_path.write_text(s, encoding="utf-8")
 
     tmp_out = Path(f"./_work/{slug}_tmp.hwpx")
-    subprocess.run(["python", PACK_PY, str(unpack_dir), str(tmp_out)], check=True)
-    subprocess.run(["python", VALIDATE_PY, str(tmp_out), "--baseline", cfg["src"]], check=True)
+    subprocess.run(["python3", PACK_PY, str(unpack_dir), str(tmp_out)], check=True)
+    subprocess.run(["python3", VALIDATE_PY, str(tmp_out), "--baseline", cfg["src"]], check=True)
     shutil.copy(tmp_out, cfg["out"])
     print(f"[done] {cfg['out']}")
 ```

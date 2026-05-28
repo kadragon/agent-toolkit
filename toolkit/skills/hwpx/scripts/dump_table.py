@@ -25,9 +25,6 @@ import sys
 import zipfile
 from pathlib import Path
 
-LINESEG_RE = re.compile(r"<hp:linesegarray>.*?</hp:linesegarray>", re.DOTALL)
-
-
 def _load_xml(inp: Path, section: int) -> str:
     target = "Contents/section%d.xml" % section
     if inp.is_dir():
@@ -199,7 +196,6 @@ def dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
 
         sublist_start = tc.index(">", sublist_m.start()) + 1
         depth = 1
-        pos = sublist_start
         sublist_end = None
         for m in re.finditer(r"<hp:subList\b|</hp:subList>", tc[sublist_start:]):
             if m.group().startswith("</"):
@@ -236,11 +232,14 @@ def dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
             para_pr = para_pr_m.group(1) if para_pr_m else "?"
             runs = re.findall(r'charPrIDRef="(\d+)"[^>]*>.*?<hp:t>(.*?)</hp:t>', para_xml, re.DOTALL)
             runs_empty = re.findall(r'charPrIDRef="(\d+)"[^>]*/>', para_xml)
+            runs_t_empty = re.findall(r'charPrIDRef="(\d+)"[^>]*><hp:t/>', para_xml)
             run_desc = []
             for cpr, txt in runs:
                 display = txt[:30] + "..." if len(txt) > 30 else txt
                 run_desc.append("charPr=%s:%r" % (cpr, display))
             for cpr in runs_empty:
+                run_desc.append("charPr=%s:(empty)" % cpr)
+            for cpr in runs_t_empty:
                 run_desc.append("charPr=%s:(empty)" % cpr)
             run_str = " + ".join(run_desc) if run_desc else "(empty)"
             print("  P[%d] paraPr=%s  %s" % (i, para_pr, run_str))
@@ -262,6 +261,9 @@ def main() -> None:
     ap.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     ap.add_argument("--cell", help="Verbose dump of specific cell as colAddr,rowAddr (requires --table-id)")
     args = ap.parse_args()
+
+    if args.cell and not args.table_id:
+        ap.error("--cell requires --table-id")
 
     inp = Path(args.input)
     if not inp.exists():
