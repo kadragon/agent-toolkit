@@ -61,13 +61,46 @@ python3 "$SKILL_DIR/scripts/next_id.py" document.hwpx --count 5
 
 `section0.xml` is one giant single-line XML — finding table/paragraph positions by hand is hard. Use these helpers for table structure changes — automate `rowAddr` renumbering, `rowCnt`, `rowSpan` correction.
 
+### 0) Dump table cell map (dump_table.py)
+
+셀 주소 → 텍스트 내용 전체 매핑. `replace_cell.py --list`보다 상세 (span 포함):
+
+```bash
+# 섹션 내 모든 표 목록 (id + 크기 + preview)
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx
+
+# 특정 표 전체 셀 맵 (rowAddr, colAddr, colSpan, rowSpan, text)
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --table-id 1000000003
+
+# 특정 텍스트 포함 표 자동 탐색
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --contains "항목명"
+
+# 이미 unpack된 디렉토리 직접 사용
+python3 "$SKILL_DIR/scripts/dump_table.py" ./unpacked/ --contains "합계"
+```
+
+출력 예:
+```
+table id=1000000003: 9 cells
+  row    col    cSpan  rSpan  text
+  --------------------------------------------------------
+  0      0      1      1      항목명
+  0      1      1      1      내용
+  0      2      1      2      비고
+  1      0      1      1      사업명
+  1      1      1      1      스마트캠퍼스 구축
+```
+
 ### 1) Find element position (locate.py)
 
-Search table/row/paragraph spans by text:
+Search table/row/paragraph spans by text. Accepts `.hwpx` file **or** already-unpacked directory (avoids re-unpack cycle when probing repeatedly):
 
 ```bash
 # '항목명' 포함하는 hp:tbl 모두
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명"
+
+# unpack된 디렉토리 직접 사용 (반복 probe 시 re-unpack 불필요)
+python3 "$SKILL_DIR/scripts/locate.py" ./unpacked/ --tag hp:tc --contains "이름"
 
 # 여러 --contains는 AND — 특정 표만 좁히기
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
