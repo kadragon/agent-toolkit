@@ -9,6 +9,7 @@ Usage:
     python dump_table.py doc.hwpx --table-id 1000000003   # dump specific table
     python dump_table.py doc.hwpx --contains "항목명"     # dump table(s) containing text
     python dump_table.py ./unpacked/ --contains "합계"    # from unpacked directory
+    python dump_table.py doc.hwpx --table-id 1000000003 --cell 2,1   # verbose cell
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys
@@ -23,6 +24,8 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+
+LINESEG_RE = re.compile(r"<hp:linesegarray>.*?</hp:linesegarray>", re.DOTALL)
 
 
 def _load_xml(inp: Path, section: int) -> str:
@@ -171,6 +174,81 @@ def dump_table(tbl_xml: str, table_id: str) -> None:
     for row, col, cs, rs, text in cells:
         display = text[:55] + ("…" if len(text) > 55 else "")
         print("  %-6d %-6d %-6d %-6d  %s" % (row, col, cs, rs, display))
+    print("  [col,row for --cell: e.g. row=1 col=2 → --cell 2,1]")
+
+
+def dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
+    """Print detailed info for a single cell: paraPr, charPr, runs, linesegarray."""
+    for cs, ce in _top_cells(tbl_xml):
+        tc = tbl_xml[cs:ce]
+        addr = _own_cell_addr(tc)
+        if addr != (col, row):
+            continue
+
+        col_span, row_span = _cell_span(tc)
+        has_lineseg = bool(re.search(r"<hp:linesegarray>", tc))
+
+        print("table id=%s  cell col=%d row=%d  cSpan=%d rSpan=%d"
+              % (table_id, col, row, col_span, row_span))
+        print("  linesegarray: %s" % ("YES (replace_cell.py will strip)" if has_lineseg else "no"))
+
+        sublist_m = re.search(r"<hp:subList\b[^>]*>", tc)
+        if sublist_m is None:
+            print("  (no hp:subList found)")
+            return
+
+        sublist_start = tc.index(">", sublist_m.start()) + 1
+        depth = 1
+        pos = sublist_start
+        sublist_end = None
+        for m in re.finditer(r"<hp:subList\b|</hp:subList>", tc[sublist_start:]):
+            if m.group().startswith("</"):
+                depth -= 1
+                if depth == 0:
+                    sublist_end = sublist_start + m.start()
+                    break
+            else:
+                depth += 1
+        if sublist_end is None:
+            sublist_end = len(tc)
+
+        sublist_content = tc[sublist_start:sublist_end]
+
+        tbl_depth = 0
+        para_spans = []
+        stack = []
+        for m in re.finditer(r"<hp:tbl\b|</hp:tbl>|<hp:p\b[^/]|</hp:p>", sublist_content):
+            g = m.group()
+            if g == "<hp:tbl":
+                tbl_depth += 1
+            elif g == "</hp:tbl>":
+                tbl_depth -= 1
+            elif g.startswith("<hp:p") and tbl_depth == 0:
+                stack.append(m.start())
+            elif g == "</hp:p>" and tbl_depth == 0 and stack:
+                ps = stack.pop()
+                para_spans.append((ps, m.end()))
+
+        print("  paragraphs: %d" % len(para_spans))
+        for i, (ps, pe) in enumerate(para_spans):
+            para_xml = sublist_content[ps:pe]
+            para_pr_m = re.search(r'paraPrIDRef="(\d+)"', para_xml)
+            para_pr = para_pr_m.group(1) if para_pr_m else "?"
+            runs = re.findall(r'charPrIDRef="(\d+)"[^>]*>.*?<hp:t>(.*?)</hp:t>', para_xml, re.DOTALL)
+            runs_empty = re.findall(r'charPrIDRef="(\d+)"[^>]*/>', para_xml)
+            run_desc = []
+            for cpr, txt in runs:
+                display = txt[:30] + "..." if len(txt) > 30 else txt
+                run_desc.append("charPr=%s:%r" % (cpr, display))
+            for cpr in runs_empty:
+                run_desc.append("charPr=%s:(empty)" % cpr)
+            run_str = " + ".join(run_desc) if run_desc else "(empty)"
+            print("  P[%d] paraPr=%s  %s" % (i, para_pr, run_str))
+        return
+
+    print("Error: cell col=%d row=%d not found in table %s" % (col, row, table_id),
+          file=sys.stderr)
+    sys.exit(1)
 
 
 def main() -> None:
@@ -182,6 +260,7 @@ def main() -> None:
     ap.add_argument("--contains", action="append", default=[],
                     help="Dump table(s) whose XML contains this text (repeatable, AND)")
     ap.add_argument("--section", type=int, default=0, help="Section index (default 0)")
+    ap.add_argument("--cell", help="Verbose dump of specific cell as colAddr,rowAddr (requires --table-id)")
     args = ap.parse_args()
 
     inp = Path(args.input)
@@ -196,7 +275,15 @@ def main() -> None:
         if span is None:
             print("Error: table id=%s not found" % args.table_id, file=sys.stderr)
             sys.exit(1)
-        dump_table(xml[span[0]:span[1]], args.table_id)
+        if args.cell:
+            try:
+                col, row = (int(x) for x in args.cell.split(","))
+            except ValueError:
+                print("Error: --cell expects col,row (got %r)" % args.cell, file=sys.stderr)
+                sys.exit(1)
+            dump_cell_verbose(xml[span[0]:span[1]], args.table_id, col, row)
+        else:
+            dump_table(xml[span[0]:span[1]], args.table_id)
         return
 
     all_tables = _find_all_table_spans(xml)

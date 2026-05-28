@@ -223,11 +223,20 @@ Many items → split into stages to catch silent failures early, verify each sta
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `_work_stepN.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file.
 
+> **Multi-cell dir-mode**: when replacing many cells in one file, use `replace_cell.py` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
+> ```bash
+> python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
+> python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
+> python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ result.hwpx
+> ```
+
 ### Bulk File Edit — N files simultaneously
 
 Pattern for editing N template-based files simultaneously:
 
 ```python
+import sys
+sys.stdout.reconfigure(encoding="utf-8")  # Windows cp949 guard
 import shutil
 import subprocess
 from pathlib import Path
@@ -261,7 +270,7 @@ for cfg in FILES:
     subprocess.run(["python", PACK_PY, str(unpack_dir), str(tmp_out)], check=True)
     subprocess.run(["python", VALIDATE_PY, str(tmp_out), "--baseline", cfg["src"]], check=True)
     shutil.copy(tmp_out, cfg["out"])
-    print(f"✓ {cfg['out']}")
+    print(f"[done] {cfg['out']}")
 ```
 
 - Include slug in `unpack_dir` — prevents directory collision in N-file parallel runs
@@ -441,11 +450,11 @@ python3 "$SKILL_DIR/scripts/page_guard.py" \
 | `scripts/validate.py` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate ID. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors |
 | `scripts/page_guard.py` | page-drift risk check vs. reference (restore-mode gate / edit-mode reference) |
 | `scripts/text_extract.py` | HWPX text extraction — self-implemented, no external `hwpx` package needed |
-| `scripts/dump_table.py` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; use before `replace_cell.py` to identify target cell addresses |
+| `scripts/dump_table.py` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; `--cell col,row` for verbose cell inspector (paraPr/charPr/runs/linesegarray); use before `replace_cell.py` to identify target cell addresses |
 | `scripts/locate.py` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`); accepts `.hwpx` or unpacked directory |
 | `scripts/delete_table_rows.py` | delete table rows — remove `<hp:tr>` + auto-fix rowCnt/rowSpan/rowAddr (`--list` to view rows) |
 | `scripts/insert_table_row.py` | insert table row — insert `<hp:tr>` + auto-fix rowCnt/rowAddr/rowSpan (`--grow` to extend group-end rowSpan) |
-| `scripts/replace_cell.py` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check |
+| `scripts/replace_cell.py` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs within a paragraph |
 | `scripts/strip_linesegarray.py` | remove `<hp:linesegarray>` — prevent "document corrupted" warning after text edits |
 | `scripts/patch_section.py` | safe text replacement — str.replace + lineseg strip + ID verification. `--after anchor` for context-limited replacement |
 | `scripts/calc_col_widths.py` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |

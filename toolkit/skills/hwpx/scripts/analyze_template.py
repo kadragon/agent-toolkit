@@ -9,6 +9,7 @@ HWPX 파일을 분석하여 문서의 전체 구조, 스타일 정의, 테이블
 Usage:
     python3 analyze_template.py <input.hwpx>
     python3 analyze_template.py <input.hwpx> --extract-header /tmp/ref_header.xml
+    python3 analyze_template.py <input.hwpx> --table-id 1000000003
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys
@@ -292,7 +293,7 @@ def analyze_table(tbl, indent=""):
     return '\n'.join(lines)
 
 
-def analyze_paragraph(p, indent=""):
+def analyze_paragraph(p, indent="", table_id_filter=None):
     lines = []
 
     pid = p.get('id', '?')
@@ -315,11 +316,13 @@ def analyze_paragraph(p, indent=""):
         tbl = run.find('hp:tbl', NS)
         if tbl is not None:
             has_table = True
-            if run_parts:
-                content = ' + '.join(run_parts)
-                lines.append(f"{indent}P id={pid} paraPr={ppr} {content}")
-                run_parts = []
-            lines.append(analyze_table(tbl, indent))
+            tbl_id = tbl.get('id', '?')
+            if table_id_filter is None or tbl_id == table_id_filter:
+                if run_parts and table_id_filter is None:
+                    content = ' + '.join(run_parts)
+                    lines.append(f"{indent}P id={pid} paraPr={ppr} {content}")
+                    run_parts = []
+                lines.append(analyze_table(tbl, indent))
             continue
 
         txt = get_text(run)
@@ -328,6 +331,9 @@ def analyze_paragraph(p, indent=""):
             run_parts.append(f'charPr={cpr}:"{display}"')
         else:
             run_parts.append(f'charPr={cpr}:(빈)')
+
+    if table_id_filter is not None:
+        return '\n'.join(lines) if lines else ''
 
     if not has_table:
         content = ' + '.join(run_parts) if run_parts else '(빈)'
@@ -340,7 +346,7 @@ def analyze_paragraph(p, indent=""):
     return '\n'.join(lines)
 
 
-def analyze_section(section_root):
+def analyze_section(section_root, table_id_filter=None):
     lines = ["▶ 문서 구조"]
 
     secpr = section_root.find('.//hp:secPr', NS)
@@ -376,8 +382,9 @@ def analyze_section(section_root):
     if sec is None:
         sec = section_root
     for p in sec.findall('hp:p', NS):
-        para_lines = analyze_paragraph(p, "  ")
-        lines.append(para_lines)
+        para_lines = analyze_paragraph(p, "  ", table_id_filter=table_id_filter)
+        if para_lines:
+            lines.append(para_lines)
 
     return '\n'.join(lines)
 
@@ -389,6 +396,8 @@ def main():
                         help='header.xml을 지정 경로로 추출')
     parser.add_argument('--extract-section', metavar='PATH',
                         help='section0.xml을 지정 경로로 추출')
+    parser.add_argument('--table-id', metavar='TABLE_ID',
+                        help='Print only analysis of table with this id')
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
@@ -425,15 +434,18 @@ def main():
         print("=" * 64)
         print()
 
-        for line in analyze_fonts(header_root):
-            print(line)
-        for line in analyze_borderfills(header_root):
-            print(line)
-        for line in analyze_charprops(header_root):
-            print(line)
-        for line in analyze_paraprops(header_root):
-            print(line)
-        print(analyze_section(section_root))
+        if args.table_id:
+            print(analyze_section(section_root, table_id_filter=args.table_id))
+        else:
+            for line in analyze_fonts(header_root):
+                print(line)
+            for line in analyze_borderfills(header_root):
+                print(line)
+            for line in analyze_charprops(header_root):
+                print(line)
+            for line in analyze_paraprops(header_root):
+                print(line)
+            print(analyze_section(section_root))
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
