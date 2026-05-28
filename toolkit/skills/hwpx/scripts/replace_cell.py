@@ -12,6 +12,7 @@ direct content is replaced; nested tables inside other cells are untouched.
 New content comes from either:
   --content-file FILE   raw <hp:p>...</hp:p> paragraph XML (compacted on load)
   --para PARAPR CHARPR TEXT   one simple text paragraph (repeatable)
+  --run CHARPR TEXT   additional run within last --para paragraph (repeatable)
 
 New paragraphs use placeholder id="0". Any non-placeholder hp:p id in
 --content-file that collides with the rest of the document aborts the script.
@@ -24,6 +25,11 @@ Usage:
         -o result.hwpx
     python replace_cell.py doc.hwpx --table-id TABLE_ID --cell 1,0 \
         --content-file paras.xml -o result.hwpx
+    python replace_cell.py ./unpacked/ --table-id TABLE_ID --cell 1,0 \
+        --para 0 0 "텍스트"
+    python replace_cell.py ./unpacked/ --table-id TABLE_ID --list
+    python replace_cell.py doc.hwpx --table-id TABLE_ID --cell 1,0 \
+        --para 19 0 "" --run 18 "위원장" --run 19 "김 승 현" -o result.hwpx
 """
 # Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys
@@ -124,11 +130,23 @@ def _xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _build_run(char_pr: str, text: str) -> str:
+    if not text:
+        return '<hp:run charPrIDRef="%s"><hp:t/></hp:run>' % char_pr
+    return ('<hp:run charPrIDRef="%s"><hp:t>%s</hp:t></hp:run>'
+            % (char_pr, _xml_escape(text)))
+
+
 def build_para(para_pr: str, char_pr: str, text: str) -> str:
     return ('<hp:p id="0" paraPrIDRef="%s" styleIDRef="0" pageBreak="0" '
-            'columnBreak="0" merged="0"><hp:run charPrIDRef="%s"><hp:t>%s'
-            "</hp:t></hp:run></hp:p>"
-            % (para_pr, char_pr, _xml_escape(text)))
+            'columnBreak="0" merged="0">%s</hp:p>'
+            % (para_pr, _build_run(char_pr, text)))
+
+
+def build_para_runs(para_pr: str, runs: list) -> str:
+    run_xml = "".join(_build_run(c, t) for c, t in runs)
+    return ('<hp:p id="0" paraPrIDRef="%s" styleIDRef="0" pageBreak="0" '
+            'columnBreak="0" merged="0">%s</hp:p>' % (para_pr, run_xml))
 
 
 def replace_cell(xml: str, table_id: str, col: int, row: int,
@@ -197,39 +215,50 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Replace a table cell's paragraph content in an HWPX section"
     )
-    ap.add_argument("input", help="Input .hwpx file")
+    ap.add_argument("input", help="Input .hwpx file or unpacked directory")
     ap.add_argument("--table-id", required=True, help="HWP table id attribute")
     ap.add_argument("--cell", help="Target cell as colAddr,rowAddr")
     ap.add_argument("--content-file", help="File with raw <hp:p>...</hp:p> XML")
     ap.add_argument("--para", action="append", nargs=3, default=[],
                     metavar=("PARAPR", "CHARPR", "TEXT"),
                     help="One text paragraph (repeatable)")
+    ap.add_argument("--run", action="append", nargs=2, default=[],
+                    metavar=("CHARPR", "TEXT"),
+                    help="Extra run appended to last --para paragraph (repeatable)")
     ap.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     ap.add_argument("--list", action="store_true", help="List table cells and exit")
     ap.add_argument("--output", "-o", help="Output .hwpx file")
     args = ap.parse_args()
 
     inp = Path(args.input)
-    if not inp.is_file():
-        print("Error: file not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    is_dir_mode = inp.is_dir()
 
     target = "Contents/section%d.xml" % args.section
-    with zipfile.ZipFile(inp, "r") as zin:
-        if target not in zin.namelist():
-            print("Error: %s not in archive" % target, file=sys.stderr)
+    if is_dir_mode:
+        section_file = inp / target
+        if not section_file.is_file():
+            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
             sys.exit(1)
-        xml = zin.read(target).decode("utf-8")
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print("Error: %s not in archive" % target, file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print("Error: not found: %s" % args.input, file=sys.stderr)
+        sys.exit(1)
 
     if args.list:
         list_cells(xml, args.table_id)
         sys.exit(0)
 
-    if not args.cell or not args.output:
-        print("Error: --cell and --output required (or use --list)", file=sys.stderr)
+    if not args.cell or (not is_dir_mode and not args.output):
+        print("Error: --cell required (and --output required for .hwpx input, or use --list)", file=sys.stderr)
         sys.exit(1)
-    if bool(args.content_file) == bool(args.para):
-        print("Error: provide exactly one of --content-file / --para", file=sys.stderr)
+    if bool(args.content_file) == (bool(args.para) or bool(args.run)):
+        print("Error: provide exactly one of --content-file / --para[+--run]", file=sys.stderr)
         sys.exit(1)
     try:
         col, row = (int(x) for x in args.cell.split(","))
@@ -242,7 +271,14 @@ def main() -> None:
         content = LINESEG_RE.sub("", content)
         content = re.sub(r">[ \t\r\n]+<", "><", content).strip()
     else:
-        content = "".join(build_para(p, c, t) for p, c, t in args.para)
+        if args.run and not args.para:
+            print("Error: --run requires at least one --para", file=sys.stderr)
+            sys.exit(1)
+        # Build para list; all --run args append to the last --para
+        paras = [(p[0], [(p[1], p[2])]) for p in args.para]
+        for char_pr, text in args.run:
+            paras[-1][1].append((char_pr, text))
+        content = "".join(build_para_runs(pp, runs) for pp, runs in paras)
 
     try:
         new_xml, info = replace_cell(xml, args.table_id, col, row, content)
@@ -252,16 +288,19 @@ def main() -> None:
 
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
 
-    with zipfile.ZipFile(inp, "r") as zin:
-        entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-    with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-        for zi, data in entries:
-            if zi.filename == target:
-                data = new_xml.encode("utf-8")
-            ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-            zout.writestr(zi.filename, data, compress_type=ct)
-
-    print("DONE: %s" % args.output)
+    if is_dir_mode:
+        section_file.write_text(new_xml, encoding="utf-8")
+        print("DONE (in-place): %s" % section_file)
+    else:
+        with zipfile.ZipFile(inp, "r") as zin:
+            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
+        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi, data in entries:
+                if zi.filename == target:
+                    data = new_xml.encode("utf-8")
+                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
+                zout.writestr(zi.filename, data, compress_type=ct)
+        print("DONE: %s" % args.output)
     for line in info:
         print("  %s" % line)
     print("  linesegarray stripped: %d" % n_ls)

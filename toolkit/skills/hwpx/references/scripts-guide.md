@@ -91,6 +91,18 @@ table id=1000000003: 9 cells
   1      1      1      1      스마트캠퍼스 구축
 ```
 
+### 0a) Verbose cell inspector (dump_table.py --cell)
+
+Show paraPr, charPr, runs, and linesegarray presence for a single cell:
+
+```bash
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --table-id 1000000003 --cell 2,1
+```
+
+Output shows: paragraphs with their paraPrIDRef, each run's charPrIDRef and text, and whether linesegarray is present (relevant for rule #24).
+
+Note: `dump_table.py` output lists addresses as `row col` but `replace_cell.py --cell` expects `col,row`. Hint printed at bottom of dump output.
+
 ### 1) Find element position (locate.py)
 
 Search table/row/paragraph spans by text. Accepts `.hwpx` file **or** already-unpacked directory (avoids re-unpack cycle when probing repeatedly):
@@ -131,7 +143,7 @@ python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id TABLE_ID \
 
 ### 3) Replace table cell content (replace_cell.py)
 
-Replace cell's paragraphs wholesale:
+Replace cell's paragraphs wholesale. Accepts `.hwpx` file or unpacked directory.
 
 ```bash
 # 셀 목록 (colAddr,rowAddr 확인)
@@ -141,10 +153,22 @@ python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --list
 python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --para 1 0 "헤더 텍스트" --para 0 0 "본문 내용" -o result.hwpx
 
-# 또는 raw <hp:p> XML 파일
+# 혼합 charPr (여러 run, 한 문단) — --run은 마지막 --para에 추가됨
+python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 2,3 \
+  --para 19 0 "" --run 18 "위원장" --run 19 "홍 길 동" --run 18 "(서명)" -o result.hwpx
+
+# raw <hp:p> XML 파일
 python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --content-file paras.xml -o result.hwpx
+
+# 다중 셀 교체 (dir 모드 — 압축 오버헤드 없음, in-place 수정)
+python3 "$SKILL_DIR/scripts/office/unpack.py" doc.hwpx ./unpacked/
+python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
+python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
+python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ result.hwpx
 ```
+
+**`--run` note**: appends to the LAST `--para`. For N paragraphs each with 1 run, use N `--para` without `--run`. For 1 paragraph with M runs, use 1 `--para` + (M−1) `--run` args.
 
 ### 4) Delete table rows (delete_table_rows.py)
 

@@ -47,6 +47,23 @@ subprocess.run(
 )
 ```
 
+### PYTHONUTF8 — system-wide UTF-8 for all Python processes
+
+Setting `PYTHONUTF8=1` makes Python use UTF-8 for all text I/O without per-script `sys.stdout.reconfigure`. Eliminates cp949 issues in scripts and inline `python -c "..."` calls.
+
+**Claude Code (project-level)** — add to `.claude/settings.json`:
+```json
+{
+  "env": {
+    "PYTHONUTF8": "1"
+  }
+}
+```
+
+**Claude Code (global)** — add to `~/.claude/settings.json` under `"env"`.
+
+When set, the `sys.stdout.reconfigure` calls in bundled scripts become redundant (harmless to keep). Inline `python -c "print('한글')"` also works without extra setup.
+
 ## Special Character Matching
 
 Quote variants (`ʹ` U+02B9 vs U+0374), PUA (U+F0E8), dash/middle-dot variants, and other visually-similar glyphs are encoding-unstable when typed as literals in a script or heredoc — the same glyph can resolve to a different codepoint each run.
