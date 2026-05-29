@@ -228,10 +228,9 @@ Summary:
 
 To run a subsequent review cycle on the same PR (e.g., after applying changes and wanting fresh reviews):
 
-1. Skip Step 1 — the PR already exists.
-2. Push the latest changes to the PR branch. Run `commit-and-push.sh` with `--message` only (no `--pr`, no `--no-push`) — this pushes to the existing remote branch without creating a new PR.
-3. Start from Step 2 with the existing PR number.
-4. Continue through Steps 3–6 as normal.
+1. Re-run Step 1 normally. `commit-and-push.sh --pr` is idempotent: it commits new changes (or pushes the existing HEAD as-is when the tree is clean) and, when a PR already exists for the branch, returns that PR's `pr_number`/`pr_url` instead of creating a duplicate. Use the returned `pr_number`.
+2. Continue from Step 2 with that PR number.
+3. Proceed through Steps 3–6 as normal.
 
 When `--no-hub` is set, re-running simply means committing new changes locally and collecting fresh reviews from Step 2 onward.
 
@@ -261,7 +260,7 @@ For detailed procedures, consult:
 
 - **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with tool availability and repo metadata
 - **`scripts/changed-files.sh`** — Detects tracked changes + untracked new files; one path per line. Called automatically by commit-and-push.sh — do not invoke directly.
-- **`scripts/commit-and-push.sh`** `--message <msg> [--files "f1 f2"] [--no-push] [--pr] [--base <branch>]` — Stage, commit, push, and optionally create a PR; outputs JSON `{commit_hash, pushed, pr_number, pr_url}`
+- **`scripts/commit-and-push.sh`** `--message <msg> [--files "f1 f2"] [--no-push] [--pr] [--base <branch>]` — Stage, commit, push, and optionally create a PR; outputs JSON `{commit_hash, committed, pushed, pr_number, pr_url}` (`committed: false` = clean tree, HEAD pushed/PR'd as-is on a re-run). Idempotent with `--pr`: returns the existing PR when one already exists for the branch.
 - **`scripts/ci-wait.sh`** `<pr_number>` — Waits for all CI checks to complete; outputs JSON `{passed: bool}`
 - **`scripts/agy-review.sh`** — Antigravity (agy) review launcher
 - **`scripts/codex-review.sh`** — Codex review launcher (plugin or CLI mode)
