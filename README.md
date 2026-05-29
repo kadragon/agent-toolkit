@@ -13,7 +13,7 @@ Two plugins:
 | `security-overview` | Aggregates GitHub security alerts across owned repos | ✅ | ✅ |
 | `dependabot-manager` | Bulk Dependabot PR operations | ✅ | ⚠️ |
 
-### `productivity` — productivity
+### `productivity` — document authoring
 
 | Skill | Description | Claude Code | Codex |
 |---|---|---|---|

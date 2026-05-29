@@ -1,6 +1,7 @@
 ---
 name: dev-review-cycle
-description: Post-development workflow that creates a PR, collects reviews from dynamically detected Claude skills (1–N in parallel) plus Antigravity and Codex, consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "full PR review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review. NOT for: reviewing only with no implementation intent, code review discussions without write intent, or one-off review requests that don't involve committing and merging.
+description: >
+  Post-development workflow that creates a PR, collects reviews from dynamically detected Claude skills (1–N in parallel) plus Antigravity and Codex, consolidates feedback, applies improvements, waits for CI, and merges — all in one continuous flow. This skill should be used when the user asks to "review cycle", "run review", "review and merge", "full PR review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지", or wants to review and merge completed work. Supports --no-hub flag to skip all GitHub operations for local-only review. NOT for: reviewing only with no implementation intent, code review discussions without write intent, or one-off review requests that don't involve committing and merging.
 ---
 
 # Dev Review Cycle

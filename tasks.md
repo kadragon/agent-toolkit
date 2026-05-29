@@ -14,3 +14,11 @@
 ### PR #6 — [FIX] harness-sync: prevent crashes in parallel run (2026-05-04)
 
 - [x] [debt] `symlink-guard.sh` Case 4: text-form pointer safe for POSIX peers only when `.agents/skills` entry tracked as git mode 120000; warn or guard if not (source: Claude) — `dev-tools/skills/harness-init/scripts/symlink-guard.sh:44`
+
+### PR #17 — [REFACTOR] split marketplace into dev-tools + productivity plugins (2026-05-29)
+
+- [ ] [doc] Add migration note for `toolkit:harness-maintenance` → `dev-tools:harness-maintenance` hook rename in README.md (source: review)
+- [ ] [debt] `validate_hwpx` catches only `BadZipFile`; broaden to `except (BadZipFile, OSError)` to handle missing/permission errors (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/build_hwpx.py:147`
+- [ ] [debt] `validate-harness.sh` section 6b uses `grep` but header comment claims "zero grep" — narrow comment to sections 1–5/7–10 (source: pr-review-toolkit:review-pr) — `dev-tools/skills/harness-init/scripts/validate-harness.sh:192`
+- [ ] [debt] `reconcile-harness.py` missing exec bit (mode 100644) — `git update-index --chmod=+x` if direct invocation needed (source: pr-review-toolkit:review-pr)
+- [ ] [doc] README.md Codex install path ambiguous — split `dev-tools/skills/<name>` and `productivity/skills/<name>` into labelled separate lines (source: pr-review-toolkit:review-pr) — `README.md:55`
