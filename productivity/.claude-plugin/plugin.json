@@ -1,0 +1,11 @@
+{
+  "name": "productivity",
+  "description": "Personal Claude Code productivity skills by kadragon",
+  "version": "1.0.0",
+  "author": {
+    "name": "kadragon"
+  },
+  "homepage": "https://github.com/kadragon/claude-toolkit",
+  "repository": "https://github.com/kadragon/claude-toolkit",
+  "license": "MIT"
+}

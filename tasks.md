@@ -13,4 +13,4 @@
 
 ### PR #6 — [FIX] harness-sync: prevent crashes in parallel run (2026-05-04)
 
-- [x] [debt] `symlink-guard.sh` Case 4: text-form pointer safe for POSIX peers only when `.agents/skills` entry tracked as git mode 120000; warn or guard if not (source: Claude) — `toolkit/skills/harness-init/scripts/symlink-guard.sh:44`
+- [x] [debt] `symlink-guard.sh` Case 4: text-form pointer safe for POSIX peers only when `.agents/skills` entry tracked as git mode 120000; warn or guard if not (source: Claude) — `dev-tools/skills/harness-init/scripts/symlink-guard.sh:44`

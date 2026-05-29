@@ -385,7 +385,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
 
-The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`dev-tools:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 
