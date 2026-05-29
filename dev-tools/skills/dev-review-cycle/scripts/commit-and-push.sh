@@ -12,7 +12,9 @@
 #   --base <branch>    Base branch for the PR (default: main)
 #
 # Output: JSON to stdout
-#   {commit_hash, pushed, pr_number, pr_url}
+#   {commit_hash, committed, pushed, pr_number, pr_url}
+#   committed=false means the tree was clean and HEAD was pushed/PR'd as-is
+#   (re-run against an already-committed branch).
 
 set -euo pipefail
 
@@ -46,21 +48,26 @@ if [ -z "$FILES" ]; then
 fi
 FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 
-if [ -z "$FILES" ]; then
+# --- Stage and commit ---
+# A clean tree on a push/PR run means the branch is already committed (e.g. a
+# re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
+# A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
+COMMITTED=false
+if [ -n "$FILES" ]; then
+  # Word-split is intentional here: FILES is a space-separated list of paths.
+  # shellcheck disable=SC2086
+  git add -- $FILES
+  git commit -m "$MESSAGE"
+  COMMITTED=true
+elif [ "$NO_PUSH" = "true" ]; then
   echo '{"error": "No changed files detected — nothing to commit"}' >&2
   exit 1
 fi
-
-# --- Stage and commit ---
-# Word-split is intentional here: FILES is a space-separated list of paths.
-# shellcheck disable=SC2086
-git add -- $FILES
-git commit -m "$MESSAGE"
 COMMIT_HASH=$(git rev-parse HEAD)
 
 if [ "$NO_PUSH" = "true" ]; then
-  jq -n --arg hash "$COMMIT_HASH" \
-    '{commit_hash: $hash, pushed: false, pr_number: null, pr_url: null}'
+  jq -n --arg hash "$COMMIT_HASH" --argjson committed "$COMMITTED" \
+    '{commit_hash: $hash, committed: $committed, pushed: false, pr_number: null, pr_url: null}'
   exit 0
 fi
 
@@ -78,15 +85,22 @@ if [ "$CREATE_PR" = "true" ]; then
     --title "$TITLE" \
     --body "$BODY" \
     --base "$BASE_BRANCH" 2>&1 | grep -E '^https://' | head -1 || true)
+  if [ -z "$PR_URL" ]; then
+    # gh pr create fails when a PR already exists for this branch (re-run) —
+    # fetch the existing one so the caller still gets its number/URL.
+    PR_URL=$(gh pr view --json url --jq '.url' 2>/dev/null || true)
+  fi
   PR_NUMBER=$(printf '%s' "$PR_URL" | grep -oE '[0-9]+$' || true)
 fi
 
 jq -n \
   --arg hash "$COMMIT_HASH" \
+  --argjson committed "$COMMITTED" \
   --arg pr_number "$PR_NUMBER" \
   --arg pr_url "$PR_URL" \
   '{
     commit_hash: $hash,
+    committed: $committed,
     pushed: true,
     pr_number: ($pr_number | if . == "" then null else . end),
     pr_url: ($pr_url | if . == "" then null else . end)
