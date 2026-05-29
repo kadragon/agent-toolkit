@@ -1,4 +1,6 @@
 node_modules/
+__pycache__/
+*.pyc
 .DS_Store
 .claude/worktrees/
 kadragon-tools/skills/security-overview-workspace/
