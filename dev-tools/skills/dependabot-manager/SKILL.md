@@ -92,6 +92,7 @@ Never pause for:
 
 - **Rebase not automatic**: After merging CI infra fix (e.g., Node.js version bump), Dependabot does NOT auto-rebase blocked PRs — always send `@dependabot rebase` explicitly. After sending the rebase command, wait and re-list PRs (`gh pr list --author app/dependabot --state open`) until the rebased PR appears before proceeding to Phase 3 actions.
 - **Dependabot may replace PRs**: After rebase, Dependabot sometimes closes the stale PR and opens a new one with a different number and updated scope. Re-list with `--author app/dependabot --state open` after rebase and confirm new PR numbers before any merge or further action — never use original PR numbers from pre-rebase triage.
+- **Branch protection needs GitHub Pro on private repos**: `enable-automerge.sh` on a private repo on the free plan gets `403 Upgrade to GitHub Pro` from the protection API. The script reports `protection_action: "unsupported_plan"` and exits 0 (so a batch run survives) — but `allow_auto_merge` is on with NO required checks, so any later `gh pr merge --auto` fires immediately. Treat these repos as merge-on-manual-confirm, not auto.
 
 ## Subagent Model Selection
 
