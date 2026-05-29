@@ -1,6 +1,5 @@
 ---
 name: harness-init
-version: 0.8.0
 description: |
   Use when user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or repo has no AGENTS.md/docs/ structure. Also for "validate harness", "harness audit", "하네스 점검". Repo-scoped — does NOT modify ~/.claude/CLAUDE.md.
 ---
