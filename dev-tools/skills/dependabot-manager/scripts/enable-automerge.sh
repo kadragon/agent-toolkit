@@ -67,7 +67,8 @@ put_err=$(echo "$protection_payload" | gh api -X PUT "repos/$repo/branches/$defa
   --input - --silent 2>&1) || {
   # Plan limitation: branch protection on private repos needs GitHub Pro.
   # Not a script failure — report and exit 0 so batch runs survive.
-  if echo "$put_err" | grep -qiE "Upgrade to GitHub Pro|make this repository public"; then
+  if echo "$put_err" | grep -qiE "Upgrade to GitHub Pro|make this repository public|billing plan|protected branch gate"; then
+    echo "NOTE: branch protection unavailable on $repo/$default_branch (plan limit): ${put_err:-unknown}" >&2
     jq -n \
       --arg repo "$repo" \
       --arg default_branch "$default_branch" \
