@@ -1,6 +1,5 @@
 ---
 name: harness-init
-version: 0.8.0
 description: |
   Use when user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or repo has no AGENTS.md/docs/ structure. Also for "validate harness", "harness audit", "하네스 점검". Repo-scoped — does NOT modify ~/.claude/CLAUDE.md.
 ---
@@ -385,7 +384,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
 
-The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`toolkit:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`dev-tools:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 

@@ -32,7 +32,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] Delegation routing table triggers are objective and measurable (no subjective conditions)
 - [ ] `docs/workflows.md` embeds delegation gates as named steps (not footnotes)
 - [ ] Lint/test infrastructure exists and passes
-- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or `toolkit:harness-maintenance` SessionStart hook)
+- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or `dev-tools:harness-maintenance` SessionStart hook)
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
 

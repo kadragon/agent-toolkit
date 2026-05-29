@@ -6,9 +6,14 @@
   },
   "plugins": [
     {
-      "name": "toolkit",
-      "source": "./toolkit",
-      "description": "Personal Claude Code skills and agents by kadragon"
+      "name": "dev-tools",
+      "source": "./dev-tools",
+      "description": "Personal Claude Code development skills and agents by kadragon"
+    },
+    {
+      "name": "productivity",
+      "source": "./productivity",
+      "description": "Personal Claude Code productivity skills by kadragon"
     }
   ]
 }
