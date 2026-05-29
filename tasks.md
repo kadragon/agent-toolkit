@@ -1,5 +1,9 @@
 ## Review Backlog
 
+### PR #15 — [DOCS] hwpx skill: lean SKILL.md, dump_table.py, cell editing patterns (2026-05-28)
+
+- [ ] [doc] Fixed OWPML attribute order assumption undocumented in `_own_cell_addr` / `_cell_span` (source: pr-review-toolkit:review-pr) — `dump_table.py:102,117`
+
 ### PR #13 — [FEAT] harness-init: mechanical auto-delegation routing (2026-05-27)
 
 - [x] [docs] Citation added for "~50% trigger rate" — Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)" (2025-11-06), https://scottspence.com/posts/claude-code-skills-dont-auto-activate. Year corrected from 2026 → 2025. Applied to `SKILL.md` (×2), `references/orchestrator-template.md`, `references/trigger-router-template.md` (×3) (source: pr-review-toolkit:review-pr).

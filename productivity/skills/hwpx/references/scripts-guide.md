@@ -61,13 +61,58 @@ python3 "$SKILL_DIR/scripts/next_id.py" document.hwpx --count 5
 
 `section0.xml` is one giant single-line XML — finding table/paragraph positions by hand is hard. Use these helpers for table structure changes — automate `rowAddr` renumbering, `rowCnt`, `rowSpan` correction.
 
+### 0) Dump table cell map (dump_table.py)
+
+셀 주소 → 텍스트 내용 전체 매핑. `replace_cell.py --list`보다 상세 (span 포함):
+
+```bash
+# 섹션 내 모든 표 목록 (id + 크기 + preview)
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx
+
+# 특정 표 전체 셀 맵 (rowAddr, colAddr, colSpan, rowSpan, text)
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --table-id 1000000003
+
+# 특정 텍스트 포함 표 자동 탐색
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --contains "항목명"
+
+# 이미 unpack된 디렉토리 직접 사용
+python3 "$SKILL_DIR/scripts/dump_table.py" ./unpacked/ --contains "합계"
+```
+
+출력 예:
+```
+table id=1000000003: 9 cells
+  row    col    cSpan  rSpan  text
+  --------------------------------------------------------
+  0      0      1      1      항목명
+  0      1      1      1      내용
+  0      2      1      2      비고
+  1      0      1      1      사업명
+  1      1      1      1      스마트캠퍼스 구축
+```
+
+### 0a) Verbose cell inspector (dump_table.py --cell)
+
+Show paraPr, charPr, runs, and linesegarray presence for a single cell:
+
+```bash
+python3 "$SKILL_DIR/scripts/dump_table.py" doc.hwpx --table-id 1000000003 --cell 2,1
+```
+
+Output shows: paragraphs with their paraPrIDRef, each run's charPrIDRef and text, and whether linesegarray is present (relevant for rule #24).
+
+Note: `dump_table.py` output lists addresses as `row col` but `replace_cell.py --cell` expects `col,row`. Hint printed at bottom of dump output.
+
 ### 1) Find element position (locate.py)
 
-Search table/row/paragraph spans by text:
+Search table/row/paragraph spans by text. Accepts `.hwpx` file **or** already-unpacked directory (avoids re-unpack cycle when probing repeatedly):
 
 ```bash
 # '항목명' 포함하는 hp:tbl 모두
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명"
+
+# unpack된 디렉토리 직접 사용 (반복 probe 시 re-unpack 불필요)
+python3 "$SKILL_DIR/scripts/locate.py" ./unpacked/ --tag hp:tc --contains "이름"
 
 # 여러 --contains는 AND — 특정 표만 좁히기
 python3 "$SKILL_DIR/scripts/locate.py" doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
@@ -98,7 +143,7 @@ python3 "$SKILL_DIR/scripts/insert_table_row.py" doc.hwpx --table-id TABLE_ID \
 
 ### 3) Replace table cell content (replace_cell.py)
 
-Replace cell's paragraphs wholesale:
+Replace cell's paragraphs wholesale. Accepts `.hwpx` file or unpacked directory.
 
 ```bash
 # 셀 목록 (colAddr,rowAddr 확인)
@@ -108,10 +153,22 @@ python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --list
 python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --para 1 0 "헤더 텍스트" --para 0 0 "본문 내용" -o result.hwpx
 
-# 또는 raw <hp:p> XML 파일
+# 혼합 charPr (여러 run, 한 문단) — --run은 마지막 --para에 추가됨
+python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 2,3 \
+  --para 19 0 "" --run 18 "위원장" --run 19 "홍 길 동" --run 18 "(서명)" -o result.hwpx
+
+# raw <hp:p> XML 파일
 python3 "$SKILL_DIR/scripts/replace_cell.py" doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --content-file paras.xml -o result.hwpx
+
+# 다중 셀 교체 (dir 모드 — 압축 오버헤드 없음, in-place 수정)
+python3 "$SKILL_DIR/scripts/office/unpack.py" doc.hwpx ./unpacked/
+python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
+python3 "$SKILL_DIR/scripts/replace_cell.py" ./unpacked/ --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
+python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ result.hwpx
 ```
+
+**`--run` note**: appends to the LAST `--para`. For N paragraphs each with 1 run, use N `--para` without `--run`. For 1 paragraph with M runs, use 1 `--para` + (M−1) `--run` args.
 
 ### 4) Delete table rows (delete_table_rows.py)
 
