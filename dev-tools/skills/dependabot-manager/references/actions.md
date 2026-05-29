@@ -30,16 +30,18 @@ Interpret `protection_action`:
 - `created` — branch protection added with detected CI check names; report contexts.
 - `already_present` — protection exists; `allow_auto_merge` toggled, nothing else changed.
 - `skipped` — no CI signal found. Warn: "auto-merge may fire immediately without required checks — consider adding branch protection manually."
+- `unsupported_plan` — branch protection unavailable (private repo on free plan). `allow_auto_merge` is on but NO required checks exist. Do NOT apply `--auto` — treat as merge-on-manual-confirm.
 
 ### Step 3: Apply `--auto` to ci_pending PRs
 
-For each `ci_pending` dependabot PR in repos that now have auto-merge enabled:
+For each `ci_pending` dependabot PR in repos that now have auto-merge enabled.
+**Exclude repos that returned `skipped` or `unsupported_plan`** — they have no required checks, so `--auto` would merge immediately. Merge those only on manual confirm.
 
 ```bash
 gh pr merge {number} -R {owner}/{repo} --auto --squash
 ```
 
-Skip: `ci_failed`, `needs_rebase`, `no_ci` (unsafe — would merge without checks or needs rebase first).
+Skip: `ci_failed`, `needs_rebase`, `no_ci` (unsafe — would merge without checks or needs rebase first). Also skip PRs in `skipped` / `unsupported_plan` repos.
 
 ### Step 4: Report
 
@@ -47,6 +49,7 @@ Skip: `ci_failed`, `needs_rebase`, `no_ci` (unsafe — would merge without check
 ✅ Auto-merge enabled: N repos
 🔀 --auto set on: M PRs (will merge when CI passes)
 ⚠️  Skipped (skipped protection): repo-a — add branch protection to avoid immediate merge
+⚠️  Unsupported plan (free-plan private repo): repo-b — merge on manual confirm, --auto not applied
 ```
 
 No further polling needed for these PRs — they will merge on their own when CI finishes.
