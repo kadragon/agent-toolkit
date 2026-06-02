@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Multi-agent delegation playbook — decide whether to use a single sub-agent, Agent fan-out, or the Workflow tool, plus model routing, verify/fix loops, and a delegation brief template. Use when about to orchestrate work across agents, fan out parallel tasks, set up a Workflow, run a verify-until-green loop, or split a task across sub-agents ("orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this"). For general task delegation — NOT the PR review-and-merge flow (see dev-review-cycle). Pairs with the always-on §Delegation rule in CLAUDE.md.
+description: Multi-agent delegation playbook — decide whether to use a single sub-agent, Agent fan-out, or the Workflow tool, plus model routing, verify/fix loops, and a delegation brief template. Use when about to orchestrate work across agents, fan out parallel tasks, set up a Workflow, run a verify-until-green loop, or split a task across sub-agents ("orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this"). For general task delegation — NOT the PR review-and-merge flow (see dev-review-cycle).
 ---
 
 # Orchestrate
@@ -15,7 +15,7 @@ The main thread is the orchestrator. Default to delegation; do broad work throug
 4. **Multi-stage with control flow (find→verify→fix, migrate-each-site, audit-then-confirm)?** → `Workflow` tool. Deterministic loops/conditionals/fan-out beat model-driven juggling.
 5. **Unknown-size discovery (find all bugs / edge cases)?** → Workflow loop-until-dry: keep spawning finders until K rounds return nothing new.
 
-Barrier rule: only synchronize stages (`parallel` between stages) when stage N needs **all** of stage N-1 (dedup, early-exit-on-zero, cross-item compare). Otherwise `pipeline` — no wasted wall-clock.
+Barrier rule: only put a barrier between stages (a `parallel()` step, which awaits all of stage N-1) when stage N needs **all** of stage N-1 (dedup, early-exit-on-zero, cross-item compare). Otherwise `pipeline` — no wasted wall-clock.
 
 ## Verify/fix loop (the "keep going until green" discipline)
 
