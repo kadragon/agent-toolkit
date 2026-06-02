@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .claude/worktrees/
-kadragon-tools/skills/security-overview-workspace/
+.security-scan/
+/cache/
 
 .antigravitycli/
