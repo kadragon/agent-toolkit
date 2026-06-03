@@ -1,0 +1,17 @@
+{
+  "description": "SessionStart staleness nudge for /dev-tools:task-audit. Tracks days since last audit run via ~/.claude/.task-audit-state.json; emits a one-line reminder when stale (>7d), throttled to once per 24h. Never blocks startup.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/task-audit-nudge/nudge.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking task-audit staleness..."
+          }
+        ]
+      }
+    ]
+  }
+}

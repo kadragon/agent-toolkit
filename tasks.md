@@ -19,6 +19,11 @@
 
 - [x] [debt] `symlink-guard.sh` Case 4: text-form pointer safe for POSIX peers only when `.agents/skills` entry tracked as git mode 120000; warn or guard if not (source: Claude) — `dev-tools/skills/harness-init/scripts/symlink-guard.sh:44`
 
+### PR #24 — [FEAT] dev-tools: adopt task-audit command + staleness nudge hook (2026-06-03)
+
+- [ ] [debt] `/dev-tools:task-audit all` applies the 400-prompt cap per project — an account with many projects can still dump a context-sized history. Add a global project/prompt cap or top-N recent-project selection (source: codex) — `dev-tools/commands/task-audit.md:59-68`
+- [ ] [debt] `--project` arg parsing uses `.split()`, breaking on project paths containing spaces. Use `shlex.split` for robust tokenization (source: agy) — `dev-tools/commands/task-audit.md:20`
+
 ### PR #17 — [REFACTOR] split marketplace into dev-tools + productivity plugins (2026-05-29)
 
 - [ ] [doc] Add migration note for `toolkit:harness-maintenance` → `dev-tools:harness-maintenance` hook rename in README.md (source: review)
