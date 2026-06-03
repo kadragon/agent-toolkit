@@ -39,8 +39,7 @@ def main():
     since_nudge = now - (state.get("lastNudgeMs") or 0)
 
     if stale_ms <= STALE_DAYS * DAY_MS or since_nudge <= THROTTLE_MS:
-        sys.stdout.write("OK")   # fresh enough, or already nudged recently
-        return
+        return   # audit is fresh, or nudge already sent within the throttle window
 
     never = not state.get("lastRunMs")
     days = stale_ms // DAY_MS
@@ -66,5 +65,5 @@ def main():
 try:
     main()
 except Exception:
-    sys.stdout.write("OK")   # any failure -> silent, never block startup
+    pass   # any failure -> silent, never block startup
 sys.exit(0)

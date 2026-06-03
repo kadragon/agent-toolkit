@@ -18,16 +18,21 @@ Run this to extract a compact, noise-filtered prompt list for the chosen scope. 
 
 ```bash
 python3 - "$ARGUMENTS" <<'PY'
-import json, sys, os, collections, re
+import json, sys, os, collections
 args = (sys.argv[1] if len(sys.argv) > 1 else "").split()
 scope = "current"
 named = None
 if "all" in args: scope = "all"
 if "--project" in args:
     i = args.index("--project")
-    named = args[i+1] if i+1 < len(args) else None
+    if i + 1 >= len(args):
+        print("--project requires a path, e.g. /dev-tools:task-audit --project /path/to/repo")
+        sys.exit(2)
+    named = args[i+1]
     scope = "named"
 cwd = os.getcwd()
+config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+history_path = os.path.join(config_dir, "history.jsonl")
 
 NOISE = {"hi","ok","okay","yes","no","go","go on","continue","next","thanks","ty",
          "y","n","do it","yep","nope","sure","stop","wait","done","more","again"}
@@ -42,14 +47,20 @@ def keep(d):
     return True
 
 rows = collections.defaultdict(list)            # project -> [(ts, display)]
-for line in open(os.path.expanduser("~/.claude/history.jsonl"), encoding="utf-8"):
-    try: r = json.loads(line)
-    except: continue
-    p, disp, ts = r.get("project"), r.get("display"), r.get("timestamp", 0)
-    if not keep(disp): continue
-    if scope == "current" and p != cwd: continue
-    if scope == "named"  and p != named: continue
-    rows[p].append((ts, disp.replace("\n", " ").strip()))
+try:
+    fh = open(history_path, encoding="utf-8")
+except FileNotFoundError:
+    print(f"No history file at {history_path} — nothing to audit yet.")
+    sys.exit(0)
+with fh:
+    for line in fh:
+        try: r = json.loads(line)
+        except: continue
+        p, disp, ts = r.get("project"), r.get("display"), r.get("timestamp", 0)
+        if not keep(disp): continue
+        if scope == "current" and p != cwd: continue
+        if scope == "named"  and p != named: continue
+        rows[p].append((ts, disp.replace("\n", " ").strip()))
 
 if not rows:
     print(f"NO DATA for scope={scope} (cwd={cwd}, named={named}).")
@@ -103,12 +114,14 @@ Record this run so the SessionStart staleness reminder resets (idempotent):
 ```bash
 python3 - <<'PY'
 import json, os, time
-p = os.path.expanduser("~/.claude/.task-audit-state.json")
+config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+p = os.path.join(config_dir, ".task-audit-state.json")
 s = {}
-try: s = json.load(open(p))
-except: pass
+try:
+    with open(p) as f: s = json.load(f)
+except Exception: pass
 s["lastRunMs"] = int(time.time() * 1000)
-json.dump(s, open(p, "w"))
+with open(p, "w") as f: json.dump(s, f)
 print("task-audit run recorded")
 PY
 ```
