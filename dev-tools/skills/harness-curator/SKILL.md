@@ -18,13 +18,16 @@ Replaces the old `/dev-tools:task-audit` command, which mined only `history.json
 
 ## Step 1 — Scan (bounded, deterministic)
 
-Run the scanner. It caps output and prints every dropped count (no silent truncation):
+Run the scanner with the scope tokens passed as real arguments (not a single combined string). It caps output and prints every dropped count (no silent truncation):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/harness-curator/scripts/scan_transcripts.py" "$SCOPE"
+SCAN="${CLAUDE_PLUGIN_ROOT}/skills/harness-curator/scripts/scan_transcripts.py"
+python3 "$SCAN"                              # current project (cwd)
+python3 "$SCAN" all                          # every project
+python3 "$SCAN" --project "/abs/path"        # one named project — quote paths with spaces
 ```
 
-`$SCOPE` is empty (current), `all`, or `--project /abs/path`. Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `CORRECTION-SIGNALS` (skill-active then user pushed back), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
+Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `CORRECTION-SIGNALS` (skill-active then user pushed back), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
 
 If the scan volume is large (`all` scope, or thousands of prompts), do NOT read it all inline — delegate the per-project reading to `Explore` or an `Agent` and analyze the returned summaries. See `references/transcript-format.md` for the record shapes and grep patterns.
 

@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart staleness nudge for the harness-curator skill. Tracks days since last harness analysis via ~/.claude/.task-audit-state.json; emits a one-line reminder when stale (>7d), throttled to once per 24h. Never blocks startup.",
+  "description": "SessionStart staleness nudge for the harness-curator skill (folder + state file keep the task-audit name for migration continuity). Tracks days since last harness analysis via ~/.claude/.task-audit-state.json; emits a one-line reminder when stale (>7d), throttled to once per 24h. Never blocks startup.",
   "hooks": {
     "SessionStart": [
       {

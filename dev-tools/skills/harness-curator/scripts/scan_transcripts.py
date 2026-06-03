@@ -25,7 +25,6 @@ import glob
 import json
 import os
 import re
-import shlex
 import sys
 
 # ---- caps (bounded output) ----
@@ -37,12 +36,18 @@ NOISE = {"hi", "ok", "okay", "yes", "no", "go", "go on", "continue", "next",
          "thanks", "ty", "y", "n", "do it", "yep", "nope", "sure", "stop",
          "wait", "done", "more", "again", "yeah", "k"}
 
-# short user follow-up matching these right after a skill-active turn = correction
+# short user follow-up matching this right after a skill-active turn = correction.
+# English: anchor weak words (no/stop) to message start and avoid bare \bactually\b —
+# "no worries", "actually perfect" are positive follow-ups, not corrections.
+# Korean: substring match (no \b) — \b does not fire between Hangul syllable + 조사
+# ("아니야", "틀렸어"), so word-boundary anchoring would miss real corrections.
 CORRECTION_RE = re.compile(
-    r"\b(no|wrong|not what|actually|undo|revert|that'?s not|don'?t|nope|incorrect|"
-    r"아니|그게 아니|다시|틀렸|잘못|되돌려|아닌데|왜)\b",
+    r"^(no|nope|nah)\b(?![ ]\w)"                       # leading "no" — not "no worries"/"no problem"
+    r"|\b(wrong|undo|revert|incorrect|not what|that'?s not|don'?t)\b"
+    r"|(아니|그게 아니|아닌데|다시|틀렸|잘못|되돌려)",
     re.IGNORECASE,
 )
+CORRECTION_MAXLEN = 50   # a real correction is short; longer text is usually a new task
 
 
 def encode_project(path):
@@ -63,6 +68,10 @@ def keep_prompt(d):
     low = d.lower()
     if low in NOISE:
         return False
+    # Korean is dense — "스킬 만들어줘" (7 chars, 2 words) is a real request. Exempt
+    # Hangul-bearing text from the English short-prompt filter; drop only ultra-short.
+    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in d):
+        return len(d) >= 5
     if len(d) < 12 and len(d.split()) < 3:
         return False
     return True
@@ -99,12 +108,12 @@ def scan_dir(tdir, label):
     sessions = 0
 
     for fp in files:
-        sessions += 1
         last_skill = None                # skill active on the most recent assistant turn
         try:
             fh = open(fp, encoding="utf-8")
         except OSError:
-            continue
+            continue                     # unreadable file is not a counted session
+        sessions += 1
         with fh:
             for line in fh:
                 try:
@@ -126,7 +135,7 @@ def scan_dir(tdir, label):
                     txt = text_of(r.get("message")).replace("\n", " ").strip()
                     if not txt:
                         continue
-                    if last_skill and len(txt) < 80 and CORRECTION_RE.search(txt):
+                    if last_skill and len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
                         corrections.append((last_skill, txt[:160]))
                     last_skill = None    # reset after any real user turn
                     if keep_prompt(txt):
@@ -174,7 +183,7 @@ def emit(summary):
 
 
 def main():
-    args = shlex.split(sys.argv[1]) if len(sys.argv) > 1 else []   # robust to paths with spaces
+    args = sys.argv[1:]    # caller passes scope tokens directly; quote paths with spaces
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     proj_root = os.path.join(config_dir, "projects")
 
