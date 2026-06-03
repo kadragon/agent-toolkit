@@ -2,12 +2,13 @@
 """task-audit-nudge — Claude Code SessionStart staleness reminder.
 
 Honest B-tier automation: does NOT detect "X done 5x" (that needs per-session
-LLM clustering, which the on-demand /dev-tools:task-audit deliberately avoids).
-Instead it tracks how long since the audit last ran and emits a one-line nudge
-when stale. The audit itself still does all analysis on demand.
+LLM clustering, which the on-demand harness-curator skill deliberately avoids).
+Instead it tracks how long since the harness analysis last ran and emits a
+one-line nudge when stale. The skill itself still does all analysis on demand.
 
 State: $CLAUDE_CONFIG_DIR/.task-audit-state.json  { lastRunMs, lastNudgeMs }
-  lastRunMs   - written by the /dev-tools:task-audit command's final step
+  (filename kept for migration continuity; written by harness-curator Step 5)
+  lastRunMs   - written by the harness-curator skill's final step
   lastNudgeMs - written here, throttles the nudge to once per THROTTLE window
 
 Never raises - a reminder must never block session start.
@@ -54,11 +55,12 @@ def main():
         pass
 
     sys.stdout.write(
-        f"TASK-AUDIT REMINDER: /dev-tools:task-audit {age} (>{STALE_DAYS}d stale). "
-        "Recurring inline work accumulates in ~/.claude/history.jsonl across sessions but is only "
-        "surfaced when the audit runs. If a natural pause comes up, suggest the user run "
-        "`/dev-tools:task-audit` (current project) or `/dev-tools:task-audit all` to catch work that "
-        "should become an agent/skill/hook. Do not interrupt active work to do this."
+        f"HARNESS-CURATOR REMINDER: harness analysis {age} (>{STALE_DAYS}d stale). "
+        "Recurring inline work and skill misfires accumulate across sessions but are only "
+        "surfaced when the analysis runs. If a natural pause comes up, suggest the user invoke "
+        "the `harness-curator` skill (current project, or 'all' scope) to catch work that should "
+        "become an agent/skill/hook, skills that aren't triggering, or assets to retire. "
+        "Do not interrupt active work to do this."
     )
 
 

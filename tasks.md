@@ -21,8 +21,8 @@
 
 ### PR #24 — [FEAT] dev-tools: adopt task-audit command + staleness nudge hook (2026-06-03)
 
-- [ ] [debt] `/dev-tools:task-audit all` applies the 400-prompt cap per project — an account with many projects can still dump a context-sized history. Add a global project/prompt cap or top-N recent-project selection (source: codex) — `dev-tools/commands/task-audit.md:59-68`
-- [ ] [debt] `--project` arg parsing uses `.split()`, breaking on project paths containing spaces. Use `shlex.split` for robust tokenization (source: agy) — `dev-tools/commands/task-audit.md:20`
+- [x] [debt] `all` scope could dump context-sized history with many projects. Resolved: harness-curator scanner adds `PROJECT_CAP` (top-N busiest projects) + per-project `PROMPT_CAP`/`CORRECTION_CAP`, all with printed drop counts (source: codex) — `dev-tools/skills/harness-curator/scripts/scan_transcripts.py`
+- [x] [debt] `--project` arg parsing broke on paths with spaces. Resolved: scanner reads `sys.argv[1:]` directly (no string re-split) and SKILL.md documents quoting the path (source: agy, codex, pr-review) — `dev-tools/skills/harness-curator/scripts/scan_transcripts.py`
 
 ### PR #17 — [REFACTOR] split marketplace into dev-tools + productivity plugins (2026-05-29)
 
