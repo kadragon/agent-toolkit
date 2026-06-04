@@ -45,6 +45,9 @@ grep -l '"attributionSkill":"skill-creator:skill-creator"' "$DIR"/*.jsonl
 
 # explicit Skill tool invocations
 grep -o '"name":"Skill","input":{"skill":"[^"]*"' "$DIR"/*.jsonl
+
+# harness-friction candidates (over-collects task complaints — read before routing)
+grep -h '"type":"user"' "$DIR"/*.jsonl | grep -i 'you keep\|every.time\|자꾸\|매번\|disable'
 ```
 
 ## Bounds
