@@ -29,6 +29,7 @@ Records with `.isMeta` or `.isSidechain` true are non-conversational (injected c
 - **Explicit skill call** — `tool_use` block with `name == "Skill"`, `input.skill == "<plugin:skill>"`. Rare.
 - **Agent delegation** — `tool_use` block with `name == "Agent"` or `"Task"`.
 - **Correction** — a short `user` text (< 80 chars) matching a negative pattern (`no`, `wrong`, `actually`, `revert`, `아니`, `다시`, `틀렸`, `잘못` …) immediately after a skill-active assistant turn. Heuristic, not exact — confirm by reading.
+- **Harness friction** — a `user` text matching a recurring-behavior complaint (`you keep`, `every time`, `자꾸`, `매번`, `disable …` …) anywhere in the session. Targets a hook/rule, not the answer, so it carries no `attributionSkill` — collected standalone. Deliberately over-collects (a task complaint shares the phrasing); read before treating as over-protection.
 - **Tool error** — encodings vary; `.toolUseResult.is_error` / `.error`, or an `is_error` `tool_result` block. Best-effort; the correction signal is more reliable for "this asset underperformed".
 
 ## Useful grep patterns
@@ -44,6 +45,9 @@ grep -l '"attributionSkill":"skill-creator:skill-creator"' "$DIR"/*.jsonl
 
 # explicit Skill tool invocations
 grep -o '"name":"Skill","input":{"skill":"[^"]*"' "$DIR"/*.jsonl
+
+# harness-friction candidates (over-collects task complaints — read before routing)
+grep -h '"type":"user"' "$DIR"/*.jsonl | grep -i 'you keep\|every.time\|자꾸\|매번\|disable'
 ```
 
 ## Bounds

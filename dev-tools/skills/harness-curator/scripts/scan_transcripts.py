@@ -10,6 +10,7 @@ Unlike history.jsonl (prompts only), transcripts also carry:
   - attributionSkill : which skill was active on each assistant record (skill-load signal)
   - Agent/Task tool_use : which subagent_type the main thread invoked (agent-use signal)
   - user corrections : short negative follow-ups right after a skill- or agent-active turn
+  - harness-friction : recurring-behavior complaints (FRICTION_RE) — over-protection signal
 These power the triggering-miss / underperforming-asset / demote signals for BOTH
 skills and agents — an installed agent with ~0 invocations is a demote candidate just
 like an unused skill.
@@ -33,6 +34,7 @@ import sys
 # ---- caps (bounded output) ----
 PROMPT_CAP = 250        # prompts shown per project (most recent kept)
 CORRECTION_CAP = 40     # correction samples per project
+FRICTION_CAP = 30       # harness-friction samples per project
 PROJECT_CAP = 25        # projects shown in `all` scope (busiest kept)
 
 NOISE = {"hi", "ok", "okay", "yes", "no", "go", "go on", "continue", "next",
@@ -51,6 +53,26 @@ CORRECTION_RE = re.compile(
     re.IGNORECASE,
 )
 CORRECTION_MAXLEN = 50   # a real correction is short; longer text is usually a new task
+
+# Harness-friction (over-protection) signal: the user complaining about a RECURRING
+# imposed behavior — typically a hook or a CLAUDE.md rule that fires too often or
+# blocks them. Distinct from a task correction: it targets the harness itself, not
+# the answer. Anchored to recurrence-complaint phrasing ("you keep", "every time",
+# "자꾸", "매번") so it does not fire on a one-off "stop". These have no
+# attributionSkill (hooks/rules don't carry one), so they're collected standalone;
+# the model judges which rule/hook each maps to and routes to loosen/demote.
+# Over-collects: "every time it crashes" (task complaint) also passes — the model
+# MUST read samples before routing (see signal-taxonomy.md §5). Korean alternation
+# assumes txt has been newline-stripped upstream (text_of → .replace("\n", " ")).
+FRICTION_RE = re.compile(
+    r"\b(you keep|you always|every ?time|each time|"
+    r"stop (doing|asking|adding|using|inserting|reminding)|"
+    r"turn (this|that|it) off|disable (this|that|it|the)|"
+    r"why do you (keep|always))\b"
+    r"|(자꾸|매번|왜.{0,4}자꾸|비활성|끄(자|고|는|자고|다|기)|꺼(줘|라)?)",
+    re.IGNORECASE,
+)
+FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
 
 
 def encode_project(path):
@@ -108,6 +130,7 @@ def scan_dir(tdir, label):
     prompts = []                                    # (ts, text)
     corrections = []                                # (skill_active, text)
     agent_corrections = []                          # (agent_active, text)
+    frictions = []                                  # (text) — harness over-protection complaints
     skill_sessions = collections.defaultdict(set)   # skill -> {session files}
     agent_sessions = collections.defaultdict(set)   # subagent_type -> {session files}
     sessions = 0
@@ -115,6 +138,7 @@ def scan_dir(tdir, label):
     for fp in files:
         last_skill = None                # skill active on the most recent assistant turn
         last_agents = set()              # subagent_types invoked since the last user turn
+        frictions_seen = set()           # deduplicate friction phrases within a session
         try:
             fh = open(fp, encoding="utf-8")
         except OSError:
@@ -163,6 +187,11 @@ def scan_dir(tdir, label):
                         # block happened to be last.
                         for st in last_agents:
                             agent_corrections.append((st, txt[:160]))
+                    # Harness-friction is orthogonal to skill/agent attribution — a
+                    # complaint about a hook or rule, captured wherever it appears.
+                    if len(txt) <= FRICTION_MAXLEN and FRICTION_RE.search(txt) and txt not in frictions_seen:
+                        frictions_seen.add(txt)
+                        frictions.append(txt)
                     last_skill = None    # reset after any real user turn
                     last_agents = set()
                     if keep_prompt(txt):
@@ -177,6 +206,7 @@ def scan_dir(tdir, label):
         "agent_sessions": {k: len(v) for k, v in agent_sessions.items()},
         "corrections": corrections,
         "agent_corrections": agent_corrections,
+        "frictions": frictions,
     }
 
 
@@ -223,6 +253,17 @@ def emit(summary):
         for agent, txt in show:
             print(f"  [{agent}] {txt}")
 
+    fric = summary["frictions"]
+    if fric:
+        show = fric[:FRICTION_CAP]
+        fdropped = len(fric) - len(show)
+        print("\nHARNESS-FRICTION (recurring-behavior complaint — inspect: a hook/rule firing"
+              " too often = over-protection/demote candidate; ≥2 = signal. May also be a task"
+              " complaint — read before routing):"
+              + (f"  [dropped {fdropped}]" if fdropped else ""))
+        for txt in show:
+            print(f"  {txt}")
+
     print("\nPROMPTS (cluster these by intent):")
     for _, txt in shown:
         print("- " + txt)
@@ -252,7 +293,7 @@ def main():
         cwd = os.getcwd()
         scope, dirs = "current", [(os.path.join(proj_root, encode_project(cwd)), cwd)]
 
-    summaries = [s for s in (scan_dir(d, label) for d, label in dirs) if s and s["prompts"]]
+    summaries = [s for s in (scan_dir(d, label) for d, label in dirs) if s and (s["prompts"] or s["frictions"] or s["corrections"])]
     if not summaries:
         print(f"NO TRANSCRIPT DATA for scope={scope} (looked in {proj_root}).")
         if scope != "all":

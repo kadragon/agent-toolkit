@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-The scanner emits five blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `PROMPTS`. Classify findings into the four signals below. Each maps to exactly one delegate. The skill's value is correct routing — never reimplement a generator.
+The scanner emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Six output blocks, five classification signals — `PROMPTS` is raw input for clustering, not a classified signal. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -43,6 +43,20 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **Demote (delete):** An installed asset with **~0 sessions-used** is dead weight — a skill absent from `SKILLS-ACTIVE` or an agent absent from `AGENTS-USED` over a long history (cross-reference the Step 2 inventory: the asset is installed but never appears in the use block). Surface it as a delete candidate. On confirmation, remove the file and bump the owning plugin version. Never delete without confirmation.
 
+**Adversarial check before any DELETE.** A delete recommendation is a completeness output with no test, so self-judgment is biased (CLAUDE.md: self-check ≠ verification). Before routing a DELETE to confirmation, spawn one independent reviewer agent (`Explore` or `general-purpose`) with the single question: *"Asset X is flagged for deletion on ~0 transcript use. Argue why removing it is unsafe — does it guard a rare-but-critical path, fire only on phrasing the scanner can't see (slash-command-only, hook-invoked, sidechain), or backstop a failure mode that simply hasn't recurred yet?"* Downgrade DELETE → `Watch:` if the reviewer surfaces a real reason. Low transcript use ≠ uselessness — an asset that fires rarely but prevents a disaster is load-bearing.
+
+## 5. Harness friction (over-protection)
+
+**Detect:** Lines in `HARNESS-FRICTION` — the user complaining about a **recurring imposed behavior** ("you keep …", "every time …", "자꾸 …", "매번 …"). Unlike a correction, this targets the *harness*, not the answer: a hook firing too often, a permission gate re-asking, or a CLAUDE.md rule the user keeps working around. These carry no skill/agent attribution, so the scanner collects them standalone.
+
+**Confirm before routing:** read each sample. The block deliberately over-collects (a "every time it crashes" task complaint matches the same phrasing) — keep only complaints aimed at a guardrail. Map the complaint to the specific hook (`.claude/settings.json`) or rule (CLAUDE.md / AGENTS.md) that produces the behavior.
+
+**Route:**
+- Over-firing hook / permission gate → `update-config` to narrow its matcher or add a staleness/scope guard (loosen, don't delete a safety hook outright).
+- CLAUDE.md / AGENTS.md rule the user keeps overriding → propose shrinking or making it conditional (CLAUDE.md "Bloat signal" + "On model upgrade: re-examine guardrails"). Surface the line; let the user decide — never auto-edit global instructions.
+
+**Caution:** one complaint is a mood, not a signal. Require **≥2** complaints about the same behavior, or one with an obvious systematic cause, before routing. A guardrail the user dislikes once may still be load-bearing — same adversarial caution as DELETE.
+
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
@@ -50,6 +64,7 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 | New-asset candidate | 3 |
 | Triggering miss (skill or agent) | 2 |
 | Underperforming asset (skill or agent) | 2 (or 1 with systematic cause) |
-| Demote (unused skill or agent) | judgment — long history + ~0 use |
+| Harness friction (over-protection) | 2 (or 1 with systematic cause) |
+| Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.
