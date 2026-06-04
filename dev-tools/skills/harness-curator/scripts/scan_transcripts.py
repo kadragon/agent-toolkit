@@ -8,8 +8,11 @@ task-audit command).
 
 Unlike history.jsonl (prompts only), transcripts also carry:
   - attributionSkill : which skill was active on each assistant record (skill-load signal)
-  - user corrections : short negative follow-ups right after a skill-active turn
-These power the triggering-miss / underperforming-asset / demote signals.
+  - Agent/Task tool_use : which subagent_type the main thread invoked (agent-use signal)
+  - user corrections : short negative follow-ups right after a skill- or agent-active turn
+These power the triggering-miss / underperforming-asset / demote signals for BOTH
+skills and agents — an installed agent with ~0 invocations is a demote candidate just
+like an unused skill.
 
 Scope (mirrors the old command):
   (empty)            current cwd project
@@ -104,11 +107,14 @@ def scan_dir(tdir, label):
 
     prompts = []                                    # (ts, text)
     corrections = []                                # (skill_active, text)
+    agent_corrections = []                          # (agent_active, text)
     skill_sessions = collections.defaultdict(set)   # skill -> {session files}
+    agent_sessions = collections.defaultdict(set)   # subagent_type -> {session files}
     sessions = 0
 
     for fp in files:
         last_skill = None                # skill active on the most recent assistant turn
+        last_agent = None                # subagent_type invoked on the most recent assistant turn
         try:
             fh = open(fp, encoding="utf-8")
         except OSError:
@@ -129,15 +135,32 @@ def scan_dir(tdir, label):
                     if a:
                         skill_sessions[a].add(fp)
                         last_skill = a
+                    # Agent/Task tool_use carries the subagent_type the main thread
+                    # delegated to. The subagent's own turns are isSidechain (skipped
+                    # above), so this main-chain tool_use is the only agent-use record.
+                    msg = r.get("message")
+                    content = msg.get("content") if isinstance(msg, dict) else None
+                    if isinstance(content, list):
+                        for b in content:
+                            if (isinstance(b, dict) and b.get("type") == "tool_use"
+                                    and b.get("name") in ("Agent", "Task")):
+                                st = (b.get("input") or {}).get("subagent_type")
+                                if st:
+                                    agent_sessions[st].add(fp)
+                                    last_agent = st
                     continue
 
                 if typ == "user":
                     txt = text_of(r.get("message")).replace("\n", " ").strip()
                     if not txt:
                         continue
-                    if last_skill and len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
-                        corrections.append((last_skill, txt[:160]))
+                    if len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
+                        if last_skill:
+                            corrections.append((last_skill, txt[:160]))
+                        if last_agent:
+                            agent_corrections.append((last_agent, txt[:160]))
                     last_skill = None    # reset after any real user turn
+                    last_agent = None
                     if keep_prompt(txt):
                         prompts.append((ts, txt[:200]))
 
@@ -147,7 +170,9 @@ def scan_dir(tdir, label):
         "sessions": sessions,
         "prompts": prompts,
         "skill_sessions": {k: len(v) for k, v in skill_sessions.items()},
+        "agent_sessions": {k: len(v) for k, v in agent_sessions.items()},
         "corrections": corrections,
+        "agent_corrections": agent_corrections,
     }
 
 
@@ -168,6 +193,14 @@ def emit(summary):
     else:
         print("\nSKILLS-ACTIVE: (none recorded)")
 
+    ag = summary["agent_sessions"]
+    if ag:
+        print("\nAGENTS-USED (subagent_type: sessions-invoked — installed agent near 0 = demote candidate):")
+        for name, n in sorted(ag.items(), key=lambda x: -x[1]):
+            print(f"  {name}: {n}")
+    else:
+        print("\nAGENTS-USED: (none recorded)")
+
     corr = summary["corrections"]
     if corr:
         show = corr[:CORRECTION_CAP]
@@ -176,6 +209,15 @@ def emit(summary):
               + (f"  [dropped {cdropped}]" if cdropped else ""))
         for skill, txt in show:
             print(f"  [{skill}] {txt}")
+
+    acorr = summary["agent_corrections"]
+    if acorr:
+        show = acorr[:CORRECTION_CAP]
+        adropped = len(acorr) - len(show)
+        print("\nAGENT-CORRECTION-SIGNALS (agent invoked then user pushed back — underperform candidate):"
+              + (f"  [dropped {adropped}]" if adropped else ""))
+        for agent, txt in show:
+            print(f"  [{agent}] {txt}")
 
     print("\nPROMPTS (cluster these by intent):")
     for _, txt in shown:

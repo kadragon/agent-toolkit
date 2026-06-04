@@ -1,0 +1,23 @@
+[
+  {"query": "신제품 구독 모델 가격을 월 9900원으로 잡았는데 사람들이 비싸다고 느낄까? 다양한 소비자 입장에서 반응 좀 시뮬레이션 해줘", "should_trigger": true},
+  {"query": "정년 65세 연장에 대해 세대별로 어떻게 생각하는지 토론 붙여보고 싶어. 20대부터 60대까지", "should_trigger": true},
+  {"query": "our startup wants to move to a 4-day workweek — how would typical Korean employees actually react? simulate a panel of different workers debating it", "should_trigger": true},
+  {"query": "이 정책 슬로건 'AI로 더 따뜻한 복지' 일반 시민들한테 어떻게 들릴지 여러 사람 관점으로 좀 봐줘", "should_trigger": true},
+  {"query": "30대 워킹맘들이 우리 밀키트 서비스를 어떻게 볼지 가상 포커스그룹 돌려줄 수 있어?", "should_trigger": true},
+  {"query": "회사 단톡방에서 야근 문화 없애자고 주장하려는데, 사람들이 동의할지 반대할지 갑론을박 시켜봐", "should_trigger": true},
+  {"query": "전기차 보조금 폐지, 사람들 찬반 의견 한 5명 정도 모아서 토론시켜줘", "should_trigger": true},
+  {"query": "수도권 집중 문제에 대해 지방 사는 사람 서울 사는 사람 다양하게 섞어서 의견 들어보고 싶다", "should_trigger": true},
+  {"query": "내 칼럼 초안인데 평범한 독자들이 어느 대목에서 공감하고 어디서 반발할지 여러 사람 시각으로 평가해줘", "should_trigger": true},
+  {"query": "투표 의무화하면 보통 시민들 반응이 어떨까? 입장 갈리는 사람들로 토론 한번 붙여줘", "should_trigger": true},
+
+  {"query": "주 4일제 도입한 해외 기업 사례랑 생산성 통계 자료 좀 찾아서 정리해줘", "should_trigger": false},
+  {"query": "이 설문조사 응답 1200개가 든 survey_responses.csv 분석해서 연령대별 만족도 집계해줘", "should_trigger": false},
+  {"query": "페르소나 기반 마케팅 전략 문서 만들어줘 — 우리 타겟 고객 3명 프로필이랑 메시지 정리해서", "should_trigger": false},
+  {"query": "내 소설 등장인물 다섯 명이 카페에서 나누는 대화 장면 한 챕터 써줘", "should_trigger": false},
+  {"query": "고객 인터뷰 녹취록 8개 요약해서 공통 불만사항 뽑아줘", "should_trigger": false},
+  {"query": "멀티에이전트 debate 챗봇 만들려는데 autogen으로 토론 오케스트레이션 코드 짜줘", "should_trigger": false},
+  {"query": "어제 팀 회의에서 나온 찬반 의견 정리해서 회의록 깔끔하게 만들어줘", "should_trigger": false},
+  {"query": "우리 앱 스토어 리뷰 별점이랑 텍스트 데이터로 감성분석 돌려줘", "should_trigger": false},
+  {"query": "동아리 디베이트 대회용 토론 주제 10개만 추천해줘", "should_trigger": false},
+  {"query": "신제품 출시 여론조사 결과 나왔는데 이걸로 보도자료 초안 써줘", "should_trigger": false}
+]

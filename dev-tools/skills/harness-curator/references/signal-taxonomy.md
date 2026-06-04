@@ -1,6 +1,8 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-The scanner emits three blocks per project: `SKILLS-ACTIVE`, `CORRECTION-SIGNALS`, `PROMPTS`. Classify findings into the four signals below. Each maps to exactly one delegate. The skill's value is correct routing — never reimplement a generator.
+The scanner emits five blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `PROMPTS`. Classify findings into the four signals below. Each maps to exactly one delegate. The skill's value is correct routing — never reimplement a generator.
+
+Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
 ## 1. New-asset candidate
 
@@ -23,27 +25,31 @@ The scanner emits three blocks per project: `SKILLS-ACTIVE`, `CORRECTION-SIGNALS
 
 **Tip:** the most reliable descriptions are *directive* ("This skill should be used when the user asks to …") with concrete trigger phrases, not feature descriptions.
 
+**Agent variant:** the main thread selects agents by reading their descriptions, so an agent that exists and fits the work but is **absent from `AGENTS-USED`** (while you did that work inline or via the wrong agent) is the same miss. Read the agent's `description`/`when to use`; route the fix to `plugin-dev:agent-development` to sharpen the triggering description.
+
 ## 3. Underperforming asset
 
 **Detect:** A skill that appears in `CORRECTION-SIGNALS` — it loaded, then the user pushed back (short negative follow-up). The skill triggers fine but its instructions produced a wrong/unwanted result. Read the correction text to understand the failure mode.
 
 **Route:** `skill-creator:skill-creator` modify mode. Brief: the skill path, the failure mode (quote the correction), and the desired behavior. This is a content/instruction fix, distinct from the description fix in signal 2.
 
-**Caution:** a single correction may be a one-off. Require **≥2** corrections against the same skill, or one with an obvious systematic cause, before routing.
+**Agent variant:** an agent in `AGENT-CORRECTION-SIGNALS` triggered/was-invoked fine but produced a wrong result — a system-prompt/instruction fix. Route to `plugin-dev:agent-development` (modify) with the agent path, the quoted correction, and the desired behavior.
+
+**Caution:** a single correction may be a one-off. Require **≥2** corrections against the same skill/agent, or one with an obvious systematic cause, before routing.
 
 ## 4. Promote / demote
 
 **Promote (skill/agent → hook):** A repeated action that is fully **deterministic** (same trigger → same action, no judgment) is better as a hook than a skill the model must remember to invoke. Route to `update-config` (settings.json hook) or `hookify`.
 
-**Demote (delete):** An installed asset with **~0 sessions-used** in `SKILLS-ACTIVE` over a long history is dead weight. Surface it as a delete candidate. On confirmation, remove the file and bump the owning plugin version. Never delete without confirmation.
+**Demote (delete):** An installed asset with **~0 sessions-used** is dead weight — a skill absent from `SKILLS-ACTIVE` or an agent absent from `AGENTS-USED` over a long history (cross-reference the Step 2 inventory: the asset is installed but never appears in the use block). Surface it as a delete candidate. On confirmation, remove the file and bump the owning plugin version. Never delete without confirmation.
 
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
 |--------|-----------------|
 | New-asset candidate | 3 |
-| Triggering miss | 2 |
-| Underperforming asset | 2 (or 1 with systematic cause) |
-| Demote (unused) | judgment — long history + ~0 use |
+| Triggering miss (skill or agent) | 2 |
+| Underperforming asset (skill or agent) | 2 (or 1 with systematic cause) |
+| Demote (unused skill or agent) | judgment — long history + ~0 use |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.
