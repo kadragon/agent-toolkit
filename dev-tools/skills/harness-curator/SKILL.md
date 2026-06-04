@@ -1,7 +1,7 @@
 ---
 name: harness-curator
 description: This skill should be used when the user wants to analyze their Claude Code conversation history / session transcripts to manage their harness across sessions — "analyze my conversation history", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "task audit", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "what recurring work should become a skill/agent/hook", "audit my skills and agents across sessions", "안 쓰는 스킬 정리". It mines transcripts to (1) propose new skills/agents/hooks from recurring work, (2) find existing skills that fail to trigger or underperform, (3) flag unused assets to retire — then delegates the actual create/fix to the right tool. Project-scoped, conversation-analysis-driven. NOT when the user already knows the specific skill to create, modify, or fix — for "create a skill for X", "improve skill X", "make skill X trigger", "기존 스킬 개선해줘" use skill-creator / plugin-dev:skill-development directly. NOT for bootstrapping or validating a repo's AGENTS.md/docs structure ("harness audit", "하네스 점검", "하네스 초기화") — use harness-init.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -27,7 +27,7 @@ python3 "$SCAN" all                          # every project
 python3 "$SCAN" --project "/abs/path"        # one named project — quote paths with spaces
 ```
 
-Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `CORRECTION-SIGNALS` (skill-active then user pushed back), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
+Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `AGENTS-USED` (subagent_type → sessions-invoked), `CORRECTION-SIGNALS` and `AGENT-CORRECTION-SIGNALS` (skill/agent active then user pushed back), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
 
 If the scan volume is large (`all` scope, or thousands of prompts), do NOT read it all inline — delegate the per-project reading to `Explore` or an `Agent` and analyze the returned summaries. See `references/transcript-format.md` for the record shapes and grep patterns.
 
@@ -39,7 +39,7 @@ Before proposing anything, know what already exists, or candidates will duplicat
 - Project-local: `./.claude/skills/*/SKILL.md`, `./.claude/agents/*.md`
 - Rules in `~/.claude/CLAUDE.md` and the project's `CLAUDE.md` / `AGENTS.md`
 
-The `SKILLS-ACTIVE` block already names which skills fired — cross-reference it against this inventory to find assets that exist but rarely/never load.
+The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
 ## Step 3 — Classify into four signals
 
@@ -48,9 +48,9 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | Signal | Detected from | Route to |
 |--------|---------------|----------|
 | **New-asset candidate** | recurring prompt shape (≥3), no inventory asset covers it | promote/demote rule → `agent-creator` / `skill-creator` / `update-config` |
-| **Triggering miss** | prompts in an existing skill's domain, but that skill is absent / low in `SKILLS-ACTIVE` | `skill-creator` description optimizer |
-| **Underperforming asset** | skill present in `CORRECTION-SIGNALS` (loaded, then user corrected) | `skill-creator` modify mode |
-| **Promote / demote** | deterministic repeat → **hook**; asset with ~0 sessions-used → **delete** | `update-config` / `hookify` / manual removal |
+| **Triggering miss** | prompts in an existing skill's domain, skill absent/low in `SKILLS-ACTIVE`; or work done inline that a fitting agent absent from `AGENTS-USED` should own | skill → `skill-creator` description optimizer; agent → `plugin-dev:agent-development` |
+| **Underperforming asset** | skill in `CORRECTION-SIGNALS` / agent in `AGENT-CORRECTION-SIGNALS` (loaded/invoked, then user corrected) | skill → `skill-creator` modify; agent → `plugin-dev:agent-development` modify |
+| **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** | `update-config` / `hookify` / manual removal |
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss and underperform need ≥2.
 
@@ -94,7 +94,7 @@ PY
 
 Ask whether to act on the **top** candidate now. Do not auto-create. On yes, invoke the matching skill with a brief (goal · constraint · exit criterion):
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
-- New agent → `plugin-dev:agent-creator`.
+- New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook → `hookify` or `update-config`.
 - Delete an unused asset → confirm, then remove the file and bump the owning plugin version.
 

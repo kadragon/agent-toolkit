@@ -1,5 +1,9 @@
 ## Review Backlog
 
+### PR #26 — [FEAT] harness-curator agent analysis + productivity persona-debate skill (2026-06-04)
+
+- [ ] [debt] `--seed` seeds `random()` but isn't reproducible cross-run over HTTP (parquet fetch order varies). For true reproducibility use DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. Help text softened in-PR; proper fix deferred (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109`
+
 ### PR #15 — [DOCS] hwpx skill: lean SKILL.md, dump_table.py, cell editing patterns (2026-05-28)
 
 - [ ] [doc] Fixed OWPML attribute order assumption undocumented in `_own_cell_addr` / `_cell_span` (source: pr-review-toolkit:review-pr) — `dump_table.py:102,117`

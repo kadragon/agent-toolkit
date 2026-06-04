@@ -1,0 +1,23 @@
+{
+  "skill_name": "persona-debate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "주 4일제 근무 도입에 대해 사람들이 어떻게 생각할까? 다양한 관점으로 토론해줘.",
+      "expected_output": "Skill proposes representative-random panel, auto-picks N (~5-6), samples personas, runs isolated openings + rebuttal, returns Korean spectrum + minority report. No silent single-verdict.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "신혼부부 대상 월 30만원 주거 지원 정책, 실제 당사자들 입장에서 의견 들어보고 싶어.",
+      "expected_output": "Skill recognizes implicitly targeted group, proposes targeted WHERE (newlyweds/young married), flags reduced representativeness, validates Korean literals, runs debate, preserves disagreement.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "AI가 초등학교 교사를 대체하는 것에 대해 5명이서 토론하면 어떤 결론이 나올까?",
+      "expected_output": "Skill uses N=5 as given (no auto-pick), treats as contested/identity-adjacent topic, devil's-advocate seat, identity-coupled caveat, spectrum not single verdict.",
+      "files": []
+    }
+  ]
+}
