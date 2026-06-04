@@ -114,7 +114,7 @@ def scan_dir(tdir, label):
 
     for fp in files:
         last_skill = None                # skill active on the most recent assistant turn
-        last_agent = None                # subagent_type invoked on the most recent assistant turn
+        last_agents = set()              # subagent_types invoked since the last user turn
         try:
             fh = open(fp, encoding="utf-8")
         except OSError:
@@ -147,7 +147,7 @@ def scan_dir(tdir, label):
                                 st = (b.get("input") or {}).get("subagent_type")
                                 if st:
                                     agent_sessions[st].add(fp)
-                                    last_agent = st
+                                    last_agents.add(st)
                     continue
 
                 if typ == "user":
@@ -157,10 +157,14 @@ def scan_dir(tdir, label):
                     if len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
                         if last_skill:
                             corrections.append((last_skill, txt[:160]))
-                        if last_agent:
-                            agent_corrections.append((last_agent, txt[:160]))
+                        # Credit every distinct subagent type invoked since the last
+                        # user turn — one turn can spawn many (the set dedups repeats
+                        # of the same type), so a scalar would misattribute to whichever
+                        # block happened to be last.
+                        for st in last_agents:
+                            agent_corrections.append((st, txt[:160]))
                     last_skill = None    # reset after any real user turn
-                    last_agent = None
+                    last_agents = set()
                     if keep_prompt(txt):
                         prompts.append((ts, txt[:200]))
 

@@ -66,7 +66,13 @@ def connect():
 def shard_urls(shard):
     if shard == "all":
         return [f"{BASE}/{SHARD.format(i)}" for i in range(N_SHARDS)]
-    return [f"{BASE}/{SHARD.format(int(shard))}"]
+    try:
+        idx = int(shard)
+    except (TypeError, ValueError):
+        sys.exit("--shard must be an integer 0-8 or 'all'")
+    if not 0 <= idx < N_SHARDS:
+        sys.exit(f"--shard out of range: {idx} (valid 0-{N_SHARDS - 1} or 'all')")
+    return [f"{BASE}/{SHARD.format(idx)}"]
 
 
 def src(shard):
@@ -106,10 +112,14 @@ def cmd_sample(args):
     if matched < args.n:
         print(f"WARN: only {matched} match (< requested {args.n}); returning all matches", file=sys.stderr)
 
-    seed = "" if args.seed is None else f"setseed({(args.seed % 1000) / 1000.0}); "
+    # setseed must run as its own statement (`SELECT setseed(...)`); DuckDB rejects
+    # a bare `setseed(...);` prefix. Seeds random() for the ORDER BY that follows on
+    # the same connection.
+    if args.seed is not None:
+        con.execute(f"SELECT setseed({(args.seed % 1000) / 1000.0})")
     cols = ", ".join(fields)
     rows = con.execute(
-        f"{seed}SELECT {cols} FROM {source} WHERE {where} ORDER BY random() LIMIT {args.n}"
+        f"SELECT {cols} FROM {source} WHERE {where} ORDER BY random() LIMIT {args.n}"
     ).fetchall()
     out = [dict(zip(fields, r)) for r in rows]
     print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -168,7 +178,7 @@ def main():
     s.add_argument("--where", default=None, help="SQL WHERE clause body, e.g. \"age BETWEEN 20 AND 39 AND province IN ('서울','경기')\"")
     s.add_argument("--fields", default=None, help="CSV subset of debater fields to return (default: curated full set); trim to the topic to cut spawn tokens")
     s.add_argument("--shard", default="0", help="shard index 0-8 (default 0); 'all' for full 1M scan (~18s)")
-    s.add_argument("--seed", type=int, default=None, help="reproducible sampling")
+    s.add_argument("--seed", type=int, default=None, help="seed random() for sampling; not fully reproducible over HTTP (parquet fetch order varies)")
     s.set_defaults(func=cmd_sample)
 
     pl = sub.add_parser("plan", help="deterministic N + round + model routing for a depth (never opus)")
