@@ -78,9 +78,11 @@ Record the run so the staleness nudge resets (idempotent, shared state file):
 
 ```bash
 python3 - <<'PY'
-import json, os, time
+import json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-p = os.path.join(config_dir, ".task-audit-state.json")
+state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.]", "-", os.getcwd()))
+os.makedirs(state_dir, exist_ok=True)
+p = os.path.join(state_dir, ".harness-curator-state.json")
 s = {}
 try:
     with open(p) as f: s = json.load(f)
