@@ -42,7 +42,7 @@ Before proposing anything, know what already exists, or candidates will duplicat
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
 Two supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, or exist yet never parse):
-- **Stale code** — `git log --follow -1 --format='%ci' <skill-path>/SKILL.md`; flag assets with no commit in 60+ days. Skip if git unavailable.
+- **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run `git -C "$(dirname "$asset")" rev-parse --show-toplevel`; if it succeeds, run `git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset"` and flag assets with no commit in 60+ days. If repo detection fails, mark the asset as `non-git` and skip the stale-code age check rather than running `git log` from the current project.
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
 
 Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate; unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
