@@ -6,8 +6,9 @@ LLM clustering, which the on-demand harness-curator skill deliberately avoids).
 Instead it tracks how long since the harness analysis last ran and emits a
 one-line nudge when stale. The skill itself still does all analysis on demand.
 
-State: $CLAUDE_CONFIG_DIR/.task-audit-state.json  { lastRunMs, lastNudgeMs }
-  (filename kept for migration continuity; written by harness-curator Step 5)
+State: $CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/.harness-curator-state.json
+  Per-project isolation: running the audit in project A no longer suppresses
+  nudges for project B. Encoded path mirrors the transcript directory layout.
   lastRunMs   - written by the harness-curator skill's final step
   lastNudgeMs - written here, throttles the nudge to once per THROTTLE window
 
@@ -16,6 +17,7 @@ Never raises - a reminder must never block session start.
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -24,9 +26,15 @@ STALE_DAYS = 7         # nudge once audit is older than this
 THROTTLE_MS = DAY_MS   # at most one nudge per 24h, even while stale
 
 
+def encode_project(path):
+    return re.sub(r"[/.]", "-", path)
+
+
 def main():
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-    state_path = os.path.join(config_dir, ".task-audit-state.json")
+    cwd = os.getcwd()
+    state_dir = os.path.join(config_dir, "projects", encode_project(cwd))
+    state_path = os.path.join(state_dir, ".harness-curator-state.json")
     now = int(time.time() * 1000)
 
     state = {"lastRunMs": 0, "lastNudgeMs": 0}
@@ -48,6 +56,7 @@ def main():
 
     # Persist throttle stamp.
     try:
+        os.makedirs(state_dir, exist_ok=True)
         state["lastNudgeMs"] = now
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f)

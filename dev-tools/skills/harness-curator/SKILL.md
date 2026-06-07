@@ -1,7 +1,7 @@
 ---
 name: harness-curator
 description: This skill should be used when the user wants to analyze their Claude Code conversation history / session transcripts to manage their harness across sessions — "analyze my conversation history", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "task audit", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "what recurring work should become a skill/agent/hook", "audit my skills and agents across sessions", "안 쓰는 스킬 정리". It mines transcripts to (1) propose new skills/agents/hooks from recurring work, (2) find existing skills that fail to trigger or underperform, (3) flag unused assets to retire — then delegates the actual create/fix to the right tool. Project-scoped, conversation-analysis-driven. NOT when the user already knows the specific skill to create, modify, or fix — for "create a skill for X", "improve skill X", "make skill X trigger", "기존 스킬 개선해줘" use skill-creator / plugin-dev:skill-development directly. NOT for bootstrapping or validating a repo's AGENTS.md/docs structure ("harness audit", "하네스 점검", "하네스 초기화") — use harness-init.
-version: 1.2.0
+version: 1.2.1
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -41,6 +41,12 @@ Before proposing anything, know what already exists, or candidates will duplicat
 
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
+Two supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, or exist yet never parse):
+- **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, capture `repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel)`; if it succeeds, run `git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset"`. If output is empty (new/untracked file), treat as new asset and skip age check. Flag assets with a commit date 60+ days ago. If repo detection fails, mark the asset as `non-git` and skip the stale-code age check rather than running `git log` from the current project.
+- **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
+
+Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 6); unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+
 ## Step 3 — Classify into five signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
@@ -78,9 +84,11 @@ Record the run so the staleness nudge resets (idempotent, shared state file):
 
 ```bash
 python3 - <<'PY'
-import json, os, time
+import json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-p = os.path.join(config_dir, ".task-audit-state.json")
+state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.]", "-", os.getcwd()))
+os.makedirs(state_dir, exist_ok=True)
+p = os.path.join(state_dir, ".harness-curator-state.json")
 s = {}
 try:
     with open(p) as f: s = json.load(f)

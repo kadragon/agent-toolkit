@@ -89,14 +89,18 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py
 
 Output:
 - `Sprint active: <title>` — tasks.md active or evaluating; leave intact
+- `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
+- `Sprint '<title>' failed. Reverted to backlog.` — sprint returned to queue
 - `Backlog: N queued, M active` — backlog has pending items
 - `Backlog clear.` — nothing pending
 
 ---
 
-## D) Harness Docs & Skills Refresh
+## D) Harness Docs Reconciliation
 
-Run after C. Requires judgment — not scripted.
+Run after C. Requires judgment — not scripted. Repo file-state only; skill/agent
+**portfolio** health (which assets fire, which are stale or never load) is not
+maintained here — that is transcript-driven and lives in `harness-curator`.
 
 ### D-1) Docs structure check
 
@@ -109,17 +113,30 @@ Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
 Either file entirely missing → repo not fully bootstrapped — point user at harness-init Step 4b, don't guess content.
 
-### D-2) Skills refresh
+### D-2) Doc-worthy capture (when C reported a sprint `done`)
 
-```bash
-find .claude/skills -name "SKILL.md" 2>/dev/null
-```
+The C script removes a `done` item from `backlog.md` mechanically — git history
+becomes its record. Before that record is the *only* trace, judge whether the
+shipped work established something future work must respect: a constraint, an
+invariant, a behavior contract, a design decision. The script cannot make this
+call; you must.
 
-For each `SKILL.md` found:
-- Verify frontmatter parseable (must have `name` and `description` fields)
-- Flag stale skills: run `git log --follow -1 --format='%ci' <skill-path>/SKILL.md` for each skill. Flag skills with no commit in 60+ days. If git is unavailable, skip and note in summary.
+Signal to judge from (tasks.md is already deleted by C):
+- the `done` line C printed (`Sprint '<title>' done. tasks.md removed.`)
+- the latest `CHANGELOG.md` entry (acceptance-criteria summary), if present
+- `git log origin/main..HEAD` / `git diff origin/main..HEAD` for the sprint's commits
 
-Print stale list to stdout if any. Do **not** auto-delete — human decides.
+If doc-worthy → extract it into the relevant `docs/*.md` (the file named in the
+AGENTS.md docs index) **as a durable rule**, before moving on. If it was a
+routine fix, do nothing — git log already carries it. Never resurrect the
+backlog line; docs is the home for the rule, not the queue.
+
+### D-3) Plan remaining (only when the user asks)
+
+When the user asks what to do next ("남은 작업 계획", "뭐부터 하지", "what's
+next"), summarize the `backlog.md` `[ ]` queue grouped by `##` heading and
+propose an order. Do **not** promote anything to `[>]` or write a `tasks.md` —
+opening a sprint is a separate, deliberate act the user starts explicitly.
 
 ---
 
