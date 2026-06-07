@@ -17,7 +17,8 @@
 # A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Sections 1–5 and 7–10 use [[ =~ ]] bash builtins, no grep
 # subprocesses. AGENTS.md is read in a single pass — no repeated file scans.
-# Section 6b (auto-delegation router) uses grep to match SKILL.md content.
+# Section 6b (auto-delegation router) uses grep twice: agent file detection
+# (find | grep -q) and SKILL.md content matching (grep -qiE).
 
 set -euo pipefail
 

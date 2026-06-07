@@ -72,12 +72,13 @@ For each major PR, resolve the **dependency's** source repo and fetch its releas
 **Resolve `dep_repo`:**
 Extract the dependency name from the PR title (e.g. `Bump actions/checkout from 3 to 4` → `actions/checkout`).
 For GitHub Actions: `dep_repo` is the action slug directly (`{owner}/{action-name}`).
-For npm/PyPI packages: look up the `repository` field in the package manifest or the PR body's
-"Release notes" / "Commits" link — both include a GitHub URL when available.
+For npm packages: check `package.json` → `.repository.url`.
+For PyPI packages: check `pyproject.toml` → `[project.urls] Repository`, or `setup.cfg` → `[metadata] url`.
+Alternatively, use the PR body's "Release notes" / "Commits" link — both include a GitHub URL when available.
 If `dep_repo` cannot be resolved, skip this step and note it to the user — do not silently return empty data.
 
 ```bash
-dep_repo="{resolved-owner}/{resolved-repo}"   # derived above
+dep_repo="<resolved-owner>/<resolved-repo>"   # replace with actual repo slug derived above
 gh api "repos/$dep_repo/releases" --jq '.[0:3] | .[] | {tag: .tag_name, body: (.body // "" | .[0:500])}'
 ```
 

@@ -24,6 +24,8 @@ Two plugins:
 > **Migrating from `toolkit@kadragon`?** The former single plugin is now split into
 > `dev-tools@kadragon` and `productivity@kadragon`. Remove the old plugin
 > (`claude plugin uninstall toolkit@kadragon`) and install both below.
+> Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
+> the hook now ships as `dev-tools:harness-maintenance`.
 
 ### Claude Code
 
