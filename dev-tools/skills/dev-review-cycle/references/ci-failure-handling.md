@@ -58,7 +58,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/merge-and-cleanup.sh 
   9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
 ```
 
-The script selects the best merge strategy (squash > merge > rebase) from the JSON, merges with `--delete-branch`, then checks out the base branch, fetches and hard-resets to `origin/<base>` (avoids `git pull` failures when `pull.rebase` is unconfigured), and safely deletes the local feature branch (`-d`, not `-D`). If a worktree path is provided, it removes that too.
+The script selects the best merge strategy (squash > merge > rebase) from the JSON, merges with `--delete-branch`, then checks out the base branch, fetches and fast-forward merges `FETCH_HEAD` (avoids `git pull` failures when `pull.rebase` is unconfigured; `ff-only` fails gracefully on unpushed local commits instead of discarding them), and safely deletes the local feature branch (`-d`, not `-D`). If a worktree path is provided, it removes that too.
 
 **Common mistake:** `merge-and-cleanup.sh 9 squash` — this passes only 2 args. The script requires 4: pr_number, base_branch, feature_branch, and merge_strategy as JSON.
 

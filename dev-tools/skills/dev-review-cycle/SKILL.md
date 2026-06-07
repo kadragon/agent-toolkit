@@ -103,8 +103,7 @@ Use `review_candidates` from preflight output to dynamically select and launch r
 
 1. Get and store the full branch diff — this becomes the authoritative scope reference for Step 3:
    ```bash
-   CHANGED_FILES=$(git diff ${BASE_BRANCH}...HEAD --name-only)
-   CHANGED_FILES_STAT=$(git diff ${BASE_BRANCH}...HEAD --stat)
+   CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
    ```
    Do NOT use `git diff HEAD` (last commit only). The branch may have multiple commits.
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).

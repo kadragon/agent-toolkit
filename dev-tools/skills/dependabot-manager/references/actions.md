@@ -4,7 +4,7 @@ Present all applicable actions at once. One confirmation per action class, then 
 
 ## 3a. Batch Merge Ready PRs
 
-Offer to merge all ready PRs in one shot. Do **not** use `--auto` — these PRs are already CLEAN; `--auto` is only for `ci_pending` PRs.
+Offer to merge all ready PRs in one shot. Do **not** use `--auto` — these PRs are already CLEAN; `--auto` is only for `ci_pending` PRs. If `--auto` is used on a CLEAN PR, it fires immediately with no additional CI gating.
 
 **Execution order:**
 - PRs across **different repos** → run in parallel (background `&` + `wait`)

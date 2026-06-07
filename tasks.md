@@ -1,5 +1,10 @@
 ## Review Backlog
 
+### PR #29 — [HARNESS] dev-review-cycle: fix merge cleanup + scope clarity + shell doc rule (2026-06-07)
+
+- [ ] [debt] `actions.md:72` — `gh api repos/{owner}/{repo}/releases` fetches the **app** repo's releases, not the upgraded dependency's releases; returns irrelevant/empty data for major PRs. Fix: resolve dep source from PR body or package metadata before calling releases API. (source: codex)
+- [ ] [debt] `actions.md:69` — jq body filter `.body` not truncated; large release notes bloat context. Fix: cap at 500 chars with `(.body // "" | .[0:500])`. (source: pr-review-toolkit:review-pr)
+
 ### PR #28 — [FIX] harness-curator: resolve asset repo before stale-code git check (2026-06-07)
 
 - [ ] [harness] Skill/agent instruction fixes use `[HARNESS]` commit type, not `[FIX]` — `[FIX]` requires reproducing test per CLAUDE.md (source: pr-review-toolkit:review-pr)

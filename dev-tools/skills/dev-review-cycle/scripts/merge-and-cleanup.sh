@@ -84,8 +84,8 @@ WORKTREE_MSG=""
 
 if [ "$MERGE_OK" = "true" ]; then
   git checkout "$BASE_BRANCH" >/dev/null 2>&1
-  git fetch origin "$BASE_BRANCH" >/dev/null 2>&1
-  git reset --hard "origin/$BASE_BRANCH" >/dev/null 2>&1
+  git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
+  git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
 
   # Use -d (safe delete) — only deletes if fully merged
   if git branch -d "$FEATURE_BRANCH" >/dev/null 2>&1; then
