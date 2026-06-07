@@ -4,7 +4,11 @@ Present all applicable actions at once. One confirmation per action class, then 
 
 ## 3a. Batch Merge Ready PRs
 
-Offer to merge all ready PRs in one shot:
+Offer to merge all ready PRs in one shot. Do **not** use `--auto` — these PRs are already CLEAN; `--auto` is only for `ci_pending` PRs.
+
+**Execution order:**
+- PRs across **different repos** → run in parallel (background `&` + `wait`)
+- Multiple PRs in the **same repo** → run sequentially (parallel causes "Base branch was modified" failure)
 
 ```bash
 gh pr merge {number} -R {owner}/{repo} --squash
@@ -59,6 +63,22 @@ No further polling needed for these PRs — they will merge on their own when CI
 ## 3c. Handle Multiple Major PRs
 
 Detect major PRs by title (major version number differs). Merging one makes others go behind, creating a serial bottleneck.
+
+### Step 0: Check changelog before merge decision
+
+For each major PR, fetch release notes to surface breaking changes:
+
+```bash
+gh api repos/{owner}/{repo}/releases --jq '.[0:3] | .[] | {tag: .tag_name, body: .body}'
+```
+
+Report to user:
+- **Breaking changes** (API removals, dropped runtime support, required migrations)
+- **Runtime requirement changes** (e.g., Node.js minimum version bump) — cross-check against repo's CI workflow and `engines` field in `package.json`
+
+Present findings before proposing merge or consolidation. User decides whether to proceed.
+
+### Merge strategy
 
 - **2 or fewer major PRs** — sequential merge + `@dependabot rebase` on remaining
 - **3+ major PRs** — offer consolidated branch (`chore/major-dependency-updates`): apply all bumps together, create single PR, close originals with `gh pr close --comment "Included in #{consolidated_pr}"`
