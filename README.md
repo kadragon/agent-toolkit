@@ -21,6 +21,12 @@ Two plugins:
 
 ## Installation
 
+> **Migrating from `toolkit@kadragon`?** The former single plugin is now split into
+> `dev-tools@kadragon` and `productivity@kadragon`. Remove the old plugin
+> (`claude plugin uninstall toolkit@kadragon`) and install both below.
+> Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
+> the hook now ships as `dev-tools:harness-maintenance`.
+
 ### Claude Code
 
 ```bash
@@ -54,9 +60,15 @@ Via `~/.claude/settings.json`:
 Codex ignores Claude marketplaces. Install skills via `skill-installer`:
 
 ```bash
+# dev-tools plugin skills:
 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo kadragon/claude-toolkit \
-  --path dev-tools/skills/<name>      # or productivity/skills/<name>
+  --path dev-tools/skills/<name>
+
+# productivity plugin skills:
+~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo kadragon/claude-toolkit \
+  --path productivity/skills/<name>
 ```
 
 Install only ✅/⚠️ skills from table above.
