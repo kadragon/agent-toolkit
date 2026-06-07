@@ -40,7 +40,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 
 from lxml import etree
 
@@ -144,9 +144,8 @@ def validate_hwpx(hwpx_path: Path) -> list[str]:
     ]
 
     try:
-        from zipfile import BadZipFile
         zf = ZipFile(hwpx_path, "r")
-    except BadZipFile:
+    except (BadZipFile, OSError):
         return [f"Not a valid ZIP: {hwpx_path}"]
 
     with zf:

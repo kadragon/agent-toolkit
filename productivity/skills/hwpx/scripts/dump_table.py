@@ -113,6 +113,8 @@ def _top_cells(tbl: str) -> list[tuple[int, int]]:
 
 
 def _own_cell_addr(tc: str) -> tuple[int, int] | None:
+    # Assumes fixed OWPML attribute order: colAddr before rowAddr.
+    # Attribute-reordered input would not match the regex.
     tbl_depth = 0
     for m in re.finditer(
         r'<hp:tbl\b|</hp:tbl>|<hp:cellAddr colAddr="(\d+)" rowAddr="(\d+)"/>',
@@ -129,7 +131,11 @@ def _own_cell_addr(tc: str) -> tuple[int, int] | None:
 
 
 def _cell_span(tc: str) -> tuple[int, int]:
-    """(colSpan, rowSpan) — defaults to (1,1) if not found."""
+    """(colSpan, rowSpan) — defaults to (1,1) if not found.
+
+    Assumes fixed OWPML attribute order: colSpan before rowSpan.
+    Attribute-reordered input would not match the regex.
+    """
     m = re.search(r'<hp:cellSpan colSpan="(\d+)" rowSpan="(\d+)"/>', tc)
     return (int(m.group(1)), int(m.group(2))) if m else (1, 1)
 
