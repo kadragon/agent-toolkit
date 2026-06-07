@@ -2,20 +2,20 @@
 
 ### PR #29 — [HARNESS] dev-review-cycle: fix merge cleanup + scope clarity + shell doc rule (2026-06-07)
 
-- [ ] [debt] `actions.md:72` — `gh api repos/{owner}/{repo}/releases` fetches the **app** repo's releases, not the upgraded dependency's releases; returns irrelevant/empty data for major PRs. Fix: resolve dep source from PR body or package metadata before calling releases API. (source: codex)
-- [ ] [debt] `actions.md:69` — jq body filter `.body` not truncated; large release notes bloat context. Fix: cap at 500 chars with `(.body // "" | .[0:500])`. (source: pr-review-toolkit:review-pr)
+- [x] [debt] `actions.md:72` — `gh api repos/{owner}/{repo}/releases` fetches the **app** repo's releases, not the upgraded dependency's releases; returns irrelevant/empty data for major PRs. Fix: resolve dep source from PR body or package metadata before calling releases API. (source: codex) — Added dep_repo resolution step with npm/Actions/PyPI guidance; skip+notify if unresolvable.
+- [x] [debt] `actions.md:69` — jq body filter `.body` not truncated; large release notes bloat context. Fix: cap at 500 chars with `(.body // "" | .[0:500])`. (source: pr-review-toolkit:review-pr) — Applied to jq query in Step 0.
 
 ### PR #28 — [FIX] harness-curator: resolve asset repo before stale-code git check (2026-06-07)
 
-- [ ] [harness] Skill/agent instruction fixes use `[HARNESS]` commit type, not `[FIX]` — `[FIX]` requires reproducing test per CLAUDE.md (source: pr-review-toolkit:review-pr)
+- [x] [harness] Skill/agent instruction fixes use `[HARNESS]` commit type, not `[FIX]` — `[FIX]` requires reproducing test per CLAUDE.md (source: pr-review-toolkit:review-pr) — Acknowledged (retro process note; no file change needed).
 
 ### PR #26 — [FEAT] harness-curator agent analysis + productivity persona-debate skill (2026-06-04)
 
-- [ ] [debt] `--seed` seeds `random()` but isn't reproducible cross-run over HTTP (parquet fetch order varies). For true reproducibility use DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. Help text softened in-PR; proper fix deferred (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109`
+- [ ] [debt] `--seed` seeds `random()` but isn't reproducible cross-run over HTTP (parquet fetch order varies). For true reproducibility use DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. Help text softened in-PR; proper fix deferred (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109` *(deferred: needs DuckDB reservoir rewrite)*
 
 ### PR #15 — [DOCS] hwpx skill: lean SKILL.md, dump_table.py, cell editing patterns (2026-05-28)
 
-- [ ] [doc] Fixed OWPML attribute order assumption undocumented in `_own_cell_addr` / `_cell_span` (source: pr-review-toolkit:review-pr) — `dump_table.py:102,117`
+- [x] [doc] Fixed OWPML attribute order assumption undocumented in `_own_cell_addr` / `_cell_span` (source: pr-review-toolkit:review-pr) — `dump_table.py:102,117` — Added comment to `_own_cell_addr` and docstring to `_cell_span` noting fixed-order assumption.
 
 ### PR #13 — [FEAT] harness-init: mechanical auto-delegation routing (2026-05-27)
 
@@ -39,8 +39,8 @@
 
 ### PR #17 — [REFACTOR] split marketplace into dev-tools + productivity plugins (2026-05-29)
 
-- [ ] [doc] Add migration note for `toolkit:harness-maintenance` → `dev-tools:harness-maintenance` hook rename in README.md (source: review)
-- [ ] [debt] `validate_hwpx` catches only `BadZipFile`; broaden to `except (BadZipFile, OSError)` to handle missing/permission errors (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/build_hwpx.py:147`
-- [ ] [debt] `validate-harness.sh` section 6b uses `grep` but header comment claims "zero grep" — narrow comment to sections 1–5/7–10 (source: pr-review-toolkit:review-pr) — `dev-tools/skills/harness-init/scripts/validate-harness.sh:192`
-- [ ] [debt] `reconcile-harness.py` missing exec bit (mode 100644) — `git update-index --chmod=+x` if direct invocation needed (source: pr-review-toolkit:review-pr)
-- [ ] [doc] README.md Codex install path ambiguous — split `dev-tools/skills/<name>` and `productivity/skills/<name>` into labelled separate lines (source: pr-review-toolkit:review-pr) — `README.md:55`
+- [x] [doc] Add migration note for `toolkit:harness-maintenance` → `dev-tools:harness-maintenance` hook rename in README.md (source: review) — Added migration note under `## Installation` in README.md.
+- [x] [debt] `validate_hwpx` catches only `BadZipFile`; broaden to `except (BadZipFile, OSError)` to handle missing/permission errors (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/build_hwpx.py:147` — Fixed; `BadZipFile` also moved to top-level import.
+- [x] [debt] `validate-harness.sh` section 6b uses `grep` but header comment claims "zero grep" — narrow comment to sections 1–5/7–10 (source: pr-review-toolkit:review-pr) — `dev-tools/skills/harness-init/scripts/validate-harness.sh:18` — Narrowed performance comment to sections 1–5/7–10; noted section 6b grep.
+- [x] [debt] `reconcile-harness.py` missing exec bit (mode 100644) — `git update-index --chmod=+x` if direct invocation needed (source: pr-review-toolkit:review-pr) — wontfix: always invoked as `python3 … reconcile-harness.py`; exec bit not needed.
+- [x] [doc] README.md Codex install path ambiguous — split `dev-tools/skills/<name>` and `productivity/skills/<name>` into labelled separate lines (source: pr-review-toolkit:review-pr) — `README.md:55` — Split into two labelled example blocks.
