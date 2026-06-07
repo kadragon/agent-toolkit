@@ -89,6 +89,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py
 
 Output:
 - `Sprint active: <title>` — tasks.md active or evaluating; leave intact
+- `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
+- `Sprint '<title>' failed. Reverted to backlog.` — sprint returned to queue
 - `Backlog: N queued, M active` — backlog has pending items
 - `Backlog clear.` — nothing pending
 
@@ -120,9 +122,9 @@ invariant, a behavior contract, a design decision. The script cannot make this
 call; you must.
 
 Signal to judge from (tasks.md is already deleted by C):
-- the `done` line C printed (`Sprint '<title>' done.`)
+- the `done` line C printed (`Sprint '<title>' done. tasks.md removed.`)
 - the latest `CHANGELOG.md` entry (acceptance-criteria summary), if present
-- `git log` / `git diff` for the sprint's commits
+- `git log origin/main..HEAD` / `git diff origin/main..HEAD` for the sprint's commits
 
 If doc-worthy → extract it into the relevant `docs/*.md` (the file named in the
 AGENTS.md docs index) **as a durable rule**, before moving on. If it was a
