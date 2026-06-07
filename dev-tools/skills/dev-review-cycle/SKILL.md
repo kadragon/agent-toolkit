@@ -101,7 +101,11 @@ Use `review_candidates` from preflight output to dynamically select and launch r
 
 **Selection procedure (do this inline — no extra Agent tool call):**
 
-1. Get diff context: `git diff ${BASE_BRANCH}...HEAD --name-only --stat`
+1. Get and store the full branch diff — this becomes the authoritative scope reference for Step 3:
+   ```bash
+   CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
+   ```
+   Do NOT use `git diff HEAD` (last commit only). The branch may have multiple commits.
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
 3. Apply these selection rules:
    - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
@@ -160,6 +164,8 @@ If all launched sources failed or returned no findings, fall back to inline revi
 ### Step 3: Consolidate Reviews and Get User Approval
 
 Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
+
+**Scope reference:** Use `CHANGED_FILES` from Step 2-1 as the authoritative file list. A finding is in-scope if its file appears in `CHANGED_FILES` (full branch diff). Do not use `git diff HEAD` — that shows only the most recent commit and will incorrectly exclude files changed in earlier commits on this branch.
 
 **If `--auto` is NOT set:** STOP here and ask the user for confirmation. The user may approve all, reject some, or change scope classifications before proceeding.
 

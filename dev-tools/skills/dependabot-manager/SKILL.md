@@ -94,6 +94,7 @@ Never pause for:
 - **Dependabot may replace PRs**: After rebase, Dependabot sometimes closes the stale PR and opens a new one with a different number and updated scope. Re-list with `--author app/dependabot --state open` after rebase and confirm new PR numbers before any merge or further action — never use original PR numbers from pre-rebase triage.
 - **Branch protection needs GitHub Pro on private repos**: `enable-automerge.sh` on a private repo on the free plan gets `403 Upgrade to GitHub Pro` from the protection API. The script reports `protection_action: "unsupported_plan"` and exits 0 (so a batch run survives) — but `allow_auto_merge` is on with NO required checks, so any later `gh pr merge --auto` fires immediately. Treat these repos as merge-on-manual-confirm, not auto.
 - **No CI signal = same immediate-merge risk**: when `enable-automerge.sh` finds no CI checks it returns `protection_action: "skipped"` — `allow_auto_merge` on, no required checks. Identical risk to `unsupported_plan`: `--auto` would merge immediately. Treat `skipped` repos as merge-on-manual-confirm too.
+- **Same-repo parallel merge causes "Base branch was modified"**: when a repo has multiple ready PRs, merging them in parallel background processes fails because the first merge advances the base branch before the second can land. Merge PRs from the **same repo sequentially**; PRs across different repos can run in parallel.
 
 ## Subagent Model Selection
 
