@@ -66,10 +66,19 @@ Detect major PRs by title (major version number differs). Merging one makes othe
 
 ### Step 0: Check changelog before merge decision
 
-For each major PR, fetch release notes to surface breaking changes:
+For each major PR, resolve the **dependency's** source repo and fetch its release notes.
+`repos/{owner}/{repo}` is the *app* repo — not the dependency — so always derive `dep_repo` first.
+
+**Resolve `dep_repo`:**
+Extract the dependency name from the PR title (e.g. `Bump actions/checkout from 3 to 4` → `actions/checkout`).
+For GitHub Actions: `dep_repo` is the action slug directly (`{owner}/{action-name}`).
+For npm/PyPI packages: look up the `repository` field in the package manifest or the PR body's
+"Release notes" / "Commits" link — both include a GitHub URL when available.
+If `dep_repo` cannot be resolved, skip this step and note it to the user — do not silently return empty data.
 
 ```bash
-gh api repos/{owner}/{repo}/releases --jq '.[0:3] | .[] | {tag: .tag_name, body: .body}'
+dep_repo="{resolved-owner}/{resolved-repo}"   # derived above
+gh api "repos/$dep_repo/releases" --jq '.[0:3] | .[] | {tag: .tag_name, body: (.body // "" | .[0:500])}'
 ```
 
 Report to user:
