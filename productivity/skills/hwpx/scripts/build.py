@@ -545,11 +545,12 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                 print(line)
             for line in _analyze_paraprops(header_root):
                 print(line)
-            for i, sec_name in enumerate(section_names):
+            for sec_name in section_names:
                 sec_path = os.path.join(tmpdir, sec_name.replace("/", os.sep))
                 section_root = ET.parse(sec_path).getroot()
                 if len(section_names) > 1:
-                    print(f"\n── section {i} ──")
+                    sec_idx = SECTION_N_RE.match(sec_name).group(1)  # type: ignore[union-attr]
+                    print(f"\n── section {sec_idx} ──")
                 print(_analyze_section(section_root))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -600,7 +601,7 @@ def main() -> None:
     p_analyze = sub.add_parser("analyze", help="Deep-analyze HWPX document structure")
     p_analyze.add_argument("input", help="Input .hwpx file")
     p_analyze.add_argument("--extract-header", metavar="PATH", help="Extract header.xml to path")
-    p_analyze.add_argument("--extract-section", metavar="PATH", help="Extract section0.xml to path")
+    p_analyze.add_argument("--extract-section", metavar="PATH", help="Extract first section XML to path")
     p_analyze.add_argument("--table-id", metavar="TABLE_ID", help="Show only this table's analysis")
 
     # next-id
