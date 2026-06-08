@@ -75,11 +75,9 @@ trap 'rm -f "$AGY_OUT"' EXIT
 NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --dangerously-skip-permissions \
   --add-dir "$REPO_ROOT" \
-  --print-timeout 9m > "$AGY_OUT"
+  --print-timeout 9m 2>/dev/stderr | tee "$AGY_OUT"
 
-if [ ! -s "$AGY_OUT" ]; then
+if ! grep -q '[^[:space:]]' "$AGY_OUT"; then
   echo "agy returned empty output — review skipped (possible platform compat issue)" >&2
   exit 1
 fi
-
-cat "$AGY_OUT"
