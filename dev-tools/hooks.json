@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./hooks/harness-maintenance/run.sh",
+            "timeout": 15,
+            "statusMessage": "Checking harness..."
+          },
+          {
+            "type": "command",
+            "command": "python3 ./hooks/task-audit-nudge/nudge.py",
+            "timeout": 5,
+            "statusMessage": "Checking harness-curator staleness..."
+          }
+        ]
+      }
+    ]
+  }
+}

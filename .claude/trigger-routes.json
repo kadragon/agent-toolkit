@@ -1,0 +1,27 @@
+[
+  {
+    "pattern": "(implement.*backlog|backlog.*item|스킬.*수정|스킬.*추가|훅.*수정|에이전트.*수정|fix.*skill|add.*skill|modify.*hook|update.*agent|이거.*구현|구현해줘|백로그.*구현)",
+    "instruction": "Use Skill(skill-dev-orchestrator) to orchestrate the implementation. Do NOT inline-implement.",
+    "skip_if_prompt_matches": "(inline|직접|without orchestrator)"
+  },
+  {
+    "pattern": "(dev.*review|review.*cycle|리뷰.*사이클|dev-review|dev review|리뷰.*돌려|review.*pr|pr.*review)",
+    "instruction": "Use Skill(dev-tools:dev-review-cycle) to run the review cycle. Do NOT inline-manage review.",
+    "skip_if_prompt_matches": "(skip|no review|without review)"
+  },
+  {
+    "pattern": "(harness.*curator|transcript.*anal|스킬.*분석|harness.*friction|curator)",
+    "instruction": "Use Skill(dev-tools:harness-curator) for harness analysis.",
+    "skip_if_prompt_matches": ""
+  },
+  {
+    "pattern": "(explore.*skill|탐색.*스킬|map.*plugin|plugin.*structure.*unknown|explore.*plugin)",
+    "instruction": "Spawn Agent(subagent_type=explorer) before editing — first-touch discovery rule.",
+    "skip_if_prompt_matches": ""
+  },
+  {
+    "pattern": "(skill.*quality|evaluate.*skill|스킬.*평가|skill.*eval|assess.*skill)",
+    "instruction": "Spawn Agent(subagent_type=skill-evaluator) for skill quality assessment.",
+    "skip_if_prompt_matches": ""
+  }
+]

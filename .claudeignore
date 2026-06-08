@@ -31,3 +31,14 @@ uv.lock
 *.log
 tmp/
 .cache/
+
+# Plugin cache (installed, not source)
+cache/
+
+# Workspace artifacts (ephemeral)
+_workspace/
+
+# Codex-specific dirs (not Claude Code context)
+.agents/plugins/
+dev-tools/.codex-plugin/
+productivity/.codex-plugin/

@@ -1,0 +1,44 @@
+name: harness-check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-bump:
+    name: Plugin version bump check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check dev-tools version bumped
+        run: |
+          CHANGED=$(git diff origin/main...HEAD -- dev-tools/ | grep -c '^+\|^-' || true)
+          if [ "$CHANGED" -gt 0 ]; then
+            BUMP=$(git diff origin/main...HEAD -- dev-tools/.claude-plugin/plugin.json | grep '^\+.*"version"' | wc -l | tr -d ' ')
+            if [ "$BUMP" -eq 0 ]; then
+              echo "ERROR: dev-tools/ changed but dev-tools/.claude-plugin/plugin.json version not bumped."
+              echo "See docs/conventions.md for semver rules."
+              exit 1
+            fi
+            echo "OK: dev-tools version bumped."
+          else
+            echo "SKIP: dev-tools/ not changed."
+          fi
+
+      - name: Check productivity version bumped
+        run: |
+          CHANGED=$(git diff origin/main...HEAD -- productivity/ | grep -c '^+\|^-' || true)
+          if [ "$CHANGED" -gt 0 ]; then
+            BUMP=$(git diff origin/main...HEAD -- productivity/.claude-plugin/plugin.json | grep '^\+.*"version"' | wc -l | tr -d ' ')
+            if [ "$BUMP" -eq 0 ]; then
+              echo "ERROR: productivity/ changed but productivity/.claude-plugin/plugin.json version not bumped."
+              echo "See docs/conventions.md for semver rules."
+              exit 1
+            fi
+            echo "OK: productivity version bumped."
+          else
+            echo "SKIP: productivity/ not changed."
+          fi

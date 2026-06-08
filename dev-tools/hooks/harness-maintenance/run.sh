@@ -13,7 +13,11 @@
 
 set -uo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [[ -z "$PLUGIN_ROOT" ]] && [[ -n "$SCRIPT_DIR" ]]; then
+  PLUGIN_ROOT=$(cd -- "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P)
+fi
 SCRIPTS="${PLUGIN_ROOT}/skills/harness-init/scripts"
 
 # Guard: not a harness repo
