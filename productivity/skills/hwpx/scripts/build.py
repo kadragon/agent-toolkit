@@ -33,6 +33,7 @@ from _common import (
     collect_ids,
     get_ids_from_hwpx,
     MIN_USER_ID,
+    SECTION_N_RE,
     xml_escape,
 )
 
@@ -488,25 +489,32 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     tmpdir = tempfile.mkdtemp()
     try:
         with zipfile.ZipFile(args.input, "r") as z:
+            all_names = z.namelist()
             z.extractall(tmpdir)
 
         header_path = os.path.join(tmpdir, "Contents", "header.xml")
-        section_path = os.path.join(tmpdir, "Contents", "section0.xml")
+        if not os.path.exists(header_path):
+            print("Error: Contents/header.xml not found", file=sys.stderr)
+            sys.exit(1)
 
-        if not os.path.exists(header_path) or not os.path.exists(section_path):
-            print("Error: Contents/header.xml or Contents/section0.xml not found", file=sys.stderr)
+        section_names = sorted(
+            [n for n in all_names if SECTION_N_RE.match(n)],
+            key=lambda n: int(SECTION_N_RE.match(n).group(1)),  # type: ignore[union-attr]
+        )
+        if not section_names:
+            print("Error: no section XML files found in archive", file=sys.stderr)
             sys.exit(1)
 
         header_root = ET.parse(header_path).getroot()
-        section_root = ET.parse(section_path).getroot()
 
         if args.extract_header:
             shutil.copy2(header_path, args.extract_header)
             print(f"header.xml → {args.extract_header}")
 
         if args.extract_section:
-            shutil.copy2(section_path, args.extract_section)
-            print(f"section0.xml → {args.extract_section}")
+            section0_path = os.path.join(tmpdir, section_names[0].replace("/", os.sep))
+            shutil.copy2(section0_path, args.extract_section)
+            print(f"{section_names[0]} → {args.extract_section}")
 
         print("=" * 64)
         print(f"  HWPX 심층 분석: {os.path.basename(args.input)}")
@@ -514,9 +522,15 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         print()
 
         if args.table_id:
-            result = _analyze_section(section_root, table_id_filter=args.table_id)
-            print(result)
-            if "TABLE id=" not in result:
+            found = False
+            for sec_name in section_names:
+                sec_path = os.path.join(tmpdir, sec_name.replace("/", os.sep))
+                section_root = ET.parse(sec_path).getroot()
+                result = _analyze_section(section_root, table_id_filter=args.table_id)
+                if "TABLE id=" in result:
+                    print(result)
+                    found = True
+            if not found:
                 print(
                     f"Warning: table id={args.table_id} not found "
                     "(only top-level tables are searched; nested tables are not traversed)",
@@ -531,7 +545,12 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                 print(line)
             for line in _analyze_paraprops(header_root):
                 print(line)
-            print(_analyze_section(section_root))
+            for i, sec_name in enumerate(section_names):
+                sec_path = os.path.join(tmpdir, sec_name.replace("/", os.sep))
+                section_root = ET.parse(sec_path).getroot()
+                if len(section_names) > 1:
+                    print(f"\n── section {i} ──")
+                print(_analyze_section(section_root))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

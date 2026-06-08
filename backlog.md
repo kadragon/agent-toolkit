@@ -2,17 +2,24 @@
 
 ## Now
 
-- [ ] [debt] `validate.py:175` — double-read of section XML in `do_validate`: bytes read once for tree parse, again via `zf.read()` for regex ID extraction. Consolidate into single read. (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/validate.py`
-- [ ] [debt] `build.py:cmd_analyze` — hard-wired to `section0.xml` only; multi-section HWPX shows only first section. Enumerate all sections like `collect_metrics` does. (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/build_hwpx.py`
-- [ ] [debt] `validate.py:31` — `SECTION_N_RE` imported as alias `SECTION_RE`, shadowing the non-capturing `SECTION_RE` from `_common`. Rename local alias. (source: agy)
-
 ## Next
+
+- [ ] [harness] `harness-check.yml` — add `OLD_CODEX` baseline: `git show origin/main:{plugin}/.codex-plugin/plugin.json | jq -r .version`. Without it, Codex-only version drift emits misleading "Claude manifest not bumped" error. (source: pr-review-toolkit:review-pr, PR #35)
+- [ ] [doc] `docs/platform-specs.md` Codex plugin.json example — add `"hooks": "./hooks.json"` (omitted despite spec saying Codex supports hooks field). (source: pr-review-toolkit:review-pr, PR #35)
+- [ ] [doc] `docs/platform-specs.md:126` — replace hardcoded `"version": "3.0.7"` with `"version": "X.Y.Z"` in example JSON. (source: pr-review-toolkit:review-pr, PR #35)
+- [ ] [doc] `docs/platform-specs.md` Sources section — verify URLs (`code.claude.com` vs `docs.anthropic.com`, Codex URL format). (source: pr-review-toolkit:review-pr, PR #35)
 
 - [ ] [debt] `--seed` in persona-debate not reproducible cross-run over HTTP (parquet fetch order varies). Fix: DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109` *(deferred: needs DuckDB reservoir rewrite)*
 
 ## Someday
 
 ## History
+
+### PR #36 — hwpx: Now-backlog debt (2026-06-09)
+
+- [x] [debt] `validate.py` — `SECTION_N_RE as SECTION_RE` alias removed; renamed all 4 uses to `SECTION_N_RE`. (source: agy)
+- [x] [debt] `validate.py:do_validate` — section bytes cached during parse loop; eliminated second `zf.read()` at line 175. (source: pr-review-toolkit:review-pr)
+- [x] [fix] `build.py:cmd_analyze` — multi-section HWPX supported; enumerates all sections, loops for analysis + `--table-id` search. (source: pr-review-toolkit:review-pr)
 
 ### PR #33 — hwpx: port lxml → stdlib ET (2026-06-08)
 
