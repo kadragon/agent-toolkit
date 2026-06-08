@@ -498,9 +498,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         header_root = ET.parse(header_path).getroot()
-        assert header_root is not None
         section_root = ET.parse(section_path).getroot()
-        assert section_root is not None
 
         if args.extract_header:
             shutil.copy2(header_path, args.extract_header)

@@ -234,9 +234,7 @@ def _text_of_t(t_node: ET.Element) -> str:
 def _collect_one_section(section_bytes: bytes) -> Metrics:
     """Parse one section XML and return its Metrics."""
     root = ET.parse(BytesIO(section_bytes)).getroot()
-    paragraphs = root.findall(".//hs:sec/hp:p", NS_PG)
-    if not paragraphs:
-        paragraphs = root.findall(".//hp:p", NS_PG)
+    paragraphs = root.findall(".//hp:p", NS_PG)
     page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
     column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
     tables = root.findall(".//hp:tbl", NS_PG)
