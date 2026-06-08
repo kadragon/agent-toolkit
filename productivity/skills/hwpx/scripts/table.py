@@ -348,6 +348,29 @@ def cmd_locate(args: argparse.Namespace) -> None:
 
 # ── insert ────────────────────────────────────────────────────────────────────
 
+def _set_row_addr(row: str, new_idx: int) -> str:
+    """Replace rowAddr only in top-level cells, not inside nested tables."""
+    depth = 0
+    result = []
+    last = 0
+    for m in re.finditer(r'<hp:tbl\b|</hp:tbl>|rowAddr="\d+"', row):
+        g = m.group()
+        if g.startswith("<hp:tbl"):
+            depth += 1
+            result.append(row[last:m.end()])
+            last = m.end()
+        elif g == "</hp:tbl>":
+            depth -= 1
+            result.append(row[last:m.end()])
+            last = m.end()
+        else:
+            result.append(row[last:m.start()])
+            last = m.end()
+            result.append('rowAddr="%d"' % new_idx if depth == 0 else g)
+    result.append(row[last:])
+    return "".join(result)
+
+
 CELL_RE = re.compile(
     r'(<hp:cellAddr colAddr=")(\d+)(" rowAddr=")(\d+)("/>)'
     r'(<hp:cellSpan colSpan="\d+" rowSpan=")(\d+)("/>)'
@@ -398,8 +421,7 @@ def _insert_row(xml: str, table_id: str, at_index: int,
                      if a[6] != b[6])
         new_rows.append(row)
     new_rows.insert(at_index, row_xml)
-    new_rows = [re.sub(r'rowAddr="\d+"', 'rowAddr="%d"' % i, r)
-                for i, r in enumerate(new_rows)]
+    new_rows = [_set_row_addr(r, i) for i, r in enumerate(new_rows)]
     new_prefix, nc = re.subn(
         r'(<hp:tbl\b[^>]*\browCnt=")(\d+)(")',
         lambda m: m.group(1) + str(int(m.group(2)) + 1) + m.group(3),
@@ -696,8 +718,7 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
 
         row = TRIPLET_RE.sub(_fix, row)
         kept.append(row)
-    kept = [re.sub(r'rowAddr="\d+"', 'rowAddr="%d"' % idx, r)
-            for idx, r in enumerate(kept)]
+    kept = [_set_row_addr(r, idx) for idx, r in enumerate(kept)]
     new_prefix, nc = re.subn(
         r'(<hp:tbl\b[^>]*\browCnt=")(\d+)(")',
         lambda m: m.group(1) + str(int(m.group(2)) - len(del_idx)) + m.group(3),

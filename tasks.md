@@ -1,5 +1,12 @@
 ## Review Backlog
 
+### PR #32 — [REFACTOR] hwpx: consolidate 16 scripts into 5 + _common.py (2026-06-08)
+
+- [ ] [debt] Multi-section HWPX not supported in `validate.py page-guard` — `collect_metrics` reads only `section0.xml`. Iterate all `Contents/section*.xml` and aggregate Metrics across sections. (source: agy) — `validate.py:232`
+- [ ] [debt] `_assert_int` helper defined but used only once — inline `assert open_inner is not None` or `cast(int, open_inner)`. (source: pr-review-toolkit:review-pr) — `table.py:46`
+- [ ] [debt] `end or 0` fallback in `_matched_spans` silently swallows a bug — replace with `assert end is not None`. (source: pr-review-toolkit:review-pr) — `table.py:291`
+- [ ] [debt] `_validate_hwpx` uses `etree` without `_require_lxml` guard at function level — safe in current call graph but latent trap for direct callers. (source: pr-review-toolkit:review-pr) — `build.py:109`
+
 ### PR #29 — [HARNESS] dev-review-cycle: fix merge cleanup + scope clarity + shell doc rule (2026-06-07)
 
 - [x] [debt] `actions.md:72` — `gh api repos/{owner}/{repo}/releases` fetches the **app** repo's releases, not the upgraded dependency's releases; returns irrelevant/empty data for major PRs. Fix: resolve dep source from PR body or package metadata before calling releases API. (source: codex) — Added dep_repo resolution step with npm/Actions/PyPI guidance; skip+notify if unresolvable.

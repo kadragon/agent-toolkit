@@ -17,7 +17,6 @@ except Exception:
 
 import argparse
 import json
-import re
 import sys
 import zipfile
 from collections import Counter
@@ -28,6 +27,8 @@ from typing import List, Tuple
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 from lxml import etree
+
+from _common import SECTION_N_RE as SECTION_RE, PARA_ID_RE, PLACEHOLDER_IDS
 
 REQUIRED_FILES = [
     "mimetype",
@@ -40,9 +41,6 @@ NS_HH = "http://www.hancom.co.kr/hwpml/2011/head"
 NS_HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 NS_HS = "http://www.hancom.co.kr/hwpml/2011/section"
 NS = {"hh": NS_HH, "hp": NS_HP, "hs": NS_HS}
-SECTION_RE = re.compile(r"^Contents/section(\d+)\.xml$")
-PARA_ID_RE = re.compile(r'<hp:p\s[^>]*\bid="(\d+)"')
-PLACEHOLDER_IDS = {"0", "2147483648"}
 
 
 # ── validate ──────────────────────────────────────────────────────────────────

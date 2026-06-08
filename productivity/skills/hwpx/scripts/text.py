@@ -22,18 +22,14 @@ except Exception:
 
 import argparse
 import importlib.util
-import re
 import sys
 import zipfile
-from collections import Counter
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
-from _common import LINESEG_RE, PARA_ID_RE, PLACEHOLDER_IDS
+from _common import LINESEG_RE, check_para_ids, SECTION_N_RE as SECTION_RE
 
 _HAS_LXML = importlib.util.find_spec("lxml") is not None
-
-SECTION_RE = re.compile(r"^Contents/section(\d+)\.xml$")
 
 
 # ── extract ───────────────────────────────────────────────────────────────────
@@ -122,19 +118,10 @@ def cmd_extract(args: argparse.Namespace) -> None:
         Path(args.output).write_text(result, encoding="utf-8")
         print(f"Extracted to: {args.output}", file=sys.stderr)
     else:
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         print(result)
 
 
 # ── patch ─────────────────────────────────────────────────────────────────────
-
-def _check_para_ids(xml_str: str) -> list[str]:
-    ids = [i for i in PARA_ID_RE.findall(xml_str) if i not in PLACEHOLDER_IDS]
-    dupes = [i for i, n in Counter(ids).items() if n > 1]
-    if dupes:
-        return [f"Duplicate hp:p IDs detected (HWP crash risk): {dupes}"]
-    return []
-
 
 def _patch_xml(
     xml_bytes: bytes, old: str, new: str, count: int, after: str | None = None
@@ -157,7 +144,7 @@ def _patch_xml(
     if replaced == 0:
         return xml_bytes, 0, []
     new_str, _ = LINESEG_RE.subn("", prefix + new_body)
-    errors = _check_para_ids(new_str)
+    errors = check_para_ids(new_str)
     return new_str.encode("utf-8"), replaced, errors
 
 

@@ -74,14 +74,14 @@ def _update_metadata(content_hpf: Path, title: str | None, creator: str | None) 
         raw = re.sub(r"<opf:title\s*/>", f"<opf:title>{safe_title}</opf:title>", raw)
         raw = re.sub(r"<opf:title>[^<]*</opf:title>", f"<opf:title>{safe_title}</opf:title>", raw)
     if creator:
-        safe_creator = xml_escape(creator).replace("&quot;", '"')
+        safe_creator = xml_escape(creator)
         raw = re.sub(
             r'(<opf:meta name="creator" content=")[^"]*(")',
-            rf'\g<1>{safe_creator}\2', raw,
+            lambda m: m.group(1) + safe_creator + m.group(2), raw,
         )
         raw = re.sub(
             r'(<opf:meta name="lastsaveby" content=")[^"]*(")',
-            rf'\g<1>{safe_creator}\2', raw,
+            lambda m: m.group(1) + safe_creator + m.group(2), raw,
         )
     raw = re.sub(r'(<opf:meta name="CreatedDate" content=")[^"]*(")', rf'\g<1>{iso_now}\2', raw)
     raw = re.sub(r'(<opf:meta name="ModifiedDate" content=")[^"]*(")', rf'\g<1>{iso_now}\2', raw)
@@ -399,7 +399,7 @@ def _analyze_table(tbl: etree._Element, indent: str = "") -> str:
                         col_widths[col_idx] = csz.get("width", "?")
     sorted_widths = [col_widths.get(i, "?") for i in range(cols)]
     lines.append(f"{indent}│  열너비: [{', '.join(sorted_widths)}]")
-    total = sum(int(v) for v in sorted_widths if v != "?")
+    total = sum(int(v) for v in sorted_widths if v != "?" and v.isdigit())
     lines.append(f"{indent}│  합계: {total}")
     lines.append(f"{indent}│")
     for ri, tr in enumerate(tbl.findall("hp:tr", NS)):
@@ -491,6 +491,7 @@ def _analyze_section(section_root: etree._Element, table_id_filter: str | None =
 
 def cmd_analyze(args: argparse.Namespace) -> None:
     _require_lxml("analyze")
+    FONT_MAP.clear()
     if not os.path.exists(args.input):
         print(f"Error: {args.input} not found", file=sys.stderr)
         sys.exit(1)
