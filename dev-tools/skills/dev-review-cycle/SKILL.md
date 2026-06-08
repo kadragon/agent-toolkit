@@ -131,6 +131,8 @@ Agent tool parameters:
        - For kind="builtin": invoke exactly like any other skill.
     3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
        Tag each finding with source="${SKILL_ID}".
+    IMPORTANT: Only flag issues that were **introduced or made significantly worse** by
+    this PR's changes. Do NOT flag pre-existing issues in code untouched by this PR.
 ```
 
 #### 2-2: Antigravity (agy) Review
@@ -165,7 +167,7 @@ If all launched sources failed or returned no findings, fall back to inline revi
 
 Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
 
-**Scope reference:** Use `CHANGED_FILES` from Step 2-1 as the authoritative file list. A finding is in-scope if its file appears in `CHANGED_FILES` (full branch diff). Do not use `git diff HEAD` — that shows only the most recent commit and will incorrectly exclude files changed in earlier commits on this branch.
+**Scope reference:** Use `CHANGED_FILES` from Step 2-1 as the authoritative file list. A finding is in-scope only if (a) its file appears in `CHANGED_FILES` AND (b) the issue was introduced or made significantly worse by this PR — not pre-existing. Pre-existing issues in changed files are out-of-scope unless this PR made them materially worse. Issues in unchanged files are always out-of-scope. Do not use `git diff HEAD` — that shows only the most recent commit and will incorrectly exclude files changed in earlier commits on this branch.
 
 **If `--auto` is NOT set:** STOP here and ask the user for confirmation. The user may approve all, reject some, or change scope classifications before proceeding.
 
