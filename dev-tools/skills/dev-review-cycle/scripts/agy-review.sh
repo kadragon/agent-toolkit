@@ -67,7 +67,19 @@ List findings ordered by priority (P0 first). After all findings, add:
 - If no issues worth flagging exist, say so plainly — do not invent findings."
 
 # The orchestrator already enforces a 600s timeout via run_in_background.
+# Capture to temp file so we can detect empty output (e.g. Windows compat failures
+# where agy exits 0 but writes nothing to stdout).
+AGY_OUT=$(mktemp)
+trap 'rm -f "$AGY_OUT"' EXIT
+
 NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --dangerously-skip-permissions \
   --add-dir "$REPO_ROOT" \
-  --print-timeout 9m
+  --print-timeout 9m > "$AGY_OUT"
+
+if [ ! -s "$AGY_OUT" ]; then
+  echo "agy returned empty output — review skipped (possible platform compat issue)" >&2
+  exit 1
+fi
+
+cat "$AGY_OUT"
