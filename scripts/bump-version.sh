@@ -49,17 +49,19 @@ bump_plugin() {
   [[ -f "$claude_json" ]] || { echo "Not found: $claude_json" >&2; exit 1; }
   [[ -f "$codex_json"  ]] || { echo "Not found: $codex_json"  >&2; exit 1; }
 
-  local current_version
-  current_version=$(grep '"version"' "$claude_json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+  local claude_ver codex_ver
+  claude_ver=$(grep '"version"' "$claude_json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/' | tr -d '\r')
+  [[ -n "$claude_ver" ]] || { echo "Could not parse version from $claude_json" >&2; exit 1; }
+  codex_ver=$(grep '"version"' "$codex_json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/' | tr -d '\r')
+  [[ -n "$codex_ver" ]] || { echo "Could not parse version from $codex_json" >&2; exit 1; }
 
   local new_version
-  new_version=$(bump_semver "$current_version" "$bump_type")
+  new_version=$(bump_semver "$claude_ver" "$bump_type")
 
-  for f in "$claude_json" "$codex_json"; do
-    sed -i '' "s/\"version\": \"${current_version}\"/\"version\": \"${new_version}\"/" "$f"
-  done
+  perl -pi -e "s/\"version\": \"${claude_ver}\"/\"version\": \"${new_version}\"/" "$claude_json"
+  perl -pi -e "s/\"version\": \"${codex_ver}\"/\"version\": \"${new_version}\"/" "$codex_json"
 
-  echo "  ${plugin}: ${current_version} → ${new_version}"
+  echo "  ${plugin}: ${claude_ver} → ${new_version}"
 }
 
 bump_skill() {
@@ -69,14 +71,14 @@ bump_skill() {
   [[ -f "$skill_md" ]] || { echo "Not found: $skill_md" >&2; exit 1; }
 
   local current_version
-  current_version=$(grep '^version:' "$skill_md" | awk '{print $2}')
+  current_version=$(grep '^version:' "$skill_md" | awk '{print $2}' | tr -d '\r')
 
   [[ -n "$current_version" ]] || { echo "No 'version:' field in $skill_md" >&2; exit 1; }
 
   local new_version
   new_version=$(bump_semver "$current_version" "$bump_type")
 
-  sed -i '' "s/^version: ${current_version}$/version: ${new_version}/" "$skill_md"
+  perl -pi -e "s/^version: ${current_version}\$/version: ${new_version}/" "$skill_md"
   echo "    skill ${skill_name}: ${current_version} → ${new_version}"
 }
 
@@ -108,6 +110,18 @@ done
 
 [[ "$BUMP_TYPE" =~ ^(major|minor|patch)$ ]] || usage
 
+# ── Pre-flight: validate all targets before mutating any files ─────────────────
+
+if [[ -n "$SKILL_NAME" ]]; then
+  if [[ "$PLUGIN" == "all" ]]; then
+    echo "Error: --skill with 'all' is ambiguous; specify the plugin explicitly" >&2
+    exit 1
+  fi
+  _skill_md="${REPO_ROOT}/${PLUGIN}/skills/${SKILL_NAME}/SKILL.md"
+  [[ -f "$_skill_md" ]] || { echo "Not found: $_skill_md" >&2; exit 1; }
+  grep -q '^version:' "$_skill_md" || { echo "No 'version:' field in $_skill_md" >&2; exit 1; }
+fi
+
 # ── Execute ───────────────────────────────────────────────────────────────────
 
 echo "Bumping versions (${BUMP_TYPE}):"
@@ -122,9 +136,6 @@ case "$PLUGIN" in
   all)
     bump_plugin "dev-tools" "$BUMP_TYPE"
     bump_plugin "productivity" "$BUMP_TYPE"
-    if [[ -n "$SKILL_NAME" ]]; then
-      echo "Warning: --skill with 'all' is ambiguous; skipping skill bump" >&2
-    fi
     ;;
   *) usage ;;
 esac

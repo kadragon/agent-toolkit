@@ -132,7 +132,8 @@ Agent tool parameters:
     3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
        Tag each finding with source="${SKILL_ID}".
     IMPORTANT: Only flag issues that were **introduced or made significantly worse** by
-    this PR's changes. Do NOT flag pre-existing issues in code untouched by this PR.
+    this PR's changes. Do NOT flag pre-existing issues — whether in untouched files or in
+    unchanged lines within touched files.
 ```
 
 #### 2-2: Antigravity (agy) Review

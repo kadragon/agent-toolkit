@@ -34,7 +34,6 @@ For each remaining suggestion, determine whether it falls within the current PR'
 
 - **In-scope:** Issue was **introduced or made significantly worse** by this PR AND is fixable without expanding the PR's stated purpose.
 - **Out-of-scope:** Issue is pre-existing in code this PR didn't touch, OR requires architectural change beyond this PR's purpose, OR is in an unchanged file.
-- **Quick-win (apply as in-scope):** Pre-existing issue in an adjacent unchanged file that is a trivial 1–2 line fix and does not expand the PR's logical scope. Explicitly note it as a quick-win when classifying.
 
 When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
 
