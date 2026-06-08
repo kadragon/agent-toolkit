@@ -18,13 +18,18 @@ jobs:
           CHANGED=$(git diff origin/main...HEAD -- dev-tools/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
             OLD=$(git show origin/main:dev-tools/.claude-plugin/plugin.json | jq -r .version)
-            NEW=$(jq -r .version dev-tools/.claude-plugin/plugin.json)
-            if [ "$OLD" = "$NEW" ]; then
-              echo "ERROR: dev-tools/ changed but dev-tools/.claude-plugin/plugin.json version not bumped ($NEW)."
+            NEW_CLAUDE=$(jq -r .version dev-tools/.claude-plugin/plugin.json)
+            NEW_CODEX=$(jq -r .version dev-tools/.codex-plugin/plugin.json)
+            if [ "$OLD" = "$NEW_CLAUDE" ]; then
+              echo "ERROR: dev-tools/ changed but dev-tools/.claude-plugin/plugin.json version not bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
-            echo "OK: dev-tools version bumped ($OLD -> $NEW)."
+            if [ "$NEW_CLAUDE" != "$NEW_CODEX" ]; then
+              echo "ERROR: dev-tools manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
+              exit 1
+            fi
+            echo "OK: dev-tools version bumped ($OLD -> $NEW_CLAUDE), both manifests in sync."
           else
             echo "SKIP: dev-tools/ not changed."
           fi
@@ -34,13 +39,18 @@ jobs:
           CHANGED=$(git diff origin/main...HEAD -- productivity/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
             OLD=$(git show origin/main:productivity/.claude-plugin/plugin.json | jq -r .version)
-            NEW=$(jq -r .version productivity/.claude-plugin/plugin.json)
-            if [ "$OLD" = "$NEW" ]; then
-              echo "ERROR: productivity/ changed but productivity/.claude-plugin/plugin.json version not bumped ($NEW)."
+            NEW_CLAUDE=$(jq -r .version productivity/.claude-plugin/plugin.json)
+            NEW_CODEX=$(jq -r .version productivity/.codex-plugin/plugin.json)
+            if [ "$OLD" = "$NEW_CLAUDE" ]; then
+              echo "ERROR: productivity/ changed but productivity/.claude-plugin/plugin.json version not bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
-            echo "OK: productivity version bumped ($OLD -> $NEW)."
+            if [ "$NEW_CLAUDE" != "$NEW_CODEX" ]; then
+              echo "ERROR: productivity manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
+              exit 1
+            fi
+            echo "OK: productivity version bumped ($OLD -> $NEW_CLAUDE), both manifests in sync."
           else
             echo "SKIP: productivity/ not changed."
           fi

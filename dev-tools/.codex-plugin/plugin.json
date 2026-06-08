@@ -16,6 +16,7 @@
     "automation"
   ],
   "skills": "./skills/",
+  "hooks": "./hooks.json",
   "interface": {
     "displayName": "Dev Tools",
     "shortDescription": "Development workflows for agent-assisted engineering",

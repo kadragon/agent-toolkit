@@ -16,6 +16,7 @@
     "analysis"
   ],
   "skills": "./skills/",
+  "agents": "./agents/",
   "interface": {
     "displayName": "Productivity",
     "shortDescription": "Document authoring and persona analysis skills",
