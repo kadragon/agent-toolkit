@@ -1,7 +1,7 @@
 {
   "name": "dev-tools",
   "description": "Personal development skills and workflows for agent-assisted engineering.",
-  "version": "3.0.7",
+  "version": "3.0.8",
   "author": {
     "name": "kadragon"
   },
@@ -16,6 +16,7 @@
     "automation"
   ],
   "skills": "./skills/",
+  "commands": "./commands/",
   "hooks": "./hooks.json",
   "interface": {
     "displayName": "Dev Tools",

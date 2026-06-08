@@ -1,7 +1,7 @@
 {
   "name": "productivity",
   "description": "Personal productivity skills for document authoring and persona-based analysis.",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "author": {
     "name": "kadragon"
   },
@@ -16,6 +16,7 @@
     "analysis"
   ],
   "skills": "./skills/",
+  "agents": "./agents/",
   "interface": {
     "displayName": "Productivity",
     "shortDescription": "Document authoring and persona analysis skills",
