@@ -64,6 +64,21 @@ Both `dev-tools/.claude-plugin/plugin.json` and `productivity/.claude-plugin/plu
 
 Rule: if any file under `dev-tools/` changed in the diff → `dev-tools/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 
+Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):
+
+```bash
+# patch bump for dev-tools
+bash scripts/bump-version.sh dev-tools patch
+
+# minor bump + skill version
+bash scripts/bump-version.sh dev-tools minor --skill harness-curator patch
+
+# bump both plugins
+bash scripts/bump-version.sh all patch
+```
+
+Files updated per plugin: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and optionally `skills/{name}/SKILL.md`.
+
 ## Skill Doc Rules
 
 When writing shell patterns in `SKILL.md` that use variables, always show:

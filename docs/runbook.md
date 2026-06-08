@@ -44,7 +44,7 @@ echo "$PROMPT" | bash .claude/hooks/trigger-router.sh
 ## Release Workflow
 
 1. Make changes to skill/agent files
-2. Bump `plugin.json` version (see `docs/conventions.md` — semver rules)
+2. Bump versions: `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (see `docs/conventions.md` — semver rules)
 3. Run harness validate
 4. Commit + push + PR via `dev-tools:dev-review-cycle`
 5. Merge triggers marketplace update
@@ -62,7 +62,7 @@ git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugi
 
 **Symptom:** `harness-check.yml` exits 1 with "version not bumped"
 **Cause:** Modified files in `dev-tools/` or `productivity/` but didn't bump `plugin.json`
-**Fix:** Run `docs/conventions.md` semver table to choose correct bump; edit `plugin.json` `version` field
+**Fix:** `bash scripts/bump-version.sh <plugin> patch` (or minor/major per semver table in `docs/conventions.md`)
 
 ### Trigger router not firing
 
@@ -94,6 +94,7 @@ bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harne
 
 | Script | Purpose |
 |--------|---------|
+| `scripts/bump-version.sh` | Bump plugin + skill versions atomically across both platforms |
 | `tools/sweep.sh` | Garbage collection sweep |
 | Validate: see above | Structural validation |
 
