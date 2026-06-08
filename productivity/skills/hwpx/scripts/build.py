@@ -107,6 +107,7 @@ def _pack_hwpx(input_dir: Path, output_path: Path) -> None:
 
 
 def _validate_hwpx(hwpx_path: Path) -> list[str]:
+    _require_lxml("validate")
     from zipfile import BadZipFile, ZIP_STORED, ZipFile
     errors: list[str] = []
     required = ["mimetype", "Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml"]

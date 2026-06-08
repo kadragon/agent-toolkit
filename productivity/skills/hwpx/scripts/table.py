@@ -43,11 +43,6 @@ from _common import (
 A4_BODY_WIDTH = 42520
 
 
-def _assert_int(v: int | None) -> int:
-    assert v is not None
-    return v
-
-
 # ── shared table helpers ──────────────────────────────────────────────────────
 
 def _own_cell_addr(tc: str) -> tuple[int, int] | None:
@@ -288,7 +283,8 @@ def _matched_spans(xml: str, tag: str) -> list[tuple[int, int, int]]:
             if not stack:
                 raise ValueError("unbalanced </%s> at offset %d" % (tag, pos))
             start = stack.pop()
-            out.append((start, end or 0, len(stack)))
+            assert end is not None
+            out.append((start, end, len(stack)))
     if stack:
         raise ValueError("unclosed <%s> at offset %d" % (tag, stack[-1]))
     out.sort(key=lambda x: x[0])
@@ -522,7 +518,8 @@ def _direct_sublist(tc: str) -> tuple[int, int] | None:
         else:
             depth -= 1
             if depth == 0:
-                return _assert_int(open_inner), pos
+                assert open_inner is not None
+                return open_inner, pos
     return None
 
 
