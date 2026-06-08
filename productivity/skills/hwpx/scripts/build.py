@@ -19,7 +19,8 @@ except Exception:
     pass
 
 import argparse
-import importlib.util
+import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import Element
 import os
 import re
 import shutil
@@ -35,16 +36,6 @@ from _common import (
     xml_escape,
 )
 
-_HAS_LXML = importlib.util.find_spec("lxml") is not None
-if _HAS_LXML:
-    from lxml import etree
-
-
-def _require_lxml(cmd: str) -> None:
-    if not _HAS_LXML:
-        print(f"Error: lxml required for '{cmd}'. Install: pip install lxml", file=sys.stderr)
-        sys.exit(1)
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 TEMPLATES_DIR = SKILL_DIR / "templates"
@@ -56,8 +47,8 @@ AVAILABLE_TEMPLATES = ["gonmun", "report", "minutes", "proposal"]
 
 def _validate_xml(filepath: Path) -> None:
     try:
-        etree.parse(str(filepath))
-    except etree.XMLSyntaxError as e:
+        ET.parse(str(filepath))
+    except ET.ParseError as e:
         raise SystemExit(f"Malformed XML in {filepath.name}: {e}")
 
 
@@ -107,7 +98,6 @@ def _pack_hwpx(input_dir: Path, output_path: Path) -> None:
 
 
 def _validate_hwpx(hwpx_path: Path) -> list[str]:
-    _require_lxml("validate")
     from zipfile import BadZipFile, ZIP_STORED, ZipFile
     errors: list[str] = []
     required = ["mimetype", "Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml"]
@@ -134,8 +124,8 @@ def _validate_hwpx(hwpx_path: Path) -> list[str]:
         for name in names:
             if name.endswith(".xml") or name.endswith(".hpf"):
                 try:
-                    etree.fromstring(zf.read(name))
-                except etree.XMLSyntaxError as e:
+                    ET.fromstring(zf.read(name))
+                except ET.ParseError as e:
                     errors.append(f"Malformed XML: {name}: {e}")
     return errors
 
@@ -147,15 +137,14 @@ def _update_preview(work_dir: Path) -> None:
         return
     ns = {"hp": "http://www.hancom.co.kr/hwpml/2011/paragraph"}
     try:
-        root = etree.fromstring(section_path.read_bytes())
+        root = ET.fromstring(section_path.read_bytes())
         texts = [t.text for t in root.findall(".//hp:t", ns) if t.text]
         prv_text_path.write_text("".join(texts)[:500], encoding="utf-8")
-    except etree.XMLSyntaxError:
+    except ET.ParseError:
         pass
 
 
 def cmd_build(args: argparse.Namespace) -> None:
-    _require_lxml("build")
     if not BASE_DIR.is_dir():
         raise SystemExit(f"Base template not found: {BASE_DIR}")
 
@@ -223,11 +212,11 @@ NS = {
 FONT_MAP: dict[tuple[str, str], str] = {}
 
 
-def _get_text(el: etree._Element) -> str:
+def _get_text(el: Element) -> str:
     return "".join(t.text for t in el.findall(".//hp:t", NS) if t.text)
 
 
-def _analyze_fonts(root: etree._Element) -> list[str]:
+def _analyze_fonts(root: Element) -> list[str]:
     lines = ["▶ 폰트 정의"]
     for fontface in root.findall(".//hh:fontface", NS):
         lang = fontface.get("lang", "?")
@@ -241,7 +230,7 @@ def _analyze_fonts(root: etree._Element) -> list[str]:
     return lines
 
 
-def _analyze_borderfills(root: etree._Element) -> list[str]:
+def _analyze_borderfills(root: Element) -> list[str]:
     lines = ["▶ borderFill (테두리/배경)"]
     for bf in root.findall(".//hh:borderFill", NS):
         bid = bf.get("id")
@@ -265,7 +254,7 @@ def _analyze_borderfills(root: etree._Element) -> list[str]:
     return lines
 
 
-def _analyze_charprops(root: etree._Element) -> list[str]:
+def _analyze_charprops(root: Element) -> list[str]:
     lines = ["▶ charPr (글자 스타일)"]
     for cp in root.findall(".//hh:charPr", NS):
         cid = cp.get("id")
@@ -295,7 +284,7 @@ def _analyze_charprops(root: etree._Element) -> list[str]:
     return lines
 
 
-def _analyze_paraprops(root: etree._Element) -> list[str]:
+def _analyze_paraprops(root: Element) -> list[str]:
     lines = ["▶ paraPr (문단 스타일)"]
     for pp in root.findall(".//hh:paraPr", NS):
         pid = pp.get("id")
@@ -330,7 +319,7 @@ def _analyze_paraprops(root: etree._Element) -> list[str]:
     return lines
 
 
-def _analyze_cell(tc: etree._Element, indent: str = "") -> str:
+def _analyze_cell(tc: Element, indent: str = "") -> str:
     lines = []
     bf = tc.get("borderFillIDRef", "?")
     addr = tc.find("hp:cellAddr", NS)
@@ -372,7 +361,7 @@ def _analyze_cell(tc: etree._Element, indent: str = "") -> str:
     return "\n".join(lines)
 
 
-def _analyze_table(tbl: etree._Element, indent: str = "") -> str:
+def _analyze_table(tbl: Element, indent: str = "") -> str:
     lines = []
     rows = int(tbl.get("rowCnt", "0"))
     cols = int(tbl.get("colCnt", "0"))
@@ -412,7 +401,7 @@ def _analyze_table(tbl: etree._Element, indent: str = "") -> str:
     return "\n".join(lines)
 
 
-def _analyze_paragraph(p: etree._Element, indent: str = "", table_id_filter: str | None = None) -> str:
+def _analyze_paragraph(p: Element, indent: str = "", table_id_filter: str | None = None) -> str:
     lines = []
     pid = p.get("id", "?")
     ppr = p.get("paraPrIDRef", "0")
@@ -453,7 +442,7 @@ def _analyze_paragraph(p: etree._Element, indent: str = "", table_id_filter: str
     return "\n".join(lines)
 
 
-def _analyze_section(section_root: etree._Element, table_id_filter: str | None = None) -> str:
+def _analyze_section(section_root: Element, table_id_filter: str | None = None) -> str:
     lines = ["▶ 문서 구조"]
     secpr = section_root.find(".//hp:secPr", NS)
     if secpr is not None:
@@ -491,7 +480,6 @@ def _analyze_section(section_root: etree._Element, table_id_filter: str | None =
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
-    _require_lxml("analyze")
     FONT_MAP.clear()
     if not os.path.exists(args.input):
         print(f"Error: {args.input} not found", file=sys.stderr)
@@ -509,8 +497,10 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             print("Error: Contents/header.xml or Contents/section0.xml not found", file=sys.stderr)
             sys.exit(1)
 
-        header_root = etree.parse(header_path).getroot()
-        section_root = etree.parse(section_path).getroot()
+        header_root = ET.parse(header_path).getroot()
+        assert header_root is not None
+        section_root = ET.parse(section_path).getroot()
+        assert section_root is not None
 
         if args.extract_header:
             shutil.copy2(header_path, args.extract_header)

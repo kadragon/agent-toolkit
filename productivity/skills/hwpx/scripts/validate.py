@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import List, Tuple
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
-from lxml import etree
+import xml.etree.ElementTree as ET
 
 from _common import SECTION_N_RE as SECTION_RE, PARA_ID_RE, PLACEHOLDER_IDS
 
@@ -61,7 +61,7 @@ def _dup_para_ids(hwpx_path: str) -> set[str]:
     return {i for i, n in Counter(ids).items() if n > 1}
 
 
-def _check_itemcnt(root: etree._Element) -> list[str]:
+def _check_itemcnt(root: ET.Element) -> list[str]:
     errors = []
     checks = [
         (".//hh:charProperties", "hh:charPr"),
@@ -86,7 +86,7 @@ def _check_itemcnt(root: etree._Element) -> list[str]:
     return errors
 
 
-def _collect_defined_ids(header_root: etree._Element) -> dict[str, set[str]]:
+def _collect_defined_ids(header_root: ET.Element) -> dict[str, set[str]]:
     defined: dict[str, set[str]] = {
         "charPrIDRef": set(),
         "paraPrIDRef": set(),
@@ -104,7 +104,7 @@ def _collect_defined_ids(header_root: etree._Element) -> dict[str, set[str]]:
     return defined
 
 
-def _check_idref(section_root: etree._Element, defined: dict[str, set[str]], section_name: str) -> list[str]:
+def _check_idref(section_root: ET.Element, defined: dict[str, set[str]], section_name: str) -> list[str]:
     errors = []
     checks = [
         (f".//{{{NS_HP}}}run", "charPrIDRef"),
@@ -147,13 +147,13 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
             info = zf.getinfo("mimetype")
             if info.compress_type != ZIP_STORED:
                 errors.append("mimetype must be ZIP_STORED (uncompressed)")
-        parsed: dict[str, etree._Element] = {}
+        parsed: dict[str, ET.Element] = {}
         for name in names:
             if name.endswith(".xml") or name.endswith(".hpf"):
                 try:
-                    root = etree.fromstring(zf.read(name))
+                    root = ET.fromstring(zf.read(name))
                     parsed[name] = root
-                except etree.XMLSyntaxError as e:
+                except ET.ParseError as e:
                     errors.append(f"Malformed XML in {name}: {e}")
         header_root = parsed.get("Contents/header.xml")
         if header_root is None:
@@ -227,22 +227,22 @@ class Metrics:
     paragraph_text_lengths: List[int]
 
 
-def _text_of_t(t_node: etree._Element) -> str:
+def _text_of_t(t_node: ET.Element) -> str:
     return "".join(t_node.itertext())
 
 
 def _collect_one_section(section_bytes: bytes) -> Metrics:
     """Parse one section XML and return its Metrics."""
-    root = etree.parse(BytesIO(section_bytes)).getroot()
-    paragraphs = root.xpath(".//hs:sec/hp:p", namespaces=NS_PG)
+    root = ET.parse(BytesIO(section_bytes)).getroot()
+    paragraphs = root.findall(".//hs:sec/hp:p", NS_PG)
     if not paragraphs:
-        paragraphs = root.xpath(".//hp:p", namespaces=NS_PG)
+        paragraphs = root.findall(".//hp:p", NS_PG)
     page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
     column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
-    tables = root.xpath(".//hp:tbl", namespaces=NS_PG)
+    tables = root.findall(".//hp:tbl", NS_PG)
     table_shapes: List[Tuple[str, str, str, str, str, str]] = []
     for t in tables:
-        sz = t.find("hp:sz", namespaces=NS_PG)
+        sz = t.find("hp:sz", NS_PG)
         width = sz.get("width", "") if sz is not None else ""
         height = sz.get("height", "") if sz is not None else ""
         table_shapes.append((
@@ -253,7 +253,7 @@ def _collect_one_section(section_bytes: bytes) -> Metrics:
             t.get("repeatHeader", ""),
             t.get("pageBreak", ""),
         ))
-    t_nodes = root.xpath(".//hp:t", namespaces=NS_PG)
+    t_nodes = root.findall(".//hp:t", NS_PG)
     text_char_total = 0
     text_char_total_nospace = 0
     for t in t_nodes:
@@ -262,7 +262,7 @@ def _collect_one_section(section_bytes: bytes) -> Metrics:
         text_char_total_nospace += len("".join(s.split()))
     paragraph_text_lengths: List[int] = []
     for p in paragraphs:
-        plen = sum(len(_text_of_t(t)) for t in p.xpath(".//hp:t", namespaces=NS_PG))
+        plen = sum(len(_text_of_t(t)) for t in p.findall(".//hp:t", NS_PG))
         paragraph_text_lengths.append(plen)
     return Metrics(
         paragraph_count=len(paragraphs),

@@ -37,7 +37,7 @@ Intent unclear → ask user, do not assume restore.
 
 ## Environment
 
-Only required package: **`lxml`**. Install via `pip install lxml` if `python -c "import lxml"` fails.
+No external packages required. Scripts use stdlib `xml.etree.ElementTree` only.
 - `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`)
 - OS-specific Python invocation, encoding gotchas (Windows cp949/UTF-8, codepoint escaping), subprocess encoding, and temp-file placement: see `$SKILL_DIR/references/environment.md`
 
@@ -483,20 +483,20 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
 5. 🟡 **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
 6. 🟡 **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
-7. 🔵 **Use venv when available**: prefer project's `.venv/bin/python3` if it exists; any Python with lxml importable works (see `environment.md`)
+7. 🔵 **Python version**: any Python 3.8+ works (stdlib only; no external packages required)
 8. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`; environment/encoding → `environment.md`
 9. 🔵 **build.py build first**: use `build.py build` for new document creation (avoid calling python-hwpx API directly)
 10. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `build.py analyze` + extracted-XML-based restore/rewrite
 11. 🟡 **Same page count required (reference restore mode only)**: in restore mode, keep final result's page count identical to reference. Does not apply to content-edit / new-creation modes
 12. 🟡 **No unauthorized page increase (reference restore mode only)**: in restore mode, no structure changes causing page increase without explicit user request/approval
 13. 🟡 **page-guard must pass (reference restore mode only)**: in restore mode, `validate.py page-guard` must also pass — separate from `validate.py validate` — to mark complete. In content-edit mode, `validate.py page-guard` is reference info, and `validate.py validate --baseline` + actually opening in Hancom is completion gate
-14. 🔴 **No lxml re-serialization**: do not `etree.fromstring()` then `etree.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
-15. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes (no lxml needed) — **except table cell text: use `table.py replace` instead (see rule 24)**
-16. 🔴 **Compact required on new-paragraph insertion**: after serializing lxml-extracted element, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
+14. 🔴 **No XML re-serialization**: do not `ET.fromstring()` then `ET.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
+15. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes — **except table cell text: use `table.py replace` instead (see rule 24)**
+16. 🔴 **Compact required on new-paragraph insertion**: after extracting element content, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
 17. 🟡 **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
 18. 🔴 **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
 19. 🟡 **linesegarray removal required**: when modifying text in existing section, remove that paragraph's `<hp:linesegarray>` — stale line-break cache makes HWP show "document corrupted/modified" warning (HWP auto-recalculates on open)
-20. 🔵 **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no lxml re-serialization. When modifying script directly, this invariant must be kept
+20. 🔵 **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no XML re-serialization. When modifying script directly, this invariant must be kept
 
 > Rules 14–20 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.
 
