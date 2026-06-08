@@ -21,15 +21,13 @@ except Exception:
     pass
 
 import argparse
-import importlib.util
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 from _common import LINESEG_RE, check_para_ids, SECTION_N_RE as SECTION_RE
-
-_HAS_LXML = importlib.util.find_spec("lxml") is not None
 
 
 # ── extract ───────────────────────────────────────────────────────────────────
@@ -61,8 +59,7 @@ def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_ta
 
 
 def _section_lines(xml_bytes: bytes, include_tables: bool) -> list[str]:
-    from lxml import etree
-    root = etree.fromstring(xml_bytes)
+    root = ET.fromstring(xml_bytes)
     lines: list[str] = []
     cur: list[str] = []
     _walk(root, False, lines, cur, include_tables)
@@ -96,10 +93,6 @@ def extract_markdown(hwpx_path: str) -> str:
 
 
 def cmd_extract(args: argparse.Namespace) -> None:
-    if not _HAS_LXML:
-        print("Error: lxml required for 'extract'. Install: pip install lxml", file=sys.stderr)
-        sys.exit(1)
-    from lxml import etree
     if not Path(args.input).is_file():
         print(f"Error: File not found: {args.input}", file=sys.stderr)
         sys.exit(1)
@@ -111,7 +104,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
     except BadZipFile:
         print(f"Error: not a valid HWPX (ZIP) file: {args.input}", file=sys.stderr)
         sys.exit(1)
-    except etree.XMLSyntaxError as e:
+    except ET.ParseError as e:
         print(f"Error: malformed section XML: {e}", file=sys.stderr)
         sys.exit(1)
     if args.output:
