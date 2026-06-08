@@ -84,6 +84,47 @@ First `<hp:p>` of section0.xml — first `<hp:run>` must contain `<hp:secPr>` an
 </hp:p>
 ```
 
+## Table placement patterns
+
+`treatAsChar` controls placement behavior:
+
+| Value | DOM position | Behavior |
+|-------|-------------|----------|
+| `1` (inline) | `<hp:p>` is a normal sibling of other paragraphs inside `<hs:sec>` | Flows with surrounding text |
+| `0` (floating) | Same `<hp:p><hp:run>` anchor structure, but table is position-independent | Hancom ignores surrounding text flow |
+
+**Critical**: both inline and floating tables live inside `<hp:p><hp:run>`. Floating tables placed as bare siblings of `<hs:sec>` are invisible in Hancom.
+
+Inline table (`treatAsChar="1"`) — standard form shown in the template above.
+
+Floating table (`treatAsChar="0"`) — same anchor structure, different attribute:
+
+```xml
+<!-- hs:sec > hp:p > hp:run > hp:tbl (floating) -->
+<hp:p id="고유ID" paraPrIDRef="1" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">
+  <hp:run charPrIDRef="29">
+    <hp:tbl id="고유ID" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM"
+            textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL"
+            repeatHeader="0" rowCnt="행수" colCnt="열수" cellSpacing="0"
+            borderFillIDRef="3" noAdjust="0">
+      <hp:sz width="42520" widthRelTo="ABSOLUTE" height="전체높이" heightRelTo="ABSOLUTE" protect="0"/>
+      <hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="0" allowOverlap="0"
+              holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP"
+              horzAlign="LEFT" vertOffset="0" horzOffset="0"/>
+      <!-- rows ... -->
+    </hp:tbl>
+  </hp:run>
+</hp:p>
+```
+
+**WRONG** — bare sibling of `<hs:sec>` (Hancom does not render):
+
+```xml
+<hs:sec>
+  <hp:tbl treatAsChar="0">...</hp:tbl>  <!-- ← never do this -->
+</hs:sec>
+```
+
 ## Table size calculation
 
 - **A4 body width**: 42520 HWPUNIT = 59528 (paper) - 8504×2 (left/right margins)
