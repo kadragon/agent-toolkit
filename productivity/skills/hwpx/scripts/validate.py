@@ -28,7 +28,7 @@ from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 import xml.etree.ElementTree as ET
 
-from _common import SECTION_N_RE as SECTION_RE, PARA_ID_RE, PLACEHOLDER_IDS
+from _common import SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS
 
 REQUIRED_FILES = [
     "mimetype",
@@ -54,7 +54,7 @@ def _dup_para_ids(hwpx_path: str) -> set[str]:
     try:
         with ZipFile(hwpx_path, "r") as zf:
             for name in zf.namelist():
-                if SECTION_RE.match(name):
+                if SECTION_N_RE.match(name):
                     ids.extend(_ids_from_xml_str(zf.read(name).decode("utf-8")))
     except (BadZipFile, OSError):
         return set()
@@ -148,18 +148,21 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
             if info.compress_type != ZIP_STORED:
                 errors.append("mimetype must be ZIP_STORED (uncompressed)")
         parsed: dict[str, ET.Element] = {}
+        section_bytes: dict[str, bytes] = {}
         for name in names:
             if name.endswith(".xml") or name.endswith(".hpf"):
                 try:
-                    root = ET.fromstring(zf.read(name))
-                    parsed[name] = root
+                    data = zf.read(name)
+                    if SECTION_N_RE.match(name):
+                        section_bytes[name] = data
+                    parsed[name] = ET.fromstring(data)
                 except ET.ParseError as e:
                     errors.append(f"Malformed XML in {name}: {e}")
         header_root = parsed.get("Contents/header.xml")
         if header_root is None:
             return errors, warnings
         sec_cnt_declared = int(header_root.get("secCnt", "0"))
-        actual_sections = sorted(n for n in names if SECTION_RE.match(n))
+        actual_sections = sorted(n for n in names if SECTION_N_RE.match(n))
         if sec_cnt_declared != len(actual_sections):
             errors.append(
                 f"secCnt mismatch: header declares secCnt={sec_cnt_declared}, "
@@ -172,7 +175,7 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
             sec_root = parsed.get(sec_name)
             if sec_root is None:
                 continue
-            xml_str = zf.read(sec_name).decode("utf-8")
+            xml_str = section_bytes[sec_name].decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
         dupes = {i for i, n in Counter(all_para_ids).items() if n > 1}
@@ -278,8 +281,8 @@ def collect_metrics(hwpx_path: Path) -> Metrics:
     """Aggregate Metrics across all sections in an HWPX file."""
     with zipfile.ZipFile(hwpx_path, "r") as zf:
         section_names = sorted(
-            [n for n in zf.namelist() if SECTION_RE.match(n)],
-            key=lambda n: int(SECTION_RE.match(n).group(1)),  # type: ignore[union-attr]
+            [n for n in zf.namelist() if SECTION_N_RE.match(n)],
+            key=lambda n: int(SECTION_N_RE.match(n).group(1)),  # type: ignore[union-attr]
         )
         if not section_names:
             return Metrics(0, 0, 0, 0, [], 0, 0, [])
