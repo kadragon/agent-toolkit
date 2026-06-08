@@ -2,10 +2,10 @@
 
 ### PR #32 — [REFACTOR] hwpx: consolidate 16 scripts into 5 + _common.py (2026-06-08)
 
-- [ ] [debt] Multi-section HWPX not supported in `validate.py page-guard` — `collect_metrics` reads only `section0.xml`. Iterate all `Contents/section*.xml` and aggregate Metrics across sections. (source: agy) — `validate.py:232`
-- [ ] [debt] `_assert_int` helper defined but used only once — inline `assert open_inner is not None` or `cast(int, open_inner)`. (source: pr-review-toolkit:review-pr) — `table.py:46`
-- [ ] [debt] `end or 0` fallback in `_matched_spans` silently swallows a bug — replace with `assert end is not None`. (source: pr-review-toolkit:review-pr) — `table.py:291`
-- [ ] [debt] `_validate_hwpx` uses `etree` without `_require_lxml` guard at function level — safe in current call graph but latent trap for direct callers. (source: pr-review-toolkit:review-pr) — `build.py:109`
+- [x] [debt] Multi-section HWPX not supported in `validate.py page-guard` — `collect_metrics` reads only `section0.xml`. Iterate all `Contents/section*.xml` and aggregate Metrics across sections. (source: agy) — `validate.py:232` — Extracted `_collect_one_section(bytes)->Metrics`; `collect_metrics` now enumerates via `SECTION_N_RE`, sorts by index, aggregates all fields. Verified 2×section file yields 2× counts.
+- [x] [debt] `_assert_int` helper defined but used only once — inline `assert open_inner is not None` or `cast(int, open_inner)`. (source: pr-review-toolkit:review-pr) — `table.py:46` — Deleted helper; inlined `assert open_inner is not None` at the single call site.
+- [x] [debt] `end or 0` fallback in `_matched_spans` silently swallows a bug — replace with `assert end is not None`. (source: pr-review-toolkit:review-pr) — `table.py:291` — Replaced with `assert end is not None` + bare `end`.
+- [x] [debt] `_validate_hwpx` uses `etree` without `_require_lxml` guard at function level — safe in current call graph but latent trap for direct callers. (source: pr-review-toolkit:review-pr) — `build.py:109` — Added `_require_lxml("validate")` as first line of `_validate_hwpx`.
 
 ### PR #29 — [HARNESS] dev-review-cycle: fix merge cleanup + scope clarity + shell doc rule (2026-06-07)
 
