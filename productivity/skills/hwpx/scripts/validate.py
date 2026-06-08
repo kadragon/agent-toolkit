@@ -227,17 +227,12 @@ class Metrics:
     paragraph_text_lengths: List[int]
 
 
-def _read_section_bytes(hwpx_path: Path) -> bytes:
-    with zipfile.ZipFile(hwpx_path, "r") as zf:
-        return zf.read("Contents/section0.xml")
-
-
 def _text_of_t(t_node: etree._Element) -> str:
     return "".join(t_node.itertext())
 
 
-def collect_metrics(hwpx_path: Path) -> Metrics:
-    section_bytes = _read_section_bytes(hwpx_path)
+def _collect_one_section(section_bytes: bytes) -> Metrics:
+    """Parse one section XML and return its Metrics."""
     root = etree.parse(BytesIO(section_bytes)).getroot()
     paragraphs = root.xpath(".//hs:sec/hp:p", namespaces=NS_PG)
     if not paragraphs:
@@ -278,6 +273,28 @@ def collect_metrics(hwpx_path: Path) -> Metrics:
         text_char_total=text_char_total,
         text_char_total_nospace=text_char_total_nospace,
         paragraph_text_lengths=paragraph_text_lengths,
+    )
+
+
+def collect_metrics(hwpx_path: Path) -> Metrics:
+    """Aggregate Metrics across all sections in an HWPX file."""
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        section_names = sorted(
+            [n for n in zf.namelist() if SECTION_RE.match(n)],
+            key=lambda n: int(SECTION_RE.match(n).group(1)),  # type: ignore[union-attr]
+        )
+        if not section_names:
+            return Metrics(0, 0, 0, 0, [], 0, 0, [])
+        sections = [_collect_one_section(zf.read(name)) for name in section_names]
+    return Metrics(
+        paragraph_count=sum(s.paragraph_count for s in sections),
+        page_break_count=sum(s.page_break_count for s in sections),
+        column_break_count=sum(s.column_break_count for s in sections),
+        table_count=sum(s.table_count for s in sections),
+        table_shapes=[shape for s in sections for shape in s.table_shapes],
+        text_char_total=sum(s.text_char_total for s in sections),
+        text_char_total_nospace=sum(s.text_char_total_nospace for s in sections),
+        paragraph_text_lengths=[length for s in sections for length in s.paragraph_text_lengths],
     )
 
 
