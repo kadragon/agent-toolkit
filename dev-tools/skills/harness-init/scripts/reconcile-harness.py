@@ -86,7 +86,7 @@ def remove_empty_headings(backlog: str) -> str:
     result = []
     for i, line in enumerate(lines):
         if re.match(r'^#+\s', line):
-            following = [l for l in lines[i + 1:] if l.strip()]
+            following = [ln for ln in lines[i + 1:] if ln.strip()]
             if not following or re.match(r'^#+\s', following[0]):
                 continue
         result.append(line)
