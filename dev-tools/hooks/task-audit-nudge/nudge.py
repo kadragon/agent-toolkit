@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""task-audit-nudge — Claude Code SessionStart staleness reminder.
+"""task-audit-nudge — SessionStart staleness reminder.
 
 Honest B-tier automation: does NOT detect "X done 5x" (that needs per-session
 LLM clustering, which the on-demand harness-curator skill deliberately avoids).
 Instead it tracks how long since the harness analysis last ran and emits a
 one-line nudge when stale. The skill itself still does all analysis on demand.
 
-State: $CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/.harness-curator-state.json
+State:
+  Claude: $CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/.harness-curator-state.json
+  Codex:  $CODEX_HOME/projects/<encoded-cwd>/.harness-curator-state.json
   Per-project isolation: running the audit in project A no longer suppresses
   nudges for project B. Encoded path mirrors the transcript directory layout.
   lastRunMs   - written by the harness-curator skill's final step
@@ -30,10 +32,21 @@ def encode_project(path):
     return re.sub(r"[/.]", "-", path)
 
 
+def config_dir():
+    if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    if os.environ.get("CODEX_HOME"):
+        return os.environ["CODEX_HOME"]
+
+    script_path = os.path.realpath(__file__)
+    if "/.codex/" in script_path:
+        return os.path.expanduser("~/.codex")
+    return os.path.expanduser("~/.claude")
+
+
 def main():
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     cwd = os.getcwd()
-    state_dir = os.path.join(config_dir, "projects", encode_project(cwd))
+    state_dir = os.path.join(config_dir(), "projects", encode_project(cwd))
     state_path = os.path.join(state_dir, ".harness-curator-state.json")
     now = int(time.time() * 1000)
 
