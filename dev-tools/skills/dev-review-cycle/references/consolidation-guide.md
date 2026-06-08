@@ -32,8 +32,10 @@ Remove suggestions that conflict with project conventions.
 
 For each remaining suggestion, determine whether it falls within the current PR's scope:
 
-- **In-scope:** Directly related to the files and logic changed in this PR.
-- **Out-of-scope:** Valid improvement but touches unrelated code, requires a separate feature branch, or is an architectural concern beyond this PR's purpose.
+- **In-scope:** Issue was **introduced or made significantly worse** by this PR AND is fixable without expanding the PR's stated purpose.
+- **Out-of-scope:** Issue is pre-existing in code this PR didn't touch, OR requires architectural change beyond this PR's purpose, OR is in an unchanged file.
+
+When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
 
 ### 6. Present to User
 
