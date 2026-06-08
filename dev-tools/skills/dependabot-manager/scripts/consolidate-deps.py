@@ -298,7 +298,7 @@ def main():
         print(f'   Closed PR #{u["pr"]}')
 
     print('\nConsolidation complete!')
-    print(f'\nNext steps:')
+    print('\nNext steps:')
     print(f'   1. Review PR: {pr_url}')
     print(f'   2. Merge when ready: gh pr merge {pr_number} --squash --delete-branch')
 
