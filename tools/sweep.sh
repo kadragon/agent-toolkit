@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(cd "$TOOLS_DIR/.." && pwd)"
 
 RED='\033[0;31m'
@@ -57,7 +57,7 @@ while IFS= read -r _line; do
 done < <(git log --since="7 days ago" --name-only --pretty=format: 2>/dev/null | grep 'skills/.*/SKILL\.md' | sort -u || true)
 
 if [[ -n "$RECENT_SKILLS" ]]; then
-    SKILL_COUNT=$(echo "$RECENT_SKILLS" | wc -l | tr -d ' ')
+    SKILL_COUNT=$(printf '%s' "$RECENT_SKILLS" | grep -c . || true)
     echo -e "  ${YELLOW}INFO${NC} $SKILL_COUNT SKILL.md modified in last 7 days — verify version bumped"
     FINDINGS+=("[doc] $SKILL_COUNT SKILL.md recently modified — confirm plugin.json version bump")
 else
@@ -70,7 +70,7 @@ echo -e "${CYAN}[3/5] Golden principles...${NC}"
 # Check: any file under dev-tools/ or productivity/ changed vs main, but plugin.json unchanged
 DEVTOOLS_CHANGED=$(git diff main -- dev-tools/ 2>/dev/null | grep -c '^+\|^-' || true)
 if [[ "$DEVTOOLS_CHANGED" -gt 0 ]]; then
-    BUMP=$(git diff main -- dev-tools/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ')
+    BUMP=$(git diff main -- dev-tools/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
     if [[ "$BUMP" -eq 0 ]]; then
         FINDINGS+=("[constraint] VIOLATION: dev-tools/ changed vs main but plugin.json version not bumped")
         echo -e "  ${RED}FAIL${NC} dev-tools/ changed but plugin.json not bumped (vs main)"
@@ -81,7 +81,7 @@ fi
 
 PRODUCTIVITY_CHANGED=$(git diff main -- productivity/ 2>/dev/null | grep -c '^+\|^-' || true)
 if [[ "$PRODUCTIVITY_CHANGED" -gt 0 ]]; then
-    BUMP=$(git diff main -- productivity/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ')
+    BUMP=$(git diff main -- productivity/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
     if [[ "$BUMP" -eq 0 ]]; then
         FINDINGS+=("[constraint] VIOLATION: productivity/ changed vs main but plugin.json version not bumped")
         echo -e "  ${RED}FAIL${NC} productivity/ changed but plugin.json not bumped (vs main)"

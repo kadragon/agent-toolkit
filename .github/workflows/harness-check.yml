@@ -17,13 +17,14 @@ jobs:
         run: |
           CHANGED=$(git diff origin/main...HEAD -- dev-tools/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
-            BUMP=$(git diff origin/main...HEAD -- dev-tools/.claude-plugin/plugin.json | grep '^\+.*"version"' | wc -l | tr -d ' ')
-            if [ "$BUMP" -eq 0 ]; then
-              echo "ERROR: dev-tools/ changed but dev-tools/.claude-plugin/plugin.json version not bumped."
+            OLD=$(git show origin/main:dev-tools/.claude-plugin/plugin.json | jq -r .version)
+            NEW=$(jq -r .version dev-tools/.claude-plugin/plugin.json)
+            if [ "$OLD" = "$NEW" ]; then
+              echo "ERROR: dev-tools/ changed but dev-tools/.claude-plugin/plugin.json version not bumped ($NEW)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
-            echo "OK: dev-tools version bumped."
+            echo "OK: dev-tools version bumped ($OLD -> $NEW)."
           else
             echo "SKIP: dev-tools/ not changed."
           fi
@@ -32,13 +33,14 @@ jobs:
         run: |
           CHANGED=$(git diff origin/main...HEAD -- productivity/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
-            BUMP=$(git diff origin/main...HEAD -- productivity/.claude-plugin/plugin.json | grep '^\+.*"version"' | wc -l | tr -d ' ')
-            if [ "$BUMP" -eq 0 ]; then
-              echo "ERROR: productivity/ changed but productivity/.claude-plugin/plugin.json version not bumped."
+            OLD=$(git show origin/main:productivity/.claude-plugin/plugin.json | jq -r .version)
+            NEW=$(jq -r .version productivity/.claude-plugin/plugin.json)
+            if [ "$OLD" = "$NEW" ]; then
+              echo "ERROR: productivity/ changed but productivity/.claude-plugin/plugin.json version not bumped ($NEW)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
-            echo "OK: productivity version bumped."
+            echo "OK: productivity version bumped ($OLD -> $NEW)."
           else
             echo "SKIP: productivity/ not changed."
           fi

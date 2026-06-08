@@ -7,7 +7,8 @@
 
 set -u
 
-ROUTES_FILE=".claude/trigger-routes.json"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+ROUTES_FILE="${PROJECT_ROOT}/.claude/trigger-routes.json"
 [[ -f "$ROUTES_FILE" ]] || exit 0
 
 payload=$(cat)

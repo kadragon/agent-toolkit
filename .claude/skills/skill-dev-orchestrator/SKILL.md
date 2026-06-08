@@ -21,6 +21,18 @@ _workspace/campaign-state.json exists → Resume → read next_entry_point, skip
 
 Read `current_phase` and `tasks`. Report: "Resuming from Phase {N}."
 
+**State file schema** (`_workspace/campaign-state.json`):
+```json
+{
+  "current_phase": 1,
+  "next_entry_point": "Phase 2: Explore",
+  "tasks": ["<backlog item description>"],
+  "completed_phases": [1]
+}
+```
+
+**Write after each phase completes.** Update `current_phase` to the next phase number and `next_entry_point` to the next phase title. Add the completed phase to `completed_phases`. Without this write, resume will never trigger.
+
 ## Phase 1: Identify Backlog Item
 
 1. Read `backlog.md` — find the item to implement (from user prompt or first `- [ ]` in `## Now`)

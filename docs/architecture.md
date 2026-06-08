@@ -70,4 +70,4 @@ plugin.json
 2. **`SKILL.md` `description:` field** — primary auto-invocation signal; directive phrasing ("ALWAYS invoke when...") outperforms descriptive
 3. **Agent roles** (`.claude/agents/*.md`) — reusable subagent definitions; Markdown body is system prompt; frontmatter controls tools/model
 4. **Trigger router** (`.claude/hooks/trigger-router.sh`) — pattern-matches prompt → emits explicit delegation instruction; raises ~50% description-only baseline toward deterministic
-5. **`backlog.md`** — queue of work not yet in flight; reconciled by `scripts/reconcile-harness.py` against `tasks.md` sprints
+5. **`backlog.md`** — queue of work not yet in flight; reconciled by `scripts/reconcile-harness.py` against `backlog.md` sprints

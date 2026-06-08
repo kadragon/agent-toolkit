@@ -28,7 +28,7 @@ codex plugin add productivity@kadragon
 
 | Command | Purpose |
 |---------|---------|
-| `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.6/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
+| `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 | `bash .claude/hooks/trigger-router.sh` | Test trigger routing (pipe JSON prompt) |
 
@@ -87,7 +87,7 @@ Add/fix route in `.claude/trigger-routes.json`
 **Symptom:** Skill lookup fails; `validate-harness.sh` reports symlink warning
 **Fix:**
 ```bash
-bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.6/skills/harness-init/scripts/symlink-guard.sh
+bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/symlink-guard.sh
 ```
 
 ## Harness Scripts
