@@ -1,39 +1,30 @@
 #!/usr/bin/env python3
-"""Validate the structural integrity of an HWPX file.
-
-Checks:
-  - Valid ZIP archive
-  - Required files present (mimetype, content.hpf, header.xml, section0.xml)
-  - mimetype content is correct, first entry, ZIP_STORED
-  - All XML files are well-formed
-  - secCnt in header.xml matches actual section count in archive
-  - itemCnt attributes match actual child element counts (charProperties,
-    paraProperties, borderFills, fontfaces)
-  - IDRef cross-validation: charPrIDRef/paraPrIDRef/borderFillIDRef in
-    section XML all resolve to defined IDs in header.xml
-  - hp:p ID uniqueness across all sections. NOTE: real-world HWPX files can
-    contain pre-existing duplicate IDs that HWP tolerates. Pass --baseline to
-    compare against the source document; only NEWLY introduced duplicates are
-    then treated as errors.
+"""HWPX structural validation and page-drift guard.
 
 Usage:
-    python validate.py document.hwpx
-    python validate.py document.hwpx --strict              # warnings -> errors
-    python validate.py result.hwpx --baseline original.hwpx  # diff-aware ID check
+    python validate.py validate document.hwpx
+    python validate.py validate result.hwpx --baseline original.hwpx
+    python validate.py validate document.hwpx --strict
+    python validate.py page-guard --reference ref.hwpx --output result.hwpx
+    python validate.py page-guard --reference ref.hwpx --output result.hwpx --json
 """
-# Windows console: emit UTF-8 (avoid cp949 mojibake)
 import sys as _sys
 try:
-    _sys.stdout.reconfigure(encoding="utf-8")
-    _sys.stderr.reconfigure(encoding="utf-8")
+    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except Exception:
     pass
 
 import argparse
+import json
 import re
 import sys
+import zipfile
 from collections import Counter
+from dataclasses import dataclass, asdict
+from io import BytesIO
 from pathlib import Path
+from typing import List, Tuple
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 from lxml import etree
@@ -44,27 +35,23 @@ REQUIRED_FILES = [
     "Contents/header.xml",
     "Contents/section0.xml",
 ]
-
 EXPECTED_MIMETYPE = "application/hwp+zip"
-
 NS_HH = "http://www.hancom.co.kr/hwpml/2011/head"
 NS_HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 NS_HS = "http://www.hancom.co.kr/hwpml/2011/section"
 NS = {"hh": NS_HH, "hp": NS_HP, "hs": NS_HS}
-
 SECTION_RE = re.compile(r"^Contents/section(\d+)\.xml$")
 PARA_ID_RE = re.compile(r'<hp:p\s[^>]*\bid="(\d+)"')
 PLACEHOLDER_IDS = {"0", "2147483648"}
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── validate ──────────────────────────────────────────────────────────────────
 
 def _ids_from_xml_str(xml_str: str) -> list[str]:
     return [i for i in PARA_ID_RE.findall(xml_str) if i not in PLACEHOLDER_IDS]
 
 
 def _dup_para_ids(hwpx_path: str) -> set[str]:
-    """Return non-placeholder hp:p IDs that are duplicated within the file."""
     ids: list[str] = []
     try:
         with ZipFile(hwpx_path, "r") as zf:
@@ -77,7 +64,6 @@ def _dup_para_ids(hwpx_path: str) -> set[str]:
 
 
 def _check_itemcnt(root: etree._Element) -> list[str]:
-    """Verify itemCnt attributes match actual child count in header.xml."""
     errors = []
     checks = [
         (".//hh:charProperties", "hh:charPr"),
@@ -93,8 +79,7 @@ def _check_itemcnt(root: etree._Element) -> list[str]:
         if declared is None:
             continue
         child_local = child_tag.split(":")[1]
-        child_ns = NS_HH
-        actual = len(parent.findall(f"{{{child_ns}}}{child_local}"))
+        actual = len(parent.findall(f"{{{NS_HH}}}{child_local}"))
         if int(declared) != actual:
             errors.append(
                 f"itemCnt mismatch in <{parent.tag.split('}')[1]}> "
@@ -104,7 +89,6 @@ def _check_itemcnt(root: etree._Element) -> list[str]:
 
 
 def _collect_defined_ids(header_root: etree._Element) -> dict[str, set[str]]:
-    """Collect all defined IDs for charPr, paraPr, borderFill from header.xml."""
     defined: dict[str, set[str]] = {
         "charPrIDRef": set(),
         "paraPrIDRef": set(),
@@ -112,18 +96,17 @@ def _collect_defined_ids(header_root: etree._Element) -> dict[str, set[str]]:
     }
     for el in header_root.findall(f".//{{{NS_HH}}}charPr"):
         if el.get("id") is not None:
-            defined["charPrIDRef"].add(el.get("id"))
+            defined["charPrIDRef"].add(el.get("id", ""))
     for el in header_root.findall(f".//{{{NS_HH}}}paraPr"):
         if el.get("id") is not None:
-            defined["paraPrIDRef"].add(el.get("id"))
+            defined["paraPrIDRef"].add(el.get("id", ""))
     for el in header_root.findall(f".//{{{NS_HH}}}borderFill"):
         if el.get("id") is not None:
-            defined["borderFillIDRef"].add(el.get("id"))
+            defined["borderFillIDRef"].add(el.get("id", ""))
     return defined
 
 
 def _check_idref(section_root: etree._Element, defined: dict[str, set[str]], section_name: str) -> list[str]:
-    """Validate that all IDRef values in section XML resolve in header.xml."""
     errors = []
     checks = [
         (f".//{{{NS_HP}}}run", "charPrIDRef"),
@@ -138,42 +121,25 @@ def _check_idref(section_root: etree._Element, defined: dict[str, set[str]], sec
             if val is not None and val not in defined[attr]:
                 dangling.add(val)
         if dangling:
-            errors.append(
-                f"{section_name}: undefined {attr} value(s): {sorted(dangling)}"
-            )
+            errors.append(f"{section_name}: undefined {attr} value(s): {sorted(dangling)}")
     return errors
 
 
-# ── main validation ───────────────────────────────────────────────────────────
-
-def validate(hwpx_path: str, baseline_dupes: set | None = None) -> tuple[list[str], list[str]]:
-    """Return (errors, warnings). errors = must fix; warnings = should fix.
-
-    baseline_dupes: duplicate hp:p IDs known to exist in the source document.
-    Duplicates shared with the baseline become warnings; only newly introduced
-    duplicates are errors. When None, every duplicate is an error.
-    """
+def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     path = Path(hwpx_path)
-
     if not path.is_file():
         return [f"File not found: {hwpx_path}"], []
-
     try:
         zf = ZipFile(hwpx_path, "r")
     except BadZipFile:
         return [f"Not a valid ZIP archive: {hwpx_path}"], []
-
     with zf:
         names = zf.namelist()
-
-        # ── Required files ────────────────────────────────────────────────
         for required in REQUIRED_FILES:
             if required not in names:
                 errors.append(f"Missing required file: {required}")
-
-        # ── mimetype checks ───────────────────────────────────────────────
         if "mimetype" in names:
             content = zf.read("mimetype").decode("utf-8").strip()
             if content != EXPECTED_MIMETYPE:
@@ -183,8 +149,6 @@ def validate(hwpx_path: str, baseline_dupes: set | None = None) -> tuple[list[st
             info = zf.getinfo("mimetype")
             if info.compress_type != ZIP_STORED:
                 errors.append("mimetype must be ZIP_STORED (uncompressed)")
-
-        # ── XML well-formedness ───────────────────────────────────────────
         parsed: dict[str, etree._Element] = {}
         for name in names:
             if name.endswith(".xml") or name.endswith(".hpf"):
@@ -193,30 +157,18 @@ def validate(hwpx_path: str, baseline_dupes: set | None = None) -> tuple[list[st
                     parsed[name] = root
                 except etree.XMLSyntaxError as e:
                     errors.append(f"Malformed XML in {name}: {e}")
-
-        # Abort deep checks if header/section can't be parsed
         header_root = parsed.get("Contents/header.xml")
         if header_root is None:
             return errors, warnings
-
-        # ── secCnt vs actual section files ───────────────────────────────
         sec_cnt_declared = int(header_root.get("secCnt", "0"))
-        actual_sections = sorted(
-            n for n in names if SECTION_RE.match(n)
-        )
+        actual_sections = sorted(n for n in names if SECTION_RE.match(n))
         if sec_cnt_declared != len(actual_sections):
             errors.append(
                 f"secCnt mismatch: header declares secCnt={sec_cnt_declared}, "
                 f"archive has {len(actual_sections)} section file(s)"
             )
-
-        # ── itemCnt consistency ───────────────────────────────────────────
         errors.extend(_check_itemcnt(header_root))
-
-        # ── IDRef cross-validation ────────────────────────────────────────
         defined_ids = _collect_defined_ids(header_root)
-
-        # ── hp:p ID uniqueness + IDRef per section ────────────────────────
         all_para_ids: list[str] = []
         for sec_name in actual_sections:
             sec_root = parsed.get(sec_name)
@@ -225,7 +177,6 @@ def validate(hwpx_path: str, baseline_dupes: set | None = None) -> tuple[list[st
             xml_str = zf.read(sec_name).decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
-
         dupes = {i for i, n in Counter(all_para_ids).items() if n > 1}
         if dupes:
             base = baseline_dupes or set()
@@ -237,46 +188,199 @@ def validate(hwpx_path: str, baseline_dupes: set | None = None) -> tuple[list[st
                 warnings.append(
                     f"Pre-existing duplicate hp:p IDs (shared with baseline, HWP tolerates): {preexisting}"
                 )
-
     return errors, warnings
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Validate HWPX file structure and internal consistency"
-    )
-    parser.add_argument("input", help="Path to .hwpx file")
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="Treat warnings as errors",
-    )
-    parser.add_argument(
-        "--baseline",
-        help="Reference .hwpx (source document); duplicate hp:p IDs shared with "
-             "it are downgraded from errors to warnings",
-    )
-    args = parser.parse_args()
-
+def cmd_validate(args: argparse.Namespace) -> None:
     baseline_dupes = _dup_para_ids(args.baseline) if args.baseline else None
-    errors, warnings = validate(args.input, baseline_dupes)
-
+    errors, warnings = do_validate(args.input, baseline_dupes)
     if warnings:
         print(f"WARNINGS: {args.input}")
         for w in warnings:
             print(f"  ~ {w}")
-
     if errors:
         print(f"INVALID: {args.input}", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         sys.exit(1)
-
     if args.strict and warnings:
         sys.exit(1)
-
     print(f"VALID: {args.input}")
     print("  All structural checks passed.")
+
+
+# ── page-guard ────────────────────────────────────────────────────────────────
+
+NS_PG = {
+    "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
+    "hs": "http://www.hancom.co.kr/hwpml/2011/section",
+}
+
+
+@dataclass
+class Metrics:
+    paragraph_count: int
+    page_break_count: int
+    column_break_count: int
+    table_count: int
+    table_shapes: List[Tuple[str, str, str, str, str, str]]
+    text_char_total: int
+    text_char_total_nospace: int
+    paragraph_text_lengths: List[int]
+
+
+def _read_section_bytes(hwpx_path: Path) -> bytes:
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        return zf.read("Contents/section0.xml")
+
+
+def _text_of_t(t_node: etree._Element) -> str:
+    return "".join(t_node.itertext())
+
+
+def collect_metrics(hwpx_path: Path) -> Metrics:
+    section_bytes = _read_section_bytes(hwpx_path)
+    root = etree.parse(BytesIO(section_bytes)).getroot()
+    paragraphs = root.xpath(".//hs:sec/hp:p", namespaces=NS_PG)
+    if not paragraphs:
+        paragraphs = root.xpath(".//hp:p", namespaces=NS_PG)
+    page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
+    column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
+    tables = root.xpath(".//hp:tbl", namespaces=NS_PG)
+    table_shapes: List[Tuple[str, str, str, str, str, str]] = []
+    for t in tables:
+        sz = t.find("hp:sz", namespaces=NS_PG)
+        width = sz.get("width", "") if sz is not None else ""
+        height = sz.get("height", "") if sz is not None else ""
+        table_shapes.append((
+            t.get("rowCnt", ""),
+            t.get("colCnt", ""),
+            width,
+            height,
+            t.get("repeatHeader", ""),
+            t.get("pageBreak", ""),
+        ))
+    t_nodes = root.xpath(".//hp:t", namespaces=NS_PG)
+    text_char_total = 0
+    text_char_total_nospace = 0
+    for t in t_nodes:
+        s = _text_of_t(t)
+        text_char_total += len(s)
+        text_char_total_nospace += len("".join(s.split()))
+    paragraph_text_lengths: List[int] = []
+    for p in paragraphs:
+        plen = sum(len(_text_of_t(t)) for t in p.xpath(".//hp:t", namespaces=NS_PG))
+        paragraph_text_lengths.append(plen)
+    return Metrics(
+        paragraph_count=len(paragraphs),
+        page_break_count=page_break_count,
+        column_break_count=column_break_count,
+        table_count=len(tables),
+        table_shapes=table_shapes,
+        text_char_total=text_char_total,
+        text_char_total_nospace=text_char_total_nospace,
+        paragraph_text_lengths=paragraph_text_lengths,
+    )
+
+
+def _ratio_delta(a: int, b: int) -> float:
+    return abs(b - a) / max(a, 1)
+
+
+def compare_metrics(
+    ref: Metrics,
+    out: Metrics,
+    max_text_delta_ratio: float,
+    max_paragraph_delta_ratio: float,
+) -> List[str]:
+    errors: List[str] = []
+    if ref.paragraph_count != out.paragraph_count:
+        errors.append(f"문단 수 불일치: ref={ref.paragraph_count}, out={out.paragraph_count}")
+    if ref.page_break_count != out.page_break_count:
+        errors.append(f"명시적 pageBreak 수 불일치: ref={ref.page_break_count}, out={out.page_break_count}")
+    if ref.column_break_count != out.column_break_count:
+        errors.append(f"명시적 columnBreak 수 불일치: ref={ref.column_break_count}, out={out.column_break_count}")
+    if ref.table_count != out.table_count:
+        errors.append(f"표 수 불일치: ref={ref.table_count}, out={out.table_count}")
+    if ref.table_shapes != out.table_shapes:
+        errors.append("표 구조(rowCnt/colCnt/width/height/pageBreak) 불일치")
+    td = _ratio_delta(ref.text_char_total_nospace, out.text_char_total_nospace)
+    if td > max_text_delta_ratio:
+        errors.append(
+            "전체 텍스트 길이 편차 초과: "
+            f"ref={ref.text_char_total_nospace}, out={out.text_char_total_nospace}, "
+            f"delta={td:.2%}, limit={max_text_delta_ratio:.2%}"
+        )
+    if len(ref.paragraph_text_lengths) == len(out.paragraph_text_lengths):
+        for idx, (a, b) in enumerate(zip(ref.paragraph_text_lengths, out.paragraph_text_lengths), start=1):
+            if a == 0 and b == 0:
+                continue
+            pd = _ratio_delta(a, b)
+            if pd > max_paragraph_delta_ratio:
+                errors.append(
+                    f"{idx}번째 문단 텍스트 길이 편차 초과: "
+                    f"ref={a}, out={b}, delta={pd:.2%}, limit={max_paragraph_delta_ratio:.2%}"
+                )
+    return errors
+
+
+def cmd_page_guard(args: argparse.Namespace) -> int:
+    ref_path = Path(args.reference)
+    out_path = Path(args.output)
+    if not ref_path.exists():
+        print(f"Error: reference not found: {ref_path}", file=sys.stderr)
+        return 2
+    if not out_path.exists():
+        print(f"Error: output not found: {out_path}", file=sys.stderr)
+        return 2
+    ref = collect_metrics(ref_path)
+    out = collect_metrics(out_path)
+    if args.json:
+        print(json.dumps({"reference": asdict(ref), "output": asdict(out)}, ensure_ascii=False, indent=2))
+    errors = compare_metrics(ref, out,
+                             max_text_delta_ratio=args.max_text_delta_ratio,
+                             max_paragraph_delta_ratio=args.max_paragraph_delta_ratio)
+    if errors:
+        print("FAIL: page-guard")
+        for e in errors:
+            print(f" - {e}")
+        return 1
+    print("PASS: page-guard")
+    print("  paragraph/table/pageBreak 구조와 텍스트 길이 편차가 허용 범위 내입니다.")
+    return 0
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="HWPX structural validation and page-drift guard")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # validate
+    p_val = sub.add_parser("validate", help="Validate HWPX file structure and internal consistency")
+    p_val.add_argument("input", help="Path to .hwpx file")
+    p_val.add_argument("--strict", action="store_true", help="Treat warnings as errors")
+    p_val.add_argument(
+        "--baseline",
+        help="Reference .hwpx (source document); duplicate hp:p IDs shared with it are downgraded to warnings",
+    )
+
+    # page-guard
+    p_pg = sub.add_parser("page-guard", help="Detect page-drift risk vs. reference HWPX")
+    p_pg.add_argument("--reference", "-r", required=True, help="Reference HWPX path")
+    p_pg.add_argument("--output", "-o", required=True, help="Result HWPX path")
+    p_pg.add_argument("--max-text-delta-ratio", type=float, default=0.15,
+                      help="Total text length deviation limit (default: 0.15)")
+    p_pg.add_argument("--max-paragraph-delta-ratio", type=float, default=0.25,
+                      help="Per-paragraph text length deviation limit (default: 0.25)")
+    p_pg.add_argument("--json", action="store_true", help="Output metrics as JSON")
+
+    args = parser.parse_args()
+
+    if args.cmd == "validate":
+        cmd_validate(args)
+    elif args.cmd == "page-guard":
+        raise SystemExit(cmd_page_guard(args))
 
 
 if __name__ == "__main__":
