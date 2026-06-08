@@ -18,7 +18,7 @@ Plugin marketplace (dev-tools + productivity) by kadragon. This repo IS the harn
 
 Invariants enforced mechanically. Violations block merges.
 
-1. **Version bump mandatory** — If files under `dev-tools/` changed, both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `productivity/`. Enforced by CI (`harness-check.yml`) for Claude; Codex bump is manual. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
+1. **Version bump mandatory** — If files under `dev-tools/` changed, both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `productivity/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review + PR checklist.
 3. **Delegation discipline** — Objective triggers in `docs/delegation.md` are hard stops. Skipping a mandatory gate is a violation. Triggers are measurable (file count, path pattern) — not subjective.
 4. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.

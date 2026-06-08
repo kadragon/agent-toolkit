@@ -209,7 +209,7 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 
 ### Version bumps
 
-Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.json` must be bumped together. CI enforces Claude only; Codex bump is manual discipline.
+Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.json` must be bumped together. CI enforces both — version mismatch between manifests blocks merge.
 
 ---
 
