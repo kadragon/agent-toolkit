@@ -49,10 +49,12 @@ CASES=(
   "hwpx|hwpx 만들어줘"
   "hwpx|공문 작성해줘"
   "NONE|hancom is slow these days"
+  # --- JSON-escaping guard: prompt with embedded double-quotes must still route ---
+  'hwpx|"긴급" 공문 작성해줘'
 )
 
 pass=0; fail=0
-run() { echo "{\"prompt\": \"$1\", \"session_id\": \"t\"}" | bash "$ROUTER" 2>/dev/null; }
+run() { jq -nc --arg p "$1" '{prompt:$p, session_id:"t"}' | bash "$ROUTER" 2>/dev/null; }
 
 for c in "${CASES[@]}"; do
   expected="${c%%|*}"; prompt="${c#*|}"

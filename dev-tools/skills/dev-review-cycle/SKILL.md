@@ -23,7 +23,10 @@ Post-dev workflow: creates PR, collects reviews from multiple sources, consolida
 Run bundled preflight script to detect available tools and repo metadata in one step. Outputs JSON with all values needed throughout workflow.
 
 ```bash
-PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hub])
+# Default (hub mode):
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)
+# Local-only mode — append the flag instead:
+# PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh --no-hub)
 echo "$PREFLIGHT"
 ```
 
