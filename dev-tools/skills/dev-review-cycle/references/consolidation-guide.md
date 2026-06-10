@@ -16,19 +16,45 @@ All reviewers use the same P0-P3 priority scheme, making deduplication straightf
 
 Merge identical issues flagged by multiple reviewers into a single entry, listing all source skill ids (e.g., `pr-review-toolkit:review-pr, codex`).
 
-### 2. Resolve Conflicts
+### 2. Re-verify Against the Diff
+
+This is the step where the orchestrator earns its keep. The delegated reviewers never cross-check each other — a pattern match in one reviewer can be surfaced as a finding without any confirming signal from the others. Before proceeding, re-read the actual diff lines referenced by each merged finding and verify the issue is real in *this* code.
+
+Drop a finding if:
+- The flagged line was not actually changed by this PR (pre-existing; landed here by file name only)
+- The reviewer's concern doesn't apply to the specific pattern in the code (e.g., flagged "no error handling" on a function that explicitly returns an error value)
+- The concern is theoretical and has no concrete path to harm given the actual call context
+
+Keep findings that survive direct inspection. A finding with a concrete file:line in the diff and a clear mechanism is worth surfacing. A plausible-sounding pattern match without a traceable path is not.
+
+### 3. Drop Low-Confidence and Excluded Findings
+
+Drop findings that a reviewer itself flagged as speculative, uncertain, or worth investigating but unconfirmed. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
+
+Also drop findings in these excluded categories — surfacing them adds noise without actionable value:
+
+- **Purely theoretical risk** — DoS, timing attacks, resource exhaustion with no practical exploit path in this context
+- **Style owned by a linter** — formatting, naming conventions, import order if a linter config already covers them
+- **Missing rate limiting, audit logs, or monitoring** — absence of defence-in-depth features is a product decision, not a code defect
+- **Third-party library vulnerabilities** — out of scope for a PR review; handle via Dependabot or a separate audit
+- **Issues in test files** unless the test itself is wrong (e.g., a test that asserts nothing)
+- **Documentation gaps in files this PR didn't touch**
+
+These categories exist because every reviewer has a tendency to surface low-confidence, catch-all patterns. Dropping them at consolidation keeps the output focused on what the engineer can and should act on now.
+
+### 4. Resolve Conflicts
 
 When reviewers disagree, prefer the suggestion aligned with project conventions (CLAUDE.md / AGENTS.md). If conventions are silent, prefer the more conservative option and note the disagreement.
 
-### 3. Categorize
+### 5. Categorize
 
 Categorize each remaining suggestion: bug fix, performance, readability, style, architecture.
 
-### 4. Discard Convention Conflicts
+### 6. Discard Convention Conflicts
 
 Remove suggestions that conflict with project conventions.
 
-### 5. Scope Classification
+### 7. Scope Classification
 
 For each remaining suggestion, determine whether it falls within the current PR's scope:
 
@@ -37,22 +63,32 @@ For each remaining suggestion, determine whether it falls within the current PR'
 
 When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
 
-### 6. Present to User
+### 8. Apply Approval-Bias Gate
+
+Not every in-scope finding should block the merge. Sort by whether it gates forward motion:
+
+- **P0 / P1 (correctness bugs, concrete security risk, broken tests)** — must be resolved before merge. These are findings with a clear, demonstrable path to breakage or exploit.
+- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — do NOT apply inline; route to `tasks.md` as backlog items. A PR with only P2/P3 in-scope findings is effectively approved.
+
+The reason for this asymmetry: blocking a clean PR on a P3 nit forces the engineer to touch unrelated code, creates merge-conflict risk, and makes the review cycle feel punishing. P2/P3 findings are real and worth tracking — `tasks.md` ensures they're not forgotten — but they don't belong between the PR and the merge button.
+
+### 9. Present to User
 
 Present the consolidated list as a table with:
 - Priority (P0-P3)
 - Title
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
 - Scope column (In / Out)
+- Gate column (Blocking / Backlog) — Blocking = P0/P1 in-scope; Backlog = P2/P3 in-scope or out-of-scope
 - Recommendation (apply / skip with reason)
 
-After the findings table, add a "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "out of scope for this diff", "exceeds 4-agent cap").
+After the findings table, add a "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
 
-**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
+**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying blocking changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
-## Recording Out-of-Scope Items in tasks.md
+## Recording Backlog Items in tasks.md
 
-After user confirmation, if any suggestions were classified as out-of-scope:
+After user confirmation, route to `tasks.md`: all out-of-scope findings AND all in-scope P2/P3 findings.
 
 1. Read the existing `tasks.md` in the project root. If it does not exist, create one.
 2. Append items under a `## Review Backlog` section. Classify each item using harness tags based on its nature.
@@ -87,4 +123,4 @@ After user confirmation, if any suggestions were classified as out-of-scope:
 | `[constraint]` | Missing tests or architectural rules |
 | `[harness]` | Tooling or CI improvements |
 
-Each out-of-scope suggestion becomes a `- [ ]` item for tracking in a future cycle. If a `## Review Backlog` section already exists, append the new PR's items — do not overwrite previous entries.
+Each backlog suggestion becomes a `- [ ]` item for tracking in a future cycle. If a `## Review Backlog` section already exists, append the new PR's items — do not overwrite previous entries.
