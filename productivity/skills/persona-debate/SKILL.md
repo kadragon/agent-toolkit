@@ -1,19 +1,6 @@
 ---
 name: persona-debate
-description: >-
-  Run a structured debate among N synthetic-but-realistic Korean personas
-  (sampled from the 1M-row nvidia/Nemotron-Personas-Korea dataset) to
-  pressure-test an opinion, message, product, pricing, or policy, then
-  synthesize the spread of views — consensus, live disagreements, and a minority
-  report — back to the user. Use this whenever the user wants to know how
-  different or ordinary people would react to or argue about something: a focus
-  group / 여론 / 다양한 관점 / 페르소나 토론 / 갑론을박, stress-testing a slogan or
-  stance against a diverse public, or "사람들이 이걸 어떻게 생각할까", "찬반 붙여줘".
-  Trigger even when the user never says "persona" — any request to simulate how a
-  varied group of real people would weigh in belongs here. Do NOT use for
-  analyzing real survey/poll/review data, summarizing real interviews or
-  meetings, writing fictional character dialogue, or building debate/chatbot
-  software — those are different tasks. Korean output.
+description: Structured debate among synthetic Korean personas to pressure-test opinion, message, product, pricing, or policy — synthesizes consensus, disagreements, minority report. Trigger: "여론", "다양한 관점", "페르소나 토론", "갑론을박", "사람들이 이걸 어떻게 생각할까", "찬반 붙여줘", focus group, or any "how would real/ordinary people react" request — even without "persona". NOT for: real survey/poll analysis, summarizing real interviews, fictional dialogue, building debate software. Korean output.
 ---
 
 # Persona Debate

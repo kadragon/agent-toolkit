@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "hwpx": {
+      "source": "kadragon/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "productivity/skills/hwpx/SKILL.md",
+      "computedHash": "ac7bc767ddcb9ef5e526928c7abd1edde12357d0a9344ab0aab1f43849aafd80"
+    }
+  }
+}

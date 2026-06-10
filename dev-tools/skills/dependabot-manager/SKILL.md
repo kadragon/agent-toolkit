@@ -1,13 +1,6 @@
 ---
 name: dependabot-manager
-description: >
-  This skill should be used when the user asks to "manage dependabot PRs",
-  "merge dependabot PRs", "clean up dependabot", "consolidate dependency PRs",
-  "batch update dependencies", "too many dependabot PRs", "configure grouped updates",
-  "audit dependabot config", "review dependency PRs", "check dependabot status",
-  "dependabot rebase", or describes multiple open dependency-update PRs across repos
-  — even without saying "dependabot" explicitly.
-  NOT when: user asks only to rebase a single PR (use `@dependabot rebase` directly without invoking this skill) unless full triage is explicitly requested.
+description: Bulk dependabot PR triage — "manage dependabot PRs", "merge dependabot PRs", "clean up dependabot", "too many dependabot PRs", "consolidate dependency PRs", "batch update dependencies", "configure grouped updates", "audit dependabot config", "check dependabot status", "dependabot rebase", or multiple open dependency-update PRs — even without saying "dependabot". NOT for single-PR rebase only (use `@dependabot rebase`) unless full triage is also requested.
 ---
 
 # Dependabot Manager

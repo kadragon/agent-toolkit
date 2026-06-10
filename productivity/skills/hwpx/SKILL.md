@@ -1,7 +1,6 @@
 ---
 name: hwpx
-description: |
-  This skill should be used when the user asks to "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "한글 파일 수정", "create hwpx", "make a hancom document", "edit hwp file", "generate hwpx", or describes creating, editing, or reading a Korean government or business document. Also trigger when the user attaches a .hwpx file, asks to extract text from hwpx, mentions OWPML, or mentions Hancom document creation, editing, or conversion — even without saying "hwpx" explicitly. NOT when: discussing Hancom as a product/company without a document task (e.g. "Hancom is slow", "Hancom pricing").
+description: Create, edit, or read HWPX (Hancom/한글) documents. "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text from hwpx, OWPML, Hancom document conversion, Korean gov/biz document without saying "hwpx". NOT for Hancom product/company discussion without a document task.
 ---
 
 # HWPX Document Skill — XML-first Workflow
