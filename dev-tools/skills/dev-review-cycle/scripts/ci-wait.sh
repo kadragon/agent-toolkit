@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
-TIMEOUT_SECS=900
+TIMEOUT_SECS=870
 POLL_INTERVAL=20
 DEADLINE=$(( $(date +%s) + TIMEOUT_SECS ))
 

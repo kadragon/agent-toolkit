@@ -12,3 +12,8 @@
 
 - [ ] [debt] `agy-review.sh` — Linux/Mac non-TTY context also silently loses agy output if agy uses platform-specific console rendering there too; no guard added for non-Windows platforms. (source: inline) — `dev-tools/skills/dev-review-cycle/scripts/agy-review.sh`
 - [ ] [constraint] `preflight.sh` — no test coverage for the new Windows agy-disable branch; manual smoke test only. (source: code-review, pr-review-toolkit:review-pr) — `dev-tools/skills/dev-review-cycle/scripts/preflight.sh`
+
+### PR #41 — feat(dev-review-cycle): consolidation re-verify, approval-bias, trivial short-circuit (2026-06-10)
+
+- [ ] [harness] `plugin.json` — version bumped to `3.2.0` but AGENTS.md semver rule says skill modification = patch; correct value is `3.1.2`. Fix: `bash scripts/bump-version.sh dev-tools patch` and re-release. (source: agy, codex) — `dev-tools/.claude-plugin/plugin.json:4`
+- [ ] [doc] `SKILL.md:14` — `--auto` argument description says "apply all in-scope suggestions" but after approval-bias gate P2/P3 in-scope items are routed to backlog, not applied. Update to reflect P0/P1-only apply. (source: pr-review-toolkit:review-pr) — `dev-tools/skills/dev-review-cycle/SKILL.md:14`
