@@ -1,6 +1,7 @@
 ---
 name: harness-curator
-description: This skill should be used when the user wants to analyze their Claude Code conversation history / session transcripts to manage their harness across sessions — "analyze my conversation history", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "task audit", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "what recurring work should become a skill/agent/hook", "audit my skills and agents across sessions", "안 쓰는 스킬 정리". It mines transcripts to (1) propose new skills/agents/hooks from recurring work, (2) find existing skills that fail to trigger or underperform, (3) flag unused assets to retire — then delegates the actual create/fix to the right tool. Project-scoped, conversation-analysis-driven. NOT when the user already knows the specific skill to create, modify, or fix — for "create a skill for X", "improve skill X", "make skill X trigger", "기존 스킬 개선해줘" use skill-creator / plugin-dev:skill-development directly. NOT for bootstrapping or validating a repo's AGENTS.md/docs structure ("harness audit", "하네스 점검", "하네스 초기화") — use harness-init.
+description: >-
+  Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
 version: 1.2.1
 ---
 

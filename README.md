@@ -12,8 +12,14 @@ Two plugins:
 | `dev-review-cycle` | Orchestrates Claude/Antigravity/Codex reviewers, merges | ✅ | ❌ |
 | `orchestrate` | Multi-agent delegation playbook | ✅ | ❌ |
 | `harness-curator` | Mines transcripts to manage harness assets | ✅ | ❌ |
-| `security-overview` | Aggregates GitHub security alerts across owned repos | ✅ | ❌ |
+| `loop-engineer` | Iterative quality-improvement loop (Reflexion + independent verifier) for artifacts with no test gate | ✅ | ❌ |
 | `dependabot-manager` | Bulk Dependabot PR operations | ✅ | ⚠️ |
+
+**Commands:**
+
+| Command | Description | Claude Code | Codex |
+|---|---|---|---|
+| `/security-overview` | Scans GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos, writes per-repo `plan.md` | ✅ | ❌ |
 
 ### `productivity` — document authoring
 
@@ -29,6 +35,21 @@ Two plugins:
 > (`claude plugin uninstall toolkit@kadragon`) and install both below.
 > Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
 > the hook now ships as `dev-tools:harness-maintenance`.
+
+### npx skills
+
+```bash
+# All skills
+npx skills add kadragon/agent-toolkit
+
+# Specific skills
+npx skills add kadragon/agent-toolkit --skill hwpx
+npx skills add kadragon/agent-toolkit --skill persona-debate
+npx skills add kadragon/agent-toolkit --skill dev-review-cycle
+npx skills add kadragon/agent-toolkit --skill harness-init
+npx skills add kadragon/agent-toolkit --skill orchestrate
+npx skills add kadragon/agent-toolkit --skill loop-engineer
+```
 
 ### Claude Code
 
