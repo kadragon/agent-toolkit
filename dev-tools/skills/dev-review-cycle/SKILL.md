@@ -23,7 +23,8 @@ Post-dev workflow: creates PR, collects reviews from multiple sources, consolida
 Run bundled preflight script to detect available tools and repo metadata in one step. Outputs JSON with all values needed throughout workflow.
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hub]
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh [--no-hub])
+echo "$PREFLIGHT"
 ```
 
 Detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, merge strategy. `--no-hub` skips remote/GitHub checks, detects base branch from local state only.
@@ -32,7 +33,21 @@ If `CLAUDE_PLUGIN_ROOT` is unset, stop immediately and report — all scripts de
 
 If `has_errors` is `true`, stop and report errors.
 
-Use returned JSON values (`no_hub`, `feature_branch`, `base_branch`, `owner_repo`, `agy_available`, `codex_available`, `codex_mode`, `codex_companion_path`, `merge_strategy`, `review_candidates`) in all subsequent steps. Prefer squash > merge > rebase for merge strategy.
+**Capture all reused values from the preflight JSON now** — every `${...}` placeholder below resolves to one of these shell variables. Run this once and keep them in context for all subsequent steps:
+
+```bash
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
+FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
+OWNER_REPO=$(jq -r '.owner_repo' <<<"$PREFLIGHT")
+AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
+CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
+CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
+CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
+MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")   # JSON object, e.g. {"squash":true}
+NO_HUB=$(jq -r '.no_hub' <<<"$PREFLIGHT")
+```
+
+`review_candidates` is read inline in Step 2-1 (`jq -c '.review_candidates' <<<"$PREFLIGHT"`). `COMMIT_MESSAGE` and `FILES_TO_STAGE` are NOT from preflight — you determine them yourself in Steps 1/5. `PR_NUMBER` is captured from the commit script output in Step 1. Prefer squash > merge > rebase for merge strategy.
 
 ## CRITICAL: Execution Model
 
@@ -87,7 +102,7 @@ RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-p
 echo "$RESULT"
 ```
 
-Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If the script exits non-zero, stop and report the error. If `pr_number` is null but `pr_url` is non-null, extract the number from the URL: `basename $pr_url`. If both are null, halt with error — do not proceed.
+Extract `pr_number` and `pr_url` from the JSON output (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If the script exits non-zero, stop and report the error. If `pr_number` is null but `pr_url` is non-null, extract the number from the URL: `basename "$pr_url"`. If both are null, halt with error — do not proceed.
 
 **Do NOT pause or ask the user after PR creation.** Immediately proceed to Step 2.
 

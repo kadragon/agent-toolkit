@@ -2,17 +2,27 @@
   {
     "pattern": "(implement.*backlog|backlog.*item|스킬.*수정|스킬.*추가|훅.*수정|에이전트.*수정|fix.*skill|add.*skill|modify.*hook|update.*agent|이거.*구현|구현해줘|백로그.*구현)",
     "instruction": "Use Skill(skill-dev-orchestrator) to orchestrate the implementation. Do NOT inline-implement.",
-    "skip_if_prompt_matches": "(inline|직접|without orchestrator)"
+    "skip_if_prompt_matches": "(inline|직접|without orchestrator|오타|typo|한 줄|one line|one-line)"
   },
   {
-    "pattern": "(dev.*review|review.*cycle|리뷰.*사이클|dev-review|dev review|리뷰.*돌려|review.*pr|pr.*review)",
+    "pattern": "(dev.*review|review.*cycle|리뷰.*사이클|dev-review|dev review|리뷰.*돌려|리뷰.*머지|review.*(and.*)?merge|run.*review)",
     "instruction": "Use Skill(dev-tools:dev-review-cycle) to run the review cycle. Do NOT inline-manage review.",
-    "skip_if_prompt_matches": "(skip|no review|without review)"
+    "skip_if_prompt_matches": "(skip|no review|without review|review.*only|리뷰만|don't merge|do not merge|머지.*하지|머지하지)"
   },
   {
-    "pattern": "(harness.*curator|transcript.*anal|스킬.*분석|harness.*friction|curator)",
-    "instruction": "Use Skill(dev-tools:harness-curator) for harness analysis.",
+    "pattern": "(orchestrate|fan out|fan-out|parallel agents|split.*across agents|delegate this|write a workflow|run a workflow|병렬.*에이전트|에이전트.*팬아웃)",
+    "instruction": "Use Skill(dev-tools:orchestrate) for the delegation decision (single agent vs fan-out vs Workflow).",
+    "skip_if_prompt_matches": "(review.*cycle)"
+  },
+  {
+    "pattern": "(set ?up.*harness|initialize.*harness|bootstrap.*AGENTS|하네스.*초기화|하네스.*점검|validate.*harness|harness.*audit|harness.*init|에이전트.*인프라)",
+    "instruction": "Use Skill(dev-tools:harness-init) to bootstrap or validate repo agent infrastructure.",
     "skip_if_prompt_matches": ""
+  },
+  {
+    "pattern": "(harness.*curator|transcript.*anal|conversation.*history|대화.*기록.*분석|harness.*friction|recurring.*(work|skill|agent|hook)|안.?쓰는.*스킬.*정리)",
+    "instruction": "Use Skill(dev-tools:harness-curator) for cross-session transcript analysis.",
+    "skip_if_prompt_matches": "(harness.*init|set ?up.*harness|validate.*harness)"
   },
   {
     "pattern": "(explore.*skill|탐색.*스킬|map.*plugin|plugin.*structure.*unknown|explore.*plugin)",
@@ -20,13 +30,28 @@
     "skip_if_prompt_matches": ""
   },
   {
-    "pattern": "(skill.*quality|evaluate.*skill|스킬.*평가|skill.*eval|assess.*skill)",
+    "pattern": "(skill.*quality|evaluate.*skill|스킬.*평가|skill.*eval|assess.*skill|audit.*skill.*quality)",
     "instruction": "Spawn Agent(subagent_type=skill-evaluator) for skill quality assessment.",
-    "skip_if_prompt_matches": ""
+    "skip_if_prompt_matches": "(improv|loop|iterativ|만족.*고쳐|반복.*개선)"
   },
   {
-    "pattern": "(loop.*engineer|루프.*돌려.*개선|iterative.*improv|반복.*개선|improvement.*cycle|자기.*개선.*루프|루프.*엔지니어|스스로.*평가.*고쳐|refine.*until.*convergent|loop-engineer)",
+    "pattern": "(loop.*engineer|루프.*돌려.*개선|iterative.*improv|improve.*iterativ|반복.*개선|improvement.*cycle|eval.*loop|keep.*improv|자기.*개선.*루프|루프.*엔지니어|스스로.*평가.*고쳐|만족.*때까지.*고쳐|refine.*until.*convergent|loop-engineer)",
     "instruction": "Use Skill(dev-tools:loop-engineer) for iterative quality improvement without a test gate.",
     "skip_if_prompt_matches": "(orchestrate|verify.*fix|테스트.*있|has.*tests)"
+  },
+  {
+    "pattern": "(dependabot|dependency.*PRs?|grouped.*updates|dependency.*update|merge.*dependabot|batch.*update.*depend)",
+    "instruction": "Use Skill(dev-tools:dependabot-manager) for dependency-PR triage.",
+    "skip_if_prompt_matches": "(@dependabot rebase|single.*PR.*rebase|rebase.*single)"
+  },
+  {
+    "pattern": "(갑론을박|찬반.*(붙여|토론|시켜|모아)|토론.*붙여|토론.*시켜|포커스.?그룹|focus group|여러 사람.*(관점|시각|입장|반응|평가)|다양한.*(소비자|사람|시민|입장).*(반응|토론|관점|의견)|페르소나.*토론|시뮬레이션.*(반응|관점)|simulate.*panel|panel.*debat|입장.*갈리는.*토론|다양.*섞.*의견|다양하게.*의견 들어)",
+    "instruction": "Use Skill(productivity:persona-debate) to simulate a debate among synthetic Korean personas.",
+    "skip_if_prompt_matches": "(\\.csv|survey|설문|여론조사 결과|보도자료|회의록|녹취|챗봇|autogen|오케스트레이션 코드|코드 짜|소설|등장인물|마케팅 전략 문서|감성분석|주제.*추천|추천해줘|자료.*찾아|자료.*정리|통계 자료)"
+  },
+  {
+    "pattern": "(hwpx|한글.*문서|한글.*파일|공문.*만들|공문.*작성|hancom|owpml|\\.hwp)",
+    "instruction": "Use Skill(productivity:hwpx) for Korean Hancom (HWPX) document tasks.",
+    "skip_if_prompt_matches": "(hancom.*(느리|slow|pricing|가격|회사|company))"
   }
 ]
