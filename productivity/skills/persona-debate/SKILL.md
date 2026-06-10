@@ -14,8 +14,11 @@ defeat false consensus, synthesize honestly.
 levers, output template, the why. Read it before running.
 `references/dataset.md` — fields + exact Korean filter literals.
 All deterministic steps (sampling, depth→plan, roster) are in this skill's
-`scripts/sample_personas.py` (no install, no download — queries HF parquet over
-HTTP in ~2s). **`…` below means** `uv run --with duckdb python sample_personas.py`
+`scripts/sample_personas.py` (no project install, no local dataset — queries HF
+parquet over HTTP in ~2s). **Requires `uv` on PATH and network access to
+huggingface.co over HTTP.** If `uv` is missing or HF is unreachable (the script
+errors / hangs), tell the user the prerequisite that failed and stop — do not
+fabricate personas. **`…` below means** `uv run --with duckdb python sample_personas.py`
 run from the skill's `scripts/` directory — e.g. `cd <this-skill-dir>/scripts`
 first, then `… plan …`.
 

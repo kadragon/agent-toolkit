@@ -75,9 +75,11 @@ Write implementer output to `_workspace/02_implementer_diff.md`.
 ```
 Agent({
   subagent_type: "qa-verifier",
-  prompt: "Objective: verify implementation at _workspace/02_implementer_diff.md against sprint contract at _workspace/00_lead_sprint-contract.md. Pass: 1. Output format: criterion/pass/fail/evidence table. Tools: Bash for lint/test, Read/Grep for verification. Boundaries: no production edits."
+  prompt: "Objective: verify implementation at _workspace/02_implementer_diff.md against sprint contract at _workspace/00_lead_sprint-contract.md. Pass criteria: all acceptance items green. Output format: criterion/pass/fail/evidence table. Tools: Bash for lint/test, Read/Grep for verification. Boundaries: no production edits."
 })
 ```
+
+Write qa-verifier output to `_workspace/03_qa-verifier_report.md`.
 
 If QA fails: present failures to user. Do NOT retry automatically — user decides whether to continue.
 

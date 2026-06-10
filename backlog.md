@@ -8,6 +8,7 @@
 - [ ] [doc] `docs/platform-specs.md` Codex plugin.json example — add `"hooks": "./hooks.json"` (omitted despite spec saying Codex supports hooks field). (source: pr-review-toolkit:review-pr, PR #35)
 - [ ] [doc] `docs/platform-specs.md:126` — replace hardcoded `"version": "3.0.7"` with `"version": "X.Y.Z"` in example JSON. (source: pr-review-toolkit:review-pr, PR #35)
 - [ ] [doc] `docs/platform-specs.md` Sources section — verify URLs (`code.claude.com` vs `docs.anthropic.com`, Codex URL format). (source: pr-review-toolkit:review-pr, PR #35)
+- [ ] [spec] `dev-tools/skills/loop-engineer/SKILL.md` description exceeds Codex 1024-char limit — Codex rejects load (`invalid description: exceeds maximum length of 1024 characters`). Compact description ≤1024. (source: codex review, PR #43)
 
 - [ ] [debt] `--seed` in persona-debate not reproducible cross-run over HTTP (parquet fetch order varies). Fix: DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109` *(deferred: needs DuckDB reservoir rewrite)*
 

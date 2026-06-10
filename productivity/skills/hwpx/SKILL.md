@@ -98,8 +98,6 @@ No external packages required. Scripts use stdlib `xml.etree.ElementTree` only.
 ### Basic usage
 
 ```bash
-source "$VENV"
-
 # 빈 문서 (base 템플릿)
 python3 "$SKILL_DIR/scripts/build.py" build --output result.hwpx
 
@@ -181,8 +179,6 @@ Pick template → look up `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef` in style
 > **Prerequisite**: read `$SKILL_DIR/references/editing-gotchas.md` before any edits — covers FORMULA fields, substring collision, count verification, paragraph deletion, and other silent-failure traps.
 
 ```bash
-source "$VENV"
-
 # 1. HWPX → 디렉토리 (raw bytes 추출, .hwpx_pack_order manifest 기록)
 python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx ./unpacked/
 
@@ -285,8 +281,6 @@ python3 "$SKILL_DIR/scripts/text.py" extract path/to/file.hwpx --format markdown
 ```
 
 ```bash
-source "$VENV"
-
 # 순수 텍스트
 python3 "$SKILL_DIR/scripts/text.py" extract document.hwpx
 
@@ -328,7 +322,6 @@ Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
 ## Workflow 4: validation
 
 ```bash
-source "$VENV"
 # 단독 새 문서
 python3 "$SKILL_DIR/scripts/validate.py" validate document.hwpx
 # 첨부 원본을 편집/복원한 결과 — 기존 중복 ID 오탐 방지
@@ -374,8 +367,6 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 ### Usage
 
 ```bash
-source "$VENV"
-
 # 1. 심층 분석 (구조 청사진 출력)
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx
 

@@ -15,7 +15,7 @@ Phases 1–2: `gh` CLI only (no clone). Only Phase 3 actions **3g (configure gro
 gh search prs --author app/dependabot --state open --owner @me --json repository,number,title,url --limit 200
 ```
 
-Group by repo, show count summary. None found → exit early.
+Group by repo, show count summary. None found → exit early. If returned count == 200 (the `--limit`), warn user results may be truncated — more open PRs may exist beyond this page.
 
 ## Phase 2: Triage
 

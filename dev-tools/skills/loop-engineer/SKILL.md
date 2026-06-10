@@ -17,12 +17,12 @@ Before the first iteration:
 
 1. **Identify the artifact.** File path, inline text, or description of the thing being improved.
 
-2. **Write a rubric.** 3–6 criteria, each with a observable signal:
+2. **Write a rubric.** 3–6 criteria, each with an observable signal:
 
    | Criterion | Signal |
    |-----------|--------|
    | Trigger accuracy | Skill fires on ≥9/10 correct cases, silent on near-misses |
-   | Brevity | Body under 400 lines; each sentence earns its place |
+   | Step ordering | Plan steps are dependency-correct; no step needs a later step's output |
    | Completeness | Covers the 3 scenarios from Step 1 without gaps |
    | Clarity | A new collaborator could follow it without reading the codebase |
 
