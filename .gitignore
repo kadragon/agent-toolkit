@@ -8,3 +8,7 @@ __pycache__/
 /cache/
 
 .antigravitycli/
+
+# Runtime state files (session-specific, not repo artifacts)
+.harness-curator-state.json
+.agents/.maintenance-stamp

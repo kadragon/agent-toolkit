@@ -23,5 +23,10 @@
     "pattern": "(skill.*quality|evaluate.*skill|스킬.*평가|skill.*eval|assess.*skill)",
     "instruction": "Spawn Agent(subagent_type=skill-evaluator) for skill quality assessment.",
     "skip_if_prompt_matches": ""
+  },
+  {
+    "pattern": "(loop.*engineer|루프.*돌려.*개선|iterative.*improv|반복.*개선|improvement.*cycle|자기.*개선.*루프|루프.*엔지니어|스스로.*평가.*고쳐|refine.*until.*convergent|loop-engineer)",
+    "instruction": "Use Skill(dev-tools:loop-engineer) for iterative quality improvement without a test gate.",
+    "skip_if_prompt_matches": "(orchestrate|verify.*fix|테스트.*있|has.*tests)"
   }
 ]
