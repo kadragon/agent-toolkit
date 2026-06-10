@@ -34,15 +34,13 @@ AGY_AVAILABLE=false
 if command -v agy >/dev/null 2>&1; then
   AGY_AVAILABLE=true
   # On Windows/Git Bash, agy.exe writes output via Windows console API (text_drip renderer)
-  # rather than stdout. Output is silently lost when stdout is not a TTY (e.g., piped in
-  # scripts). Detect this and disable agy so the skill doesn't spin up an agy session
-  # that produces no usable output.
+  # rather than stdout. agy-review.sh always invokes agy in a pipeline (agy ... | tee),
+  # so agy's stdout is always a pipe — never a TTY — and the output is silently lost
+  # regardless of whether the outer terminal is interactive. Disable unconditionally on
+  # Windows rather than using a TTY heuristic that would incorrectly report
+  # agy_available=true when preflight is run in an interactive shell.
   case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*)
-      if ! [ -t 1 ]; then
-        AGY_AVAILABLE=false
-      fi
-      ;;
+    MINGW*|MSYS*|CYGWIN*) AGY_AVAILABLE=false ;;
   esac
 fi
 

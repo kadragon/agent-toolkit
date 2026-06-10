@@ -88,3 +88,17 @@ if ! grep -q '[^[:space:]]' "$AGY_OUT"; then
   fi
   exit 1
 fi
+
+# agy wrote output but exited non-zero — output is likely truncated; treat as failure
+# rather than silently using partial review content.
+if [ "$AGY_EXIT" -ne 0 ]; then
+  echo "agy exited $AGY_EXIT with partial output — review skipped" >&2
+  if [ -s "$AGY_ERR" ]; then
+    echo "agy stderr:" >&2
+    cat "$AGY_ERR" >&2
+  fi
+  exit 1
+fi
+
+# Forward any agy stderr (warnings, auth notices, rate-limit messages) even on success
+[ -s "$AGY_ERR" ] && cat "$AGY_ERR" >&2
