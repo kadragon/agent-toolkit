@@ -1,6 +1,7 @@
 ---
 name: dev-review-cycle
-description: Post-dev workflow — parallel reviews (Claude skills + Antigravity + Codex) → apply feedback → CI → merge. Trigger: "review cycle", "run review", "review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지". --no-hub to skip GitHub ops for local review. NOT for review-only (no merge intent), code review discussions, or one-off reviews without committing.
+description: >-
+  Post-dev workflow — parallel reviews (Claude skills + Antigravity + Codex) → apply feedback → CI → merge. Trigger: "review cycle", "run review", "review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지". --no-hub to skip GitHub ops for local review. NOT for review-only (no merge intent), code review discussions, or one-off reviews without committing.
 ---
 
 # Dev Review Cycle

@@ -1,6 +1,7 @@
 ---
 name: loop-engineer
-description: Iterative quality loop for non-testable artifacts (skills, prompts, agent defs, CLAUDE.md, plans, docs) — Reflexion-style structured reflection + independent verifier. Trigger: "evaluate and improve", "loop-engineer this", "keep improving until good", "improvement cycle on this", "improve a skill iteratively", "run eval loop on this agent", "이걸 루프 돌려서 개선해줘", "퀄리티가 만족스러울 때까지 고쳐줘", "자기 개선 루프", "루프 엔지니어링", "반복 개선", "스스로 평가하고 고쳐줘". NOT: code with tests (→ orchestrate), PR review+merge (→ dev-review-cycle), new skill from scratch (→ skill-creator), transcript analysis (→ harness-curator).
+description: >-
+  Iterative quality loop for non-testable artifacts (skills, prompts, agent defs, CLAUDE.md, plans, docs) — Reflexion-style structured reflection + independent verifier. Trigger: "evaluate and improve", "loop-engineer this", "keep improving until good", "improvement cycle on this", "improve a skill iteratively", "run eval loop on this agent", "이걸 루프 돌려서 개선해줘", "퀄리티가 만족스러울 때까지 고쳐줘", "자기 개선 루프", "루프 엔지니어링", "반복 개선", "스스로 평가하고 고쳐줘". NOT: code with tests (→ orchestrate), PR review+merge (→ dev-review-cycle), new skill from scratch (→ skill-creator), transcript analysis (→ harness-curator).
 version: 1.0.0
 ---
 

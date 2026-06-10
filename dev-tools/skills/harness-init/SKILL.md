@@ -1,6 +1,7 @@
 ---
 name: harness-init
-description: "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "validate harness", "harness audit", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", "하네스 점검", or repo has no AGENTS.md/docs/ structure. Does NOT modify ~/.claude/CLAUDE.md.
+description: >-
+  Bootstrap or validate repo agent infrastructure. "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "validate harness", "harness audit", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", "하네스 점검", or repo has no AGENTS.md/docs/ structure. Does NOT modify ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init

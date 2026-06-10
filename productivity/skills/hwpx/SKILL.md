@@ -1,6 +1,7 @@
 ---
 name: hwpx
-description: Create, edit, or read HWPX (Hancom/한글) documents. "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text from hwpx, OWPML, Hancom document conversion, Korean gov/biz document without saying "hwpx". NOT for Hancom product/company discussion without a document task.
+description: >-
+  Create, edit, or read HWPX (Hancom/한글) documents. "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text from hwpx, OWPML, Hancom document conversion, Korean gov/biz document without saying "hwpx". NOT for Hancom product/company discussion without a document task.
 ---
 
 # HWPX Document Skill — XML-first Workflow

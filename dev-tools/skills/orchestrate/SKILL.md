@@ -1,6 +1,7 @@
 ---
 name: orchestrate
-description: Multi-agent delegation playbook — single sub-agent vs Agent fan-out vs Workflow, model routing, verify/fix loops, brief template. Trigger: "orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this". NOT for PR review+merge (→ dev-review-cycle).
+description: >-
+  Multi-agent delegation playbook — single sub-agent vs Agent fan-out vs Workflow, model routing, verify/fix loops, brief template. Trigger: "orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this". NOT for PR review+merge (→ dev-review-cycle).
 ---
 
 # Orchestrate

@@ -1,6 +1,7 @@
 ---
 name: harness-curator
-description: Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
+description: >-
+  Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
 version: 1.2.1
 ---
 
