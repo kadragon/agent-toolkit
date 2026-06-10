@@ -108,6 +108,7 @@ Use `review_candidates` from preflight output to dynamically select and launch r
    Do NOT use `git diff HEAD` (last commit only). The branch may have multiple commits.
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
 3. Apply these selection rules:
+   - **Trivial-diff short-circuit** — Before proceeding, compute diff size: count the files in `CHANGED_FILES` and read line delta from `git diff "${BASE_BRANCH}...HEAD" --shortstat`. If ≤ 10 changed lines AND ≤ 3 files AND none of the changed file paths contain security-related patterns (auth, crypto, secret, permission, network, env) → launch exactly 1 general reviewer (highest-priority candidate per rules below). Record all other candidates in 'Reviewers Skipped' with reason "trivial diff — single reviewer sufficient". A security-path hit overrides this short-circuit regardless of diff size.
    - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
@@ -176,10 +177,14 @@ Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts
 
 In both cases, complete these two steps in order before proceeding:
 
-1. **Record out-of-scope items** — If any suggestions are classified out-of-scope, write them to `tasks.md` now (format in `references/consolidation-guide.md`). Do this before touching any code. Do not skip even if only one item is out-of-scope.
-2. **Proceed to Step 4** — Apply only in-scope items.
+1. **Record backlog items** — Before touching any code, write to `tasks.md`: (a) all out-of-scope items, and (b) all in-scope P2/P3 items (readability, style, minor improvements). Format in `references/consolidation-guide.md`.
+2. **Proceed to Step 4** — Apply only P0/P1 in-scope items (correctness bugs, concrete security risks, broken tests). P2/P3 items are already captured in `tasks.md`; do not apply them inline.
 
-If no actionable in-scope suggestions exist, report that reviews found no in-scope issues and skip Steps 4–5 (apply fixes and commit). Step 6 (merge/push) still executes unless `--no-hub` is set, in which case the workflow ends after this step.
+If no P0/P1 in-scope suggestions exist:
+- If `tasks.md` was modified in Step 3 (P2/P3 or out-of-scope items recorded), skip Step 4 but still execute Step 5 to commit `tasks.md` before merging. Use `--files "tasks.md"` with a commit message describing the backlog update (e.g. `[PLAN] record review backlog from PR #N`).
+- If `tasks.md` was NOT modified, skip Steps 4–5 entirely.
+
+Step 6 (merge/push) still executes in either case unless `--no-hub` is set, in which case the workflow ends after the Step 5 commit (or after Step 3 if no commit was needed).
 
 ### Step 4: Apply Improvements
 
