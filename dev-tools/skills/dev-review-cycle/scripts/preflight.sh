@@ -31,7 +31,20 @@ fi
 
 # --- Antigravity (agy) CLI ---
 AGY_AVAILABLE=false
-command -v agy >/dev/null 2>&1 && AGY_AVAILABLE=true
+if command -v agy >/dev/null 2>&1; then
+  AGY_AVAILABLE=true
+  # On Windows/Git Bash, agy.exe writes output via Windows console API (text_drip renderer)
+  # rather than stdout. Output is silently lost when stdout is not a TTY (e.g., piped in
+  # scripts). Detect this and disable agy so the skill doesn't spin up an agy session
+  # that produces no usable output.
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if ! [ -t 1 ]; then
+        AGY_AVAILABLE=false
+      fi
+      ;;
+  esac
+fi
 
 # --- Codex ---
 CODEX_AVAILABLE=false
