@@ -1,7 +1,7 @@
 ---
 name: dev-review-cycle
 description: >-
-  Post-dev workflow — parallel reviews (Claude skills + Antigravity + Codex) → apply feedback → CI → merge. Trigger: "review cycle", "run review", "review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지". --no-hub to skip GitHub ops for local review. NOT for review-only (no merge intent), code review discussions, or one-off reviews without committing.
+  Post-dev workflow — parallel reviews (Claude skills + Antigravity + Codex) → apply feedback → CI → merge. Works against GitHub (gh) and Forgejo/Gitea (REST) remotes. Trigger: "review cycle", "run review", "review and merge", "dev review", "리뷰 돌려줘", "리뷰 사이클", "리뷰 머지". --no-hub to skip remote/PR ops for local review. NOT for review-only (no merge intent), code review discussions, or one-off reviews without committing.
 ---
 
 # Dev Review Cycle
@@ -10,13 +10,16 @@ Post-dev workflow: creates PR, collects reviews from multiple sources, consolida
 
 ## Arguments
 
-- `--no-hub` — Skip all GitHub ops: no push, no PR creation, no CI wait, no merge. Commits locally, collects reviews from local diff against base branch. Use when you want review feedback without publishing to GitHub.
+- `--no-hub` — Skip all remote hub ops: no push, no PR creation, no CI wait, no merge. Commits locally, collects reviews from local diff against base branch. Use when you want review feedback without publishing to the remote.
 - `--auto` — Skip user confirmation in Step 3. Apply all in-scope suggestions automatically and continue the workflow without pausing. Out-of-scope items are still recorded in `tasks.md`.
 
 ## Prerequisites
 
 - Dev complete, all changes ready to commit.
-- `--no-hub`: `gh` CLI auth not required.
+- Hub backend is auto-detected from the `origin` remote (`scripts/hub.sh`):
+  - **GitHub** remote → `gh` CLI must be authenticated.
+  - **Forgejo/Gitea** remote (any other host) → `FORGEJO_TOKEN` or `GITEA_TOKEN` env var must hold a personal access token. API base derives from the remote host (`https://HOST/api/v1`); override with `DRC_HUB_API_URL` if it differs.
+- `--no-hub`: no hub auth required at all.
 
 ## Setup: Pre-flight Checks and Repository Metadata
 
@@ -30,7 +33,7 @@ PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight
 echo "$PREFLIGHT"
 ```
 
-Detects: `gh` auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, merge strategy. `--no-hub` skips remote/GitHub checks, detects base branch from local state only.
+Detects: hub type (`github` / `forgejo`) + auth status, Antigravity (agy) CLI, Codex (plugin or CLI mode), current branch, base branch, owner/repo, merge strategy. `--no-hub` skips remote/hub checks, detects base branch from local state only.
 
 If `CLAUDE_PLUGIN_ROOT` is unset, stop immediately and report — all scripts depend on this variable.
 
@@ -39,6 +42,7 @@ If `has_errors` is `true`, stop and report errors.
 **Capture all reused values from the preflight JSON now** — every `${...}` placeholder below resolves to one of these shell variables. Run this once and keep them in context for all subsequent steps:
 
 ```bash
+HUB_TYPE=$(jq -r '.hub_type' <<<"$PREFLIGHT")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
 OWNER_REPO=$(jq -r '.owner_repo' <<<"$PREFLIGHT")
@@ -127,7 +131,7 @@ Use `review_candidates` from preflight output to dynamically select and launch r
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
 3. Apply these selection rules:
    - **Trivial-diff short-circuit** — Before proceeding, compute diff size: count the files in `CHANGED_FILES` and read line delta from `git diff "${BASE_BRANCH}...HEAD" --shortstat`. If ≤ 10 changed lines AND ≤ 3 files AND none of the changed file paths contain security-related patterns (auth, crypto, secret, permission, network, env) → launch exactly 1 general reviewer (highest-priority candidate per rules below). Record all other candidates in 'Reviewers Skipped' with reason "trivial diff — single reviewer sufficient". A security-path hit overrides this short-circuit regardless of diff size.
-   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
+   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) uses `gh pr` commands internally and requires a GitHub PR to exist — skip it when `--no-hub` is set, when `HUB_TYPE` is not `github`, or when no PR has been created yet.
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
@@ -148,11 +152,20 @@ Agent tool parameters:
        - For kind="command" with id="code-review": also pass ${PR_NUMBER} as args
          (code-review uses gh pr commands internally and requires a PR number).
        - For kind="builtin": invoke exactly like any other skill.
-    3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
-       Tag each finding with source="${SKILL_ID}".
-    IMPORTANT: Only flag issues that were **introduced or made significantly worse** by
-    this PR's changes. Do NOT flag pre-existing issues — whether in untouched files or in
-    unchanged lines within touched files.
+    3. Return findings as a JSON array. Each finding:
+       {"file": "...", "line": N, "severity": "P0".."P3", "confidence": 0-100,
+        "problem": "...", "fix": "...", "source": "${SKILL_ID}"}
+       confidence = how certain you are the issue is real in THIS code (not a
+       pattern match). 100 = verified by reading the actual code path; below 50 =
+       speculative. Be honest — low-confidence findings get filtered, and a wrong
+       high-confidence finding wastes a verification pass.
+    Only flag issues that were **introduced or made significantly worse** by this
+    PR's changes. Do NOT flag:
+    - Pre-existing issues — whether in untouched files or unchanged lines within touched files
+    - Anything a linter/formatter already covers (style, naming, import order)
+    - Lockfiles, generated, or vendored files
+    - Speculative "might be a problem" concerns with no concrete trigger path
+    - More than 5 style-level nits — summarize the rest as a single count
 ```
 
 #### 2-2: Antigravity (agy) Review
@@ -185,7 +198,9 @@ If all launched sources failed or returned no findings, fall back to inline revi
 
 ### Step 3: Consolidate Reviews and Get User Approval
 
-Read **`references/consolidation-guide.md`** now. Deduplicate, resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
+Read **`references/consolidation-guide.md`** now. Deduplicate, filter by confidence (< 75 drops to low-confidence list), resolve conflicts, classify scope (in/out), and present a consolidated table following that procedure.
+
+**Verifier gate (P0/P1 only):** Before presenting the table, if any P0/P1 in-scope candidates survived consolidation, spawn ONE verifier sub-agent (`model: sonnet`) to adversarially re-check them against the actual code — reviewers never cross-check each other, and a separate verification pass is the single biggest false-positive filter. Prompt it to: read each candidate's file:line in the working tree, confirm the issue (a) exists, (b) was introduced by this branch's diff, and (c) has a concrete path to breakage; return per-finding verdicts `confirmed | refuted | uncertain` with one-line evidence. Refuted findings move to a "Refuted by verifier" section (not applied); uncertain ones stay in the table flagged as uncertain. Skip the verifier when there are no P0/P1 candidates — do not spend an agent on P2/P3.
 
 **Scope reference:** Use `CHANGED_FILES` from Step 2-1 as the authoritative file list. A finding is in-scope only if (a) its file appears in `CHANGED_FILES` AND (b) the issue was introduced or made significantly worse by this PR — not pre-existing. Pre-existing issues in changed files are out-of-scope unless this PR made them materially worse. Issues in unchanged files are always out-of-scope. Do not use `git diff HEAD` — that shows only the most recent commit and will incorrectly exclude files changed in earlier commits on this branch.
 
@@ -248,7 +263,7 @@ Read **`references/ci-failure-handling.md`** now. Follow its procedure for CI wa
 Summary:
 
 1. **Wait for CI** — run `scripts/ci-wait.sh` and check `passed` in the JSON output (timeout 15 min).
-2. **On failure** — Fetch logs via `scripts/ci-failure-logs.sh`, classify fix (trivial → apply directly; logic change → re-run Steps 2-3). Hard stop after 3 consecutive failures.
+2. **On failure** — Fetch logs via `scripts/ci-failure-logs.sh`, classify fix (trivial → apply directly; logic change → re-run Steps 2-3). Hard stop after 3 consecutive failures. On Forgejo remotes the output has `logs_available: false` (no log API ≤ v15) — surface each failed check's name and link to the user, and diagnose from the local test run instead of CI logs.
 3. **Merge and clean up** — Run the merge script with all 4 required positional args (5th is optional):
    ```
    bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/merge-and-cleanup.sh \
@@ -270,7 +285,7 @@ When `--no-hub` is set, re-running simply means committing new changes locally a
 
 | Failure | Action |
 |---------|--------|
-| Pre-flight `has_errors: true` | Stop. Report errors (e.g., suggest `gh auth login`). |
+| Pre-flight `has_errors: true` | Stop. Report errors (e.g., suggest `gh auth login` for GitHub, or setting `FORGEJO_TOKEN`/`GITEA_TOKEN` for Forgejo). |
 | Step 1 (commit/PR) fails | Stop. Report the error. |
 | Review skill sub-agent fails | Log the failed skill id, proceed with remaining reviewers. |
 | Antigravity/Codex unavailable or fails | Inform user, proceed with available reviews. |
@@ -290,7 +305,8 @@ For detailed procedures, consult:
 
 ### Scripts
 
-- **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with tool availability and repo metadata
+- **`scripts/hub.sh`** `<detect|repo-info|pr-create|pr-get|ci-status|ci-logs|merge>` — Hub adapter routing PR/CI/merge ops to `gh` (GitHub) or the Forgejo/Gitea REST API (curl). Called by the other scripts — rarely invoked directly.
+- **`scripts/preflight.sh`** — Pre-flight checks, outputs JSON with hub type, tool availability, and repo metadata
 - **`scripts/changed-files.sh`** — Detects tracked changes + untracked new files; one path per line. Called automatically by commit-and-push.sh — do not invoke directly.
 - **`scripts/commit-and-push.sh`** `--message <msg> [--files "f1 f2"] [--no-push] [--pr] [--base <branch>]` — Stage, commit, push, and optionally create a PR; outputs JSON `{commit_hash, committed, pushed, pr_number, pr_url}` (`committed: false` = clean tree, HEAD pushed/PR'd as-is on a re-run). Idempotent with `--pr`: returns the existing PR when one already exists for the branch.
 - **`scripts/ci-wait.sh`** `<pr_number>` — Waits for all CI checks to complete; outputs JSON `{passed: bool}`

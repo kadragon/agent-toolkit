@@ -24,7 +24,7 @@ Use the bundled script:
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/ci-failure-logs.sh <PR_NUMBER>
 ```
 
-The script identifies failed checks, extracts run IDs, and returns JSON with logs for each failure (last 200 lines per job).
+The script identifies failed checks and returns JSON with logs for each failure (last 200 lines per job on GitHub). On Forgejo remotes the response has `logs_available: false` — the API exposes no job logs (≤ v15), only the failed check names and `target_url` links. In that case: report each failed check's name and link to the user, then reproduce the failure locally (run the project's test/lint command) and diagnose from local output instead of CI logs.
 
 ### 2. Classify the Fix
 

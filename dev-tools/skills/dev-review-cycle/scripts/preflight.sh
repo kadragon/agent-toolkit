@@ -19,13 +19,17 @@ done
 
 errors=()
 
-# --- GitHub CLI ---
-GH_AUTHENTICATED=false
+# --- Hub detection (GitHub via gh, Forgejo/Gitea via REST) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HUB_TYPE="none"
+HUB_AUTHENTICATED=false
 if [ "$NO_HUB" = "false" ]; then
-  if gh auth status >/dev/null 2>&1; then
-    GH_AUTHENTICATED=true
-  else
-    errors+=("gh CLI not authenticated. Run 'gh auth login' first.")
+  DETECT=$(bash "${SCRIPT_DIR}/hub.sh" detect 2>/dev/null || echo '{}')
+  HUB_TYPE=$(jq -r '.hub_type // "none"' <<<"$DETECT")
+  HUB_AUTHENTICATED=$(jq -r '.token_present // false' <<<"$DETECT")
+  DETECT_ERRORS=$(jq -r '(.errors // [])[]' <<<"$DETECT")
+  if [ -n "$DETECT_ERRORS" ]; then
+    while IFS= read -r e; do errors+=("$e"); done <<<"$DETECT_ERRORS"
   fi
 fi
 
@@ -67,13 +71,11 @@ BASE_BRANCH=""
 MERGE_INFO='{}'
 
 if [ "$NO_HUB" = "false" ]; then
-  OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
-  BASE_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo "")
+  REPO_INFO=$(bash "${SCRIPT_DIR}/hub.sh" repo-info 2>/dev/null || echo '{}')
+  OWNER_REPO=$(jq -r '.owner_repo // ""' <<<"$REPO_INFO")
+  BASE_BRANCH=$(jq -r '.default_branch // ""' <<<"$REPO_INFO")
   [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
-
-  if [ -n "$OWNER_REPO" ]; then
-    MERGE_INFO=$(gh api "repos/${OWNER_REPO}" --jq '{squash: .allow_squash_merge, merge: .allow_merge_commit, rebase: .allow_rebase_merge}' 2>/dev/null || echo '{}')
-  fi
+  MERGE_INFO=$(jq -c '.merge_strategy // {}' <<<"$REPO_INFO")
 else
   # Detect base branch purely locally — no remote references
   BASE_BRANCH=$(git config init.defaultBranch 2>/dev/null || true)
@@ -89,7 +91,6 @@ else
 fi
 
 # --- Detect installed review skills ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEW_CANDIDATES='{"candidates":[],"count":0}'
 if [[ -f "${SCRIPT_DIR}/detect-review-skills.sh" ]]; then
   REVIEW_CANDIDATES=$(bash "${SCRIPT_DIR}/detect-review-skills.sh" 2>/dev/null) || REVIEW_CANDIDATES='{"candidates":[],"count":0}'
@@ -104,7 +105,8 @@ fi
 
 jq -n \
   --argjson no_hub "$NO_HUB" \
-  --argjson gh_authenticated "$GH_AUTHENTICATED" \
+  --arg hub_type "$HUB_TYPE" \
+  --argjson hub_authenticated "$HUB_AUTHENTICATED" \
   --argjson agy_available "$AGY_AVAILABLE" \
   --argjson codex_available "$CODEX_AVAILABLE" \
   --arg codex_mode "$CODEX_MODE" \
@@ -117,7 +119,8 @@ jq -n \
   --argjson review_candidates "$REVIEW_CANDIDATES" \
   '{
     no_hub: $no_hub,
-    gh_authenticated: $gh_authenticated,
+    hub_type: $hub_type,
+    hub_authenticated: $hub_authenticated,
     agy_available: $agy_available,
     codex_available: $codex_available,
     codex_mode: $codex_mode,

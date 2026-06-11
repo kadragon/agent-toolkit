@@ -81,16 +81,14 @@ if [ "$CREATE_PR" = "true" ]; then
   TITLE=$(printf '%s' "$MESSAGE" | head -n 1)
   BODY=$(printf '%s' "$MESSAGE" | tail -n +3)
 
-  PR_URL=$(gh pr create \
+  # hub.sh routes to gh (GitHub) or the Forgejo/Gitea REST API, and falls back
+  # to the existing PR when one already exists for this branch (re-run).
+  PR_JSON=$(bash "$SCRIPT_DIR/hub.sh" pr-create \
+    --base "$BASE_BRANCH" \
     --title "$TITLE" \
-    --body "$BODY" \
-    --base "$BASE_BRANCH" 2>&1 | grep -E '^https://' | head -1 || true)
-  if [ -z "$PR_URL" ]; then
-    # gh pr create fails when a PR already exists for this branch (re-run) —
-    # fetch the existing one so the caller still gets its number/URL.
-    PR_URL=$(gh pr view --json url --jq '.url' 2>/dev/null || true)
-  fi
-  PR_NUMBER=$(printf '%s' "$PR_URL" | grep -oE '[0-9]+$' || true)
+    --body "$BODY" 2>/dev/null || echo '{}')
+  PR_NUMBER=$(jq -r '.pr_number // ""' <<<"$PR_JSON")
+  PR_URL=$(jq -r '.pr_url // ""' <<<"$PR_JSON")
 fi
 
 jq -n \

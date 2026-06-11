@@ -18,7 +18,12 @@ Merge identical issues flagged by multiple reviewers into a single entry, listin
 
 ### 2. Re-verify Against the Diff
 
-This is the step where the orchestrator earns its keep. The delegated reviewers never cross-check each other — a pattern match in one reviewer can be surfaced as a finding without any confirming signal from the others. Before proceeding, re-read the actual diff lines referenced by each merged finding and verify the issue is real in *this* code.
+This is the step where the orchestrator earns its keep. The delegated reviewers never cross-check each other — a pattern match in one reviewer can be surfaced as a finding without any confirming signal from the others.
+
+Verification has two tiers:
+
+- **P0/P1 candidates → independent verifier agent.** Self-checking your own consolidation absorbs the reviewers' bias; an agent with fresh context and Read/Grep access re-checks each candidate at its file:line, confirms it was introduced by this branch, and returns `confirmed | refuted | uncertain` verdicts with evidence. (Procedure and prompt are in SKILL.md Step 3 — the verifier gate.) Refuted findings go to a "Refuted by verifier" section in the output, not the action table.
+- **P2/P3 candidates → inline re-read.** Re-read the actual diff lines referenced by each merged finding yourself and verify the issue is real in *this* code. A separate agent for nits is not worth the cost.
 
 Drop a finding if:
 - The flagged line was not actually changed by this PR (pre-existing; landed here by file name only)
@@ -29,7 +34,7 @@ Keep findings that survive direct inspection. A finding with a concrete file:lin
 
 ### 3. Drop Low-Confidence and Excluded Findings
 
-Drop findings that a reviewer itself flagged as speculative, uncertain, or worth investigating but unconfirmed. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
+Reviewers emit a `confidence` score (0–100) per finding. Drop findings with confidence below 75 from the action table — list them in a collapsed "Low confidence (not actioned)" note instead, so the signal isn't silently lost. Also drop findings a reviewer itself hedged as speculative or unconfirmed regardless of score. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
 
 Also drop findings in these excluded categories — surfacing them adds noise without actionable value:
 
@@ -78,11 +83,14 @@ Present the consolidated list as a table with:
 - Priority (P0-P3)
 - Title
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
+- Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate)
 - Scope column (In / Out)
 - Gate column (Blocking / Backlog) — Blocking = P0/P1 in-scope; Backlog = P2/P3 in-scope or out-of-scope
 - Recommendation (apply / skip with reason)
 
-After the findings table, add a "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
+After the findings table, add:
+- A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
+- A "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying blocking changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
