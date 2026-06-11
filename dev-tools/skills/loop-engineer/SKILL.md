@@ -2,7 +2,7 @@
 name: loop-engineer
 description: >-
   Iterative quality loop for non-testable artifacts (skills, prompts, agent defs, CLAUDE.md, plans, docs) — Reflexion-style structured reflection + independent verifier. Trigger: "evaluate and improve", "loop-engineer this", "keep improving until good", "improvement cycle on this", "improve a skill iteratively", "run eval loop on this agent", "이걸 루프 돌려서 개선해줘", "퀄리티가 만족스러울 때까지 고쳐줘", "자기 개선 루프", "루프 엔지니어링", "반복 개선", "스스로 평가하고 고쳐줘". NOT: code with tests (→ orchestrate), PR review+merge (→ dev-review-cycle), new skill from scratch (→ skill-creator), transcript analysis (→ harness-curator).
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Loop Engineer — iterative quality improvement without a test gate
@@ -32,6 +32,10 @@ Before the first iteration:
 
 4. **Set a loop ceiling.** Default: stop after 4 rounds of no improvement or 8 rounds total. Loops without ceilings drift; ceilings force reflection on whether the rubric itself is wrong.
 
+5. **Open a loop ledger.** This skill's value is *accumulated structured reflection* — each round builds on the last round's hypotheses. But an 8-round loop that spawns a verifier subagent every round can hit context compaction mid-loop, which silently erases the reflections the skill depends on. So the ledger lives on disk, not in context.
+
+   Write it to a scratch path keyed to the artifact — `/tmp/loop-engineer-<artifact-slug>.md` — not next to the artifact (it improves arbitrary files; a ledger dropped beside a `CLAUDE.md` or a plan is litter). Seed it now with the rubric, exit condition, and ceiling. Steps 3 and 5 append to it; Step 6 reads it. **Delete it on exit** (any exit — success, plateau, or ceiling). On resume after a compaction, read the ledger first to recover state instead of restarting the loop.
+
 ## Step 2 — Evaluate with an independent verifier
 
 **Do not self-grade.** Self-preferential bias is documented — the same model that wrote the artifact will rationalize it. Spawn a verifier subagent with no context of prior iterations:
@@ -49,7 +53,7 @@ Aggregate the verdicts. If all criteria PASS → exit. If not → proceed to Ste
 
 ## Step 3 — Reflect structurally
 
-For each FAIL or PARTIAL, write a structured reflection entry:
+For each FAIL or PARTIAL, append a structured reflection entry to the ledger:
 
 ```
 [FINDING]: <what failed>
@@ -70,7 +74,7 @@ If you find yourself changing things not tied to a reflection entry, stop. That'
 
 ## Step 5 — Verify, then repeat or exit
 
-Re-run the verifier from Step 2 (cold read, new subagent, same rubric). Record:
+Re-run the verifier from Step 2 (cold read, new subagent, same rubric). Append to the ledger:
 
 ```
 Round N:
@@ -84,11 +88,13 @@ Round N:
 - 2 consecutive rounds of flat delta (exit: plateau — see Step 6)
 - Loop ceiling reached (exit: ceiling — escalate to user)
 
+On any exit, delete the loop ledger (`/tmp/loop-engineer-<artifact-slug>.md`). It's scratch state for the loop, not a deliverable — leaving it behind is litter. For a plateau or ceiling exit, fold its contents into the Step 6 user report first.
+
 ## Step 6 — Handle convergence failures
 
 If the loop exits on plateau or ceiling without full PASS:
 
-1. **Check the rubric first.** A plateau often means the rubric is wrong, not the artifact. If a criterion keeps producing contradictory verdicts across rounds, it's not observable enough. Rewrite that criterion before adding more iterations.
+1. **Check the rubric first.** A plateau often means the rubric is wrong, not the artifact. Read the ledger's round log: if a criterion keeps producing contradictory verdicts across rounds, it's not observable enough. Rewrite that criterion before adding more iterations.
 
 2. **Report to user.** State: which criteria are still failing, why improvement stalled, and what decision is needed (user rewrites from scratch, weakens the rubric, or accepts current state).
 
@@ -120,3 +126,4 @@ Do not substitute self-grading when the Agent tool is absent. That defeats the s
 - **Over-improvement.** Changing things not tied to a failing criterion adds noise and makes attribution harder. One reflection entry → one minimal change.
 - **Skipping Step 1.** Jumping straight to "improve" without a rubric produces direction-less iteration. It feels productive but doesn't converge.
 - **Using this skill when a test gate exists.** If `pytest` can tell you pass/fail, use `orchestrate`'s verify/fix loop instead — it's faster and more reliable than judgment-based iteration.
+- **Cognitive surrender.** The verifier reduces the maker's blind spots; it does not eliminate them. A loop of green verdicts is not understanding — if you can't say *why* a change moved a criterion from FAIL to PASS, the loop is shipping artifact you don't comprehend. The ceiling exists partly as a human checkpoint: stop and read what actually changed before accepting it. Automating the loop is the point; automating away your judgment is the failure mode.
