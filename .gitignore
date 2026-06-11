@@ -13,3 +13,6 @@ __pycache__/
 .harness-curator-state.json
 .agents/.maintenance-stamp
 skills-lock.json
+
+# skill-dev-orchestrator scratch
+_workspace/
