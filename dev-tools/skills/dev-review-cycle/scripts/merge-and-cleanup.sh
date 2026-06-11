@@ -57,24 +57,25 @@ if ! echo "$MERGE_STRATEGY_JSON" | jq empty 2>/dev/null; then
 fi
 
 # --- Determine merge method (squash > merge > rebase) ---
-MERGE_FLAG=""
+MERGE_METHOD=""
 if [[ "$MERGE_STRATEGY_JSON" =~ \"squash\"[[:space:]]*:[[:space:]]*true ]]; then
-  MERGE_FLAG="--squash"
+  MERGE_METHOD="squash"
 elif [[ "$MERGE_STRATEGY_JSON" =~ \"merge\"[[:space:]]*:[[:space:]]*true ]]; then
-  MERGE_FLAG="--merge"
+  MERGE_METHOD="merge"
 elif [[ "$MERGE_STRATEGY_JSON" =~ \"rebase\"[[:space:]]*:[[:space:]]*true ]]; then
-  MERGE_FLAG="--rebase"
+  MERGE_METHOD="rebase"
 else
-  MERGE_FLAG="--squash"
+  MERGE_METHOD="squash"
 fi
 
-# --- Merge PR ---
-MERGE_OK=true
-MERGE_OUTPUT=""
-if MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "$MERGE_FLAG" --delete-branch 2>&1); then
-  MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_FLAG#--}"
+# --- Merge PR (hub.sh routes to gh or the Forgejo/Gitea REST API) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
+MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
+MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
+if [ "$MERGE_OK" = "true" ]; then
+  MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
 else
-  MERGE_OK=false
   MERGE_MSG="Merge failed for PR #${PR_NUMBER}"
 fi
 
@@ -109,7 +110,7 @@ fi
 # --- Output JSON safely with jq ---
 jq -n \
   --argjson merge_ok "$MERGE_OK" \
-  --arg merge_method "${MERGE_FLAG#--}" \
+  --arg merge_method "$MERGE_METHOD" \
   --arg merge_message "$MERGE_MSG" \
   --arg merge_output "$MERGE_OUTPUT" \
   --arg cleanup_message "$CLEANUP_MSG" \

@@ -2,6 +2,15 @@
 
 ## Review Backlog
 
+### PR #45 — dev-review-cycle: hub adapter (GitHub/Forgejo) + review-quality upgrades (2026-06-11)
+
+- [ ] [debt] `hub.sh` callers — `2>/dev/null` on hub.sh invocations (preflight.sh, commit-and-push.sh, ci-wait.sh) discards stderr diagnostics; on failure callers see only `{}` and lose the cause. Fix: capture stderr to a var/file and surface it in error JSON. (source: agy) — P2
+- [ ] [debt] `hub.sh:30` — scp-style remotes with non-`git` ssh users (`forgejo@host:owner/repo`) miss the `git@*` pattern → HUB_TYPE=none. Fix: order url patterns http(s) → ssh:// → `*@*:*`. (source: agy) — P2
+- [ ] [debt] `hub.sh:47` — GitHub Enterprise hosts (`github.company.com`) classified as forgejo; regresses gh-authenticated GHE workflows. Fix: probe `gh auth status --hostname $HOST` before falling back to forgejo. (source: codex) — P2
+- [ ] [debt] `hub.sh:64` — Forgejo PAT passed in curl argv (`-H "Authorization: token …"`), visible via process list to local users. Fix: pass header via `--config`/stdin file. Low risk single-user tool. (source: security-review) — P3
+- [ ] [debt] `hub.sh` — HUB_TYPE=none falls into the forgejo else-branch of operational subcommands → misleading "no token" error instead of "no remote". Fix: shared early guard. (source: pr-review-toolkit:review-pr) — P3
+- [ ] [harness] `ci-wait.sh` — NO_CHECKS_GRACE_SECS=90 may be short for slow CI registration; make configurable via env (e.g. DRC_NO_CHECKS_GRACE_SECS). (source: pr-review-toolkit:review-pr) — P3
+
 ### PR #44 — harness-curator repo-fit plugin disable (2026-06-11)
 
 - [ ] [debt] `loop-engineer/SKILL.md:37` — `/tmp/loop-engineer-<slug>.md` ledger collides in multi-user hosts (another user owns the file → `PermissionError` on write). Fix: per-user temp dir (`tempfile.gettempdir()` / `$TMPDIR`) or include uid in the name. (source: agy) — P2
