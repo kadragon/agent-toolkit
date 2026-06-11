@@ -55,20 +55,25 @@ API_URL="${DRC_HUB_API_URL:-https://${HOST}/api/v1}"
 TOKEN="${FORGEJO_TOKEN:-${GITEA_TOKEN:-}}"
 
 # fj_api <method> <path> [json_body] — prints body; returns non-zero on HTTP >= 400.
-# Captures HTTP code via trailing line so callers can distinguish 404/409.
-FJ_HTTP_CODE=""
+# fj_api is almost always invoked inside command substitution or a pipeline —
+# both subshells, where a plain variable assignment cannot reach the parent.
+# The HTTP code is persisted to a temp file instead; read it with fj_code.
+FJ_CODE_FILE="$(mktemp)"
+trap 'rm -f "$FJ_CODE_FILE"' EXIT
+fj_code() { cat "$FJ_CODE_FILE" 2>/dev/null || printf '000'; }
 fj_api() {
   local method="$1" path="$2" body="${3:-}"
-  local resp
+  local resp code
   resp=$(curl -sS -X "$method" \
     -H "Authorization: token ${TOKEN}" \
     -H "Content-Type: application/json" \
     ${body:+-d "$body"} \
     -w $'\n%{http_code}' \
-    "${API_URL}${path}") || { FJ_HTTP_CODE="000"; return 1; }
-  FJ_HTTP_CODE="${resp##*$'\n'}"
+    "${API_URL}${path}") || { printf '000' >"$FJ_CODE_FILE"; return 1; }
+  code="${resp##*$'\n'}"
+  printf '%s' "$code" >"$FJ_CODE_FILE"
   printf '%s' "${resp%$'\n'*}"
-  [ "$FJ_HTTP_CODE" -lt 400 ]
+  [ "$code" -lt 400 ]
 }
 
 require_forgejo_token() {
@@ -101,7 +106,7 @@ case "$SUBCOMMAND" in
         TOKEN_PRESENT=true
         # Probe the API to confirm a Forgejo/Gitea-compatible server.
         if ! fj_api GET "/version" >/dev/null 2>&1; then
-          errors+=("Remote host '${HOST}' did not answer ${API_URL}/version (HTTP ${FJ_HTTP_CODE}). Set DRC_HUB_API_URL if the API base differs.")
+          errors+=("Remote host '${HOST}' did not answer ${API_URL}/version (HTTP $(fj_code)). Set DRC_HUB_API_URL if the API base differs.")
         fi
       else
         errors+=("Forgejo/Gitea remote '${HOST}' detected but no token. Set FORGEJO_TOKEN or GITEA_TOKEN.")
@@ -134,7 +139,7 @@ case "$SUBCOMMAND" in
     else
       require_forgejo_token
       REPO_JSON=$(fj_api GET "/repos/${OWNER_REPO}") || {
-        echo "{\"error\": \"Failed to fetch repo info (HTTP ${FJ_HTTP_CODE})\"}" >&2; exit 1; }
+        echo "{\"error\": \"Failed to fetch repo info (HTTP $(fj_code))\"}" >&2; exit 1; }
       printf '%s' "$REPO_JSON" | jq --arg or "$OWNER_REPO" \
         '{default_branch: .default_branch, owner_repo: $or, merge_strategy: {squash: .allow_squash_merge, merge: .allow_merge_commits, rebase: .allow_rebase}}'
     fi
@@ -167,13 +172,13 @@ case "$SUBCOMMAND" in
       PAYLOAD=$(jq -n --arg head "$HEAD_BRANCH" --arg base "$BASE" --arg title "$TITLE" --arg body "$BODY" \
         '{head: $head, base: $base, title: $title, body: $body}')
       PR_JSON=$(fj_api POST "/repos/${OWNER_REPO}/pulls" "$PAYLOAD") || true
-      if [ "$FJ_HTTP_CODE" = "409" ] || [ -z "$PR_JSON" ] || ! jq -e '.number' <<<"$PR_JSON" >/dev/null 2>&1; then
+      if [ "$(fj_code)" = "409" ] || [ -z "$PR_JSON" ] || ! jq -e '.number' <<<"$PR_JSON" >/dev/null 2>&1; then
         # PR already exists (or create failed) — look up the open PR for this branch.
         PR_JSON=$(fj_api GET "/repos/${OWNER_REPO}/pulls?state=open&limit=50" \
           | jq --arg head "$HEAD_BRANCH" '[.[] | select(.head.ref == $head)] | first // empty') || true
       fi
       if [ -z "$PR_JSON" ] || ! jq -e '.number' <<<"$PR_JSON" >/dev/null 2>&1; then
-        echo "{\"error\": \"PR create failed (HTTP ${FJ_HTTP_CODE}) and no existing PR found for branch ${HEAD_BRANCH}\"}" >&2
+        echo "{\"error\": \"PR create failed (HTTP $(fj_code)) and no existing PR found for branch ${HEAD_BRANCH}\"}" >&2
         exit 1
       fi
       printf '%s' "$PR_JSON" | jq '{pr_number: (.number | tostring), pr_url: .html_url}'
@@ -198,24 +203,28 @@ case "$SUBCOMMAND" in
     if [ "$HUB_TYPE" = "github" ]; then
       EXIT=0
       CHECKS=$(gh pr checks "$PR_NUMBER" --json bucket 2>/dev/null) || EXIT=$?
-      if [ "$EXIT" -eq 8 ]; then
-        emit_status "pending" "$(jq 'length' <<<"${CHECKS:-[]}" 2>/dev/null || echo 0)"
-      elif [ "$EXIT" -ne 0 ]; then
-        # gh exits 1 both for real errors and for "no checks reported".
-        emit_status "none" 0
-      else
+      # gh pr checks exits 1 when any check FAILED — while still printing the
+      # check JSON. Trust the JSON over the exit code: parse buckets whenever a
+      # non-empty array came back, regardless of exit status.
+      if jq -e 'type == "array" and length > 0' <<<"${CHECKS:-null}" >/dev/null 2>&1; then
         TOTAL=$(jq 'length' <<<"$CHECKS")
         PENDING=$(jq '[.[] | select(.bucket == "pending")] | length' <<<"$CHECKS")
         FAILED=$(jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' <<<"$CHECKS")
         if [ "$PENDING" -gt 0 ]; then emit_status "pending" "$TOTAL"
         elif [ "$FAILED" -gt 0 ]; then emit_status "failure" "$TOTAL"
         else emit_status "success" "$TOTAL"; fi
+      elif [ "$EXIT" -eq 8 ]; then
+        emit_status "pending" 0
+      else
+        # No parseable checks: gh exits 1 with empty stdout when no checks are
+        # reported on the branch ("none" lets the caller apply its grace logic).
+        emit_status "none" 0
       fi
     else
       require_forgejo_token
       HEAD_SHA=$(fj_api GET "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}" | jq -r '.head.sha // empty') || true
       if [ -z "$HEAD_SHA" ]; then
-        echo "{\"error\": \"Could not resolve head SHA for PR ${PR_NUMBER} (HTTP ${FJ_HTTP_CODE})\"}" >&2
+        echo "{\"error\": \"Could not resolve head SHA for PR ${PR_NUMBER} (HTTP $(fj_code))\"}" >&2
         exit 1
       fi
       COMBINED=$(fj_api GET "/repos/${OWNER_REPO}/commits/${HEAD_SHA}/status") || COMBINED='{}'
@@ -264,7 +273,7 @@ case "$SUBCOMMAND" in
       # their target URLs so the orchestrator can surface links to the user.
       HEAD_SHA=$(fj_api GET "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}" | jq -r '.head.sha // empty') || true
       if [ -z "$HEAD_SHA" ]; then
-        echo "{\"error\": \"Could not resolve head SHA for PR ${PR_NUMBER} (HTTP ${FJ_HTTP_CODE})\"}" >&2
+        echo "{\"error\": \"Could not resolve head SHA for PR ${PR_NUMBER} (HTTP $(fj_code))\"}" >&2
         exit 1
       fi
       COMBINED=$(fj_api GET "/repos/${OWNER_REPO}/commits/${HEAD_SHA}/status") || COMBINED='{}'
@@ -288,7 +297,7 @@ case "$SUBCOMMAND" in
       PAYLOAD=$(jq -n --arg do "$STRATEGY" '{Do: $do, delete_branch_after_merge: true}')
       MERGE_OK=true
       MERGE_OUTPUT=$(fj_api POST "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/merge" "$PAYLOAD" 2>&1) || MERGE_OK=false
-      [ "$MERGE_OK" = "false" ] && MERGE_OUTPUT="HTTP ${FJ_HTTP_CODE}: ${MERGE_OUTPUT}"
+      [ "$MERGE_OK" = "false" ] && MERGE_OUTPUT="HTTP $(fj_code): ${MERGE_OUTPUT}"
       jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, merge_output: $out}'
     fi
     ;;
