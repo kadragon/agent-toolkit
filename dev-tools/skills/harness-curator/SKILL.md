@@ -97,9 +97,11 @@ After per-plugin confirmation, call the helper once with all confirmed bare plug
 ```bash
 DISABLE="${CLAUDE_PLUGIN_ROOT}/skills/harness-curator/scripts/disable_plugins.py"
 python3 "$DISABLE" dev-tools frontend-design   # example — use confirmed names
+# auditing a repo other than cwd (`all` / `--project` scope)? name it explicitly:
+python3 "$DISABLE" --project=/abs/path/to/repo dev-tools
 ```
 
-The script resolves each bare name to its `plugin@market` key in the global `enabledPlugins`, then atomically writes `false` entries into `<cwd>/.claude/settings.json`:
+The script resolves each bare name to its `plugin@market` key in the global `enabledPlugins` (scanning **all** matching marketplaces so a stale `false` key never masks the enabled one), then atomically writes `false` entries into the target project's `.claude/settings.json` (defaults to `<cwd>`, or `--project=PATH`):
 - Reads global settings from `$CLAUDE_CONFIG_DIR/settings.json` (fallback `~/.claude/settings.json`).
 - Writes only to the **project** `.claude/settings.json` — never the global file.
 - Preserves all existing keys and sections; creates `enabledPlugins` if absent.

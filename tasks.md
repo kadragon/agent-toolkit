@@ -2,6 +2,11 @@
 
 ## Review Backlog
 
+### PR #44 — harness-curator repo-fit plugin disable (2026-06-11)
+
+- [ ] [debt] `loop-engineer/SKILL.md:37` — `/tmp/loop-engineer-<slug>.md` ledger collides in multi-user hosts (another user owns the file → `PermissionError` on write). Fix: per-user temp dir (`tempfile.gettempdir()` / `$TMPDIR`) or include uid in the name. (source: agy) — P2
+- [ ] [debt] `loop-engineer/SKILL.md` — abnormal loop exit leaves a stale ledger; a later loop on the same artifact may mis-detect it as a resumable session. Fix: on start, purge a stale ledger unless the user explicitly requested resume. (source: agy) — P3
+
 ### PR #36 — hwpx: Now-backlog debt (2026-06-09)
 
 - [ ] [debt] `build.py:cmd_analyze` — `"TABLE id=" in result` sentinel fragile; if `_analyze_section` format string changes, `--table-id` silently breaks. Fix: `_analyze_section` returns `(str, bool)` or separate `_section_has_table(root, id) -> bool`. (source: pr-review-toolkit:review-pr) — `productivity/skills/hwpx/scripts/build.py:530`

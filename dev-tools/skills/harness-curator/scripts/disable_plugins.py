@@ -3,8 +3,12 @@
 project-scope disable entries to .claude/settings.json.
 
 Usage:
-  python3 disable_plugins.py <plugin-name> [<plugin-name> ...]
+  python3 disable_plugins.py [--project=PATH] <plugin-name> [<plugin-name> ...]
   python3 disable_plugins.py --test
+
+  --project=PATH  write the disable into PATH/.claude/settings.json instead of the
+                  current directory. Use when auditing a repo other than cwd
+                  (harness-curator `all` / `--project` scope).
 
 Resolution:
   - Reads global settings (CLAUDE_CONFIG_DIR or ~/.claude)/settings.json for
@@ -46,17 +50,21 @@ def resolve_enabled_keys(global_enabled: dict, plugin_names: list[str]) -> dict[
     """
     result: dict[str, str] = {}
     for name in plugin_names:
-        matched = None
-        for full_key in global_enabled:
-            if full_key.split("@")[0] == name:
-                matched = full_key
-                break
-        if matched is None:
+        # A bare name can match several marketplaces (e.g. foo@old, foo@current).
+        # Scan ALL matches — never stop at the first — and disable only the
+        # currently-true one. Stopping early could land on a stale false key and
+        # silently skip the genuinely-enabled key.
+        matches = [k for k in global_enabled if k.split("@")[0] == name]
+        if not matches:
             print(f"  [skip] {name!r}: no matching key in global enabledPlugins")
-        elif not global_enabled[matched]:
+            continue
+        enabled = [k for k in matches if global_enabled[k]]
+        if not enabled:
             print(f"  [skip] {name!r}: already false in global settings (no-op)")
+        elif len(enabled) > 1:
+            print(f"  [skip] {name!r}: ambiguous — multiple enabled keys {enabled}; disable manually")
         else:
-            result[name] = matched
+            result[name] = enabled[0]
     return result
 
 
@@ -71,10 +79,12 @@ def write_disabled(project_settings_path: str, keys_to_disable: list[str]) -> No
         print("  [info] nothing to write")
         return
 
-    # Disable-only guard — checked before any I/O
+    # Type guard — keys must be strings, not a bare boolean. The disable-only
+    # invariant itself is enforced by the hardcoded `= False` write below; this
+    # only catches a caller passing malformed (non-string) key data.
     for k in keys_to_disable:
-        if k is True:
-            raise ValueError(f"BUG: attempted to enable {k!r} — disable-only")
+        if not isinstance(k, str):
+            raise TypeError(f"BUG: key must be str, got {k!r}")
 
     # Read existing project settings (create from scratch if absent)
     existing: dict = {}
@@ -126,8 +136,17 @@ def main(argv: list[str]) -> int:
 
     plugin_names = [a for a in argv if not a.startswith("--")]
     if not plugin_names:
-        print("Usage: disable_plugins.py <plugin-name> [...]  |  --test", file=sys.stderr)
+        print("Usage: disable_plugins.py [--project=PATH] <plugin-name> [...]  |  --test", file=sys.stderr)
         return 1
+
+    # Write target defaults to cwd, but the audited repo may differ from cwd when
+    # harness-curator runs with `all` / `--project` scope. Let the caller name the
+    # repo explicitly so the disable lands in the project whose evidence was scored,
+    # not the caller's directory.
+    project_root = os.getcwd()
+    for a in argv:
+        if a.startswith("--project="):
+            project_root = os.path.expanduser(a.split("=", 1)[1])
 
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     global_settings_path = os.path.join(config_dir, "settings.json")
@@ -135,8 +154,12 @@ def main(argv: list[str]) -> int:
     # Read global enabledPlugins
     global_enabled: dict = {}
     if os.path.exists(global_settings_path):
-        with open(global_settings_path, "r", encoding="utf-8") as fh:
-            raw = json.load(fh)
+        try:
+            with open(global_settings_path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  [error] cannot read global settings {global_settings_path}: {exc}", file=sys.stderr)
+            return 1
         global_enabled = raw.get("enabledPlugins", {})
     else:
         print(f"  [warn] global settings not found: {global_settings_path}")
@@ -150,7 +173,7 @@ def main(argv: list[str]) -> int:
 
     print(f"Resolved to disable: {list(resolution.values())}")
 
-    project_settings_path = os.path.join(os.getcwd(), ".claude", "settings.json")
+    project_settings_path = os.path.join(project_root, ".claude", "settings.json")
     write_disabled(project_settings_path, list(resolution.values()))
 
     print(
@@ -213,6 +236,16 @@ def run_tests() -> int:
     result = resolve_enabled_keys(global_enabled, ["dev-tools", "frontend-design", "productivity", "nonexistent"])
     _assert(set(result.values()) == {"dev-tools@kadragon", "frontend-design@claude-plugins-official"},
             "only truly-enabled keys returned for multiple names")
+
+    # ---- Test 4b: multi-marketplace — stale false key must not mask enabled key ----
+    print("\nTest 4b: resolve_enabled_keys — multi-marketplace collision")
+    multi = {"foo@old": False, "foo@current": True}
+    result = resolve_enabled_keys(multi, ["foo"])
+    _assert(result == {"foo": "foo@current"},
+            "enabled key found despite an earlier stale false key for same bare name")
+    multi_both = {"foo@a": True, "foo@b": True}
+    result = resolve_enabled_keys(multi_both, ["foo"])
+    _assert(result == {}, "two enabled keys for one bare name → ambiguous, skipped (not mis-disabled)")
 
     # ---- Test 5: write_disabled creates file + section from scratch ----
     print("\nTest 5: write_disabled — create-if-absent")
