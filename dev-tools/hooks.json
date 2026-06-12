@@ -6,13 +6,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/harness-maintenance/run.sh\"",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/harness-maintenance/run.sh\"",
             "timeout": 15,
             "statusMessage": "Checking harness..."
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/task-audit-nudge/nudge.py\"",
+            "command": "python3 \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/task-audit-nudge/nudge.py\"",
             "timeout": 5,
             "statusMessage": "Checking harness-curator staleness..."
           }

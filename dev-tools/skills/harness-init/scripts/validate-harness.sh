@@ -56,6 +56,31 @@ done
 # Harness state files (sync C/D-1 expect these)
 [[ -f "backlog.md" ]] && pass "backlog.md exists" || warn "backlog.md missing (sync C expects it)"
 
+# ── 1b. Executable text line endings ───────────────────────
+echo ""
+echo "--- Executable Text Line Endings ---"
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    crlf_files=""
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        if LC_ALL=C grep -Iq . "$f" && LC_ALL=C grep -q $'\r' "$f"; then
+            crlf_files+="$f"$'\n'
+        fi
+    done < <(git ls-files "*.sh" "*.bash" "*.py")
+
+    if [[ -n "$crlf_files" ]]; then
+        fail "Executable text files contain CRLF; enforce LF with .gitattributes:"
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && echo "        $f"
+        done <<< "$crlf_files"
+    else
+        pass "Shell/Python scripts use LF line endings"
+    fi
+else
+    warn "Skipping line-ending check outside a git worktree"
+fi
+
 # ── 2. AGENTS.md line count ────────────────────────────────
 echo ""
 echo "--- AGENTS.md Size ---"

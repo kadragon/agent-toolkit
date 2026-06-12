@@ -51,6 +51,13 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 - Hooks (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`): always `exit 0` — never block on unexpected input
 - Validation scripts (`validate-harness.sh`, CI checks): `exit 1` on failure, `0` on success
 - Use `set -u` (unbound var error); avoid `set -e` in hook scripts (one bad regex should not kill the hook)
+- Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
+
+### Plugin Hook Root Variables
+
+- Codex plugin hooks should use `$PLUGIN_ROOT` as the canonical installed plugin root.
+- Claude Code plugin hooks should use `$CLAUDE_PLUGIN_ROOT`.
+- Shared hook definitions should use `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
 
 ## Plugin Version Bump Rules
 
