@@ -5,6 +5,46 @@ on:
     branches: [main]
 
 jobs:
+  line-endings:
+    name: Executable line ending check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell and Python scripts use LF
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+
+          paths = subprocess.check_output(
+              ["git", "-c", "core.quotePath=false", "ls-files", "--", "*.sh", "*.bash", "*.py"],
+              text=True,
+          ).splitlines()
+
+          bad = []
+          for raw_path in paths:
+              try:
+                  blob = subprocess.check_output(
+                      ["git", "cat-file", "blob", f"HEAD:{raw_path}"]
+                  )
+              except (subprocess.CalledProcessError, OSError) as e:
+                  print(f"WARNING: could not read blob {raw_path}: {e}", file=sys.stderr)
+                  continue
+              if b"\r" in blob:
+                  bad.append(raw_path)
+
+          if bad:
+              print("ERROR: executable text files must use LF line endings:")
+              for path in bad:
+                  print(f"  {path}")
+              print("Fix with .gitattributes and git add --renormalize.")
+              sys.exit(1)
+
+          print("OK: executable text files use LF line endings.")
+          PY
+
   version-bump:
     name: Plugin version bump check
     runs-on: ubuntu-latest

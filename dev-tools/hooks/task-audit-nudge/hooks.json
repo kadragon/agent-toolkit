@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/task-audit-nudge/nudge.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/task-audit-nudge/nudge.py\"",
             "timeout": 5,
             "statusMessage": "Checking harness-curator staleness..."
           }

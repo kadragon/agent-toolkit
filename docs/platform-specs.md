@@ -12,7 +12,7 @@ This repo ships plugins for **both** platforms. Any skill, hook, or agent added 
 | Hooks | `hooks.json` (plugin.json `hooks` field) | `hooks.json` (same field, fewer events) |
 | Commands | `commands/*.md` | NOT supported |
 | MCP | `.mcp.json` via `mcpServers` field | Same |
-| Env var | `$CLAUDE_PLUGIN_ROOT` | `$CLAUDE_PLUGIN_ROOT` (same) |
+| Env var | `$CLAUDE_PLUGIN_ROOT` | `$PLUGIN_ROOT` (canonical), `$CLAUDE_PLUGIN_ROOT` compatibility fallback |
 | Instruction file | `CLAUDE.md` (Anthropic-specific) | `AGENTS.md` (cross-tool standard) |
 
 ---
@@ -69,7 +69,7 @@ Key: `description` field + trigger router (`trigger-router.sh`) together drive a
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/foo/run.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/foo/run.sh",
             "timeout": 15,
             "statusMessage": "Running..."
           }
@@ -199,7 +199,8 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 
 1. Add to `{plugin}/hooks.json` (both platforms read it)
 2. Use only the **8 Codex events** if the hook should work cross-platform; Claude-only hooks (e.g., `PreCompact`, `WorktreeCreate`) are fine but will silently no-op on Codex
-3. Test hook with both `$CLAUDE_PLUGIN_ROOT` paths
+3. Use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` in shared hook commands — `CLAUDE_PLUGIN_ROOT` wins (canonical for Claude Code; Codex sets it as compat alias), with `PLUGIN_ROOT` as fallback
+4. Test hook with both `$CLAUDE_PLUGIN_ROOT` and `$PLUGIN_ROOT` paths
 
 ### When adding an agent
 
@@ -215,11 +216,19 @@ Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.
 
 ## Environment Variables
 
-| Var | Both platforms | Claude only |
-|-----|---------------|-------------|
-| `$CLAUDE_PLUGIN_ROOT` | ✓ | — |
-| `$CLAUDE_PLUGIN_DATA` | — | ✓ (`~/.claude/plugins/data/{id}/`) |
-| `$CLAUDE_PROJECT_DIR` | — | ✓ |
+| Var | Codex | Claude Code |
+|-----|-------|-------------|
+| `$PLUGIN_ROOT` | Canonical installed plugin root | Not documented |
+| `$PLUGIN_DATA` | Canonical writable plugin data directory | Not documented |
+| `$CLAUDE_PLUGIN_ROOT` | Compatibility fallback for existing plugin hooks | Canonical installed plugin root |
+| `$CLAUDE_PLUGIN_DATA` | Compatibility fallback for existing plugin hooks | Writable plugin data directory |
+| `$CLAUDE_PROJECT_DIR` | Not documented | Project directory |
+
+For shared Claude/Codex hook definitions, prefer `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` — `CLAUDE_PLUGIN_ROOT` is canonical for Claude Code and also set by Codex as a compat alias, so it is safe to prefer it in both environments.
+
+## Executable Line Endings
+
+All shell and Python scripts shipped in plugins must use LF line endings. Bash hooks installed on Windows still run through bash, and CRLF causes parse errors such as `set: pipefail\r: invalid option name`.
 
 ---
 
