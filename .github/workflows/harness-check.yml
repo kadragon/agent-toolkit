@@ -19,14 +19,20 @@ jobs:
           import sys
 
           paths = subprocess.check_output(
-              ["git", "ls-files", "*.sh", "*.bash", "*.py"],
+              ["git", "-c", "core.quotePath=false", "ls-files", "--", "*.sh", "*.bash", "*.py"],
               text=True,
           ).splitlines()
 
           bad = []
           for raw_path in paths:
-              path = pathlib.Path(raw_path)
-              if b"\r\n" in path.read_bytes():
+              try:
+                  blob = subprocess.check_output(
+                      ["git", "cat-file", "blob", f"HEAD:{raw_path}"]
+                  )
+              except (subprocess.CalledProcessError, OSError) as e:
+                  print(f"WARNING: could not read blob {raw_path}: {e}", file=sys.stderr)
+                  continue
+              if b"\r" in blob:
                   bad.append(raw_path)
 
           if bad:

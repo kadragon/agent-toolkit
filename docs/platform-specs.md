@@ -69,7 +69,7 @@ Key: `description` field + trigger router (`trigger-router.sh`) together drive a
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/foo/run.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/foo/run.sh",
             "timeout": 15,
             "statusMessage": "Running..."
           }
@@ -199,8 +199,8 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 
 1. Add to `{plugin}/hooks.json` (both platforms read it)
 2. Use only the **8 Codex events** if the hook should work cross-platform; Claude-only hooks (e.g., `PreCompact`, `WorktreeCreate`) are fine but will silently no-op on Codex
-3. Use `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` in shared hook commands so Codex uses its canonical variable and Claude Code keeps working
-4. Test hook with Codex `$PLUGIN_ROOT` and Claude `$CLAUDE_PLUGIN_ROOT` paths
+3. Use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` in shared hook commands — `CLAUDE_PLUGIN_ROOT` wins (canonical for Claude Code; Codex sets it as compat alias), with `PLUGIN_ROOT` as fallback
+4. Test hook with both `$CLAUDE_PLUGIN_ROOT` and `$PLUGIN_ROOT` paths
 
 ### When adding an agent
 
@@ -224,7 +224,7 @@ Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.
 | `$CLAUDE_PLUGIN_DATA` | Compatibility fallback for existing plugin hooks | Writable plugin data directory |
 | `$CLAUDE_PROJECT_DIR` | Not documented | Project directory |
 
-For shared Claude/Codex hook definitions, prefer `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` so Codex uses its canonical variable and Claude Code keeps working.
+For shared Claude/Codex hook definitions, prefer `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` — `CLAUDE_PLUGIN_ROOT` is canonical for Claude Code and also set by Codex as a compat alias, so it is safe to prefer it in both environments.
 
 ## Executable Line Endings
 

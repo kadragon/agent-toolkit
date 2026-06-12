@@ -55,9 +55,8 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 
 ### Plugin Hook Root Variables
 
-- Codex plugin hooks should use `$PLUGIN_ROOT` as the canonical installed plugin root.
-- Claude Code plugin hooks should use `$CLAUDE_PLUGIN_ROOT`.
-- Shared hook definitions should use `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
+- In `hooks.json` command fields, use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` for shared Claude/Codex hooks — Claude Code's canonical var takes precedence; Codex works because it also sets `$CLAUDE_PLUGIN_ROOT` as a compat alias.
+- Script bodies (`.sh` / `.py`) that use `$CLAUDE_PLUGIN_ROOT` directly are also correct for both platforms.
 
 ## Plugin Version Bump Rules
 
