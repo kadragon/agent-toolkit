@@ -61,6 +61,10 @@ jobs:
             OLD_CODEX=$(git show origin/main:dev-tools/.codex-plugin/plugin.json | jq -r .version)
             NEW_CLAUDE=$(jq -r .version dev-tools/.claude-plugin/plugin.json)
             NEW_CODEX=$(jq -r .version dev-tools/.codex-plugin/plugin.json)
+            for v in OLD_CLAUDE OLD_CODEX NEW_CLAUDE NEW_CODEX; do
+              eval "val=\$$v"
+              [ "$val" = "null" ] && { echo "ERROR: dev-tools $v version key missing in manifest."; exit 1; }
+            done
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ] && [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
               echo "ERROR: dev-tools/ changed but neither manifest bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."
@@ -91,6 +95,10 @@ jobs:
             OLD_CODEX=$(git show origin/main:productivity/.codex-plugin/plugin.json | jq -r .version)
             NEW_CLAUDE=$(jq -r .version productivity/.claude-plugin/plugin.json)
             NEW_CODEX=$(jq -r .version productivity/.codex-plugin/plugin.json)
+            for v in OLD_CLAUDE OLD_CODEX NEW_CLAUDE NEW_CODEX; do
+              eval "val=\$$v"
+              [ "$val" = "null" ] && { echo "ERROR: productivity $v version key missing in manifest."; exit 1; }
+            done
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ] && [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
               echo "ERROR: productivity/ changed but neither manifest bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."

@@ -67,7 +67,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     crlf_files=""
     while IFS= read -r f; do
         [[ -z "$f" || ! -f "$f" ]] && continue
-        LC_ALL=C grep -Iq . "$f"; rc=$?
+        rc=0; LC_ALL=C grep -Iq . "$f" || rc=$?
         if [ "$rc" -eq 2 ]; then warn "cannot read $f — skipping line-ending check"; continue; fi
         if [ "$rc" -eq 0 ] && LC_ALL=C grep -q $'\r' "$f"; then
             crlf_files+="$f"$'\n'
