@@ -123,8 +123,9 @@ Plugin-shipped agents **cannot** declare `hooks`, `mcpServers`, or `permissionMo
 ```json
 {
   "name": "dev-tools",
-  "version": "3.0.7",
+  "version": "X.Y.Z",
   "skills": "./skills/",
+  "hooks": "./hooks.json",
   "mcpServers": "./.mcp.json"
 }
 ```
