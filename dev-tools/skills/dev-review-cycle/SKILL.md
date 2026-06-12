@@ -111,6 +111,7 @@ Use `review_candidates` from preflight output to dynamically select and launch r
    - **General reviewer (always include one).** Priority: `pr-review-toolkit:review-pr` > `review` > `code-review`
      - `pr-review-toolkit:review-pr` — git-diff-based; works on any host (GitHub, Forgejo, etc.)
      - `code-review` — uses `gh pr` internally; **skip** when `--no-hub`, no PR yet, or non-GitHub remote
+     - If all three must be skipped, proceed without a general reviewer and note the omission in the Step 3 summary.
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
