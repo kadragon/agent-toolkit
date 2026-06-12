@@ -108,7 +108,9 @@ Use `review_candidates` from preflight output to dynamically select and launch r
    Do NOT use `git diff HEAD` (last commit only). The branch may have multiple commits.
 2. Read `review_candidates` from preflight JSON (list of `{id, kind, description}`).
 3. Apply these selection rules:
-   - **Always include** one general-purpose code reviewer if available. Priority order: `pr-review-toolkit:review-pr` > `review`. Note: `code-review` (kind=command) requires a GitHub PR to exist — skip it when `--no-hub` is set or no PR has been created yet.
+   - **General reviewer (always include one).** Priority: `pr-review-toolkit:review-pr` > `review` > `code-review`
+     - `pr-review-toolkit:review-pr` — git-diff-based; works on any host (GitHub, Forgejo, etc.)
+     - `code-review` — uses `gh pr` internally; **skip** when `--no-hub`, no PR yet, or non-GitHub remote
    - **Include `security-review`** only if the diff touches files related to auth, crypto, secrets, permissions, network, or environment variables.
    - **Skip `caveman:caveman-review`** by default — it produces style-compressed output that duplicates general review signal. Include only if the user explicitly requests caveman review.
    - **Cap at 4 total** claude-skill sub-agents to prevent runaway context cost.
@@ -125,10 +127,8 @@ Agent tool parameters:
     Review the changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
     1. Run `git diff ${BASE_BRANCH}...HEAD --name-only` to list changed files.
     2. Invoke the Skill tool with skill="${SKILL_ID}" to perform the review.
-       - For kind="skill": the skill accepts a git diff context; pass it directly.
-       - For kind="command" with id="code-review": also pass ${PR_NUMBER} as args
-         (code-review uses gh pr commands internally and requires a PR number).
-       - For kind="builtin": invoke exactly like any other skill.
+       - id="code-review": pass `${PR_NUMBER}` as args (uses `gh pr` internally; GitHub only)
+       - all others (`pr-review-toolkit:review-pr`, `review`, `security-review`, etc.): no extra args
     3. Return findings as a list: each line = file:line, severity (P0-P3), description, fix.
        Tag each finding with source="${SKILL_ID}".
     IMPORTANT: Only flag issues that were **introduced or made significantly worse** by
