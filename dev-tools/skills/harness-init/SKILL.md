@@ -1,7 +1,7 @@
 ---
 name: harness-init
-description: |
-  Use when user asks to "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", or repo has no AGENTS.md/docs/ structure. Also for "validate harness", "harness audit", "하네스 점검". Repo-scoped — does NOT modify ~/.claude/CLAUDE.md.
+description: >-
+  Use when setting up or validating repo agent infrastructure — "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "validate harness", "harness audit", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", "하네스 점검", or repo has no AGENTS.md/docs/ structure. Does NOT modify ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init
@@ -143,7 +143,7 @@ Both files follow **Reconciliation Contract** documented in `references/harness-
 
 ### Step 4b: Define Reusable Roles
 
-**Default: create the starter pack** (implementer, explorer, qa-verifier, product-evaluator) for any repo with >1 source file. The cost of an unused role file is ~50 lines on disk; the cost of skipping is that the router in Step 7b has nothing to route to, and the agent does everything inline (the user's reported failure mode). Empirically, harness-init that skipped this step produced repos where "auto-delegation never fires" — because there were no delegation targets to fire at.
+**Default: create the starter pack** (implementer, explorer, qa-verifier, product-evaluator) for any repo with >1 source file (default-on per Step 0).
 
 **Skip only if** the repo is genuinely trivial: a single-script tool, a docs-only repo, or a one-file library with no meaningful module boundaries. When unsure, create the starter pack — the override cost is low.
 
@@ -157,7 +157,7 @@ Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema 
 
 ### Step 4c: Create Orchestrator Skill
 
-**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that the UserPromptSubmit router (Step 7b) routes prompts to. Without one, Step 7b has nothing to install and the agent has nothing to invoke.
+**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo) (default-on per Step 0). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that the UserPromptSubmit router (Step 7b) routes prompts to.
 
 If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) or C (hybrid). For single-agent domains, use Template B with one sub-agent — it is still worth creating because the orchestrator gives the router a target and the model an explicit "spawn the agent, do not inline" instruction.
 
@@ -180,7 +180,7 @@ After creation, register in CLAUDE.md: add `## Harness: {Domain}` pointer block 
 
 **Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". Pair with Step 7b's router for highest reliability.
 
-**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same bar as Step 4b. The historical "single-agent project → skip" rule was wrong: it produced exactly the user-reported failure where init completes but downstream work never delegates. An orchestrator with one sub-agent target is still a net win over no orchestrator.
+**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same bar as Step 4b (default-on per Step 0).
 
 ### Step 4d: _workspace Pattern
 
@@ -261,7 +261,7 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
-**Default: install** — matches the Step 4b/4c default-on policy. With those two defaults on, the router has targets to fire at; skipping 7b leaves the routing surface empty.
+**Default: install** (default-on per Step 0). With Step 4b/4c defaults on, the router has targets to fire at.
 
 **Skip only when** both Step 4b and Step 4c were skipped (i.e., truly trivial single-script / docs-only / one-file library repos). For everything else, install — even with one orchestrator and one agent role, the router earns its keep.
 

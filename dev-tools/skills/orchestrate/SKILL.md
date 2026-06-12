@@ -1,6 +1,7 @@
 ---
 name: orchestrate
-description: Multi-agent delegation playbook — decide whether to use a single sub-agent, Agent fan-out, or the Workflow tool, plus model routing, verify/fix loops, and a delegation brief template. Use when about to orchestrate work across agents, fan out parallel tasks, set up a Workflow, run a verify-until-green loop, or split a task across sub-agents ("orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this"). For general task delegation — NOT the PR review-and-merge flow (see dev-review-cycle).
+description: >-
+  Multi-agent delegation playbook — single sub-agent vs Agent fan-out vs Workflow, model routing, verify/fix loops, brief template. Trigger: "orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this". NOT for PR review+merge (→ dev-review-cycle).
 ---
 
 # Orchestrate
@@ -10,7 +11,7 @@ The main thread is the orchestrator. Default to delegation; do broad work throug
 ## Decision tree — task shape → tool
 
 1. **Clear, bounded, 1–2 files?** → do it inline. Don't delegate trivial work.
-2. **Need to read/search across many files, scope uncertain?** → one `Explore` (broad sweep) or `cavecrew-investigator` (compressed locator). You keep the conclusion, not the file dumps.
+2. **Need to read/search across many files, scope uncertain?** → one `Explore` (broad sweep; or `cavecrew-investigator` compressed locator if available). You keep the conclusion, not the file dumps.
 3. **Several independent tasks, no shared state?** → `Agent` fan-out — one message, multiple Agent calls, run concurrently.
 4. **Multi-stage with control flow (find→verify→fix, migrate-each-site, audit-then-confirm)?** → `Workflow` tool. Deterministic loops/conditionals/fan-out beat model-driven juggling.
 5. **Unknown-size discovery (find all bugs / edge cases)?** → Workflow loop-until-dry: keep spawning finders until K rounds return nothing new.

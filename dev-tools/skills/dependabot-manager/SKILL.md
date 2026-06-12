@@ -1,13 +1,6 @@
 ---
 name: dependabot-manager
-description: >
-  This skill should be used when the user asks to "manage dependabot PRs",
-  "merge dependabot PRs", "clean up dependabot", "consolidate dependency PRs",
-  "batch update dependencies", "too many dependabot PRs", "configure grouped updates",
-  "audit dependabot config", "review dependency PRs", "check dependabot status",
-  "dependabot rebase", or describes multiple open dependency-update PRs across repos
-  — even without saying "dependabot" explicitly.
-  NOT when: user asks only to rebase a single PR (use `@dependabot rebase` directly without invoking this skill) unless full triage is explicitly requested.
+description: Bulk dependabot PR triage — "manage dependabot PRs", "merge dependabot PRs", "clean up dependabot", "too many dependabot PRs", "consolidate dependency PRs", "batch update dependencies", "configure grouped updates", "audit dependabot config", "check dependabot status", "dependabot rebase", or multiple open dependency-update PRs — even without saying "dependabot". NOT for single-PR rebase only (use `@dependabot rebase`) unless full triage is also requested.
 ---
 
 # Dependabot Manager
@@ -22,7 +15,7 @@ Phases 1–2: `gh` CLI only (no clone). Only Phase 3 actions **3g (configure gro
 gh search prs --author app/dependabot --state open --owner @me --json repository,number,title,url --limit 200
 ```
 
-Group by repo, show count summary. None found → exit early.
+Group by repo, show count summary. None found → exit early. If returned count == 200 (the `--limit`), warn user results may be truncated — more open PRs may exist beyond this page.
 
 ## Phase 2: Triage
 

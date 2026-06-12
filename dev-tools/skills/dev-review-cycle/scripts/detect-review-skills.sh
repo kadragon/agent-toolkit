@@ -95,6 +95,8 @@ if [[ -d "$PLUGINS_CACHE" ]]; then
     skill_dir=$(dirname "$skill_md")
     skill_name=$(basename "$skill_dir")
 
+    # TODO: substring match on "review" is broad — unrelated skills named *review* become candidates.
+    # Consider allowlist or description-based matching if detection noise becomes a problem.
     [[ "$skill_name" =~ review ]] || continue
     [[ "$skill_md" =~ /codex/ ]]  && continue
     [[ "$skill_name" == "dev-review-cycle" ]] && continue
