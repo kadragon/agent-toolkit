@@ -4,6 +4,7 @@
 #
 # Checks (keep aligned with references/harness-invariants.md):
 #   1. Required files exist (AGENTS.md, CLAUDE.md, docs/*, backlog.md)
+#   1b. Executable text file line endings (*.sh/*.bash/*.py)
 #   2. AGENTS.md size policy (target ≤100, warn ≤120, fail >120)
 #   3. All files referenced in AGENTS.md docs index exist
 #   4. Golden principles section present and 3-7 items
@@ -16,9 +17,9 @@
 #
 # A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Sections 1–5 and 7–10 use [[ =~ ]] bash builtins, no grep
-# subprocesses. AGENTS.md is read in a single pass — no repeated file scans.
-# Section 6b (auto-delegation router) uses grep twice: agent file detection
-# (find | grep -q) and SKILL.md content matching (grep -qiE).
+# subprocesses. Section 1b uses grep per file. AGENTS.md is read in a single
+# pass — no repeated file scans. Section 6b uses grep twice: agent file
+# detection (find | grep -q) and SKILL.md content matching (grep -qiE).
 
 set -euo pipefail
 
@@ -55,6 +56,35 @@ done
 
 # Harness state files (sync C/D-1 expect these)
 [[ -f "backlog.md" ]] && pass "backlog.md exists" || warn "backlog.md missing (sync C expects it)"
+
+# ── 1b. Executable text line endings ───────────────────────
+echo ""
+echo "--- Executable Text Line Endings ---"
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git_files=$(git ls-files "*.sh" "*.bash" "*.py" 2>/dev/null) \
+        || { warn "git ls-files failed — skipping line-ending check"; git_files=""; }
+    crlf_files=""
+    while IFS= read -r f; do
+        [[ -z "$f" || ! -f "$f" ]] && continue
+        rc=0; LC_ALL=C grep -Iq . "$f" || rc=$?
+        if [ "$rc" -eq 2 ]; then warn "cannot read $f — skipping line-ending check"; continue; fi
+        if [ "$rc" -eq 0 ] && LC_ALL=C grep -q $'\r' "$f"; then
+            crlf_files+="$f"$'\n'
+        fi
+    done <<< "$git_files"
+
+    if [[ -n "$crlf_files" ]]; then
+        warn "Executable text files contain CR (CRLF or CR-only); enforce LF with .gitattributes:"
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && echo "        $f"
+        done <<< "$crlf_files"
+    else
+        pass "Shell/Python scripts use LF line endings"
+    fi
+else
+    warn "Skipping line-ending check outside a git worktree"
+fi
 
 # ── 2. AGENTS.md line count ────────────────────────────────
 echo ""

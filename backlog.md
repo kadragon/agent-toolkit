@@ -4,17 +4,21 @@
 
 ## Next
 
-- [ ] [harness] `harness-check.yml` — add `OLD_CODEX` baseline: `git show origin/main:{plugin}/.codex-plugin/plugin.json | jq -r .version`. Without it, Codex-only version drift emits misleading "Claude manifest not bumped" error. (source: pr-review-toolkit:review-pr, PR #35)
-- [ ] [doc] `docs/platform-specs.md` Codex plugin.json example — add `"hooks": "./hooks.json"` (omitted despite spec saying Codex supports hooks field). (source: pr-review-toolkit:review-pr, PR #35)
-- [ ] [doc] `docs/platform-specs.md:126` — replace hardcoded `"version": "3.0.7"` with `"version": "X.Y.Z"` in example JSON. (source: pr-review-toolkit:review-pr, PR #35)
-- [ ] [doc] `docs/platform-specs.md` Sources section — verify URLs (`code.claude.com` vs `docs.anthropic.com`, Codex URL format). (source: pr-review-toolkit:review-pr, PR #35)
-- [ ] [spec] `dev-tools/skills/loop-engineer/SKILL.md` description exceeds Codex 1024-char limit — Codex rejects load (`invalid description: exceeds maximum length of 1024 characters`). Compact description ≤1024. (source: codex review, PR #43)
-
 - [ ] [debt] `--seed` in persona-debate not reproducible cross-run over HTTP (parquet fetch order varies). Fix: DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109` *(deferred: needs DuckDB reservoir rewrite)*
 
 ## Someday
 
 ## History
+
+### PR #48 — next-tasks batch (2026-06-12)
+
+- [x] [harness] `harness-check.yml` — `OLD_CODEX` baseline added; all four divergence cases now emit distinct errors. (source: PR #35)
+- [x] [doc] `docs/platform-specs.md` Codex example — added `"hooks": "./hooks.json"`. (source: PR #35)
+- [x] [doc] `docs/platform-specs.md:126` — `"version": "3.0.7"` → `"version": "X.Y.Z"`. (source: PR #35)
+- [x] [doc] `docs/platform-specs.md` Sources — all 5 URLs verified HTTP 200, no changes needed. (source: PR #35)
+- [x] [spec] `loop-engineer` description — measured 590 chars, already under Codex 1024 limit; item was stale. (source: PR #43)
+- [x] [debt] `dev-tools/hooks.json` — `:?` guard on `PLUGIN_ROOT`; both-unset now errors loudly. (source: tasks.md PR #47)
+- [x] [debt] `validate-harness.sh:70` — `grep -Iq` exit 2 captured; unreadable file → `warn` + `continue`. (source: tasks.md PR #47)
 
 ### PR #36 — hwpx: Now-backlog debt (2026-06-09)
 
