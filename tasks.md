@@ -2,7 +2,10 @@
 
 ## Review Backlog
 
-### PR #44 — harness-curator repo-fit plugin disable (2026-06-11)
+### PR #49 — failure-log hook + curator wiring (2026-06-13)
+
+- [ ] [debt] `dev-tools/hooks/failure-log/log.py:append_capped` — log + `.gitignore` writes follow symlinks (plain `open('w')`, no `O_NOFOLLOW`); a pre-planted symlink in `.claude/logs/` could redirect the secret-bearing stderr write, and a pre-existing non-ignoring `.gitignore` is left untouched. Fix: open both with `os.open(..., O_CREAT|O_WRONLY|O_NOFOLLOW)` and always ensure the dir ignore covers the log. Local-only, not remotely exploitable. (source: security-review, conf 40) — P3
+- [ ] [debt] `dev-tools/hooks/failure-log/summarize.py:main` — `--help`/`-h` is treated as a path arg (git_root lookup) instead of printing usage. Fix: handle `--help`/`-h` before path resolution. (source: agy) — P3
 
 - [ ] [debt] `loop-engineer/SKILL.md:37` — `/tmp/loop-engineer-<slug>.md` ledger collides in multi-user hosts (another user owns the file → `PermissionError` on write). Fix: per-user temp dir (`tempfile.gettempdir()` / `$TMPDIR`) or include uid in the name. (source: agy) — P2
 - [ ] [debt] `loop-engineer/SKILL.md` — abnormal loop exit leaves a stale ledger; a later loop on the same artifact may mis-detect it as a resumable session. Fix: on start, purge a stale ledger unless the user explicitly requested resume. (source: agy) — P3

@@ -22,6 +22,7 @@ Output (stdout), deterministic, never raises:
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -44,8 +45,11 @@ def git_root(path):
 
 
 def signature(command):
-    toks = [t for t in command.split() if "=" not in t.split("/")[0]] if command else []
-    toks = [t for t in toks if t not in ("sudo",)]
+    try:
+        toks = shlex.split(command) if command else []
+    except ValueError:
+        toks = command.split() if command else []
+    toks = [t for t in toks if "=" not in t.split("/")[0] and t != "sudo"]
     head = [os.path.basename(t) for t in toks[:2]]
     return " ".join(head) or "(empty)"
 
@@ -62,7 +66,7 @@ def load(path):
                     rows.append(json.loads(line))
                 except Exception:
                     continue
-    except FileNotFoundError:
+    except OSError:
         pass
     return rows
 

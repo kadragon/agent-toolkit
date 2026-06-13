@@ -37,11 +37,22 @@ check("test conditional skipped", log.should_log("[ -f missing ]", 1) is False)
 check("diff difference skipped", log.should_log("diff a b", 1) is False)
 
 check("git grep no-match skipped", log.should_log("git grep -q foo", 1) is False)
+check("git -C grep no-match skipped", log.should_log("git -C /p grep foo", 1) is False)
+check("git --no-pager grep skipped", log.should_log("git --no-pager grep foo", 1) is False)
 check("git commit failure logged", log.should_log("git commit -m x", 1) is True)
 check("SIGPIPE skipped", log.should_log("sort big | head", 141) is False)
 check("go test compile err (exit 2) logged", log.should_log("go test ./...", 2) is True)
 check("eslint config err (exit 2) logged", log.should_log("eslint .", 2) is True)
 check("go test red skipped", log.should_log("go test ./...", 1) is False)
+check("npm run test:unit red skipped", log.should_log("npm run test:unit", 1) is False)
+check("./gradlew test red skipped", log.should_log("./gradlew test", 1) is False)
+check("dotnet test red skipped", log.should_log("dotnet test", 1) is False)
+check("local jest red skipped", log.should_log("./node_modules/.bin/jest", 1) is False)
+check("pip install pytest failure logged", log.should_log("pip install pytest", 1) is True)
+check("npm install jest failure logged", log.should_log("npm install jest", 1) is True)
+check("env-with-spaces real fail logged", log.should_log('VAR="a b" gti status', 1) is True)
+check("git_subcommand resolves through -C", log.git_subcommand("git -C /p grep x") == "grep")
+check("first_token env w/ spaces", log.first_token('VAR="a b" gti') == "gti")
 check("pytest red skipped", log.should_log("pytest -q", 1) is False)
 check("npm run test red skipped", log.should_log("npm run test", 1) is False)
 check("golangci-lint red skipped", log.should_log("golangci-lint run", 1) is False)
@@ -69,6 +80,10 @@ check("record truncates command", len(rec["command"]) == log.CMD_CAP)
 check("record truncates stderr", len(rec["stderr"]) == log.STDERR_CAP)
 check("record exitCode", rec["exitCode"] == 2)
 check("record ts", rec["ts"] == 1234)
+check("exit_code via exitCode key", log.exit_code({"exitCode": 3}) == 3)
+check("exit_code via snake_case key", log.exit_code({"exit_code": 4}) == 4)
+rec2 = log.build_record({"tool_response": {"exitCode": 5}}, 1)
+check("record exitCode fallback", rec2["exitCode"] == 5)
 
 # --- append_capped trims ----------------------------------------------------
 with tempfile.TemporaryDirectory() as d:
@@ -113,6 +128,37 @@ with tempfile.TemporaryDirectory() as d:
                        input=json.dumps(payload), text=True, capture_output=True)
     target = os.path.join(d, ".claude", "logs", "failed-commands.jsonl")
     check("e2e noise not written", not os.path.exists(target))
+
+# --- end-to-end: exitCode-only payload (no returnCode key) -----------------
+with tempfile.TemporaryDirectory() as d:
+    subprocess.run(["git", "init", "-q", d], check=True)
+    payload = {
+        "tool_name": "Bash", "cwd": d, "session_id": "s",
+        "tool_input": {"command": "gti push"},
+        "tool_response": {"exitCode": 127, "stderr": "not found"},
+    }
+    r = subprocess.run([sys.executable, os.path.join(HERE, "log.py")],
+                       input=json.dumps(payload), text=True, capture_output=True)
+    target = os.path.join(d, ".claude", "logs", "failed-commands.jsonl")
+    check("e2e exitCode-only written", os.path.exists(target))
+    with open(target) as f:
+        row = json.loads(f.readline())
+    check("e2e exitCode-only recorded", row["exitCode"] == 127)
+
+# --- end-to-end: non-git cwd falls back to CLAUDE_PROJECT_DIR ---------------
+with tempfile.TemporaryDirectory() as nogit, tempfile.TemporaryDirectory() as proj:
+    subprocess.run(["git", "init", "-q", proj], check=True)
+    payload = {
+        "tool_name": "Bash", "cwd": nogit, "session_id": "s",
+        "tool_input": {"command": "gti status"},
+        "tool_response": {"returnCode": 127, "stderr": "x"},
+    }
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=proj)
+    r = subprocess.run([sys.executable, os.path.join(HERE, "log.py")],
+                       input=json.dumps(payload), text=True, capture_output=True, env=env)
+    # nogit is itself non-git; git_root(nogit) returns None → fall back to proj
+    target = os.path.join(proj, ".claude", "logs", "failed-commands.jsonl")
+    check("e2e CLAUDE_PROJECT_DIR fallback", os.path.exists(target))
 
 # --- end-to-end: non-Bash tool ignored -------------------------------------
 r = subprocess.run([sys.executable, os.path.join(HERE, "log.py")],
