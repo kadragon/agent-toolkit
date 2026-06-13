@@ -1,5 +1,10 @@
 ## Review Backlog
 
+### PR #49 — failure-log hook + curator wiring (2026-06-13)
+
+- [ ] [debt] `dev-tools/hooks/failure-log/log.py:append_capped` — log + `.gitignore` writes follow symlinks (plain `open('w')`, no `O_NOFOLLOW`); a pre-planted symlink in `.claude/logs/` could redirect the secret-bearing stderr write, and a pre-existing non-ignoring `.gitignore` is left untouched. Fix: open both with `os.open(..., O_CREAT|O_WRONLY|O_NOFOLLOW)` and always ensure the dir ignore covers the log. Local-only, not remotely exploitable. (source: security-review, conf 40) — P3
+- [ ] [debt] `dev-tools/hooks/failure-log/summarize.py:main` — `--help`/`-h` is treated as a path arg (git_root lookup) instead of printing usage. Fix: handle `--help`/`-h` before path resolution. (source: agy) — P3
+
 ### PR #47 — [HARNESS] CI checks, validate-harness, platform-specs, version bumps (2026-06-12)
 
 - [x] [debt] Both `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` unset → hook command collapses to empty path with no error (source: pr-review-toolkit:review-pr) — `dev-tools/hooks.json:9`

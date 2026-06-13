@@ -2,12 +2,12 @@
 name: harness-curator
 description: >-
   Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
-version: 1.3.0
+version: 1.3.1
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds into four signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds into six signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
 Replaces the old `/dev-tools:task-audit` command, which mined only `history.jsonl` prompts (good for new-asset candidates, blind to triggering misses and underperforming skills).
 
@@ -32,6 +32,16 @@ Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `AGENTS-
 
 If the scan volume is large (`all` scope, or thousands of prompts), do NOT read it all inline — delegate the per-project reading to `Explore` or an `Agent` and analyze the returned summaries. See `references/transcript-format.md` for the record shapes and grep patterns.
 
+Also fold in the **per-repo failed-command log** (written by the `failure-log` PostToolUse hook to `<root>/.claude/logs/failed-commands.jsonl` — genuinely-failed Bash commands, noise already filtered). Cluster it with the bundled summarizer:
+
+```bash
+FLOG="${CLAUDE_PLUGIN_ROOT}/hooks/failure-log/summarize.py"
+python3 "$FLOG"                              # current repo (cwd → git root)
+python3 "$FLOG" /abs/path/to/repo           # one named repo
+```
+
+Its `FAILED-COMMANDS` block ranks failure signatures by count. A signature failing ≥3× is a harness gap — route it in Step 3 (recurring typo → alias/doc; missing tool/dep → setup doc or guard; same wrong flag → CLAUDE.md note or a PreToolUse block).
+
 ## Step 2 — Inventory existing assets
 
 Before proposing anything, know what already exists, or candidates will duplicate it. Glob:
@@ -48,7 +58,7 @@ Two supplementary file-lenses complement the transcript firing data (a skill can
 
 Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
-## Step 3 — Classify into five signals
+## Step 3 — Classify into six signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
 
@@ -59,6 +69,7 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Underperforming asset** | skill in `CORRECTION-SIGNALS` / agent in `AGENT-CORRECTION-SIGNALS` (loaded/invoked, then user corrected) | skill → `skill-creator` modify; agent → `plugin-dev:agent-development` modify |
 | **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing) | loosen/narrow → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
+| **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Before any **delete**, run the adversarial check (Step 7).
 
