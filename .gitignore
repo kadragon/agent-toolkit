@@ -16,3 +16,6 @@ skills-lock.json
 
 # skill-dev-orchestrator scratch
 _workspace/
+
+# hwpx skill temp working directory
+.hwpx_work/

@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #52 — hwpx .hwpx_work/ temp dir cleanup (2026-06-14)
+
+- [ ] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing)
+- [ ] [debt] `SKILL.md:219` — Workflow 2 multi-stage prose references `.hwpx_work/step_N.hwpx` but no `mkdir -p .hwpx_work` shown before it; `office.py pack` will fail on fresh checkout. Fix: add `mkdir -p .hwpx_work` before stage pack step. (source: codex) — P2
+- [ ] [debt] `SKILL.md:152` — concurrent single-file hwpx workflows in same CWD: first to finish wipes `.hwpx_work/` while second is still running. Fix: add comment warning, or use per-invocation suffix. (source: review) — P2
+
 ### PR #51 — next-tasks debt batch (2026-06-14)
 
 - [ ] [debt] `dev-tools/hooks/failure-log/log.py:186` — `gi_fd` leaks if `os.fdopen()` raises before `with` block entered; inner `except OSError: pass` catches without closing. Fix: same `try/except OSError: os.close(gi_fd); raise` guard as log_fd. (source: pr-review-toolkit:review-pr, conf 90) — P2
