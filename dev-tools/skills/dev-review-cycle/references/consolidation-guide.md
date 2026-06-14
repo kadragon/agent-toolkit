@@ -68,35 +68,33 @@ For each remaining suggestion, determine whether it falls within the current PR'
 
 When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
 
-### 8. Apply Approval-Bias Gate
+### 8. Apply / Skip Gate
 
-Not every in-scope finding should block the merge. Sort by whether it gates forward motion:
+All in-scope findings are applied before merge, regardless of severity. Sort by severity so critical items are addressed first:
 
 - **P0 / P1 (correctness bugs, concrete security risk, broken tests)** — must be resolved before merge. These are findings with a clear, demonstrable path to breakage or exploit.
-- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — do NOT apply inline; route to `tasks.md` as backlog items. A PR with only P2/P3 in-scope findings is effectively approved.
-
-The reason for this asymmetry: blocking a clean PR on a P3 nit forces the engineer to touch unrelated code, creates merge-conflict risk, and makes the review cycle feel punishing. P2/P3 findings are real and worth tracking — `tasks.md` ensures they're not forgotten — but they don't belong between the PR and the merge button.
+- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — apply inline along with P0/P1. The reviewer already reviewed this PR's files — fixing while context is live is cheaper than deferring.
 
 ### 9. Present to User
 
 Present the consolidated list as a table with:
-- Priority (P0-P3)
+- Priority (P0-P3) — rows sorted by severity (P0 first) so critical items are visible at the top
 - Title
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
 - Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate)
 - Scope column (In / Out)
-- Gate column (Blocking / Backlog) — Blocking = P0/P1 in-scope; Backlog = P2/P3 in-scope or out-of-scope
+- Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope
 - Recommendation (apply / skip with reason)
 
 After the findings table, add:
 - A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
 
-**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying blocking changes.) The user may approve all, reject some, change scope classifications, or request modifications.
+**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
 ## Recording Backlog Items in tasks.md
 
-After user confirmation, route to `tasks.md`: all out-of-scope findings AND all in-scope P2/P3 findings.
+After user confirmation, route to `tasks.md`: all out-of-scope findings only.
 
 1. Read the existing `tasks.md` in the project root. If it does not exist, create one.
 2. Append items under a `## Review Backlog` section. Classify each item using harness tags based on its nature.
