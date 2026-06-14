@@ -41,7 +41,8 @@ case "$CODEX_MODE" in
     # so nothing is silently dropped. All WARNs go to stderr; stdout stays pure review.
     TEXT=""
     if command -v jq >/dev/null 2>&1; then
-      _jq_tmp=$(mktemp)
+      _jq_tmp=$(mktemp) || { printf 'ERROR: mktemp failed\n' >&2; exit 1; }
+      trap 'rm -f "$_jq_tmp"' EXIT
       TEXT=$(printf '%s' "$RAW" | jq -r '.codex.stdout // empty' 2>"$_jq_tmp") || true
       JQ_ERR=$(cat "$_jq_tmp")
       rm -f "$_jq_tmp"
