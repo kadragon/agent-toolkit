@@ -184,17 +184,28 @@ def append_capped(path, line):
         gi = os.path.join(d, ".gitignore")
         try:
             gi_fd = os.open(gi, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
-            with os.fdopen(gi_fd, "r+", encoding="utf-8") as gf:
+            try:
+                gf = os.fdopen(gi_fd, "r+", encoding="utf-8")
+            except OSError:
+                os.close(gi_fd)
+                raise
+            with gf:
                 content = gf.read()
                 if not any(ln.strip() in {"*", "failed-commands.jsonl"}
                            for ln in content.splitlines()):
                     gf.seek(0, 2)
-                    gf.write("*\n")
+                    prefix = "\n" if content and not content.endswith("\n") else ""
+                    gf.write(prefix + "*\n")
         except OSError:
             pass  # gitignore write failed (e.g. symlink); log write still attempted
         # O_NOFOLLOW: raises ELOOP (OSError) if path is a pre-planted symlink
         log_fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(log_fd, "r+", encoding="utf-8") as f:
+        try:
+            f = os.fdopen(log_fd, "r+", encoding="utf-8")
+        except OSError:
+            os.close(log_fd)
+            raise
+        with f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 f.seek(0)
@@ -253,6 +264,17 @@ def _test():
             content = fh.read()
         check("symlink write skipped — target unmodified", content == "original\n")
         check("symlink still a symlink", os.path.islink(link))
+
+    # .gitignore without trailing newline → write must start a new line, not corrupt last pattern
+    with tempfile.TemporaryDirectory() as td:
+        log_path = os.path.join(td, "test.jsonl")
+        gi_path = os.path.join(td, ".gitignore")
+        with open(gi_path, "w", encoding="utf-8") as gh:
+            gh.write("keep")  # no trailing newline
+        append_capped(log_path, '{"test":1}')
+        with open(gi_path, encoding="utf-8") as gh:
+            gi_content = gh.read()
+        check(".gitignore line boundary preserved", gi_content == "keep\n*\n")
 
     print()
     if fails:
