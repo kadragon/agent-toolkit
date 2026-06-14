@@ -1,25 +1,27 @@
 ---
 name: start-task
-version: 1.0.1
+version: 1.0.2
 description: >-
-  Trigger: "start a task", "pick the next task", "work the backlog", "next task",
-  "start work", "다음 작업 시작", "백로그에서 작업 골라", "작업 하나 돌려줘", "백로그 시작",
-  "작업 시작", "백로그 작업". Picks an open item from backlog.md/tasks.md, drives the full
-  code cycle (branch → Sprint Contract → implement → qa-verifier → version bump), and hands
-  off to dev-review-cycle --auto for review, CI, and merge. NOT for: review-only requests,
-  or exploring backlog without intent to implement+merge this session.
+  This skill should be used when the user says "start a task", "pick the next task",
+  "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
+  "작업 하나 돌려줘", "백로그 시작", "작업 시작", "백로그 작업", "태스크 시작", or
+  "태스크 골라줘". Picks an open item from backlog.md or tasks.md, drives the full code
+  cycle (branch → Sprint Contract → implement → qa-verifier → version bump), and hands off
+  to dev-review-cycle --auto for review, CI, and merge. Not for review-only requests or
+  backlog browsing without intent to implement and merge this session.
 ---
 
 # Start Task
 
-Thin orchestration spine over the `code` cycle in `docs/workflows.md`. Picks work, runs
-the cycle, hands off to `dev-review-cycle --auto`. The heavy lifting is delegated — this skill
-is the **decision and sequencing layer**, not the implementation engine.
+Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
+run the cycle, and hand off to `dev-review-cycle --auto`. Delegate the heavy lifting — this
+skill is the **decision and sequencing layer**, not the implementation engine.
 
 ## Prerequisites
 
-The repo must have `backlog.md` and `docs/workflows.md` (harness-init artifacts). If either
-is missing, stop and point the user to `dev-tools:harness-init`.
+The repo must have `backlog.md`, `docs/workflows.md`, `docs/eval-criteria.md`, and
+`docs/conventions.md` (harness-init artifacts). If any is missing, stop and point the user
+to `dev-tools:harness-init`.
 
 **Working tree gate:** Run `git status --porcelain`. If the output is non-empty, stop and
 list the dirty files — do NOT proceed. Ask the user to commit, stash, or discard first.
@@ -46,7 +48,8 @@ then backlog `## Next`. Within each tier, preserve file order.
 | Candidates found | Action |
 |-----------------|--------|
 | 0 | Report "backlog and tasks are clear — nothing open to start." Stop. |
-| 1 | Announce the item. If it has `*(deferred: ...)*`, surface the blocker and ask the user to confirm it is resolved before proceeding. |
+| 1 (not deferred) | Announce the item and proceed to Step 3. |
+| 1 (deferred) | The item has `*(deferred: ...)*`. Surface the blocker text and ask the user to confirm it is resolved before proceeding. If unresolved, report and stop. |
 | ≥2 | Present top candidates (cap at 4) with `AskUserQuestion`. Each option: type tag, first ~80 chars, file:line. Wait for selection. |
 
 ## Step 3 — Run the code cycle
@@ -56,20 +59,22 @@ Overrides below; standard steps apply where not overridden.
 
 **Branch (workflows.md Step 0)**
 `git checkout -b <type>/<slug>` — derive from the item's `[type]` tag + short slug. If the
-item has no `[type]` tag (common for tasks.md findings), default to `fix/` prefix.
+item has no `[type]` tag (common for tasks.md findings), emit a warning ("Item has no [type]
+tag — defaulting branch prefix to `fix/`") and use `fix/` prefix.
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
 writing the Sprint Contract.
 
 **Plan mode gate (before workflows.md Step 2)**
-Decide scope:
-- **Trivial** (1–2 files AND tag is NOT `[FEAT]` or `[REFACTOR]`): skip plan mode.
-- **Non-trivial** (≥3 files, OR new public API/schema, OR tag is `[FEAT]`/`[REFACTOR]`): use
-  `ToolSearch` (`query: "select:EnterPlanMode,ExitPlanMode"`) to load plan mode tools, call
-  `EnterPlanMode`, design the approach, call `ExitPlanMode` for user approval. If ToolSearch
-  returns no results, present the plan as a numbered list and wait for explicit "proceed" before
-  coding.
+Check tag first, then file count:
+- **Non-trivial** (tag is `[FEAT]` or `[REFACTOR]`, OR ≥3 files, OR new public API/schema):
+  use `ToolSearch` (`query: "select:EnterPlanMode,ExitPlanMode"`) to load plan mode tools,
+  call `EnterPlanMode`, design the approach, call `ExitPlanMode` for user approval. If
+  ToolSearch returns no results, present the plan as a numbered list and wait for explicit
+  "proceed" before coding.
+- **Trivial** (tag is NOT `[FEAT]`/`[REFACTOR]` AND 1–2 files AND no new public API/schema):
+  skip plan mode.
 
 **Mark active — after scope is confirmed**
 Once plan is approved (or trivial gate passed):
