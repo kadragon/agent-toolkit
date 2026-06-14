@@ -10,6 +10,15 @@
 
 ## History
 
+### PR #51 — next-tasks debt batch (2026-06-14)
+
+- [x] [debt] `dev-tools/hooks/failure-log/log.py:append_capped` — opened log + `.gitignore` with `os.O_NOFOLLOW`; pre-planted symlink now raises ELOOP (caught silently). `.gitignore` check-and-append ensures existing files without a wildcard are updated. (source: security-review PR #49, conf 40) — P3
+- [x] [debt] `dev-tools/hooks/failure-log/summarize.py:main` — `--help`/`-h` handled before path resolution; prints usage, no git_root lookup. (source: agy) — P3
+- [x] [debt] `status` variable in zsh is read-only — renamed to `codex_status`. (source: agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:30`
+- [x] [debt] Empty `RAW` on companion silent crash — `printf 'WARN: codex companion exited %s with no stdout\n'` to stderr. (source: review) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:33`
+- [x] [debt] Silent raw-JSON fallback — three distinct stderr WARNs (jq absent / `.codex.stdout` empty / jq parse error via `mktemp` capture). (source: review, pr-review-toolkit:review-pr, agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:39-42`
+- [x] [doc] Comment at L36-37 — added "jq parse failure" to listed fallback triggers. (source: pr-review-toolkit:review-pr)
+
 ### PR #48 — next-tasks batch (2026-06-12)
 
 - [x] [harness] `harness-check.yml` — `OLD_CODEX` baseline added; all four divergence cases now emit distinct errors. (source: PR #35)
