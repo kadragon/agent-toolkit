@@ -19,7 +19,7 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
 # ---------------------------------------------------------------------------
-# Helpers (shims that will be added in GREEN phase)
+# Helpers — thin wrappers around mod.* for readable test assertions
 # ---------------------------------------------------------------------------
 
 def tasks_anchors(content: str) -> list:
@@ -173,6 +173,7 @@ def test_revert_both_anchors_on_failed():
           "[>] [FIX] mktemp guard" not in result and "[>] [FIX] trap on exit" not in result)
     check("failed: unrelated [ ] preserved", "- [ ] [FEAT] new thing" in result)
     check("failed: note appended to first", "ci-fail" in result)
+    check("failed: note appended to both", result.count("ci-fail") == 2)
 
 
 def test_revert_backward_compat_single_title():
@@ -189,6 +190,83 @@ def test_revert_backward_compat_single_title():
 
 
 # ---------------------------------------------------------------------------
+# tasks_anchors() — edge cases
+# ---------------------------------------------------------------------------
+
+def test_tasks_anchors_blank_line_before_bullets():
+    """## Covers with blank line before bullets still parses correctly."""
+    tasks = """\
+# Bundle: blank-line test
+
+status: active
+
+## Covers
+
+- [FIX] mktemp guard
+- [FIX] trap on exit
+
+## Scope
+fix two files
+"""
+    anchors = tasks_anchors(tasks)
+    check("blank-line-covers: returns 2 items", len(anchors) == 2, str(anchors))
+    check("blank-line-covers: first anchor", anchors[0] == "[FIX] mktemp guard", repr(anchors[0]))
+    check("blank-line-covers: second anchor", anchors[1] == "[FIX] trap on exit", repr(anchors[1]))
+
+
+def test_tasks_anchors_empty_covers_fallback():
+    """## Covers present but no bullets → falls back to title."""
+    tasks = """\
+# My Sprint
+
+status: active
+
+## Covers
+
+## Scope
+content here
+"""
+    anchors = tasks_anchors(tasks)
+    check("empty-covers: falls back to 1-item list", len(anchors) == 1, str(anchors))
+    check("empty-covers: value is title", anchors[0] == "My Sprint", repr(anchors[0]))
+
+
+# ---------------------------------------------------------------------------
+# remove_active_markers() / revert_active_markers() — edge cases
+# ---------------------------------------------------------------------------
+
+def test_remove_does_not_touch_queued_items():
+    """[ ] lines are never removed even when text matches an anchor."""
+    backlog = "## Now\n- [ ] [FIX] mktemp guard in codex-review.sh\n"
+    anchors = ["[FIX] mktemp guard in codex-review.sh"]
+    result = remove_active_markers(backlog, anchors)
+    check("noop-queued: [ ] item preserved despite anchor match", "- [ ] [FIX] mktemp guard" in result)
+
+
+def test_remove_case_insensitive():
+    """Anchor match is case-insensitive."""
+    backlog = "## Now\n- [>] [FIX] MKTEMP Guard in codex-review.sh\n"
+    anchors = ["[fix] mktemp guard in codex-review.sh"]
+    result = remove_active_markers(backlog, anchors)
+    check("case-insensitive: lowercase anchor matches uppercase [>] line", "[>]" not in result)
+
+
+# ---------------------------------------------------------------------------
+# backward-compat shims — direct invocation
+# ---------------------------------------------------------------------------
+
+def test_shims_direct():
+    """Single-title shim functions delegate to multi-anchor variants correctly."""
+    backlog = "## Now\n- [>] Fix: codex review\n- [ ] [FEAT] other\n"
+    result_rm = mod.remove_active_marker(backlog, "Fix: codex review")
+    check("shim-rm: [>] removed", "[>]" not in result_rm)
+    check("shim-rm: [ ] preserved", "- [ ] [FEAT] other" in result_rm)
+    result_rv = mod.revert_active_marker(backlog, "Fix: codex review", "shim-note")
+    check("shim-rv: [>] → [ ]", "[>]" not in result_rv)
+    check("shim-rv: note present", "shim-note" in result_rv)
+
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 
@@ -196,11 +274,16 @@ SUITES = [
     ("tasks_anchors: ## Covers", test_tasks_anchors_covers),
     ("tasks_anchors: fallback to title", test_tasks_anchors_fallback),
     ("tasks_anchors: trims bullet prefix", test_tasks_anchors_covers_trims_bullets),
+    ("tasks_anchors: blank line before bullets", test_tasks_anchors_blank_line_before_bullets),
+    ("tasks_anchors: empty Covers fallback", test_tasks_anchors_empty_covers_fallback),
     ("remove_active_markers: done removes all", test_remove_both_anchors_on_done),
     ("remove_active_markers: single no collateral", test_remove_single_anchor_no_unrelated_strike),
     ("remove_active_markers: backward compat", test_remove_backward_compat_single_title),
+    ("remove_active_markers: no-op on queued items", test_remove_does_not_touch_queued_items),
+    ("remove_active_markers: case-insensitive", test_remove_case_insensitive),
     ("revert_active_markers: failed reverts all", test_revert_both_anchors_on_failed),
     ("revert_active_markers: backward compat", test_revert_backward_compat_single_title),
+    ("shims: direct invocation", test_shims_direct),
 ]
 
 if __name__ == "__main__":

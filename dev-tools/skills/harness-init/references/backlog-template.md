@@ -15,9 +15,11 @@ reconciles it against `tasks.md` every session.
 | `[>]` | Active — promoted into the current `tasks.md` sprint | Human on sprint start |
 | `[x]` | Done — kept as history or pruned | `reconcile-harness.py` on sprint `status: done` |
 
-Exactly **one** `[>]` at a time is normal. Zero `[>]` means the repo is idle.
-Multiple `[>]` usually indicates a broken reconciliation — fix before starting
-new work.
+Exactly **one** `[>]` at a time is normal for single-item sprints. Zero `[>]`
+means the repo is idle. Multiple `[>]` is valid only when `tasks.md` has a
+`## Covers` section listing each covered item — that is a **bundle sprint** and
+reconcile will archive all of them on close. Without a `## Covers` section,
+multiple `[>]` indicates broken reconciliation — fix before starting new work.
 
 ## Minimal Template to Copy
 
