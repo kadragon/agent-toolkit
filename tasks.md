@@ -14,6 +14,19 @@
 - [ ] [debt] `dev-tools/hooks/failure-log/log.py:209` — `f.flush()` missing before `fcntl.LOCK_UN`; buffered writes may not reach disk before lock released, allowing parallel reader to see stale data. Pre-existing pattern. (source: agy) — P2 (out-of-scope; pre-existing)
 - [ ] [debt] `dev-tools/hooks/failure-log/log.py:188` — `UnicodeDecodeError` from `encoding="utf-8"` not caught by `except OSError`; propagates to `__main__` `except BaseException: pass` (silent, no disruption). Pre-existing. Fix: add `errors="replace"` or wrap with `except (OSError, UnicodeDecodeError)`. (source: agy) — P2 (out-of-scope; pre-existing)
 
+### PR #54 — start-task skill (2026-06-14)
+
+- [ ] [debt] `SKILL.md:59` — plan mode gate trivial/non-trivial conditions still partially overlap: "1–2 files AND not [FEAT]/[REFACTOR]" skip vs "≥3 files OR [FEAT]/[REFACTOR]" enter — a 1-file `[FEAT]` now routes to non-trivial (correct) but the OR logic may still mis-route 2-file `[REFACTOR]` (source: review, pr-review-toolkit) — P2
+- [ ] [debt] `.claude/trigger-routes.json:4` — `start.*work` pattern can match "start implementing a skill"; no guard for `implement|구현` to skip to skill-dev-orchestrator route instead (source: review) — P2
+- [ ] [debt] `SKILL.md:40` — Step 2 table "1 candidate → proceed" doesn't check deferred status inline; the deferred check is only in the table note, which can be missed. Move deferred check to an inline branch in the table (source: agy) — P2
+- [ ] [debt] `SKILL.md:54` — `backlog-template.md:15` documents `[>]` setter as "Human on sprint start" only; start-task writes `[>]` programmatically. Update `harness-init/references/backlog-template.md` to add "or start-task skill" as a permitted setter (source: pr-review-toolkit) — P2
+- [ ] [debt] `SKILL.md:22` — prerequisites list `backlog.md`/`docs/workflows.md` but sprint body reads `docs/eval-criteria.md` (Sprint Contract) and `docs/conventions.md` (version bump). Add both to prerequisites guard (source: pr-review-toolkit) — P2
+- [ ] [debt] `SKILL.md:51` — branch name fallback documented for no-[type]-tag items but no warning emitted when falling back; silent assumption can produce wrong branch prefix (source: pr-review-toolkit) — P2
+- [ ] [debt] `SKILL.md:47` — inner step labels use "workflows.md Step N" but SKILL.md outer steps are also numbered 1–4; "before workflows.md Step 2" could be misread as "before SKILL.md Step 2". Prefix all inner refs as "workflows.md Step N" consistently (partial, some still ambiguous) (source: pr-review-toolkit) — P3
+- [ ] [harness] `SKILL.md:31` — P-label sort order documented, but missing-label placement note is implicit. Explicit "unlabelled items sort after P3" already present; verify it remains after future edits (source: review, pr-review-toolkit) — P3
+- [ ] [debt] `.claude/trigger-routes.json:4` — route instruction "Do NOT inline-pick or inline-implement" conflicts with SKILL.md line 66 which allows "inline edit" for ≤2 files. Reword route to "Do NOT skip the skill" (source: pr-review-toolkit, conf 70) — P3
+- [ ] [debt] `SKILL.md:65` — implementer brief spec mentions "Sprint Contract + absolute paths + lint/test command" but `docs/delegation.md` four-field format (Objective/Output format/Tools/Boundaries) not referenced. Add pointer to delegation brief template (source: agy, pr-review-toolkit) — P3
+
 ### PR #47 — [HARNESS] CI checks, validate-harness, platform-specs, version bumps (2026-06-12)
 
 - [x] [debt] Both `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` unset → hook command collapses to empty path with no error (source: pr-review-toolkit:review-pr) — `dev-tools/hooks.json:9`
