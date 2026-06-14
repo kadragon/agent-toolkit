@@ -12,12 +12,14 @@
 
 ### PR #51 — next-tasks debt batch (2026-06-14)
 
-- [x] [debt] `dev-tools/hooks/failure-log/log.py:append_capped` — opened log + `.gitignore` with `os.O_NOFOLLOW`; pre-planted symlink now raises ELOOP (caught silently). `.gitignore` check-and-append ensures existing files without a wildcard are updated. (source: security-review PR #49, conf 40) — P3
-- [x] [debt] `dev-tools/hooks/failure-log/summarize.py:main` — `--help`/`-h` handled before path resolution; prints usage, no git_root lookup. (source: agy) — P3
-- [x] [debt] `status` variable in zsh is read-only — renamed to `codex_status`. (source: agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:30`
-- [x] [debt] Empty `RAW` on companion silent crash — `printf 'WARN: codex companion exited %s with no stdout\n'` to stderr. (source: review) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:33`
-- [x] [debt] Silent raw-JSON fallback — three distinct stderr WARNs (jq absent / `.codex.stdout` empty / jq parse error via `mktemp` capture). (source: review, pr-review-toolkit:review-pr, agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:39-42`
-- [x] [doc] Comment at L36-37 — added "jq parse failure" to listed fallback triggers. (source: pr-review-toolkit:review-pr)
+- [x] [debt] `dev-tools/hooks/failure-log/log.py:append_capped` — opened log + `.gitignore` with `os.O_NOFOLLOW`; pre-planted symlink now raises ELOOP (caught silently). (source: security-review PR #49, conf 40)
+- [x] [debt] `dev-tools/hooks/failure-log/summarize.py:main` — `--help`/`-h` handled before path resolution; prints usage, no git_root lookup. (source: agy)
+- [x] [debt] `status` → `codex_status` (zsh read-only special). (source: agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:30`
+- [x] [debt] Empty `RAW` on companion crash → `WARN: codex companion exited %s with no stdout`. (source: review) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:33`
+- [x] [debt] Three distinct jq fallback WARNs via `mktemp` stderr capture. (source: review, pr-review-toolkit:review-pr, agy) — `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:39-42`
+- [x] [doc] Comment updated to include "jq parse failure" as fallback trigger. (source: pr-review-toolkit:review-pr)
+- [x] [fix] `log.py:191` — `.gitignore` line boundary: existing content without trailing `\n` caused `keep*` corruption; prefix `\n` now added when needed. (source: codex — empirically proven)
+- [x] [fix] `log.py:186,196` — `gi_fd`/`log_fd` fd leak guard: `try/except OSError: os.close(fd); raise` wraps `os.fdopen()` calls. (source: pr-review-toolkit:review-pr, conf 95)
 
 ### PR #48 — next-tasks batch (2026-06-12)
 
