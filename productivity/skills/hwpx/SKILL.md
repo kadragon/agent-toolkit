@@ -128,6 +128,7 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 ### Practical pattern: write section0.xml inline → build
 
 ```bash
+set -euo pipefail
 # 1. section0.xml을 임시파일로 작성
 mkdir -p .hwpx_work
 SECTION=$(mktemp .hwpx_work/section0_XXXX.xml)
@@ -248,29 +249,29 @@ FILES = [
     {"src": "template_B.hwpx", "out": "result_B.hwpx", "name": "이순신", "dept": "인사과"},
 ]
 
-for cfg in FILES:
-    slug = Path(cfg["out"]).stem
-    unpack_dir = Path(f".hwpx_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
+try:
+    for cfg in FILES:
+        slug = Path(cfg["out"]).stem
+        unpack_dir = Path(f".hwpx_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
 
-    subprocess.run(["python3", UNPACK_PY, "unpack", cfg["src"], str(unpack_dir)], check=True)
-    section_path = unpack_dir / "Contents/section0.xml"
-    s = section_path.read_text(encoding="utf-8")
+        subprocess.run(["python3", UNPACK_PY, "unpack", cfg["src"], str(unpack_dir)], check=True)
+        section_path = unpack_dir / "Contents/section0.xml"
+        s = section_path.read_text(encoding="utf-8")
 
-    # 파일별 값 치환
-    assert s.count("<hp:t>이름</hp:t>") == 1
-    s = s.replace("<hp:t>이름</hp:t>", f'<hp:t>{cfg["name"]}</hp:t>')
+        # 파일별 값 치환
+        assert s.count("<hp:t>이름</hp:t>") == 1
+        s = s.replace("<hp:t>이름</hp:t>", f'<hp:t>{cfg["name"]}</hp:t>')
 
-    section_path.write_text(s, encoding="utf-8")
+        section_path.write_text(s, encoding="utf-8")
 
-    tmp_out = Path(f".hwpx_work/{slug}_tmp.hwpx")
-    subprocess.run(["python3", PACK_PY, "pack", str(unpack_dir), str(tmp_out)], check=True)
-    subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)
-    shutil.copy(tmp_out, cfg["out"])
-    print(f"[done] {cfg['out']}")
-
-# 완료 후 임시 디렉토리 정리
-shutil.rmtree(".hwpx_work", ignore_errors=True)
-print("임시 폴더 .hwpx_work/ 삭제 완료")
+        tmp_out = Path(f".hwpx_work/{slug}_tmp.hwpx")
+        subprocess.run(["python3", PACK_PY, "pack", str(unpack_dir), str(tmp_out)], check=True)
+        subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)
+        shutil.copy(tmp_out, cfg["out"])
+        print(f"[done] {cfg['out']}")
+finally:
+    # 성공/실패 모두 정리 — 실패 시 .hwpx_work/ 에서 아티팩트 디버그 가능
+    shutil.rmtree(".hwpx_work", ignore_errors=True)
 ```
 
 - Include slug in `unpack_dir` — prevents directory collision in N-file parallel runs
@@ -385,6 +386,7 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 # 1. 심층 분석 (구조 청사진 출력)
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx
 
+set -euo pipefail
 # 2. header.xml과 section0.xml을 추출하여 참고용으로 보관
 mkdir -p .hwpx_work
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx \

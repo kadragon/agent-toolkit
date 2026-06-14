@@ -78,6 +78,6 @@ Putting non-ASCII characters (`■`, `○`, Korean) into `python -c "..."` sourc
 
 ## Temp Files
 
-Use the **working document's folder** for temp files (e.g. `./_work/`), not `/tmp`.
+Use the **working document's folder** for temp files (e.g. `.hwpx_work/`), not `/tmp`.
 
 Windows `python` interprets `/tmp` as a drive-relative path, which diverges from the Bash tool's `/tmp` — use project-relative paths only.

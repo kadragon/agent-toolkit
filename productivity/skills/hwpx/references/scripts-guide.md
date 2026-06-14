@@ -118,9 +118,9 @@ python3 "$SKILL_DIR/scripts/table.py" locate ./unpacked/ --tag hp:tc --contains 
 python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
 
 # 매치 요소를 파일로 추출 (clone 원본 확보용)
-# Note: create _work/ before using --extract-dir (it will fail if missing)
-mkdir -p ./_work
-python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tr --contains "항목코드" --extract-dir ./_work --pretty
+# Note: create .hwpx_work/ before using --extract-dir (it will fail if missing)
+mkdir -p .hwpx_work
+python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tr --contains "항목코드" --extract-dir .hwpx_work --pretty
 ```
 
 ### 2) Insert table row (table.py insert)
