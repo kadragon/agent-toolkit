@@ -73,9 +73,7 @@ When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping
 Not every in-scope finding should block the merge. Sort by whether it gates forward motion:
 
 - **P0 / P1 (correctness bugs, concrete security risk, broken tests)** — must be resolved before merge. These are findings with a clear, demonstrable path to breakage or exploit.
-- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — do NOT apply inline; route to `tasks.md` as backlog items. A PR with only P2/P3 in-scope findings is effectively approved.
-
-The reason for this asymmetry: blocking a clean PR on a P3 nit forces the engineer to touch unrelated code, creates merge-conflict risk, and makes the review cycle feel punishing. P2/P3 findings are real and worth tracking — `tasks.md` ensures they're not forgotten — but they don't belong between the PR and the merge button.
+- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — apply inline along with P0/P1. The reviewer already reviewed this PR's files — fixing while context is live is cheaper than deferring.
 
 ### 9. Present to User
 
@@ -85,7 +83,7 @@ Present the consolidated list as a table with:
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
 - Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate)
 - Scope column (In / Out)
-- Gate column (Blocking / Backlog) — Blocking = P0/P1 in-scope; Backlog = P2/P3 in-scope or out-of-scope
+- Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope
 - Recommendation (apply / skip with reason)
 
 After the findings table, add:
@@ -96,7 +94,7 @@ After the findings table, add:
 
 ## Recording Backlog Items in tasks.md
 
-After user confirmation, route to `tasks.md`: all out-of-scope findings AND all in-scope P2/P3 findings.
+After user confirmation, route to `tasks.md`: all out-of-scope findings only.
 
 1. Read the existing `tasks.md` in the project root. If it does not exist, create one.
 2. Append items under a `## Review Backlog` section. Classify each item using harness tags based on its nature.

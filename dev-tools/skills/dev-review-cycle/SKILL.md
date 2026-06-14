@@ -210,11 +210,11 @@ Read **`references/consolidation-guide.md`** now. Deduplicate, filter by confide
 
 In both cases, complete these two steps in order before proceeding:
 
-1. **Record backlog items** — Before touching any code, write to `tasks.md`: (a) all out-of-scope items, and (b) all in-scope P2/P3 items (readability, style, minor improvements). Format in `references/consolidation-guide.md`.
-2. **Proceed to Step 4** — Apply only P0/P1 in-scope items (correctness bugs, concrete security risks, broken tests). P2/P3 items are already captured in `tasks.md`; do not apply them inline.
+1. **Record backlog items** — Before touching any code, write to `tasks.md`: all out-of-scope items only. Format in `references/consolidation-guide.md`.
+2. **Proceed to Step 4** — Apply all in-scope items (P0/P1/P2/P3). Findings table must be sorted by severity (P0 first) so critical items are not buried under minor ones.
 
-If no P0/P1 in-scope suggestions exist:
-- If `tasks.md` was modified in Step 3 (P2/P3 or out-of-scope items recorded), skip Step 4 but still execute Step 5 to commit `tasks.md` before merging. Use `--files "tasks.md"` with a commit message describing the backlog update (e.g. `[PLAN] record review backlog from PR #N`).
+If no in-scope suggestions exist:
+- If `tasks.md` was modified in Step 3 (out-of-scope items recorded), skip Step 4 but still execute Step 5 to commit `tasks.md` before merging. Use `--files "tasks.md"` with a commit message describing the backlog update (e.g. `[PLAN] record review backlog from PR #N`).
 - If `tasks.md` was NOT modified, skip Steps 4–5 entirely.
 
 Step 6 (merge/push) still executes in either case unless `--no-hub` is set, in which case the workflow ends after the Step 5 commit (or after Step 3 if no commit was needed).
