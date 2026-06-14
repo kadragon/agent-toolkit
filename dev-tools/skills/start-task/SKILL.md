@@ -49,7 +49,8 @@ Before presenting options, group candidates into **bundles** where every item in
 the group shares **both** the same area (same file, or same immediate directory)
 **and** a compatible type (never mix `[FEAT]`/`[REFACTOR]` with `[FIX]`/`[DEBT]`/
 `[DOCS]`/`[HARNESS]`/`[TEST]`; `[FEAT]` bundles with `[FEAT]` only; `[REFACTOR]`
-bundles with `[REFACTOR]` only). A group must have ≥2 items to qualify as a
+bundles with `[REFACTOR]` only; types within `[FIX]`/`[DEBT]`/`[DOCS]`/`[HARNESS]`/`[TEST]`
+may bundle with each other). A group must have ≥2 items to qualify as a
 bundle — a lone item remains a singleton option.
 
 The point is to avoid making the user kick off five separate cycles for five
@@ -67,7 +68,7 @@ handles them cleanly. Do not auto-bundle silently — always offer the choice.
 
 ## Step 3 — Run the code cycle
 
-Execute `docs/workflows.md` → `code` cycle (Steps 0, 1, 2–5; Step 6 is this skill's Step 4).
+Execute `docs/workflows.md` → `code` cycle (workflows.md Steps 0–5; workflows.md Step 6 is this skill's Step 4).
 Overrides below; standard steps apply where not overridden.
 
 **Branch (workflows.md Step 0)**
@@ -129,9 +130,10 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
 - 1–2 files AND not `[FEAT]`/`[REFACTOR]` (including small bundles that still touch ≤2
   files in total): inline edit.
 - Otherwise: spawn `implementer` agent. Brief must include: Sprint Contract + absolute paths
-  of all in-scope files + lint/test command. For a bundle, list each member item's file:line
-  in the brief so the implementer works all of them. `implementer` must NOT verify its own
-  output.
+  of all in-scope files + lint/test command (follow `docs/delegation.md` four-field format:
+  Objective / Output format / Tools to use / Boundaries). For a bundle, list each member item's
+  file:line in the brief so the implementer works all of them. `implementer` must NOT verify
+  its own output.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
   Do not proceed to qa-verifier.
 
