@@ -1,5 +1,9 @@
 ## Review Backlog
 
+### PR #57 — start-task bundle candidates (2026-06-15)
+
+- [ ] [debt] `start-task/SKILL.md:50` — type-compat rule says "[FEAT] bundles only with [FEAT]" but silent on whether [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may cross-bundle. Add sentence: "Types within [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may bundle with each other." (source: review, confidence 72) — P2
+
 ### PR #52 — hwpx .hwpx_work/ temp dir cleanup (2026-06-14)
 
 - [ ] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing)

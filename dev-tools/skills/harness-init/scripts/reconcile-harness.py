@@ -38,7 +38,7 @@ def tasks_field(content: str, field: str) -> str | None:
 
 def tasks_title(content: str) -> str:
     m = re.search(r'^#\s+(.+)', content, re.MULTILINE)
-    return m.group(1).strip() if m else "untitled sprint"
+    return (m.group(1).strip() if m else None) or "untitled sprint"
 
 
 def sprint_summary(content: str) -> str:
@@ -51,28 +51,64 @@ def sprint_summary(content: str) -> str:
     return "sprint completed"
 
 
-def remove_active_marker(backlog: str, title: str) -> str:
-    """Remove the [>] line whose text contains the sprint title."""
+def tasks_anchors(content: str) -> list:
+    """Return backlog anchors for this sprint.
+
+    If tasks.md has a '## Covers' section, return its bullet texts (one per
+    bundled backlog item).  Otherwise fall back to [tasks_title(content)] so
+    single-item sprints behave exactly as before.  Also falls back if the
+    '## Covers' section is present but contains no non-empty bullet lines
+    after stripping the dash prefix.
+    """
+    m = re.search(r'^## Covers\s*\n(?:[ \t]*\n)*((?:[ \t]*-[ \t]*.+\n?)+)', content, re.MULTILINE)
+    if m:
+        bullets = []
+        for line in m.group(1).splitlines():
+            text = line.strip()
+            if text.startswith('-'):
+                text = text[1:].strip()
+                if text:
+                    bullets.append(text)
+        if bullets:
+            return bullets
+        print("WARNING: ## Covers found but yielded no usable bullets; falling back to title anchor", file=sys.stderr)
+    return [tasks_title(content)]
+
+
+def remove_active_markers(backlog: str, anchors: list) -> str:
+    """Remove every [>] line whose text contains any anchor from the list."""
     lines = backlog.splitlines(keepends=True)
     result = []
     for line in lines:
-        if re.match(r'\s*-\s*\[>\]', line) and title.lower() in line.lower():
-            continue  # drop the matched active item
+        if re.match(r'\s*-\s*\[>\]', line):
+            if any(anchor.lower() in line.lower() for anchor in anchors):
+                continue  # drop matched active item
         result.append(line)
     return "".join(result)
 
 
-def revert_active_marker(backlog: str, title: str, note: str) -> str:
-    """Revert [>] → [ ] for the matching sprint, appending a short evaluator note."""
+def revert_active_markers(backlog: str, anchors: list, note: str) -> str:
+    """Revert [>] → [ ] for every line matching any anchor, appending evaluator note."""
     lines = backlog.splitlines(keepends=True)
     result = []
     for line in lines:
-        if re.match(r'\s*-\s*\[>\]', line) and title.lower() in line.lower():
+        if re.match(r'\s*-\s*\[>\]', line) and any(anchor.lower() in line.lower() for anchor in anchors):
             reverted = re.sub(r'\[>\]', '[ ]', line, count=1).rstrip('\n')
             result.append(f"{reverted}  <!-- {note} -->\n")
         else:
             result.append(line)
     return "".join(result)
+
+
+# Keep single-title shims for any external callers; main() uses the multi-anchor versions.
+def remove_active_marker(backlog: str, title: str) -> str:
+    """Remove the [>] line whose text contains the sprint title."""
+    return remove_active_markers(backlog, [title])
+
+
+def revert_active_marker(backlog: str, title: str, note: str) -> str:
+    """Revert [>] → [ ] for the matching sprint, appending a short evaluator note."""
+    return revert_active_markers(backlog, [title], note)
 
 
 def remove_orphan_markers(backlog: str) -> str:
@@ -118,11 +154,18 @@ def main() -> None:
         raw_status = tasks_field(tasks_content, "status")
         status = raw_status.lower() if raw_status else None
         title = tasks_title(tasks_content)
+        anchors = tasks_anchors(tasks_content)
         backlog = read(BACKLOG) or ""
 
         if status == "done":
             summary = sprint_summary(tasks_content)
-            updated = remove_active_marker(backlog, title)
+            updated = remove_active_markers(backlog, anchors)
+            if updated == backlog:
+                print(
+                    f"WARNING: Sprint '{title}' — no [>] lines matched anchors {anchors!r}. "
+                    "Backlog may contain stale active markers.",
+                    file=sys.stderr,
+                )
             BACKLOG.write_text(updated, encoding="utf-8")
             append_changelog(title, summary)
             TASKS.unlink()
@@ -131,7 +174,13 @@ def main() -> None:
         elif status == "failed":
             fb = tasks_field(tasks_content, "Evaluator Feedback") or "failed"
             note = fb[:80]
-            updated = revert_active_marker(backlog, title, note)
+            updated = revert_active_markers(backlog, anchors, note)
+            if updated == backlog:
+                print(
+                    f"WARNING: Sprint '{title}' — no [>] lines matched anchors {anchors!r}. "
+                    "Backlog active markers may not have been reverted.",
+                    file=sys.stderr,
+                )
             BACKLOG.write_text(updated, encoding="utf-8")
             TASKS.unlink()
             print(f"Sprint '{title}' failed. Reverted to backlog.")

@@ -43,6 +43,19 @@ Read both files:
 Order: tasks.md P0→P1→P2→P3 first (unlabelled items sort after P3), then backlog `## Now`,
 then backlog `## Next`. Within each tier, preserve file order.
 
+## Step 1.5 — Cluster & propose bundles
+
+Before presenting options, group candidates into **bundles** where every item in
+the group shares **both** the same area (same file, or same immediate directory)
+**and** a compatible type (never mix `[FEAT]`/`[REFACTOR]` with `[FIX]`/`[DEBT]`/
+`[DOCS]`/`[HARNESS]`/`[TEST]`; `[FEAT]` bundles with `[FEAT]` only; `[REFACTOR]`
+bundles with `[REFACTOR]` only). A group must have ≥2 items to qualify as a
+bundle — a lone item remains a singleton option.
+
+The point is to avoid making the user kick off five separate cycles for five
+nits from the same PR review in the same file. One branch + one Sprint Contract
+handles them cleanly. Do not auto-bundle silently — always offer the choice.
+
 ## Step 2 — Select
 
 | Candidates found | Action |
@@ -50,7 +63,7 @@ then backlog `## Next`. Within each tier, preserve file order.
 | 0 | Report "backlog and tasks are clear — nothing open to start." Stop. |
 | 1 (not deferred) | Announce the item and proceed to Step 3. |
 | 1 (deferred) | The item has `*(deferred: ...)*`. Surface the blocker text and ask the user to confirm it is resolved before proceeding. If unresolved, report and stop. |
-| ≥2 | Present top candidates (cap at 4) with `AskUserQuestion`. Each option: type tag, first ~80 chars, file:line. Wait for selection. |
+| ≥2 | Build the offer list (cap at 4 options) via `AskUserQuestion`: include any qualifying bundle first (label with "Bundle: N items in `<area>`" and list members), then top singletons to fill the cap. Each singleton: type tag, first ~80 chars, file:line. Wait for selection. |
 
 ## Step 3 — Run the code cycle
 
@@ -58,9 +71,11 @@ Execute `docs/workflows.md` → `code` cycle (Steps 0, 1, 2–5; Step 6 is this 
 Overrides below; standard steps apply where not overridden.
 
 **Branch (workflows.md Step 0)**
-`git checkout -b <type>/<slug>` — derive from the item's `[type]` tag + short slug. If the
-item has no `[type]` tag (common for tasks.md findings), emit a warning ("Item has no [type]
-tag — defaulting branch prefix to `fix/`") and use `fix/` prefix.
+`git checkout -b <type>/<slug>` — derive from the item's `[type]` tag + short slug.
+For a bundle: use the common `[type]` if all members share one (e.g. all `[FIX]` →
+`fix/<bundle-slug>`); otherwise default to `fix/`. If the item has no `[type]` tag (common
+for tasks.md findings), emit a warning ("Item has no [type] tag — defaulting branch prefix
+to `fix/`") and use `fix/` prefix.
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
@@ -78,20 +93,45 @@ Check tag first, then file count:
 
 **Mark active — after scope is confirmed**
 Once plan is approved (or trivial gate passed):
-- If item came from `backlog.md`: flip `[ ]` → `[>]` AND write a `tasks.md` Sprint Contract
-  with a heading matching the backlog line text and `status: active`. This gives
+
+*Single item from `backlog.md`:* flip `[ ]` → `[>]` AND write a `tasks.md` Sprint Contract
+  with a `# heading` matching the backlog line text and `status: active`. This gives
   `reconcile-harness.py` the anchor it needs to archive or revert the sprint at completion.
-- If item came from `tasks.md` Review Backlog: leave its checkbox as `[ ]` — the finding
-  resolves when the fix is committed and verified in a future review.
+
+*Bundle of items from `backlog.md`:* flip each bundled `[ ]` → `[>]`. Write a `tasks.md`
+  Sprint Contract with a `# heading` that is a short descriptive title for the bundle (e.g.
+  "Bundle: fix codex-review.sh guards"), `status: active`, and a `## Covers` section that
+  lists each bundled backlog line's **exact text** as a bullet (one line per item). Example:
+  ```
+  ## Covers
+  - [FIX] mktemp guard in codex-review.sh
+  - [FIX] trap cleanup on exit in codex-review.sh
+  ```
+  `reconcile-harness.py` reads `## Covers` at completion and archives/reverts every listed
+  `[>]` anchor — no orphans.
+
+*Item(s) from `tasks.md` Review Backlog:* leave checkbox(es) as `[ ]` — findings resolve
+  when the fix is committed and verified in a future review. No `[>]` flip; no `## Covers`
+  section needed (reconcile is not involved).
+
+*Mixed bundle (backlog + findings):* apply both rules — flip backlog items to `[>]` with a
+  `## Covers` section; leave finding items at `[ ]`. Sprint Contract heading and Acceptance
+  criteria cover all members.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
 **Lint/test command**.
 
+For a bundle: Acceptance criteria has **one concrete checkbox per bundled item** — do not
+merge them into a single vague criterion. Scope lists all in-scope files/areas.
+
 **Implement (workflows.md Step 3)**
-- 1–2 files AND not `[FEAT]`/`[REFACTOR]`: inline edit.
-- Otherwise: spawn `implementer` agent. Brief must include: Sprint Contract + absolute paths of
-  in-scope files + lint/test command. `implementer` must NOT verify its own output.
+- 1–2 files AND not `[FEAT]`/`[REFACTOR]` (including small bundles that still touch ≤2
+  files in total): inline edit.
+- Otherwise: spawn `implementer` agent. Brief must include: Sprint Contract + absolute paths
+  of all in-scope files + lint/test command. For a bundle, list each member item's file:line
+  in the brief so the implementer works all of them. `implementer` must NOT verify its own
+  output.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
   Do not proceed to qa-verifier.
 
@@ -136,6 +176,10 @@ Offer: "I see uncommitted changes on `<branch>`. Skip to `dev-review-cycle --aut
 and confirm it is resolved before proceeding. If unresolved, skip to the next candidate.
 If all candidates are deferred with unresolved blockers, report that and stop.
 (For the single-candidate case, see Step 2 table.)
+
+**Deferred item in a bundle** — if any member of a proposed bundle is deferred and the
+blocker is unresolved, exclude that member from the bundle option (or drop the bundle if
+it collapses to one item). Do not silently include deferred items in a bundle.
 
 **tasks.md finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
 Record broader related items back to `tasks.md` via the out-of-scope path in dev-review-cycle.
