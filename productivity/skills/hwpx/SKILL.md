@@ -41,6 +41,16 @@ No external packages required. Scripts use stdlib `xml.etree.ElementTree` only.
 - `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`)
 - OS-specific Python invocation, encoding gotchas (Windows cp949/UTF-8, codepoint escaping), subprocess encoding, and temp-file placement: see `$SKILL_DIR/references/environment.md`
 
+## 임시 작업 디렉토리
+
+작업 중 `.hwpx_work/` 숨김 폴더가 생성됩니다. 최종 파일 완성 후 반드시 사용자에게 아래 명령을 제시하거나 워크플로우 마지막 단계에서 자동 실행:
+
+```bash
+rm -rf .hwpx_work/
+```
+
+> Windows: `Remove-Item -Recurse -Force .hwpx_work`
+
 ## Directory structure
 
 ```
@@ -119,8 +129,8 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 
 ```bash
 # 1. section0.xml을 임시파일로 작성
-mkdir -p ./_work
-SECTION=$(mktemp ./_work/section0_XXXX.xml)
+mkdir -p .hwpx_work
+SECTION=$(mktemp .hwpx_work/section0_XXXX.xml)
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
 <hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -138,8 +148,9 @@ XMLEOF
 # 2. 빌드
 python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result.hwpx
 
-# 3. 정리
-rm -f "$SECTION"
+# 3. 정리 (임시 디렉토리 제거)
+rm -rf .hwpx_work/
+# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 .hwpx_work/ 삭제했습니다."
 ```
 
 ---
@@ -205,7 +216,7 @@ Many items → split into stages to catch silent failures early, verify each sta
 
 1. **unpack once**. All later stages cumulatively modify `unpacked/Contents/section0.xml`.
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
-3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `_work_stepN.hwpx` to avoid file-lock conflicts.
+3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `.hwpx_work/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file.
 
 > **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
@@ -239,7 +250,7 @@ FILES = [
 
 for cfg in FILES:
     slug = Path(cfg["out"]).stem
-    unpack_dir = Path(f"./_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
+    unpack_dir = Path(f".hwpx_work/unpack_{slug}/")  # slug 포함 필수 — 충돌 방지
 
     subprocess.run(["python3", UNPACK_PY, "unpack", cfg["src"], str(unpack_dir)], check=True)
     section_path = unpack_dir / "Contents/section0.xml"
@@ -251,11 +262,15 @@ for cfg in FILES:
 
     section_path.write_text(s, encoding="utf-8")
 
-    tmp_out = Path(f"./_work/{slug}_tmp.hwpx")
+    tmp_out = Path(f".hwpx_work/{slug}_tmp.hwpx")
     subprocess.run(["python3", PACK_PY, "pack", str(unpack_dir), str(tmp_out)], check=True)
     subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)
     shutil.copy(tmp_out, cfg["out"])
     print(f"[done] {cfg['out']}")
+
+# 완료 후 임시 디렉토리 정리
+shutil.rmtree(".hwpx_work", ignore_errors=True)
+print("임시 폴더 .hwpx_work/ 삭제 완료")
 ```
 
 - Include slug in `unpack_dir` — prevents directory collision in N-file parallel runs
@@ -371,10 +386,10 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx
 
 # 2. header.xml과 section0.xml을 추출하여 참고용으로 보관
-mkdir -p ./_work
+mkdir -p .hwpx_work
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx \
-  --extract-header ./_work/ref_header.xml \
-  --extract-section ./_work/ref_section.xml
+  --extract-header .hwpx_work/ref_header.xml \
+  --extract-section .hwpx_work/ref_section.xml
 
 # 3. 분석 결과를 보고 새 section0.xml 작성
 #    - 동일한 charPrIDRef, paraPrIDRef 사용
@@ -383,8 +398,8 @@ python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx \
 
 # 4. 추출한 header.xml + 새 section0.xml로 빌드
 python3 "$SKILL_DIR/scripts/build.py" build \
-  --header ./_work/ref_header.xml \
-  --section ./_work/new_section0.xml \
+  --header .hwpx_work/ref_header.xml \
+  --section .hwpx_work/new_section0.xml \
   --output result.hwpx
 
 # 5. 검증 (원본 대비 — 기존 중복 ID 오탐 방지)
@@ -394,6 +409,10 @@ python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline referen
 python3 "$SKILL_DIR/scripts/validate.py" page-guard \
   --reference reference.hwpx \
   --output result.hwpx
+
+# 7. 완료 후 임시 디렉토리 정리
+rm -rf .hwpx_work/
+# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 .hwpx_work/ 삭제했습니다."
 ```
 
 ### Analysis output items
