@@ -132,9 +132,10 @@ Offer: "I see uncommitted changes on `<branch>`. Skip to `dev-review-cycle --aut
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.
 
-**Deferred backlog item** — item has `*(deferred: ...)*`. Surface the blocker and confirm it
-is resolved before proceeding. If unresolved, skip to the next candidate. If all candidates
-are deferred with unresolved blockers, report that and stop.
+**Deferred backlog item (≥2 candidates)** — item has `*(deferred: ...)*`. Surface the blocker
+and confirm it is resolved before proceeding. If unresolved, skip to the next candidate.
+If all candidates are deferred with unresolved blockers, report that and stop.
+(For the single-candidate case, see Step 2 table.)
 
 **tasks.md finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
 Record broader related items back to `tasks.md` via the out-of-scope path in dev-review-cycle.
