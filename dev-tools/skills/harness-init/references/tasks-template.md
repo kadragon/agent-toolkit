@@ -11,8 +11,8 @@ revert, or leave the sprint intact.
 
 The file MUST contain:
 
-1. A top-level heading `# <Sprint Title>` — used by reconcile to match the `[>]`
-   line in `backlog.md`
+1. A top-level heading `# <Sprint Title>` — used by reconcile as the display name and
+   fallback anchor when no `## Covers` section is present.
 2. A `status:` field on its own line, lowercase, one of:
    - `active` — work in progress
    - `evaluating` — implementation done, awaiting evaluator verdict
@@ -20,6 +20,23 @@ The file MUST contain:
    - `failed` — sprint rejected; reconcile will return it to the backlog
 3. Sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` (can be empty
    initially but the headings must be present so later tooling can append)
+
+## Optional: ## Covers (bundle sprints only)
+
+When a sprint covers **multiple backlog items** bundled together, add a `## Covers`
+section listing each bundled backlog line's exact text as a bullet:
+
+```markdown
+## Covers
+- [FIX] mktemp guard in codex-review.sh
+- [FIX] trap cleanup on exit in codex-review.sh
+```
+
+`reconcile-harness.py` reads this section to determine which `[>]` lines to
+archive/revert in `backlog.md` on sprint close. Without `## Covers`, reconcile
+matches only `[>]` lines containing the `# Sprint Title` text (single-item behaviour).
+Each bullet must be the **verbatim** text of the matching backlog `[>]` line so the
+case-insensitive substring match is precise.
 
 ## Minimal Template to Copy
 
