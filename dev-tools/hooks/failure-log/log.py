@@ -172,17 +172,40 @@ def append_capped(path, line):
     """Append one line, trimming to MAX_LINES, atomically under an exclusive lock.
 
     Read-modify-write is guarded by flock so parallel agent fan-outs against the
-    same repo can't clobber each other's entries. Self-contained: swallows OSError
-    (disk full, permissions) so a logging failure never propagates."""
+    same repo can't clobber each other's entries. Both the log and its .gitignore are
+    opened with O_NOFOLLOW: a pre-planted symlink in .claude/logs/ raises ELOOP
+    (OSError), which the outer except catches silently — the session is never disrupted.
+    Self-contained: swallows OSError (disk full, permissions, symlink) so a logging
+    failure never propagates."""
     d = os.path.dirname(path)
     try:
         os.makedirs(d, exist_ok=True)
-        # never let captured stderr snippets get committed, whatever the repo ignores
+        # ensure logs dir is gitignored; O_NOFOLLOW blocks symlink redirect
         gi = os.path.join(d, ".gitignore")
-        if not os.path.exists(gi):
-            with open(gi, "w", encoding="utf-8") as f:
-                f.write("*\n")
-        with open(path, "a+", encoding="utf-8") as f:
+        try:
+            gi_fd = os.open(gi, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
+            try:
+                gf = os.fdopen(gi_fd, "r+", encoding="utf-8")
+            except OSError:
+                os.close(gi_fd)
+                raise
+            with gf:
+                content = gf.read()
+                if not any(ln.strip() in {"*", "failed-commands.jsonl"}
+                           for ln in content.splitlines()):
+                    gf.seek(0, 2)
+                    prefix = "\n" if content and not content.endswith("\n") else ""
+                    gf.write(prefix + "*\n")
+        except OSError:
+            pass  # gitignore write failed (e.g. symlink); log write still attempted
+        # O_NOFOLLOW: raises ELOOP (OSError) if path is a pre-planted symlink
+        log_fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            f = os.fdopen(log_fd, "r+", encoding="utf-8")
+        except OSError:
+            os.close(log_fd)
+            raise
+        with f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 f.seek(0)
@@ -220,9 +243,52 @@ def main():
     append_capped(path, json.dumps(rec, ensure_ascii=False))
 
 
+def _test():
+    import tempfile
+    fails = []
+
+    def check(name, cond):
+        print(("PASS" if cond else "FAIL") + f" — {name}")
+        if not cond:
+            fails.append(name)
+
+    # symlink planted at log path → append_capped must skip silently, target untouched
+    with tempfile.TemporaryDirectory() as td:
+        target = os.path.join(td, "target.txt")
+        with open(target, "w") as fh:
+            fh.write("original\n")
+        link = os.path.join(td, "link.jsonl")
+        os.symlink(target, link)
+        append_capped(link, '{"test":1}')
+        with open(target) as fh:
+            content = fh.read()
+        check("symlink write skipped — target unmodified", content == "original\n")
+        check("symlink still a symlink", os.path.islink(link))
+
+    # .gitignore without trailing newline → write must start a new line, not corrupt last pattern
+    with tempfile.TemporaryDirectory() as td:
+        log_path = os.path.join(td, "test.jsonl")
+        gi_path = os.path.join(td, ".gitignore")
+        with open(gi_path, "w", encoding="utf-8") as gh:
+            gh.write("keep")  # no trailing newline
+        append_capped(log_path, '{"test":1}')
+        with open(gi_path, encoding="utf-8") as gh:
+            gi_content = gh.read()
+        check(".gitignore line boundary preserved", gi_content == "keep\n*\n")
+
+    print()
+    if fails:
+        print(f"{len(fails)} FAILED: {fails}")
+        sys.exit(1)
+    print("all passed")
+
+
 if __name__ == "__main__":
-    try:
-        main()
-    except BaseException:
-        pass
-    sys.exit(0)
+    if "--test" in sys.argv:
+        _test()
+    else:
+        try:
+            main()
+        except BaseException:
+            pass
+        sys.exit(0)

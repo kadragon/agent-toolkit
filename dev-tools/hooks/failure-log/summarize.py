@@ -104,7 +104,17 @@ def render(root, rows):
     return "\n".join(lines)
 
 
+_USAGE = """\
+Usage:
+  python3 summarize.py [root]      # default root = cwd
+  python3 summarize.py --test
+"""
+
+
 def main(argv):
+    if argv and argv[0] in {"--help", "-h"}:
+        print(_USAGE, end="")
+        return
     root = git_root(os.path.abspath(argv[0])) if argv else git_root(os.getcwd())
     rows = load(os.path.join(root, LOG_REL))
     print(render(root, rows))
@@ -135,6 +145,18 @@ def _test():
     check("render header", "3 records, 2 signatures" in out)
     check("render top first", "2x  exit 1  git psh" in out)
     check("render empty ok", "0 records" in render("/tmp/r", []))
+
+    # --help must print usage text, not treat flag as a path
+    import io
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        main(["--help"])
+    finally:
+        sys.stdout = old_stdout
+    out = buf.getvalue()
+    check("--help prints usage (not FAILED-COMMANDS)", "FAILED-COMMANDS" not in out and len(out) > 0)
 
     print()
     if fails:
