@@ -131,7 +131,7 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   files in total): inline edit.
 - Otherwise: spawn `implementer` agent. Brief must include: Sprint Contract + absolute paths
   of all in-scope files + lint/test command (follow `docs/delegation.md` four-field format:
-  Objective / Output format / Tools / Boundaries). For a bundle, list each member item's
+  Objective / Output format / Tools to use / Boundaries). For a bundle, list each member item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
