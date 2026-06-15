@@ -1,17 +1,15 @@
-# Sprint: hwpx .hwpx_work/ guards (PR #52 findings)
+# Sprint: codex-review.sh jq partial-parse fallback (PR #51 finding)
 
-status: done
+status: active
 
-**Scope:** `productivity/skills/hwpx/SKILL.md` only — fix three `.hwpx_work/` usage bugs surfaced in PR #52 review.
+**Scope:** `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh` only — resolve the line 48 jq partial-parse finding from PR #51 review.
 
 **Acceptance criteria:**
-- [x] `mktemp` template uses trailing `X`s only (`section0_XXXXXX`) so it works on BSD/macOS, with a comment explaining the suffix constraint.
-- [x] Workflow 2 multi-stage instructions show `mkdir -p .hwpx_work` before stage 3 packs `.hwpx_work/step_N.hwpx`.
-- [x] Inline-build cleanup block warns that concurrent same-CWD runs share `.hwpx_work/` and points to a per-invocation dir for parallel use.
+- [x] On a jq parse error (`JQ_ERR` non-empty), the possibly-truncated `TEXT` is discarded and the raw JSON is emitted instead, so no truncated review reaches stdout. WARN message states raw fallback is in effect.
 
-**Out of scope:** any `scripts/*.py` changes; the resolved start-task findings (bookkeeping in this same branch).
+**Out of scope:** the line 44 mktemp/trap finding (already resolved in PR #56); any `dev-review-cycle/SKILL.md` or other-file changes.
 
-**Lint/test command:** `bash dev-tools/skills/harness-init/scripts/validate-harness.sh` (no Python test harness for SKILL.md prose).
+**Lint/test command:** `bash dev-tools/skills/harness-init/scripts/validate-harness.sh` then `bash -n dev-tools/skills/dev-review-cycle/scripts/codex-review.sh`.
 
 ---
 
@@ -39,7 +37,7 @@ status: done
 ### PR #51 — next-tasks debt batch (2026-06-14)
 
 - [ ] [debt] `dev-tools/hooks/failure-log/log.py:186` — `gi_fd` leaks if `os.fdopen()` raises before `with` block entered; inner `except OSError: pass` catches without closing. Fix: same `try/except OSError: os.close(gi_fd); raise` guard as log_fd. (source: pr-review-toolkit:review-pr, conf 90) — P2
-- [ ] [debt] `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:44` — `mktemp` temp file leaks on SIGINT/error between creation and `rm -f`; also no diagnostic when `mktemp` itself fails (set -e aborts silently). Fix: `trap 'rm -f "$_jq_tmp"' EXIT` immediately after mktemp; add `|| { printf 'ERROR: mktemp failed\n' >&2; exit 1; }`. (source: pr-review-toolkit:review-pr, agy) — P2
+- [x] [debt] `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:44` — `mktemp` temp file leaks on SIGINT/error between creation and `rm -f`; also no diagnostic when `mktemp` itself fails (set -e aborts silently). Fix: `trap 'rm -f "$_jq_tmp"' EXIT` immediately after mktemp; add `|| { printf 'ERROR: mktemp failed\n' >&2; exit 1; }`. (source: pr-review-toolkit:review-pr, agy) — P2 *(resolved: PR #56 — trap + mktemp guard at lines 44-45)*
 - [ ] [debt] `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:48` — jq partial parse edge: if companion output has valid JSON prefix + trailing garbage, jq may populate TEXT and emit stderr. Current code warns but outputs TEXT instead of raw fallback, dropping diagnostic detail. (source: codex) — P3
 - [x] [debt] `dev-tools/hooks/failure-log/log.py:209` — `f.flush()` missing before `fcntl.LOCK_UN`; buffered writes may not reach disk before lock released, allowing parallel reader to see stale data. Pre-existing pattern. (source: agy) — P2 *(resolved: PR #60 — flush before _unlock)*
 - [x] [debt] `dev-tools/hooks/failure-log/log.py:188` — `UnicodeDecodeError` from `encoding="utf-8"` not caught by `except OSError`; propagates to `__main__` `except BaseException: pass` (silent, no disruption). Pre-existing. Fix: add `errors="replace"` or wrap with `except (OSError, UnicodeDecodeError)`. (source: agy) — P2 *(resolved: PR #60 — inner+outer except widened; log write preserved)*
