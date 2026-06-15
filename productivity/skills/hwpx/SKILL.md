@@ -131,7 +131,7 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 set -euo pipefail
 # 1. section0.xml을 임시파일로 작성
 mkdir -p .hwpx_work
-SECTION=$(mktemp .hwpx_work/section0_XXXXXX)  # trailing X's only: BSD/macOS mktemp won't substitute X's that precede a suffix like .xml
+SECTION=$(mktemp .hwpx_work/section0_XXXXXX)  # trailing X's only — a .xml suffix after the X's makes BSD/macOS mktemp silently create a literal, non-random name (exit 0), so the 2nd call collides with "File exists"
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
 <hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -151,8 +151,10 @@ python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result
 
 # 3. 정리 (임시 디렉토리 제거)
 # ⚠️ 동시 실행 주의: 같은 CWD에서 hwpx 작업을 병렬로 돌리면 먼저 끝난 쪽이
-#    아직 실행 중인 다른 작업의 .hwpx_work/를 지운다. 병렬 시 작업별 디렉토리
-#    (예: mktemp -d .hwpx_work_XXXXXX) 사용.
+#    아직 실행 중인 다른 작업의 .hwpx_work/를 지운다. 병렬 시 작업별 디렉토리를
+#    캡처해서 그것만 정리한다 (고정 .hwpx_work/ 대신):
+#      WORK=$(mktemp -d .hwpx_work_XXXXXX); SECTION=$(mktemp "$WORK/section0_XXXXXX")
+#      ...빌드...; rm -rf "$WORK"
 rm -rf .hwpx_work/
 # 사용자에게 알림: "result.hwpx 완성. 임시 폴더 .hwpx_work/ 삭제했습니다."
 ```

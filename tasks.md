@@ -1,13 +1,13 @@
 # Sprint: hwpx .hwpx_work/ guards (PR #52 findings)
 
-status: active
+status: done
 
 **Scope:** `productivity/skills/hwpx/SKILL.md` only — fix three `.hwpx_work/` usage bugs surfaced in PR #52 review.
 
 **Acceptance criteria:**
-- [ ] `mktemp` template uses trailing `X`s only (`section0_XXXXXX`) so it works on BSD/macOS, with a comment explaining the suffix constraint.
-- [ ] Workflow 2 multi-stage instructions show `mkdir -p .hwpx_work` before stage 3 packs `.hwpx_work/step_N.hwpx`.
-- [ ] Inline-build cleanup block warns that concurrent same-CWD runs share `.hwpx_work/` and points to a per-invocation dir for parallel use.
+- [x] `mktemp` template uses trailing `X`s only (`section0_XXXXXX`) so it works on BSD/macOS, with a comment explaining the suffix constraint.
+- [x] Workflow 2 multi-stage instructions show `mkdir -p .hwpx_work` before stage 3 packs `.hwpx_work/step_N.hwpx`.
+- [x] Inline-build cleanup block warns that concurrent same-CWD runs share `.hwpx_work/` and points to a per-invocation dir for parallel use.
 
 **Out of scope:** any `scripts/*.py` changes; the resolved start-task findings (bookkeeping in this same branch).
 
@@ -16,6 +16,11 @@ status: active
 ---
 
 ## Review Backlog
+
+### PR #62 — hwpx .hwpx_work/ guards (2026-06-15)
+
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:221` — Workflow 2 multi-stage still shares a fixed `.hwpx_work/`; parallel multi-stage sessions in the same CWD collide. Fix: use a per-stage unique dir (e.g. `.hwpx_work_step_N` or captured `mktemp -d`). (source: agy) — P3
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:131-157` — inline-build example has no `trap 'rm -rf ...' EXIT`; under `set -euo pipefail` an error before the cleanup line leaks `.hwpx_work/`. Fix: `trap 'rm -rf .hwpx_work' EXIT` after the `mkdir -p`. (source: agy) — P3
 
 ### PR #59 — failure-log cross-platform fix (2026-06-15)
 
@@ -27,9 +32,9 @@ status: active
 
 ### PR #52 — hwpx .hwpx_work/ temp dir cleanup (2026-06-14)
 
-- [ ] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing)
-- [ ] [debt] `SKILL.md:219` — Workflow 2 multi-stage prose references `.hwpx_work/step_N.hwpx` but no `mkdir -p .hwpx_work` shown before it; `office.py pack` will fail on fresh checkout. Fix: add `mkdir -p .hwpx_work` before stage pack step. (source: codex) — P2
-- [ ] [debt] `SKILL.md:152` — concurrent single-file hwpx workflows in same CWD: first to finish wipes `.hwpx_work/` while second is still running. Fix: add comment warning, or use per-invocation suffix. (source: review) — P2
+- [x] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing) *(resolved: PR #62)*
+- [x] [debt] `SKILL.md:219` — Workflow 2 multi-stage prose references `.hwpx_work/step_N.hwpx` but no `mkdir -p .hwpx_work` shown before it; `office.py pack` will fail on fresh checkout. Fix: add `mkdir -p .hwpx_work` before stage pack step. (source: codex) — P2 *(resolved: PR #62)*
+- [x] [debt] `SKILL.md:152` — concurrent single-file hwpx workflows in same CWD: first to finish wipes `.hwpx_work/` while second is still running. Fix: add comment warning, or use per-invocation suffix. (source: review) — P2 *(resolved: PR #62)*
 
 ### PR #51 — next-tasks debt batch (2026-06-14)
 
