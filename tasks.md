@@ -1,4 +1,26 @@
+# Sprint: hwpx .hwpx_work/ guards (PR #52 findings)
+
+status: done
+
+**Scope:** `productivity/skills/hwpx/SKILL.md` only — fix three `.hwpx_work/` usage bugs surfaced in PR #52 review.
+
+**Acceptance criteria:**
+- [x] `mktemp` template uses trailing `X`s only (`section0_XXXXXX`) so it works on BSD/macOS, with a comment explaining the suffix constraint.
+- [x] Workflow 2 multi-stage instructions show `mkdir -p .hwpx_work` before stage 3 packs `.hwpx_work/step_N.hwpx`.
+- [x] Inline-build cleanup block warns that concurrent same-CWD runs share `.hwpx_work/` and points to a per-invocation dir for parallel use.
+
+**Out of scope:** any `scripts/*.py` changes; the resolved start-task findings (bookkeeping in this same branch).
+
+**Lint/test command:** `bash dev-tools/skills/harness-init/scripts/validate-harness.sh` (no Python test harness for SKILL.md prose).
+
+---
+
 ## Review Backlog
+
+### PR #62 — hwpx .hwpx_work/ guards (2026-06-15)
+
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:221` — Workflow 2 multi-stage still shares a fixed `.hwpx_work/`; parallel multi-stage sessions in the same CWD collide. Fix: use a per-stage unique dir (e.g. `.hwpx_work_step_N` or captured `mktemp -d`). (source: agy) — P3
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:131-157` — inline-build example has no `trap 'rm -rf ...' EXIT`; under `set -euo pipefail` an error before the cleanup line leaks `.hwpx_work/`. Fix: `trap 'rm -rf .hwpx_work' EXIT` after the `mkdir -p`. (source: agy) — P3
 
 ### PR #59 — failure-log cross-platform fix (2026-06-15)
 
@@ -6,13 +28,13 @@
 
 ### PR #57 — start-task bundle candidates (2026-06-15)
 
-- [ ] [debt] `start-task/SKILL.md:50` — type-compat rule says "[FEAT] bundles only with [FEAT]" but silent on whether [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may cross-bundle. Add sentence: "Types within [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may bundle with each other." (source: review, confidence 72) — P2
+- [x] [debt] `start-task/SKILL.md:50` — type-compat rule says "[FEAT] bundles only with [FEAT]" but silent on whether [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may cross-bundle. Add sentence: "Types within [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may bundle with each other." (source: review, confidence 72) — P2 *(resolved: PR #58 — sentence added, SKILL.md:52)*
 
 ### PR #52 — hwpx .hwpx_work/ temp dir cleanup (2026-06-14)
 
-- [ ] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing)
-- [ ] [debt] `SKILL.md:219` — Workflow 2 multi-stage prose references `.hwpx_work/step_N.hwpx` but no `mkdir -p .hwpx_work` shown before it; `office.py pack` will fail on fresh checkout. Fix: add `mkdir -p .hwpx_work` before stage pack step. (source: codex) — P2
-- [ ] [debt] `SKILL.md:152` — concurrent single-file hwpx workflows in same CWD: first to finish wipes `.hwpx_work/` while second is still running. Fix: add comment warning, or use per-invocation suffix. (source: review) — P2
+- [x] [debt] `SKILL.md:132` — `mktemp .hwpx_work/section0_XXXX.xml` invalid on macOS; template must end in X's (`.xml` suffix blocks substitution). Pre-existing pattern. Fix: `mktemp .hwpx_work/section0_XXXXXX` (source: agy) — P2 (out-of-scope; pre-existing) *(resolved: PR #62)*
+- [x] [debt] `SKILL.md:219` — Workflow 2 multi-stage prose references `.hwpx_work/step_N.hwpx` but no `mkdir -p .hwpx_work` shown before it; `office.py pack` will fail on fresh checkout. Fix: add `mkdir -p .hwpx_work` before stage pack step. (source: codex) — P2 *(resolved: PR #62)*
+- [x] [debt] `SKILL.md:152` — concurrent single-file hwpx workflows in same CWD: first to finish wipes `.hwpx_work/` while second is still running. Fix: add comment warning, or use per-invocation suffix. (source: review) — P2 *(resolved: PR #62)*
 
 ### PR #51 — next-tasks debt batch (2026-06-14)
 
@@ -27,13 +49,13 @@
 - [x] [debt] `SKILL.md:59` — plan mode gate trivial/non-trivial conditions still partially overlap: "1–2 files AND not [FEAT]/[REFACTOR]" skip vs "≥3 files OR [FEAT]/[REFACTOR]" enter — a 1-file `[FEAT]` now routes to non-trivial (correct) but the OR logic may still mis-route 2-file `[REFACTOR]` (source: review, pr-review-toolkit) — P2
 - [ ] [debt] `.claude/trigger-routes.json:4` — `start.*work` pattern can match "start implementing a skill"; no guard for `implement|구현` to skip to skill-dev-orchestrator route instead (source: review) — P2
 - [x] [debt] `SKILL.md:40` — Step 2 table "1 candidate → proceed" doesn't check deferred status inline; the deferred check is only in the table note, which can be missed. Move deferred check to an inline branch in the table (source: agy) — P2
-- [ ] [debt] `SKILL.md:54` — `backlog-template.md:15` documents `[>]` setter as "Human on sprint start" only; start-task writes `[>]` programmatically. Update `harness-init/references/backlog-template.md` to add "or start-task skill" as a permitted setter (source: pr-review-toolkit) — P2
+- [x] [debt] `SKILL.md:54` — `backlog-template.md:15` documents `[>]` setter as "Human on sprint start" only; start-task writes `[>]` programmatically. Update `harness-init/references/backlog-template.md` to add "or start-task skill" as a permitted setter (source: pr-review-toolkit) — P2 *(resolved: PR #58 — backlog-template.md setter now lists start-task skill)*
 - [x] [debt] `SKILL.md:22` — prerequisites list `backlog.md`/`docs/workflows.md` but sprint body reads `docs/eval-criteria.md` (Sprint Contract) and `docs/conventions.md` (version bump). Add both to prerequisites guard (source: pr-review-toolkit) — P2
 - [x] [debt] `SKILL.md:51` — branch name fallback documented for no-[type]-tag items but no warning emitted when falling back; silent assumption can produce wrong branch prefix (source: pr-review-toolkit) — P2
-- [ ] [debt] `SKILL.md:47` — inner step labels use "workflows.md Step N" but SKILL.md outer steps are also numbered 1–4; "before workflows.md Step 2" could be misread as "before SKILL.md Step 2". Prefix all inner refs as "workflows.md Step N" consistently (partial, some still ambiguous) (source: pr-review-toolkit) — P3
-- [ ] [harness] `SKILL.md:31` — P-label sort order documented, but missing-label placement note is implicit. Explicit "unlabelled items sort after P3" already present; verify it remains after future edits (source: review, pr-review-toolkit) — P3
+- [x] [debt] `SKILL.md:47` — inner step labels use "workflows.md Step N" but SKILL.md outer steps are also numbered 1–4; "before workflows.md Step 2" could be misread as "before SKILL.md Step 2". Prefix all inner refs as "workflows.md Step N" consistently (partial, some still ambiguous) (source: pr-review-toolkit) — P3 *(resolved: PR #58 — bare "Steps 0–5/Step 6" prefixed with "workflows.md")*
+- [x] [harness] `SKILL.md:31` — P-label sort order documented, but missing-label placement note is implicit. Explicit "unlabelled items sort after P3" already present; verify it remains after future edits (source: review, pr-review-toolkit) — P3 *(resolved: verified present, SKILL.md:43)*
 - [ ] [debt] `.claude/trigger-routes.json:4` — route instruction "Do NOT inline-pick or inline-implement" conflicts with SKILL.md line 66 which allows "inline edit" for ≤2 files. Reword route to "Do NOT skip the skill" (source: pr-review-toolkit, conf 70) — P3
-- [ ] [debt] `SKILL.md:65` — implementer brief spec mentions "Sprint Contract + absolute paths + lint/test command" but `docs/delegation.md` four-field format (Objective/Output format/Tools/Boundaries) not referenced. Add pointer to delegation brief template (source: agy, pr-review-toolkit) — P3
+- [x] [debt] `SKILL.md:65` — implementer brief spec mentions "Sprint Contract + absolute paths + lint/test command" but `docs/delegation.md` four-field format (Objective/Output format/Tools/Boundaries) not referenced. Add pointer to delegation brief template (source: agy, pr-review-toolkit) — P3 *(resolved: PR #58 — four-field pointer added, SKILL.md:133)*
 
 ### PR #47 — [HARNESS] CI checks, validate-harness, platform-specs, version bumps (2026-06-12)
 
