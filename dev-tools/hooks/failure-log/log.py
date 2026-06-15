@@ -20,7 +20,6 @@ Design contract: this runs after EVERY Bash call. It must be fast and must NEVER
 raise or block — always exit 0. A logging failure must never disrupt the session.
 """
 
-import fcntl
 import json
 import os
 import re
@@ -28,6 +27,29 @@ import shlex
 import subprocess
 import sys
 import time
+
+_IS_WIN = sys.platform == "win32"
+# O_NOFOLLOW: raises ELOOP on Unix if path is a symlink; undefined on Windows (use 0)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+try:
+    import fcntl as _fcntl
+    _LOCK_EX = _fcntl.LOCK_EX  # eager: AttributeError here → no-op branch below
+    _LOCK_UN = _fcntl.LOCK_UN
+
+    def _lock(f):
+        _fcntl.flock(f.fileno(), _LOCK_EX)  # type: ignore[attr-defined]
+
+    def _unlock(f):
+        _fcntl.flock(f.fileno(), _LOCK_UN)  # type: ignore[attr-defined]
+
+except (ImportError, AttributeError):
+    # Windows or stub fcntl: flock unavailable; locking skipped (safe for serial use)
+    def _lock(_f):  # type: ignore[misc]
+        pass
+
+    def _unlock(_f):  # type: ignore[misc]
+        pass
 
 LOG_REL = os.path.join(".claude", "logs", "failed-commands.jsonl")
 MAX_LINES = 1000          # bound the per-repo log; keep the newest N
@@ -169,21 +191,21 @@ def build_record(data, now_ms):
 
 
 def append_capped(path, line):
-    """Append one line, trimming to MAX_LINES, atomically under an exclusive lock.
+    """Append one line, trimming to MAX_LINES, under an exclusive lock (Unix).
 
-    Read-modify-write is guarded by flock so parallel agent fan-outs against the
-    same repo can't clobber each other's entries. Both the log and its .gitignore are
-    opened with O_NOFOLLOW: a pre-planted symlink in .claude/logs/ raises ELOOP
-    (OSError), which the outer except catches silently — the session is never disrupted.
-    Self-contained: swallows OSError (disk full, permissions, symlink) so a logging
-    failure never propagates."""
+    On Unix: flock guards read-modify-write; O_NOFOLLOW rejects pre-planted symlinks
+    (raises ELOOP → OSError, caught silently). On Windows: O_NOFOLLOW is unavailable;
+    both the log and .gitignore opens are guarded by an os.path.islink() pre-check
+    (TOCTOU best-effort) and locking is skipped (safe for serial use). Self-contained:
+    swallows OSError so a logging failure never disrupts the session."""
     d = os.path.dirname(path)
     try:
         os.makedirs(d, exist_ok=True)
-        # ensure logs dir is gitignored; O_NOFOLLOW blocks symlink redirect
         gi = os.path.join(d, ".gitignore")
         try:
-            gi_fd = os.open(gi, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
+            if _O_NOFOLLOW == 0 and os.path.islink(gi):
+                raise OSError("symlink at gitignore path")
+            gi_fd = os.open(gi, os.O_CREAT | os.O_RDWR | _O_NOFOLLOW, 0o644)
             try:
                 gf = os.fdopen(gi_fd, "r+", encoding="utf-8")
             except OSError:
@@ -198,15 +220,16 @@ def append_capped(path, line):
                     gf.write(prefix + "*\n")
         except OSError:
             pass  # gitignore write failed (e.g. symlink); log write still attempted
-        # O_NOFOLLOW: raises ELOOP (OSError) if path is a pre-planted symlink
-        log_fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        if _O_NOFOLLOW == 0 and os.path.islink(path):
+            raise OSError("symlink at log path")
+        log_fd = os.open(path, os.O_RDWR | os.O_CREAT | _O_NOFOLLOW, 0o600)
         try:
             f = os.fdopen(log_fd, "r+", encoding="utf-8")
         except OSError:
             os.close(log_fd)
             raise
         with f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            _lock(f)
             try:
                 f.seek(0)
                 lines = f.readlines()
@@ -217,7 +240,7 @@ def append_capped(path, line):
                 f.truncate()
                 f.writelines(lines)
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                _unlock(f)
     except OSError:
         pass
 
@@ -253,17 +276,21 @@ def _test():
             fails.append(name)
 
     # symlink planted at log path → append_capped must skip silently, target untouched
-    with tempfile.TemporaryDirectory() as td:
-        target = os.path.join(td, "target.txt")
-        with open(target, "w") as fh:
-            fh.write("original\n")
-        link = os.path.join(td, "link.jsonl")
-        os.symlink(target, link)
-        append_capped(link, '{"test":1}')
-        with open(target) as fh:
-            content = fh.read()
-        check("symlink write skipped — target unmodified", content == "original\n")
-        check("symlink still a symlink", os.path.islink(link))
+    # O_NOFOLLOW not available on Windows; symlink guard is Unix-only by design
+    if _IS_WIN:
+        print("SKIP — symlink protection test (O_NOFOLLOW unavailable on Windows)")
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "target.txt")
+            with open(target, "w") as fh:
+                fh.write("original\n")
+            link = os.path.join(td, "link.jsonl")
+            os.symlink(target, link)
+            append_capped(link, '{"test":1}')
+            with open(target) as fh:
+                content = fh.read()
+            check("symlink write skipped — target unmodified", content == "original\n")
+            check("symlink still a symlink", os.path.islink(link))
 
     # .gitignore without trailing newline → write must start a new line, not corrupt last pattern
     with tempfile.TemporaryDirectory() as td:

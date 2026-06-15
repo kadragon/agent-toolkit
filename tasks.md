@@ -1,5 +1,9 @@
 ## Review Backlog
 
+### PR #59 — failure-log cross-platform fix (2026-06-15)
+
+- [ ] [debt] `dev-tools/hooks/failure-log/log.py:44` — Windows no-op `_lock`/`_unlock` makes `append_capped` read-modify-write unguarded; two concurrent PostToolUse hook processes targeting same repo log can race and drop/duplicate entries. Fix: implement `msvcrt.locking()` in the ImportError branch, or switch append to `O_APPEND` + separate MAX_LINES trim pass. (source: pr-review-toolkit:review-pr, code-review) — P2
+
 ### PR #57 — start-task bundle candidates (2026-06-15)
 
 - [ ] [debt] `start-task/SKILL.md:50` — type-compat rule says "[FEAT] bundles only with [FEAT]" but silent on whether [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may cross-bundle. Add sentence: "Types within [FIX]/[DEBT]/[DOCS]/[HARNESS]/[TEST] may bundle with each other." (source: review, confidence 72) — P2
