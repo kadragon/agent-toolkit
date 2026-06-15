@@ -131,7 +131,7 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 set -euo pipefail
 # 1. section0.xml을 임시파일로 작성
 mkdir -p .hwpx_work
-SECTION=$(mktemp .hwpx_work/section0_XXXX.xml)
+SECTION=$(mktemp .hwpx_work/section0_XXXXXX)  # trailing X's only: BSD/macOS mktemp won't substitute X's that precede a suffix like .xml
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
 <hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -150,6 +150,9 @@ XMLEOF
 python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result.hwpx
 
 # 3. 정리 (임시 디렉토리 제거)
+# ⚠️ 동시 실행 주의: 같은 CWD에서 hwpx 작업을 병렬로 돌리면 먼저 끝난 쪽이
+#    아직 실행 중인 다른 작업의 .hwpx_work/를 지운다. 병렬 시 작업별 디렉토리
+#    (예: mktemp -d .hwpx_work_XXXXXX) 사용.
 rm -rf .hwpx_work/
 # 사용자에게 알림: "result.hwpx 완성. 임시 폴더 .hwpx_work/ 삭제했습니다."
 ```
@@ -215,7 +218,7 @@ python3 "$SKILL_DIR/scripts/validate.py" validate edited.hwpx --baseline documen
 
 Many items → split into stages to catch silent failures early, verify each stage in Hancom.
 
-1. **unpack once**. All later stages cumulatively modify `unpacked/Contents/section0.xml`.
+1. **unpack once** (run **`mkdir -p .hwpx_work`** first — stage 3 packs into `.hwpx_work/step_N.hwpx`, which fails on a fresh checkout if the dir is absent). All later stages cumulatively modify `unpacked/Contents/section0.xml`.
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `.hwpx_work/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file.
