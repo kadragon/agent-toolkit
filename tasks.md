@@ -1,3 +1,28 @@
+# Bundle: failure-log/log.py concurrency & decode robustness
+
+status: active
+
+## Scope
+
+`dev-tools/hooks/failure-log/log.py` — harden `append_capped` and its lock primitives.
+
+## Acceptance criteria
+
+- [ ] Windows `_lock`/`_unlock` use `msvcrt.locking` (no longer no-ops); two concurrent PostToolUse processes serialize their read-modify-write (PR #59 finding).
+- [ ] `f.flush()` issued before `_unlock(f)` so buffered writes reach the OS before the lock is released (PR #51 finding).
+- [ ] `UnicodeDecodeError` from reading `.gitignore`/log no longer escapes `append_capped` (PR #51 finding). New `--test` case proves an invalid-UTF-8 `.gitignore` does not raise.
+
+## Out of scope
+
+- O_APPEND/trim-pass rewrite of the Unix path (Unix flock already correct).
+- `os.fsync` durability (crash-durability not required; flush suffices for cross-process visibility).
+
+## Lint/test command
+
+`python3 dev-tools/hooks/failure-log/log.py --test`
+
+---
+
 ## Review Backlog
 
 ### PR #59 — failure-log cross-platform fix (2026-06-15)
