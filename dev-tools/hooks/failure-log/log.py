@@ -49,15 +49,20 @@ except (ImportError, AttributeError):
     try:
         import msvcrt as _msvcrt
 
-        # Windows mandatory byte-range lock; matches flock's read-modify-write guard so
-        # two concurrent PostToolUse processes serialize. Lock/unlock the same region
-        # from offset 0 (append_capped seeks to 0 under the lock anyway).
+        # Windows mandatory byte-range lock guarding append_capped's read-modify-write.
+        # LK_NBLCK (non-blocking): if a concurrent PostToolUse hook holds the region,
+        # raise immediately so the outer except drops this one entry rather than stalling
+        # ~10s (LK_LOCK retries 10×/1s) — the hook contract is "fast, never block";
+        # best-effort logging prefers dropping over stalling. Lock and unlock anchor at
+        # offset 0 via os.lseek (raw fd — avoids TextIOWrapper buffer-state exceptions)
+        # so the [0, _LOCK_BYTES) region is identical. The unlock seek is load-bearing:
+        # writelines advances the position, and LK_UNLK must release the locked region.
         def _lock(f):  # type: ignore[misc]
-            f.seek(0)
-            _msvcrt.locking(f.fileno(), _msvcrt.LK_LOCK, _LOCK_BYTES)  # type: ignore[attr-defined]
+            os.lseek(f.fileno(), 0, os.SEEK_SET)
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_NBLCK, _LOCK_BYTES)  # type: ignore[attr-defined]
 
         def _unlock(f):  # type: ignore[misc]
-            f.seek(0)
+            os.lseek(f.fileno(), 0, os.SEEK_SET)
             _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLK, _LOCK_BYTES)  # type: ignore[attr-defined]
 
     except (ImportError, AttributeError):
@@ -211,10 +216,12 @@ def append_capped(path, line):
     """Append one line, trimming to MAX_LINES, under an exclusive lock (Unix).
 
     On Unix: flock guards read-modify-write; O_NOFOLLOW rejects pre-planted symlinks
-    (raises ELOOP → OSError, caught silently). On Windows: O_NOFOLLOW is unavailable;
-    both the log and .gitignore opens are guarded by an os.path.islink() pre-check
-    (TOCTOU best-effort) and locking is skipped (safe for serial use). Self-contained:
-    swallows OSError so a logging failure never disrupts the session."""
+    (raises ELOOP → OSError, caught silently). On Windows: O_NOFOLLOW is unavailable,
+    so both the log and .gitignore opens are guarded by an os.path.islink() pre-check
+    (TOCTOU best-effort), and msvcrt.locking provides a non-blocking mandatory
+    byte-range lock (locking is skipped only when neither fcntl nor msvcrt is
+    importable). Self-contained: swallows OSError/UnicodeDecodeError so a logging
+    failure never disrupts the session."""
     d = os.path.dirname(path)
     try:
         os.makedirs(d, exist_ok=True)
@@ -235,8 +242,11 @@ def append_capped(path, line):
                     gf.seek(0, 2)
                     prefix = "\n" if content and not content.endswith("\n") else ""
                     gf.write(prefix + "*\n")
-        except OSError:
-            pass  # gitignore write failed (e.g. symlink); log write still attempted
+        except (OSError, UnicodeDecodeError):
+            # gitignore update failed (symlink, perms, or non-UTF-8 content); caught HERE
+            # — not at the outer except — so the log write below is still attempted.
+            # .gitignore maintenance is best-effort; logging is the primary behavior.
+            pass
         if _O_NOFOLLOW == 0 and os.path.islink(path):
             raise OSError("symlink at log path")
         log_fd = os.open(path, os.O_RDWR | os.O_CREAT | _O_NOFOLLOW, 0o600)
@@ -261,9 +271,11 @@ def append_capped(path, line):
             finally:
                 _unlock(f)
     except (OSError, UnicodeDecodeError):
-        # OSError: any FS failure (symlink/ELOOP, perms). UnicodeDecodeError: a non-UTF-8
-        # .gitignore or log file (ValueError subclass, not an OSError) — swallow both so a
-        # logging failure never disrupts the session.
+        # OSError: any FS failure (symlink/ELOOP, perms, msvcrt lock contention).
+        # UnicodeDecodeError: a non-UTF-8 *log* file read (ValueError subclass, not an
+        # OSError); the .gitignore decode case is handled at the inner except so it does
+        # not abort the log write. Swallow both so a logging failure never disrupts the
+        # session.
         pass
 
 
@@ -325,7 +337,8 @@ def _test():
             gi_content = gh.read()
         check(".gitignore line boundary preserved", gi_content == "keep\n*\n")
 
-    # invalid-UTF-8 .gitignore → read must not raise UnicodeDecodeError out of append_capped
+    # invalid-UTF-8 .gitignore → append must not raise AND must still record the log entry
+    # (.gitignore maintenance is best-effort; a corrupt one must not drop the log write)
     with tempfile.TemporaryDirectory() as td:
         log_p = os.path.join(td, "test.jsonl")
         gi_path = os.path.join(td, ".gitignore")
@@ -337,6 +350,9 @@ def _test():
         except UnicodeDecodeError:
             raised = True
         check("invalid-utf8 .gitignore does not raise", not raised)
+        wrote = os.path.exists(log_p) and \
+            '{"test":1}' in open(log_p, encoding="utf-8").read()
+        check("log entry written despite undecodable .gitignore", wrote)
 
     print()
     if fails:
