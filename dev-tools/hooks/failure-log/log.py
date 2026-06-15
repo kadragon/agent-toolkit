@@ -34,15 +34,17 @@ _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 try:
     import fcntl as _fcntl
+    _LOCK_EX = _fcntl.LOCK_EX  # eager: AttributeError here → no-op branch below
+    _LOCK_UN = _fcntl.LOCK_UN
 
     def _lock(f):
-        _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)  # type: ignore[attr-defined]
+        _fcntl.flock(f.fileno(), _LOCK_EX)  # type: ignore[attr-defined]
 
     def _unlock(f):
-        _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)  # type: ignore[attr-defined]
+        _fcntl.flock(f.fileno(), _LOCK_UN)  # type: ignore[attr-defined]
 
-except ImportError:
-    # Windows: flock unavailable; locking skipped (log write safe for serial use)
+except (ImportError, AttributeError):
+    # Windows or stub fcntl: flock unavailable; locking skipped (safe for serial use)
     def _lock(_f):  # type: ignore[misc]
         pass
 
@@ -192,14 +194,17 @@ def append_capped(path, line):
     """Append one line, trimming to MAX_LINES, under an exclusive lock (Unix).
 
     On Unix: flock guards read-modify-write; O_NOFOLLOW rejects pre-planted symlinks
-    (raises ELOOP → OSError, caught silently). On Windows: locking and O_NOFOLLOW are
-    skipped (not available); symlink redirect is not guarded. Self-contained: swallows
-    OSError so a logging failure never disrupts the session."""
+    (raises ELOOP → OSError, caught silently). On Windows: O_NOFOLLOW is unavailable;
+    both the log and .gitignore opens are guarded by an os.path.islink() pre-check
+    (TOCTOU best-effort) and locking is skipped (safe for serial use). Self-contained:
+    swallows OSError so a logging failure never disrupts the session."""
     d = os.path.dirname(path)
     try:
         os.makedirs(d, exist_ok=True)
         gi = os.path.join(d, ".gitignore")
         try:
+            if _O_NOFOLLOW == 0 and os.path.islink(gi):
+                raise OSError("symlink at gitignore path")
             gi_fd = os.open(gi, os.O_CREAT | os.O_RDWR | _O_NOFOLLOW, 0o644)
             try:
                 gf = os.fdopen(gi_fd, "r+", encoding="utf-8")
@@ -215,6 +220,8 @@ def append_capped(path, line):
                     gf.write(prefix + "*\n")
         except OSError:
             pass  # gitignore write failed (e.g. symlink); log write still attempted
+        if _O_NOFOLLOW == 0 and os.path.islink(path):
+            raise OSError("symlink at log path")
         log_fd = os.open(path, os.O_RDWR | os.O_CREAT | _O_NOFOLLOW, 0o600)
         try:
             f = os.fdopen(log_fd, "r+", encoding="utf-8")
