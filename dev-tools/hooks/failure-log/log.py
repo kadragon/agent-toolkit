@@ -31,10 +31,12 @@ import time
 _IS_WIN = sys.platform == "win32"
 # O_NOFOLLOW: raises ELOOP on Unix if path is a symlink; undefined on Windows (use 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+# whole-file lock region for msvcrt.locking (locks from offset 0 past EOF; Windows allows this)
+_LOCK_BYTES = 0x7FFFFFFF
 
 try:
     import fcntl as _fcntl
-    _LOCK_EX = _fcntl.LOCK_EX  # eager: AttributeError here → no-op branch below
+    _LOCK_EX = _fcntl.LOCK_EX  # eager: AttributeError here → next branch below
     _LOCK_UN = _fcntl.LOCK_UN
 
     def _lock(f):
@@ -44,12 +46,27 @@ try:
         _fcntl.flock(f.fileno(), _LOCK_UN)  # type: ignore[attr-defined]
 
 except (ImportError, AttributeError):
-    # Windows or stub fcntl: flock unavailable; locking skipped (safe for serial use)
-    def _lock(_f):  # type: ignore[misc]
-        pass
+    try:
+        import msvcrt as _msvcrt
 
-    def _unlock(_f):  # type: ignore[misc]
-        pass
+        # Windows mandatory byte-range lock; matches flock's read-modify-write guard so
+        # two concurrent PostToolUse processes serialize. Lock/unlock the same region
+        # from offset 0 (append_capped seeks to 0 under the lock anyway).
+        def _lock(f):  # type: ignore[misc]
+            f.seek(0)
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_LOCK, _LOCK_BYTES)  # type: ignore[attr-defined]
+
+        def _unlock(f):  # type: ignore[misc]
+            f.seek(0)
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLK, _LOCK_BYTES)  # type: ignore[attr-defined]
+
+    except (ImportError, AttributeError):
+        # neither fcntl nor msvcrt: locking skipped (safe for serial use)
+        def _lock(_f):  # type: ignore[misc]
+            pass
+
+        def _unlock(_f):  # type: ignore[misc]
+            pass
 
 LOG_REL = os.path.join(".claude", "logs", "failed-commands.jsonl")
 MAX_LINES = 1000          # bound the per-repo log; keep the newest N
@@ -239,9 +256,14 @@ def append_capped(path, line):
                 f.seek(0)
                 f.truncate()
                 f.writelines(lines)
+                f.flush()  # push buffered writes to the OS before releasing the lock,
+                           # so a parallel reader cannot grab the lock and see stale data
             finally:
                 _unlock(f)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # OSError: any FS failure (symlink/ELOOP, perms). UnicodeDecodeError: a non-UTF-8
+        # .gitignore or log file (ValueError subclass, not an OSError) — swallow both so a
+        # logging failure never disrupts the session.
         pass
 
 
@@ -302,6 +324,19 @@ def _test():
         with open(gi_path, encoding="utf-8") as gh:
             gi_content = gh.read()
         check(".gitignore line boundary preserved", gi_content == "keep\n*\n")
+
+    # invalid-UTF-8 .gitignore → read must not raise UnicodeDecodeError out of append_capped
+    with tempfile.TemporaryDirectory() as td:
+        log_p = os.path.join(td, "test.jsonl")
+        gi_path = os.path.join(td, ".gitignore")
+        with open(gi_path, "wb") as gh:
+            gh.write(b"\xff\xfe not valid utf-8\n")
+        raised = False
+        try:
+            append_capped(log_p, '{"test":1}')
+        except UnicodeDecodeError:
+            raised = True
+        check("invalid-utf8 .gitignore does not raise", not raised)
 
     print()
     if fails:
