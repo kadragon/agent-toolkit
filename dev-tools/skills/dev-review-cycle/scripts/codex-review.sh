@@ -47,7 +47,11 @@ case "$CODEX_MODE" in
       JQ_ERR=$(cat "$_jq_tmp")
       rm -f "$_jq_tmp"
       if [ -n "$JQ_ERR" ]; then
-        printf 'WARN: jq parse error: %s\n' "$JQ_ERR" >&2
+        # A parse error means jq may have emitted only a partial parse of a
+        # valid-prefix/trailing-garbage payload; the captured TEXT is unreliable,
+        # so discard it and fall back to RAW below — never emit a truncated review.
+        printf 'WARN: jq parse error (emitting raw JSON): %s\n' "$JQ_ERR" >&2
+        TEXT=""
       elif [ -z "$TEXT" ]; then
         printf 'WARN: .codex.stdout empty; emitting raw JSON\n' >&2
       fi
