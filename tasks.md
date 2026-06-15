@@ -1,33 +1,8 @@
-# Bundle: failure-log/log.py concurrency & decode robustness
-
-status: active
-
-## Scope
-
-`dev-tools/hooks/failure-log/log.py` — harden `append_capped` and its lock primitives.
-
-## Acceptance criteria
-
-- [ ] Windows `_lock`/`_unlock` use `msvcrt.locking` (no longer no-ops); two concurrent PostToolUse processes serialize their read-modify-write (PR #59 finding).
-- [ ] `f.flush()` issued before `_unlock(f)` so buffered writes reach the OS before the lock is released (PR #51 finding).
-- [ ] `UnicodeDecodeError` from reading `.gitignore`/log no longer escapes `append_capped` (PR #51 finding). New `--test` case proves an invalid-UTF-8 `.gitignore` does not raise.
-
-## Out of scope
-
-- O_APPEND/trim-pass rewrite of the Unix path (Unix flock already correct).
-- `os.fsync` durability (crash-durability not required; flush suffices for cross-process visibility).
-
-## Lint/test command
-
-`python3 dev-tools/hooks/failure-log/log.py --test`
-
----
-
 ## Review Backlog
 
 ### PR #59 — failure-log cross-platform fix (2026-06-15)
 
-- [ ] [debt] `dev-tools/hooks/failure-log/log.py:44` — Windows no-op `_lock`/`_unlock` makes `append_capped` read-modify-write unguarded; two concurrent PostToolUse hook processes targeting same repo log can race and drop/duplicate entries. Fix: implement `msvcrt.locking()` in the ImportError branch, or switch append to `O_APPEND` + separate MAX_LINES trim pass. (source: pr-review-toolkit:review-pr, code-review) — P2
+- [x] [debt] `dev-tools/hooks/failure-log/log.py:44` — Windows no-op `_lock`/`_unlock` makes `append_capped` read-modify-write unguarded; two concurrent PostToolUse hook processes targeting same repo log can race and drop/duplicate entries. Fix: implement `msvcrt.locking()` in the ImportError branch, or switch append to `O_APPEND` + separate MAX_LINES trim pass. (source: pr-review-toolkit:review-pr, code-review) — P2 *(resolved: PR #60 — msvcrt LK_NBLCK branch)*
 
 ### PR #57 — start-task bundle candidates (2026-06-15)
 
@@ -44,8 +19,8 @@ status: active
 - [ ] [debt] `dev-tools/hooks/failure-log/log.py:186` — `gi_fd` leaks if `os.fdopen()` raises before `with` block entered; inner `except OSError: pass` catches without closing. Fix: same `try/except OSError: os.close(gi_fd); raise` guard as log_fd. (source: pr-review-toolkit:review-pr, conf 90) — P2
 - [ ] [debt] `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:44` — `mktemp` temp file leaks on SIGINT/error between creation and `rm -f`; also no diagnostic when `mktemp` itself fails (set -e aborts silently). Fix: `trap 'rm -f "$_jq_tmp"' EXIT` immediately after mktemp; add `|| { printf 'ERROR: mktemp failed\n' >&2; exit 1; }`. (source: pr-review-toolkit:review-pr, agy) — P2
 - [ ] [debt] `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh:48` — jq partial parse edge: if companion output has valid JSON prefix + trailing garbage, jq may populate TEXT and emit stderr. Current code warns but outputs TEXT instead of raw fallback, dropping diagnostic detail. (source: codex) — P3
-- [ ] [debt] `dev-tools/hooks/failure-log/log.py:209` — `f.flush()` missing before `fcntl.LOCK_UN`; buffered writes may not reach disk before lock released, allowing parallel reader to see stale data. Pre-existing pattern. (source: agy) — P2 (out-of-scope; pre-existing)
-- [ ] [debt] `dev-tools/hooks/failure-log/log.py:188` — `UnicodeDecodeError` from `encoding="utf-8"` not caught by `except OSError`; propagates to `__main__` `except BaseException: pass` (silent, no disruption). Pre-existing. Fix: add `errors="replace"` or wrap with `except (OSError, UnicodeDecodeError)`. (source: agy) — P2 (out-of-scope; pre-existing)
+- [x] [debt] `dev-tools/hooks/failure-log/log.py:209` — `f.flush()` missing before `fcntl.LOCK_UN`; buffered writes may not reach disk before lock released, allowing parallel reader to see stale data. Pre-existing pattern. (source: agy) — P2 *(resolved: PR #60 — flush before _unlock)*
+- [x] [debt] `dev-tools/hooks/failure-log/log.py:188` — `UnicodeDecodeError` from `encoding="utf-8"` not caught by `except OSError`; propagates to `__main__` `except BaseException: pass` (silent, no disruption). Pre-existing. Fix: add `errors="replace"` or wrap with `except (OSError, UnicodeDecodeError)`. (source: agy) — P2 *(resolved: PR #60 — inner+outer except widened; log write preserved)*
 
 ### PR #54 — start-task skill (2026-06-14)
 
