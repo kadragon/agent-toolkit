@@ -2,10 +2,10 @@
   {
     "pattern": "(start.*task|pick.*task|work.*backlog|next.*task|start.*work|다음.*작업.*시작|백로그에서.*작업|작업.*하나.*돌려|백로그.*시작|작업.*시작|백로그.*작업)",
     "instruction": "Use Skill(dev-tools:next-tasks) to pick and drive the next task through the full code cycle. Do NOT skip the skill.",
-    "skip_if_prompt_matches": "(review|리뷰|resume|이어서|already.*branch|already.*started|mid.*flight|진행.*중|이미.*시작|implement|구현)"
+    "skip_if_prompt_matches": "(review|리뷰|resume|이어서|already.*branch|already.*started|mid.*flight|진행.*중|이미.*시작|implement.*(skill|hook|agent)|스킬.*구현|훅.*구현|에이전트.*구현)"
   },
   {
-    "pattern": "(implement.*backlog|backlog.*item|스킬.*수정|스킬.*추가|훅.*수정|에이전트.*수정|fix.*skill|add.*skill|modify.*hook|update.*agent|이거.*구현|구현해줘|백로그.*구현)",
+    "pattern": "(implement.*(backlog|skill|hook|agent)|backlog.*item|스킬.*수정|스킬.*추가|훅.*수정|에이전트.*수정|fix.*skill|add.*skill|modify.*hook|update.*agent|이거.*구현|구현해줘|백로그.*구현|스킬.*구현|훅.*구현|에이전트.*구현)",
     "instruction": "Use Skill(skill-dev-orchestrator) to orchestrate the implementation. Do NOT inline-implement.",
     "skip_if_prompt_matches": "(inline|직접|without orchestrator|오타|typo|한 줄|one line|one-line)"
   },
