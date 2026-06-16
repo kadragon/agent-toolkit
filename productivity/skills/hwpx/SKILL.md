@@ -131,6 +131,7 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 set -euo pipefail
 # 1. section0.xml을 임시파일로 작성
 mkdir -p .hwpx_work
+trap 'rm -rf .hwpx_work' EXIT
 SECTION=$(mktemp .hwpx_work/section0_XXXXXX)  # trailing X's only — a .xml suffix after the X's makes BSD/macOS mktemp silently create a literal, non-random name (exit 0), so the 2nd call collides with "File exists"
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
@@ -220,10 +221,10 @@ python3 "$SKILL_DIR/scripts/validate.py" validate edited.hwpx --baseline documen
 
 Many items → split into stages to catch silent failures early, verify each stage in Hancom.
 
-1. **unpack once** (run **`mkdir -p .hwpx_work`** first — stage 3 packs into `.hwpx_work/step_N.hwpx`, which fails on a fresh checkout if the dir is absent). All later stages cumulatively modify `unpacked/Contents/section0.xml`.
+1. **unpack once** (run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first — stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` collisions when two sessions run concurrently in the same CWD). All later stages cumulatively modify `unpacked/Contents/section0.xml`.
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
-3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `.hwpx_work/step_N.hwpx` to avoid file-lock conflicts.
-4. After all stages pass, apply final version to real file.
+3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
+4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`.
 
 > **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
 > ```bash
