@@ -1,6 +1,6 @@
 # Sprint: hwpx .hwpx_work/ guards (PR #62 findings)
 
-status: active
+status: done
 
 **Scope:** `productivity/skills/hwpx/SKILL.md` only — add trap cleanup to inline-build example and fix parallel session dir collision in multi-stage section.
 
