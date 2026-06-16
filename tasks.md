@@ -1,6 +1,22 @@
-# Sprint: codex-review.sh jq partial-parse fallback (PR #51 finding)
+# Sprint: hwpx .hwpx_work/ guards (PR #62 findings)
 
 status: active
+
+**Scope:** `productivity/skills/hwpx/SKILL.md` only — add trap cleanup to inline-build example and fix parallel session dir collision in multi-stage section.
+
+**Acceptance criteria:**
+- [ ] `SKILL.md:131-157` inline-build example: `trap 'rm -rf .hwpx_work' EXIT` added immediately after `mkdir -p .hwpx_work`
+- [ ] `SKILL.md:221` multi-stage section: `HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)` replaces fixed `mkdir -p .hwpx_work`; all `.hwpx_work/step_N.hwpx` refs updated to `$HWPX_WORK/step_N.hwpx`
+
+**Out of scope:** Python scripts, other SKILL.md sections, productivity plugin scripts.
+
+**Lint/test command:** `bash dev-tools/skills/harness-init/scripts/validate-harness.sh`
+
+---
+
+# Sprint: codex-review.sh jq partial-parse fallback (PR #51 finding)
+
+status: done
 
 **Scope:** `dev-tools/skills/dev-review-cycle/scripts/codex-review.sh` only — resolve the line 48 jq partial-parse finding from PR #51 review.
 
@@ -14,6 +30,10 @@ status: active
 ---
 
 ## Review Backlog
+
+### PR #67 — hwpx .hwpx_work/ guard fixes (2026-06-16)
+
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:224` — multi-stage workflow still unpack to shared `./unpacked/` dir; two parallel sessions corrupt each other's working XML before pack. Fix: derive unpack dir from `$HWPX_WORK` (e.g. `$HWPX_WORK/unpacked/`) and update all `./unpacked/` refs. (source: codex) — P2
 
 ### PR #62 — hwpx .hwpx_work/ guards (2026-06-15)
 
