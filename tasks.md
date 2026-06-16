@@ -31,6 +31,10 @@ status: done
 
 ## Review Backlog
 
+### PR #67 — hwpx .hwpx_work/ guard fixes (2026-06-16)
+
+- [ ] [debt] `productivity/skills/hwpx/SKILL.md:224` — multi-stage workflow still unpack to shared `./unpacked/` dir; two parallel sessions corrupt each other's working XML before pack. Fix: derive unpack dir from `$HWPX_WORK` (e.g. `$HWPX_WORK/unpacked/`) and update all `./unpacked/` refs. (source: codex) — P2
+
 ### PR #62 — hwpx .hwpx_work/ guards (2026-06-15)
 
 - [ ] [debt] `productivity/skills/hwpx/SKILL.md:221` — Workflow 2 multi-stage still shares a fixed `.hwpx_work/`; parallel multi-stage sessions in the same CWD collide. Fix: use a per-stage unique dir (e.g. `.hwpx_work_step_N` or captured `mktemp -d`). (source: agy) — P3

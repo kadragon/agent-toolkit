@@ -129,10 +129,10 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 
 ```bash
 set -euo pipefail
-# 1. section0.xml을 임시파일로 작성
-mkdir -p .hwpx_work
-trap 'rm -rf .hwpx_work' EXIT
-SECTION=$(mktemp .hwpx_work/section0_XXXXXX)  # trailing X's only — a .xml suffix after the X's makes BSD/macOS mktemp silently create a literal, non-random name (exit 0), so the 2nd call collides with "File exists"
+# 1. section0.xml을 임시파일로 작성 (per-session unique dir — parallel-safe)
+HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
+trap 'rm -rf "$HWPX_WORK"' EXIT  # error-path cleanup: fires on any set -e trigger or normal exit
+SECTION=$(mktemp "$HWPX_WORK/section0_XXXXXX")  # trailing X's only — a .xml suffix after the X's makes BSD/macOS mktemp silently create a literal, non-random name (exit 0), so the 2nd call collides with "File exists"
 cat > "$SECTION" << 'XMLEOF'
 <?xml version='1.0' encoding='UTF-8'?>
 <hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -150,14 +150,9 @@ XMLEOF
 # 2. 빌드
 python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result.hwpx
 
-# 3. 정리 (임시 디렉토리 제거)
-# ⚠️ 동시 실행 주의: 같은 CWD에서 hwpx 작업을 병렬로 돌리면 먼저 끝난 쪽이
-#    아직 실행 중인 다른 작업의 .hwpx_work/를 지운다. 병렬 시 작업별 디렉토리를
-#    캡처해서 그것만 정리한다 (고정 .hwpx_work/ 대신):
-#      WORK=$(mktemp -d .hwpx_work_XXXXXX); SECTION=$(mktemp "$WORK/section0_XXXXXX")
-#      ...빌드...; rm -rf "$WORK"
-rm -rf .hwpx_work/
-# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 .hwpx_work/ 삭제했습니다."
+# 3. 정리 (trap이 처리; 명시적 제거도 가능)
+rm -rf "$HWPX_WORK"
+# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 정리했습니다."
 ```
 
 ---
@@ -224,7 +219,7 @@ Many items → split into stages to catch silent failures early, verify each sta
 1. **unpack once** (run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first — stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` collisions when two sessions run concurrently in the same CWD). All later stages cumulatively modify `unpacked/Contents/section0.xml`.
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
-4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`.
+4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`. On failure, the dir is preserved for artifact inspection — clean manually when done.
 
 > **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
 > ```bash
