@@ -216,16 +216,16 @@ python3 "$SKILL_DIR/scripts/validate.py" validate edited.hwpx --baseline documen
 
 Many items → split into stages to catch silent failures early, verify each stage in Hancom.
 
-1. **unpack once** (run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first — stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` collisions when two sessions run concurrently in the same CWD). All later stages cumulatively modify `unpacked/Contents/section0.xml`.
+1. **unpack once** — run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first, then `office.py unpack document.hwpx "$HWPX_WORK/unpacked/"`. Stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` and `./unpacked/` collisions when two sessions run concurrently in the same CWD. All later stages cumulatively modify `$HWPX_WORK/unpacked/Contents/section0.xml`.
 2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`. On failure, the dir is preserved for artifact inspection — clean manually when done.
 
 > **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
 > ```bash
-> python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
-> python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
-> python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ result.hwpx
+> python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
+> python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
+> python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
 > ```
 
 ### Bulk File Edit — N files simultaneously
