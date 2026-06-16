@@ -1,6 +1,6 @@
 # Sprint: hwpx .hwpx_work/ guards (PR #62 findings)
 
-status: active
+status: done
 
 **Scope:** `productivity/skills/hwpx/SKILL.md` only — add trap cleanup to inline-build example and fix parallel session dir collision in multi-stage section.
 
@@ -37,8 +37,8 @@ status: done
 
 ### PR #62 — hwpx .hwpx_work/ guards (2026-06-15)
 
-- [ ] [debt] `productivity/skills/hwpx/SKILL.md:221` — Workflow 2 multi-stage still shares a fixed `.hwpx_work/`; parallel multi-stage sessions in the same CWD collide. Fix: use a per-stage unique dir (e.g. `.hwpx_work_step_N` or captured `mktemp -d`). (source: agy) — P3
-- [ ] [debt] `productivity/skills/hwpx/SKILL.md:131-157` — inline-build example has no `trap 'rm -rf ...' EXIT`; under `set -euo pipefail` an error before the cleanup line leaks `.hwpx_work/`. Fix: `trap 'rm -rf .hwpx_work' EXIT` after the `mkdir -p`. (source: agy) — P3
+- [x] [debt] `productivity/skills/hwpx/SKILL.md:221` — Workflow 2 multi-stage still shares a fixed `.hwpx_work/`; parallel multi-stage sessions in the same CWD collide. Fix: use a per-stage unique dir (e.g. `.hwpx_work_step_N` or captured `mktemp -d`). (source: agy) — P3 *(resolved: PR #67 — HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX) + step_N.hwpx pattern)*
+- [x] [debt] `productivity/skills/hwpx/SKILL.md:131-157` — inline-build example has no `trap 'rm -rf ...' EXIT`; under `set -euo pipefail` an error before the cleanup line leaks `.hwpx_work/`. Fix: `trap 'rm -rf .hwpx_work' EXIT` after the `mkdir -p`. (source: agy) — P3 *(resolved: PR #67 — trap 'rm -rf "$HWPX_WORK"' EXIT added at line 134)*
 
 ### PR #59 — failure-log cross-platform fix (2026-06-15)
 
