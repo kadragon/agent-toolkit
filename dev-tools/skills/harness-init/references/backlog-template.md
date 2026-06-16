@@ -12,7 +12,7 @@ reconciles it against `tasks.md` every session.
 | State | Meaning | Set by |
 |-------|---------|--------|
 | `[ ]` | Queued — nothing active | Human |
-| `[>]` | Active — promoted into the current `tasks.md` sprint | Human on sprint start, or `start-task` skill |
+| `[>]` | Active — promoted into the current `tasks.md` sprint | Human on sprint start, or `next-tasks` skill |
 | `[x]` | Done — kept as history or pruned | `reconcile-harness.py` on sprint `status: done` |
 
 Exactly **one** `[>]` at a time is normal for single-item sprints. Zero `[>]`

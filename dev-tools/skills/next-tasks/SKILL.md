@@ -1,6 +1,6 @@
 ---
-name: start-task
-version: 1.0.2
+name: next-tasks
+version: 1.0.3
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -11,7 +11,7 @@ description: >-
   backlog browsing without intent to implement and merge this session.
 ---
 
-# Start Task
+# Next Tasks
 
 Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
 run the cycle, and hand off to `dev-review-cycle --auto`. Delegate the heavy lifting — this
