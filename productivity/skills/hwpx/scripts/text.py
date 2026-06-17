@@ -38,34 +38,37 @@ def _local(tag: object) -> str:
     return ""
 
 
-def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_tables: bool) -> None:
+def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_tables: bool, skipped: list[int]) -> None:
     for child in el:
         tag = _local(child.tag)
         if tag == "tbl":
-            _walk(child, True, lines, cur, include_tables)
+            _walk(child, True, lines, cur, include_tables, skipped)
         elif tag == "p":
             if cur:
                 lines.append("".join(cur))
                 cur.clear()
-            _walk(child, in_tbl, lines, cur, include_tables)
+            _walk(child, in_tbl, lines, cur, include_tables, skipped)
             if cur:
                 lines.append("".join(cur))
                 cur.clear()
         elif tag == "t":
             if (not in_tbl) or include_tables:
                 cur.append(child.text or "")
+            elif in_tbl and not include_tables:
+                skipped[0] += 1
         else:
-            _walk(child, in_tbl, lines, cur, include_tables)
+            _walk(child, in_tbl, lines, cur, include_tables, skipped)
 
 
-def _section_lines(xml_bytes: bytes, include_tables: bool) -> list[str]:
+def _section_lines(xml_bytes: bytes, include_tables: bool) -> tuple[list[str], int]:
     root = ET.fromstring(xml_bytes)
     lines: list[str] = []
     cur: list[str] = []
-    _walk(root, False, lines, cur, include_tables)
+    skipped = [0]
+    _walk(root, False, lines, cur, include_tables, skipped)
     if cur:
         lines.append("".join(cur))
-    return [ln for ln in lines if ln.strip()]
+    return [ln for ln in lines if ln.strip()], skipped[0]
 
 
 def _iter_sections(hwpx_path: str):  # type: ignore[return]
@@ -78,17 +81,21 @@ def _iter_sections(hwpx_path: str):  # type: ignore[return]
             yield zf.read(name)
 
 
-def extract_plain(hwpx_path: str, *, include_tables: bool = False) -> str:
+def extract_plain(hwpx_path: str, *, include_tables: bool = False) -> tuple[str, int]:
     out: list[str] = []
+    total_skipped = 0
     for xml_bytes in _iter_sections(hwpx_path):
-        out.extend(_section_lines(xml_bytes, include_tables))
-    return "\n".join(out)
+        lines, skipped = _section_lines(xml_bytes, include_tables)
+        out.extend(lines)
+        total_skipped += skipped
+    return "\n".join(out), total_skipped
 
 
 def extract_markdown(hwpx_path: str) -> str:
     blocks: list[str] = []
     for xml_bytes in _iter_sections(hwpx_path):
-        blocks.append("\n".join(_section_lines(xml_bytes, include_tables=True)))
+        lines, _ = _section_lines(xml_bytes, include_tables=True)
+        blocks.append("\n".join(lines))
     return "\n\n---\n\n".join(b for b in blocks if b.strip())
 
 
@@ -99,14 +106,17 @@ def cmd_extract(args: argparse.Namespace) -> None:
     try:
         if args.format == "markdown":
             result = extract_markdown(args.input)
+            skipped = 0
         else:
-            result = extract_plain(args.input, include_tables=args.include_tables)
+            result, skipped = extract_plain(args.input, include_tables=args.include_tables)
     except BadZipFile:
         print(f"Error: not a valid HWPX (ZIP) file: {args.input}", file=sys.stderr)
         sys.exit(1)
     except ET.ParseError as e:
         print(f"Error: malformed section XML: {e}", file=sys.stderr)
         sys.exit(1)
+    if args.format != "markdown" and skipped > 0:
+        print(f"[warn] {skipped} table text node(s) omitted; pass --include-tables to include", file=sys.stderr)
     if args.output:
         Path(args.output).write_text(result, encoding="utf-8")
         print(f"Extracted to: {args.output}", file=sys.stderr)

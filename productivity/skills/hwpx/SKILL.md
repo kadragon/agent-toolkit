@@ -228,6 +228,8 @@ Many items → split into stages to catch silent failures early, verify each sta
 > python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
 > python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
 > ```
+>
+> ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To clear cell text while preserving the original character style, use `--set-text OLD ""` instead (requires text to be contiguous in a single `<hp:t>` node; if fragmented across runs, no charPr-preserving option exists — use `--para` and manually copy the charPrIDRef).
 
 ### Bulk File Edit — N files simultaneously
 
@@ -268,7 +270,7 @@ try:
 
         tmp_out = Path(f".hwpx_work/{slug}_tmp.hwpx")
         subprocess.run(["python3", PACK_PY, "pack", str(unpack_dir), str(tmp_out)], check=True)
-        subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)
+        subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)  # do NOT add capture_output=True here — stderr must be visible for debugging
         shutil.copy(tmp_out, cfg["out"])
         print(f"[done] {cfg['out']}")
 finally:
@@ -517,6 +519,6 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 21. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
 22. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
 23. 🔵 **Content-edit completion gate**: after `validate.py --baseline` passes, confirm actually opens in Hancom. Fully close Hancom before repackaging (multiple windows: `CloseMainWindow` closes only main window), after applying to real file verify copy success via md5 or similar (see Workflow 2)
-24. 🟡 **Table cell text edit → table.py replace only**: for any text change inside a table cell (`<hp:tc>`), use `table.py replace` — not `str.replace()` or `text.py patch`. Table cells have per-subList `<hp:linesegarray>`; `table.py replace` strips it and checks ID collisions automatically. Raw `str.replace()` on cell content leaves stale lineseg → "문서가 변경됨" warning in Hancom.
+24. 🟡 **Table cell text edit → table.py replace only**: for any text change inside a table cell (`<hp:tc>`), use `table.py replace` — not `str.replace()` or `text.py patch`. Table cells have per-subList `<hp:linesegarray>`; `table.py replace` strips it and checks ID collisions automatically. Raw `str.replace()` on cell content leaves stale lineseg → "문서가 변경됨" warning in Hancom. For simple contiguous text changes that must preserve charPr/paraPr (run styling), use `--set-text OLD NEW` — it does a targeted text-only replacement inside the existing runs, keeping all attribute structure intact. When the target text is fragmented across multiple `<hp:run>` nodes (run-split), use `--para` or `--content-file` instead.
 25. 🔴 **Floating table must be anchored in `<hp:p><hp:run>`**: `treatAsChar="0"` (floating) tables must be a direct child of `<hp:run>` inside `<hp:p>` — never a bare sibling of `<hs:sec>` or `<hp:p>`. Bare-sibling floating tables are not rendered by Hancom. See `section-writing.md` § "Table placement patterns" for both placement forms.
 26. 🟡 **Escape angle brackets in text nodes**: Korean legal/administrative text commonly contains `<개정 2026. 6.>` or similar angle-bracket spans — always write as `&lt;개정 2026. 6.&gt;`. Unescaped `<` inside `<hp:t>` causes XML parse failure at document load.
