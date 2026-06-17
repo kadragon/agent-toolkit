@@ -38,7 +38,7 @@ def _local(tag: object) -> str:
     return ""
 
 
-def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_tables: bool, skipped: list) -> None:
+def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_tables: bool, skipped: list[int]) -> None:
     for child in el:
         tag = _local(child.tag)
         if tag == "tbl":
@@ -60,7 +60,7 @@ def _walk(el: object, in_tbl: bool, lines: list[str], cur: list[str], include_ta
             _walk(child, in_tbl, lines, cur, include_tables, skipped)
 
 
-def _section_lines(xml_bytes: bytes, include_tables: bool) -> tuple:
+def _section_lines(xml_bytes: bytes, include_tables: bool) -> tuple[list[str], int]:
     root = ET.fromstring(xml_bytes)
     lines: list[str] = []
     cur: list[str] = []
@@ -81,7 +81,7 @@ def _iter_sections(hwpx_path: str):  # type: ignore[return]
             yield zf.read(name)
 
 
-def extract_plain(hwpx_path: str, *, include_tables: bool = False) -> tuple:
+def extract_plain(hwpx_path: str, *, include_tables: bool = False) -> tuple[str, int]:
     out: list[str] = []
     total_skipped = 0
     for xml_bytes in _iter_sections(hwpx_path):

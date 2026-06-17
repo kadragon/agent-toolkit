@@ -596,14 +596,25 @@ def _set_text_cell(xml: str, table_id: str, col: int, row: int,
     in_s, in_e = sl
     cell_content = tc[in_s:in_e]
     escaped_old = xml_escape(old_text)
-    count = cell_content.count(escaped_old)
-    if count != 1:
+    t_matches = re.findall(r"<hp:t>%s</hp:t>" % re.escape(escaped_old), cell_content)
+    count = len(t_matches)
+    if count == 0:
         raise ValueError(
-            "--set-text: '%s' not found contiguously in cell %d,%d subList "
-            "(found %d time(s)); text may be split across runs — "
-            "use --para or --content-file instead." % (old_text, col, row, count)
+            "--set-text: '%s' not found in cell %d,%d subList; "
+            "text may be split across runs — use --para or --content-file instead."
+            % (old_text, col, row)
         )
-    new_content = cell_content.replace(escaped_old, xml_escape(new_text), 1)
+    if count > 1:
+        raise ValueError(
+            "--set-text: '%s' found %d times in cell %d,%d subList (ambiguous); "
+            "provide a more specific old_text or use --content-file."
+            % (old_text, count, col, row)
+        )
+    new_content = cell_content.replace(
+        "<hp:t>%s</hp:t>" % escaped_old,
+        "<hp:t>%s</hp:t>" % xml_escape(new_text),
+        1,
+    )
     new_content, _ = strip_linesegarray(new_content)
     new_tc = tc[:in_s] + new_content + tc[in_e:]
     new_tbl = tbl[:cs] + new_tc + tbl[ce:]
@@ -1057,6 +1068,7 @@ def _run_tests() -> None:
 def main() -> None:
     if sys.argv[1:] == ["--test"]:
         _run_tests()
+        return
     parser = argparse.ArgumentParser(description="HWPX table operations and utilities")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

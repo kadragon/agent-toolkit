@@ -229,7 +229,7 @@ Many items → split into stages to catch silent failures early, verify each sta
 > python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
 > ```
 >
-> ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To clear cell text while preserving the original character style, use `--set-text OLD ""` instead.
+> ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To clear cell text while preserving the original character style, use `--set-text OLD ""` instead (requires text to be contiguous in a single `<hp:t>` node; if fragmented across runs, no charPr-preserving option exists — use `--para` and manually copy the charPrIDRef).
 
 ### Bulk File Edit — N files simultaneously
 
