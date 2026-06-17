@@ -156,18 +156,28 @@ so there is one clean commit per review/merge cycle.
 
 **Pre-merge cleanup (do before Step 4)**
 
-Mark the work done and clean up tracking files — leave as uncommitted so they land in the
+Mark the sprint done and sync tracking files — leave as uncommitted so they land in the
 initial PR commit alongside the code.
 
 *Task came from `backlog.md` (single item or bundle):*
 1. In `tasks.md`: change `status: active` → `status: done`
-2. In `backlog.md`: flip `[>]` → `[x]` for every covered item (single or all bundle members)
+2. Run `reconcile-harness.py` from the project root:
+   ```bash
+   python "${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py"
+   ```
+   This removes the `[>]` marker(s) from `backlog.md`, appends to `CHANGELOG.md` if present,
+   and cleans up empty headings. Do NOT flip `[>]` → `[x]` manually — `remove_active_markers()`
+   matches `[>]` specifically; a manual flip to `[x]` breaks that lookup.
 
 *Task came from `tasks.md` Review Backlog:*
 - In `tasks.md` Review Backlog section: flip the finding `[ ]` → `[x]`
 
-Do NOT run `reconcile-harness.py` here — that tool archives and rewrites; the raw flip-to-done
-is enough and is safer to include in the PR diff.
+*Mixed bundle (backlog items + tasks.md findings):*
+- Apply both sets of steps: set `status: done` and run `reconcile-harness.py` for the backlog
+  members; flip finding checkboxes `[ ]` → `[x]` for tasks.md Review Backlog members.
+
+Post-merge, `reconcile-harness.py` is a no-op for this sprint (already reconciled) but can
+still be run as part of a sweep without side effects.
 
 ## Step 4 — Hand off
 
@@ -176,9 +186,10 @@ Invoke `Skill(dev-tools:dev-review-cycle)` with `args: --auto`.
 `dev-review-cycle --auto` commits (including the cleanup changes above), creates PR, collects
 reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, waits CI, and merges.
 
-**If dev-review-cycle reports CI failure or a hard blocker:** revert the cleanup edits
-(`git restore backlog.md tasks.md`) before asking the user for guidance — the items should not
-appear done while the work is blocked.
+**If dev-review-cycle reports CI failure and the PR must be abandoned:** close the PR and delete
+the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
+If you continue on the same branch after fixing CI, the cleanup commit is already correct and
+no further action is required.
 
 ## Edge cases
 
