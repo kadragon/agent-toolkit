@@ -572,6 +572,46 @@ def _replace_cell(xml: str, table_id: str, col: int, row: int,
     return new_xml, ["cell %d,%d content replaced (%d paragraph(s))" % (col, row, n_para)]
 
 
+def _set_text_cell(xml: str, table_id: str, col: int, row: int,
+                   old_text: str, new_text: str) -> tuple[str, list[str]]:
+    span = find_table(xml, table_id)
+    if span is None:
+        raise ValueError("table id=%s not found" % table_id)
+    ti, tend = span
+    tbl = xml[ti:tend]
+    target = None
+    for cs, ce in top_cells(tbl):
+        addr = _own_cell_addr(tbl[cs:ce])
+        if addr == (col, row):
+            if target is not None:
+                raise ValueError("cell %d,%d is not unique in table" % (col, row))
+            target = (cs, ce)
+    if target is None:
+        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+    cs, ce = target
+    tc = tbl[cs:ce]
+    sl = _direct_sublist(tc)
+    if sl is None:
+        raise ValueError("cell %d,%d has no <hp:subList>" % (col, row))
+    in_s, in_e = sl
+    cell_content = tc[in_s:in_e]
+    escaped_old = xml_escape(old_text)
+    count = cell_content.count(escaped_old)
+    if count != 1:
+        raise ValueError(
+            "--set-text: '%s' not found contiguously in cell %d,%d subList "
+            "(found %d time(s)); text may be split across runs — "
+            "use --para or --content-file instead." % (old_text, col, row, count)
+        )
+    new_content = cell_content.replace(escaped_old, xml_escape(new_text), 1)
+    new_content, _ = strip_linesegarray(new_content)
+    new_tc = tc[:in_s] + new_content + tc[in_e:]
+    new_tbl = tbl[:cs] + new_tc + tbl[ce:]
+    new_xml = xml[:ti] + new_tbl + xml[tend:]
+    msg = "cell %d,%d text '%s' -> '%s' (charPr preserved)" % (col, row, old_text, new_text)
+    return new_xml, [msg]
+
+
 def _list_cells(xml: str, table_id: str) -> None:
     span = find_table(xml, table_id)
     if span is None:
@@ -616,7 +656,11 @@ def cmd_replace(args: argparse.Namespace) -> None:
     if not args.cell or (not is_dir_mode and not args.output):
         print("Error: --cell required (and --output required for .hwpx input)", file=sys.stderr)
         sys.exit(1)
-    if bool(args.content_file) == (bool(args.para) or bool(args.run)):
+    if args.set_text:
+        if args.content_file or args.para or args.run:
+            print("Error: --set-text cannot be combined with --content-file, --para, or --run", file=sys.stderr)
+            sys.exit(1)
+    elif bool(args.content_file) == (bool(args.para) or bool(args.run)):
         print("Error: provide exactly one of --content-file / --para[+--run]", file=sys.stderr)
         sys.exit(1)
     try:
@@ -624,23 +668,31 @@ def cmd_replace(args: argparse.Namespace) -> None:
     except ValueError:
         print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
         sys.exit(1)
-    if args.content_file:
-        content = Path(args.content_file).read_text(encoding="utf-8")
-        content = LINESEG_RE.sub("", content)
-        content = re.sub(r">[ \t\r\n]+<", "><", content).strip()
-    else:
-        if args.run and not args.para:
-            print("Error: --run requires at least one --para", file=sys.stderr)
+    if args.set_text:
+        old_text, new_text = args.set_text
+        try:
+            new_xml, info = _set_text_cell(xml, args.table_id, col, row, old_text, new_text)
+        except ValueError as e:
+            print("Error: %s" % e, file=sys.stderr)
             sys.exit(1)
-        paras = [(p[0], [(p[1], p[2])]) for p in args.para]
-        for char_pr, text in args.run:
-            paras[-1][1].append((char_pr, text))
-        content = "".join(_build_para_runs(pp, runs) for pp, runs in paras)
-    try:
-        new_xml, info = _replace_cell(xml, args.table_id, col, row, content)
-    except ValueError as e:
-        print("Error: %s" % e, file=sys.stderr)
-        sys.exit(1)
+    else:
+        if args.content_file:
+            content = Path(args.content_file).read_text(encoding="utf-8")
+            content = LINESEG_RE.sub("", content)
+            content = re.sub(r">[ \t\r\n]+<", "><", content).strip()
+        else:
+            if args.run and not args.para:
+                print("Error: --run requires at least one --para", file=sys.stderr)
+                sys.exit(1)
+            paras = [(p[0], [(p[1], p[2])]) for p in args.para]
+            for char_pr, text in args.run:
+                paras[-1][1].append((char_pr, text))
+            content = "".join(_build_para_runs(pp, runs) for pp, runs in paras)
+        try:
+            new_xml, info = _replace_cell(xml, args.table_id, col, row, content)
+        except ValueError as e:
+            print("Error: %s" % e, file=sys.stderr)
+            sys.exit(1)
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
     if is_dir_mode:
         section_file = inp / target
@@ -885,9 +937,126 @@ def cmd_strip_lineseg(args: argparse.Namespace) -> None:
         print(f"CLEAN: no linesegarray found in {input_path}")
 
 
+# ── self-test ─────────────────────────────────────────────────────────────────
+
+_FIXTURE = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="800" spacing="0" horzpos="0" horzsize="8000" flags="0"/></hp:linesegarray>
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>위원</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+_FIXTURE_SPLIT = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>위</hp:t></hp:run><hp:run charPrIDRef="3"><hp:t>원</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+
+def _run_tests() -> None:
+    failures = []
+
+    # AC-1a: --set-text preserves charPrIDRef="5"
+    try:
+        result, _ = _set_text_cell(_FIXTURE, "1", 0, 0, "위원", "새위원")
+        if 'charPrIDRef="5"' not in result:
+            failures.append("AC-1a FAIL: charPrIDRef='5' not preserved after --set-text")
+        else:
+            print("AC-1a PASS: charPr preserved")
+    except Exception as e:
+        failures.append("AC-1a FAIL: %s" % e)
+
+    # AC-1b: linesegarray stripped after --set-text
+    try:
+        result, _ = _set_text_cell(_FIXTURE, "1", 0, 0, "위원", "새위원")
+        if "<hp:linesegarray" in result:
+            failures.append("AC-1b FAIL: linesegarray still present after --set-text")
+        else:
+            print("AC-1b PASS: linesegarray removed")
+    except Exception as e:
+        failures.append("AC-1b FAIL: %s" % e)
+
+    # AC-1c: --set-text OLD "" clears text, preserves charPr
+    try:
+        result, _ = _set_text_cell(_FIXTURE, "1", 0, 0, "위원", "")
+        if 'charPrIDRef="5"' not in result:
+            failures.append("AC-1c FAIL: charPrIDRef='5' not preserved after clearing text")
+        elif "<hp:t></hp:t>" not in result and "<hp:t/>" not in result:
+            failures.append("AC-1c FAIL: expected empty hp:t after clear, result: %r" % result[result.find("<hp:t"):result.find("<hp:t") + 40])
+        else:
+            print("AC-1c PASS: empty text with charPr preserved")
+    except Exception as e:
+        failures.append("AC-1c FAIL: %s" % e)
+
+    # AC-1d: fragmented text (split across runs) raises ValueError
+    try:
+        _set_text_cell(_FIXTURE_SPLIT, "1", 0, 0, "위원", "새위원")
+        failures.append("AC-1d FAIL: expected ValueError for split run, none raised")
+    except ValueError as e:
+        msg = str(e)
+        if "contiguously" in msg or "split across runs" in msg:
+            print("AC-1d PASS: ValueError with correct message")
+        else:
+            failures.append("AC-1d FAIL: ValueError raised but message lacks expected keyword: %s" % msg)
+    except Exception as e:
+        failures.append("AC-1d FAIL: unexpected exception: %s" % e)
+
+    # Regression: _replace_cell (--para path) still works
+    try:
+        content = _build_para_runs("10", [("5", "위원장")])
+        result, info = _replace_cell(_FIXTURE, "1", 0, 0, content)
+        if "위원장" not in result:
+            failures.append("Regression FAIL: _replace_cell did not insert expected text")
+        else:
+            print("Regression PASS: _replace_cell --para path intact")
+    except Exception as e:
+        failures.append("Regression FAIL: %s" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All tests passed")
+    sys.exit(0)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()
     parser = argparse.ArgumentParser(description="HWPX table operations and utilities")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -929,6 +1098,8 @@ def main() -> None:
     p_rep.add_argument("input", help="Input .hwpx file or unpacked directory")
     p_rep.add_argument("--table-id", required=True, help="HWP table id attribute")
     p_rep.add_argument("--cell", help="Target cell as colAddr,rowAddr")
+    p_rep.add_argument("--set-text", nargs=2, default=None, metavar=("OLD", "NEW"),
+                       help="Replace text OLD->NEW preserving charPr/paraPr structure (mutually exclusive with --content-file/--para/--run)")
     p_rep.add_argument("--content-file", help="File with raw <hp:p>...</hp:p> XML")
     p_rep.add_argument("--para", action="append", nargs=3, default=[],
                        metavar=("PARAPR", "CHARPR", "TEXT"), help="One text paragraph (repeatable)")
