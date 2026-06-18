@@ -62,7 +62,8 @@ rm -rf .hwpx_work/
 │   ├── build.py build|analyze|next-id    # 문서 조립 + 심층 분석 + ID 조회
 │   ├── table.py dump|locate|insert|replace|delete|calc-widths|strip-lineseg  # 표 편집 전체
 │   ├── validate.py validate|page-guard   # 구조 검증 + 페이지 드리프트 위험 검사
-│   └── text.py extract|patch             # 텍스트 추출 + 원자적 텍스트 교체
+│   ├── text.py extract|patch             # 텍스트 추출 + 원자적 텍스트 교체
+│   └── convert_hwp.ps1                  # HWP → HWPX 변환 (Hancom COM) + 원본 삭제
 ├── templates/
 │   ├── base/                             # 베이스 템플릿 (Skeleton 기반)
 │   │   ├── mimetype, META-INF/*, version.xml, settings.xml, Preview/*
@@ -464,6 +465,7 @@ rm -rf .hwpx_work/
 | `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs within a paragraph |
 | `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` — prevent "document corrupted" warning after text edits |
 | `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |
+| `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
 
 ## New utility usage
 
@@ -493,7 +495,18 @@ Covers: `text.py patch` (safe text replace) · `table.py strip-lineseg` · `tabl
 
 Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 style/consistency
 
-1. 🔵 **HWPX only**: `.hwp` (binary) files not supported. If user provides `.hwp`, guide them to **re-save as `.hwpx` from Hancom Office**. (File → Save As → File type: HWPX)
+1. 🔵 **HWP → HWPX auto-conversion**: `.hwp` (binary legacy format) cannot be processed directly. When user provides a `.hwp` file, **automatically convert to `.hwpx` first** using `scripts/convert_hwp.ps1` (Windows + Hancom installed), then proceed with normal workflow. Original `.hwp` is deleted after verified conversion. If Hancom is not installed, fall back to guiding the user to re-save as HWPX manually (File → Save As → File type: HWPX).
+
+   ```powershell
+   # Single file conversion
+   powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp"
+   # Output: absolute path to the new .hwpx file
+
+   # Batch: convert all .hwp in current directory
+   Get-ChildItem -Filter "*.hwp" | ForEach-Object {
+       powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path $_.FullName
+   }
+   ```
 2. 🔴 **secPr required**: first run of section0.xml's first paragraph must contain secPr + colPr
 3. 🔴 **mimetype order**: when packaging HWPX, mimetype = first ZIP entry, ZIP_STORED
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
