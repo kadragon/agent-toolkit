@@ -60,7 +60,7 @@ rm -rf .hwpx_work/
 │   ├── _common.py                        # 공유 유틸리티 (regex, ZIP helpers, table helpers)
 │   ├── office.py unpack|pack             # HWPX ↔ 디렉토리 (raw bytes + 순서 manifest)
 │   ├── build.py build|analyze|next-id    # 문서 조립 + 심층 분석 + ID 조회
-│   ├── table.py dump|locate|insert|replace|delete|calc-widths|strip-lineseg  # 표 편집 전체
+│   ├── table.py dump|locate|insert|replace|fill|delete|calc-widths|strip-lineseg  # 표 편집 전체
 │   ├── validate.py validate|page-guard   # 구조 검증 + 페이지 드리프트 위험 검사
 │   ├── text.py extract|patch             # 텍스트 추출 + 원자적 텍스트 교체
 │   └── convert_hwp.ps1                  # HWP → HWPX 변환 (Hancom COM) + 원본 삭제
@@ -230,7 +230,7 @@ Many items → split into stages to catch silent failures early, verify each sta
 > python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
 > ```
 >
-> ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To clear cell text while preserving the original character style, use `--set-text OLD ""` instead (requires text to be contiguous in a single `<hp:t>` node; if fragmented across runs, no charPr-preserving option exists — use `--para` and manually copy the charPrIDRef).
+> ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To replace cell text while preserving the original character style, prefer `--preserve-style --text "새내용"` — it reads the existing paraPrIDRef and charPrIDRef from the cell automatically. For clearing a single contiguous text run, `--set-text OLD ""` also works (requires text to be contiguous in a single `<hp:t>` node).
 
 ### Bulk File Edit — N files simultaneously
 
@@ -347,9 +347,11 @@ Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
 python3 "$SKILL_DIR/scripts/validate.py" validate document.hwpx
 # 첨부 원본을 편집/복원한 결과 — 기존 중복 ID 오탐 방지
 python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline original.hwpx
+# 폰트 크기 경고 임계값 조정 (기본 5pt)
+python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline original.hwpx --min-pt 6
 ```
 
-Validation items: ZIP validity, required files present, mimetype content/position/compression method, XML well-formedness, secCnt/itemCnt/IDRef, `hp:p` ID duplicates (with `--baseline`, only new duplicates are errors).
+Validation items: ZIP validity, required files present, mimetype content/position/compression method, XML well-formedness, secCnt/itemCnt/IDRef, `hp:p` ID duplicates (with `--baseline`, only new duplicates are errors), charPr font-size check — texted runs with charPr height below `--min-pt` (default 5pt) emit `WARN`.
 
 ---
 
@@ -454,15 +456,16 @@ rm -rf .hwpx_work/
 | `scripts/build.py next-id` | look up next `hp:p` ID — for collision-free new paragraph insertion |
 | `scripts/office.py unpack` | HWPX → directory (raw bytes + `.hwpx_pack_order` manifest) |
 | `scripts/office.py pack` | directory → HWPX (restores entry order/compression from manifest, mimetype first) |
-| `scripts/validate.py validate` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate ID. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors |
+| `scripts/validate.py validate` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate ID + charPr font-size check. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors; `--min-pt N` adjusts readable-size threshold (default 5pt) |
 | `scripts/validate.py page-guard` | page-drift risk check vs. reference (restore-mode gate / edit-mode reference) |
 | `scripts/text.py extract` | HWPX text extraction — plain or markdown, optional table inclusion |
 | `scripts/text.py patch` | safe text replacement — str.replace + lineseg strip + ID verification. `--after anchor` for context-limited replacement |
-| `scripts/table.py dump` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; `--cell col,row` for verbose cell inspector (paraPr/charPr/runs/linesegarray) |
+| `scripts/table.py dump` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; `--cell col,row` for verbose cell inspector (paraPr/charPr/runs/linesegarray); `--style-map` for paraPr/charPr/pt grid per cell |
 | `scripts/table.py locate` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`); accepts `.hwpx` or unpacked directory |
 | `scripts/table.py delete` | delete table rows — remove `<hp:tr>` + auto-fix rowCnt/rowSpan/rowAddr (`--list` to view rows) |
 | `scripts/table.py insert` | insert table row — insert `<hp:tr>` + auto-fix rowCnt/rowAddr/rowSpan (`--grow` to extend group-end rowSpan) |
-| `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs within a paragraph |
+| `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs; `--preserve-style` to reuse existing charPr/paraPr (with optional `--charpr` override) |
+| `scripts/table.py fill` | bulk-fill multiple cells from JSON data (`{table_id: {col,row: text}}`) using preserve-style logic — WARN on unreadable font sizes, collects all warnings before summary |
 | `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` — prevent "document corrupted" warning after text edits |
 | `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |
 | `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
@@ -540,6 +543,6 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 21. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
 22. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
 23. 🔵 **Content-edit completion gate**: after `validate.py --baseline` passes, confirm actually opens in Hancom. Fully close Hancom before repackaging (multiple windows: `CloseMainWindow` closes only main window), after applying to real file verify copy success via md5 or similar (see Workflow 2)
-24. 🟡 **Table cell text edit → table.py replace only**: for any text change inside a table cell (`<hp:tc>`), use `table.py replace` — not `str.replace()` or `text.py patch`. Table cells have per-subList `<hp:linesegarray>`; `table.py replace` strips it and checks ID collisions automatically. Raw `str.replace()` on cell content leaves stale lineseg → "문서가 변경됨" warning in Hancom. For simple contiguous text changes that must preserve charPr/paraPr (run styling), use `--set-text OLD NEW` — it does a targeted text-only replacement inside the existing runs, keeping all attribute structure intact. When the target text is fragmented across multiple `<hp:run>` nodes (run-split), use `--para` or `--content-file` instead.
+24. 🟡 **Table cell text edit → table.py replace only**: for any text change inside a table cell (`<hp:tc>`), use `table.py replace` — not `str.replace()` or `text.py patch`. Table cells have per-subList `<hp:linesegarray>`; `table.py replace` strips it and checks ID collisions automatically. Raw `str.replace()` on cell content leaves stale lineseg → "문서가 변경됨" warning in Hancom. For simple contiguous text changes that must preserve charPr/paraPr (run styling), use `--set-text OLD NEW` — it does a targeted text-only replacement inside the existing runs, keeping all attribute structure intact. When the target text is fragmented across multiple `<hp:run>` nodes (run-split), or when you want to replace cell content while reusing the existing charPr/paraPr from the cell (preventing charPr reset to 0), use `--preserve-style --text "새내용"` instead — it reads the first paraPrIDRef and charPrIDRef from the cell and rebuilds the paragraph with them. For bulk multi-cell replace with style preservation, use `table.py fill --data data.json`.
 25. 🔴 **Floating table must be anchored in `<hp:p><hp:run>`**: `treatAsChar="0"` (floating) tables must be a direct child of `<hp:run>` inside `<hp:p>` — never a bare sibling of `<hs:sec>` or `<hp:p>`. Bare-sibling floating tables are not rendered by Hancom. See `section-writing.md` § "Table placement patterns" for both placement forms.
 26. 🟡 **Escape angle brackets in text nodes**: Korean legal/administrative text commonly contains `<개정 2026. 6.>` or similar angle-bracket spans — always write as `&lt;개정 2026. 6.&gt;`. Unescaped `<` inside `<hp:t>` causes XML parse failure at document load.

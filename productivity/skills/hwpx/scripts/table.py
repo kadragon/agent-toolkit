@@ -22,6 +22,7 @@ except Exception:
     pass
 
 import argparse
+import json
 import re
 import sys
 import zipfile
@@ -29,10 +30,13 @@ from pathlib import Path
 
 from _common import (
     LINESEG_RE,
+    MIN_READABLE_PT,
     PARA_ID_RE,
     PLACEHOLDER_IDS,
     SECTION_RE,
+    charpr_pt,
     find_table,
+    load_charpr_heights,
     load_section_xml,
     strip_linesegarray,
     top_cells,
@@ -225,6 +229,9 @@ def cmd_dump(args: argparse.Namespace) -> None:
                 print("Error: --cell expects col,row (got %r)" % args.cell, file=sys.stderr)
                 sys.exit(1)
             _dump_cell_verbose(xml[span[0]:span[1]], args.table_id, col, row)
+        elif args.style_map:
+            heights = load_charpr_heights(inp)
+            _dump_style_map(xml[span[0]:span[1]], args.table_id, heights)
         else:
             _dump_table(xml[span[0]:span[1]], args.table_id)
         return
@@ -623,6 +630,130 @@ def _set_text_cell(xml: str, table_id: str, col: int, row: int,
     return new_xml, [msg]
 
 
+def _read_cell_style(tc: str) -> tuple[str, str]:
+    """Returns (paraPrIDRef, charPrIDRef) from first run in the cell's direct subList."""
+    sl = _direct_sublist(tc)
+    if sl is None:
+        return "0", "0"
+    content = tc[sl[0]:sl[1]]
+    para_m = re.search(r'paraPrIDRef="(\d+)"', content)
+    char_m = re.search(r'charPrIDRef="(\d+)"', content)
+    return (para_m.group(1) if para_m else "0"), (char_m.group(1) if char_m else "0")
+
+
+def _replace_cell_preserve_style(
+    xml: str, table_id: str, col: int, row: int,
+    text: str, charpr_override: str | None, heights: dict[str, int],
+) -> tuple[str, list[str]]:
+    span = find_table(xml, table_id)
+    if span is None:
+        raise ValueError("table id=%s not found" % table_id)
+    ti, tend = span
+    tbl = xml[ti:tend]
+    tc = None
+    for cs, ce in top_cells(tbl):
+        if _own_cell_addr(tbl[cs:ce]) == (col, row):
+            tc = tbl[cs:ce]
+            break
+    if tc is None:
+        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+    para_pr, char_pr = _read_cell_style(tc)
+    if charpr_override is not None:
+        char_pr = charpr_override
+    info: list[str] = []
+    height = heights.get(char_pr, 0)
+    if height > 0 and charpr_pt(height) < MIN_READABLE_PT:
+        warn = "WARN: cell(%d,%d) charPr=%s height=%d(%spt) — 가독 불가 크기" % (
+            col, row, char_pr, height, "%g" % charpr_pt(height))
+        info.append(warn)
+    content = _build_para_runs(para_pr, [(char_pr, text)])
+    new_xml, replace_info = _replace_cell(xml, table_id, col, row, content)
+    info.extend(replace_info)
+    return new_xml, info
+
+
+def _dump_style_map(tbl_xml: str, table_id: str, heights: dict[str, int]) -> None:
+    rows: dict[int, list[tuple[int, str, str, float]]] = {}
+    for cs, ce in top_cells(tbl_xml):
+        tc = tbl_xml[cs:ce]
+        addr = _own_cell_addr(tc)
+        if addr is None:
+            continue
+        col, row = addr
+        para_pr, char_pr = _read_cell_style(tc)
+        height = heights.get(char_pr, 0)
+        pt = charpr_pt(height) if height > 0 else 0.0
+        rows.setdefault(row, []).append((col, para_pr, char_pr, pt))
+    for row_idx in sorted(rows.keys()):
+        cells = sorted(rows[row_idx], key=lambda x: x[0])
+        parts = ["c%d=p%s/c%s(%spt)" % (col, pp, cp, "%g" % pt) for col, pp, cp, pt in cells]
+        print("row%d: %s" % (row_idx, " ".join(parts)))
+
+
+def cmd_fill(args: argparse.Namespace) -> None:
+    inp = Path(args.input)
+    is_dir_mode = inp.is_dir()
+    target = "Contents/section%d.xml" % args.section
+    if is_dir_mode:
+        section_file = inp / target
+        if not section_file.is_file():
+            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
+            sys.exit(1)
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print("Error: %s not in archive" % target, file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print("Error: not found: %s" % args.input, file=sys.stderr)
+        sys.exit(1)
+    heights = load_charpr_heights(inp)
+    data = json.loads(Path(args.data).read_text(encoding="utf-8"))
+    all_warns: list[str] = []
+    for table_id, cells in data.items():
+        for cell_key, text in cells.items():
+            try:
+                col_s, row_s = cell_key.split(",")
+                col, row = int(col_s), int(row_s)
+            except ValueError:
+                print("Error: invalid cell key %r (expected col,row)" % cell_key, file=sys.stderr)
+                sys.exit(1)
+            try:
+                xml, info = _replace_cell_preserve_style(xml, table_id, col, row, text, None, heights)
+                all_warns.extend(i for i in info if i.startswith("WARN"))
+            except ValueError as e:
+                print("Error: table %s cell %s: %s" % (table_id, cell_key, e), file=sys.stderr)
+                sys.exit(1)
+    xml, n_ls = LINESEG_RE.subn("", xml)
+    if is_dir_mode:
+        section_file = inp / target
+        section_file.write_text(xml, encoding="utf-8")
+        print("DONE (in-place): %s" % section_file)
+    else:
+        if not args.output and inp.suffix.lower() != ".hwpx":
+            print("Error: --output required for non-.hwpx archive input", file=sys.stderr)
+            sys.exit(1)
+        out = args.output or str(inp.with_stem(inp.stem + "_filled"))
+        if not args.output:
+            print("Warning: no --output specified, writing to %s" % out, file=sys.stderr)
+        with zipfile.ZipFile(inp, "r") as zin:
+            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi, data_bytes in entries:
+                if zi.filename == target:
+                    data_bytes = xml.encode("utf-8")
+                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
+                zout.writestr(zi.filename, data_bytes, compress_type=ct)
+        print("DONE: %s" % out)
+    print("  linesegarray stripped: %d" % n_ls)
+    if all_warns:
+        print("WARNINGS (%d):" % len(all_warns))
+        for w in all_warns:
+            print("  %s" % w)
+
+
 def _list_cells(xml: str, table_id: str) -> None:
     span = find_table(xml, table_id)
     if span is None:
@@ -667,7 +798,14 @@ def cmd_replace(args: argparse.Namespace) -> None:
     if not args.cell or (not is_dir_mode and not args.output):
         print("Error: --cell required (and --output required for .hwpx input)", file=sys.stderr)
         sys.exit(1)
-    if args.set_text:
+    if args.preserve_style:
+        if args.set_text or args.content_file or args.para or args.run:
+            print("Error: --preserve-style is mutually exclusive with --set-text/--content-file/--para/--run", file=sys.stderr)
+            sys.exit(1)
+        if args.text is None:
+            print("Error: --preserve-style requires --text (use --text \"\" to clear)", file=sys.stderr)
+            sys.exit(1)
+    elif args.set_text:
         if args.content_file or args.para or args.run:
             print("Error: --set-text cannot be combined with --content-file, --para, or --run", file=sys.stderr)
             sys.exit(1)
@@ -679,7 +817,15 @@ def cmd_replace(args: argparse.Namespace) -> None:
     except ValueError:
         print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
         sys.exit(1)
-    if args.set_text:
+    if args.preserve_style:
+        heights = load_charpr_heights(inp)
+        try:
+            new_xml, info = _replace_cell_preserve_style(
+                xml, args.table_id, col, row, args.text or "", args.charpr, heights)
+        except ValueError as e:
+            print("Error: %s" % e, file=sys.stderr)
+            sys.exit(1)
+    elif args.set_text:
         old_text, new_text = args.set_text
         try:
             new_xml, info = _set_text_cell(xml, args.table_id, col, row, old_text, new_text)
@@ -1055,6 +1201,79 @@ def _run_tests() -> None:
     except Exception as e:
         failures.append("Regression FAIL: %s" % e)
 
+    # AC-2a: preserve-style reuses charPr/paraPr from existing cell
+    try:
+        result, info = _replace_cell_preserve_style(_FIXTURE, "1", 0, 0, "새글", None, {})
+        if 'charPrIDRef="5"' not in result:
+            failures.append("AC-2a FAIL: preserve-style did not keep charPrIDRef=5")
+        elif 'paraPrIDRef="10"' not in result:
+            failures.append("AC-2b FAIL: preserve-style did not keep paraPrIDRef=10")
+        else:
+            print("AC-2a PASS: preserve-style reuses existing charPr/paraPr")
+    except Exception as e:
+        failures.append("AC-2a FAIL: %s" % e)
+
+    # AC-2c: 5pt WARN for 3pt charPr
+    try:
+        heights_3pt = {"5": 300}
+        result, info = _replace_cell_preserve_style(_FIXTURE, "1", 0, 0, "새글", None, heights_3pt)
+        warns = [i for i in info if "WARN" in i]
+        if not warns:
+            failures.append("AC-2c FAIL: expected WARN for 3pt charPr, info=%r" % info)
+        else:
+            print("AC-2c PASS: 3pt charPr triggers WARN")
+    except Exception as e:
+        failures.append("AC-2c FAIL: %s" % e)
+
+    # AC-2d: --charpr override
+    try:
+        result, info = _replace_cell_preserve_style(_FIXTURE, "1", 0, 0, "새글", "99", {})
+        if 'charPrIDRef="99"' not in result:
+            failures.append("AC-2d FAIL: --charpr override did not apply")
+        else:
+            print("AC-2d PASS: --charpr override applied")
+    except Exception as e:
+        failures.append("AC-2d FAIL: %s" % e)
+
+    # AC-3: style-map format
+    try:
+        import io as _io
+        _buf = _io.StringIO()
+        _old = sys.stdout
+        sys.stdout = _buf
+        try:
+            _span = find_table(_FIXTURE, "1")
+            assert _span is not None, "AC-3: table '1' not found in fixture"
+            _dump_style_map(_FIXTURE[_span[0]:_span[1]], "1", {})
+        finally:
+            sys.stdout = _old
+        _out = _buf.getvalue()
+        if not _out.startswith("row0:"):
+            failures.append("AC-3 FAIL: style-map does not start with 'row0:', got %r" % _out[:60])
+        elif "c0=p10/c5" not in _out:
+            failures.append("AC-3 FAIL: style-map missing c0=p10/c5, got %r" % _out[:80])
+        else:
+            print("AC-3 PASS: style-map format correct")
+    except Exception as e:
+        failures.append("AC-3 FAIL: %s" % e)
+
+    # AC-4: fill-style multi-cell
+    try:
+        _data = {"1": {"0,0": "채움"}}
+        _xml = _FIXTURE
+        for _tid, _cells in _data.items():
+            for _ck, _txt in _cells.items():
+                _c, _r = (int(x) for x in _ck.split(","))
+                _xml, _info = _replace_cell_preserve_style(_xml, _tid, _c, _r, _txt, None, {})
+        if "채움" not in _xml:
+            failures.append("AC-4 FAIL: fill did not insert text")
+        elif 'charPrIDRef="5"' not in _xml:
+            failures.append("AC-4 FAIL: fill did not preserve charPr")
+        else:
+            print("AC-4 PASS: fill inserts text with style preserved")
+    except Exception as e:
+        failures.append("AC-4 FAIL: %s" % e)
+
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
@@ -1080,6 +1299,7 @@ def main() -> None:
                         help="Dump table(s) containing text (repeatable, AND)")
     p_dump.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     p_dump.add_argument("--cell", help="Verbose dump of specific cell as colAddr,rowAddr (requires --table-id)")
+    p_dump.add_argument("--style-map", action="store_true", help="Show paraPr/charPr/pt per cell grid (requires --table-id)")
 
     # locate
     p_loc = sub.add_parser("locate", help="Find HWPX elements by contained text (nesting-aware)")
@@ -1110,6 +1330,10 @@ def main() -> None:
     p_rep.add_argument("input", help="Input .hwpx file or unpacked directory")
     p_rep.add_argument("--table-id", required=True, help="HWP table id attribute")
     p_rep.add_argument("--cell", help="Target cell as colAddr,rowAddr")
+    p_rep.add_argument("--preserve-style", action="store_true",
+                       help="Replace cell text keeping existing charPr/paraPr (mutually exclusive with --set-text/--content-file/--para/--run)")
+    p_rep.add_argument("--text", help="Text to write (for --preserve-style)")
+    p_rep.add_argument("--charpr", help="Override charPrIDRef (for --preserve-style)")
     p_rep.add_argument("--set-text", nargs=2, default=None, metavar=("OLD", "NEW"),
                        help="Replace text OLD->NEW preserving charPr/paraPr structure (mutually exclusive with --content-file/--para/--run)")
     p_rep.add_argument("--content-file", help="File with raw <hp:p>...</hp:p> XML")
@@ -1129,6 +1353,13 @@ def main() -> None:
     p_del.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     p_del.add_argument("--list", action="store_true", help="List rows and exit")
     p_del.add_argument("--output", "-o", help="Output .hwpx file")
+
+    # fill
+    p_fill = sub.add_parser("fill", help="Bulk-fill cells from JSON data preserving style")
+    p_fill.add_argument("input", help="Input .hwpx file or unpacked directory")
+    p_fill.add_argument("--data", required=True, help='JSON file: {"table_id": {"col,row": "text"}}')
+    p_fill.add_argument("--section", type=int, default=0, help="Section index (default 0)")
+    p_fill.add_argument("--output", "-o", help="Output .hwpx file (required for .hwpx input)")
 
     # calc-widths
     p_cw = sub.add_parser("calc-widths", help="Calculate table column widths (HWPUNIT) summing to body width")
@@ -1155,6 +1386,8 @@ def main() -> None:
         cmd_insert(args)
     elif args.cmd == "replace":
         cmd_replace(args)
+    elif args.cmd == "fill":
+        cmd_fill(args)
     elif args.cmd == "delete":
         cmd_delete(args)
     elif args.cmd == "calc-widths":

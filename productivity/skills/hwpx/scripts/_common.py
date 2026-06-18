@@ -8,9 +8,55 @@ except Exception:
 
 import re
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 from pathlib import Path
+
+MIN_READABLE_PT = 5
+
+
+def charpr_pt(height_hwpunit: int) -> float:
+    return height_hwpunit / 100
+
+
+def load_charpr_heights(path) -> dict:
+    """unpacked dir, header.xml path, or .hwpx archive → {charPr_id_str: height_int}"""
+    p = Path(path)
+    if p.is_dir():
+        header = p / "Contents" / "header.xml"
+        if not header.exists():
+            return {}
+        try:
+            root = ET.parse(str(header)).getroot()
+        except ET.ParseError:
+            return {}
+    elif p.suffix.lower() in (".hwpx", ".zip"):
+        try:
+            with zipfile.ZipFile(str(p), "r") as zf:
+                if "Contents/header.xml" not in zf.namelist():
+                    return {}
+                data = zf.read("Contents/header.xml")
+            root = ET.fromstring(data)
+        except (zipfile.BadZipFile, KeyError, EOFError, ET.ParseError) as e:
+            print("Warning: could not load charPr heights from %s: %s" % (p, e), file=sys.stderr)
+            return {}
+    else:
+        if not p.exists():
+            return {}
+        try:
+            root = ET.parse(str(p)).getroot()
+        except ET.ParseError:
+            return {}
+    result = {}
+    for cp in root.iter():
+        if not (cp.tag.endswith("}charPr") or cp.tag == "charPr"):
+            continue
+        cid = cp.get("id")
+        height = int(cp.get("height", "0"))
+        if cid is not None:
+            result[cid] = height
+    return result
 
 LINESEG_RE = re.compile(r"<hp:linesegarray>.*?</hp:linesegarray>", re.DOTALL)
 PARA_ID_RE = re.compile(r'<hp:p\s[^>]*\bid="(\d+)"')
