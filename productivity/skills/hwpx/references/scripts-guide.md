@@ -103,6 +103,23 @@ Output shows: paragraphs with their paraPrIDRef, each run's charPrIDRef and text
 
 Note: `table.py dump` output lists addresses as `row col` but `table.py replace --cell` expects `col,row`. Hint printed at bottom of dump output.
 
+### 0b) Style map (table.py dump --style-map)
+
+표 전체 셀의 paraPrIDRef / charPrIDRef / 폰트 크기(pt) 격자 출력. 셀 스타일 일괄 확인 후 `--preserve-style` / `--charpr` 값 결정에 사용:
+
+```bash
+python3 "$SKILL_DIR/scripts/table.py" dump ./unpacked/ --table-id 1000000003 --style-map
+```
+
+출력 예:
+```
+row0: c0=p31/c27(10pt) c1=p31/c27(10pt) c2=p31/c27(10pt)
+row1: c0=p10/c5(9pt)   c1=p10/c5(9pt)   c2=p31/c27(10pt)
+```
+
+- `pN` = paraPrIDRef, `cN` = charPrIDRef, `(Xpt)` = header.xml에서 읽은 실제 폰트 크기
+- 폰트 크기 확인 후 5pt 미만 셀은 `validate.py validate --min-pt`로 검증
+
 ### 1) Find element position (table.py locate)
 
 Search table/row/paragraph spans by text. Accepts `.hwpx` file **or** already-unpacked directory (avoids re-unpack cycle when probing repeatedly):
@@ -161,6 +178,14 @@ python3 "$SKILL_DIR/scripts/table.py" replace doc.hwpx --table-id TABLE_ID --cel
 python3 "$SKILL_DIR/scripts/table.py" replace doc.hwpx --table-id TABLE_ID --cell 1,0 \
   --content-file paras.xml -o result.hwpx
 
+# 기존 charPr/paraPr 보존하면서 텍스트만 교체 (--preserve-style)
+python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 2,1 \
+  --preserve-style --text "새 내용"
+
+# --charpr로 charPrIDRef 강제 지정 (style-map으로 ID 확인 후 사용)
+python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 2,1 \
+  --preserve-style --text "새 내용" --charpr 27
+
 # 다중 셀 교체 (dir 모드 — 압축 오버헤드 없음, in-place 수정)
 python3 "$SKILL_DIR/scripts/office.py" unpack doc.hwpx ./unpacked/
 python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
@@ -169,6 +194,38 @@ python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ result.hwpx
 ```
 
 **`--run` note**: appends to the LAST `--para`. For N paragraphs each with 1 run, use N `--para` without `--run`. For 1 paragraph with M runs, use 1 `--para` + (M−1) `--run` args.
+
+**`--preserve-style` note**: reads the first `paraPrIDRef` and `charPrIDRef` from the target cell and rebuilds the paragraph with them. Use `dump --style-map` first to verify the IDs. If the charPr height is below 5pt, a `WARN` is printed to stderr. Use `--charpr N` to override the charPrIDRef.
+
+### 3a) Bulk fill (table.py fill)
+
+여러 표 / 여러 셀을 JSON 데이터로 일괄 채우기. 모든 셀에 `--preserve-style` 로직 적용:
+
+```bash
+# data.json 작성
+cat > data.json << 'EOF'
+{
+  "1000000003": {
+    "1,0": "홍길동",
+    "2,0": "총무과",
+    "1,1": "이순신",
+    "2,1": "인사과"
+  }
+}
+EOF
+
+# dir 모드 (in-place 수정)
+python3 "$SKILL_DIR/scripts/office.py" unpack doc.hwpx ./unpacked/
+python3 "$SKILL_DIR/scripts/table.py" fill ./unpacked/ --data data.json
+python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ result.hwpx
+
+# archive 모드
+python3 "$SKILL_DIR/scripts/table.py" fill doc.hwpx --data data.json -o result.hwpx
+```
+
+- JSON 키: `"col,row"` 형식 (dump 출력에서 확인)
+- 가독 불가 크기(5pt 미만) 셀 발견 시 모든 교체 완료 후 WARN 요약 출력
+- 여러 표 동시 지원: JSON 최상위 키가 table_id
 
 ### 4) Delete table rows (table.py delete)
 

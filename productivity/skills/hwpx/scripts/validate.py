@@ -17,6 +17,7 @@ except Exception:
 
 import argparse
 import json
+import re
 import sys
 import zipfile
 from collections import Counter
@@ -28,7 +29,7 @@ from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 import xml.etree.ElementTree as ET
 
-from _common import SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS
+from _common import MIN_READABLE_PT, SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS
 
 REQUIRED_FILES = [
     "mimetype",
@@ -123,7 +124,35 @@ def _check_idref(section_root: ET.Element, defined: dict[str, set[str]], section
     return errors
 
 
-def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple[list[str], list[str]]:
+def _charpr_font_warnings(xml_str: str, heights: dict[str, int], min_pt: float) -> list[str]:
+    """Return warnings for runs with text whose charPr height is below min_pt."""
+    warns = []
+    for m in re.finditer(r'charPrIDRef="(\d+)"[^>]*><hp:t>(.*?)</hp:t>', xml_str, re.DOTALL):
+        cid = m.group(1)
+        text = m.group(2).strip()
+        if not text:
+            continue
+        height = heights.get(cid, 0)
+        if height == 0 or height / 100 >= min_pt:
+            continue
+        pos = m.start()
+        tbl_m = None
+        for tm in re.finditer(r'<hp:tbl\b[^>]*\bid="(\d+)"', xml_str[:pos]):
+            tbl_m = tm
+        cell_m = None
+        for cm in re.finditer(r'<hp:cellAddr colAddr="(\d+)" rowAddr="(\d+)"/>', xml_str[:pos]):
+            cell_m = cm
+        tbl_id = tbl_m.group(1) if tbl_m else "?"
+        col = cell_m.group(1) if cell_m else "?"
+        row = cell_m.group(2) if cell_m else "?"
+        warns.append(
+            "WARN: table %s cell(%s,%s) charPr=%s height=%d(%spt) — 가독 불가 크기"
+            % (tbl_id, col, row, cid, height, "%g" % (height / 100))
+        )
+    return warns
+
+
+def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: float | None = None) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     path = Path(hwpx_path)
@@ -170,6 +199,14 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
             )
         errors.extend(_check_itemcnt(header_root))
         defined_ids = _collect_defined_ids(header_root)
+        charpr_heights: dict[str, int] = {}
+        for cp in header_root.iter():
+            if cp.tag.endswith("}charPr") or cp.tag == "charPr":
+                cid = cp.get("id")
+                h = int(cp.get("height", "0"))
+                if cid is not None:
+                    charpr_heights[cid] = h
+        eff_min_pt = min_pt if min_pt is not None else MIN_READABLE_PT
         all_para_ids: list[str] = []
         for sec_name in actual_sections:
             sec_root = parsed.get(sec_name)
@@ -178,6 +215,7 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
             xml_str = section_bytes[sec_name].decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
+            warnings.extend(_charpr_font_warnings(xml_str, charpr_heights, eff_min_pt))
         dupes = {i for i, n in Counter(all_para_ids).items() if n > 1}
         if dupes:
             base = baseline_dupes or set()
@@ -194,7 +232,7 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None) -> tuple
 
 def cmd_validate(args: argparse.Namespace) -> None:
     baseline_dupes = _dup_para_ids(args.baseline) if args.baseline else None
-    errors, warnings = do_validate(args.input, baseline_dupes)
+    errors, warnings = do_validate(args.input, baseline_dupes, getattr(args, "min_pt", None))
     if warnings:
         print(f"WARNINGS: {args.input}")
         for w in warnings:
@@ -366,9 +404,88 @@ def cmd_page_guard(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── self-test ─────────────────────────────────────────────────────────────────
+
+def _run_tests() -> None:
+    failures = []
+
+    _section_with_text = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:tbl id="1000000003">'
+        '<hp:tc>'
+        '<hp:cellAddr colAddr="0" rowAddr="0"/>'
+        '<hp:subList>'
+        '<hp:p id="0" paraPrIDRef="10">'
+        '<hp:run charPrIDRef="5"><hp:t>텍스트</hp:t></hp:run>'
+        '<hp:run charPrIDRef="10"><hp:t>큰글자</hp:t></hp:run>'
+        '</hp:p>'
+        '</hp:subList>'
+        '</hp:tc>'
+        '</hp:tbl>'
+        '</hp:BodyText>'
+    )
+    _heights = {"5": 300, "10": 1000}
+
+    # VAL-1: 3pt charPr triggers warning
+    try:
+        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        if not warns:
+            failures.append("VAL-1 FAIL: expected warning for 3pt charPr")
+        else:
+            print("VAL-1 PASS: 3pt charPr triggers warning")
+    except Exception as e:
+        failures.append("VAL-1 FAIL: %s" % e)
+
+    # VAL-1b: only warns for small charPr (not 10pt)
+    try:
+        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        if len(warns) > 1:
+            failures.append("VAL-1b FAIL: expected 1 warning, got %d: %r" % (len(warns), warns))
+        else:
+            print("VAL-1b PASS: only small charPr warns (10pt not warned)")
+    except Exception as e:
+        failures.append("VAL-1b FAIL: %s" % e)
+
+    # VAL-2: empty run excluded from warning
+    _section_empty_run = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:tbl id="1000000003">'
+        '<hp:tc>'
+        '<hp:cellAddr colAddr="0" rowAddr="0"/>'
+        '<hp:subList>'
+        '<hp:p id="0" paraPrIDRef="10">'
+        '<hp:run charPrIDRef="5"><hp:t/></hp:run>'
+        '</hp:p>'
+        '</hp:subList>'
+        '</hp:tc>'
+        '</hp:tbl>'
+        '</hp:BodyText>'
+    )
+    try:
+        warns_empty = _charpr_font_warnings(_section_empty_run, _heights, 5.0)
+        if warns_empty:
+            failures.append("VAL-2 FAIL: empty run should not warn, got: %r" % warns_empty)
+        else:
+            print("VAL-2 PASS: empty run excluded from warning")
+    except Exception as e:
+        failures.append("VAL-2 FAIL: %s" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All validate tests passed")
+    sys.exit(0)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()
+        return
     parser = argparse.ArgumentParser(description="HWPX structural validation and page-drift guard")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -379,6 +496,10 @@ def main() -> None:
     p_val.add_argument(
         "--baseline",
         help="Reference .hwpx (source document); duplicate hp:p IDs shared with it are downgraded to warnings",
+    )
+    p_val.add_argument(
+        "--min-pt", type=float, dest="min_pt", default=None,
+        help="Minimum readable font size in pt (default: %g). Runs below this threshold warn." % MIN_READABLE_PT,
     )
 
     # page-guard
