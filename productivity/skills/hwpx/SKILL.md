@@ -498,7 +498,11 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 1. 🔵 **HWP → HWPX auto-conversion**: `.hwp` (binary legacy format) cannot be processed directly. When user provides a `.hwp` file, **automatically convert to `.hwpx` first** using `scripts/convert_hwp.ps1` (Windows + Hancom installed), then proceed with normal workflow. Original `.hwp` is deleted after verified conversion. If Hancom is not installed, fall back to guiding the user to re-save as HWPX manually (File → Save As → File type: HWPX).
 
    ```powershell
-   # Single file conversion
+   # Resolve SKILL_DIR at runtime (run from any directory)
+   $SKILL_DIR = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+   # Or hard-code: $SKILL_DIR = "$env:USERPROFILE\.claude\plugins\cache\kadragon\productivity\<ver>\skills\hwpx"
+
+   # Single file conversion (exits non-zero + stderr on failure; original preserved)
    powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp"
    # Output: absolute path to the new .hwpx file
 
@@ -506,7 +510,11 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
    Get-ChildItem -Filter "*.hwp" | ForEach-Object {
        powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path $_.FullName
    }
+
+   # Add -Force to overwrite an existing same-name .hwpx (default: abort if target exists)
+   powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp" -Force
    ```
+   > ⚠️ `forceopen:true` bypasses Hancom's macro security prompt. Only call on trusted input files.
 2. 🔴 **secPr required**: first run of section0.xml's first paragraph must contain secPr + colPr
 3. 🔴 **mimetype order**: when packaging HWPX, mimetype = first ZIP entry, ZIP_STORED
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
