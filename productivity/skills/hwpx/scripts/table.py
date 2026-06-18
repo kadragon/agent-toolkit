@@ -665,7 +665,6 @@ def _replace_cell_preserve_style(
     if height > 0 and charpr_pt(height) < MIN_READABLE_PT:
         warn = "WARN: cell(%d,%d) charPr=%s height=%d(%spt) — 가독 불가 크기" % (
             col, row, char_pr, height, "%g" % charpr_pt(height))
-        print(warn, file=sys.stderr)
         info.append(warn)
     content = _build_para_runs(para_pr, [(char_pr, text)])
     new_xml, replace_info = _replace_cell(xml, table_id, col, row, content)
@@ -733,7 +732,10 @@ def cmd_fill(args: argparse.Namespace) -> None:
         section_file.write_text(xml, encoding="utf-8")
         print("DONE (in-place): %s" % section_file)
     else:
-        out = args.output or str(inp).replace(".hwpx", "_filled.hwpx")
+        if not args.output and inp.suffix.lower() != ".hwpx":
+            print("Error: --output required for non-.hwpx archive input", file=sys.stderr)
+            sys.exit(1)
+        out = args.output or str(inp.with_stem(inp.stem + "_filled"))
         if not args.output:
             print("Warning: no --output specified, writing to %s" % out, file=sys.stderr)
         with zipfile.ZipFile(inp, "r") as zin:
@@ -799,6 +801,9 @@ def cmd_replace(args: argparse.Namespace) -> None:
     if args.preserve_style:
         if args.set_text or args.content_file or args.para or args.run:
             print("Error: --preserve-style is mutually exclusive with --set-text/--content-file/--para/--run", file=sys.stderr)
+            sys.exit(1)
+        if args.text is None:
+            print("Error: --preserve-style requires --text (use --text \"\" to clear)", file=sys.stderr)
             sys.exit(1)
     elif args.set_text:
         if args.content_file or args.para or args.run:

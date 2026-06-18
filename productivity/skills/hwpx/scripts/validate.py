@@ -142,13 +142,20 @@ def _charpr_font_warnings(xml_str: str, heights: dict[str, int], min_pt: float) 
         cell_m = None
         for cm in re.finditer(r'<hp:cellAddr colAddr="(\d+)" rowAddr="(\d+)"/>', xml_str[:pos]):
             cell_m = cm
-        tbl_id = tbl_m.group(1) if tbl_m else "?"
-        col = cell_m.group(1) if cell_m else "?"
-        row = cell_m.group(2) if cell_m else "?"
-        warns.append(
-            "WARN: table %s cell(%s,%s) charPr=%s height=%d(%spt) — 가독 불가 크기"
-            % (tbl_id, col, row, cid, height, "%g" % (height / 100))
-        )
+        in_table = xml_str[:pos].count("<hp:tbl") > xml_str[:pos].count("</hp:tbl>")
+        if in_table:
+            tbl_id = tbl_m.group(1) if tbl_m else "?"
+            col = cell_m.group(1) if cell_m else "?"
+            row = cell_m.group(2) if cell_m else "?"
+            warns.append(
+                "WARN: table %s cell(%s,%s) charPr=%s height=%d(%spt) — 가독 불가 크기"
+                % (tbl_id, col, row, cid, height, "%g" % (height / 100))
+            )
+        else:
+            warns.append(
+                "WARN: (body text) charPr=%s height=%d(%spt) — 가독 불가 크기"
+                % (cid, height, "%g" % (height / 100))
+            )
     return warns
 
 

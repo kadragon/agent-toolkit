@@ -38,7 +38,8 @@ def load_charpr_heights(path) -> dict:
                     return {}
                 data = zf.read("Contents/header.xml")
             root = ET.fromstring(data)
-        except Exception:
+        except (zipfile.BadZipFile, KeyError, EOFError, ET.ParseError) as e:
+            print("Warning: could not load charPr heights from %s: %s" % (p, e), file=sys.stderr)
             return {}
     else:
         if not p.exists():
