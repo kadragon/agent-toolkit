@@ -51,7 +51,10 @@ Read `docs/delegation.md` for full routing table. All triggers are objective.
 - Skills are in `{plugin}/skills/{name}/SKILL.md` — `description:` field drives auto-invocation
 - Agent roles in `.claude/agents/*.md` — used both as subagent and Agent Teams teammate
 - Tests: Python scripts in `{plugin}/skills/{name}/scripts/` — run with `python {script} --test` if `--test` flag exists
-- Validate harness: `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/validate-harness.sh`
+- Validate harness: run `validate-harness.sh` from the installed `dev-tools/harness-init` skill. Resolve the newest cached copy:
+  ```sh
+  bash "$(ls -d ~/.claude/plugins/cache/kadragon/dev-tools/*/skills/harness-init/scripts/validate-harness.sh | sort -V | tail -1)"
+  ```
 
 ## Platform Pointers
 
