@@ -114,6 +114,8 @@ gh run view {run-id} --repo {owner}/{repo} --log-failed 2>&1 | head -100
 
 Spawn parallel `sonnet` subagents for repos with different failure patterns. For repos with the same root cause, analyze one and apply the pattern to the rest.
 
+**Analysis alone is not a fix — it is a hypothesis.** Reading logs and the dependency changelog tells you what *probably* broke, but the new tool version is the only authority on its own config schema and rule set. A confident, well-reasoned proposal can still be wrong: a config key placed at the wrong nesting level, or a real error masked behind the one you spotted. So whoever applies the fix must verify it against the actual tool (see Step 2) before pushing — never push an analysis-only proposal.
+
 Common failure patterns:
 
 | Pattern | Likely cause |
@@ -128,7 +130,10 @@ Common failure patterns:
 
 After the user confirms the fix strategy, execute this pipeline autonomously without re-asking:
 
-1. **Create fix PRs** — spawn `sonnet` subagents in parallel, one per repo needing the fix
+1. **Create fix PRs** — spawn `sonnet` subagents in parallel, one per repo needing the fix. **The subagent must verify the fix against the real tool before pushing**, using the failing job's own command (from the workflow YAML) as the exit criterion:
+   - For config/schema migrations, run the upgraded tool's own migration helper when it has one (e.g. `biome migrate --write`, `eslint --migrate`) rather than hand-editing — the tool writes the canonical config and won't guess the wrong key level.
+   - Re-run the **exact failing command** (e.g. `bun run lint`, `npm test`) against the new dependency version and confirm it exits 0. A clean migration can still leave a real error the analysis missed (e.g. a rule promoted to error-level in the new major) — that error must be resolved too, not just the config.
+   - Only push once the failing command is green locally. If it can't be made green (needs secrets, env, or a design decision), stop and report — do not push a still-red branch.
 2. **Poll CI on fix PRs**:
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/poll-ci.sh \
@@ -191,3 +196,7 @@ For repos with 3+ individual PRs and no grouped updates, offer consolidation usi
 - **Other ecosystems**: Manual workflow via Edit tool. Requires local clone.
 
 Both scripts: fetch dependabot PRs → parse versions → create branch → apply bumps → test → commit → push → create consolidated PR → close originals.
+
+**Mixed single + grouped PRs:** the scripts read each PR's title *and* body. Single-package PRs ("bump X from A to B") parse from the title; grouped PRs ("Bump the *X group* with N updates") carry their per-package versions only in the body, so the scripts fall back to parsing the body's `Updates \`pkg\` from A to B` lines. A PR that parses as neither is printed as a loud `WARNING: ... SKIPPING` and excluded — if you see one, consolidate it manually so its updates aren't missing from the combined PR. Security-update PRs are always individual (Dependabot never groups them), so a repo with a working `groups:` config can still legitimately show a group PR alongside several single security PRs — that's a consolidation case, not a broken config.
+
+**Version fidelity:** `uv add`/`uv lock --upgrade-package` and `npm install` resolve to the *latest compatible* version, which may exceed the exact target a Dependabot PR pinned (e.g. resolving cryptography to 49.x when the PR targeted 48.0.1). That's usually fine and picks up extra fixes, but if exact parity with the reviewed PRs matters, pin with `==<version>` (uv) or the exact version string (npm) and confirm the lockfile shows the intended versions before pushing.

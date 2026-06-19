@@ -47,14 +47,14 @@ def cleanup_and_exit(exit_code: int):
 def get_dependabot_prs() -> List[Dict]:
     """Get all open dependabot PRs"""
     output = exec_cmd(
-        'gh pr list --state open --author "app/dependabot" --json number,title,headRefName',
+        'gh pr list --state open --author "app/dependabot" --json number,title,headRefName,body',
         capture=True
     )
     return json.loads(output)
 
 
 def parse_package_update(title: str) -> Optional[Dict]:
-    """Parse package update from PR title"""
+    """Parse package update from PR title (single-package PRs only)"""
     # Format: "build(deps): bump package-name from X to Y"
     match = re.search(r'bump (.+?) from (.+?) to (.+?)$', title, re.IGNORECASE)
     if not match:
@@ -65,6 +65,26 @@ def parse_package_update(title: str) -> Optional[Dict]:
         'old_version': match.group(2),
         'new_version': match.group(3)
     }
+
+
+def parse_group_pr_body(body: str) -> List[Dict]:
+    """Parse a grouped PR's body for its per-package updates.
+
+    Grouped PR titles ("Bump the X group with N updates") don't carry versions,
+    so the title regex returns nothing — the real updates live in the body as
+    Dependabot's canonical "Updates `pkg` from A to B" lines. We anchor on that
+    exact phrasing (capital "Updates", backticked package) so we don't pick up
+    the lowercase "bump tornado from ..." noise in nested changelog excerpts.
+    Last occurrence per package wins (Dependabot lists the final target last).
+    """
+    seen: Dict[str, Dict] = {}
+    for m in re.finditer(r'Updates `(.+?)` from (\S+) to (\S+)', body or ''):
+        seen[m.group(1)] = {
+            'package': m.group(1),
+            'old_version': m.group(2),
+            'new_version': m.group(3),
+        }
+    return list(seen.values())
 
 
 def detect_project_type() -> str:
@@ -184,7 +204,11 @@ def main():
 
     print(f'Found {len(prs)} dependabot PRs')
 
-    # Parse updates
+    # Parse updates. Single-package PRs carry versions in the title; grouped PRs
+    # ("Bump the X group with N updates") carry them only in the body. Try the
+    # title first, then fall back to the body so grouped PRs aren't silently
+    # dropped — a PR that parses as neither is reported loudly, never skipped in
+    # silence (that would consolidate a partial set and look complete).
     updates = []
     for pr in prs:
         parsed = parse_package_update(pr['title'])
@@ -194,6 +218,23 @@ def main():
                 'branch': pr['headRefName'],
                 **parsed
             })
+            continue
+
+        body_updates = parse_group_pr_body(pr.get('body', ''))
+        if body_updates:
+            for bu in body_updates:
+                updates.append({
+                    'pr': pr['number'],
+                    'branch': pr['headRefName'],
+                    **bu
+                })
+            continue
+
+        print(
+            f"WARNING: PR #{pr['number']} ({pr['title']!r}) parsed from neither "
+            f"title nor body — SKIPPING. Consolidate it manually or its updates "
+            f"will be missing from the combined PR."
+        )
 
     if not updates:
         print('Could not parse any package updates')

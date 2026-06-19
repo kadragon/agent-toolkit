@@ -95,6 +95,8 @@ Spawn subagents only for tasks needing read + reasoning (CI log analysis, multi-
 
 Spawn `sonnet` subagents for CI log analysis, config fix PR creation, and PR consolidation.
 
+A fix subagent's analysis is a hypothesis, not a fix — it must verify against the actual failing command (re-run the failing lint/test/build to exit 0, using the tool's own migration helper for config changes) before pushing. Never push an analysis-only proposal. See `references/actions.md` §3e Step 2.
+
 ## Scripts
 
 ```
