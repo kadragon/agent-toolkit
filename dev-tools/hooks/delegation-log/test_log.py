@@ -217,6 +217,39 @@ with tempfile.TemporaryDirectory() as nogit:
     check("no git root no proj dir: exit 0", r.returncode == 0)
     check("no git root no proj dir: no write", not os.path.exists(target))
 
+# ============================================================================
+# REGRESSION TESTS — finding #10 (delegation-log)
+# ============================================================================
+
+# Finding #10: .gitignore idempotency — existing pattern that already MATCHES
+#   delegations.jsonl via fnmatch (e.g. *.jsonl, *) must suppress appending *.
+with tempfile.TemporaryDirectory() as td:
+    lp = os.path.join(td, "test.jsonl")
+    gi_path = os.path.join(td, ".gitignore")
+    with open(gi_path, "w", encoding="utf-8") as gh:
+        gh.write("*.jsonl\n")
+    log.append_capped(lp, '{"test":1}')
+    with open(gi_path, encoding="utf-8") as gh:
+        gi_content = gh.read()
+    check(
+        "regression #10: *.jsonl already matches delegations.jsonl → no * appended",
+        gi_content == "*.jsonl\n",
+    )
+
+# Also verify an arbitrary glob that matches (e.g. 'delegations.*') suppresses append
+with tempfile.TemporaryDirectory() as td:
+    lp = os.path.join(td, "test.jsonl")
+    gi_path = os.path.join(td, ".gitignore")
+    with open(gi_path, "w", encoding="utf-8") as gh:
+        gh.write("delegations.*\n")
+    log.append_capped(lp, '{"test":1}')
+    with open(gi_path, encoding="utf-8") as gh:
+        gi_content = gh.read()
+    check(
+        "regression #10: delegations.* already matches → no * appended",
+        gi_content == "delegations.*\n",
+    )
+
 print()
 if fails:
     print(f"{len(fails)} FAILED: {fails}")

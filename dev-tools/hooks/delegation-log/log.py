@@ -18,6 +18,7 @@ Design contract: never-raise, always exit 0. A logging failure must never
 disrupt the session.
 """
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -140,8 +141,14 @@ def append_capped(path, line):
                 raise
             with gf:
                 content = gf.read()
-                if not any(ln.strip() in {"*", "delegations.jsonl"}
-                           for ln in content.splitlines()):
+                # Suppress appending if any existing pattern already matches
+                # 'delegations.jsonl' (e.g. *.jsonl, *, delegations.*).
+                # Use the canonical log filename, not basename(path), so that
+                # test paths (test.jsonl) don't affect the coverage check.
+                _log_fname = os.path.basename(LOG_REL)
+                if not any(fnmatch.fnmatch(_log_fname, ln.strip())
+                           for ln in content.splitlines()
+                           if ln.strip()):
                     gf.seek(0, 2)
                     prefix = "\n" if content and not content.endswith("\n") else ""
                     gf.write(prefix + "*\n")

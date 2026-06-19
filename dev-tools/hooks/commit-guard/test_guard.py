@@ -47,9 +47,6 @@ check("_is_git_commit: git commit", guard._is_git_commit("git commit"))
 check("_is_git_commit: git -C /p commit", guard._is_git_commit("git -C /p commit"))
 check("_is_git_commit: git status → False", not guard._is_git_commit("git status"))
 check("_is_git_commit: echo hi → False", not guard._is_git_commit("echo hi"))
-check("_find_commit_segment: direct", guard._find_commit_segment("git commit -m '[FEAT] x'") is not None)
-check("_find_commit_segment: chained", guard._find_commit_segment("echo hi && git commit -m 'wip'") is not None)
-check("_find_commit_segment: no commit → None", guard._find_commit_segment("echo hi") is None)
 check("_git_cwd: uses -C", guard._git_cwd("git -C /mypath commit", "/cwd") == "/mypath")
 check("_git_cwd: no -C → env_cwd", guard._git_cwd("git commit", "/cwd") == "/cwd")
 
@@ -212,6 +209,152 @@ with tempfile.TemporaryDirectory() as _d:
     _r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
                         input=payload_good, text=True, capture_output=True)
     check("e2e valid type message passes (exit 0)", _r.returncode == 0)
+
+# ============================================================================
+# REGRESSION TESTS — findings #1–#9 (commit-guard)
+# ============================================================================
+
+# Finding #1: cd <path> && git commit — effective cwd must be the cd target;
+#   branch guard must check the cd target's branch (not env_cwd).
+#   branch_override as callable: cwd → branch string.
+def run_hook_branch_fn(command, branch_fn, marker=False, cwd=None, tool_name="Bash"):
+    """Like run_hook but branch_override may be a callable (cwd→branch)."""
+    import io
+    payload = json.dumps({
+        "tool_name": tool_name,
+        "tool_input": {"command": command},
+        "cwd": cwd or "/tmp",
+    })
+    old_stdin, sys.stdin = sys.stdin, io.StringIO(payload)
+    old_stderr, sys.stderr = sys.stderr, io.StringIO()
+    try:
+        guard.main(branch_override=branch_fn, marker_override=marker)
+        return 0
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 0
+    finally:
+        sys.stdin = old_stdin
+        sys.stderr = old_stderr
+
+def _branch_by_cwd(mapping):
+    """Return a callable: cwd→branch, defaulting to 'feature/x' for unknown."""
+    def _fn(cwd):
+        return mapping.get(cwd, "feature/x")
+    return _fn
+
+# cd to /main-repo (branch=main) then commit → must block
+check(
+    "regression #1: cd→commit uses cd-target cwd for branch guard (blocks on main)",
+    run_hook_branch_fn(
+        "cd /main-repo && git commit -m '[FEAT] x'",
+        branch_fn=_branch_by_cwd({"/main-repo": "main"}),
+        marker=False,
+        cwd="/tmp",
+    ) == 2,
+)
+# cd to /feature-repo (branch=feature/x) then commit → must pass
+check(
+    "regression #1: cd→commit uses cd-target cwd for branch guard (allows feature)",
+    run_hook_branch_fn(
+        "cd /feature-repo && git commit -m '[FEAT] x'",
+        branch_fn=_branch_by_cwd({"/feature-repo": "feature/x"}),
+        marker=False,
+        cwd="/tmp",
+    ) == 0,
+)
+
+# Finding #2a: newline as separator — must detect commit and block on main
+check(
+    "regression #2: newline separator detects git commit (branch bypass blocked)",
+    run_hook("cd /x\ngit commit -m '[FEAT] x'", branch="main", marker=False) == 2,
+)
+# Finding #2b: single & separator
+check(
+    "regression #2: single-& separator detects git commit (branch bypass blocked)",
+    run_hook("true & git commit -m '[FEAT] x'", branch="main", marker=False) == 2,
+)
+# Finding #2c: `command git commit` — wrapper word
+check(
+    "regression #2: command-prefix git commit detected (branch bypass blocked)",
+    run_hook("command git commit -m '[FEAT] x'", branch="main", marker=False) == 2,
+)
+
+# Finding #3: special chars in quoted -m must NOT split the message segment
+check(
+    "regression #3: semicolon inside quoted -m does not split (valid type passes)",
+    run_hook("git commit -m '[FEAT] a; b'", branch="feature/x") == 0,
+)
+check(
+    "regression #3: && inside quoted -m does not split (valid type passes)",
+    run_hook("git commit -m '[FEAT] a && b'", branch="feature/x") == 0,
+)
+check(
+    "regression #3: || inside quoted -m does not split (valid type passes)",
+    run_hook("git commit -m '[FEAT] a || b'", branch="feature/x") == 0,
+)
+
+# Finding #4: multiple -m — FIRST is the type-checked subject; last must NOT win
+check(
+    "regression #4: multiple -m uses first as subject — valid first passes",
+    run_hook("git commit -m '[FEAT] x' -m 'body detail'", branch="feature/x") == 0,
+)
+check(
+    "regression #4: multiple -m — bad second -m must not override valid first",
+    run_hook("git commit -m '[FEAT] x' -m 'wip body'", branch="feature/x") == 0,
+)
+check(
+    "regression #4: multiple -m — bad FIRST is still blocked",
+    run_hook("git commit -m 'wip' -m '[FEAT] x'", branch="feature/x") == 2,
+)
+
+# Finding #5: chained commits — ALL segments checked, not just first
+check(
+    "regression #5: chained commits — bad second segment blocked",
+    run_hook("git commit -m '[FEAT] ok' && git commit -m 'wip'", branch="feature/x") == 2,
+)
+check(
+    "regression #5: chained commits — both good segments pass",
+    run_hook("git commit -m '[FEAT] ok' && git commit -m '[FIX] z'", branch="feature/x") == 0,
+)
+
+# Finding #6: env-assign strip must be LEADING-only; -m 'foo=bar' must stay as message
+check(
+    "regression #6: -m 'foo=bar' — env-assign NOT stripped from message (blocks bad type)",
+    run_hook("git commit -m 'foo=bar'", branch="feature/x") == 2,
+)
+# env-assign in leading prefix is still stripped (existing behavior preserved)
+check(
+    "regression #6: leading ENV=val git commit still detected",
+    run_hook("GIT_AUTHOR_NAME=test git commit -m '[FEAT] x'", branch="feature/x") == 0,
+)
+
+# Finding #7: -C with relative path — must be normalized against env_cwd
+# After normalization, branch is looked up on the resolved absolute path.
+check(
+    "regression #7: git -C relative path resolved against env_cwd for branch guard",
+    run_hook_branch_fn(
+        "git -C subdir commit -m '[FEAT] x'",
+        branch_fn=_branch_by_cwd({"/tmp/subdir": "main"}),
+        marker=False,
+        cwd="/tmp",
+    ) == 2,
+)
+
+# Finding #8: bare | inside quoted -m → shlex ValueError → fail-open (exit 0)
+check(
+    "regression #8: pipe inside quoted -m is fail-open (not blocked)",
+    run_hook("git commit -m '[FEAT] foo | bar'", branch="feature/x") == 0,
+)
+
+# Finding #9: bundled -am 'wip' — message must be parsed, bad type → block
+check(
+    "regression #9: -am 'wip' bundled short opt message is parsed and blocked",
+    run_hook("git commit -am 'wip'", branch="feature/x") == 2,
+)
+check(
+    "regression #9: -am '[FEAT] x' bundled short opt valid message passes",
+    run_hook("git commit -am '[FEAT] x'", branch="feature/x") == 0,
+)
 
 print()
 if fails:

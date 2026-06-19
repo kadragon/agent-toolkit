@@ -25,30 +25,103 @@ TYPE_PATTERN = re.compile(r"^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|P
 # git options that consume the following token as their value (git-level, before subcommand)
 GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
-# strip leading subshell punctuation; env-assign detector
+# strip leading subshell punctuation
 _LEAD_NOISE = re.compile(r"^\s*[\(\{!]*\s*")
+# env-assign detector — matches only a complete token that is VAR=value
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# wrapper words that may precede 'git' but do not affect semantics
+_GIT_WRAPPERS = {"command", "exec"}
 
 
 def _tokens(s):
-    """Tokenize a shell fragment, stripping env-assigns. ValueError → split()."""
+    """Tokenize a shell fragment, stripping LEADING env-assigns only.
+
+    Env-assign stripping applies only to the prefix before the command name:
+    once we've seen the first non-assign token (the command), remaining tokens
+    (e.g. -m 'foo=bar') are left intact.
+
+    On shlex.split ValueError (unbalanced quotes etc.) → return [] so the
+    segment is treated as non-commit (fail-open), preserving the documented
+    never-block-on-parse-error contract.
+    """
     s = _LEAD_NOISE.sub("", s or "")
     try:
         parts = shlex.split(s)
     except ValueError:
-        parts = s.split()
-    return [p for p in parts if not _ENV_ASSIGN.match(p)]
+        return []  # unparseable segment → fail-open (not a commit)
+    # strip only the leading env-assignment prefix (before the command name)
+    i = 0
+    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
+        i += 1
+    return parts[i:]
+
+
+def _split_segments(command):
+    """Quote-aware split on shell segment separators: ; && || | & and newline.
+
+    Uses shlex.shlex with posix=False so quoted tokens are preserved verbatim
+    (e.g. '[FEAT] a && b' stays as one token) — downstream _tokens() then
+    calls shlex.split() which correctly unquotes them.  Newlines outside quotes
+    are pre-normalized to ';' via a simple quote-tracking pass.
+
+    Returns a list of raw segment strings; individual segments may be empty.
+    """
+    # Replace unquoted newlines with ';' (newline = command separator in shell).
+    # A simple state-machine is sufficient since we don't need full posix quoting
+    # here — we just need to know if we're inside a single or double-quoted span.
+    buf = []
+    in_single = False
+    in_double = False
+    for ch in command:
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "\n" and not in_single and not in_double:
+            ch = ";"
+        buf.append(ch)
+    normalized = "".join(buf)
+
+    # Lex with posix=False so quotes are kept as part of the token text.
+    # punctuation_chars groups '&&', '||', '|', ';', '&' as operator tokens.
+    try:
+        lex = shlex.shlex(normalized, posix=False, punctuation_chars="&|;<>")
+        lex.whitespace_split = False
+        tokens = list(lex)
+    except ValueError:
+        return re.split(r"&&|\|\||[;|\n&]", command)
+
+    _SEP_OPS = {"&&", "||", "|", ";", "&"}
+    segments = []
+    current = []
+    for tok in tokens:
+        if tok in _SEP_OPS:
+            segments.append(" ".join(current))
+            current = []
+        else:
+            current.append(tok)
+    segments.append(" ".join(current))
+    return segments
 
 
 def _is_git_commit(segment):
-    """True if this shell segment is a git commit invocation."""
+    """True if this shell segment is a git commit invocation.
+
+    Handles wrapper words like 'command' (POSIX shell built-in that just
+    executes the named command) preceding 'git'.
+    """
     toks = _tokens(segment)
     if not toks:
         return False
-    if os.path.basename(toks[0]) != "git":
+    # skip optional wrapper words (e.g. 'command git commit')
+    i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    if i >= len(toks) or os.path.basename(toks[i]) != "git":
         return False
+    i += 1  # skip 'git'
     # walk past git-level flags (e.g. -C path, -c key=val, --no-pager)
-    i = 1
     while i < len(toks):
         tok = toks[i]
         if tok in GIT_VALUE_OPTS:
@@ -61,27 +134,23 @@ def _is_git_commit(segment):
     return False
 
 
-def _split_segments(command):
-    """Naïve split on ;  &&  ||  |  to get independent shell segments."""
-    return re.split(r"&&|\|\||[;|]", command)
-
-
-def _find_commit_segment(command):
-    """Return the first segment that is a git commit invocation, or None."""
-    for seg in _split_segments(command):
-        if _is_git_commit(seg.strip()):
-            return seg.strip()
-    return None
-
-
 def _git_cwd(segment, env_cwd):
-    """Effective cwd for the git call: env_cwd unless overridden by -C flag."""
+    """Effective cwd for the git call: env_cwd unless overridden by -C flag.
+
+    Relative -C values are resolved as absolute paths against env_cwd.
+    """
     toks = _tokens(segment)
-    i = 1  # skip 'git'
+    # skip wrapper words
+    i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    i += 1  # skip 'git'
     while i < len(toks):
         tok = toks[i]
         if tok == "-C" and i + 1 < len(toks):
-            return toks[i + 1]
+            val = toks[i + 1]
+            # normalize relative paths against env_cwd
+            return os.path.abspath(os.path.join(env_cwd, val))
         if tok in GIT_VALUE_OPTS - {"-C"}:
             i += 2
             continue
@@ -93,8 +162,14 @@ def _git_cwd(segment, env_cwd):
 
 
 def _current_branch(cwd, _override=None):
-    """Return current branch name, or '' on failure. _override injects for tests."""
+    """Return current branch name, or '' on failure.
+
+    _override may be a string (returned as-is for any cwd) or a callable
+    (cwd) -> str (used by tests that need per-cwd branch injection).
+    """
     if _override is not None:
+        if callable(_override):
+            return _override(cwd)
         return _override
     try:
         out = subprocess.run(
@@ -141,10 +216,20 @@ def _parse_commit_args(segment):
       has_merge_squash: bool (--squash flag present)
       editor_mode: bool      (no -m and no -F: message comes from editor)
     Fail-open: -F read error sets message=None (treated as editor_mode by caller).
+
+    Multiple -m flags: git uses the FIRST as the commit subject line.
+    The first -m/--message sets `message`; subsequent ones are ignored for
+    type-checking (they become the body in git's eyes).
+
+    Bundled short options: -am parses the trailing 'm' as the message flag,
+    consuming the next token as the message value.
     """
     toks = _tokens(segment)
-    # skip to 'git'
+    # skip wrapper words then find 'git'
     i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    # skip to 'git'
     while i < len(toks) and os.path.basename(toks[i]) != "git":
         i += 1
     i += 1  # skip 'git' itself
@@ -168,16 +253,29 @@ def _parse_commit_args(segment):
     while i < len(toks):
         tok = toks[i]
         if tok in ("-m", "--message") and i + 1 < len(toks):
-            message = toks[i + 1]
+            if message is None:  # first -m wins (git uses first as subject)
+                message = toks[i + 1]
             i += 2
             continue
         if tok.startswith("--message="):
-            message = tok[len("--message="):]
+            if message is None:
+                message = tok[len("--message="):]
             i += 1
             continue
         if tok.startswith("-m") and len(tok) > 2:
-            message = tok[2:]
+            # -m<msg> attached (e.g. -m[FEAT] or -mwip)
+            if message is None:
+                message = tok[2:]
             i += 1
+            continue
+        # bundled short flags: -am, -pam, etc. — if last char is 'm',
+        # it consumes the next token as the message value
+        if (tok.startswith("-") and not tok.startswith("--")
+                and len(tok) > 2 and tok.endswith("m")
+                and i + 1 < len(toks)):
+            if message is None:
+                message = toks[i + 1]
+            i += 2
             continue
         if tok in ("-F", "--file") and i + 1 < len(toks):
             msg_file = toks[i + 1]
@@ -218,7 +316,13 @@ def _block(reason):
 
 
 def main(branch_override=None, marker_override=None):
-    """Main hook logic. branch_override / marker_override for test injection."""
+    """Main hook logic. branch_override / marker_override for test injection.
+
+    branch_override may be:
+      - None       → real git subprocess call
+      - str        → returned for ALL cwds (legacy test interface)
+      - callable   → called as branch_override(cwd) → str (per-cwd injection)
+    """
     try:
         data = json.load(sys.stdin)
     except Exception:
@@ -230,35 +334,57 @@ def main(branch_override=None, marker_override=None):
     if not command.strip():
         return
 
-    seg = _find_commit_segment(command)
-    if seg is None:
+    env_cwd = data.get("cwd") or os.getcwd()
+
+    # Build a map of segment-index → effective cwd by tracking cd commands
+    # that appear before commit segments in the same command chain.
+    segments = list(_split_segments(command))
+    effective_cwd_at = {}  # segment_index → effective cwd
+    running_cwd = env_cwd
+    for idx, seg in enumerate(segments):
+        toks = _tokens(seg.strip())
+        if len(toks) >= 2 and toks[0] == "cd":
+            # cd <path>: update running effective cwd (resolve relative paths)
+            running_cwd = os.path.abspath(os.path.join(running_cwd, toks[1]))
+        effective_cwd_at[idx] = running_cwd
+
+    # Collect all commit segments with their effective cwds
+    commit_segs = []
+    for idx, seg in enumerate(segments):
+        stripped = seg.strip()
+        if _is_git_commit(stripped):
+            # -C flag overrides the cd-tracked cwd for this specific git call
+            base_cwd = effective_cwd_at[idx]
+            git_effective_cwd = _git_cwd(stripped, base_cwd)
+            commit_segs.append((stripped, git_effective_cwd))
+
+    if not commit_segs:
         return  # not a git commit invocation → pass through
 
-    env_cwd = data.get("cwd") or os.getcwd()
-    effective_cwd = _git_cwd(seg, env_cwd)
+    # Check ALL commit segments — any failure blocks the entire command
+    for seg, effective_cwd in commit_segs:
+        # --- Branch guard ---------------------------------------------------------
+        branch = _current_branch(effective_cwd, _override=branch_override)
+        if branch in ("main", "master"):
+            if not _marker_present(effective_cwd, _override=marker_override):
+                _block(
+                    f"commit-guard: blocked — branch '{branch}' is protected. "
+                    "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
+                )
 
-    # --- Branch guard ---------------------------------------------------------
-    branch = _current_branch(effective_cwd, _override=branch_override)
-    if branch in ("main", "master"):
-        if not _marker_present(effective_cwd, _override=marker_override):
-            _block(
-                f"commit-guard: blocked — branch '{branch}' is protected. "
-                "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
-            )
-
-    # --- Type guard -----------------------------------------------------------
-    args = _parse_commit_args(seg)
-    # skip type check for editor mode, --amend, or --squash (merge/squash workflows)
-    skip_type = args["editor_mode"] or args["has_amend"] or args["has_merge_squash"]
-    if not skip_type:
-        msg = args["message"]
-        if msg is not None and not TYPE_PATTERN.match(msg):
-            _block(
-                f"commit-guard: blocked — message does not match required format "
-                r"^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|PLAN)\] . "
-                f"Got: {msg!r}"
-            )
-        # msg is None here only when -F read failed → fail-open (allow)
+        # --- Type guard -----------------------------------------------------------
+        args = _parse_commit_args(seg)
+        # skip type check for editor mode, --amend, or --squash (merge/squash workflows)
+        skip_type = args["editor_mode"] or args["has_amend"] or args["has_merge_squash"]
+        if not skip_type:
+            msg = args["message"]
+            if msg is not None and not TYPE_PATTERN.match(msg):
+                _block(
+                    f"commit-guard: blocked — message does not match required format "
+                    r"^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|PLAN)\] . "
+                    f"Got: {msg!r}"
+                )
+            # msg is None here only when -F read failed → fail-open (allow)
 
 
 def _test():
