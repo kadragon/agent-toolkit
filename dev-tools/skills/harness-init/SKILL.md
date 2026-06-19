@@ -40,7 +40,7 @@ Work through steps in order. Each produces concrete artifacts.
 
 Before acting, determine mode AND maturity level.
 
-> **Relation to the platform's own `/init`.** Claude Code ships an interactive `/init` (`CLAUDE_CODE_NEW_INIT=1`) that bootstraps a basic CLAUDE.md + optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
+> **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
 
 **Default toward orchestration infrastructure.** When unsure whether a repo "needs" Step 4b/4c (agents + orchestrator), build them. Empirical failure mode: repos initialized without orchestrator + agents never auto-delegate downstream — the router (Step 7b) has nothing to route to, and the model does everything inline. The override cost of unused role files is ~50 lines on disk; the cost of skipping is a permanently inline workflow that floods the main context. Skip only for genuinely trivial repos (single script, docs-only, one-file library).
 
@@ -115,7 +115,7 @@ See `examples/agents-md-example.md` for complete reference.
 
 **What NOT to put in AGENTS.md:** workflow details, delegation details, evaluation criteria, architecture deep dives, API references. These belong in `docs/`.
 
-### Step 3b: Path-Scoped Rules (`.claude/rules/`) — conditional
+### Step 3a: Path-Scoped Rules (`.claude/rules/`) — conditional
 
 **First decide by tool setup — this is the deciding factor:**
 
@@ -425,7 +425,7 @@ All `references/*.md` files cited inline at point of use — consult there. File
 - **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, CLAUDE.md pointer block, directive-description rule. **Read at Step 4c.**
 - **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
-- **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3b.**
+- **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
 - **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.
 

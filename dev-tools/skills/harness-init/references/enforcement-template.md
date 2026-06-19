@@ -27,14 +27,16 @@ Not every project needs all layers. Match enforcement depth to team size and ris
       "Bash(git push --force*)",
       "Read(./.env)",
       "Read(./secrets/**)",
-      "Write(/etc/**)"
+      "Write(/etc/**)",
+      "Edit(/etc/**)",
+      "MultiEdit(/etc/**)"
     ]
   },
   "sandbox": { "enabled": true }
 }
 ```
 
-- **`permissions.deny`** — glob/command patterns the agent can never run, regardless of prompt. Use for destructive Bash, secret reads, writes outside the repo.
+- **`permissions.deny`** — glob/command patterns the agent can never run, regardless of prompt. Use for destructive Bash, secret reads, writes outside the repo. **A path-write block must list every write-capable tool** — `Write` *and* `Edit`/`MultiEdit` — or an agent edits the existing file through the unlisted tool and the guard is bypassed. (Reads similarly: pair `Read` with `Grep`/`Glob` if you mean to hide a path entirely.) For broad isolation, prefer `sandbox.enabled` over enumerating tools.
 - **`sandbox.enabled`** — OS-level filesystem + network isolation for Bash; commands run without prompts inside defined boundaries and cannot escape them.
 - **Managed settings** (`managed-settings.json`, or platform-specific managed `CLAUDE.md` via the `claudeMd` key) — org-level, **cannot be excluded by the repo**. Use when policy must hold across every clone, not just this checkout.
 
@@ -496,7 +498,8 @@ if [[ "$exit_code" -ne 0 ]]; then
     if (( count >= THRESHOLD )); then
         echo "CIRCUIT BREAKER: $count consecutive failures. Stop retrying. Call advisor or report to user." >&2
         echo "Last exit code: $exit_code. Reset by running a successful command." >&2
-        # Exit 2 sends blocking feedback to agent via PostToolUse stderr
+        # Exit 2 surfaces stderr to the agent (non-blocking on PostToolUse —
+        # injects a course-correction message; does NOT prevent the next command)
         exit 2
     fi
 else

@@ -30,8 +30,8 @@ In a Claude-only repo, path-scoped rules add a third, mechanical home: loaded au
 
 Loading semantics, confirmed against official docs ([code.claude.com/docs/en/memory](https://code.claude.com/docs/en/memory)):
 
-- `.claude/rules/*.md` (recursive) load at launch with the same priority as `.claude/CLAUDE.md`.
-- A rule file with a `paths:` frontmatter glob loads **only when Claude reads or edits a file matching the glob** — otherwise it stays out of context entirely.
+- `.claude/rules/*.md` (recursive) are **registered** at launch with the same priority as `.claude/CLAUDE.md`. A rule with **no** `paths:` glob loads its content fully then (like CLAUDE.md); a rule **with** a `paths:` glob does not — only its existence is registered.
+- A rule file with a `paths:` frontmatter glob loads its content **only when Claude reads or edits a file matching the glob** — otherwise it stays out of context entirely.
 - This is genuine lazy loading. Note the contrast: **`@`-imports do NOT save context** — an imported file loads fully at launch. Only **skills, path-scoped rules, and auto-memory topic files** achieve true on-demand loading. So content that would bloat AGENTS.md/CLAUDE.md should move to a path-scoped rule, not an `@`-import.
 
 ## Layout

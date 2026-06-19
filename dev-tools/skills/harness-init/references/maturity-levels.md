@@ -33,7 +33,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] `docs/workflows.md` embeds delegation gates as named steps (not footnotes)
 - [ ] Lint/test infrastructure exists and passes
 - [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or `dev-tools:harness-maintenance` SessionStart hook)
-- [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `references/path-scoped-rules.md`
+- [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `references/path-scoped-rules.md` *(manual check — not enforced by `validate-harness.sh`)*
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
 
@@ -47,7 +47,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 
 **Required additions beyond Level 2:**
 - [ ] Branch protection: direct push to `main`/`master` requires PR + CI green
-- [ ] Layer 0 settings-level deny for any destructive surface — `permissions.deny` / `sandbox.enabled` (model-independent; see `references/enforcement-template.md` → "Layer 0")
+- [ ] Layer 0 settings-level deny for any destructive surface — `permissions.deny` / `sandbox.enabled` (model-independent; see `references/enforcement-template.md` → "Layer 0") *(manual check — not enforced by `validate-harness.sh`)*
 - [ ] PostToolUse hooks catch golden principle violations at edit time (Layer 1 in enforcement chain)
 - [ ] Pre-commit hooks block commits with unresolved violations (Layer 2)
 - [ ] Drift detection on push — AGENTS.md checked for size and stale cross-references
