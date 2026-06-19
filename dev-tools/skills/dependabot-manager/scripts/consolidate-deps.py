@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 BRANCH_NAME = 'chore/deps-combined-update'
@@ -106,68 +106,92 @@ def detect_project_type() -> str:
         raise RuntimeError("No supported Python dependency file found")
 
 
-def update_dependencies(updates: List[Dict], project_type: str) -> bool:
-    """Update dependency files based on project type"""
+def update_dependencies(updates: List[Dict], project_type: str) -> None:
+    """Update dependency files based on project type.
+
+    Contract (shared by every updater below): mutate the project's dependency
+    files in place and raise on any failure. There is no bool return — `main`
+    wraps the call in try/except and relies on the raise→`cleanup_and_exit`
+    path, so a bool would be dead signal that masks the real contract.
+    """
     if project_type == 'uv':
-        return update_uv_dependencies(updates)
+        update_uv_dependencies(updates)
     elif project_type == 'poetry':
-        return update_poetry_dependencies(updates)
+        update_poetry_dependencies(updates)
     elif project_type == 'pip-tools':
-        return update_pip_tools_dependencies(updates)
+        update_pip_tools_dependencies(updates)
     elif project_type == 'pip':
-        return update_requirements_txt(updates)
-    return False
+        update_requirements_txt(updates)
+    else:
+        raise RuntimeError(f"Unsupported project type: {project_type}")
 
 
-def update_uv_dependencies(updates: List[Dict]) -> bool:
+def _replace_pinned_versions(content: str, updates: List[Dict]) -> Tuple[str, List[str]]:
+    """Rewrite `pkg==version` pins in a requirements file's text.
+
+    Returns the rewritten text and the list of packages that produced zero
+    substitutions. `re.sub` swallows a no-op silently and would let the caller
+    report success while committing stale versions, so we use `re.subn` and
+    surface the misses. Callers warn (not raise) on misses: a pip-tools
+    transitive dependency legitimately lives only in the compiled
+    requirements.txt, never in requirements.in, so a hard abort would over-fire.
+    """
+    missing: List[str] = []
+    for update in updates:
+        pkg = update['package']
+        version = update['new_version']
+        pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
+        replacement = f'{pkg}=={version}'
+        content, n = re.subn(pattern, replacement, content)
+        if n == 0:
+            missing.append(pkg)
+    return content, missing
+
+
+def update_uv_dependencies(updates: List[Dict]) -> None:
     """Update dependencies using uv"""
     for update in updates:
         pkg = update['package']
         version = update['new_version']
         exec_cmd(f'uv add "{pkg}=={version}"')
-    return True
 
 
-def update_poetry_dependencies(updates: List[Dict]) -> bool:
+def update_poetry_dependencies(updates: List[Dict]) -> None:
     """Update dependencies using poetry"""
     for update in updates:
         pkg = update['package']
         version = update['new_version']
         exec_cmd(f'poetry add "{pkg}@{version}"')
-    return True
 
 
-def update_pip_tools_dependencies(updates: List[Dict]) -> bool:
+def update_pip_tools_dependencies(updates: List[Dict]) -> None:
     """Update requirements.in and compile"""
     req_file = Path('requirements.in')
-    content = req_file.read_text()
-
-    for update in updates:
-        pkg = update['package']
-        version = update['new_version']
-        pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
-        replacement = f'{pkg}=={version}'
-        content = re.sub(pattern, replacement, content)
-
+    content, missing = _replace_pinned_versions(req_file.read_text(), updates)
+    if missing:
+        print(
+            f"WARNING: {len(missing)} package(s) not pinned in requirements.in, "
+            f"left unchanged: {', '.join(missing)}. They may be transitive "
+            f"(pinned only in the compiled requirements.txt) or renamed — verify "
+            f"the consolidated PR before merging.",
+            file=sys.stderr,
+        )
     req_file.write_text(content)
     exec_cmd('pip-compile requirements.in')
-    return True
 
 
-def update_requirements_txt(updates: List[Dict]) -> bool:
+def update_requirements_txt(updates: List[Dict]) -> None:
     """Update requirements.txt directly"""
     req_file = Path('requirements.txt')
-    content = req_file.read_text()
-
-    for update in updates:
-        pkg = update['package']
-        version = update['new_version']
-        pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
-        replacement = f'{pkg}=={version}'
-        content = re.sub(pattern, replacement, content)
-
+    content, missing = _replace_pinned_versions(req_file.read_text(), updates)
+    if missing:
+        print(
+            f"WARNING: {len(missing)} package(s) not found in requirements.txt, "
+            f"left unchanged: {', '.join(missing)} — verify the consolidated PR "
+            f"before merging.",
+            file=sys.stderr,
+        )
     req_file.write_text(content)
-    return True
 
 
 def run_tests(project_type: str) -> bool:
@@ -181,7 +205,9 @@ def run_tests(project_type: str) -> bool:
             exec_cmd('poetry run pytest')
             exec_cmd('poetry run mypy .', check=False)
         else:
-            exec_cmd('pytest')
+            # `python -m pytest`, not bare `pytest`: the bare binary may resolve
+            # to a global install instead of the project venv's interpreter.
+            exec_cmd('python -m pytest')
         return True
     except subprocess.CalledProcessError:
         return False
@@ -398,6 +424,24 @@ def cmd_selftest():
     # bar: pre-release intact
     check(results['bar']['new_version'] == '2.0.0-beta.1',
           f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}")
+
+    # --- _replace_pinned_versions: pin rewrite + missing-package tracking ---
+    # A real hit rewrites the pinned line; an absent package is reported as
+    # missing (so the caller can warn instead of silently committing stale
+    # versions); the line anchor stops `foo` matching inside `bar-foo`.
+    content = "foo==1.0.0\nbar-foo==9.9.9\n"
+    new_content, missing = _replace_pinned_versions(
+        content,
+        [
+            {'package': 'foo', 'new_version': '1.1.0'},
+            {'package': 'absent', 'new_version': '2.0.0'},
+        ],
+    )
+    check('foo==1.1.0' in new_content, f"foo not rewritten to 1.1.0: {new_content!r}")
+    check('bar-foo==9.9.9' in new_content,
+          f"bar-foo must stay untouched (line anchor), got {new_content!r}")
+    check(missing == ['absent'],
+          f"missing should be ['absent'] (zero-substitution package), got {missing!r}")
 
     print('selftest OK')
 

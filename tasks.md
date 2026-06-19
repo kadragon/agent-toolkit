@@ -4,9 +4,9 @@
 
 Out-of-scope items surfaced during PR #80's review cycle. Behavior changes / refactors that need their own design pass, not part of the 5 bundled fixes.
 
-- [ ] `consolidate-deps.py:update_pip_tools_dependencies` / `update_requirements_txt` — `re.sub` silently no-ops when the package isn't found in the file (zero replacements → still reports success, commits stale versions). Use `re.subn` and warn/fail on `count == 0`. Caveat: pip-tools transitive deps legitimately absent from `requirements.in`, so a hard `raise` would over-abort — needs warn-vs-raise design. conf ~75%, P2. (source: agy)
-- [ ] `consolidate-deps.py:run_tests` — pip/pip-tools branch runs bare `pytest`, which may resolve to a global binary instead of the project venv. Use `python -m pytest`. conf ~70%, P2. (source: agy)
-- [ ] `consolidate-deps.py:update_uv_dependencies` — return contract inconsistent with sibling updaters: `return True` is unreachable on failure (relies on raise→main cleanup) while `update_pip_tools_dependencies`/`update_requirements_txt` return `bool`. Pick one contract across all updaters. conf ~82%, P2. (source: review)
+- [x] `consolidate-deps.py:update_pip_tools_dependencies` / `update_requirements_txt` — `re.sub` silently no-ops when the package isn't found in the file (zero replacements → still reports success, commits stale versions). Use `re.subn` and warn/fail on `count == 0`. Caveat: pip-tools transitive deps legitimately absent from `requirements.in`, so a hard `raise` would over-abort — needs warn-vs-raise design. conf ~75%, P2. (source: agy)
+- [x] `consolidate-deps.py:run_tests` — pip/pip-tools branch runs bare `pytest`, which may resolve to a global binary instead of the project venv. Use `python -m pytest`. conf ~70%, P2. (source: agy)
+- [x] `consolidate-deps.py:update_uv_dependencies` — return contract inconsistent with sibling updaters: `return True` is unreachable on failure (relies on raise→main cleanup) while `update_pip_tools_dependencies`/`update_requirements_txt` return `bool`. Pick one contract across all updaters. conf ~82%, P2. (source: review)
 
 ### PR #79 — dependabot-manager consolidate group-PR parsing (out-of-scope, pre-existing)
 
@@ -66,3 +66,26 @@ status: done
 
 **Lint/test command**
 - `uv run --with duckdb python productivity/skills/persona-debate/scripts/sample_personas.py test`
+
+---
+
+# Sprint: consolidate-deps PR #80 review-backlog fixes (bundle of 3)
+
+status: done
+
+**Scope**
+- `dev-tools/skills/dependabot-manager/scripts/consolidate-deps.py` — `update_pip_tools_dependencies`, `update_requirements_txt`, `update_uv_dependencies`, `update_poetry_dependencies`, `update_dependencies`, `run_tests`, `cmd_selftest`.
+
+**Acceptance criteria**
+- [x] #1: version-replace uses `re.subn`; packages with zero substitutions are collected and a `WARNING` is printed to stderr naming them (warn, not raise — pip-tools transitive deps legitimately absent from `requirements.in`); file still written. Substitution logic lives in a shared pure helper `_replace_pinned_versions(content, updates) -> (text, missing)`, unit-tested in `--selftest` (covers a hit, a missing package, and the line-anchor `bar-foo` non-match).
+- [x] #2: `run_tests` pip/pip-tools branch runs `python -m pytest` (not bare `pytest`) so it resolves the project venv, not a global binary.
+- [x] #3: all four updaters + `update_dependencies` share one contract — annotated `-> None`, raise on failure; `update_dependencies` raises `RuntimeError` on unknown project type. No `return True`/`return False` in any updater. `main` already ignores the return and relies on the raise→cleanup path.
+
+**Out of scope**
+- `.cjs` parser changes (no behavioral overlap with these `.py`-only sites).
+- `parse_group_pr_body` / title-regex behavior.
+- Network/subprocess integration tests for `uv add`, `pip-compile`, `gh`.
+
+**Lint/test command**
+- `python dev-tools/skills/dependabot-manager/scripts/consolidate-deps.py --selftest`
+- `node dev-tools/skills/dependabot-manager/scripts/consolidate-deps.cjs --selftest`
