@@ -45,12 +45,12 @@ function cleanupAndExit(exitCode) {
 
 // Get all open dependabot PRs
 function getDependabotPRs() {
-  const output = exec('gh pr list --state open --author "app/dependabot" --json number,title,headRefName', { silent: true });
+  const output = exec('gh pr list --state open --author "app/dependabot" --json number,title,headRefName,body', { silent: true });
   if (!output) return [];
   return JSON.parse(output);
 }
 
-// Parse package update from PR title
+// Parse package update from PR title (single-package PRs only)
 function parsePackageUpdate(title) {
   // Format: "build(deps-dev): Bump @package/name from X to Y"
   const match = title.match(/Bump (.+?) from (.+?) to (.+?)$/i);
@@ -61,6 +61,28 @@ function parsePackageUpdate(title) {
     oldVersion: match[2],
     newVersion: match[3]
   };
+}
+
+// Parse a grouped PR's body for its per-package updates.
+// Grouped PR titles ("Bump the X group with N updates") don't carry versions,
+// so the title regex returns nothing — the real updates live in the body as
+// Dependabot's canonical "Updates `pkg` from A to B" lines. Anchor on that exact
+// phrasing (capital "Updates", backticked package) so we skip the lowercase
+// "bump tornado from ..." noise in nested changelog excerpts. Last occurrence
+// per package wins (Dependabot lists the final target last).
+function parseGroupPrBody(body) {
+  const seen = new Map();
+  // Version tokens are word chars, dots, hyphens, and '+' (PEP 440 local
+  // versions; semver pre-release like 2.0.0-beta.3). The token must END in a
+  // word char ([\w.+-]*\w): a real version never ends in a dot, so this drops
+  // trailing markdown punctuation ("... to 1.4.7.") while keeping internal dots
+  // — something neither \S+ nor a flat [\w.+-]+ class can do.
+  const re = /Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)/g;
+  let m;
+  while ((m = re.exec(body || '')) !== null) {
+    seen.set(m[1], { package: m[1], oldVersion: m[2], newVersion: m[3] });
+  }
+  return Array.from(seen.values());
 }
 
 // Detect version prefix from existing value (^, ~, >=, etc.)
@@ -112,15 +134,31 @@ async function main() {
 
   console.log(`Found ${prs.length} dependabot PRs`);
 
-  // Parse updates
-  const updates = prs.map(pr => {
+  // Parse updates. Single-package PRs carry versions in the title; grouped PRs
+  // ("Bump the X group with N updates") carry them only in the body. Try the
+  // title first, then fall back to the body so grouped PRs aren't silently
+  // dropped — a PR that parses as neither is reported loudly, never skipped in
+  // silence (that would consolidate a partial set and look complete).
+  const updates = [];
+  prs.forEach(pr => {
     const parsed = parsePackageUpdate(pr.title);
-    return {
-      pr: pr.number,
-      branch: pr.headRefName,
-      ...parsed
-    };
-  }).filter(u => u.package);
+    if (parsed) {
+      updates.push({ pr: pr.number, branch: pr.headRefName, ...parsed });
+      return;
+    }
+
+    const bodyUpdates = parseGroupPrBody(pr.body);
+    if (bodyUpdates.length > 0) {
+      bodyUpdates.forEach(bu => updates.push({ pr: pr.number, branch: pr.headRefName, ...bu }));
+      return;
+    }
+
+    console.error(
+      `WARNING: PR #${pr.number} ("${pr.title}") parsed from neither title nor ` +
+      `body — SKIPPING. Consolidate it manually or its updates will be missing ` +
+      `from the combined PR.`
+    );
+  });
 
   if (updates.length === 0) {
     console.log('Could not parse any package updates');
@@ -238,11 +276,14 @@ ${prRelated}
   }
   const prNumber = prNumberMatch[1];
 
-  // Close individual PRs
+  // Close individual PRs. A grouped PR contributes one entry per package, all
+  // sharing the same PR number — dedupe so we close (and log) each PR once
+  // instead of N times.
   console.log('\nClosing individual dependabot PRs...');
-  updates.forEach(u => {
-    exec(`gh pr close ${u.pr} -c "Consolidated into #${prNumber}"`, { ignoreError: true });
-    console.log(`   Closed PR #${u.pr}`);
+  const closedPrNumbers = [...new Set(updates.map(u => u.pr))];
+  closedPrNumbers.forEach(prNum => {
+    exec(`gh pr close ${prNum} -c "Consolidated into #${prNumber}"`, { ignoreError: true });
+    console.log(`   Closed PR #${prNum}`);
   });
 
   console.log('\nConsolidation complete!');
@@ -254,7 +295,7 @@ ${prRelated}
     prNumber,
     prUrl,
     updates,
-    closedPRs: updates.map(u => u.pr)
+    closedPRs: closedPrNumbers
   };
 }
 
@@ -266,4 +307,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, getDependabotPRs, parsePackageUpdate, updatePackageJson };
+module.exports = { main, getDependabotPRs, parsePackageUpdate, parseGroupPrBody, updatePackageJson };

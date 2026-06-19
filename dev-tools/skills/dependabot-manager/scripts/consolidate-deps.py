@@ -47,14 +47,14 @@ def cleanup_and_exit(exit_code: int):
 def get_dependabot_prs() -> List[Dict]:
     """Get all open dependabot PRs"""
     output = exec_cmd(
-        'gh pr list --state open --author "app/dependabot" --json number,title,headRefName',
+        'gh pr list --state open --author "app/dependabot" --json number,title,headRefName,body',
         capture=True
     )
     return json.loads(output)
 
 
 def parse_package_update(title: str) -> Optional[Dict]:
-    """Parse package update from PR title"""
+    """Parse package update from PR title (single-package PRs only)"""
     # Format: "build(deps): bump package-name from X to Y"
     match = re.search(r'bump (.+?) from (.+?) to (.+?)$', title, re.IGNORECASE)
     if not match:
@@ -65,6 +65,31 @@ def parse_package_update(title: str) -> Optional[Dict]:
         'old_version': match.group(2),
         'new_version': match.group(3)
     }
+
+
+def parse_group_pr_body(body: str) -> List[Dict]:
+    """Parse a grouped PR's body for its per-package updates.
+
+    Grouped PR titles ("Bump the X group with N updates") don't carry versions,
+    so the title regex returns nothing — the real updates live in the body as
+    Dependabot's canonical "Updates `pkg` from A to B" lines. We anchor on that
+    exact phrasing (capital "Updates", backticked package) so we don't pick up
+    the lowercase "bump tornado from ..." noise in nested changelog excerpts.
+    Last occurrence per package wins (Dependabot lists the final target last).
+    """
+    seen: Dict[str, Dict] = {}
+    # Version tokens are word chars, dots, hyphens, and '+' (PEP 440 local
+    # versions like 1.0.0+local; semver pre-release like 2.0.0-beta.3). The token
+    # must END in a word char ([\w.+-]*[\w]): a real version never ends in a dot,
+    # so this drops trailing markdown punctuation ("... to 1.4.7.") while keeping
+    # internal dots — something neither \S+ nor a flat [\w.+-]+ class can do.
+    for m in re.finditer(r'Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)', body or ''):
+        seen[m.group(1)] = {
+            'package': m.group(1),
+            'old_version': m.group(2),
+            'new_version': m.group(3),
+        }
+    return list(seen.values())
 
 
 def detect_project_type() -> str:
@@ -184,7 +209,11 @@ def main():
 
     print(f'Found {len(prs)} dependabot PRs')
 
-    # Parse updates
+    # Parse updates. Single-package PRs carry versions in the title; grouped PRs
+    # ("Bump the X group with N updates") carry them only in the body. Try the
+    # title first, then fall back to the body so grouped PRs aren't silently
+    # dropped — a PR that parses as neither is reported loudly, never skipped in
+    # silence (that would consolidate a partial set and look complete).
     updates = []
     for pr in prs:
         parsed = parse_package_update(pr['title'])
@@ -194,6 +223,24 @@ def main():
                 'branch': pr['headRefName'],
                 **parsed
             })
+            continue
+
+        body_updates = parse_group_pr_body(pr.get('body', ''))
+        if body_updates:
+            for bu in body_updates:
+                updates.append({
+                    'pr': pr['number'],
+                    'branch': pr['headRefName'],
+                    **bu
+                })
+            continue
+
+        print(
+            f"WARNING: PR #{pr['number']} ({pr['title']!r}) parsed from neither "
+            f"title nor body — SKIPPING. Consolidate it manually or its updates "
+            f"will be missing from the combined PR.",
+            file=sys.stderr,
+        )
 
     if not updates:
         print('Could not parse any package updates')
@@ -291,11 +338,13 @@ def main():
     # Get PR number from URL
     pr_number = pr_url.rstrip('/').split('/')[-1]
 
-    # Close individual PRs
+    # Close individual PRs. A grouped PR contributes one entry per package, all
+    # sharing the same PR number — dedupe so we close (and log) each PR once
+    # instead of N times. dict.fromkeys preserves first-seen order.
     print('\nClosing individual dependabot PRs...')
-    for u in updates:
-        exec_cmd(f'gh pr close {u["pr"]} -c "Consolidated into #{pr_number}"', check=False)
-        print(f'   Closed PR #{u["pr"]}')
+    for pr_num in dict.fromkeys(u['pr'] for u in updates):
+        exec_cmd(f'gh pr close {pr_num} -c "Consolidated into #{pr_number}"', check=False)
+        print(f'   Closed PR #{pr_num}')
 
     print('\nConsolidation complete!')
     print('\nNext steps:')
