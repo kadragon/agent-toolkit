@@ -1,0 +1,18 @@
+{
+  "description": "PostToolUse(Task) recorder. Appends one JSONL line per Task tool call to the per-repo log <git-root>/.claude/logs/delegations.jsonl with fields: ts, subagent_type, description_hash (sha256 of normalized description, first 16 hex chars), cwd, session. harness-curator reads these logs to detect delegation patterns and propose skill candidates. Never raises: always exits 0. Canonical registration lives in the plugin's top-level hooks.json; this file documents the bundle.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/delegation-log/log.py\"",
+            "timeout": 5,
+            "statusMessage": "Logging delegation..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "description": "PreToolUse(Bash) gate for git commit invocations. Blocks commits to main/master unless the repo's AGENTS.md or CLAUDE.md contains <!-- commit-guard: allow-main -->, and blocks commit messages that don't match the required [TYPE] format. Skips type check for editor-mode commits, --amend, and --squash. Never blocks non-commit commands. Always exits 0 (allow) on parse errors (fail-open). Exits 2 to block. Canonical registration lives in the plugin's top-level hooks.json; this file documents the bundle.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/commit-guard/guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking commit guard..."
+          }
+        ]
+      }
+    ]
+  }
+}
