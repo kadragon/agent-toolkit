@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #84 — agent-teams task store separation (out-of-scope findings)
+
+- [ ] `agent-teams-onboarding.md` — native store path written as `~/.claude/tasks/{team-name}/`, but Claude Code honors `CLAUDE_CONFIG_DIR` when set. File uses the `~/.claude/` convention throughout; reconcile the whole file's path display (e.g. `$CLAUDE_CONFIG_DIR/...`) in one pass rather than spot-editing. P3. (source: agy)
+
+---
+
 ### PR #81 — consolidate-deps PR #80 fixes review cycle (out-of-scope findings)
 
 Pre-existing items surfaced during PR #81's review; the regex/version class predates this PR (introduced in PR #80), so they were left out of scope.

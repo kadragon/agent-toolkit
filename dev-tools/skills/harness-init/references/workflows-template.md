@@ -30,7 +30,7 @@ Check objective delegation triggers from `docs/delegation.md`:
 If none of the triggers match, proceed directly.
 
 **Step 1.5: File Ownership Declaration (multi-agent only)**
-If the sprint will spawn ≥2 parallel subagents OR use Agent Teams, the lead MUST declare file-ownership globs per role in `tasks.md` BEFORE spawning anyone. Overlapping globs cause silent overwrites. Cross-boundary edits require explicit lead approval — teammates do not cross globs unilaterally.
+If the sprint will spawn ≥2 parallel subagents OR use Agent Teams, the lead MUST declare file-ownership globs per role BEFORE spawning anyone — for plain subagents in `tasks.md`, for Agent Teams via the native shared task list (`TaskCreate`; `tasks.md` stays read-only during team work). Overlapping globs cause silent overwrites. Cross-boundary edits require explicit lead approval — teammates do not cross globs unilaterally.
 
 ```markdown
 ## File Ownership

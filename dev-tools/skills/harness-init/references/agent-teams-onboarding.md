@@ -83,7 +83,8 @@ enabled):
    teammate via the native shared task list (`TaskCreate`, persisted at
    `~/.claude/tasks/{team-name}/`). No teammate edits outside its glob.
    `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
-   work. See `docs/workflows.md` → "File Ownership Declaration".
+   work. See `references/workflows-template.md` → "Step 1.5: File Ownership
+   Declaration".
 
 2. **Team size cap: 5.** Beyond that, diminishing returns + coordination
    cost spikes. Anthropic's own guidance.
@@ -104,9 +105,9 @@ enabled):
 7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
    (read-only mid-session input). Live coordination, status, and file globs
    live in the native shared task list (Task tools, persisted at
-   `~/.claude/tasks/{team-name}/`). Sync completion back to `tasks.md` only
-   at session end. There is no project-level override for the native store
-   path — it is hardcoded.
+   `~/.claude/tasks/{team-name}/`). At session end the lead manually syncs
+   completion back to `tasks.md`. There is no project-level override for the
+   native store path — it is hardcoded.
 
 ## When to Shut Teams Down
 
