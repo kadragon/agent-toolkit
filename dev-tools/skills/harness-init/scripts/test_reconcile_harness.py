@@ -6,6 +6,7 @@ Run: python test_reconcile_harness.py
 """
 
 import sys
+import tempfile
 import importlib.util
 from pathlib import Path
 
@@ -267,6 +268,107 @@ def test_shims_direct():
 
 
 # ---------------------------------------------------------------------------
+# strip_sprint_block() — preserve ## Review Backlog on sprint completion
+# ---------------------------------------------------------------------------
+
+TASKS_WITH_BACKLOG = """\
+## Review Backlog
+
+### PR #99 — findings
+- [ ] open finding one
+- [ ] open finding two
+
+---
+
+# Sprint: do the thing
+
+status: done
+
+**Scope**
+- something
+
+**Acceptance criteria**
+- [x] did it
+"""
+
+TASKS_ONLY_SPRINT = """\
+# Sprint: solo
+
+status: done
+
+**Scope**
+- x
+"""
+
+
+def test_strip_preserves_review_backlog():
+    """strip_sprint_block removes the Sprint Contract but keeps ## Review Backlog."""
+    result = mod.strip_sprint_block(TASKS_WITH_BACKLOG)
+    check("strip: returns content (not None)", result is not None, repr(result))
+    check("strip: first open finding preserved", result and "open finding one" in result)
+    check("strip: second open finding preserved", result and "open finding two" in result)
+    check("strip: Review Backlog heading preserved", result and "## Review Backlog" in result)
+    check("strip: sprint heading removed", result and "# Sprint: do the thing" not in result)
+    check("strip: status line removed", result and "status: done" not in result)
+    check("strip: trailing --- separator trimmed", result and not result.rstrip().endswith("---"))
+
+
+def test_strip_only_sprint_returns_none():
+    """tasks.md whose only content is the sprint block → None (caller unlinks)."""
+    result = mod.strip_sprint_block(TASKS_ONLY_SPRINT)
+    check("strip-solo: returns None", result is None, repr(result))
+
+
+# ---------------------------------------------------------------------------
+# main() integration — done / failed branches write remainder, not unlink
+# ---------------------------------------------------------------------------
+
+def _run_main_in_tmp(tasks_text: str, backlog_text: str):
+    tmp = Path(tempfile.mkdtemp())
+    tpath, bpath = tmp / "tasks.md", tmp / "backlog.md"
+    tpath.write_text(tasks_text, encoding="utf-8")
+    bpath.write_text(backlog_text, encoding="utf-8")
+    saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
+    mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, tmp / "CHANGELOG.md"
+    try:
+        mod.main()
+    finally:
+        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
+    return tpath, bpath
+
+
+def test_main_done_preserves_review_backlog():
+    """done sprint with Review Backlog → tasks.md retained, findings survive."""
+    backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
+    tpath, bpath = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog)
+    check("main-done: tasks.md retained", tpath.exists())
+    body = tpath.read_text(encoding="utf-8") if tpath.exists() else ""
+    check("main-done: open finding preserved", "open finding one" in body)
+    check("main-done: sprint block gone", "# Sprint: do the thing" not in body)
+    check("main-done: backlog [>] removed", "[>] Sprint: do the thing" not in bpath.read_text(encoding="utf-8"))
+
+
+def test_main_done_only_sprint_unlinks():
+    """done sprint with no other content → tasks.md unlinked (old behaviour)."""
+    backlog = "## Now\n- [>] Sprint: solo\n"
+    tpath, _ = _run_main_in_tmp(TASKS_ONLY_SPRINT, backlog)
+    check("main-done-solo: tasks.md unlinked", not tpath.exists())
+
+
+def test_main_failed_preserves_review_backlog():
+    """failed sprint with Review Backlog → tasks.md retained, findings survive."""
+    failed_tasks = TASKS_WITH_BACKLOG.replace("status: done", "status: failed")
+    backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
+    tpath, bpath = _run_main_in_tmp(failed_tasks, backlog)
+    check("main-failed: tasks.md retained", tpath.exists())
+    body = tpath.read_text(encoding="utf-8") if tpath.exists() else ""
+    check("main-failed: open finding preserved", "open finding one" in body)
+    check("main-failed: sprint block gone", "# Sprint: do the thing" not in body)
+    check("main-failed: backlog [>] reverted to [ ]",
+          "[ ] Sprint: do the thing" in bpath.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 
@@ -284,6 +386,11 @@ SUITES = [
     ("revert_active_markers: failed reverts all", test_revert_both_anchors_on_failed),
     ("revert_active_markers: backward compat", test_revert_backward_compat_single_title),
     ("shims: direct invocation", test_shims_direct),
+    ("strip_sprint_block: preserves Review Backlog", test_strip_preserves_review_backlog),
+    ("strip_sprint_block: only sprint → None", test_strip_only_sprint_returns_none),
+    ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
+    ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
+    ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
 ]
 
 if __name__ == "__main__":
