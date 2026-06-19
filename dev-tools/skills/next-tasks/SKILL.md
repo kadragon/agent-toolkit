@@ -1,14 +1,17 @@
 ---
 name: next-tasks
-version: 1.0.3
+version: 1.1.0
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
   "작업 하나 돌려줘", "백로그 시작", "작업 시작", "백로그 작업", "태스크 시작", or
   "태스크 골라줘". Picks an open item from backlog.md or tasks.md, drives the full code
   cycle (branch → Sprint Contract → implement → qa-verifier → version bump), and hands off
-  to dev-review-cycle --auto for review, CI, and merge. Not for review-only requests or
-  backlog browsing without intent to implement and merge this session.
+  to dev-review-cycle --auto for review, CI, and merge. With the `--all` flag (also "전부
+  처리", "모두 돌려", "다 처리", "batch all", "all tasks") it batches: the user multi-selects
+  bounded items, each runs implement+QA in its own git worktree in parallel, then converges
+  one-at-a-time (version bump → reconcile → dev-review-cycle --auto) into separate PRs.
+  Not for review-only requests or backlog browsing without intent to implement and merge.
 ---
 
 # Next Tasks
@@ -16,6 +19,10 @@ description: >-
 Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
 run the cycle, and hand off to `dev-review-cycle --auto`. Delegate the heavy lifting — this
 skill is the **decision and sequencing layer**, not the implementation engine.
+
+**Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
+(or "전부 처리", "모두 돌려", "다 처리", "batch all"), run **Batch mode** instead — see the
+`## Batch mode (--all)` section. Prerequisites and the working-tree gate apply to both modes.
 
 ## Prerequisites
 
@@ -190,6 +197,113 @@ reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, wa
 the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
 If you continue on the same branch after fixing CI, the cleanup commit is already correct and
 no further action is required.
+
+## Batch mode (`--all`)
+
+Triggered by `--all`. Processes **multiple** units in one invocation: implement + QA run in
+parallel, isolated git worktrees; convergence (version bump → reconcile → merge) runs
+**serially**, one PR per unit. The serial convergence is deliberate — every unit edits the
+same `plugin.json` manifests and the same `backlog.md`/`tasks.md`/`CHANGELOG.md`, so parallel
+merges would collide. Serializing those steps keeps each PR clean while still parallelizing the
+slow part (implementation).
+
+### A1 — Gather & cluster
+
+Run Step 1 (gather) and Step 1.5 (cluster) unchanged. The output is a list of **units**: each
+unit is either a qualifying bundle (≥2 same-area, compatible-type items → one branch) or a
+singleton. Clustering is **mandatory** here, not optional: it guarantees units touch disjoint
+file areas, which is what lets the serial rebase-on-`main` stay conflict-free.
+
+### A2 — Filter to batch-eligible
+
+A unit is **batch-eligible** only if it is trivial: tag is NOT `[FEAT]`/`[REFACTOR]`, total
+in-scope files ≤2 (across all bundle members), and no new public API/schema. Non-trivial units
+need interactive plan-mode approval (single-pick Step 3) that cannot run N-way in parallel.
+
+List excluded units explicitly: "Excluded from batch (needs solo plan-mode run): `<unit>`".
+If filtering leaves 0 eligible units, report that and stop.
+
+### A3 — Multi-select
+
+Do NOT use `AskUserQuestion` (4-option cap is too small for a batch). Render a numbered list,
+one line per eligible unit: index, type tag, short slug, file:line (bundles list member count
+and area). Then ask the user to reply with a comma-separated subset (e.g. `1,3,4`) or `all`.
+Accept a comma list (`1,3,4`), inclusive ranges (`1-3`), `all`, or a combination. Map back to
+units; ignore out-of-range indices and report them. Empty/unparseable reply → re-prompt once,
+then stop.
+
+**Cost gate** — each selected unit costs roughly implementer + qa-verifier + a full
+`dev-review-cycle --auto` (which itself fans out several reviewers). A batch multiplies that.
+If the user selects **more than 4 units**, state the rough multiplier and ask for explicit
+confirmation before A4. CLAUDE.md token economy applies — the parallelism must earn its cost.
+
+### A4 — Parallel implement (worktrees)
+
+**Main session owns worktree lifecycle** — do NOT use the Agent `isolation: "worktree"` flag
+(that worktree is scoped to a single agent's lifetime and is not guaranteed to survive across
+the later A5/A6 calls). Instead, for each selected unit, the main session creates a persistent
+worktree itself, then hands its path to a plain agent:
+
+```bash
+git worktree add "../<repo>-wt-<slug>" -b "<type>/<slug>"   # one per unit, before fan-out
+```
+
+Derive `<type>/<slug>` per Step 3 Branch rules (bundle → common type). Then fan out one
+implementer agent per unit in a single message (concurrency self-caps). Each agent's brief
+(four-field per `docs/delegation.md`) gives the **worktree path** and says to, in that path:
+1. Mark active per Step 3 "Mark active" rules (flip `[>]`, write `tasks.md` Sprint Contract
+   with `## Covers` for backlog bundles). Operates on the worktree's copy.
+2. Write the Sprint Contract (Step 3 rules; one acceptance checkbox per bundled item).
+3. Implement.
+4. **Commit the work to the unit branch** (e.g. `[WIP] <unit>`). This leaves a clean tree so the
+   A6 rebase works. **Do NOT bump versions, do NOT run `reconcile-harness.py`** — those are
+   deferred to serial convergence. Return the worktree path + branch + a change summary.
+
+The agent must NOT verify its own output. If an agent fails or returns unusable output, drop
+that unit from the batch (and `git worktree remove --force` it) and record it for the final
+report — do not abort the others.
+
+### A5 — Parallel QA
+
+For each successfully-implemented unit, spawn a `qa-verifier` agent (separate from the
+implementer) pointed at that unit's worktree path, verifying against that unit's Sprint Contract.
+Fan out in one message. Collect verdicts.
+
+For any unit with blocking findings: run **one** implementer→qa-verifier retry in its worktree
+(Step "QA" retry rules). Still blocking after one retry → drop the unit from convergence and
+record it. Do not let one unit's failure block the others.
+
+### A6 — Serial convergence (one unit at a time)
+
+**Invariant — never parallelize this step.** Version bump, `reconcile-harness.py` (CHANGELOG
+append + sprint archive), and merge all mutate shared single-copy files. Correctness rides on
+each unit rebasing onto the *previously merged* state. Running two units' convergence at once
+reintroduces exactly the manifest/CHANGELOG collisions this whole design avoids.
+
+Process verified units **sequentially**. For each unit, in its worktree (tree is clean — A4
+committed):
+1. **Rebase on latest `main`** (`git fetch` + `git rebase origin/main`). Clustering aims to keep
+   units in separate areas, but it is not a hard guarantee (two units may still share an
+   import/util). If the rebase conflicts, stop that unit, record the conflict, continue with the rest.
+2. **Version bump** — compute from the **now-current** manifests (per `docs/conventions.md`).
+   Doing this post-rebase is what prevents the version collision that parallel bumps would cause.
+3. **Pre-merge cleanup** — Step 3 "Pre-merge cleanup": set `status: done`, run
+   `reconcile-harness.py` for backlog units; flip finding `[ ]` → `[x]` for tasks.md units.
+4. **Hand off** — `Skill(dev-tools:dev-review-cycle)` with `args: --auto` against this branch.
+   It commits the bump/cleanup edits, opens the PR, collects reviews, waits CI, merges.
+5. Only after this unit's PR merges (or is abandoned) move to the next unit, so the following
+   unit rebases onto the just-merged state.
+
+**Per-unit CI failure** — abandon that PR + branch (close PR, delete branch), record it,
+continue with remaining units. Independent PRs are the whole point of this model: one bad unit
+does not strand the others.
+
+### A7 — Cleanup & report
+
+The main session removes every worktree it created in A4 (`git worktree remove <path>`; add
+`--force` for dropped units that still have changes), and deletes abandoned branches. Then emit
+a summary table: each unit → merged / abandoned (reason) / dropped (reason), with PR links. This
+is the only place the per-unit outcomes are surfaced, so do not skip it.
 
 ## Edge cases
 
