@@ -36,8 +36,54 @@ def tasks_field(content: str, field: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _heading_indices(lines: list) -> list:
+    """Indices of top-level '# ' heading lines, ignoring fenced code blocks.
+
+    A '#'-prefixed line inside a ``` or ~~~ fence (e.g. a shell comment in an
+    example) is content, not a heading, and must not anchor sprint detection.
+    """
+    indices = []
+    fence = None  # the fence marker char (' ` ' or '~') while inside a block
+    for i, ln in enumerate(lines):
+        m = re.match(r'^\s*(`{3,}|~{3,})', ln)
+        if m:
+            marker = m.group(1)[0]
+            if fence is None:
+                fence = marker
+            elif marker == fence:
+                fence = None
+            continue
+        if fence is None and re.match(r'^#\s+', ln):
+            indices.append(i)
+    return indices
+
+
+def _sprint_heading_index(lines: list) -> int | None:
+    """Index of the sprint Contract's '# ' heading line.
+
+    The sprint block is the top-level '# ' heading whose section (heading through
+    the next top-level heading or EOF) owns a 'status:' field.  Falls back to the
+    first top-level heading when none owns a status field, and None when there is
+    no top-level heading at all.  Fence-aware via _heading_indices so heading-like
+    lines inside code blocks are never matched.
+    """
+    headings = _heading_indices(lines)
+    if not headings:
+        return None
+    for k, h in enumerate(headings):
+        end = headings[k + 1] if k + 1 < len(headings) else len(lines)
+        section = "".join(lines[h:end])
+        if re.search(r'^status:\s*\S', section, re.MULTILINE | re.IGNORECASE):
+            return h
+    return headings[0]
+
+
 def tasks_title(content: str) -> str:
-    m = re.search(r'^#\s+(.+)', content, re.MULTILINE)
+    lines = content.splitlines(keepends=True)
+    idx = _sprint_heading_index(lines)
+    if idx is None:
+        return "untitled sprint"
+    m = re.match(r'^#\s+(.+)', lines[idx])
     return (m.group(1).strip() if m else None) or "untitled sprint"
 
 
@@ -121,27 +167,28 @@ def strip_sprint_block(content: str) -> str | None:
     nothing meaningful (only whitespace / '---' separators) is left -- in which
     case the caller unlinks tasks.md exactly as the pre-fix behaviour did.
 
+    Heading detection is fence-aware (see _heading_indices): a '#'-prefixed line
+    inside a ``` or ~~~ code block is content, not a heading, so example shell
+    comments under '## Review Backlog' no longer get misread as the sprint heading.
+
     Ordering invariant: non-sprint content (e.g. '## Review Backlog') MUST appear
-    BEFORE the Sprint Contract '# ' heading.  The sprint block spans from its '# '
-    heading to the next '# ' heading or EOF, and legitimately contains '##'
-    sub-sections (Scope, Acceptance criteria, Covers, Out of scope) -- so the
-    boundary cannot be an '##' heading.  Any content placed AFTER the sprint
-    heading is therefore treated as part of the sprint block and removed with it.
-    The next-tasks / harness-init templates always emit Review Backlog above the
-    sprint, which satisfies this.
+    BEFORE the Sprint Contract '# ' heading.  The sprint block spans from the
+    status-owning '# ' heading to the next top-level '# ' heading or EOF, and
+    legitimately contains '##' sub-sections (Scope, Acceptance criteria, Covers,
+    Out of scope) -- so the boundary cannot be an '##' heading.  Any content placed
+    AFTER the sprint heading is therefore treated as part of the sprint block and
+    removed with it.  The next-tasks / harness-init templates always emit Review
+    Backlog above the sprint, which satisfies this.
 
     This preserves unrelated open '## Review Backlog' items that previously were
     destroyed by an unconditional TASKS.unlink() on sprint completion.
     """
     lines = content.splitlines(keepends=True)
-    start = next((i for i, ln in enumerate(lines) if re.match(r'^#\s+', ln)), None)
+    start = _sprint_heading_index(lines)
     if start is None:
         return None  # no sprint heading to isolate -> treat as fully consumed
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if re.match(r'^#\s+', lines[j]):
-            end = j
-            break
+    headings = _heading_indices(lines)
+    end = next((h for h in headings if h > start), len(lines))
     remainder = "".join(lines[:start] + lines[end:])
     # Drop separators / blank lines left dangling at the new end of file.
     remainder = re.sub(r'\s*(?:-{3,}\s*)*\Z', '', remainder)

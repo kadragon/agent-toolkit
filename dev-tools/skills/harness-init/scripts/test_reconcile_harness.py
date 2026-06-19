@@ -321,6 +321,48 @@ def test_strip_only_sprint_returns_none():
     check("strip-solo: returns None", result is None, repr(result))
 
 
+# A fenced code block under ## Review Backlog containing a '# ...' line must NOT
+# be misread as the sprint heading. Before the status-gated fix, the first
+# '^#\s+' match landed on the fenced comment line, truncating Review Backlog
+# content and leaving the real Sprint Contract un-stripped.
+TASKS_FENCED_COMMENT = """\
+## Review Backlog
+
+### PR #99 — findings
+- [ ] open finding one
+
+```sh
+# this is a shell comment, not a sprint heading
+echo hello
+```
+
+- [ ] open finding two
+
+---
+
+# Sprint: real sprint
+
+status: done
+
+**Scope**
+- something
+"""
+
+
+def test_strip_ignores_fenced_heading_like_lines():
+    """A '#' line inside a fenced code block is not treated as the sprint heading."""
+    result = mod.strip_sprint_block(TASKS_FENCED_COMMENT)
+    check("fenced: returns content (not None)", result is not None, repr(result))
+    check("fenced: real sprint heading removed",
+          result and "# Sprint: real sprint" not in result, repr(result))
+    check("fenced: status line removed", result and "status: done" not in result)
+    check("fenced: first open finding preserved", result and "open finding one" in result)
+    check("fenced: second open finding preserved", result and "open finding two" in result)
+    check("fenced: fenced comment line preserved",
+          result and "this is a shell comment" in result)
+    check("fenced: code fence preserved", result and "echo hello" in result)
+
+
 # ---------------------------------------------------------------------------
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
@@ -416,6 +458,7 @@ SUITES = [
     ("shims: direct invocation", test_shims_direct),
     ("strip_sprint_block: preserves Review Backlog", test_strip_preserves_review_backlog),
     ("strip_sprint_block: only sprint → None", test_strip_only_sprint_returns_none),
+    ("strip_sprint_block: ignores fenced heading-like lines", test_strip_ignores_fenced_heading_like_lines),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
