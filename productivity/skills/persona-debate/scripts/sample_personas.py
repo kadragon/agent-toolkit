@@ -218,8 +218,12 @@ def cmd_test(_args):
     check("seed normalized into int32 range", base == sample("sex = 0", 6, 42 + SEED_MOD))
     check("WHERE filter is honored (every sampled id is even)",
           all(i % 2 == 0 for i in sample("sex = 0", 50, 1)))
-    check("subquery blocks sample-below-filter (filtered set not emptied)",
-          sorted(sample("id < 3", 6, 7)) == [0, 1, 2])
+    # Filter matches far more than n, so a strict len == n check fails if the
+    # optimizer ever pushes the sample below the filter (pushdown would sample
+    # 6 of 1000 then filter id < 50 down to ~0 rows).
+    guarded = sample("id < 50", 6, 7)
+    check("subquery blocks sample-below-filter (sample applied after filter)",
+          len(guarded) == 6 and all(i < 50 for i in guarded))
     check("fewer-than-n returns all matches", len(sample("id < 5", 20, 7)) == 5)
     check("no seed returns a full panel of n", len(sample("TRUE", 6, None)) == 6)
 
