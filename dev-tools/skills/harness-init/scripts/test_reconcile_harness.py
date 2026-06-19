@@ -363,6 +363,77 @@ def test_strip_ignores_fenced_heading_like_lines():
     check("fenced: code fence preserved", result and "echo hello" in result)
 
 
+def test_tasks_title_ignores_fenced_heading_like_lines():
+    """tasks_title resolves to the real sprint heading, not a fenced '# ' line."""
+    title = mod.tasks_title(TASKS_FENCED_COMMENT)
+    check("title-fenced: real sprint title", title == "Sprint: real sprint", repr(title))
+
+
+# A fenced 'status:' example under a NON-sprint top-level '# ' heading must not
+# make that heading look like the sprint block. Heading detection alone is
+# fence-aware; the 'status:' probe must be too, or the wrong section gets stripped.
+TASKS_FENCED_STATUS = """\
+# Notes
+
+```
+status: active
+```
+
+# Sprint: real
+
+status: done
+
+**Scope**
+- something
+"""
+
+
+def test_strip_status_probe_is_fence_aware():
+    """A fenced 'status:' under a non-sprint heading does not anchor the sprint."""
+    result = mod.strip_sprint_block(TASKS_FENCED_STATUS)
+    check("fenced-status: returns content (not None)", result is not None, repr(result))
+    check("fenced-status: non-sprint heading preserved", result and "# Notes" in result)
+    check("fenced-status: fenced status example preserved",
+          result and "status: active" in result)
+    check("fenced-status: real sprint heading removed",
+          result and "# Sprint: real" not in result, repr(result))
+    check("fenced-status: real status line removed", result and "status: done" not in result)
+
+
+# Nested fences: a shorter inner fence must NOT close a longer outer one, so a
+# '# ' line still inside the outer 4-backtick block is not read as a heading.
+TASKS_NESTED_FENCE = """\
+## Review Backlog
+
+- [ ] open finding
+
+````md
+```
+# not a heading
+```
+````
+
+---
+
+# Sprint: real
+
+status: done
+
+**Scope**
+- x
+"""
+
+
+def test_strip_handles_nested_fences():
+    """A shorter inner fence does not prematurely close a longer outer fence."""
+    result = mod.strip_sprint_block(TASKS_NESTED_FENCE)
+    check("nested: returns content (not None)", result is not None, repr(result))
+    check("nested: open finding preserved", result and "open finding" in result)
+    check("nested: nested fence content preserved", result and "# not a heading" in result)
+    check("nested: real sprint heading removed",
+          result and "# Sprint: real" not in result, repr(result))
+
+
 # ---------------------------------------------------------------------------
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
@@ -438,6 +509,21 @@ def test_main_statusless_retained_reports_cleanly():
           r["tasks_exists"] and "leftover finding" in r["tasks_body"])
 
 
+def test_main_statusless_fenced_comment_reports_cleanly():
+    """A retained statusless tasks.md whose Review Backlog has a fenced '# comment'
+    must NOT be misread as a sprint heading (schema drift). This is the steady
+    state after strip_sprint_block on a backlog containing a shell example."""
+    statusless = "## Review Backlog\n\n```sh\n# a shell comment\n```\n- [ ] leftover finding\n"
+    backlog = "## Now\n- [ ] queued item\n"
+    r = _run_main_in_tmp(statusless, backlog)
+    check("statusless-fenced: no schema-drift warning",
+          "unknown status" not in r["stderr"], r["stderr"])
+    check("statusless-fenced: backlog reported",
+          "Backlog:" in r["stdout"] or "Backlog clear" in r["stdout"], r["stdout"])
+    check("statusless-fenced: tasks.md left intact",
+          r["tasks_exists"] and "leftover finding" in r["tasks_body"])
+
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -459,10 +545,14 @@ SUITES = [
     ("strip_sprint_block: preserves Review Backlog", test_strip_preserves_review_backlog),
     ("strip_sprint_block: only sprint → None", test_strip_only_sprint_returns_none),
     ("strip_sprint_block: ignores fenced heading-like lines", test_strip_ignores_fenced_heading_like_lines),
+    ("tasks_title: ignores fenced heading-like lines", test_tasks_title_ignores_fenced_heading_like_lines),
+    ("strip_sprint_block: status probe is fence-aware", test_strip_status_probe_is_fence_aware),
+    ("strip_sprint_block: handles nested fences", test_strip_handles_nested_fences),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
+    ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
 ]
 
 if __name__ == "__main__":

@@ -36,45 +36,74 @@ def tasks_field(content: str, field: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def _heading_indices(lines: list) -> list:
+def _fence_mask(lines: list) -> list:
+    """Per-line bool: True when the line is real content (outside fenced code
+    blocks); fence delimiter lines themselves are False.
+
+    A closing fence must use the same character as its opener and be at least as
+    long (CommonMark), so a shorter inner fence never closes a longer outer one
+    (e.g. a 3-backtick line inside a 4-backtick block stays inside the block).
+    """
+    mask = []
+    fence = None  # opening marker string (e.g. '```' / '````') while a block is open
+    for ln in lines:
+        m = re.match(r'^\s*(`{3,}|~{3,})', ln)
+        if m:
+            marker = m.group(1)
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = None
+            mask.append(False)
+        else:
+            mask.append(fence is None)
+    return mask
+
+
+def _heading_indices(lines: list, mask: list | None = None) -> list:
     """Indices of top-level '# ' heading lines, ignoring fenced code blocks.
 
     A '#'-prefixed line inside a ``` or ~~~ fence (e.g. a shell comment in an
     example) is content, not a heading, and must not anchor sprint detection.
+    Pass a precomputed ``mask`` to avoid re-scanning fences.
     """
-    indices = []
-    fence = None  # the fence marker char (' ` ' or '~') while inside a block
-    for i, ln in enumerate(lines):
-        m = re.match(r'^\s*(`{3,}|~{3,})', ln)
-        if m:
-            marker = m.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif marker == fence:
-                fence = None
-            continue
-        if fence is None and re.match(r'^#\s+', ln):
-            indices.append(i)
-    return indices
+    if mask is None:
+        mask = _fence_mask(lines)
+    return [i for i, ln in enumerate(lines) if mask[i] and re.match(r'^#\s+', ln)]
 
 
-def _sprint_heading_index(lines: list) -> int | None:
+def _has_sprint_heading(content: str) -> bool:
+    """True when content has a top-level '# ' heading outside any code fence.
+
+    Fence-aware replacement for a raw top-level-heading regex: a fenced
+    '# comment' in a retained Review Backlog must not read as a sprint heading.
+    """
+    return bool(_heading_indices(content.splitlines(keepends=True)))
+
+
+def _sprint_heading_index(lines: list, headings: list | None = None,
+                          mask: list | None = None) -> int | None:
     """Index of the sprint Contract's '# ' heading line.
 
     The sprint block is the top-level '# ' heading whose section (heading through
     the next top-level heading or EOF) owns a 'status:' field.  Falls back to the
     first top-level heading when none owns a status field, and None when there is
-    no top-level heading at all.  Fence-aware via _heading_indices so heading-like
-    lines inside code blocks are never matched.
+    no top-level heading at all.  Both heading detection AND the 'status:' probe
+    are fence-aware, so heading-like / status-like lines inside code blocks are
+    never matched.  Callers may pass precomputed ``headings``/``mask`` to avoid
+    re-scanning fences.
     """
-    headings = _heading_indices(lines)
+    if mask is None:
+        mask = _fence_mask(lines)
+    if headings is None:
+        headings = _heading_indices(lines, mask)
     if not headings:
         return None
     for k, h in enumerate(headings):
         end = headings[k + 1] if k + 1 < len(headings) else len(lines)
-        section = "".join(lines[h:end])
-        if re.search(r'^status:\s*\S', section, re.MULTILINE | re.IGNORECASE):
-            return h
+        for i in range(h, end):
+            if mask[i] and re.match(r'^status:\s*\S', lines[i], re.IGNORECASE):
+                return h
     return headings[0]
 
 
@@ -184,10 +213,11 @@ def strip_sprint_block(content: str) -> str | None:
     destroyed by an unconditional TASKS.unlink() on sprint completion.
     """
     lines = content.splitlines(keepends=True)
-    start = _sprint_heading_index(lines)
+    mask = _fence_mask(lines)
+    headings = _heading_indices(lines, mask)
+    start = _sprint_heading_index(lines, headings, mask)
     if start is None:
         return None  # no sprint heading to isolate -> treat as fully consumed
-    headings = _heading_indices(lines)
     end = next((h for h in headings if h > start), len(lines))
     remainder = "".join(lines[:start] + lines[end:])
     # Drop separators / blank lines left dangling at the new end of file.
@@ -285,7 +315,7 @@ def main() -> None:
             print(f"Sprint active: {title}")
             return
 
-        elif raw_status is None and not re.search(r'^#\s+', tasks_content, re.MULTILINE):
+        elif raw_status is None and not _has_sprint_heading(tasks_content):
             # Retained Review-Backlog-only tasks.md: a prior sprint completion
             # stripped the contract block via strip_sprint_block(), leaving no
             # '# ' heading and no status. This is the expected steady state, not
