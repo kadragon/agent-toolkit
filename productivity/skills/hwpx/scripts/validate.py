@@ -123,19 +123,16 @@ def _check_idref(section_root: ET.Element, defined: dict[str, set[str]], section
     return errors
 
 
-def _charpr_font_warnings(xml_str: str, heights: dict[str, int], min_pt: float) -> list[str]:
+def _charpr_font_warnings(root: ET.Element, heights: dict[str, int], min_pt: float) -> list[str]:
     """Return warnings for runs with text whose charPr height is below min_pt.
 
     Walks the section tree with ElementTree so a run is matched regardless of
     where `<hp:t>` sits among its children (e.g. a ctrl/field marker may precede
     the text). Table/cell context comes from ancestor lookup via a parent map,
-    avoiding any per-match backward scan of the source string.
+    avoiding any per-match backward scan of the source string. The caller passes
+    the already-parsed section root so the XML is not parsed a second time.
     """
     warns: list[str] = []
-    try:
-        root = ET.fromstring(xml_str)
-    except ET.ParseError:
-        return warns
 
     run_tag = f"{{{NS_HP}}}run"
     t_tag = f"{{{NS_HP}}}t"
@@ -247,7 +244,7 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
             xml_str = section_bytes[sec_name].decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
-            warnings.extend(_charpr_font_warnings(xml_str, charpr_heights, eff_min_pt))
+            warnings.extend(_charpr_font_warnings(sec_root, charpr_heights, eff_min_pt))
         dupes = {i for i, n in Counter(all_para_ids).items() if n > 1}
         if dupes:
             base = baseline_dupes or set()
@@ -461,7 +458,7 @@ def _run_tests() -> None:
 
     # VAL-1: 3pt charPr triggers warning
     try:
-        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        warns = _charpr_font_warnings(ET.fromstring(_section_with_text), _heights, 5.0)
         if not warns:
             failures.append("VAL-1 FAIL: expected warning for 3pt charPr")
         else:
@@ -471,7 +468,7 @@ def _run_tests() -> None:
 
     # VAL-1b: only warns for small charPr (not 10pt)
     try:
-        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        warns = _charpr_font_warnings(ET.fromstring(_section_with_text), _heights, 5.0)
         if len(warns) > 1:
             failures.append("VAL-1b FAIL: expected 1 warning, got %d: %r" % (len(warns), warns))
         else:
@@ -496,7 +493,7 @@ def _run_tests() -> None:
         '</hp:BodyText>'
     )
     try:
-        warns_empty = _charpr_font_warnings(_section_empty_run, _heights, 5.0)
+        warns_empty = _charpr_font_warnings(ET.fromstring(_section_empty_run), _heights, 5.0)
         if warns_empty:
             failures.append("VAL-2 FAIL: empty run should not warn, got: %r" % warns_empty)
         else:
@@ -514,7 +511,7 @@ def _run_tests() -> None:
         '</hp:BodyText>'
     )
     try:
-        warns_ctrl = _charpr_font_warnings(_section_ctrl_before_text, _heights, 5.0)
+        warns_ctrl = _charpr_font_warnings(ET.fromstring(_section_ctrl_before_text), _heights, 5.0)
         if not warns_ctrl:
             failures.append("VAL-3 FAIL: expected warning when <hp:t> is not first child of <hp:run>")
         else:

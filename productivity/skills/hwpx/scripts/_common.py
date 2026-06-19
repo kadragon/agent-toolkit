@@ -55,7 +55,7 @@ def load_charpr_heights(path) -> dict:
         cid = cp.get("id")
         try:
             height = int(cp.get("height", "0"))
-        except (TypeError, ValueError):
+        except ValueError:
             continue
         if cid is not None:
             result[cid] = height
