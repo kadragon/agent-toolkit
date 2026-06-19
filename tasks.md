@@ -8,8 +8,8 @@
 
 ### Follow-up (from bundle QA)
 
-- [ ] `validate.py:do_validate` (~line 238) — unwrapped `int(cp.get("height","0"))` mirrors the `_common.py` ValueError risk just fixed; wrap in try/except for parity. conf 45%, P3.
-- [ ] `validate.py` / `_common.py` — stdlib `xml.etree.ElementTree` used for parsing untrusted-ish HWPX XML (XXE/billion-laughs). Local-CLI risk is low; consider `defusedxml` if scope ever broadens. conf 30%, P3.
+- [x] `validate.py:do_validate` — `int(cp.get("height","0"))` charPr height extraction now wrapped in `try/except ValueError: continue`, mirroring `_common.py load_charpr_heights`. Red test VAL-4 added. (PR-pending fix/hwpx-charpr-height-parity)
+- [x] `validate.py` / `_common.py` — stdlib `xml.etree.ElementTree` XXE/billion-laughs. **Won't-fix:** stdlib ET default parser does NOT expand internal entities (billion-laughs raises "undefined entity") and does NOT resolve external entities (no XXE); local-CLI risk is ~nil. Adding `defusedxml` would impose a third-party runtime dep on a shipped skill across 5 files for no practical gain. Revisit only if HWPX parsing scope broadens to untrusted network input.
 
 ---
 

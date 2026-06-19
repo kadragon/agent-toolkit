@@ -232,7 +232,10 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
         for cp in header_root.iter():
             if cp.tag.endswith("}charPr") or cp.tag == "charPr":
                 cid = cp.get("id")
-                h = int(cp.get("height", "0"))
+                try:
+                    h = int(cp.get("height", "0"))
+                except ValueError:
+                    continue
                 if cid is not None:
                     charpr_heights[cid] = h
         eff_min_pt = min_pt if min_pt is not None else MIN_READABLE_PT
@@ -518,6 +521,28 @@ def _run_tests() -> None:
             print("VAL-3 PASS: non-first-child <hp:t> still warns")
     except Exception as e:
         failures.append("VAL-3 FAIL: %s" % e)
+
+    # VAL-4: malformed non-numeric charPr height in header must not raise (parity with _common COMMON-1)
+    import tempfile
+    _header_bad_height = (
+        '<?xml version="1.0"?>'
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" secCnt="0">'
+        '<hh:charPr id="5" height="1000"/>'
+        '<hh:charPr id="9" height="not-a-number"/>'
+        '</hh:head>'
+    )
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            arc = Path(d) / "bad.hwpx"
+            with ZipFile(str(arc), "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip")
+                zf.writestr("Contents/header.xml", _header_bad_height)
+            do_validate(str(arc))
+        print("VAL-4 PASS: malformed charPr height does not raise")
+    except ValueError as e:
+        failures.append("VAL-4 FAIL: malformed height raised ValueError: %s" % e)
+    except Exception as e:
+        failures.append("VAL-4 FAIL: %s" % e)
 
     if failures:
         for f in failures:
