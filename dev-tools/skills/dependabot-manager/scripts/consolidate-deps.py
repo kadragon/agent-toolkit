@@ -431,6 +431,15 @@ def cmd_selftest():
     check(results['bar']['new_version'] == '2.0.0-beta.1',
           f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}")
 
+    # ASCII scoping (parse_group_pr_body): re.ASCII keeps `\w` ASCII-only, so a
+    # trailing non-ASCII char on a version is not absorbed into the token. Without
+    # the flag the `α` would be captured as part of new_version → this assertion
+    # fails, locking the flag in.
+    ascii_parsed = {r['package']: r for r in parse_group_pr_body(
+        "Updates `qux` from 1.0.0 to 1.0.0α\n")}
+    check(ascii_parsed['qux']['new_version'] == '1.0.0',
+          f"qux new_version should be 1.0.0 (α not absorbed), got {ascii_parsed['qux']['new_version']!r}")
+
     # --- _replace_pinned_versions: pin rewrite + missing-package tracking ---
     # A real hit rewrites the pinned line; an absent package is reported as
     # missing (so the caller can warn instead of silently committing stale
@@ -451,8 +460,9 @@ def cmd_selftest():
     check(missing == ['absent'],
           f"missing should be ['absent'] (zero-substitution package), got {missing!r}")
 
-    # PEP 440 epoch version: `!` is in the version class, so the whole epoch
-    # token must be consumed and rewritten — no stale `!1.0.0` suffix left.
+    # PEP 440 epoch version: proves `!` is in the version class so the whole
+    # epoch token is consumed and rewritten — no stale `!1.0.0` suffix left.
+    # (All-ASCII, so this does NOT exercise re.ASCII; the unicode case below does.)
     epoch_content, _ = _replace_pinned_versions(
         "foo==1!1.0.0\n", [{'package': 'foo', 'new_version': '2!2.0.0'}])
     check(epoch_content == "foo==2!2.0.0\n",
