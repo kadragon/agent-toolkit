@@ -1,5 +1,12 @@
 ## Review Backlog
 
+### PR #81 — consolidate-deps PR #80 fixes review cycle (out-of-scope findings)
+
+Pre-existing items surfaced during PR #81's review; the regex/version class predates this PR (introduced in PR #80), so they were left out of scope.
+
+- [ ] `consolidate-deps.py:_replace_pinned_versions` (and `parse_group_pr_body`) — version-replace class `[\w.!+-]+` uses Unicode `\w`; a non-ASCII version token (e.g. `1.0.0α`) would match. Scope to ASCII via `re.ASCII` flag or an explicit `[A-Za-z0-9_.!+-]` class. Pre-existing (PR #80). conf ~70%, P3. (source: review)
+- [ ] `consolidate-deps.py:--selftest` — no assertion covers a PEP 440 epoch version (`foo==1!1.0.0` → `foo==2.0.0`) even though `!` is in the version class. Add an epoch case to `_replace_pinned_versions` and/or `parse_group_pr_body` selftest. Pre-existing behavior. conf ~60%, P3. (source: review)
+
 ### PR #80 — consolidate-deps review-backlog fixes (out-of-scope findings)
 
 Out-of-scope items surfaced during PR #80's review cycle. Behavior changes / refactors that need their own design pass, not part of the 5 bundled fixes.

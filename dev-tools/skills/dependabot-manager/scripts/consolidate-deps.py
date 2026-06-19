@@ -109,10 +109,11 @@ def detect_project_type() -> str:
 def update_dependencies(updates: List[Dict], project_type: str) -> None:
     """Update dependency files based on project type.
 
-    Contract (shared by every updater below): mutate the project's dependency
-    files in place and raise on any failure. There is no bool return — `main`
-    wraps the call in try/except and relies on the raise→`cleanup_and_exit`
-    path, so a bool would be dead signal that masks the real contract.
+    Contract (shared by every updater below): each updater mutates the project's
+    dependency files in place and raises on failure. This dispatcher propagates
+    those raises unchanged and itself raises only for an unknown project_type;
+    there is no bool return — `main` wraps the call in try/except and relies on
+    the raise→`cleanup_and_exit` path, so a bool would be dead signal.
     """
     if project_type == 'uv':
         update_uv_dependencies(updates)
@@ -172,8 +173,9 @@ def update_pip_tools_dependencies(updates: List[Dict]) -> None:
         print(
             f"WARNING: {len(missing)} package(s) not pinned in requirements.in, "
             f"left unchanged: {', '.join(missing)}. They may be transitive "
-            f"(pinned only in the compiled requirements.txt) or renamed — verify "
-            f"the consolidated PR before merging.",
+            f"(pinned only in the compiled requirements.txt) or renamed. "
+            f"pip-compile still runs on the partial requirements.in below — "
+            f"verify the consolidated PR before merging.",
             file=sys.stderr,
         )
     req_file.write_text(content)
@@ -205,9 +207,10 @@ def run_tests(project_type: str) -> bool:
             exec_cmd('poetry run pytest')
             exec_cmd('poetry run mypy .', check=False)
         else:
-            # `python -m pytest`, not bare `pytest`: the bare binary may resolve
-            # to a global install instead of the project venv's interpreter.
-            exec_cmd('python -m pytest')
+            # `sys.executable -m pytest`, not bare `pytest` or `python -m`: bare
+            # `pytest` may resolve to a global install, and `python` is absent on
+            # python3-only systems. The running interpreter is always present.
+            exec_cmd(f'{sys.executable} -m pytest')
         return True
     except subprocess.CalledProcessError:
         return False
@@ -440,6 +443,8 @@ def cmd_selftest():
     check('foo==1.1.0' in new_content, f"foo not rewritten to 1.1.0: {new_content!r}")
     check('bar-foo==9.9.9' in new_content,
           f"bar-foo must stay untouched (line anchor), got {new_content!r}")
+    check('bar-foo==1.1.0' not in new_content,
+          f"bar-foo must NOT be rewritten to 1.1.0 (line anchor), got {new_content!r}")
     check(missing == ['absent'],
           f"missing should be ['absent'] (zero-substitution package), got {missing!r}")
 
