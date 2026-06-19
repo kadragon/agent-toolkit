@@ -78,7 +78,12 @@ def parse_group_pr_body(body: str) -> List[Dict]:
     Last occurrence per package wins (Dependabot lists the final target last).
     """
     seen: Dict[str, Dict] = {}
-    for m in re.finditer(r'Updates `(.+?)` from (\S+) to (\S+)', body or ''):
+    # Version tokens are word chars, dots, hyphens, and '+' (PEP 440 local
+    # versions like 1.0.0+local; semver pre-release like 2.0.0-beta.3). The token
+    # must END in a word char ([\w.+-]*[\w]): a real version never ends in a dot,
+    # so this drops trailing markdown punctuation ("... to 1.4.7.") while keeping
+    # internal dots — something neither \S+ nor a flat [\w.+-]+ class can do.
+    for m in re.finditer(r'Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)', body or ''):
         seen[m.group(1)] = {
             'package': m.group(1),
             'old_version': m.group(2),
@@ -233,7 +238,8 @@ def main():
         print(
             f"WARNING: PR #{pr['number']} ({pr['title']!r}) parsed from neither "
             f"title nor body — SKIPPING. Consolidate it manually or its updates "
-            f"will be missing from the combined PR."
+            f"will be missing from the combined PR.",
+            file=sys.stderr,
         )
 
     if not updates:
@@ -332,11 +338,13 @@ def main():
     # Get PR number from URL
     pr_number = pr_url.rstrip('/').split('/')[-1]
 
-    # Close individual PRs
+    # Close individual PRs. A grouped PR contributes one entry per package, all
+    # sharing the same PR number — dedupe so we close (and log) each PR once
+    # instead of N times. dict.fromkeys preserves first-seen order.
     print('\nClosing individual dependabot PRs...')
-    for u in updates:
-        exec_cmd(f'gh pr close {u["pr"]} -c "Consolidated into #{pr_number}"', check=False)
-        print(f'   Closed PR #{u["pr"]}')
+    for pr_num in dict.fromkeys(u['pr'] for u in updates):
+        exec_cmd(f'gh pr close {pr_num} -c "Consolidated into #{pr_number}"', check=False)
+        print(f'   Closed PR #{pr_num}')
 
     print('\nConsolidation complete!')
     print('\nNext steps:')

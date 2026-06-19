@@ -72,7 +72,12 @@ function parsePackageUpdate(title) {
 // per package wins (Dependabot lists the final target last).
 function parseGroupPrBody(body) {
   const seen = new Map();
-  const re = /Updates `(.+?)` from (\S+) to (\S+)/g;
+  // Version tokens are word chars, dots, hyphens, and '+' (PEP 440 local
+  // versions; semver pre-release like 2.0.0-beta.3). The token must END in a
+  // word char ([\w.+-]*\w): a real version never ends in a dot, so this drops
+  // trailing markdown punctuation ("... to 1.4.7.") while keeping internal dots
+  // — something neither \S+ nor a flat [\w.+-]+ class can do.
+  const re = /Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)/g;
   let m;
   while ((m = re.exec(body || '')) !== null) {
     seen.set(m[1], { package: m[1], oldVersion: m[2], newVersion: m[3] });
@@ -148,7 +153,7 @@ async function main() {
       return;
     }
 
-    console.log(
+    console.error(
       `WARNING: PR #${pr.number} ("${pr.title}") parsed from neither title nor ` +
       `body — SKIPPING. Consolidate it manually or its updates will be missing ` +
       `from the combined PR.`
@@ -271,11 +276,14 @@ ${prRelated}
   }
   const prNumber = prNumberMatch[1];
 
-  // Close individual PRs
+  // Close individual PRs. A grouped PR contributes one entry per package, all
+  // sharing the same PR number — dedupe so we close (and log) each PR once
+  // instead of N times.
   console.log('\nClosing individual dependabot PRs...');
-  updates.forEach(u => {
-    exec(`gh pr close ${u.pr} -c "Consolidated into #${prNumber}"`, { ignoreError: true });
-    console.log(`   Closed PR #${u.pr}`);
+  const closedPrNumbers = [...new Set(updates.map(u => u.pr))];
+  closedPrNumbers.forEach(prNum => {
+    exec(`gh pr close ${prNum} -c "Consolidated into #${prNumber}"`, { ignoreError: true });
+    console.log(`   Closed PR #${prNum}`);
   });
 
   console.log('\nConsolidation complete!');
@@ -287,7 +295,7 @@ ${prRelated}
     prNumber,
     prUrl,
     updates,
-    closedPRs: updates.map(u => u.pr)
+    closedPRs: closedPrNumbers
   };
 }
 
