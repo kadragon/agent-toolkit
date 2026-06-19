@@ -50,6 +50,33 @@ To define a project-specific terse style, create `.claude/output-styles/terse.md
 
 **Worth doing if**: the repo's agents consistently over-explain completed work. Measurable via `ccusage` — output tokens per message should drop noticeably after switching.
 
+## Auto-memory (model-authored)
+
+Recent Claude Code (v2.1.59+) writes its own discovered learnings to a per-project memory dir (`MEMORY.md` + topic files). The first ~200 lines / 25 KB of `MEMORY.md` load every session; topic files load on demand. It is per-repo, shared across worktrees, machine-local.
+
+**Boundary with the harness you author** — keep them distinct so they don't drift:
+
+| Home | Holds | Authored by |
+|------|-------|-------------|
+| AGENTS.md, `.claude/rules/`, `docs/` | durable code/repo facts — architecture, conventions, golden principles | human, version-controlled |
+| auto-memory (`MEMORY.md`) | discovered preferences, cross-session learnings | the model, machine-local |
+
+A code fact that belongs in `docs/` should never live only in auto-memory (it won't survive a fresh clone or reach other contributors). Conversely, don't hand-curate `MEMORY.md` — that's the model's scratchpad.
+
+**Settings:**
+
+```json
+{
+  "autoMemoryEnabled": true,
+  "autoMemoryDirectory": "~/.claude/projects/<project>/memory"
+}
+```
+
+- Disable per-session with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, or globally via `autoMemoryEnabled: false`.
+- Relocate with `autoMemoryDirectory` (e.g. onto a synced volume).
+
+**Why not auto-apply**: it's on by default in recent versions and the boundary is a team decision — harness-init only documents it (a line in AGENTS.md `## Maintenance`), it does not flip the toggle.
+
 ## Autocompact-aware handoff
 
 When autocompaction is imminent, agents often preemptively wrap up work prematurely ("context anxiety" — see `workflows-template.md`). Companion pattern: write a `handoff-<feature>.md` file at the start of multi-session work, containing goals, constraints, and current state. Reload it in the next session to pick up cleanly instead of relying on compaction recovery.
@@ -63,4 +90,5 @@ This is a process habit, not a setting — but pairs naturally with `CLAUDE_AUTO
 - [anthropics/claude-code#31806](https://github.com/anthropics/claude-code/issues/31806)
 - [anthropics/claude-code#36381](https://github.com/anthropics/claude-code/issues/36381)
 - [Output styles — Claude Code Docs](https://code.claude.com/docs/en/output-styles)
+- [Memory (CLAUDE.md, rules, auto-memory) — Claude Code Docs](https://code.claude.com/docs/en/memory)
 - ["Claude Code used 2.5M tokens on my project. I got it down to 425K" — DEV Community](https://dev.to/cytostack/claude-code-used-25m-tokens-on-my-project-i-got-it-down-to-425k-with-6-hook-scripts-d40)

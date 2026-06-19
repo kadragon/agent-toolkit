@@ -40,6 +40,8 @@ Work through steps in order. Each produces concrete artifacts.
 
 Before acting, determine mode AND maturity level.
 
+> **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
+
 **Default toward orchestration infrastructure.** When unsure whether a repo "needs" Step 4b/4c (agents + orchestrator), build them. Empirical failure mode: repos initialized without orchestrator + agents never auto-delegate downstream — the router (Step 7b) has nothing to route to, and the model does everything inline. The override cost of unused role files is ~50 lines on disk; the cost of skipping is a permanently inline workflow that floods the main context. Skip only for genuinely trivial repos (single script, docs-only, one-file library).
 
 **Mode selection:**
@@ -113,6 +115,21 @@ See `examples/agents-md-example.md` for complete reference.
 
 **What NOT to put in AGENTS.md:** workflow details, delegation details, evaluation criteria, architecture deep dives, API references. These belong in `docs/`.
 
+### Step 3a: Path-Scoped Rules (`.claude/rules/`) — conditional
+
+**First decide by tool setup — this is the deciding factor:**
+
+- **Multi-tool repo (Claude Code + Codex / Cursor / Copilot / …):** keep area-specific rules in `docs/*.md` (cross-tool — every agent reaches them via the AGENTS.md Docs Index). **Do NOT split content into `.claude/rules/`** — it is Claude Code-only, so the other tools would never see it and the source fragments. This is the default for any repo targeting more than one agent (including this `agent-toolkit` repo, which targets Claude + Codex).
+- **Claude Code-only repo:** `.claude/rules/{area}.md` with a `paths:` frontmatter glob is worth it. Such rules load **mechanically and only** when Claude touches a matching file — true just-in-time context, zero budget cost elsewhere, and the agent cannot skip them (unlike `docs/`, whose discovery is voluntary).
+
+**Non-fragmenting hybrid (multi-tool repo that still wants Claude's auto-load):** keep the rule *content* in `docs/` (single source both tools read) and add a 2-line `.claude/rules/{area}.md` **pointer** — "When editing `src/billing/**`, read `docs/billing.md`." Claude gets the mechanical trigger-to-read; Codex still reads `docs/billing.md` directly; nothing is duplicated. Use only if the voluntary-read miss rate is actually hurting.
+
+Read `references/path-scoped-rules.md` for layout, the home-selection table (AGENTS.md vs rules vs docs vs settings), loading semantics, and the fat-AGENTS.md migration recipe.
+
+**Important loading fact (applies either way):** `@`-imports do **not** save context — an imported file loads fully at launch. Only **skills, path-scoped rules, and auto-memory** load on demand. So content that bloats AGENTS.md/CLAUDE.md belongs in `docs/` (or, single-tool only, a path-scoped rule) — never an `@`-import.
+
+**Skip entirely if:** the repo has no meaningful area boundaries (single-script / docs-only).
+
 ### Step 4: Create docs/ Knowledge Base
 
 Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc.
@@ -180,6 +197,8 @@ After creation, register in CLAUDE.md: add `## Harness: {Domain}` pointer block 
 
 **Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". Pair with Step 7b's router for highest reliability.
 
+**Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `model` / `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). See `references/orchestrator-template.md` → "Skill frontmatter reference".
+
 **Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same bar as Step 4b (default-on per Step 0).
 
 ### Step 4d: _workspace Pattern
@@ -234,17 +253,20 @@ Each error message becomes micro-instruction telling agent exactly how to fix is
 
 Build multi-layer enforcement chain so golden principles are mechanically guaranteed. Read `references/enforcement-template.md` for detailed templates per layer.
 
-**Four layers (defense in depth):**
+**Five layers (defense in depth):**
+0. **Settings-level deny** (`.claude/settings.json` / managed settings) — `permissions.deny` and `sandbox.enabled` block actions *regardless of what the model decides*. This is the only model-independent layer; hooks can be argued with via clever prompts, prose cannot enforce at all. Put hard blocks here (e.g. deny `Bash(rm -rf*)`, deny writes outside the repo). See `references/enforcement-template.md` → "Layer 0".
 1. **Real-time hooks** (`.claude/settings.json`) — Catch violations at edit time
 2. **Pre-commit checks** — Block commits with unfixed violations
 3. **CI gate** — Block merges on failure
 4. **PR template** (optional) — Checklist derived from golden principles
 
+**Enforcement ladder (official):** a rule that *must always run* → hook; a rule that *must be blocked no matter what* → settings-level deny / sandbox; everything else → AGENTS.md / path-scoped rule. CLAUDE.md and prose are guidance, not enforcement — "to block an action regardless of what Claude decides, use a PreToolUse hook or `permissions.deny`."
+
 **Two Layer 1 extensions (add when appropriate):**
 - **Circuit Breaker** — stops failure cascades before token spiral; fires after N consecutive Bash failures (default: 3). See `references/enforcement-template.md` → "Circuit Breaker".
 - **Consent Gates** — halts before irreversible external actions (push, PR, deploy) until user confirms. See `references/enforcement-template.md` → "Consent Gates".
 
-Match enforcement depth to maturity level target: Level 1 → no hooks required; Level 2 → Layer 1 + 3; Level 3 → all layers + circuit breaker. Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
+Match enforcement depth to maturity level target: Level 1 → no hooks required; Level 2 → Layer 1 + 3; Level 3 → all layers + circuit breaker, with Layer 0 deny rules for any high-risk repo (auth/billing/migrations/infra) at any level. Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
 
 ### Step 7b: Auto-Delegation Routing (when orchestrator or specialized agents exist)
 
@@ -285,6 +307,17 @@ Three items at repo root. All mechanical wins — "create once, benefits every s
 ```
 
 Keeps loading chain clean: Claude loads `CLAUDE.md` → `AGENTS.md` (map) → `docs/` (on demand). If drifts, repair with `scripts/sync-claude-md.sh`.
+
+Keep `CLAUDE.md` a pure `@AGENTS.md` pointer — this is a validated invariant (`scripts/validate-harness.sh` fails any other content) and keeps one cross-tool source of truth. Claude-specific guidance goes in `.claude/rules/` (path-scoped) or AGENTS.md, not in CLAUDE.md.
+
+#### Memory boundary (auto-memory)
+
+Claude Code's auto-memory (model-authored `MEMORY.md` + topic files under the per-project memory dir) is **separate from the harness you author here**. Draw the boundary explicitly so they don't drift or duplicate:
+
+- **Harness files (AGENTS.md, `.claude/rules/`, `docs/`)** = durable repo facts — architecture, conventions, golden principles. Human-authored, version-controlled, reviewed.
+- **Auto-memory (`MEMORY.md`)** = discovered preferences and cross-session learnings the model writes for itself. Machine-local, not a place for code facts.
+
+State this boundary once (a line in AGENTS.md `## Maintenance` or a `docs/` note) so future sessions don't promote a code fact into auto-memory or vice-versa. Toggle/relocation env vars are in `references/power-user-settings.md`.
 
 #### `.claudeignore` (scan exclusions)
 
@@ -392,6 +425,7 @@ All `references/*.md` files cited inline at point of use — consult there. File
 - **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, CLAUDE.md pointer block, directive-description rule. **Read at Step 4c.**
 - **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
+- **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
 - **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.
 
