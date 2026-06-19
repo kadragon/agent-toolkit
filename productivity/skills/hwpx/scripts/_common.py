@@ -53,7 +53,10 @@ def load_charpr_heights(path) -> dict:
         if not (cp.tag.endswith("}charPr") or cp.tag == "charPr"):
             continue
         cid = cp.get("id")
-        height = int(cp.get("height", "0"))
+        try:
+            height = int(cp.get("height", "0"))
+        except ValueError:
+            continue
         if cid is not None:
             result[cid] = height
     return result
@@ -171,3 +174,42 @@ def top_trs(tbl: str) -> list[tuple[int, int]]:
 
 def xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _run_tests() -> None:
+    import tempfile
+
+    failures = []
+
+    # COMMON-1: malformed non-numeric height must not raise; entry skipped, valid kept
+    xml = (
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">'
+        '<hh:charPr id="5" height="1000"/>'
+        '<hh:charPr id="9" height="not-a-number"/>'
+        '</hh:head>'
+    )
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "header.xml"
+        p.write_text(xml, encoding="utf-8")
+        try:
+            heights = load_charpr_heights(p)
+            if heights.get("5") != 1000:
+                failures.append("COMMON-1 FAIL: valid height not loaded, got %r" % heights)
+            elif "9" in heights:
+                failures.append("COMMON-1 FAIL: malformed height should be skipped, got %r" % heights)
+            else:
+                print("COMMON-1 PASS: malformed height skipped, valid height kept")
+        except Exception as e:
+            failures.append("COMMON-1 FAIL: raised %r" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All _common tests passed")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()

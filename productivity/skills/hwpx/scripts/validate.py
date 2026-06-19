@@ -17,7 +17,6 @@ except Exception:
 
 import argparse
 import json
-import re
 import sys
 import zipfile
 from collections import Counter
@@ -124,29 +123,52 @@ def _check_idref(section_root: ET.Element, defined: dict[str, set[str]], section
     return errors
 
 
-def _charpr_font_warnings(xml_str: str, heights: dict[str, int], min_pt: float) -> list[str]:
-    """Return warnings for runs with text whose charPr height is below min_pt."""
-    warns = []
-    for m in re.finditer(r'charPrIDRef="(\d+)"[^>]*><hp:t>(.*?)</hp:t>', xml_str, re.DOTALL):
-        cid = m.group(1)
-        text = m.group(2).strip()
+def _charpr_font_warnings(root: ET.Element, heights: dict[str, int], min_pt: float) -> list[str]:
+    """Return warnings for runs with text whose charPr height is below min_pt.
+
+    Walks the section tree with ElementTree so a run is matched regardless of
+    where `<hp:t>` sits among its children (e.g. a ctrl/field marker may precede
+    the text). Table/cell context comes from ancestor lookup via a parent map,
+    avoiding any per-match backward scan of the source string. The caller passes
+    the already-parsed section root so the XML is not parsed a second time.
+    """
+    warns: list[str] = []
+
+    run_tag = f"{{{NS_HP}}}run"
+    t_tag = f"{{{NS_HP}}}t"
+    tbl_tag = f"{{{NS_HP}}}tbl"
+    tc_tag = f"{{{NS_HP}}}tc"
+    cell_tag = f"{{{NS_HP}}}cellAddr"
+
+    parent = {child: p for p in root.iter() for child in p}
+
+    for run in root.iter(run_tag):
+        cid = run.get("charPrIDRef")
+        if cid is None:
+            continue
+        text = "".join(s for t in run.iter(t_tag) for s in t.itertext()).strip()
         if not text:
             continue
         height = heights.get(cid, 0)
         if height == 0 or height / 100 >= min_pt:
             continue
-        pos = m.start()
-        tbl_m = None
-        for tm in re.finditer(r'<hp:tbl\b[^>]*\bid="(\d+)"', xml_str[:pos]):
-            tbl_m = tm
-        cell_m = None
-        for cm in re.finditer(r'<hp:cellAddr colAddr="(\d+)" rowAddr="(\d+)"/>', xml_str[:pos]):
-            cell_m = cm
-        in_table = xml_str[:pos].count("<hp:tbl") > xml_str[:pos].count("</hp:tbl>")
-        if in_table:
-            tbl_id = tbl_m.group(1) if tbl_m else "?"
-            col = cell_m.group(1) if cell_m else "?"
-            row = cell_m.group(2) if cell_m else "?"
+
+        tbl_id = None
+        cell = None
+        node = parent.get(run)
+        while node is not None:
+            if cell is None and node.tag == tc_tag:
+                ca = node.find(cell_tag)
+                if ca is not None:
+                    cell = (ca.get("colAddr", "?"), ca.get("rowAddr", "?"))
+            if node.tag == tbl_tag:
+                tbl_id = node.get("id", "?")
+                break
+            node = parent.get(node)
+
+        if tbl_id is not None:
+            col = cell[0] if cell else "?"
+            row = cell[1] if cell else "?"
             warns.append(
                 "WARN: table %s cell(%s,%s) charPr=%s height=%d(%spt) — 가독 불가 크기"
                 % (tbl_id, col, row, cid, height, "%g" % (height / 100))
@@ -222,7 +244,7 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
             xml_str = section_bytes[sec_name].decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
-            warnings.extend(_charpr_font_warnings(xml_str, charpr_heights, eff_min_pt))
+            warnings.extend(_charpr_font_warnings(sec_root, charpr_heights, eff_min_pt))
         dupes = {i for i, n in Counter(all_para_ids).items() if n > 1}
         if dupes:
             base = baseline_dupes or set()
@@ -436,7 +458,7 @@ def _run_tests() -> None:
 
     # VAL-1: 3pt charPr triggers warning
     try:
-        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        warns = _charpr_font_warnings(ET.fromstring(_section_with_text), _heights, 5.0)
         if not warns:
             failures.append("VAL-1 FAIL: expected warning for 3pt charPr")
         else:
@@ -446,7 +468,7 @@ def _run_tests() -> None:
 
     # VAL-1b: only warns for small charPr (not 10pt)
     try:
-        warns = _charpr_font_warnings(_section_with_text, _heights, 5.0)
+        warns = _charpr_font_warnings(ET.fromstring(_section_with_text), _heights, 5.0)
         if len(warns) > 1:
             failures.append("VAL-1b FAIL: expected 1 warning, got %d: %r" % (len(warns), warns))
         else:
@@ -471,13 +493,31 @@ def _run_tests() -> None:
         '</hp:BodyText>'
     )
     try:
-        warns_empty = _charpr_font_warnings(_section_empty_run, _heights, 5.0)
+        warns_empty = _charpr_font_warnings(ET.fromstring(_section_empty_run), _heights, 5.0)
         if warns_empty:
             failures.append("VAL-2 FAIL: empty run should not warn, got: %r" % warns_empty)
         else:
             print("VAL-2 PASS: empty run excluded from warning")
     except Exception as e:
         failures.append("VAL-2 FAIL: %s" % e)
+
+    # VAL-3: <hp:t> not the immediate first child of <hp:run> still warns
+    _section_ctrl_before_text = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p id="0" paraPrIDRef="10">'
+        '<hp:run charPrIDRef="5"><hp:ctrl><hp:fieldBegin/></hp:ctrl><hp:t>작은글자</hp:t></hp:run>'
+        '</hp:p>'
+        '</hp:BodyText>'
+    )
+    try:
+        warns_ctrl = _charpr_font_warnings(ET.fromstring(_section_ctrl_before_text), _heights, 5.0)
+        if not warns_ctrl:
+            failures.append("VAL-3 FAIL: expected warning when <hp:t> is not first child of <hp:run>")
+        else:
+            print("VAL-3 PASS: non-first-child <hp:t> still warns")
+    except Exception as e:
+        failures.append("VAL-3 FAIL: %s" % e)
 
     if failures:
         for f in failures:
