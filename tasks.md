@@ -2,7 +2,7 @@
 
 ### PR #90 — reconcile-harness strip_sprint_block review cycle (out-of-scope findings)
 
-- [ ] `reconcile-harness.py:strip_sprint_block` (and `tasks_title`) — both locate the sprint block via the first `^#\s+` heading. A fenced code block under `## Review Backlog` containing a `# comment` line above the sprint would be misparsed as the sprint heading, truncating content. Pre-existing convention (mirrors `tasks_title`); agy's narrowing fix (`# (Sprint|Bundle):`) is wrong — single-item sprint headings are the raw backlog item text, not `# Sprint:`. A correct fix would gate on the `status:`-owning section. conf ~50%, P3. (source: agy)
+- [x] `reconcile-harness.py:strip_sprint_block` (and `tasks_title`) — both locate the sprint block via the first `^#\s+` heading. A fenced code block under `## Review Backlog` containing a `# comment` line above the sprint would be misparsed as the sprint heading, truncating content. Pre-existing convention (mirrors `tasks_title`); agy's narrowing fix (`# (Sprint|Bundle):`) is wrong — single-item sprint headings are the raw backlog item text, not `# Sprint:`. A correct fix would gate on the `status:`-owning section. conf ~50%, P3. (source: agy)
 
 ---
 
