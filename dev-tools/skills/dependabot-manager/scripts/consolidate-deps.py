@@ -83,7 +83,8 @@ def parse_group_pr_body(body: str) -> List[Dict]:
     # must END in a word char ([\w.+-]*[\w]): a real version never ends in a dot,
     # so this drops trailing markdown punctuation ("... to 1.4.7.") while keeping
     # internal dots — something neither \S+ nor a flat [\w.+-]+ class can do.
-    for m in re.finditer(r'Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)', body or ''):
+    # re.ASCII: keep `\w` to ASCII so a stray non-ASCII char can't extend a token.
+    for m in re.finditer(r'Updates `(.+?)` from ([\w.+-]*\w) to ([\w.+-]*\w)', body or '', re.ASCII):
         seen[m.group(1)] = {
             'package': m.group(1),
             'old_version': m.group(2),
@@ -141,9 +142,11 @@ def _replace_pinned_versions(content: str, updates: List[Dict]) -> Tuple[str, Li
     for update in updates:
         pkg = update['package']
         version = update['new_version']
+        # re.ASCII scopes `\w` to ASCII so a non-ASCII trailing char (e.g. the
+        # `α` in `1.0.0α`) is not absorbed into the matched version token.
         pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
         replacement = f'{pkg}=={version}'
-        content, n = re.subn(pattern, replacement, content)
+        content, n = re.subn(pattern, replacement, content, flags=re.ASCII)
         if n == 0:
             missing.append(pkg)
     return content, missing
@@ -428,6 +431,15 @@ def cmd_selftest():
     check(results['bar']['new_version'] == '2.0.0-beta.1',
           f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}")
 
+    # ASCII scoping (parse_group_pr_body): re.ASCII keeps `\w` ASCII-only, so a
+    # trailing non-ASCII char on a version is not absorbed into the token. Without
+    # the flag the `α` would be captured as part of new_version → this assertion
+    # fails, locking the flag in.
+    ascii_parsed = {r['package']: r for r in parse_group_pr_body(
+        "Updates `qux` from 1.0.0 to 1.0.0α\n")}
+    check(ascii_parsed['qux']['new_version'] == '1.0.0',
+          f"qux new_version should be 1.0.0 (α not absorbed), got {ascii_parsed['qux']['new_version']!r}")
+
     # --- _replace_pinned_versions: pin rewrite + missing-package tracking ---
     # A real hit rewrites the pinned line; an absent package is reported as
     # missing (so the caller can warn instead of silently committing stale
@@ -447,6 +459,21 @@ def cmd_selftest():
           f"bar-foo must NOT be rewritten to 1.1.0 (line anchor), got {new_content!r}")
     check(missing == ['absent'],
           f"missing should be ['absent'] (zero-substitution package), got {missing!r}")
+
+    # PEP 440 epoch version: proves `!` is in the version class so the whole
+    # epoch token is consumed and rewritten — no stale `!1.0.0` suffix left.
+    # (All-ASCII, so this does NOT exercise re.ASCII; the unicode case below does.)
+    epoch_content, _ = _replace_pinned_versions(
+        "foo==1!1.0.0\n", [{'package': 'foo', 'new_version': '2!2.0.0'}])
+    check(epoch_content == "foo==2!2.0.0\n",
+          f"epoch version not cleanly rewritten, got {epoch_content!r}")
+
+    # ASCII scoping: `\w` must not match non-ASCII, so a trailing non-ASCII
+    # character is NOT absorbed into the matched version token — it survives.
+    unicode_content, _ = _replace_pinned_versions(
+        "foo==1.0.0α\n", [{'package': 'foo', 'new_version': '2.0.0'}])
+    check(unicode_content == "foo==2.0.0α\n",
+          f"non-ASCII char must not be absorbed by \\w, got {unicode_content!r}")
 
     print('selftest OK')
 
