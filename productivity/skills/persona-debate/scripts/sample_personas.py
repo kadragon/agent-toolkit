@@ -194,14 +194,16 @@ def cmd_test(_args):
     except ImportError:
         sys.exit("duckdb not importable — run via: uv run --with duckdb python sample_personas.py test")
 
-    def sample(where, n, seed, threads=4):
+    # Bind the query builder as a default arg so the helper depends on it
+    # explicitly, not via implicit free-variable lookup of a module global.
+    def sample(where, n, seed, threads=4, build_sql=sample_sql):
         con = duckdb.connect()
         con.execute(f"SET threads={threads}")
         con.execute(
             "CREATE TABLE t AS SELECT i AS id, ('p' || i) AS persona, (i % 2) AS sex "
             "FROM range(1000) tbl(i)"
         )
-        rows = con.execute(sample_sql("id, persona", "t", where, n, seed)).fetchall()
+        rows = con.execute(build_sql("id, persona", "t", where, n, seed)).fetchall()
         return [r[0] for r in rows]
 
     failures = []
