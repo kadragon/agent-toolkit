@@ -4,7 +4,6 @@
 
 ## Next
 
-- [ ] [debt] `--seed` in persona-debate not reproducible cross-run over HTTP (parquet fetch order varies). Fix: DuckDB `USING SAMPLE n ROWS (reservoir, REPEATABLE(seed))`. (source: pr-review-toolkit:review-pr, verified empirically) — `productivity/skills/persona-debate/scripts/sample_personas.py:109` *(deferred: needs DuckDB reservoir rewrite)*
 
 ## Someday
 

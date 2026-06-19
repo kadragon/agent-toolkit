@@ -81,6 +81,34 @@ def src(shard):
     return f"read_parquet([{lst}])"
 
 
+# DuckDB's reservoir-sample seed must be a non-negative int32 literal.
+SEED_MOD = 2 ** 31
+
+
+def sample_sql(cols, source, where, n, seed):
+    """Build a reproducible reservoir-sample query.
+
+    Two non-obvious correctness points, both verified empirically:
+
+    1. The WHERE filter is wrapped in a subquery. A same-level
+       `... WHERE x USING SAMPLE n` lets the optimizer push the sample
+       *below* the filter — it samples the base rows first, then filters,
+       silently emptying or shrinking a filtered result. The subquery
+       boundary forces filter-then-sample.
+    2. `(reservoir, <seed>)` makes the sample reproducible across runs and
+       invariant to thread count. The previous `setseed()` + `ORDER BY
+       random() LIMIT n` paired random values with rows in multi-threaded
+       scan order, so the result drifted across runs over HTTP.
+
+    With no seed, `(reservoir)` returns a fresh random panel each run.
+    """
+    seed_clause = "" if seed is None else f", {seed % SEED_MOD}"
+    return (
+        f"SELECT {cols} FROM (SELECT {cols} FROM {source} WHERE {where}) "
+        f"USING SAMPLE {n} ROWS (reservoir{seed_clause})"
+    )
+
+
 def cmd_distinct(args):
     if args.field not in DISTINCTABLE:
         print(f"warn: {args.field} may be high-cardinality", file=sys.stderr)
@@ -112,15 +140,8 @@ def cmd_sample(args):
     if matched < args.n:
         print(f"WARN: only {matched} match (< requested {args.n}); returning all matches", file=sys.stderr)
 
-    # setseed must run as its own statement (`SELECT setseed(...)`); DuckDB rejects
-    # a bare `setseed(...);` prefix. Seeds random() for the ORDER BY that follows on
-    # the same connection.
-    if args.seed is not None:
-        con.execute(f"SELECT setseed({(args.seed % 1000) / 1000.0})")
     cols = ", ".join(fields)
-    rows = con.execute(
-        f"SELECT {cols} FROM {source} WHERE {where} ORDER BY random() LIMIT {args.n}"
-    ).fetchall()
+    rows = con.execute(sample_sql(cols, source, where, args.n, args.seed)).fetchall()
     out = [dict(zip(fields, r)) for r in rows]
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
@@ -164,6 +185,53 @@ def cmd_roster(_args):
     print("personas: nvidia/Nemotron-Personas-Korea (CC-BY-4.0)")
 
 
+def cmd_test(_args):
+    """Offline self-check (no HTTP): exercises sample_sql against an in-memory
+    table so the reproducibility guarantees can be verified without fetching
+    the 2GB dataset. Exits non-zero on any failed check."""
+    try:
+        import duckdb
+    except ImportError:
+        sys.exit("duckdb not importable — run via: uv run --with duckdb python sample_personas.py test")
+
+    def sample(where, n, seed, threads=4):
+        con = duckdb.connect()
+        con.execute(f"SET threads={threads}")
+        con.execute(
+            "CREATE TABLE t AS SELECT i AS id, ('p' || i) AS persona, (i % 2) AS sex "
+            "FROM range(1000) tbl(i)"
+        )
+        rows = con.execute(sample_sql("id, persona", "t", where, n, seed)).fetchall()
+        return [r[0] for r in rows]
+
+    failures = []
+
+    def check(name, cond):
+        print(("ok   " if cond else "FAIL ") + name)
+        if not cond:
+            failures.append(name)
+
+    base = sample("sex = 0", 6, 42)
+    check("same seed reproducible across runs", base == sample("sex = 0", 6, 42))
+    check("seed invariant to thread count", base == sample("sex = 0", 6, 42, threads=1))
+    check("different seed yields different panel", base != sample("sex = 0", 6, 99))
+    check("seed normalized into int32 range", base == sample("sex = 0", 6, 42 + SEED_MOD))
+    check("WHERE filter is honored (every sampled id is even)",
+          all(i % 2 == 0 for i in sample("sex = 0", 50, 1)))
+    # Filter matches far more than n, so a strict len == n check fails if the
+    # optimizer ever pushes the sample below the filter (pushdown would sample
+    # 6 of 1000 then filter id < 50 down to ~0 rows).
+    guarded = sample("id < 50", 6, 7)
+    check("subquery blocks sample-below-filter (sample applied after filter)",
+          len(guarded) == 6 and all(i < 50 for i in guarded))
+    check("fewer-than-n returns all matches", len(sample("id < 5", 20, 7)) == 5)
+    check("no seed returns a full panel of n", len(sample("TRUE", 6, None)) == 6)
+
+    if failures:
+        sys.exit(f"{len(failures)} check(s) failed: {failures}")
+    print("all checks passed")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -178,8 +246,11 @@ def main():
     s.add_argument("--where", default=None, help="SQL WHERE clause body, e.g. \"age BETWEEN 20 AND 39 AND province IN ('서울','경기')\"")
     s.add_argument("--fields", default=None, help="CSV subset of debater fields to return (default: curated full set); trim to the topic to cut spawn tokens")
     s.add_argument("--shard", default="0", help="shard index 0-8 (default 0); 'all' for full 1M scan (~18s)")
-    s.add_argument("--seed", type=int, default=None, help="seed random() for sampling; not fully reproducible over HTTP (parquet fetch order varies)")
+    s.add_argument("--seed", type=int, default=None, help="reservoir-sample seed; same seed → identical panel across runs (reproducible regardless of HTTP fetch order or thread count)")
     s.set_defaults(func=cmd_sample)
+
+    t = sub.add_parser("test", help="offline self-check of the sampler (in-memory DuckDB, no HTTP)")
+    t.set_defaults(func=cmd_test)
 
     pl = sub.add_parser("plan", help="deterministic N + round + model routing for a depth (never opus)")
     pl.add_argument("--depth", required=True, help="simple | normal | deep")
