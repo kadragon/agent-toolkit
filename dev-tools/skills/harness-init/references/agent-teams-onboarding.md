@@ -24,6 +24,11 @@ add coordination overhead and token cost that most repos never recoup.
 
 ## Setup (5 minutes)
 
+> **Path note:** Paths shown as `~/.claude/…` are the default location of
+> Claude Code's user config directory. When `CLAUDE_CONFIG_DIR` is set they
+> resolve under that directory instead — this includes user `settings.json`
+> and the native task store. There is no *project-level* override for these.
+
 ### 1. Enable the flag
 
 ```json
@@ -80,8 +85,9 @@ Embed these in `AGENTS.md` under a `## Agent Teams` section (only if
 enabled):
 
 1. **File ownership is declared upfront.** The lead assigns file globs per
-   teammate via the native shared task list (`TaskCreate`, persisted at
-   `~/.claude/tasks/{team-name}/`). No teammate edits outside its glob.
+   teammate via the native shared task list (`TaskCreate`, persisted under
+   the Claude config dir, default `~/.claude/tasks/{team-name}/`). No
+   teammate edits outside its glob.
    `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
    work. See `references/workflows-template.md` → "Step 1.5: File Ownership
    Declaration".
@@ -104,10 +110,11 @@ enabled):
 
 7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
    (read-only mid-session input). Live coordination, status, and file globs
-   live in the native shared task list (Task tools, persisted at
-   `~/.claude/tasks/{team-name}/`). At session end the lead manually syncs
-   completion back to `tasks.md`. There is no project-level override for the
-   native store path — it is hardcoded.
+   live in the native shared task list (Task tools, persisted under the
+   Claude config dir, default `~/.claude/tasks/{team-name}/`; see the Path
+   note in Setup). At session end the lead manually syncs completion back to
+   `tasks.md`. There is no project-level override for the native store path —
+   it follows `CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
 ## When to Shut Teams Down
 
