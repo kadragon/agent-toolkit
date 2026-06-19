@@ -86,8 +86,8 @@ enabled):
 
 1. **File ownership is declared upfront.** The lead assigns file globs per
    teammate via the native shared task list (`TaskCreate`, persisted under
-   the Claude config dir at `~/.claude/tasks/{team-name}/`). No teammate
-   edits outside its glob.
+   the Claude config dir, default `~/.claude/tasks/{team-name}/`). No
+   teammate edits outside its glob.
    `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
    work. See `references/workflows-template.md` → "Step 1.5: File Ownership
    Declaration".
@@ -111,8 +111,8 @@ enabled):
 7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
    (read-only mid-session input). Live coordination, status, and file globs
    live in the native shared task list (Task tools, persisted under the
-   Claude config dir at `~/.claude/tasks/{team-name}/`; see the Path note in
-   Setup). At session end the lead manually syncs completion back to
+   Claude config dir, default `~/.claude/tasks/{team-name}/`; see the Path
+   note in Setup). At session end the lead manually syncs completion back to
    `tasks.md`. There is no project-level override for the native store path —
    it follows `CLAUDE_CONFIG_DIR` (default `~/.claude`).
 
