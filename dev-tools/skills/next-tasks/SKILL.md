@@ -1,14 +1,17 @@
 ---
 name: next-tasks
-version: 1.0.3
+version: 1.1.0
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
   "작업 하나 돌려줘", "백로그 시작", "작업 시작", "백로그 작업", "태스크 시작", or
   "태스크 골라줘". Picks an open item from backlog.md or tasks.md, drives the full code
   cycle (branch → Sprint Contract → implement → qa-verifier → version bump), and hands off
-  to dev-review-cycle --auto for review, CI, and merge. Not for review-only requests or
-  backlog browsing without intent to implement and merge this session.
+  to dev-review-cycle --auto for review, CI, and merge. With the `--all` flag (also "전부
+  처리", "모두 돌려", "다 처리", "batch all", "all tasks") it batches: the user multi-selects
+  bounded items, each implemented + QA'd in its own git worktree in parallel, then all merged
+  into one integration branch for a single version bump → reconcile → dev-review-cycle --auto
+  (one PR). Not for review-only requests or backlog browsing without intent to implement.
 ---
 
 # Next Tasks
@@ -16,6 +19,10 @@ description: >-
 Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
 run the cycle, and hand off to `dev-review-cycle --auto`. Delegate the heavy lifting — this
 skill is the **decision and sequencing layer**, not the implementation engine.
+
+**Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
+(or "전부 처리", "모두 돌려", "다 처리", "batch all"), run **Batch mode** instead — see the
+`## Batch mode (--all)` section. Prerequisites and the working-tree gate apply to both modes.
 
 ## Prerequisites
 
@@ -190,6 +197,150 @@ reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, wa
 the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
 If you continue on the same branch after fixing CI, the cleanup commit is already correct and
 no further action is required.
+
+## Batch mode (`--all`)
+
+Triggered by `--all`. Implements **multiple** units in parallel (each in its own git worktree),
+then collapses them onto **one integration branch** that goes through a **single** version bump,
+`reconcile-harness.py`, and `dev-review-cycle --auto` → one PR, one CI run, one merge.
+
+**Why one integration branch, not N PRs.** The shared single-copy files this repo's tooling
+mutates — `plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited
+per-unit in parallel without collision, and the convergence tools can only run on the *main
+checkout*: `reconcile-harness.py` writes relative `tasks.md`/`backlog.md` (whatever the CWD is,
+and Bash CWD resets to the repo root between calls), and `dev-review-cycle` detects its branch
+from the session's current checkout — neither can be aimed at a worktree. So the worktrees do
+**code only**; every shared-file edit happens once, serially, on the integration branch in the
+main checkout. This sidesteps the whole class of cross-worktree merge/CWD failures.
+
+### A1 — Gather & cluster
+
+Run Step 1 (gather) and Step 1.5 (cluster) unchanged. The output is a list of **units**: each
+unit is either a qualifying bundle (≥2 same-area, compatible-type items) or a singleton.
+Clustering is **mandatory** here, not optional: keeping each unit in its own file area minimizes
+(but does not guarantee) conflicts when the unit branches merge into the integration branch in
+A6 — shared imports/utilities may still collide, which A6 handles.
+
+### A2 — Filter to batch-eligible
+
+A unit is **batch-eligible** only if ALL hold:
+- Trivial: tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2 (across all bundle
+  members), no new public API/schema. Non-trivial units need interactive plan-mode approval
+  (single-pick Step 3) that cannot run N-way in parallel.
+- In-scope files do **not** include any convergence-owned shared file (`plugin.json` manifests,
+  `backlog.md`, `tasks.md`, `CHANGELOG.md`). Those are edited only in A6; a unit whose actual
+  task is to edit them would collide with convergence — run it solo.
+
+List excluded units explicitly: "Excluded from batch (needs solo run): `<unit>` — `<reason>`".
+If filtering leaves 0 eligible units, report that and stop.
+
+### A3 — Multi-select
+
+Do NOT use `AskUserQuestion` (4-option cap is too small for a batch). Render a numbered list,
+one line per eligible unit: index, type tag, short slug, file:line (bundles list member count
+and area). Accept a comma list (`1,3,4`), inclusive ranges (`1-3`), `all`, or a combination.
+Map back to units; ignore out-of-range indices and report them. Empty/unparseable reply →
+re-prompt once, then stop.
+
+**Cost gate** — each selected unit costs roughly implementer + qa-verifier (the review cycle
+runs only **once** for the whole batch, not per unit). If the user selects **more than 6 units**,
+state the rough multiplier and ask for explicit confirmation before A4. CLAUDE.md token economy
+applies — the parallelism must earn its cost.
+
+### A4 — Parallel implement (worktrees, code only)
+
+The **main session owns worktree lifecycle** — do NOT use the Agent `isolation: "worktree"`
+flag (that worktree is scoped to one agent's lifetime; it may not survive the later A5/A6
+steps). Derive the repo name once: `REPO=$(basename "$(git rev-parse --show-toplevel)")`. Keep
+worktrees **inside** the repo (an external `../` path can fall outside an agent's sandbox);
+ensure `.worktrees/` is git-ignored — if it is not yet, add it to `.gitignore` (this edit lands
+on the integration branch in A6). `git fetch` first, then base every worktree on the **same**
+`origin/main` the A6 integration branch will use — otherwise a stale local base inflates merge
+conflicts in A6 and drops units that would have merged cleanly. For each selected unit, before
+fan-out:
+
+```bash
+git worktree add ".worktrees/<slug>" -b "wt/<slug>" origin/main   # one per unit
+```
+
+Then fan out one implementer agent per unit in a single message (concurrency self-caps). Each
+agent's brief (four-field per `docs/delegation.md`) gives the **worktree path** and says to,
+in that path:
+1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
+   or `CHANGELOG.md` — all marking-active, version bump, and reconcile happen once in A6.
+2. **Return** the Sprint Contract text (Scope / Acceptance criteria / Out of scope / Lint-test
+   command per `docs/eval-criteria.md`; one acceptance checkbox per bundled item) as part of the
+   agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
+3. **Commit the code to `wt/<slug>`** (e.g. `[WIP] <unit>`), leaving a clean tree. Return the
+   worktree path, branch, the Sprint Contract, and a change summary.
+
+The agent must NOT verify its own output. If an agent fails or returns unusable output, drop
+that unit: `git worktree remove --force .worktrees/<slug>` and `git branch -D wt/<slug>`, then
+record it for the final report — do not abort the others.
+
+### A5 — Parallel QA
+
+For each successfully-implemented unit, spawn a `qa-verifier` agent (separate from the
+implementer) pointed at that unit's worktree path, verifying against the Sprint Contract that
+unit returned in A4. Fan out all QA agents in one message.
+
+For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
+unit (all retries in one message — they are independent; do not serialize). Still blocking after
+one retry → drop the unit (remove its worktree + branch as in A4) and record it. One unit's
+failure never blocks the others.
+
+### A6 — Collapse to one integration branch, then converge once
+
+All of this runs in the **main checkout** (correct CWD/branch for the convergence tools), not in
+any worktree.
+
+1. **Create the integration branch off latest base** — `git fetch`, then
+   `git checkout -b <type>/batch-<slug> origin/main` (pick the dominant `[type]` across units, else
+   `fix/`). `<slug>` is a short batch descriptor.
+2. **Merge each verified unit branch in** — for each unit, `git merge --no-ff wt/<slug>`.
+   Disjoint areas (A1) keep this clean. On conflict: `git merge --abort`, drop that unit (record
+   it), and continue with the rest — the integration branch keeps the units that merged cleanly.
+   If every unit conflicts/drops, abandon: `git checkout main && git branch -D <type>/batch-<slug>`,
+   then jump to A7 cleanup and report (do not leave the checkout stranded on a dead branch).
+3. **Mark active — once, only if the batch has ≥1 backlog unit.** Flip each merged backlog item
+   `[ ]` → `[>]` and write **one** combined `tasks.md` Sprint Contract: `status: active`, a
+   `# heading` describing the batch, and a `## Covers` section listing **every** merged backlog
+   item's exact line (per Step 3 "Mark active" bundle rules). If the batch is findings-only (no
+   backlog units), skip the contract entirely — there is nothing for reconcile to anchor, and
+   writing one only to delete it would needlessly trigger the `tasks.md` unlink (see step 5).
+4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
+   single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
+5. **Pre-merge cleanup — once.** Order matters because `reconcile-harness.py` deletes the entire
+   `tasks.md` on completion (`TASKS.unlink()` on `status: done`):
+   - **First** flip every merged `tasks.md`-finding `[ ]` → `[x]`.
+   - **Then**, only if a contract was written in step 3, set it `status: done` and run
+     `reconcile-harness.py` (removes all `[>]` via `## Covers`, one `CHANGELOG.md` append,
+     archives the sprint — and removes `tasks.md`). For a findings-only batch, run no reconcile;
+     the `[x]` flips stay in `tasks.md`.
+
+   Leave all edits uncommitted — `dev-review-cycle` Step 1 commits them. **Known limitation:**
+   reconcile's whole-file `unlink` means a mixed batch (backlog + findings) loses any *unrelated*
+   open `## Review Backlog` items when the sprint completes — exactly as a single-pick backlog
+   sprint already does. Preserving the Review Backlog across reconcile is a separate
+   `reconcile-harness.py` fix (strip only the sprint block instead of unlinking); record it to
+   the backlog rather than working around it here.
+6. **Hand off — once.** `Skill(dev-tools:dev-review-cycle)` with `args: --auto`. Running from the
+   main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
+   work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
+   to `tasks.md`, waits CI, and merges.
+
+**If the integration PR fails CI and must be abandoned:** close the PR; the unit branches still
+exist, so you can re-run convergence after fixing, or fall back to single-pick per unit.
+
+### A7 — Cleanup & report
+
+The main session removes every worktree it created (`git worktree remove .worktrees/<slug>`;
+`--force` for any with leftover changes) and deletes **all** unit branches it created
+(`git branch -D wt/<slug>` for each — merged, dropped, or conflicted; none are needed once the
+integration branch holds the work). If the batch was abandoned (all units conflicted), the
+integration branch was already deleted in A6 step 2. Then emit a summary table: each unit →
+merged-into-PR / dropped (reason), plus the single PR link and final merge status. This is the
+only place per-unit outcomes are surfaced, so do not skip it.
 
 ## Edge cases
 
