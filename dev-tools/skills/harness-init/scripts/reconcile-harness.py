@@ -121,6 +121,15 @@ def strip_sprint_block(content: str) -> str | None:
     nothing meaningful (only whitespace / '---' separators) is left -- in which
     case the caller unlinks tasks.md exactly as the pre-fix behaviour did.
 
+    Ordering invariant: non-sprint content (e.g. '## Review Backlog') MUST appear
+    BEFORE the Sprint Contract '# ' heading.  The sprint block spans from its '# '
+    heading to the next '# ' heading or EOF, and legitimately contains '##'
+    sub-sections (Scope, Acceptance criteria, Covers, Out of scope) -- so the
+    boundary cannot be an '##' heading.  Any content placed AFTER the sprint
+    heading is therefore treated as part of the sprint block and removed with it.
+    The next-tasks / harness-init templates always emit Review Backlog above the
+    sprint, which satisfies this.
+
     This preserves unrelated open '## Review Backlog' items that previously were
     destroyed by an unconditional TASKS.unlink() on sprint completion.
     """
@@ -229,10 +238,19 @@ def main() -> None:
             print(f"Sprint active: {title}")
             return
 
+        elif raw_status is None and not re.search(r'^#\s+', tasks_content, re.MULTILINE):
+            # Retained Review-Backlog-only tasks.md: a prior sprint completion
+            # stripped the contract block via strip_sprint_block(), leaving no
+            # '# ' heading and no status. This is the expected steady state, not
+            # schema drift -- fall through to C-3 reporting instead of warning and
+            # returning early.
+            pass
+
         else:
-            # Schema drift (missing or unrecognized status). Surface it but do not
-            # abort -- downstream sync sections (D-1 schema check, E, F) still need
-            # to run, and parallel callers cancel on non-zero exit.
+            # Schema drift (missing or unrecognized status on a file that still
+            # carries a '# ' sprint heading). Surface it but do not abort --
+            # downstream sync sections (D-1 schema check, E, F) still need to run,
+            # and parallel callers cancel on non-zero exit.
             shown = raw_status if raw_status is not None else "missing"
             print(
                 f"tasks.md has unknown status '{shown}' -- leaving intact. "

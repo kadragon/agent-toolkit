@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #90 — reconcile-harness strip_sprint_block review cycle (out-of-scope findings)
+
+- [ ] `reconcile-harness.py:strip_sprint_block` (and `tasks_title`) — both locate the sprint block via the first `^#\s+` heading. A fenced code block under `## Review Backlog` containing a `# comment` line above the sprint would be misparsed as the sprint heading, truncating content. Pre-existing convention (mirrors `tasks_title`); agy's narrowing fix (`# (Sprint|Bundle):`) is wrong — single-item sprint headings are the raw backlog item text, not `# Sprint:`. A correct fix would gate on the `status:`-owning section. conf ~50%, P3. (source: agy)
+
+---
+
 ### PR #84 — agent-teams task store separation (out-of-scope findings)
 
 - [x] `agent-teams-onboarding.md` — native store path written as `~/.claude/tasks/{team-name}/`, but Claude Code honors `CLAUDE_CONFIG_DIR` when set. File uses the `~/.claude/` convention throughout; reconcile the whole file's path display (e.g. `$CLAUDE_CONFIG_DIR/...`) in one pass rather than spot-editing. P3. (source: agy)

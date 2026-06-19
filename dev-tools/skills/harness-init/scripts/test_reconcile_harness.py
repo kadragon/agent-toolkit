@@ -5,7 +5,9 @@ Unit tests for reconcile-harness.py — multi-anchor support (## Covers).
 Run: python test_reconcile_harness.py
 """
 
+import io
 import sys
+import contextlib
 import tempfile
 import importlib.util
 from pathlib import Path
@@ -323,49 +325,75 @@ def test_strip_only_sprint_returns_none():
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
 
-def _run_main_in_tmp(tasks_text: str, backlog_text: str):
-    tmp = Path(tempfile.mkdtemp())
-    tpath, bpath = tmp / "tasks.md", tmp / "backlog.md"
-    tpath.write_text(tasks_text, encoding="utf-8")
-    bpath.write_text(backlog_text, encoding="utf-8")
-    saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
-    mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, tmp / "CHANGELOG.md"
-    try:
-        mod.main()
-    finally:
-        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
-    return tpath, bpath
+def _run_main_in_tmp(tasks_text: str, backlog_text: str) -> dict:
+    """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
+
+    Returns a dict snapshotting file existence/contents and captured streams
+    BEFORE the temp dir is removed (TemporaryDirectory cleans up on exit, so all
+    reads must happen inside the context).
+    """
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        tpath, bpath = tmp / "tasks.md", tmp / "backlog.md"
+        tpath.write_text(tasks_text, encoding="utf-8")
+        bpath.write_text(backlog_text, encoding="utf-8")
+        saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
+        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, tmp / "CHANGELOG.md"
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                mod.main()
+        finally:
+            mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
+        return {
+            "tasks_exists": tpath.exists(),
+            "tasks_body": tpath.read_text(encoding="utf-8") if tpath.exists() else "",
+            "backlog_body": bpath.read_text(encoding="utf-8"),
+            "stdout": out.getvalue(),
+            "stderr": err.getvalue(),
+        }
 
 
 def test_main_done_preserves_review_backlog():
     """done sprint with Review Backlog → tasks.md retained, findings survive."""
     backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
-    tpath, bpath = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog)
-    check("main-done: tasks.md retained", tpath.exists())
-    body = tpath.read_text(encoding="utf-8") if tpath.exists() else ""
-    check("main-done: open finding preserved", "open finding one" in body)
-    check("main-done: sprint block gone", "# Sprint: do the thing" not in body)
-    check("main-done: backlog [>] removed", "[>] Sprint: do the thing" not in bpath.read_text(encoding="utf-8"))
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog)
+    check("main-done: tasks.md retained", r["tasks_exists"])
+    check("main-done: open finding preserved", "open finding one" in r["tasks_body"])
+    check("main-done: sprint block gone", "# Sprint: do the thing" not in r["tasks_body"])
+    check("main-done: backlog [>] removed", "[>] Sprint: do the thing" not in r["backlog_body"])
 
 
 def test_main_done_only_sprint_unlinks():
     """done sprint with no other content → tasks.md unlinked (old behaviour)."""
     backlog = "## Now\n- [>] Sprint: solo\n"
-    tpath, _ = _run_main_in_tmp(TASKS_ONLY_SPRINT, backlog)
-    check("main-done-solo: tasks.md unlinked", not tpath.exists())
+    r = _run_main_in_tmp(TASKS_ONLY_SPRINT, backlog)
+    check("main-done-solo: tasks.md unlinked", not r["tasks_exists"])
 
 
 def test_main_failed_preserves_review_backlog():
     """failed sprint with Review Backlog → tasks.md retained, findings survive."""
     failed_tasks = TASKS_WITH_BACKLOG.replace("status: done", "status: failed")
     backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
-    tpath, bpath = _run_main_in_tmp(failed_tasks, backlog)
-    check("main-failed: tasks.md retained", tpath.exists())
-    body = tpath.read_text(encoding="utf-8") if tpath.exists() else ""
-    check("main-failed: open finding preserved", "open finding one" in body)
-    check("main-failed: sprint block gone", "# Sprint: do the thing" not in body)
-    check("main-failed: backlog [>] reverted to [ ]",
-          "[ ] Sprint: do the thing" in bpath.read_text(encoding="utf-8"))
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("main-failed: tasks.md retained", r["tasks_exists"])
+    check("main-failed: open finding preserved", "open finding one" in r["tasks_body"])
+    check("main-failed: sprint block gone", "# Sprint: do the thing" not in r["tasks_body"])
+    check("main-failed: backlog [>] reverted to [ ]", "[ ] Sprint: do the thing" in r["backlog_body"])
+
+
+def test_main_statusless_retained_reports_cleanly():
+    """A retained Review-Backlog-only tasks.md (no status, no '# ' heading) — the
+    steady state left by this fix after a prior sprint completion — must report
+    normally, NOT emit a schema-drift warning and return early."""
+    statusless = "## Review Backlog\n\n### PR #99\n- [ ] leftover finding\n"
+    backlog = "## Now\n- [ ] queued item\n"
+    r = _run_main_in_tmp(statusless, backlog)
+    check("statusless: no schema-drift warning", "unknown status" not in r["stderr"], r["stderr"])
+    check("statusless: backlog reported",
+          "Backlog:" in r["stdout"] or "Backlog clear" in r["stdout"], r["stdout"])
+    check("statusless: tasks.md left intact",
+          r["tasks_exists"] and "leftover finding" in r["tasks_body"])
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +419,7 @@ SUITES = [
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
+    ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
 ]
 
 if __name__ == "__main__":
