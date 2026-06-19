@@ -522,14 +522,26 @@ def _run_tests() -> None:
     except Exception as e:
         failures.append("VAL-3 FAIL: %s" % e)
 
-    # VAL-4: malformed non-numeric charPr height in header must not raise (parity with _common COMMON-1)
+    # VAL-4: malformed non-numeric charPr height in header must not raise, AND a valid
+    # charPr is still captured alongside it (parity with _common COMMON-1: bad skipped, good kept).
+    # The valid charPr id=5 is 3pt (< MIN_READABLE_PT); if it survives the malformed sibling,
+    # the section run referencing it produces a font-size warning. Silently dropping heights
+    # (e.g. a wrong try scope) would yield no warning and fail this test.
     import tempfile
     _header_bad_height = (
         '<?xml version="1.0"?>'
-        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" secCnt="0">'
-        '<hh:charPr id="5" height="1000"/>'
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" secCnt="1">'
+        '<hh:charPr id="5" height="300"/>'
         '<hh:charPr id="9" height="not-a-number"/>'
         '</hh:head>'
+    )
+    _section_small_font = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p id="0" paraPrIDRef="10">'
+        '<hp:run charPrIDRef="5"><hp:t>작은글자</hp:t></hp:run>'
+        '</hp:p>'
+        '</hp:BodyText>'
     )
     try:
         with tempfile.TemporaryDirectory() as d:
@@ -537,8 +549,12 @@ def _run_tests() -> None:
             with ZipFile(str(arc), "w") as zf:
                 zf.writestr("mimetype", "application/hwp+zip")
                 zf.writestr("Contents/header.xml", _header_bad_height)
-            do_validate(str(arc))
-        print("VAL-4 PASS: malformed charPr height does not raise")
+                zf.writestr("Contents/section0.xml", _section_small_font)
+            _, _warns = do_validate(str(arc))
+        if not _warns:
+            failures.append("VAL-4 FAIL: valid charPr id=5 (3pt) not captured; expected font warning, got: %r" % _warns)
+        else:
+            print("VAL-4 PASS: malformed charPr height skipped, valid charPr still captured")
     except ValueError as e:
         failures.append("VAL-4 FAIL: malformed height raised ValueError: %s" % e)
     except Exception as e:
