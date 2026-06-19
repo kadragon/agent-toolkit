@@ -111,6 +111,45 @@ def revert_active_marker(backlog: str, title: str, note: str) -> str:
     return revert_active_markers(backlog, [title], note)
 
 
+def strip_sprint_block(content: str) -> str | None:
+    """Remove the Sprint Contract block from tasks.md, preserving everything else.
+
+    The Sprint Contract is the top-level '# ' heading section that owns the
+    'status:' field.  Removes that heading through the next top-level '# '
+    heading (or EOF), then trims any now-trailing horizontal-rule separators and
+    blank tail.  Returns the remaining content (newline-terminated), or None when
+    nothing meaningful (only whitespace / '---' separators) is left -- in which
+    case the caller unlinks tasks.md exactly as the pre-fix behaviour did.
+
+    Ordering invariant: non-sprint content (e.g. '## Review Backlog') MUST appear
+    BEFORE the Sprint Contract '# ' heading.  The sprint block spans from its '# '
+    heading to the next '# ' heading or EOF, and legitimately contains '##'
+    sub-sections (Scope, Acceptance criteria, Covers, Out of scope) -- so the
+    boundary cannot be an '##' heading.  Any content placed AFTER the sprint
+    heading is therefore treated as part of the sprint block and removed with it.
+    The next-tasks / harness-init templates always emit Review Backlog above the
+    sprint, which satisfies this.
+
+    This preserves unrelated open '## Review Backlog' items that previously were
+    destroyed by an unconditional TASKS.unlink() on sprint completion.
+    """
+    lines = content.splitlines(keepends=True)
+    start = next((i for i, ln in enumerate(lines) if re.match(r'^#\s+', ln)), None)
+    if start is None:
+        return None  # no sprint heading to isolate -> treat as fully consumed
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r'^#\s+', lines[j]):
+            end = j
+            break
+    remainder = "".join(lines[:start] + lines[end:])
+    # Drop separators / blank lines left dangling at the new end of file.
+    remainder = re.sub(r'\s*(?:-{3,}\s*)*\Z', '', remainder)
+    if not remainder.strip():
+        return None
+    return remainder + "\n"
+
+
 def remove_orphan_markers(backlog: str) -> str:
     """Remove all remaining [>] lines when no tasks.md exists."""
     return re.sub(r'^\s*-\s*\[>\].*\n?', '', backlog, flags=re.MULTILINE)
@@ -168,8 +207,13 @@ def main() -> None:
                 )
             BACKLOG.write_text(updated, encoding="utf-8")
             append_changelog(title, summary)
-            TASKS.unlink()
-            print(f"Sprint '{title}' done. tasks.md removed.")
+            remainder = strip_sprint_block(tasks_content)
+            if remainder is None:
+                TASKS.unlink()
+                print(f"Sprint '{title}' done. tasks.md removed.")
+            else:
+                TASKS.write_text(remainder, encoding="utf-8")
+                print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
             fb = tasks_field(tasks_content, "Evaluator Feedback") or "failed"
@@ -182,17 +226,31 @@ def main() -> None:
                     file=sys.stderr,
                 )
             BACKLOG.write_text(updated, encoding="utf-8")
-            TASKS.unlink()
-            print(f"Sprint '{title}' failed. Reverted to backlog.")
+            remainder = strip_sprint_block(tasks_content)
+            if remainder is None:
+                TASKS.unlink()
+                print(f"Sprint '{title}' failed. Reverted to backlog.")
+            else:
+                TASKS.write_text(remainder, encoding="utf-8")
+                print(f"Sprint '{title}' failed. Reverted to backlog; Sprint block stripped, tasks.md retained.")
 
         elif status in ("active", "evaluating"):
             print(f"Sprint active: {title}")
             return
 
+        elif raw_status is None and not re.search(r'^#\s+', tasks_content, re.MULTILINE):
+            # Retained Review-Backlog-only tasks.md: a prior sprint completion
+            # stripped the contract block via strip_sprint_block(), leaving no
+            # '# ' heading and no status. This is the expected steady state, not
+            # schema drift -- fall through to C-3 reporting instead of warning and
+            # returning early.
+            pass
+
         else:
-            # Schema drift (missing or unrecognized status). Surface it but do not
-            # abort -- downstream sync sections (D-1 schema check, E, F) still need
-            # to run, and parallel callers cancel on non-zero exit.
+            # Schema drift (missing or unrecognized status on a file that still
+            # carries a '# ' sprint heading). Surface it but do not abort --
+            # downstream sync sections (D-1 schema check, E, F) still need to run,
+            # and parallel callers cancel on non-zero exit.
             shown = raw_status if raw_status is not None else "missing"
             print(
                 f"tasks.md has unknown status '{shown}' -- leaving intact. "
