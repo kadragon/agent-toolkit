@@ -107,4 +107,13 @@ Prefer modifying or removing outdated entries over appending. When unsure, add
 a short inline `TODO:` comment rather than inventing guidance.
 
 Size budget: target ≤100 lines, hard warn >200. Move long content to
-`docs/*.md` and leave a pointer line here.
+`docs/*.md` (read on demand, cross-tool) and leave a pointer line here. On a
+Claude-Code-only repo you may instead use `.claude/rules/*.md` (path-scoped,
+auto-loads when the matching area is touched); on a multi-tool repo keep the
+content in `docs/` so Codex/Cursor see it too.
+
+**Memory boundary:** durable code/repo facts live here, in `.claude/rules/`, and
+`docs/` — human-authored and version-controlled. Claude Code's auto-memory
+(`MEMORY.md`) holds the model's discovered preferences and cross-session
+learnings only; never promote a code fact into auto-memory, and don't hand-edit
+`MEMORY.md`.

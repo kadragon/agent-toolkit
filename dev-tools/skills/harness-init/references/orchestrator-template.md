@@ -43,6 +43,29 @@ description: |
 
 Also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match — descriptions handle the long tail, the router handles the high-leverage phrases.
 
+## Skill frontmatter reference (2026)
+
+Only `description` is required (defaults aside). Per the Agent Skills standard plus Claude Code extensions, these fields are available on any `SKILL.md` you generate:
+
+| Field | Use |
+|-------|-----|
+| `description` (+ `when_to_use`) | What + when. **Combined budget ~1,536 chars — front-load the key use case**; everything past the cap is truncated and never seen. |
+| `name` | Display name; defaults to the directory name. |
+| `model` | Per-skill model override (e.g. force `opus` for a judgment-heavy orchestrator, `haiku` for a mechanical one). |
+| `effort` | Per-skill reasoning effort (`low`…`max`). |
+| `disable-model-invocation: true` | Manual-only (`/name`); also keeps it out of subagent preload. Use for destructive or expensive skills that must not auto-fire. |
+| `user-invocable: false` | Hide from the `/` menu — background knowledge the model consults but the user never calls directly. |
+| `allowed-tools` / `disallowed-tools` | Gate which tools are usable while the skill is active. |
+| `paths` | Glob-gate auto-activation — the skill surfaces only when matching files are in play (same mechanism as path-scoped rules). |
+| `context: fork` + `agent` | Run the skill body in a forked subagent so its work doesn't pollute the lead context. |
+| `hooks` | Skill-scoped lifecycle hooks, active only while the skill runs. |
+
+**Progressive-disclosure reminder:** only `description`/`when_to_use` sit in the always-loaded listing; the SKILL.md **body loads only on invocation and then persists across turns** — so keep the body concise and push long material to `references/` (loaded on demand, near-zero cost until needed).
+
+**Dynamic context injection:** `` !`command` `` in the body runs the command and inlines its output before the model sees the skill (e.g. `` !`git diff --stat HEAD` ``) — useful for an orchestrator that needs live repo state at invocation.
+
+Custom slash commands and skills are unified — `.claude/commands/deploy.md` and `.claude/skills/deploy/SKILL.md` both expose `/deploy`. Prefer the skill form for anything with supporting files or progressive disclosure.
+
 ---
 
 ## Template A — Agent Team Mode (default for ≥2 collaborative agents)
