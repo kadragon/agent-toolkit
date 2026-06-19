@@ -80,8 +80,10 @@ Embed these in `AGENTS.md` under a `## Agent Teams` section (only if
 enabled):
 
 1. **File ownership is declared upfront.** The lead assigns file globs per
-   teammate in `tasks.md`. No teammate edits outside its glob. See
-   `docs/workflows.md` → "File Ownership Declaration".
+   teammate via the native shared task list (`TaskCreate`, persisted at
+   `~/.claude/tasks/{team-name}/`). No teammate edits outside its glob.
+   `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
+   work. See `docs/workflows.md` → "File Ownership Declaration".
 
 2. **Team size cap: 5.** Beyond that, diminishing returns + coordination
    cost spikes. Anthropic's own guidance.
@@ -98,6 +100,13 @@ enabled):
 
 6. **Teammates do not inherit lead conversation.** Every spawn prompt must
    be self-contained (Spawn Prompt Contract — all 4 fields).
+
+7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
+   (read-only mid-session input). Live coordination, status, and file globs
+   live in the native shared task list (Task tools, persisted at
+   `~/.claude/tasks/{team-name}/`). Sync completion back to `tasks.md` only
+   at session end. There is no project-level override for the native store
+   path — it is hardcoded.
 
 ## When to Shut Teams Down
 
