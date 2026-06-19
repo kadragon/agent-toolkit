@@ -345,8 +345,15 @@ function runSelftest() {
 // Run if called directly
 if (require.main === module) {
   if (process.argv.includes('--selftest')) {
-    runSelftest();   // throws on failure → non-zero exit; prints selftest OK on success
-    process.exit(0);
+    // Explicit exit codes — don't rely on Node's default uncaught-exception
+    // handler for the non-zero exit; a CI wrapper could swallow the throw.
+    try {
+      runSelftest();
+      process.exit(0);
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
   }
   main().catch(error => {
     console.error('Error:', error.message);

@@ -371,31 +371,33 @@ def cmd_selftest():
 
     results = {r['package']: r for r in parse_group_pr_body(fixture)}
 
+    # Explicit raises, not bare `assert`: `python -O` strips assert statements,
+    # which would silently no-op this drift guard — the opposite of its purpose.
+    def check(cond, msg):
+        if not cond:
+            raise AssertionError(msg)
+
     # Two real packages parsed
-    assert 'foo' in results, "foo missing from parsed results"
-    assert 'baz' in results, "baz missing from parsed results"
-    assert 'bar' in results, "bar missing from parsed results"
+    check('foo' in results, "foo missing from parsed results")
+    check('baz' in results, "baz missing from parsed results")
+    check('bar' in results, "bar missing from parsed results")
 
     # tornado (lowercase bump line) must be ignored
-    assert 'tornado' not in results, "tornado should be ignored (lowercase bump line)"
+    check('tornado' not in results, "tornado should be ignored (lowercase bump line)")
 
     # foo: last-occurrence wins (1.2.0, not 1.1.0)
-    assert results['foo']['new_version'] == '1.2.0', (
-        f"foo new_version should be 1.2.0 (last occurrence wins), got {results['foo']['new_version']!r}"
-    )
-    assert results['foo']['old_version'] == '1.0.0', (
-        f"foo old_version should be 1.0.0, got {results['foo']['old_version']!r}"
-    )
+    check(results['foo']['new_version'] == '1.2.0',
+          f"foo new_version should be 1.2.0 (last occurrence wins), got {results['foo']['new_version']!r}")
+    check(results['foo']['old_version'] == '1.0.0',
+          f"foo old_version should be 1.0.0, got {results['foo']['old_version']!r}")
 
     # baz: trailing dot stripped → 1.4.7
-    assert results['baz']['new_version'] == '1.4.7', (
-        f"baz new_version should be 1.4.7 (no trailing dot), got {results['baz']['new_version']!r}"
-    )
+    check(results['baz']['new_version'] == '1.4.7',
+          f"baz new_version should be 1.4.7 (no trailing dot), got {results['baz']['new_version']!r}")
 
     # bar: pre-release intact
-    assert results['bar']['new_version'] == '2.0.0-beta.1', (
-        f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}"
-    )
+    check(results['bar']['new_version'] == '2.0.0-beta.1',
+          f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}")
 
     print('selftest OK')
 

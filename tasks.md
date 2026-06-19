@@ -1,5 +1,13 @@
 ## Review Backlog
 
+### PR #80 — consolidate-deps review-backlog fixes (out-of-scope findings)
+
+Out-of-scope items surfaced during PR #80's review cycle. Behavior changes / refactors that need their own design pass, not part of the 5 bundled fixes.
+
+- [ ] `consolidate-deps.py:update_pip_tools_dependencies` / `update_requirements_txt` — `re.sub` silently no-ops when the package isn't found in the file (zero replacements → still reports success, commits stale versions). Use `re.subn` and warn/fail on `count == 0`. Caveat: pip-tools transitive deps legitimately absent from `requirements.in`, so a hard `raise` would over-abort — needs warn-vs-raise design. conf ~75%, P2. (source: agy)
+- [ ] `consolidate-deps.py:run_tests` — pip/pip-tools branch runs bare `pytest`, which may resolve to a global binary instead of the project venv. Use `python -m pytest`. conf ~70%, P2. (source: agy)
+- [ ] `consolidate-deps.py:update_uv_dependencies` — return contract inconsistent with sibling updaters: `return True` is unreachable on failure (relies on raise→main cleanup) while `update_pip_tools_dependencies`/`update_requirements_txt` return `bool`. Pick one contract across all updaters. conf ~82%, P2. (source: review)
+
 ### PR #79 — dependabot-manager consolidate group-PR parsing (out-of-scope, pre-existing)
 
 These live in `consolidate-deps.py` functions untouched by PR #79; surfaced by Antigravity/review during that PR's review cycle. All pre-existing, not introduced by the group-PR parser work.
