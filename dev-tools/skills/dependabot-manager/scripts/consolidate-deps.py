@@ -124,7 +124,7 @@ def update_uv_dependencies(updates: List[Dict]) -> bool:
     for update in updates:
         pkg = update['package']
         version = update['new_version']
-        exec_cmd(f'uv add "{pkg}=={version}"', check=False)
+        exec_cmd(f'uv add "{pkg}=={version}"')
     return True
 
 
@@ -145,7 +145,7 @@ def update_pip_tools_dependencies(updates: List[Dict]) -> bool:
     for update in updates:
         pkg = update['package']
         version = update['new_version']
-        pattern = rf'{re.escape(pkg)}==[\d\.]+'
+        pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
         replacement = f'{pkg}=={version}'
         content = re.sub(pattern, replacement, content)
 
@@ -162,7 +162,7 @@ def update_requirements_txt(updates: List[Dict]) -> bool:
     for update in updates:
         pkg = update['package']
         version = update['new_version']
-        pattern = rf'{re.escape(pkg)}==[\d\.]+'
+        pattern = rf'(?m)^{re.escape(pkg)}==[\w.!+-]+'
         replacement = f'{pkg}=={version}'
         content = re.sub(pattern, replacement, content)
 
@@ -181,7 +181,7 @@ def run_tests(project_type: str) -> bool:
             exec_cmd('poetry run pytest')
             exec_cmd('poetry run mypy .', check=False)
         else:
-            exec_cmd('pytest', check=False)
+            exec_cmd('pytest')
         return True
     except subprocess.CalledProcessError:
         return False
@@ -352,7 +352,58 @@ def main():
     print(f'   2. Merge when ready: gh pr merge {pr_number} --squash --delete-branch')
 
 
+def cmd_selftest():
+    """Exercise parse_group_pr_body against a canonical Dependabot grouped-PR body fixture.
+
+    The fixture is intentionally minimal but covers every edge case the task
+    mandates: two real "Updates `pkg`" lines, a lowercase changelog-noise line
+    that must be ignored, a trailing-dot version that must be stripped, a
+    pre-release version that must survive intact, and a duplicate package entry
+    where the last occurrence must win.
+    """
+    fixture = (
+        "Updates `foo` from 1.0.0 to 1.1.0\n"
+        "bump tornado from 6.0 to 6.1\n"           # lowercase → must be ignored
+        "Updates `baz` from 1.0 to 1.4.7.\n"       # trailing dot → stripped by regex
+        "Updates `bar` from 2.0.0 to 2.0.0-beta.1\n"  # pre-release → intact
+        "Updates `foo` from 1.0.0 to 1.2.0\n"      # duplicate foo → last wins
+    )
+
+    results = {r['package']: r for r in parse_group_pr_body(fixture)}
+
+    # Two real packages parsed
+    assert 'foo' in results, "foo missing from parsed results"
+    assert 'baz' in results, "baz missing from parsed results"
+    assert 'bar' in results, "bar missing from parsed results"
+
+    # tornado (lowercase bump line) must be ignored
+    assert 'tornado' not in results, "tornado should be ignored (lowercase bump line)"
+
+    # foo: last-occurrence wins (1.2.0, not 1.1.0)
+    assert results['foo']['new_version'] == '1.2.0', (
+        f"foo new_version should be 1.2.0 (last occurrence wins), got {results['foo']['new_version']!r}"
+    )
+    assert results['foo']['old_version'] == '1.0.0', (
+        f"foo old_version should be 1.0.0, got {results['foo']['old_version']!r}"
+    )
+
+    # baz: trailing dot stripped → 1.4.7
+    assert results['baz']['new_version'] == '1.4.7', (
+        f"baz new_version should be 1.4.7 (no trailing dot), got {results['baz']['new_version']!r}"
+    )
+
+    # bar: pre-release intact
+    assert results['bar']['new_version'] == '2.0.0-beta.1', (
+        f"bar new_version should be 2.0.0-beta.1, got {results['bar']['new_version']!r}"
+    )
+
+    print('selftest OK')
+
+
 if __name__ == '__main__':
+    if '--selftest' in sys.argv:
+        cmd_selftest()
+        sys.exit(0)
     try:
         main()
     except Exception as e:

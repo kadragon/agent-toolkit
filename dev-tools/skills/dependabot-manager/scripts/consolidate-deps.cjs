@@ -299,12 +299,59 @@ ${prRelated}
   };
 }
 
+// Exercise parseGroupPrBody against a canonical Dependabot grouped-PR body fixture.
+// The fixture covers: two real "Updates `pkg`" lines, a lowercase changelog-noise
+// line that must be ignored, a trailing-dot version that must be stripped, a
+// pre-release version that must survive intact, and a duplicate package entry
+// where the last occurrence must win.
+function runSelftest() {
+  const fixture = [
+    'Updates `foo` from 1.0.0 to 1.1.0',
+    'bump tornado from 6.0 to 6.1',           // lowercase → must be ignored
+    'Updates `baz` from 1.0 to 1.4.7.',       // trailing dot → stripped by regex
+    'Updates `bar` from 2.0.0 to 2.0.0-beta.1',  // pre-release → intact
+    'Updates `foo` from 1.0.0 to 1.2.0',     // duplicate foo → last wins
+  ].join('\n');
+
+  const results = Object.fromEntries(
+    parseGroupPrBody(fixture).map(r => [r.package, r])
+  );
+
+  // Two real packages parsed
+  if (!results['foo']) throw new Error('foo missing from parsed results');
+  if (!results['baz']) throw new Error('baz missing from parsed results');
+  if (!results['bar']) throw new Error('bar missing from parsed results');
+
+  // tornado (lowercase bump line) must be ignored
+  if (results['tornado']) throw new Error('tornado should be ignored (lowercase bump line)');
+
+  // foo: last-occurrence wins (1.2.0, not 1.1.0)
+  if (results['foo'].newVersion !== '1.2.0')
+    throw new Error(`foo newVersion should be 1.2.0 (last occurrence wins), got ${results['foo'].newVersion}`);
+  if (results['foo'].oldVersion !== '1.0.0')
+    throw new Error(`foo oldVersion should be 1.0.0, got ${results['foo'].oldVersion}`);
+
+  // baz: trailing dot stripped → 1.4.7
+  if (results['baz'].newVersion !== '1.4.7')
+    throw new Error(`baz newVersion should be 1.4.7 (no trailing dot), got ${results['baz'].newVersion}`);
+
+  // bar: pre-release intact
+  if (results['bar'].newVersion !== '2.0.0-beta.1')
+    throw new Error(`bar newVersion should be 2.0.0-beta.1, got ${results['bar'].newVersion}`);
+
+  console.log('selftest OK');
+}
+
 // Run if called directly
 if (require.main === module) {
+  if (process.argv.includes('--selftest')) {
+    runSelftest();   // throws on failure → non-zero exit; prints selftest OK on success
+    process.exit(0);
+  }
   main().catch(error => {
     console.error('Error:', error.message);
     process.exit(1);
   });
 }
 
-module.exports = { main, getDependabotPRs, parsePackageUpdate, parseGroupPrBody, updatePackageJson };
+module.exports = { main, getDependabotPRs, parsePackageUpdate, parseGroupPrBody, updatePackageJson, runSelftest };
