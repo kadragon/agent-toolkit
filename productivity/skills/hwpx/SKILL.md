@@ -60,7 +60,7 @@ rm -rf .hwpx_work/
 │   ├── _common.py                        # 공유 유틸리티 (regex, ZIP helpers, table helpers)
 │   ├── office.py unpack|pack             # HWPX ↔ 디렉토리 (raw bytes + 순서 manifest)
 │   ├── build.py build|analyze|next-id    # 문서 조립 + 심층 분석 + ID 조회
-│   ├── table.py dump|locate|insert|replace|fill|delete|calc-widths|strip-lineseg  # 표 편집 전체
+│   ├── table.py dump|locate|insert|replace|toggle-check|fill|delete|calc-widths|strip-lineseg  # 표 편집 전체
 │   ├── validate.py validate|page-guard   # 구조 검증 + 페이지 드리프트 위험 검사
 │   ├── text.py extract|patch             # 텍스트 추출 + 원자적 텍스트 교체
 │   └── convert_hwp.ps1                  # HWP → HWPX 변환 (Hancom COM) + 원본 삭제
@@ -464,7 +464,8 @@ rm -rf .hwpx_work/
 | `scripts/table.py locate` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`); accepts `.hwpx` or unpacked directory |
 | `scripts/table.py delete` | delete table rows — remove `<hp:tr>` + auto-fix rowCnt/rowSpan/rowAddr (`--list` to view rows) |
 | `scripts/table.py insert` | insert table row — insert `<hp:tr>` + auto-fix rowCnt/rowAddr/rowSpan (`--grow` to extend group-end rowSpan) |
-| `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs; `--preserve-style` to reuse existing charPr/paraPr (with optional `--charpr` override) |
+| `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs; `--preserve-style` to reuse existing charPr/paraPr (with optional `--charpr` override); `--append-para PARAPR CHARPR TEXT` / `--match-style N TEXT` to **add** a paragraph keeping existing ones (공문 "밑에 한 줄 추가") |
+| `scripts/table.py toggle-check` | toggle a checkbox `[  ]` ↔ `[√]` next to a `--label` in a cell — flips only the box preceding the label, leaves sibling boxes (KR 정부/별지 서식 다중 체크박스) untouched; reversible |
 | `scripts/table.py fill` | bulk-fill multiple cells from JSON data (`{table_id: {col,row: text}}`) using preserve-style logic — WARN on unreadable font sizes, collects all warnings before summary |
 | `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` — prevent "document corrupted" warning after text edits |
 | `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |

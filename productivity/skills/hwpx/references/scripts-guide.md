@@ -197,7 +197,33 @@ python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ result.hwpx
 
 **`--preserve-style` note**: reads the first `paraPrIDRef` and `charPrIDRef` from the target cell and rebuilds the paragraph with them. Use `dump --style-map` first to verify the IDs. If the charPr height is below 5pt, a `WARN` is printed to stderr. Use `--charpr N` to override the charPrIDRef.
 
-### 3a) Bulk fill (table.py fill)
+### 3a) Append a paragraph instead of replacing (table.py replace --append-para / --match-style)
+
+`replace` rebuilds the **whole** cell subList, so any existing multi-run boilerplate (mixed charPr) is lost. When the goal is "기존 내용은 두고 밑에 한 줄 추가" (공문·서식 빈출 패턴), append instead — existing paragraphs are kept verbatim:
+
+```bash
+# 명시 스타일로 한 단락 추가 (PARAPR CHARPR TEXT)
+python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 1,0 \
+  --append-para 10 5 "추가 문구"
+
+# 셀의 N번째(0-based) 단락 스타일을 상속해서 추가 — 스타일 ID 조회 불필요
+python3 "$SKILL_DIR/scripts/table.py" replace ./unpacked/ --table-id TABLE_ID --cell 1,0 \
+  --match-style 0 "윗 단락과 같은 서식으로 추가"
+```
+
+`--append-para`/`--match-style` are mutually exclusive with each other and with `--para`/`--run`/`--content-file`/`--set-text`/`--preserve-style`. The new paragraph uses placeholder `id="0"`, so it never clashes with existing `hp:p` ids.
+
+### 3b) Toggle a checkbox (table.py toggle-check)
+
+KR 정부·별지 서식은 한 줄에 여러 체크박스를 둔다 — `[  ] 승인   [  ] 불가   [  ] 조건부`. `[  ] ` 가 여러 번 나오므로 단순 `replace`/`set-text`는 충돌한다. `toggle-check`는 **라벨 바로 앞** 체크박스만 `[  ]` ↔ `[√]` 로 뒤집고 나머지는 건드리지 않는다 (idempotent reversible):
+
+```bash
+python3 "$SKILL_DIR/scripts/table.py" toggle-check ./unpacked/ --table-id TABLE_ID --cell 1,0 --label "승인"
+```
+
+빈 칸 토큰은 정확히 대괄호+공백 2칸 `[  ]`, 체크 토큰은 `[√]`. 라벨이 없거나 라벨 앞에 체크박스가 없으면 `ValueError`로 종료한다.
+
+### 3c) Bulk fill (table.py fill)
 
 여러 표 / 여러 셀을 JSON 데이터로 일괄 채우기. 모든 셀에 `--preserve-style` 로직 적용:
 
