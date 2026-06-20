@@ -695,17 +695,69 @@ def _append_para_cell(
     return new_xml, [msg]
 
 
+def _direct_paras(inner: str) -> list[tuple[int, int]]:
+    """Spans of <hp:p>...</hp:p> that are *direct* children of the cell subList.
+
+    A cell may contain a nested table, whose cells carry their own paragraphs. We
+    track subList-nesting depth so only paragraphs at depth 0 (the cell's own) are
+    returned — nested-table paragraphs must not be mistaken for siblings. `inner`
+    is already the content *between* the cell subList's open/close tags, so depth 0
+    is the direct level.
+    """
+    events = sorted(
+        [(m.start(), 1) for m in re.finditer(r"<hp:subList\b", inner)]
+        + [(m.start(), -1) for m in re.finditer(r"</hp:subList>", inner)]
+    )
+
+    def depth_at(pos: int) -> int:
+        d = 0
+        for ep, delta in events:
+            if ep >= pos:
+                break
+            d += delta
+        return d
+
+    spans: list[tuple[int, int]] = []
+    for m in re.finditer(r"<hp:p\b[^>]*>", inner):
+        if depth_at(m.start()) != 0:
+            continue
+        end = inner.find("</hp:p>", m.end())
+        if end == -1:
+            continue
+        spans.append((m.start(), end + len("</hp:p>")))
+    return spans
+
+
+def _hp_t_spans(fragment: str) -> list[tuple[int, int, str]]:
+    """(start, end, text) for each <hp:t>...</hp:t> inner text run in a fragment."""
+    return [
+        (m.start(1), m.end(1), m.group(1))
+        for m in re.finditer(r"<hp:t>(.*?)</hp:t>", fragment, re.DOTALL)
+    ]
+
+
+def _concat_to_raw(segs: list[tuple[int, int, str]], ci: int) -> int:
+    """Map an index in the concatenated <hp:t> text back to a raw fragment offset."""
+    acc = 0
+    for rs, _re, t in segs:
+        if ci <= acc + len(t):
+            return rs + (ci - acc)
+        acc += len(t)
+    return segs[-1][1] if segs else 0
+
+
 def _append_para_match(
     xml: str, table_id: str, col: int, row: int, n: int, text: str,
 ) -> tuple[str, list[str]]:
     """Append a paragraph inheriting paraPr/charPr from the cell's Nth sibling.
 
     Saves the caller from having to look up style IDs when the goal is simply to
-    add a line in the same style as an existing one.
+    add a line in the same style as an existing one. N indexes only the cell's
+    *direct* paragraphs (nested-table paragraphs are skipped).
     """
     _, _, _, _, _, tc, in_s, in_e = _locate_cell_sublist(xml, table_id, col, row)
     inner = tc[in_s:in_e]
-    paras = re.findall(r"<hp:p\b.*?</hp:p>", inner, re.DOTALL)
+    paras = _direct_paras(inner)
     if not paras:
         raise ValueError("cell %d,%d has no paragraph to match style from" % (col, row))
     if n < 0 or n >= len(paras):
@@ -713,7 +765,7 @@ def _append_para_match(
             "cell %d,%d has %d paragraph(s); --match-style index %d out of range"
             % (col, row, len(paras), n)
         )
-    sib = paras[n]
+    sib = inner[paras[n][0]:paras[n][1]]
     pm = re.search(r'paraPrIDRef="(\d+)"', sib)
     cm = re.search(r'charPrIDRef="(\d+)"', sib)
     para_pr = pm.group(1) if pm else "0"
@@ -732,22 +784,38 @@ def _toggle_check_cell(
     """Toggle the checkbox glyph belonging to a label inside one cell.
 
     KR government forms pack several boxes in one line — "[  ] 승인  [  ] 불가
-    [  ] 조건부" — so a plain text replace of "[  ] " is ambiguous. Here the box
-    toggled is the nearest one *preceding* the label, flipping [  ] <-> [√] and
-    leaving every other box untouched.
+    [  ] 조건부" — so a plain text replace of "[  ] " is ambiguous. The box toggled
+    is the nearest one *preceding* the label, flipping [  ] <-> [√] and leaving
+    every other box untouched. Matching is done on the visible <hp:t> text only
+    (so an attribute like paraPrIDRef="10" can't be mistaken for the label "10")
+    and is confined to the label's own direct paragraph (so a box in a different
+    paragraph is never toggled). Box and label may live in separate runs.
     """
     ti, tend, tbl, cs, ce, tc, in_s, in_e = _locate_cell_sublist(xml, table_id, col, row)
     inner = tc[in_s:in_e]
-    li = inner.find(label)
-    if li == -1:
+    target = None
+    for ps, pe in _direct_paras(inner):
+        segs = _hp_t_spans(inner[ps:pe])
+        concat = "".join(t for _, _, t in segs)
+        if label in concat:
+            target = (ps, pe, segs, concat)
+            break
+    if target is None:
         raise ValueError("toggle-check: label %r not found in cell %d,%d" % (label, col, row))
-    before = [m for m in _CHECK_RE.finditer(inner) if m.end() <= li]
+    ps, pe, segs, concat = target
+    li = concat.find(label)
+    before = [m for m in _CHECK_RE.finditer(concat) if m.end() <= li]
     if not before:
         raise ValueError(
             "toggle-check: no checkbox precedes label %r in cell %d,%d" % (label, col, row))
     box = before[-1]
     new_tok = _CHECK_DONE if box.group() == _CHECK_EMPTY else _CHECK_EMPTY
-    new_inner = inner[:box.start()] + new_tok + inner[box.end():]
+    raw_s = _concat_to_raw(segs, box.start())
+    raw_e = _concat_to_raw(segs, box.end())
+    para = inner[ps:pe]
+    new_para = para[:raw_s] + new_tok + para[raw_e:]
+    new_inner = inner[:ps] + new_para + inner[pe:]
+    new_inner, _ = strip_linesegarray(new_inner)
     new_xml = _splice_cell_inner(xml, ti, tend, tbl, cs, ce, tc, in_s, in_e, new_inner)
     state = "checked" if new_tok == _CHECK_DONE else "cleared"
     return new_xml, ["cell %d,%d: %r %s" % (col, row, label, state)]
@@ -1366,6 +1434,87 @@ _FIXTURE_CHECK = '''\
   </hp:BodyText>
 </hpf:HWPFDocumentFile>'''
 
+# cell 0,0: one DIRECT paragraph (charPr 5) + a nested table whose cell holds a
+# paragraph (charPr 9). match-style must see only the 1 direct paragraph.
+_FIXTURE_NESTED = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>직접</hp:t></hp:run></hp:p>
+                <hp:tbl id="2" tableIDRef="2" cellIDRef="0" borderFillIDRef="1" width="4000" height="1000">
+                  <hp:tr>
+                    <hp:tc>
+                      <hp:cellAddr colAddr="0" rowAddr="0"/>
+                      <hp:subList id="102">
+                        <hp:p id="300" paraPrIDRef="20" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="9"><hp:t>중첩</hp:t></hp:run></hp:p>
+                      </hp:subList>
+                    </hp:tc>
+                  </hp:tr>
+                </hp:tbl>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+# checkbox + label split across separate runs (real KR forms do this)
+_FIXTURE_CHECK_MULTI = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] </hp:t></hp:run><hp:run charPrIDRef="6"><hp:t>승인</hp:t></hp:run><hp:run charPrIDRef="5"><hp:t>   [  ] </hp:t></hp:run><hp:run charPrIDRef="6"><hp:t>불가</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+# two direct paragraphs: para0 has a box, para1 (with label 승인) has none
+_FIXTURE_CHECK_2PARA = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] 기타</hp:t></hp:run></hp:p>
+                <hp:p id="201" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>승인 여부</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
 
 def _run_tests() -> None:
     failures = []
@@ -1570,6 +1719,51 @@ def _run_tests() -> None:
         print("AC-TC-3 PASS: missing label raises ValueError")
     except Exception as e:
         failures.append("AC-TC-3 FAIL: unexpected exception: %s" % e)
+
+    # AC-AP-4: match-style counts only DIRECT paragraphs (ignores nested table)
+    try:
+        # cell has 1 direct paragraph; index 1 would only be valid if a nested-table
+        # paragraph were wrongly counted, so it must raise.
+        _append_para_match(_FIXTURE_NESTED, "1", 0, 0, 1, "x")
+        failures.append("AC-AP-4 FAIL: nested-table paragraph counted (index 1 accepted)")
+    except ValueError:
+        # and index 0 must inherit the DIRECT para's charPr=5, not nested charPr=9
+        try:
+            result, _ = _append_para_match(_FIXTURE_NESTED, "1", 0, 0, 0, "상속")
+            if "상속" not in result:
+                failures.append("AC-AP-4 FAIL: appended text missing")
+            elif result.count('charPrIDRef="9"') != 1:
+                failures.append("AC-AP-4 FAIL: nested charPr=9 was touched")
+            elif result.count('charPrIDRef="5"') < 2:
+                failures.append("AC-AP-4 FAIL: direct charPr=5 not inherited")
+            else:
+                print("AC-AP-4 PASS: match-style ignores nested-table paragraphs")
+        except Exception as e:
+            failures.append("AC-AP-4 FAIL: index 0 path: %s" % e)
+    except Exception as e:
+        failures.append("AC-AP-4 FAIL: unexpected exception: %s" % e)
+
+    # AC-TC-4: toggle-check works when box and label are in separate runs
+    try:
+        result, _ = _toggle_check_cell(_FIXTURE_CHECK_MULTI, "1", 0, 0, "승인")
+        if result.count("[√]") != 1:
+            failures.append("AC-TC-4 FAIL: expected exactly 1 checked box, got %d" % result.count("[√]"))
+        elif result.count("[  ]") != 1:
+            failures.append("AC-TC-4 FAIL: 불가 box should stay empty (one [  ] expected)")
+        else:
+            print("AC-TC-4 PASS: toggle-check handles box/label split across runs")
+    except Exception as e:
+        failures.append("AC-TC-4 FAIL: %s" % e)
+
+    # AC-TC-5: toggle-check stays inside the label's own paragraph
+    try:
+        # label 승인 lives in para1 which has NO box; the box in para0 must NOT toggle.
+        _toggle_check_cell(_FIXTURE_CHECK_2PARA, "1", 0, 0, "승인")
+        failures.append("AC-TC-5 FAIL: toggled a box from a different paragraph")
+    except ValueError:
+        print("AC-TC-5 PASS: toggle-check confined to the label's paragraph")
+    except Exception as e:
+        failures.append("AC-TC-5 FAIL: unexpected exception: %s" % e)
 
     if failures:
         for f in failures:
