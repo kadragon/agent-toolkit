@@ -9,6 +9,9 @@ Usage:
     python table.py locate doc.hwpx --tag hp:tbl --contains "항목명"
     python table.py insert doc.hwpx --table-id ID --after-row 3 --row-file row.xml -o out.hwpx
     python table.py replace doc.hwpx --table-id ID --cell 1,0 --para 0 0 "text" -o out.hwpx
+    python table.py replace doc.hwpx --table-id ID --cell 1,0 --append-para 0 0 "한 줄 추가" -o out.hwpx
+    python table.py replace doc.hwpx --table-id ID --cell 1,0 --match-style 0 "형제 스타일로 추가" -o out.hwpx
+    python table.py toggle-check doc.hwpx --table-id ID --cell 1,0 --label "승인" -o out.hwpx
     python table.py delete doc.hwpx --table-id ID --rows 2,3 -o out.hwpx
     python table.py calc-widths 3
     python table.py calc-widths 1:4
@@ -630,6 +633,194 @@ def _set_text_cell(xml: str, table_id: str, col: int, row: int,
     return new_xml, [msg]
 
 
+def _locate_cell_sublist(
+    xml: str, table_id: str, col: int, row: int
+) -> tuple[int, int, str, int, int, str, int, int]:
+    """Resolve a unique cell's direct subList span.
+
+    Returns (ti, tend, tbl, cs, ce, tc, in_s, in_e) where in_s..in_e bound the
+    inner content of the cell's direct <hp:subList>. Raises ValueError if the
+    table/cell is missing, the cell is non-unique, or it has no subList. Factors
+    out the lookup boilerplate shared by the append/toggle ops below.
+    """
+    span = find_table(xml, table_id)
+    if span is None:
+        raise ValueError("table id=%s not found" % table_id)
+    ti, tend = span
+    tbl = xml[ti:tend]
+    target = None
+    for cs, ce in top_cells(tbl):
+        if _own_cell_addr(tbl[cs:ce]) == (col, row):
+            if target is not None:
+                raise ValueError("cell %d,%d is not unique in table" % (col, row))
+            target = (cs, ce)
+    if target is None:
+        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+    cs, ce = target
+    tc = tbl[cs:ce]
+    sl = _direct_sublist(tc)
+    if sl is None:
+        raise ValueError("cell %d,%d has no <hp:subList>" % (col, row))
+    in_s, in_e = sl
+    return ti, tend, tbl, cs, ce, tc, in_s, in_e
+
+
+def _splice_cell_inner(
+    xml: str, ti: int, tend: int, tbl: str, cs: int, ce: int,
+    tc: str, in_s: int, in_e: int, new_inner: str,
+) -> str:
+    """Rebuild the document with new subList inner content for one cell."""
+    new_tc = tc[:in_s] + new_inner + tc[in_e:]
+    new_tbl = tbl[:cs] + new_tc + tbl[ce:]
+    return xml[:ti] + new_tbl + xml[tend:]
+
+
+def _append_para_cell(
+    xml: str, table_id: str, col: int, row: int,
+    para_pr: str, char_pr: str, text: str,
+) -> tuple[str, list[str]]:
+    """Append one paragraph to a cell, keeping existing paragraphs intact.
+
+    Unlike replace (which rebuilds the whole subList), this preserves the cell's
+    current multi-run boilerplate — the common "공문/서식: add one line under the
+    existing content" pattern. The new paragraph uses placeholder id=0, so it
+    never clashes with existing hp:p ids.
+    """
+    ti, tend, tbl, cs, ce, tc, in_s, in_e = _locate_cell_sublist(xml, table_id, col, row)
+    inner = tc[in_s:in_e]
+    new_para = _build_para_runs(para_pr, [(char_pr, text)])
+    inner, _ = strip_linesegarray(inner + new_para)
+    new_xml = _splice_cell_inner(xml, ti, tend, tbl, cs, ce, tc, in_s, in_e, inner)
+    msg = "cell %d,%d: appended 1 paragraph (paraPr=%s charPr=%s)" % (col, row, para_pr, char_pr)
+    return new_xml, [msg]
+
+
+def _direct_paras(inner: str) -> list[tuple[int, int]]:
+    """Spans of <hp:p>...</hp:p> that are *direct* children of the cell subList.
+
+    A cell may contain a nested table, whose cells carry their own paragraphs. We
+    track subList-nesting depth so only paragraphs at depth 0 (the cell's own) are
+    returned — nested-table paragraphs must not be mistaken for siblings. `inner`
+    is already the content *between* the cell subList's open/close tags, so depth 0
+    is the direct level.
+    """
+    events = sorted(
+        [(m.start(), 1) for m in re.finditer(r"<hp:subList\b", inner)]
+        + [(m.start(), -1) for m in re.finditer(r"</hp:subList>", inner)]
+    )
+
+    def depth_at(pos: int) -> int:
+        d = 0
+        for ep, delta in events:
+            if ep >= pos:
+                break
+            d += delta
+        return d
+
+    spans: list[tuple[int, int]] = []
+    for m in re.finditer(r"<hp:p\b[^>]*>", inner):
+        if depth_at(m.start()) != 0:
+            continue
+        end = inner.find("</hp:p>", m.end())
+        if end == -1:
+            continue
+        spans.append((m.start(), end + len("</hp:p>")))
+    return spans
+
+
+def _hp_t_spans(fragment: str) -> list[tuple[int, int, str]]:
+    """(start, end, text) for each <hp:t>...</hp:t> inner text run in a fragment."""
+    return [
+        (m.start(1), m.end(1), m.group(1))
+        for m in re.finditer(r"<hp:t>(.*?)</hp:t>", fragment, re.DOTALL)
+    ]
+
+
+def _concat_to_raw(segs: list[tuple[int, int, str]], ci: int) -> int:
+    """Map an index in the concatenated <hp:t> text back to a raw fragment offset."""
+    acc = 0
+    for rs, _re, t in segs:
+        if ci <= acc + len(t):
+            return rs + (ci - acc)
+        acc += len(t)
+    return segs[-1][1] if segs else 0
+
+
+def _append_para_match(
+    xml: str, table_id: str, col: int, row: int, n: int, text: str,
+) -> tuple[str, list[str]]:
+    """Append a paragraph inheriting paraPr/charPr from the cell's Nth sibling.
+
+    Saves the caller from having to look up style IDs when the goal is simply to
+    add a line in the same style as an existing one. N indexes only the cell's
+    *direct* paragraphs (nested-table paragraphs are skipped).
+    """
+    _, _, _, _, _, tc, in_s, in_e = _locate_cell_sublist(xml, table_id, col, row)
+    inner = tc[in_s:in_e]
+    paras = _direct_paras(inner)
+    if not paras:
+        raise ValueError("cell %d,%d has no paragraph to match style from" % (col, row))
+    if n < 0 or n >= len(paras):
+        raise ValueError(
+            "cell %d,%d has %d paragraph(s); --match-style index %d out of range"
+            % (col, row, len(paras), n)
+        )
+    sib = inner[paras[n][0]:paras[n][1]]
+    pm = re.search(r'paraPrIDRef="(\d+)"', sib)
+    cm = re.search(r'charPrIDRef="(\d+)"', sib)
+    para_pr = pm.group(1) if pm else "0"
+    char_pr = cm.group(1) if cm else "0"
+    return _append_para_cell(xml, table_id, col, row, para_pr, char_pr, text)
+
+
+_CHECK_EMPTY = "[  ]"
+_CHECK_DONE = "[√]"
+_CHECK_RE = re.compile(r"\[ {2}\]|\[√\]")
+
+
+def _toggle_check_cell(
+    xml: str, table_id: str, col: int, row: int, label: str,
+) -> tuple[str, list[str]]:
+    """Toggle the checkbox glyph belonging to a label inside one cell.
+
+    KR government forms pack several boxes in one line — "[  ] 승인  [  ] 불가
+    [  ] 조건부" — so a plain text replace of "[  ] " is ambiguous. The box toggled
+    is the nearest one *preceding* the label, flipping [  ] <-> [√] and leaving
+    every other box untouched. Matching is done on the visible <hp:t> text only
+    (so an attribute like paraPrIDRef="10" can't be mistaken for the label "10")
+    and is confined to the label's own direct paragraph (so a box in a different
+    paragraph is never toggled). Box and label may live in separate runs.
+    """
+    ti, tend, tbl, cs, ce, tc, in_s, in_e = _locate_cell_sublist(xml, table_id, col, row)
+    inner = tc[in_s:in_e]
+    target = None
+    for ps, pe in _direct_paras(inner):
+        segs = _hp_t_spans(inner[ps:pe])
+        concat = "".join(t for _, _, t in segs)
+        if label in concat:
+            target = (ps, pe, segs, concat)
+            break
+    if target is None:
+        raise ValueError("toggle-check: label %r not found in cell %d,%d" % (label, col, row))
+    ps, pe, segs, concat = target
+    li = concat.find(label)
+    before = [m for m in _CHECK_RE.finditer(concat) if m.end() <= li]
+    if not before:
+        raise ValueError(
+            "toggle-check: no checkbox precedes label %r in cell %d,%d" % (label, col, row))
+    box = before[-1]
+    new_tok = _CHECK_DONE if box.group() == _CHECK_EMPTY else _CHECK_EMPTY
+    raw_s = _concat_to_raw(segs, box.start())
+    raw_e = _concat_to_raw(segs, box.end())
+    para = inner[ps:pe]
+    new_para = para[:raw_s] + new_tok + para[raw_e:]
+    new_inner = inner[:ps] + new_para + inner[pe:]
+    new_inner, _ = strip_linesegarray(new_inner)
+    new_xml = _splice_cell_inner(xml, ti, tend, tbl, cs, ce, tc, in_s, in_e, new_inner)
+    state = "checked" if new_tok == _CHECK_DONE else "cleared"
+    return new_xml, ["cell %d,%d: %r %s" % (col, row, label, state)]
+
+
 def _read_cell_style(tc: str) -> tuple[str, str]:
     """Returns (paraPrIDRef, charPrIDRef) from first run in the cell's direct subList."""
     sl = _direct_sublist(tc)
@@ -798,7 +989,18 @@ def cmd_replace(args: argparse.Namespace) -> None:
     if not args.cell or (not is_dir_mode and not args.output):
         print("Error: --cell required (and --output required for .hwpx input)", file=sys.stderr)
         sys.exit(1)
-    if args.preserve_style:
+    mode_append = args.append_para is not None
+    mode_match = args.match_style is not None
+    if mode_append and mode_match:
+        print("Error: --append-para and --match-style are mutually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if (mode_append or mode_match) and (
+        args.preserve_style or args.set_text or args.content_file or args.para or args.run):
+        print("Error: --append-para/--match-style cannot combine with other replace modes", file=sys.stderr)
+        sys.exit(1)
+    if mode_append or mode_match:
+        pass
+    elif args.preserve_style:
         if args.set_text or args.content_file or args.para or args.run:
             print("Error: --preserve-style is mutually exclusive with --set-text/--content-file/--para/--run", file=sys.stderr)
             sys.exit(1)
@@ -817,7 +1019,26 @@ def cmd_replace(args: argparse.Namespace) -> None:
     except ValueError:
         print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
         sys.exit(1)
-    if args.preserve_style:
+    if mode_append:
+        para_pr, char_pr, text = args.append_para
+        try:
+            new_xml, info = _append_para_cell(xml, args.table_id, col, row, para_pr, char_pr, text)
+        except ValueError as e:
+            print("Error: %s" % e, file=sys.stderr)
+            sys.exit(1)
+    elif mode_match:
+        n_s, text = args.match_style
+        try:
+            n = int(n_s)
+        except ValueError:
+            print("Error: --match-style N must be an integer (got %r)" % n_s, file=sys.stderr)
+            sys.exit(1)
+        try:
+            new_xml, info = _append_para_match(xml, args.table_id, col, row, n, text)
+        except ValueError as e:
+            print("Error: %s" % e, file=sys.stderr)
+            sys.exit(1)
+    elif args.preserve_style:
         heights = load_charpr_heights(inp)
         try:
             new_xml, info = _replace_cell_preserve_style(
@@ -868,6 +1089,56 @@ def cmd_replace(args: argparse.Namespace) -> None:
     for line in info:
         print("  %s" % line)
     print("  linesegarray stripped: %d" % n_ls)
+
+
+def cmd_toggle_check(args: argparse.Namespace) -> None:
+    inp = Path(args.input)
+    is_dir_mode = inp.is_dir()
+    target = "Contents/section%d.xml" % args.section
+    if is_dir_mode:
+        section_file = inp / target
+        if not section_file.is_file():
+            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
+            sys.exit(1)
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print("Error: %s not in archive" % target, file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print("Error: not found: %s" % args.input, file=sys.stderr)
+        sys.exit(1)
+    if not is_dir_mode and not args.output:
+        print("Error: --output required for .hwpx input", file=sys.stderr)
+        sys.exit(1)
+    try:
+        col, row = (int(x) for x in args.cell.split(","))
+    except ValueError:
+        print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
+        sys.exit(1)
+    try:
+        new_xml, info = _toggle_check_cell(xml, args.table_id, col, row, args.label)
+    except ValueError as e:
+        print("Error: %s" % e, file=sys.stderr)
+        sys.exit(1)
+    if is_dir_mode:
+        section_file = inp / target
+        section_file.write_text(new_xml, encoding="utf-8")
+        print("DONE (in-place): %s" % section_file)
+    else:
+        with zipfile.ZipFile(inp, "r") as zin:
+            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
+        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi, data in entries:
+                if zi.filename == target:
+                    data = new_xml.encode("utf-8")
+                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
+                zout.writestr(zi.filename, data, compress_type=ct)
+        print("DONE: %s" % args.output)
+    for line in info:
+        print("  %s" % line)
 
 
 # ── delete ────────────────────────────────────────────────────────────────────
@@ -1141,6 +1412,109 @@ _FIXTURE_SPLIT = '''\
   </hp:BodyText>
 </hpf:HWPFDocumentFile>'''
 
+_FIXTURE_CHECK = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] 승인   [  ] 불가   [  ] 조건부</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+# cell 0,0: one DIRECT paragraph (charPr 5) + a nested table whose cell holds a
+# paragraph (charPr 9). match-style must see only the 1 direct paragraph.
+_FIXTURE_NESTED = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>직접</hp:t></hp:run></hp:p>
+                <hp:tbl id="2" tableIDRef="2" cellIDRef="0" borderFillIDRef="1" width="4000" height="1000">
+                  <hp:tr>
+                    <hp:tc>
+                      <hp:cellAddr colAddr="0" rowAddr="0"/>
+                      <hp:subList id="102">
+                        <hp:p id="300" paraPrIDRef="20" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="9"><hp:t>중첩</hp:t></hp:run></hp:p>
+                      </hp:subList>
+                    </hp:tc>
+                  </hp:tr>
+                </hp:tbl>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+# checkbox + label split across separate runs (real KR forms do this)
+_FIXTURE_CHECK_MULTI = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] </hp:t></hp:run><hp:run charPrIDRef="6"><hp:t>승인</hp:t></hp:run><hp:run charPrIDRef="5"><hp:t>   [  ] </hp:t></hp:run><hp:run charPrIDRef="6"><hp:t>불가</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+# two direct paragraphs: para0 has a box, para1 (with label 승인) has none
+_FIXTURE_CHECK_2PARA = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" width="8000" height="2000">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] 기타</hp:t></hp:run></hp:p>
+                <hp:p id="201" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>승인 여부</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
 
 def _run_tests() -> None:
     failures = []
@@ -1274,6 +1648,123 @@ def _run_tests() -> None:
     except Exception as e:
         failures.append("AC-4 FAIL: %s" % e)
 
+    # AC-AP-1: append-para keeps existing paragraph and adds a new one
+    try:
+        result, info = _append_para_cell(_FIXTURE, "1", 0, 0, "10", "7", "신규")
+        if "위원" not in result:
+            failures.append("AC-AP-1 FAIL: existing paragraph '위원' lost on append")
+        elif "신규" not in result:
+            failures.append("AC-AP-1 FAIL: appended text '신규' missing")
+        elif result.count("<hp:p ") < 2:
+            failures.append("AC-AP-1 FAIL: expected >=2 paragraphs, got %d" % result.count("<hp:p "))
+        elif 'charPrIDRef="5"' not in result or 'charPrIDRef="7"' not in result:
+            failures.append("AC-AP-1 FAIL: charPr 5 (old) and 7 (new) not both present")
+        else:
+            print("AC-AP-1 PASS: append-para preserves siblings, adds styled para")
+    except Exception as e:
+        failures.append("AC-AP-1 FAIL: %s" % e)
+
+    # AC-AP-2: append-para strips a stray linesegarray in the cell
+    try:
+        result, info = _append_para_cell(_FIXTURE, "1", 0, 0, "10", "7", "신규")
+        if "<hp:linesegarray" in result:
+            failures.append("AC-AP-2 FAIL: linesegarray not stripped after append")
+        else:
+            print("AC-AP-2 PASS: linesegarray removed on append")
+    except Exception as e:
+        failures.append("AC-AP-2 FAIL: %s" % e)
+
+    # AC-AP-3: match-style inherits paraPr/charPr from the Nth sibling paragraph
+    try:
+        result, info = _append_para_match(_FIXTURE, "1", 0, 0, 0, "상속")
+        if "상속" not in result:
+            failures.append("AC-AP-3 FAIL: appended text '상속' missing")
+        elif result.count('paraPrIDRef="10"') < 2:
+            failures.append("AC-AP-3 FAIL: paraPr 10 not inherited (count=%d)" % result.count('paraPrIDRef="10"'))
+        elif result.count('charPrIDRef="5"') < 2:
+            failures.append("AC-AP-3 FAIL: charPr 5 not inherited (count=%d)" % result.count('charPrIDRef="5"'))
+        else:
+            print("AC-AP-3 PASS: match-style inherits sibling para style")
+    except Exception as e:
+        failures.append("AC-AP-3 FAIL: %s" % e)
+
+    # AC-TC-1: toggle-check flips the box belonging to the named label only
+    try:
+        result, info = _toggle_check_cell(_FIXTURE_CHECK, "1", 0, 0, "승인")
+        if "[√] 승인" not in result:
+            failures.append("AC-TC-1 FAIL: 승인 box not checked, got %r" % result[result.find("[") : result.find("[") + 30])
+        elif "[  ] 불가" not in result or "[  ] 조건부" not in result:
+            failures.append("AC-TC-1 FAIL: other boxes (불가/조건부) were altered")
+        else:
+            print("AC-TC-1 PASS: toggle-check checks only the matched label")
+    except Exception as e:
+        failures.append("AC-TC-1 FAIL: %s" % e)
+
+    # AC-TC-2: toggle-check is reversible (checked -> empty)
+    try:
+        checked, _ = _toggle_check_cell(_FIXTURE_CHECK, "1", 0, 0, "승인")
+        back, _ = _toggle_check_cell(checked, "1", 0, 0, "승인")
+        if "[  ] 승인" not in back:
+            failures.append("AC-TC-2 FAIL: second toggle did not restore empty box")
+        else:
+            print("AC-TC-2 PASS: toggle-check reverses an already-checked box")
+    except Exception as e:
+        failures.append("AC-TC-2 FAIL: %s" % e)
+
+    # AC-TC-3: unknown label raises ValueError
+    try:
+        _toggle_check_cell(_FIXTURE_CHECK, "1", 0, 0, "없는라벨")
+        failures.append("AC-TC-3 FAIL: expected ValueError for missing label, none raised")
+    except ValueError:
+        print("AC-TC-3 PASS: missing label raises ValueError")
+    except Exception as e:
+        failures.append("AC-TC-3 FAIL: unexpected exception: %s" % e)
+
+    # AC-AP-4: match-style counts only DIRECT paragraphs (ignores nested table)
+    try:
+        # cell has 1 direct paragraph; index 1 would only be valid if a nested-table
+        # paragraph were wrongly counted, so it must raise.
+        _append_para_match(_FIXTURE_NESTED, "1", 0, 0, 1, "x")
+        failures.append("AC-AP-4 FAIL: nested-table paragraph counted (index 1 accepted)")
+    except ValueError:
+        # and index 0 must inherit the DIRECT para's charPr=5, not nested charPr=9
+        try:
+            result, _ = _append_para_match(_FIXTURE_NESTED, "1", 0, 0, 0, "상속")
+            if "상속" not in result:
+                failures.append("AC-AP-4 FAIL: appended text missing")
+            elif result.count('charPrIDRef="9"') != 1:
+                failures.append("AC-AP-4 FAIL: nested charPr=9 was touched")
+            elif result.count('charPrIDRef="5"') < 2:
+                failures.append("AC-AP-4 FAIL: direct charPr=5 not inherited")
+            else:
+                print("AC-AP-4 PASS: match-style ignores nested-table paragraphs")
+        except Exception as e:
+            failures.append("AC-AP-4 FAIL: index 0 path: %s" % e)
+    except Exception as e:
+        failures.append("AC-AP-4 FAIL: unexpected exception: %s" % e)
+
+    # AC-TC-4: toggle-check works when box and label are in separate runs
+    try:
+        result, _ = _toggle_check_cell(_FIXTURE_CHECK_MULTI, "1", 0, 0, "승인")
+        if result.count("[√]") != 1:
+            failures.append("AC-TC-4 FAIL: expected exactly 1 checked box, got %d" % result.count("[√]"))
+        elif result.count("[  ]") != 1:
+            failures.append("AC-TC-4 FAIL: 불가 box should stay empty (one [  ] expected)")
+        else:
+            print("AC-TC-4 PASS: toggle-check handles box/label split across runs")
+    except Exception as e:
+        failures.append("AC-TC-4 FAIL: %s" % e)
+
+    # AC-TC-5: toggle-check stays inside the label's own paragraph
+    try:
+        # label 승인 lives in para1 which has NO box; the box in para0 must NOT toggle.
+        _toggle_check_cell(_FIXTURE_CHECK_2PARA, "1", 0, 0, "승인")
+        failures.append("AC-TC-5 FAIL: toggled a box from a different paragraph")
+    except ValueError:
+        print("AC-TC-5 PASS: toggle-check confined to the label's paragraph")
+    except Exception as e:
+        failures.append("AC-TC-5 FAIL: unexpected exception: %s" % e)
+
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
@@ -1341,6 +1832,10 @@ def main() -> None:
                        metavar=("PARAPR", "CHARPR", "TEXT"), help="One text paragraph (repeatable)")
     p_rep.add_argument("--run", action="append", nargs=2, default=[],
                        metavar=("CHARPR", "TEXT"), help="Extra run appended to last --para (repeatable)")
+    p_rep.add_argument("--append-para", nargs=3, default=None, metavar=("PARAPR", "CHARPR", "TEXT"),
+                       help="Append one paragraph keeping existing cell paragraphs (公文 'add a line below')")
+    p_rep.add_argument("--match-style", nargs=2, default=None, metavar=("N", "TEXT"),
+                       help="Append a paragraph inheriting paraPr/charPr from the cell's Nth (0-based) paragraph")
     p_rep.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     p_rep.add_argument("--list", action="store_true", help="List table cells and exit")
     p_rep.add_argument("--output", "-o", help="Output .hwpx file")
@@ -1360,6 +1855,15 @@ def main() -> None:
     p_fill.add_argument("--data", required=True, help='JSON file: {"table_id": {"col,row": "text"}}')
     p_fill.add_argument("--section", type=int, default=0, help="Section index (default 0)")
     p_fill.add_argument("--output", "-o", help="Output .hwpx file (required for .hwpx input)")
+
+    # toggle-check
+    p_tc = sub.add_parser("toggle-check", help="Toggle a checkbox [  ] <-> [√] next to a label in a cell")
+    p_tc.add_argument("input", help="Input .hwpx file or unpacked directory")
+    p_tc.add_argument("--table-id", required=True, help="HWP table id attribute")
+    p_tc.add_argument("--cell", required=True, help="Target cell as colAddr,rowAddr")
+    p_tc.add_argument("--label", required=True, help="Label text whose preceding checkbox is toggled (e.g. 승인)")
+    p_tc.add_argument("--section", type=int, default=0, help="Section index (default 0)")
+    p_tc.add_argument("--output", "-o", help="Output .hwpx file (required for .hwpx input)")
 
     # calc-widths
     p_cw = sub.add_parser("calc-widths", help="Calculate table column widths (HWPUNIT) summing to body width")
@@ -1390,6 +1894,8 @@ def main() -> None:
         cmd_fill(args)
     elif args.cmd == "delete":
         cmd_delete(args)
+    elif args.cmd == "toggle-check":
+        cmd_toggle_check(args)
     elif args.cmd == "calc-widths":
         cmd_calc_widths(args)
     elif args.cmd == "strip-lineseg":

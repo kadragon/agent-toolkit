@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #92 — hwpx table.py append-para/toggle-check review cycle (out-of-scope findings)
+
+- [ ] `table.py:_append_para_match` — re-runs `_locate_cell_sublist` twice (once to read the sibling style, then again inside `_append_para_cell`); a full `find_table`+`top_cells` scan repeats on the same unchanged XML. Micro-perf only on small cell strings; a fix would thread pre-resolved coords into an `_append_para_at` helper, adding complexity for negligible gain. P3, conf 100. (source: review)
+
+---
+
 ### PR #90 — reconcile-harness strip_sprint_block review cycle (out-of-scope findings)
 
 - [x] `reconcile-harness.py:strip_sprint_block` (and `tasks_title`) — both locate the sprint block via the first `^#\s+` heading. A fenced code block under `## Review Backlog` containing a `# comment` line above the sprint would be misparsed as the sprint heading, truncating content. Pre-existing convention (mirrors `tasks_title`); agy's narrowing fix (`# (Sprint|Bundle):`) is wrong — single-item sprint headings are the raw backlog item text, not `# Sprint:`. A correct fix would gate on the `status:`-owning section. conf ~50%, P3. (source: agy)
