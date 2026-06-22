@@ -1,5 +1,12 @@
 ## Review Backlog
 
+### PR #93 — commit-guard static-analysis review cycle (deferred findings)
+
+- [ ] `commit-guard/guard.py` — bare switch-back is not modeled: `git checkout -b X && git checkout main && git commit` keeps `running_branch=X` across the bare `git checkout main` (only `-b/-c`/long-create flags update attribution), so a commit that lands on main is mis-attributed to X and allowed. Deferred because the fix needs bare-`checkout <ref>` handling, which is statically ambiguous (branch switch vs `checkout <pathspec>` vs `checkout -- file`) and risks false-positives that block legit commits. Contrived multi-checkout chain; dominant accidental cases stay guarded. P3, conf 95. (source: agy/codex)
+- [ ] `commit-guard/guard.py:type-guard` — single-quoted literal command substitution is treated as undecidable: `git commit -m 'wip $(date)'` passes the literal text `wip $(date)` to git (no expansion), but the `$(`/backtick substring skip fires and the type guard is bypassed, allowing a malformed subject on a feature branch. Fix needs quote-context parsing of the raw `-m` arg to distinguish single-quoted (literal → enforce type) from double/unquoted (expandable → fail-open). Branch guard still applies. P2, conf 90. (source: codex/review)
+
+---
+
 ### PR #92 — hwpx table.py append-para/toggle-check review cycle (out-of-scope findings)
 
 - [ ] `table.py:_append_para_match` — re-runs `_locate_cell_sublist` twice (once to read the sibling style, then again inside `_append_para_cell`); a full `find_table`+`top_cells` scan repeats on the same unchanged XML. Micro-perf only on small cell strings; a fix would thread pre-resolved coords into an `_append_para_at` helper, adding complexity for negligible gain. P3, conf 100. (source: review)

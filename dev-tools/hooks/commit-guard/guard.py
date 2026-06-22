@@ -4,9 +4,13 @@
 Intercepts git commit commands before execution and applies two guards:
   1. Branch guard: blocks commits to main/master unless the repo's AGENTS.md
      or CLAUDE.md contains the literal marker <!-- commit-guard: allow-main -->.
-     A `git checkout -b/-B <name>` or `git switch -c/-C <name>` earlier in the
-     same command chain is honored — the commit's branch is the newly created
-     one, not the pre-checkout branch the live `rev-parse` still reports.
+     A branch created earlier in the same chain — `git checkout -b/-B/--orphan
+     <name>` or `git switch -c/-C/--create/--orphan <name>` — is honored: the
+     commit's branch is the newly created one, not the pre-checkout branch the
+     live `rev-parse` still reports. This attribution carries only across `&&`
+     (where the creation is guaranteed to have run) and is dropped across
+     `||`/`;`/`|`/`&`/newline or a `cd`, so a commit that may actually land on
+     main is not mis-attributed to an un-run checkout.
   2. Type guard: commit message must match ^\\[(TYPE)\\] (with trailing space).
      Skipped for editor-mode commits (no -m/-F), --amend, and --squash flags,
      and for messages carrying unexpanded command substitution ('$(...)' or
@@ -70,7 +74,12 @@ def _split_segments(command):
     calls shlex.split() which correctly unquotes them.  Newlines outside quotes
     are pre-normalized to ';' via a simple quote-tracking pass.
 
-    Returns a list of raw segment strings; individual segments may be empty.
+    Returns (segments, operators): a list of raw segment strings (individual
+    segments may be empty) and a parallel list of the separator operator that
+    PRECEDES each segment (operators[0] is None; the rest are one of
+    '&&' '||' '|' ';' '&'). Callers use the operator to decide whether state
+    from an earlier segment (e.g. an in-chain branch creation) may carry into a
+    later one — only '&&' guarantees the predecessor ran successfully.
     """
     # Replace unquoted newlines with ';' (newline = command separator in shell).
     # A simple state-machine is sufficient since we don't need full posix quoting
@@ -95,19 +104,22 @@ def _split_segments(command):
         lex.whitespace_split = False
         tokens = list(lex)
     except ValueError:
-        return re.split(r"&&|\|\||[;|\n&]", command)
+        segs = re.split(r"&&|\|\||[;|\n&]", command)
+        return segs, [None] * len(segs)
 
     _SEP_OPS = {"&&", "||", "|", ";", "&"}
     segments = []
+    operators: list = [None]  # operator preceding each segment; first has none
     current = []
     for tok in tokens:
         if tok in _SEP_OPS:
             segments.append(" ".join(current))
+            operators.append(tok)
             current = []
         else:
             current.append(tok)
     segments.append(" ".join(current))
-    return segments
+    return segments, operators
 
 
 def _is_git_commit(segment):
@@ -166,9 +178,10 @@ def _git_cwd(segment, env_cwd):
     return env_cwd
 
 
-# checkout/switch flags that CREATE a new branch (force variants included)
-_CHECKOUT_NEW_FLAGS = {"-b", "-B"}
-_SWITCH_NEW_FLAGS = {"-c", "-C"}
+# checkout/switch flags that CREATE a new branch (force + long variants included).
+# '--orphan' (unborn branch) creates+switches for both subcommands.
+_CHECKOUT_NEW_FLAGS = {"-b", "-B", "--orphan"}
+_SWITCH_NEW_FLAGS = {"-c", "-C", "--create", "--orphan"}
 
 
 def _new_branch_created(segment):
@@ -390,17 +403,26 @@ def main(branch_override=None, marker_override=None):
 
     # Build a map of segment-index → effective cwd by tracking cd commands
     # that appear before commit segments in the same command chain.
-    segments = list(_split_segments(command))
+    segments, operators = _split_segments(command)
     effective_cwd_at = {}  # segment_index → effective cwd
     effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
     running_cwd = env_cwd
     running_branch = None  # None = no in-chain branch creation seen → use live detection
     for idx, seg in enumerate(segments):
+        # Branch attribution may only carry across '&&' (predecessor guaranteed to
+        # have succeeded). After '||', ';', '|', '&' or a newline the earlier
+        # checkout may not have run — drop the attribution so the commit falls
+        # back to live branch detection.
+        if operators[idx] is not None and operators[idx] != "&&":
+            running_branch = None
         stripped = seg.strip()
         toks = _tokens(stripped)
         if len(toks) >= 2 and toks[0] == "cd":
-            # cd <path>: update running effective cwd (resolve relative paths)
+            # cd <path>: update running effective cwd (resolve relative paths).
+            # A cwd change voids branch attribution — the new directory may be a
+            # different repo where the earlier checkout never applied.
             running_cwd = os.path.abspath(os.path.join(running_cwd, toks[1]))
+            running_branch = None
         created = _new_branch_created(stripped)
         if created is not None:
             running_branch = created
@@ -537,6 +559,22 @@ def _test():
           run("git checkout feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
     check("checkout -b then bad-type commit still type-blocked",
           run("git checkout -b feature/x && git commit -m 'wip'", branch="main", marker=False) == 2)
+
+    # branch attribution only propagates across '&&' (guaranteed-success predecessor)
+    check("checkout -b || commit on main still blocked (|| not guaranteed)",
+          run("git checkout -b feature/x || git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    check("checkout -b ; commit on main still blocked (; not guaranteed)",
+          run("git checkout -b feature/x ; git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    check("checkout -b && echo && commit on main passes (&&-chain preserved)",
+          run("git checkout -b feature/x && echo ok && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
+    check("cd to another repo after checkout -b resets attribution → blocked on main",
+          run("git checkout -b feature/x && cd /other/repo && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+
+    # long-flag branch creation: switch --create / checkout|switch --orphan
+    check("switch --create then commit on main passes",
+          run("git switch --create feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
+    check("checkout --orphan then commit on main passes",
+          run("git checkout --orphan feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
 
     # command-substitution message: statically undecidable → fail-open (skip type check)
     check("$(...) message skips type check",
