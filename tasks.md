@@ -9,7 +9,7 @@
 
 ### PR #92 — hwpx table.py append-para/toggle-check review cycle (out-of-scope findings)
 
-- [ ] `table.py:_append_para_match` — re-runs `_locate_cell_sublist` twice (once to read the sibling style, then again inside `_append_para_cell`); a full `find_table`+`top_cells` scan repeats on the same unchanged XML. Micro-perf only on small cell strings; a fix would thread pre-resolved coords into an `_append_para_at` helper, adding complexity for negligible gain. P3, conf 100. (source: review)
+- [x] `table.py:_append_para_match` — re-runs `_locate_cell_sublist` twice (once to read the sibling style, then again inside `_append_para_cell`); a full `find_table`+`top_cells` scan repeats on the same unchanged XML. Micro-perf only on small cell strings; a fix would thread pre-resolved coords into an `_append_para_at` helper, adding complexity for negligible gain. P3, conf 100. (source: review) — **won't-fix 2026-06-22: negligible gain, adds complexity.**
 
 ---
 
