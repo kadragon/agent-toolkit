@@ -13,8 +13,10 @@ Intercepts git commit commands before execution and applies two guards:
      main is not mis-attributed to an un-run checkout.
   2. Type guard: commit message must match ^\\[(TYPE)\\] (with trailing space).
      Skipped for editor-mode commits (no -m/-F), --amend, and --squash flags,
-     and for messages carrying unexpanded command substitution ('$(...)' or
-     backticks) whose real text is statically undecidable (fail-open).
+     and for messages carrying shell-expandable command substitution (unquoted
+     or double-quoted '$(...)' / backticks) whose real text is statically
+     undecidable (fail-open). Single-quoted substitution is literal — git
+     receives it verbatim — so it stays type-checked.
 
 Design contract: never-raise, always exit 0 (allow) unless a guard fires (exit 2).
 A guard failure prints the reason to stderr and exits 2. All other exits are 0
@@ -64,6 +66,49 @@ def _tokens(s):
     while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
         i += 1
     return parts[i:]
+
+
+def _raw_tokens(s):
+    """Like _tokens() but posix=False: quote characters are kept inside each
+    token. Aligns 1:1 with _tokens() for our inputs (same split points; only
+    quote-stripping differs), so the raw form of the commit message can be
+    recovered at the same index. Used by the type guard to tell a single-quoted
+    (literal) '$(...)' from a shell-expandable one. Returns [] on parse error.
+    """
+    s = _LEAD_NOISE.sub("", s or "")
+    try:
+        parts = shlex.split(s, posix=False)
+    except ValueError:
+        return []
+    i = 0
+    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
+        i += 1
+    return parts[i:]
+
+
+def _has_expandable_subst(raw_arg):
+    """True if raw_arg (a message token with its original quotes intact) contains
+    a shell-EXPANDABLE command substitution — a '$(' or backtick that is NOT
+    inside single quotes. Single-quoted substitution is literal (git receives it
+    verbatim), so it is decidable and must be type-checked → returns False.
+    """
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(raw_arg)
+    while i < n:
+        ch = raw_arg[i]
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single:
+            if ch == "`":
+                return True
+            if ch == "$" and i + 1 < n and raw_arg[i + 1] == "(":
+                return True
+        i += 1
+    return False
 
 
 def _split_segments(command):
@@ -276,7 +321,11 @@ def _marker_present(git_cwd, _override=None):
 
 def _parse_commit_args(segment):
     """Parse git commit flags. Returns dict with keys:
-      message: str | None    (extracted message text, or None if not determinable)
+      message: str | None     (extracted message text, or None if not determinable)
+      message_raw: str | None  (the inline -m value with original quotes intact, or
+                                None when the message is not from an inline -m flag —
+                                e.g. -F file, editor mode; lets the type guard tell a
+                                single-quoted literal '$(...)' from an expandable one)
       has_amend: bool
       has_merge_squash: bool (--squash flag present)
       editor_mode: bool      (no -m and no -F: message comes from editor)
@@ -290,6 +339,12 @@ def _parse_commit_args(segment):
     consuming the next token as the message value.
     """
     toks = _tokens(segment)
+    raw_toks = _raw_tokens(segment)  # quote-preserving, aligned 1:1 with toks
+
+    def _raw_at(idx):
+        """Raw (quoted) token at idx, or None if raw list misaligned/short."""
+        return raw_toks[idx] if idx < len(raw_toks) else None
+
     # skip wrapper words then find 'git'
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
@@ -311,6 +366,7 @@ def _parse_commit_args(segment):
     i += 1  # skip 'commit'
 
     message = None
+    message_raw = None
     has_amend = False
     has_merge_squash = False
     msg_file = None
@@ -320,17 +376,22 @@ def _parse_commit_args(segment):
         if tok in ("-m", "--message") and i + 1 < len(toks):
             if message is None:  # first -m wins (git uses first as subject)
                 message = toks[i + 1]
+                message_raw = _raw_at(i + 1)
             i += 2
             continue
         if tok.startswith("--message="):
             if message is None:
                 message = tok[len("--message="):]
+                raw = _raw_at(i)
+                message_raw = raw[len("--message="):] if raw else None
             i += 1
             continue
         if tok.startswith("-m") and len(tok) > 2:
             # -m<msg> attached (e.g. -m[FEAT] or -mwip)
             if message is None:
                 message = tok[2:]
+                raw = _raw_at(i)
+                message_raw = raw[2:] if raw else None
             i += 1
             continue
         # bundled short flags: -am, -pam, etc. — if last char is 'm',
@@ -340,6 +401,7 @@ def _parse_commit_args(segment):
                 and i + 1 < len(toks)):
             if message is None:
                 message = toks[i + 1]
+                message_raw = _raw_at(i + 1)
             i += 2
             continue
         if tok in ("-F", "--file") and i + 1 < len(toks):
@@ -368,6 +430,7 @@ def _parse_commit_args(segment):
     editor_mode = (message is None and msg_file is None)
     return {
         "message": message,
+        "message_raw": message_raw,
         "has_amend": has_amend,
         "has_merge_squash": has_merge_squash,
         "editor_mode": editor_mode,
@@ -465,12 +528,16 @@ def main(branch_override=None, marker_override=None):
         skip_type = args["editor_mode"] or args["has_amend"] or args["has_merge_squash"]
         if not skip_type:
             msg = args["message"]
-            # A message carrying unexpanded command substitution ('$(...)' or
-            # backticks) is read literally here — the shell would expand it
-            # before git sees it, but the hook cannot (running it is unsafe).
-            # Its real text is statically undecidable, so per the fail-open
-            # contract (cf. -F read failure / editor mode) skip the type check.
-            undecidable = msg is not None and ("$(" in msg or "`" in msg)
+            # A message carrying SHELL-EXPANDABLE command substitution ('$(...)'
+            # or backticks, unquoted or double-quoted) is read literally here —
+            # the shell would expand it before git sees it, but the hook cannot
+            # (running it is unsafe). Its real text is statically undecidable, so
+            # per the fail-open contract (cf. -F read failure / editor mode) skip
+            # the type check. Single-quoted substitution is NOT expandable — git
+            # receives it verbatim — so it stays decidable and IS type-checked;
+            # we classify via the raw (quote-preserving) arg, not the unquoted msg.
+            undecidable = (args["message_raw"] is not None
+                           and _has_expandable_subst(args["message_raw"]))
             if msg is not None and not undecidable and not TYPE_PATTERN.match(msg):
                 _block(
                     f"commit-guard: blocked — message does not match required format "
@@ -576,11 +643,19 @@ def _test():
     check("checkout --orphan then commit on main passes",
           run("git checkout --orphan feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
 
-    # command-substitution message: statically undecidable → fail-open (skip type check)
-    check("$(...) message skips type check",
-          run("git commit -m '$(cat msg.txt)'", branch="feature/x") == 0)
-    check("backtick message skips type check",
-          run("git commit -m '`cat msg.txt`'", branch="feature/x") == 0)
+    # command-substitution message: only EXPANDABLE subst (double-quoted/unquoted)
+    # is statically undecidable → fail-open. Single-quoted subst is LITERAL — the
+    # shell does not expand it, git receives the text verbatim → type guard enforces.
+    check("double-quoted $(...) skips type check (shell-expanded → undecidable)",
+          run('git commit -m "$(cat msg.txt)"', branch="feature/x") == 0)
+    check("double-quoted backtick skips type check (shell-expanded → undecidable)",
+          run('git commit -m "`cat msg.txt`"', branch="feature/x") == 0)
+    check("single-quoted $(...) literal still type-checked → blocked",
+          run("git commit -m '$(cat msg.txt)'", branch="feature/x") == 2)
+    check("single-quoted backtick literal still type-checked → blocked",
+          run("git commit -m '`cat msg.txt`'", branch="feature/x") == 2)
+    check("single-quoted literal with valid type passes",
+          run("git commit -m '[FEAT] $(x) ok'", branch="feature/x") == 0)
     check("plain bad message still blocked (no subst)",
           run("git commit -m 'wip changes'", branch="feature/x") == 2)
     check("$(...) message still branch-guarded on main",
