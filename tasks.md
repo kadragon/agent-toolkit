@@ -1,5 +1,12 @@
 ## Review Backlog
 
+### PR #96 — commit-guard bare switch-back review cycle (out-of-scope findings)
+
+- [ ] `commit-guard/guard.py:_bare_switch_target` — option-value args desync the positional count: `git switch --conflict merge main` treats `merge` (the value of `--conflict`) as a positional, so `len(positionals) == 2` → returns `None` → a real switch-back to main is missed → commit on main allowed (bypass). Fail-open-consistent (matches the never-block-on-uncertainty contract) and contrived, so not a regression of this PR's new detection. Fix needs a known value-option skip-set (`--conflict`, `-t`/`--track`, …) or a more complete checkout/switch option model. P3, conf ~70. (source: agy)
+- [ ] `commit-guard/guard.py:_bare_switch_target` — previous-branch / reflog ref spellings are not modeled: `git checkout -b X && git checkout - && git commit` (or `@{-1}`) switches back to the prior branch (possibly main) but `-`/`@{-1}` are skipped as flags / left untrusted, so the commit can land on main while attributed to X (bypass). Pre-existing-class gap (the whole unmodeled-switch-back family), not introduced or worsened by this PR; both filtered at 2/10 new-finding confidence by the security pass. A future hardening could reset `running_branch = None` on statically-unknown switch targets. P3. (source: codex/security)
+
+---
+
 ### PR #93 — commit-guard static-analysis review cycle (deferred findings)
 
 - [x] `commit-guard/guard.py` — bare switch-back is not modeled: `git checkout -b X && git checkout main && git commit` keeps `running_branch=X` across the bare `git checkout main` (only `-b/-c`/long-create flags update attribution), so a commit that lands on main is mis-attributed to X and allowed. Deferred because the fix needs bare-`checkout <ref>` handling, which is statically ambiguous (branch switch vs `checkout <pathspec>` vs `checkout -- file`) and risks false-positives that block legit commits. Contrived multi-checkout chain; dominant accidental cases stay guarded. P3, conf 95. (source: agy/codex) — **fixed v3.6.7: `_bare_switch_target` re-attributes only main/master targets (fail-toward-block), `--`/multi-positional restores excluded.**

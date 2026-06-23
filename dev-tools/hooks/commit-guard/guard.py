@@ -10,13 +10,16 @@ Intercepts git commit commands before execution and applies two guards:
      live `rev-parse` still reports. This attribution carries only across `&&`
      (where the creation is guaranteed to have run) and is dropped across
      `||`/`;`/`|`/`&`/newline or a `cd`, so a commit that may actually land on
-     main is not mis-attributed to an un-run checkout. A bare switch BACK onto a
-     protected branch — `git checkout main` / `git switch master` with a single
-     ref and no `--` pathspec — re-attributes the chain to that branch, so
-     `checkout -b X && checkout main && commit` is blocked (the commit lands on
-     main). Only main/master targets update attribution (fail-toward-block); a
-     bare switch to a feature branch stays untrusted (ambiguous pathspec) and
-     does not unblock.
+     main is not mis-attributed to an un-run checkout. A bare switch — `git
+     checkout <ref>` / `git switch <ref>` with a single ref, no `--` pathspec
+     and no `--detach` — re-attributes the chain to that ref when either the
+     target is protected (so `checkout -b X && checkout main && commit` blocks)
+     or attribution is already tracked in-chain (so `checkout main && checkout
+     feature/x && commit` follows to feature/x rather than sticking at main). A
+     bare switch to a feature branch from live detection (no in-chain attribution
+     yet) stays untrusted (ambiguous pathspec) and does not unblock; a detached
+     checkout (`--detach`) never re-attributes (the commit lands on a detached
+     HEAD, not the branch ref).
   2. Type guard: commit message must match ^\\[(TYPE)\\] (with trailing space).
      Skipped for editor-mode commits (no -m/-F), --amend, and --squash flags,
      and for messages carrying shell-expandable command substitution (unquoted
@@ -291,6 +294,8 @@ def _bare_switch_target(segment):
       - create forms (-b/-c/--orphan/...) — handled by _new_branch_created
       - a `--` pathspec separator (`checkout <ref> -- <path>` restores files,
         it does NOT switch branch)
+      - a `--detach`/`-d` flag (`checkout --detach main` lands on a detached
+        HEAD; a commit there does NOT update the protected branch ref)
       - zero or multiple positionals (`checkout <ref> <path>` is a pathspec
         restore from <ref>, current branch unchanged)
 
@@ -333,6 +338,8 @@ def _bare_switch_target(segment):
             return None  # pathspec restore — not a branch switch
         if tok in new_flags:
             return None  # create form — _new_branch_created owns this segment
+        if tok in ("--detach", "-d"):
+            return None  # detached HEAD — commit does not update the branch ref
         if tok.startswith("-"):
             i += 1  # other boolean flag (-f, --track, ...) → skip
             continue
@@ -571,13 +578,22 @@ def main(branch_override=None, marker_override=None):
         if created is not None:
             running_branch = created
         else:
-            # A bare switch BACK onto a protected branch re-attributes the chain:
-            # `checkout -b X && checkout main && commit` lands on main. Only
-            # protected targets update attribution (fail-toward-block); a bare
-            # switch to a feature branch is left untrusted (ambiguous pathspec),
-            # preserving the conservative "bare checkout does not unblock" rule.
+            # A bare switch re-attributes the chain to its target when EITHER:
+            #   (a) the target is a protected branch — `checkout -b X && checkout
+            #       main && commit` lands on main → block (fail-toward-block); OR
+            #   (b) attribution is already being tracked in-chain (running_branch
+            #       non-None) — a later bare switch then updates to the real
+            #       landing branch, so `checkout main && checkout feature/x &&
+            #       commit` is correctly attributed to feature/x (not stuck at
+            #       main), and `checkout -b X && checkout Y && commit` follows to Y.
+            # When running_branch is still None (no in-chain attribution yet), a
+            # bare switch to a NON-protected target is left untrusted (ambiguous
+            # pathspec), preserving the conservative "bare checkout from live main
+            # does not unblock" rule.
             switched = _bare_switch_target(stripped)
-            if switched in ("main", "master"):
+            if switched is not None and (
+                switched in ("main", "master") or running_branch is not None
+            ):
                 running_branch = switched
         effective_cwd_at[idx] = running_cwd
         effective_branch_at[idx] = running_branch
@@ -748,6 +764,27 @@ def _test():
     # bare switch-back attribution only carries across '&&'
     check("checkout -b X || bare checkout main ; commit → live detection (main) blocks anyway",
           run("git checkout -b feature/x ; git checkout main ; git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+
+    # bare switch THROUGH main to a feature branch must follow to the landing
+    # branch, not stay stuck at main: `checkout main && checkout feature/x &&
+    # commit` lands on feature/x → allowed even though it transited main.
+    # (live override here stands in for a non-main pre-chain branch; the in-chain
+    # attribution overrides live detection regardless.)
+    check("checkout main then checkout feature/x then commit → passes (follows to feature/x)",
+          run("git checkout main && git checkout feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
+    # once attribution is tracked in-chain, a bare switch to a non-protected branch
+    # follows: `checkout -b X && checkout Y && commit` lands on Y → allowed.
+    check("checkout -b X then bare checkout Y then commit → passes (follows to Y)",
+          run("git checkout -b feature/x && git checkout feature/y && git commit -m '[FEAT] z'", branch="main", marker=False) == 0)
+    # detached HEAD: `checkout --detach main` / `switch --detach master` lands on a
+    # detached HEAD — a commit there does NOT update the protected branch, so the
+    # switch must NOT re-attribute to main (no false block). Live detection (a
+    # non-main feature branch here, standing in for the real 'HEAD' detached ref)
+    # governs instead.
+    check("checkout --detach main then commit → passes (detached, no re-attribution)",
+          run("git checkout --detach main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
+    check("switch --detach master then commit → passes (detached, no re-attribution)",
+          run("git switch --detach master && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
 
     # branch attribution only propagates across '&&' (guaranteed-success predecessor)
     check("checkout -b || commit on main still blocked (|| not guaranteed)",
