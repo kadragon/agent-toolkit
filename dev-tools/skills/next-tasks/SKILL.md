@@ -1,6 +1,6 @@
 ---
 name: next-tasks
-version: 1.1.0
+version: 1.2.0
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -36,42 +36,43 @@ list the dirty files — do NOT proceed. Ask the user to commit, stash, or disca
 `tasks.md` is optional: present in an active sprint or as a review-backlog accumulator; absent
 in the idle state. If absent, only `backlog.md` candidates are offered.
 
-## Step 1 — Gather candidates
+## Step 1 — Gather candidate groups
 
-Read both files:
+Use a single grep pass per file to extract headings and checkbox lines, then group them. This avoids reading full item text until the user picks a group.
 
-- **backlog.md** → every `- [ ]` item under `## Now` and `## Next`. If neither heading exists,
-  emit a warning ("No ## Now or ## Next in backlog.md — no backlog candidates included") and
-  continue with tasks.md only.
-- **tasks.md** (if present) → every `- [ ]` item under `## Review Backlog` sections only.
-  Skip acceptance-criteria or sprint-scope checkboxes — those belong to the active sprint, not
-  the candidate queue. Carry priority label (P0–P3) and `file:line`.
+```bash
+grep -n "^#\{1,3\} \|^- \[ \]" tasks.md 2>/dev/null
+grep -n "^#\{1,3\} \|^- \[ \]" backlog.md 2>/dev/null
+```
 
-Order: tasks.md P0→P1→P2→P3 first (unlabelled items sort after P3), then backlog `## Now`,
-then backlog `## Next`. Within each tier, preserve file order.
+From the output, group each `- [ ]` line under its nearest preceding heading. A group is **candidate** if it directly contains ≥1 open `- [ ]` line ("directly" means no narrower sub-heading sits between the item and this heading).
 
-## Step 1.5 — Cluster & propose bundles
+**tasks.md candidates (in order):**
+1. h1 (`# `) blocks with `status: open` — verify by grepping each h1 block for `^status: open`. The h1 title is the sprint scope; do not expand item list here.
+2. h3 (`### `) sub-headings under `## Review Backlog` that directly own ≥1 open `- [ ]`.
+3. h2 (`## `) headings outside Review Backlog that directly own ≥1 open `- [ ]`.
 
-Before presenting options, group candidates into **bundles** where every item in
-the group shares **both** the same area (same file, or same immediate directory)
-**and** a compatible type (never mix `[FEAT]`/`[REFACTOR]` with `[FIX]`/`[DEBT]`/
-`[DOCS]`/`[HARNESS]`/`[TEST]`; `[FEAT]` bundles with `[FEAT]` only; `[REFACTOR]`
-bundles with `[REFACTOR]` only; types within `[FIX]`/`[DEBT]`/`[DOCS]`/`[HARNESS]`/`[TEST]`
-may bundle with each other). A group must have ≥2 items to qualify as a
-bundle — a lone item remains a singleton option.
+Skip h1 blocks with `status: active` (already in flight) or `status: done`.
 
-The point is to avoid making the user kick off five separate cycles for five
-nits from the same PR review in the same file. One branch + one Sprint Contract
-handles them cleanly. Do not auto-bundle silently — always offer the choice.
+**backlog.md candidates (after tasks.md):**
+4. h3 (`### `) sub-headings under any h2 container that directly own ≥1 open `- [ ]`.
+5. h2 (`## `) headings that directly own ≥1 open `- [ ]` (domain groups, `## Now`, `## Next`).
+
+Skip headings where every item is `[x]` or `[>]`.
 
 ## Step 2 — Select
 
-| Candidates found | Action |
-|-----------------|--------|
-| 0 | Report "backlog and tasks are clear — nothing open to start." Stop. |
-| 1 (not deferred) | Announce the item and proceed to Step 3. |
-| 1 (deferred) | The item has `*(deferred: ...)*`. Surface the blocker text and ask the user to confirm it is resolved before proceeding. If unresolved, report and stop. |
-| ≥2 | Build the offer list (cap at 4 options) via `AskUserQuestion`: include any qualifying bundle first (label with "Bundle: N items in `<area>`" and list members), then top singletons to fill the cap. Each singleton: type tag, first ~80 chars, file:line. Wait for selection. |
+| Groups found | Action |
+|-------------|--------|
+| 0 | Report "backlog and tasks are clear — nothing open." Stop. |
+| 1 | Announce the group and proceed to Step 3. |
+| ≥2 | Print a numbered list of all groups (no cap): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
+
+**Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
+
+**Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
+
+Do NOT use `AskUserQuestion` — a plain numbered list handles any list size without the 4-option cap.
 
 ## Step 3 — Run the code cycle
 
@@ -80,8 +81,8 @@ Overrides below; standard steps apply where not overridden.
 
 **Branch (workflows.md Step 0)**
 `git checkout -b <type>/<slug>` — derive from the item's `[type]` tag + short slug.
-For a bundle: use the common `[type]` if all members share one (e.g. all `[FIX]` →
-`fix/<bundle-slug>`); otherwise default to `fix/`. If the item has no `[type]` tag (common
+For a heading group: use the common `[type]` if all items share one (e.g. all `[FIX]` →
+`fix/<slug>`); otherwise default to `fix/`. If the item has no `[type]` tag (common
 for tasks.md findings), emit a warning ("Item has no [type] tag — defaulting branch prefix
 to `fix/`") and use `fix/` prefix.
 
@@ -100,37 +101,29 @@ Check tag first, then file count:
   skip plan mode.
 
 **Mark active — after scope is confirmed**
-Once plan is approved (or trivial gate passed):
+Once plan is approved (or trivial gate passed), derive action from the selected group's source:
 
-*Single item from `backlog.md`:* flip `[ ]` → `[>]` AND write a `tasks.md` Sprint Contract
-  with a `# heading` matching the backlog line text and `status: active`. This gives
-  `reconcile-harness.py` the anchor it needs to archive or revert the sprint at completion.
+*tasks.md h1 block (`status: open`):* flip `status: open` → `status: active` in tasks.md.
+  The existing h1 block IS the Sprint Contract — do not write a new one. Read the h1 block's
+  body (especially `## Acceptance criteria` if present) for implementation scope.
 
-*Bundle of items from `backlog.md`:* flip each bundled `[ ]` → `[>]`. Write a `tasks.md`
-  Sprint Contract with a `# heading` that is a short descriptive title for the bundle (e.g.
-  "Bundle: fix codex-review.sh guards"), `status: active`, and a `## Covers` section that
-  lists each bundled backlog line's **exact text** as a bullet (one line per item). Example:
-  ```
-  ## Covers
-  - [FIX] mktemp guard in codex-review.sh
-  - [FIX] trap cleanup on exit in codex-review.sh
-  ```
-  `reconcile-harness.py` reads `## Covers` at completion and archives/reverts every listed
+*tasks.md finding group (h3 under Review Backlog, or h2 grab-bag):* leave `[ ]` checkboxes
+  as-is — findings resolve when the fix is committed and verified. No `[>]` flip; no
+  `## Covers` section needed.
+
+*backlog.md group (h2 or h3):* flip each open `- [ ]` under the heading → `[>]`. Write a
+  `tasks.md` Sprint Contract with:
+  - `# heading` = the selected heading title (verbatim from backlog.md)
+  - `status: active`
+  - `## Covers` listing each `[>]`-flipped item's **exact text** as a bullet.
+  `reconcile-harness.py` reads `## Covers` at completion and archives/reverts each listed
   `[>]` anchor — no orphans.
-
-*Item(s) from `tasks.md` Review Backlog:* leave checkbox(es) as `[ ]` — findings resolve
-  when the fix is committed and verified in a future review. No `[>]` flip; no `## Covers`
-  section needed (reconcile is not involved).
-
-*Mixed bundle (backlog + findings):* apply both rules — flip backlog items to `[>]` with a
-  `## Covers` section; leave finding items at `[ ]`. Sprint Contract heading and Acceptance
-  criteria cover all members.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
 **Lint/test command**.
 
-For a bundle: Acceptance criteria has **one concrete checkbox per bundled item** — do not
+For a multi-item group: Acceptance criteria has **one concrete checkbox per item** — do not
 merge them into a single vague criterion. Scope lists all in-scope files/areas.
 
 **Implement (workflows.md Step 3)**
@@ -138,7 +131,7 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   files in total): inline edit.
 - Otherwise: spawn `implementer` agent. Brief must include: Sprint Contract + absolute paths
   of all in-scope files + lint/test command (follow `docs/delegation.md` four-field format:
-  Objective / Output format / Tools to use / Boundaries). For a bundle, list each member item's
+  Objective / Output format / Tools to use / Boundaries). List each item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
@@ -166,22 +159,23 @@ so there is one clean commit per review/merge cycle.
 Mark the sprint done and sync tracking files — leave as uncommitted so they land in the
 initial PR commit alongside the code.
 
-*Task came from `backlog.md` (single item or bundle):*
+*Task came from tasks.md h1 block:*
 1. In `tasks.md`: change `status: active` → `status: done`
 2. Run `reconcile-harness.py` from the project root:
    ```bash
    python "${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py"
    ```
-   This removes the `[>]` marker(s) from `backlog.md`, appends to `CHANGELOG.md` if present,
+   This archives the sprint, appends to `CHANGELOG.md`, and removes `tasks.md`.
+
+*Task came from tasks.md finding group (h3/h2):*
+- In `tasks.md`: flip each finding `[ ]` → `[x]`
+
+*Task came from backlog.md group:*
+1. In `tasks.md`: change `status: active` → `status: done`
+2. Run `reconcile-harness.py` from the project root (same command as above).
+   This removes the `[>]` markers from `backlog.md` via `## Covers`, appends to `CHANGELOG.md`,
    and cleans up empty headings. Do NOT flip `[>]` → `[x]` manually — `remove_active_markers()`
    matches `[>]` specifically; a manual flip to `[x]` breaks that lookup.
-
-*Task came from `tasks.md` Review Backlog:*
-- In `tasks.md` Review Backlog section: flip the finding `[ ]` → `[x]`
-
-*Mixed bundle (backlog items + tasks.md findings):*
-- Apply both sets of steps: set `status: done` and run `reconcile-harness.py` for the backlog
-  members; flip finding checkboxes `[ ]` → `[x]` for tasks.md Review Backlog members.
 
 Post-merge, `reconcile-harness.py` is a no-op for this sprint (already reconciled) but can
 still be run as part of a sweep without side effects.
@@ -213,19 +207,17 @@ from the session's current checkout — neither can be aimed at a worktree. So t
 **code only**; every shared-file edit happens once, serially, on the integration branch in the
 main checkout. This sidesteps the whole class of cross-worktree merge/CWD failures.
 
-### A1 — Gather & cluster
+### A1 — Gather
 
-Run Step 1 (gather) and Step 1.5 (cluster) unchanged. The output is a list of **units**: each
-unit is either a qualifying bundle (≥2 same-area, compatible-type items) or a singleton.
-Clustering is **mandatory** here, not optional: keeping each unit in its own file area minimizes
-(but does not guarantee) conflicts when the unit branches merge into the integration branch in
-A6 — shared imports/utilities may still collide, which A6 handles.
+Run Step 1 (heading-based gather) unchanged. The output is a list of **units**: each unit is
+one heading group. Heading-based grouping naturally scopes each unit to one logical area, which
+minimizes (but does not guarantee) conflicts when units merge into the integration branch in A6
+— shared imports/utilities may still collide, which A6 handles.
 
 ### A2 — Filter to batch-eligible
 
 A unit is **batch-eligible** only if ALL hold:
-- Trivial: tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2 (across all bundle
-  members), no new public API/schema. Non-trivial units need interactive plan-mode approval
+- Trivial: tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2 (across the heading group), no new public API/schema. Non-trivial units need interactive plan-mode approval
   (single-pick Step 3) that cannot run N-way in parallel.
 - In-scope files do **not** include any convergence-owned shared file (`plugin.json` manifests,
   `backlog.md`, `tasks.md`, `CHANGELOG.md`). Those are edited only in A6; a unit whose actual
@@ -305,7 +297,7 @@ any worktree.
 3. **Mark active — once, only if the batch has ≥1 backlog unit.** Flip each merged backlog item
    `[ ]` → `[>]` and write **one** combined `tasks.md` Sprint Contract: `status: active`, a
    `# heading` describing the batch, and a `## Covers` section listing **every** merged backlog
-   item's exact line (per Step 3 "Mark active" bundle rules). If the batch is findings-only (no
+   item's exact line (per Step 3 "Mark active — backlog group" rules). If the batch is findings-only (no
    backlog units), skip the contract entirely — there is nothing for reconcile to anchor, and
    writing one only to delete it would needlessly trigger the `tasks.md` unlink (see step 5).
 4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
