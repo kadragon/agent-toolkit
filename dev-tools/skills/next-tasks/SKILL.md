@@ -1,6 +1,6 @@
 ---
 name: next-tasks
-version: 1.1.1
+version: 1.1.2
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -38,7 +38,17 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 
 ## Step 1 — Gather candidate groups
 
-Use an initial grep pass per file to extract headings, status lines, and checkbox lines, then group them. This avoids reading full item text until the user picks a group.
+**Fast path (single-pick only):** Check `tasks.md` for open h1 sprint blocks first:
+
+```bash
+grep -En "^# |^status:" tasks.md 2>/dev/null
+```
+
+For each `# ` heading, check if the immediately following `status:` line reads `open`. Collect all matching h1 titles in document order.
+
+If ≥1 found: present up to the **first 3** using `AskUserQuestion` (single-select) so the user gets a proper selection UI. Include a "더 많은 항목 보기" option as the last choice to trigger the full scan. Do not run the backlog.md grep or build the full candidate list — open sprint items are the obvious next work.
+
+**Full scan (fast path found nothing, or `--all` batch mode):** Run both greps to build the complete candidate list:
 
 ```bash
 grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
@@ -210,7 +220,7 @@ main checkout. This sidesteps the whole class of cross-worktree merge/CWD failur
 
 ### A1 — Gather
 
-Run Step 1 (heading-based gather) unchanged. The output is a list of **units**: each unit is
+Run the **full scan** from Step 1 (skip the fast path — batch mode always needs the complete list). The output is a list of **units**: each unit is
 one heading group. Heading-based grouping naturally scopes each unit to one logical area, which
 minimizes (but does not guarantee) conflicts when units merge into the integration branch in A6
 — shared imports/utilities may still collide, which A6 handles.
