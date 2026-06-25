@@ -1,6 +1,6 @@
 ---
 name: next-tasks
-version: 1.2.0
+version: 1.1.1
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -38,17 +38,17 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 
 ## Step 1 — Gather candidate groups
 
-Use a single grep pass per file to extract headings and checkbox lines, then group them. This avoids reading full item text until the user picks a group.
+Use an initial grep pass per file to extract headings, status lines, and checkbox lines, then group them. This avoids reading full item text until the user picks a group.
 
 ```bash
-grep -n "^#\{1,3\} \|^- \[ \]" tasks.md 2>/dev/null
-grep -n "^#\{1,3\} \|^- \[ \]" backlog.md 2>/dev/null
+grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
+grep -En "^#{1,3} |^- \[ \]" backlog.md 2>/dev/null
 ```
 
 From the output, group each `- [ ]` line under its nearest preceding heading. A group is **candidate** if it directly contains ≥1 open `- [ ]` line ("directly" means no narrower sub-heading sits between the item and this heading).
 
 **tasks.md candidates (in order):**
-1. h1 (`# `) blocks with `status: open` — verify by grepping each h1 block for `^status: open`. The h1 title is the sprint scope; do not expand item list here.
+1. h1 (`# `) blocks with `status: open` — the `tasks.md` grep above captures `status:` lines; match each h1 heading to the `status:` line that immediately follows it. The h1 title is the sprint scope; do not expand item list here.
 2. h3 (`### `) sub-headings under `## Review Backlog` that directly own ≥1 open `- [ ]`.
 3. h2 (`## `) headings outside Review Backlog that directly own ≥1 open `- [ ]`.
 
@@ -58,7 +58,7 @@ Skip h1 blocks with `status: active` (already in flight) or `status: done`.
 4. h3 (`### `) sub-headings under any h2 container that directly own ≥1 open `- [ ]`.
 5. h2 (`## `) headings that directly own ≥1 open `- [ ]` (domain groups, `## Now`, `## Next`).
 
-Skip headings where every item is `[x]` or `[>]`.
+Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
 
 ## Step 2 — Select
 
@@ -165,7 +165,7 @@ initial PR commit alongside the code.
    ```bash
    python "${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py"
    ```
-   This archives the sprint, appends to `CHANGELOG.md`, and removes `tasks.md`.
+   This archives the sprint and appends to `CHANGELOG.md`. tasks.md is removed only if the sprint block was its only content; if a `## Review Backlog` section exists, the sprint block is stripped and tasks.md is retained. **Expected:** reconcile-harness.py may print a WARNING about unmatched active markers — normal for h1 block sprints that never flip backlog items to `[>]`; safe to ignore.
 
 *Task came from tasks.md finding group (h3/h2):*
 - In `tasks.md`: flip each finding `[ ]` → `[x]`
@@ -173,8 +173,9 @@ initial PR commit alongside the code.
 *Task came from backlog.md group:*
 1. In `tasks.md`: change `status: active` → `status: done`
 2. Run `reconcile-harness.py` from the project root (same command as above).
-   This removes the `[>]` markers from `backlog.md` via `## Covers`, appends to `CHANGELOG.md`,
-   and cleans up empty headings. Do NOT flip `[>]` → `[x]` manually — `remove_active_markers()`
+   This removes the `[>]` markers from `backlog.md` via `## Covers` and appends to `CHANGELOG.md`.
+   Empty headings left after removal are NOT cleaned up here (cleanup only runs when tasks.md is absent);
+   they persist until a later reconcile sweep. Do NOT flip `[>]` → `[x]` manually — `remove_active_markers()`
    matches `[>]` specifically; a manual flip to `[x]` breaks that lookup.
 
 Post-merge, `reconcile-harness.py` is a no-op for this sprint (already reconciled) but can
@@ -302,20 +303,17 @@ any worktree.
    writing one only to delete it would needlessly trigger the `tasks.md` unlink (see step 5).
 4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
    single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
-5. **Pre-merge cleanup — once.** Order matters because `reconcile-harness.py` deletes the entire
-   `tasks.md` on completion (`TASKS.unlink()` on `status: done`):
+5. **Pre-merge cleanup — once.** Order matters because `reconcile-harness.py` may unlink
+   `tasks.md` on completion (only when no content remains after stripping the sprint block):
    - **First** flip every merged `tasks.md`-finding `[ ]` → `[x]`.
    - **Then**, only if a contract was written in step 3, set it `status: done` and run
      `reconcile-harness.py` (removes all `[>]` via `## Covers`, one `CHANGELOG.md` append,
-     archives the sprint — and removes `tasks.md`). For a findings-only batch, run no reconcile;
-     the `[x]` flips stay in `tasks.md`.
+     archives the sprint — unlinks `tasks.md` only if no other content remains). For a
+     findings-only batch, run no reconcile; the `[x]` flips stay in `tasks.md`.
 
-   Leave all edits uncommitted — `dev-review-cycle` Step 1 commits them. **Known limitation:**
-   reconcile's whole-file `unlink` means a mixed batch (backlog + findings) loses any *unrelated*
-   open `## Review Backlog` items when the sprint completes — exactly as a single-pick backlog
-   sprint already does. Preserving the Review Backlog across reconcile is a separate
-   `reconcile-harness.py` fix (strip only the sprint block instead of unlinking); record it to
-   the backlog rather than working around it here.
+   Leave all edits uncommitted — `dev-review-cycle` Step 1 commits them. `strip_sprint_block()`
+   preserves unrelated `## Review Backlog` content when stripping the sprint block; `tasks.md`
+   is only fully removed when the sprint block was the only content.
 6. **Hand off — once.** `Skill(dev-tools:dev-review-cycle)` with `args: --auto`. Running from the
    main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
    work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
@@ -347,9 +345,9 @@ and confirm it is resolved before proceeding. If unresolved, skip to the next ca
 If all candidates are deferred with unresolved blockers, report that and stop.
 (For the single-candidate case, see Step 2 table.)
 
-**Deferred item in a bundle** — if any member of a proposed bundle is deferred and the
-blocker is unresolved, exclude that member from the bundle option (or drop the bundle if
-it collapses to one item). Do not silently include deferred items in a bundle.
+**Deferred item in a group** — if any item in a heading group is deferred and the blocker
+is unresolved, note it as a warning but continue with the non-deferred items in that group.
+If all items in the group are deferred, skip the group (see Step 2 deferred-items rule).
 
 **tasks.md finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
 Record broader related items back to `tasks.md` via the out-of-scope path in dev-review-cycle.
