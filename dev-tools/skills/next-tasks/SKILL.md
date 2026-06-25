@@ -46,7 +46,9 @@ grep -En "^# |^status:" tasks.md 2>/dev/null
 
 For each `# ` heading, check if the immediately following `status:` line reads `open`. Collect all matching h1 titles in document order.
 
-If ≥1 found: present up to the **first 3** using `AskUserQuestion` (single-select) so the user gets a proper selection UI. Include a "더 많은 항목 보기" option as the last choice to trigger the full scan. Do not run the backlog.md grep or build the full candidate list — open sprint items are the obvious next work.
+If exactly 1 found: announce the sprint title and proceed directly to Step 3 — no prompt needed.
+
+If 2–3 found: on Claude Code, use `AskUserQuestion` (single-select); on Codex (where `AskUserQuestion` is unavailable), print a plain numbered list instead. Either way, include a "더 많은 항목 보기" option/entry as the last choice. After the user picks a sprint title, proceed directly to Step 3 with that h1 block as the selected group. When the user picks "더 많은 항목 보기", fall through to the full scan below, build the complete candidate list, then continue to Step 2 for selection. Do not run the backlog.md grep unless the user explicitly requests it.
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run both greps to build the complete candidate list:
 
@@ -75,14 +77,14 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 | Groups found | Action |
 |-------------|--------|
 | 0 | Report "backlog and tasks are clear — nothing open." Stop. |
-| 1 | Announce the group and proceed to Step 3. |
+| 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (no cap): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
 **Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
 
-Do NOT use `AskUserQuestion` — a plain numbered list handles any list size without the 4-option cap.
+Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
 
 ## Step 3 — Run the code cycle
 
