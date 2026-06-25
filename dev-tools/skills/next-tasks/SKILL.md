@@ -1,6 +1,6 @@
 ---
 name: next-tasks
-version: 1.1.1
+version: 1.1.2
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -38,7 +38,19 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 
 ## Step 1 — Gather candidate groups
 
-Use an initial grep pass per file to extract headings, status lines, and checkbox lines, then group them. This avoids reading full item text until the user picks a group.
+**Fast path (single-pick only):** Check `tasks.md` for open h1 sprint blocks first:
+
+```bash
+grep -En "^# |^status:" tasks.md 2>/dev/null
+```
+
+For each `# ` heading, check if the immediately following `status:` line reads `open`. Collect all matching h1 titles in document order.
+
+If exactly 1 found: announce the sprint title and proceed directly to Step 3 — no prompt needed.
+
+If 2–3 found: on Claude Code, use `AskUserQuestion` (single-select); on Codex (where `AskUserQuestion` is unavailable), print a plain numbered list instead. Either way, include a "더 많은 항목 보기" option/entry as the last choice. After the user picks a sprint title, proceed directly to Step 3 with that h1 block as the selected group. When the user picks "더 많은 항목 보기", fall through to the full scan below, build the complete candidate list, then continue to Step 2 for selection. Do not run the backlog.md grep unless the user explicitly requests it.
+
+**Full scan (fast path found nothing, or `--all` batch mode):** Run both greps to build the complete candidate list:
 
 ```bash
 grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
@@ -65,14 +77,14 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 | Groups found | Action |
 |-------------|--------|
 | 0 | Report "backlog and tasks are clear — nothing open." Stop. |
-| 1 | Announce the group and proceed to Step 3. |
+| 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (no cap): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
 **Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
 
-Do NOT use `AskUserQuestion` — a plain numbered list handles any list size without the 4-option cap.
+Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
 
 ## Step 3 — Run the code cycle
 
@@ -210,7 +222,7 @@ main checkout. This sidesteps the whole class of cross-worktree merge/CWD failur
 
 ### A1 — Gather
 
-Run Step 1 (heading-based gather) unchanged. The output is a list of **units**: each unit is
+Run the **full scan** from Step 1 (skip the fast path — batch mode always needs the complete list). The output is a list of **units**: each unit is
 one heading group. Heading-based grouping naturally scopes each unit to one logical area, which
 minimizes (but does not guarantee) conflicts when units merge into the integration branch in A6
 — shared imports/utilities may still collide, which A6 handles.
