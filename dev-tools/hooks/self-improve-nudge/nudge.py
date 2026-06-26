@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""self-improve-nudge — Stop hook: per-session learning-capture gate.
+"""self-improve-nudge — Stop hook: per-session learning-capture nudge.
 
 Purpose: fires ONCE at session end when capture signals are present.
          Blocks Stop so Claude captures lessons before they evaporate.
@@ -16,11 +16,12 @@ Signals:
 
 import json
 import os
+import pathlib
 import re
 import sys
 
 ACTION_TOOLS = re.compile(
-    r"^(Edit|Write|Bash|Agent|Task|Workflow|NotebookEdit|WebSearch|mcp__)"
+    r"^(Edit|Write|Bash|Agent|Task|Workflow|NotebookEdit|WebSearch)"
 )
 
 # Mirrors scan_transcripts.py CORRECTION_RE for consistency.
@@ -30,25 +31,8 @@ CORRECTION_RE = re.compile(
     r"|(아니|그게 아니|아닌데|다시|틀렸|잘못|되돌려)",
     re.IGNORECASE,
 )
-CORRECTION_MAXLEN = 80
+CORRECTION_MAXLEN = 50
 ACTION_THRESHOLD = 10
-THROTTLE_HOURS = 4          # cross-session cooldown; prevents every-session noise
-
-
-def load_state(state_path):
-    try:
-        with open(state_path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_state(state_path, state):
-    try:
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(state, f)
-    except Exception:
-        pass
 
 
 def read_input():
@@ -81,6 +65,9 @@ def text_of(message):
     if isinstance(c, str):
         return c
     if isinstance(c, list):
+        # Mirrors scan_transcripts.py: tool_result-bearing messages are not user text.
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+            return ""
         parts = []
         for b in c:
             if isinstance(b, dict) and b.get("type") == "text":
@@ -90,23 +77,53 @@ def text_of(message):
 
 
 def detect_signals(records):
+    """Single pass over records to detect all three signals."""
+    action_count = 0
+    saw_error = False
+    recovered = False
+    correction_found = False
+    prev_was_assistant = False
+
+    for r in records:
+        typ = r.get("type")
+
+        if typ == "assistant":
+            prev_was_assistant = True
+            msg = r.get("message") or {}
+            content = msg.get("content") or []
+            if isinstance(content, list):
+                for b in content:
+                    if (isinstance(b, dict)
+                            and b.get("type") == "tool_use"
+                            and ACTION_TOOLS.match(b.get("name", ""))):
+                        action_count += 1
+
+        elif typ == "user":
+            content = (r.get("message") or {}).get("content") or []
+            is_tool_result = isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            )
+
+            if is_tool_result:
+                # Signal B: O(n) linear error->recovery detection.
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        if b.get("is_error"):
+                            saw_error = True
+                        elif saw_error:
+                            recovered = True
+                # tool_result is not a human turn — don't break assistant adjacency.
+            else:
+                # Human message: check Signal C.
+                if not correction_found and prev_was_assistant:
+                    txt = text_of(r.get("message", {})).replace("\n", " ").strip()
+                    if txt and len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
+                        correction_found = True
+                prev_was_assistant = False
+
     signals = []
     parts = []
-
-    # Signal A: action tool calls across the full session
-    action_count = 0
-    for r in records:
-        if r.get("type") != "assistant":
-            continue
-        msg = r.get("message") or {}
-        content = msg.get("content") or []
-        if not isinstance(content, list):
-            continue
-        for b in content:
-            if (isinstance(b, dict)
-                    and b.get("type") == "tool_use"
-                    and ACTION_TOOLS.match(b.get("name", ""))):
-                action_count += 1
 
     if action_count >= ACTION_THRESHOLD:
         signals.append("complex-task")
@@ -115,22 +132,6 @@ def detect_signals(records):
             "Reusable workflow -> `skill-creator`; one-off -> pass."
         )
 
-    # Signal B: error->recovery in tool_result sequence
-    error_flags = []
-    for r in records:
-        if r.get("type") != "user":
-            continue
-        content = (r.get("message") or {}).get("content") or []
-        if not isinstance(content, list):
-            continue
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_result":
-                error_flags.append(bool(b.get("is_error")))
-
-    recovered = any(
-        error_flags[i] and any(not e for e in error_flags[i + 1:])
-        for i in range(len(error_flags) - 1)
-    )
     if recovered:
         signals.append("error-recovery")
         parts.append(
@@ -140,26 +141,14 @@ def detect_signals(records):
             "one-off -> pass."
         )
 
-    # Signal C: correction phrase in user turn immediately after assistant turn
-    prev_was_assistant = False
-    for r in records:
-        typ = r.get("type")
-        if typ == "assistant":
-            prev_was_assistant = True
-            continue
-        if typ == "user":
-            if prev_was_assistant:
-                txt = text_of(r.get("message", {})).replace("\n", " ").strip()
-                if txt and len(txt) <= CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
-                    signals.append("user-correction")
-                    parts.append(
-                        "[C] user corrected approach. "
-                        "Preference/style -> auto-memory; "
-                        "workflow misunderstanding -> `skill-creator` improvement; "
-                        "else -> pass."
-                    )
-                    break
-            prev_was_assistant = False
+    if correction_found:
+        signals.append("user-correction")
+        parts.append(
+            "[C] user corrected approach. "
+            "Preference/style -> auto-memory; "
+            "workflow misunderstanding -> `skill-creator` improvement; "
+            "else -> pass."
+        )
 
     return signals, parts
 
@@ -171,7 +160,6 @@ def main():
     if inp.get("stop_hook_active"):
         sys.exit(0)
 
-    # Guard 2: session-once marker
     session_id = inp.get("session_id", "")
     if not session_id:
         sys.exit(0)
@@ -183,18 +171,9 @@ def main():
     marker_dir = os.path.join(config_dir, "tmp", "nudge-markers")
     os.makedirs(marker_dir, exist_ok=True)
 
-    # Guard 2a: session-once marker
+    # Guard 2: session-once marker (sufficient — per-session hot-path needs no cross-session throttle)
     marker = os.path.join(marker_dir, f"{session_id}.nudged")
     if os.path.exists(marker):
-        sys.exit(0)
-
-    # Guard 2b: cross-session throttle — don't fire more than once per THROTTLE_HOURS
-    import time
-    state_path = os.path.join(marker_dir, ".state.json")
-    state = load_state(state_path)
-    now = time.time()
-    last_fired = state.get("lastFiredTs", 0)
-    if now - last_fired < THROTTLE_HOURS * 3600:
         sys.exit(0)
 
     # Guard 3: transcript must exist and be readable
@@ -212,11 +191,9 @@ def main():
 
     # Mark fired before output so a crash in print doesn't re-fire
     try:
-        open(marker, "w").close()
+        pathlib.Path(marker).touch()
     except Exception:
         pass
-    state["lastFiredTs"] = now
-    save_state(state_path, state)
 
     signal_list = ", ".join(signals)
     lines = [
