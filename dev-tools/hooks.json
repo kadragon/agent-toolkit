@@ -37,6 +37,18 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/self-improve-nudge/nudge.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking session for capture signals..."
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
