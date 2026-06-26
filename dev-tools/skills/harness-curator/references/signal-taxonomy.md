@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-The scanner emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Six output blocks, five classification signals — `PROMPTS` is raw input for clustering, not a classified signal. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
+The scanner emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Six output blocks, six classification signals — `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -57,6 +57,16 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **Caution:** one complaint is a mood, not a signal. Require **≥2** complaints about the same behavior, or one with an obvious systematic cause, before routing. A guardrail the user dislikes once may still be load-bearing — same adversarial caution as DELETE.
 
+## 6. Domain knowledge candidate
+
+**Detect:** From `PROMPTS` (same input as Signal 1, model judgment), a fact or constraint that appears in **≥2** sessions but is NOT a multi-step workflow and too atomic to warrant a standalone skill. Examples: a proxy bypass pattern ("NO_PROXY required for git.knue.ac.kr"), a platform quirk, a recurring env-var lookup, a fixed API constraint the model keeps re-deriving. Distinguishing from Signal 1: if the cluster reduces to a single constraint or lookup rather than a sequence of steps, it is a domain knowledge candidate, not a new-asset candidate.
+
+**Route:** Write the fact to `docs/<topic>.md`. AGENTS.md and CLAUDE.md get only an *index pointer* to the doc (one-line `filename | summary` entry) — both files are intentionally capped and serve as navigation indexes, not knowledge dumps. If the fact belongs directly in a CLAUDE.md or AGENTS.md guardrail (a hard constraint, not just reference), surface the exact line for the user to decide — never auto-edit global instructions.
+
+**Confirm before routing:** Verify the fact is not already in AGENTS.md, CLAUDE.md, or an existing `docs/` file. If it is present but the model keeps missing it, the problem is attention/placement — surface the existing location rather than duplicating.
+
+**No scanner change needed:** Signal 6 is detected by model judgment over the same `PROMPTS` block that drives Signal 1. The scanner produces no separate output block for it.
+
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
@@ -65,6 +75,7 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 | Triggering miss (skill or agent) | 2 |
 | Underperforming asset (skill or agent) | 2 (or 1 with systematic cause) |
 | Harness friction (over-protection) | 2 (or 1 with systematic cause) |
+| Domain knowledge candidate | 2 (lower than Signal 1 — atomic facts never form large clusters) |
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.

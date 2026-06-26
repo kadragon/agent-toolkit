@@ -69,7 +69,9 @@ FRICTION_RE = re.compile(
     r"stop (doing|asking|adding|using|inserting|reminding)|"
     r"turn (this|that|it) off|disable (this|that|it|the)|"
     r"why do you (keep|always))\b"
-    r"|(자꾸|매번|왜.{0,4}자꾸|비활성|끄(자|고|는|자고|다|기)|꺼(줘|라)?)",
+    r"|(자꾸|매번|왜.{0,4}자꾸|비활성|끄(자|고|는|자고|다|기)|꺼(줘|라)?)"
+    r"|(역치|임계값|threshold).{0,6}(높|낮|조정)"
+    r"|너무.{0,4}민감",
     re.IGNORECASE,
 )
 FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
