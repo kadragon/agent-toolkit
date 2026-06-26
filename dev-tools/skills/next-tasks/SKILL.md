@@ -148,9 +148,8 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
 *backlog.md group (h2 or h3):* Write a `tasks.md` Sprint Contract with:
   - `# heading` = the selected heading title (verbatim from backlog.md)
   - `status: active`
-  - `## Covers` listing each in-scope item's **exact text** as a bullet (copied verbatim from backlog.md).
+  - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
   Do NOT flip items to `[>]` — leave them as `[ ]` in backlog.md until deletion at pre-merge cleanup.
-  `## Covers` is the deletion list; keep item text exact so cleanup can match and remove the right lines.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
@@ -202,7 +201,7 @@ initial PR commit alongside the code.
 *Task came from backlog.md group:*
 1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
 2. In `backlog.md`: **delete** each item line listed in `## Covers` of the Sprint Contract. Also delete any h2/h3 heading that has no remaining open `- [ ]` items after the deletion.
-3. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased`.
+3. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased` (create the section if absent).
 
 Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or stale sprint markers.
 
@@ -319,7 +318,7 @@ any worktree.
    If every unit conflicts/drops, abandon: `git checkout main && git branch -D <type>/batch-<slug>`,
    then jump to A7 cleanup and report (do not leave the checkout stranded on a dead branch).
 3. **Collect cleanup targets — once.** For each merged unit, record what to delete:
-   - **backlog units** → the exact `- [ ]` lines this unit covered (from `backlog.md`)
+   - **backlog units** → all open `- [ ]` lines directly under the unit's heading group in `backlog.md` (read the heading section; every `- [ ]` item under it is a deletion target)
    - **finding groups** → the completed `- [ ]` lines in the relevant h3/h2 block in `tasks.md`
 4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
    single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
