@@ -1,6 +1,6 @@
 ---
 name: next-tasks
-version: 1.1.2
+version: 1.2.0
 description: >-
   This skill should be used when the user says "start a task", "pick the next task",
   "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
@@ -10,7 +10,7 @@ description: >-
   to dev-review-cycle --auto for review, CI, and merge. With the `--all` flag (also "전부
   처리", "모두 돌려", "다 처리", "batch all", "all tasks") it batches: the user multi-selects
   bounded items, each implemented + QA'd in its own git worktree in parallel, then all merged
-  into one integration branch for a single version bump → reconcile → dev-review-cycle --auto
+  into one integration branch for a single version bump → cleanup pass → dev-review-cycle --auto
   (one PR). Not for review-only requests or backlog browsing without intent to implement.
 ---
 
@@ -38,7 +38,9 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 
 ## Step 1 — Gather candidate groups
 
-**Fast path (single-pick only):** Check `tasks.md` for open h1 sprint blocks first:
+**Fast path (single-pick only):** Read a minimal slice of each file to surface the top candidates — do NOT scan the full backlog unless the user explicitly asks for more.
+
+**Phase A — h1 sprint blocks (tasks.md):**
 
 ```bash
 grep -En "^# |^status:" tasks.md 2>/dev/null
@@ -46,9 +48,29 @@ grep -En "^# |^status:" tasks.md 2>/dev/null
 
 For each `# ` heading, check if the immediately following `status:` line reads `open`. Collect all matching h1 titles in document order.
 
-If exactly 1 found: announce the sprint title and proceed directly to Step 3 — no prompt needed.
+**Phase B — top Review Backlog h3 groups (tasks.md):** *(skip if Phase A already has 5 candidates)*
 
-If 2–3 found: on Claude Code, use `AskUserQuestion` (single-select); on Codex (where `AskUserQuestion` is unavailable), print a plain numbered list instead. Either way, include a "더 많은 항목 보기" option/entry as the last choice. After the user picks a sprint title, proceed directly to Step 3 with that h1 block as the selected group. When the user picks "더 많은 항목 보기", fall through to the full scan below, build the complete candidate list, then continue to Step 2 for selection. Do not run the backlog.md grep unless the user explicitly requests it.
+```bash
+grep -n "^## Review Backlog\|^### \|^- \[ \]" tasks.md 2>/dev/null | head -80
+```
+
+Locate the `## Review Backlog` line in the output; collect up to **3** h3 sub-headings (in document order) that directly own ≥1 open `- [ ]`.
+
+**Phase C — top backlog.md groups:** *(skip if Phases A+B already have 5 candidates)*
+
+```bash
+grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
+```
+
+Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]` or `[>]`.
+
+**Fast-path selection (A+B+C combined, cap = 5):**
+
+| Count | Action |
+|-------|--------|
+| 0 | No fast-path hits — fall through to full scan below |
+| 1 | Announce the group and proceed directly to Step 3 |
+| 2–5 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run both greps to build the complete candidate list:
 
@@ -78,7 +100,7 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 |-------------|--------|
 | 0 | Report "backlog and tasks are clear — nothing open." Stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
-| ≥2 | Print a numbered list of all groups (no cap): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
+| ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
@@ -123,13 +145,12 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
   as-is — findings resolve when the fix is committed and verified. No `[>]` flip; no
   `## Covers` section needed.
 
-*backlog.md group (h2 or h3):* flip each open `- [ ]` under the heading → `[>]`. Write a
-  `tasks.md` Sprint Contract with:
+*backlog.md group (h2 or h3):* Write a `tasks.md` Sprint Contract with:
   - `# heading` = the selected heading title (verbatim from backlog.md)
   - `status: active`
-  - `## Covers` listing each `[>]`-flipped item's **exact text** as a bullet.
-  `reconcile-harness.py` reads `## Covers` at completion and archives/reverts each listed
-  `[>]` anchor — no orphans.
+  - `## Covers` listing each in-scope item's **exact text** as a bullet (copied verbatim from backlog.md).
+  Do NOT flip items to `[>]` — leave them as `[ ]` in backlog.md until deletion at pre-merge cleanup.
+  `## Covers` is the deletion list; keep item text exact so cleanup can match and remove the right lines.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
@@ -172,26 +193,18 @@ Mark the sprint done and sync tracking files — leave as uncommitted so they la
 initial PR commit alongside the code.
 
 *Task came from tasks.md h1 block:*
-1. In `tasks.md`: change `status: active` → `status: done`
-2. Run `reconcile-harness.py` from the project root:
-   ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py"
-   ```
-   This archives the sprint and appends to `CHANGELOG.md`. tasks.md is removed only if the sprint block was its only content; if a `## Review Backlog` section exists, the sprint block is stripped and tasks.md is retained. **Expected:** reconcile-harness.py may print a WARNING about unmatched active markers — normal for h1 block sprints that never flip backlog items to `[>]`; safe to ignore.
+1. Delete the entire h1 block from `tasks.md` (the `# heading`, `status:` line, and all body content). If `tasks.md` has no remaining content after deletion, delete the file.
+2. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased`.
 
 *Task came from tasks.md finding group (h3/h2):*
-- In `tasks.md`: flip each finding `[ ]` → `[x]`
+- In `tasks.md`: **delete** each completed finding line (the `- [ ]` items that were fixed). If the h3 heading has no remaining open `- [ ]` items after deletion, delete the heading line too. If `## Review Backlog` becomes empty, delete that section header as well. If `tasks.md` is now entirely empty, delete the file.
 
 *Task came from backlog.md group:*
-1. In `tasks.md`: change `status: active` → `status: done`
-2. Run `reconcile-harness.py` from the project root (same command as above).
-   This removes the `[>]` markers from `backlog.md` via `## Covers` and appends to `CHANGELOG.md`.
-   Empty headings left after removal are NOT cleaned up here (cleanup only runs when tasks.md is absent);
-   they persist until a later reconcile sweep. Do NOT flip `[>]` → `[x]` manually — `remove_active_markers()`
-   matches `[>]` specifically; a manual flip to `[x]` breaks that lookup.
+1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
+2. In `backlog.md`: **delete** each item line listed in `## Covers` of the Sprint Contract. Also delete any h2/h3 heading that has no remaining open `- [ ]` items after the deletion.
+3. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased`.
 
-Post-merge, `reconcile-harness.py` is a no-op for this sprint (already reconciled) but can
-still be run as part of a sweep without side effects.
+Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or stale sprint markers.
 
 ## Step 4 — Hand off
 
@@ -209,16 +222,14 @@ no further action is required.
 
 Triggered by `--all`. Implements **multiple** units in parallel (each in its own git worktree),
 then collapses them onto **one integration branch** that goes through a **single** version bump,
-`reconcile-harness.py`, and `dev-review-cycle --auto` → one PR, one CI run, one merge.
+cleanup pass, and `dev-review-cycle --auto` → one PR, one CI run, one merge.
 
-**Why one integration branch, not N PRs.** The shared single-copy files this repo's tooling
-mutates — `plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited
-per-unit in parallel without collision, and the convergence tools can only run on the *main
-checkout*: `reconcile-harness.py` writes relative `tasks.md`/`backlog.md` (whatever the CWD is,
-and Bash CWD resets to the repo root between calls), and `dev-review-cycle` detects its branch
-from the session's current checkout — neither can be aimed at a worktree. So the worktrees do
-**code only**; every shared-file edit happens once, serially, on the integration branch in the
-main checkout. This sidesteps the whole class of cross-worktree merge/CWD failures.
+**Why one integration branch, not N PRs.** The shared single-copy files — `plugin.json` manifests,
+`backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited per-unit in parallel without collision.
+`dev-review-cycle` also detects its branch from the session's current checkout and cannot be aimed
+at a worktree. So worktrees do **code only**; every shared-file edit happens once, serially, on
+the integration branch in the main checkout. This sidesteps the whole class of cross-worktree
+merge/CWD failures.
 
 ### A1 — Gather
 
@@ -272,7 +283,7 @@ Then fan out one implementer agent per unit in a single message (concurrency sel
 agent's brief (four-field per `docs/delegation.md`) gives the **worktree path** and says to,
 in that path:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
-   or `CHANGELOG.md` — all marking-active, version bump, and reconcile happen once in A6.
+   or `CHANGELOG.md` — all cleanup edits (backlog deletion, tasks.md cleanup, version bump, CHANGELOG) happen once in A6.
 2. **Return** the Sprint Contract text (Scope / Acceptance criteria / Out of scope / Lint-test
    command per `docs/eval-criteria.md`; one acceptance checkbox per bundled item) as part of the
    agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
@@ -307,25 +318,17 @@ any worktree.
    it), and continue with the rest — the integration branch keeps the units that merged cleanly.
    If every unit conflicts/drops, abandon: `git checkout main && git branch -D <type>/batch-<slug>`,
    then jump to A7 cleanup and report (do not leave the checkout stranded on a dead branch).
-3. **Mark active — once, only if the batch has ≥1 backlog unit.** Flip each merged backlog item
-   `[ ]` → `[>]` and write **one** combined `tasks.md` Sprint Contract: `status: active`, a
-   `# heading` describing the batch, and a `## Covers` section listing **every** merged backlog
-   item's exact line (per Step 3 "Mark active — backlog group" rules). If the batch is findings-only (no
-   backlog units), skip the contract entirely — there is nothing for reconcile to anchor, and
-   writing one only to delete it would needlessly trigger the `tasks.md` unlink (see step 5).
+3. **Collect cleanup targets — once.** For each merged unit, record what to delete:
+   - **backlog units** → the exact `- [ ]` lines this unit covered (from `backlog.md`)
+   - **finding groups** → the completed `- [ ]` lines in the relevant h3/h2 block in `tasks.md`
 4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
    single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
-5. **Pre-merge cleanup — once.** Order matters because `reconcile-harness.py` may unlink
-   `tasks.md` on completion (only when no content remains after stripping the sprint block):
-   - **First** flip every merged `tasks.md`-finding `[ ]` → `[x]`.
-   - **Then**, only if a contract was written in step 3, set it `status: done` and run
-     `reconcile-harness.py` (removes all `[>]` via `## Covers`, one `CHANGELOG.md` append,
-     archives the sprint — unlinks `tasks.md` only if no other content remains). For a
-     findings-only batch, run no reconcile; the `[x]` flips stay in `tasks.md`.
+5. **Pre-merge cleanup — once.**
+   - **tasks.md findings**: delete each completed `- [ ]` line. Remove the h3/h2 heading if no open items remain. Remove `## Review Backlog` if it becomes empty. If `tasks.md` is now entirely empty, delete the file.
+   - **backlog.md**: delete each completed item line. Remove h2/h3 headings that have no remaining open `- [ ]` items.
+   - **CHANGELOG.md**: append one entry under `## Unreleased`: `- [done] <batch-slug> (<N> units) (<date>)`.
 
-   Leave all edits uncommitted — `dev-review-cycle` Step 1 commits them. `strip_sprint_block()`
-   preserves unrelated `## Review Backlog` content when stripping the sprint block; `tasks.md`
-   is only fully removed when the sprint block was the only content.
+   Leave all edits uncommitted — `dev-review-cycle` Step 1 commits them.
 6. **Hand off — once.** `Skill(dev-tools:dev-review-cycle)` with `args: --auto`. Running from the
    main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
    work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
