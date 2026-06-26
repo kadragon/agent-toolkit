@@ -2,7 +2,7 @@
 name: harness-curator
 description: >-
   Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
-version: 1.3.1
+version: 1.3.2
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -69,6 +69,7 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Underperforming asset** | skill in `CORRECTION-SIGNALS` / agent in `AGENT-CORRECTION-SIGNALS` (loaded/invoked, then user corrected) | skill → `skill-creator` modify; agent → `plugin-dev:agent-development` modify |
 | **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing) | loosen/narrow → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
+| **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
 | **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Before any **delete**, run the adversarial check (Step 7).
@@ -134,20 +135,28 @@ Output one ranked table, candidates only:
 
 Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
 
-Record the run so the staleness nudge resets (idempotent, shared state file):
+Record the run and candidate state so the staleness nudge stays accurate. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
 ```bash
-python3 - <<'PY'
+# Choose the prefix: HARNESS_PENDING=1 if ≥1 non-Watch candidate was produced;
+# HARNESS_PENDING=0 (or omit the prefix entirely) if the report was empty or Watch-only.
+# Do NOT blindly copy HARNESS_PENDING=1 — an empty-report run must clear lastCandidateMs.
+HARNESS_PENDING=1 python3 - <<'PY'   # ← replace 1 with 0 for empty/Watch-only reports
 import json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.]", "-", os.getcwd()))
 os.makedirs(state_dir, exist_ok=True)
 p = os.path.join(state_dir, ".harness-curator-state.json")
+now = int(time.time() * 1000)
 s = {}
 try:
     with open(p) as f: s = json.load(f)
 except Exception: pass
-s["lastRunMs"] = int(time.time() * 1000)
+s["lastRunMs"] = now
+if os.environ.get("HARNESS_PENDING") == "1":
+    s["lastCandidateMs"] = now
+else:
+    s.pop("lastCandidateMs", None)
 with open(p, "w") as f: json.dump(s, f)
 print("harness-curator run recorded")
 PY
