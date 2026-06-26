@@ -138,8 +138,10 @@ Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
 Record the run and candidate state so the staleness nudge stays accurate. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
 ```bash
-# Set HARNESS_PENDING=1 if ≥1 non-Watch candidate was produced
-HARNESS_PENDING=1 python3 - <<'PY'
+# Choose the prefix: HARNESS_PENDING=1 if ≥1 non-Watch candidate was produced;
+# HARNESS_PENDING=0 (or omit the prefix entirely) if the report was empty or Watch-only.
+# Do NOT blindly copy HARNESS_PENDING=1 — an empty-report run must clear lastCandidateMs.
+HARNESS_PENDING=1 python3 - <<'PY'   # ← replace 1 with 0 for empty/Watch-only reports
 import json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.]", "-", os.getcwd()))

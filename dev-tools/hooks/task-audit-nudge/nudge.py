@@ -76,8 +76,8 @@ def main():
     if (not analysis_stale and not candidates_pending) or since_nudge <= THROTTLE_MS:
         return
 
-    if candidates_pending:
-        days = (candidate_age_ms or 0) // DAY_MS
+    if candidates_pending and candidate_age_ms is not None:
+        days = candidate_age_ms // DAY_MS
         msg = (
             f"HARNESS-CURATOR REMINDER: harness candidates were surfaced {days}d ago "
             "and have not been acted on or refreshed. "
