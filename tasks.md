@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #102 — next-tasks --tree mode + size-gate lite path (out-of-scope findings)
+
+- [ ] [debt] `next-tasks/SKILL.md:447` — Batch mode A7 cleanup: uses `git branch -D` on ALL units (merged, dropped, conflicted). Conflicted units that completed QA but failed merge lose their implementation. Fix: use `git branch -d` for merged units; preserve conflicted branches for manual resolution. Pre-existing batch mode code, not introduced by this PR. P1 (source: agy)
+
+---
+
 ### PR #96 — commit-guard bare switch-back review cycle (out-of-scope findings)
 
 - [ ] `commit-guard/guard.py:_bare_switch_target` — option-value args desync the positional count: `git switch --conflict merge main` treats `merge` (the value of `--conflict`) as a positional, so `len(positionals) == 2` → returns `None` → a real switch-back to main is missed → commit on main allowed (bypass). Fail-open-consistent (matches the never-block-on-uncertainty contract) and contrived, so not a regression of this PR's new detection. Fix needs a known value-option skip-set (`--conflict`, `-t`/`--track`, …) or a more complete checkout/switch option model. P3, conf ~70. (source: agy)

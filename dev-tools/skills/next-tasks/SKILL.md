@@ -2,9 +2,12 @@
 name: next-tasks
 version: 1.3.0
 description: >-
-  Run the full code cycle for a backlog item: pick → branch → Sprint Contract → implement →
-  qa-verifier → version bump → dev-review-cycle --auto. Flags: --all (parallel batch, one PR),
-  --tree (worktree isolation). Trivial tasks auto-offer lite path (direct merge, no PR/CI).
+  Use when user says "start a task", "next task", "work the backlog", "start work", "태스크
+  시작", "태스크 골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full
+  code cycle: pick → branch → Sprint Contract → implement → qa-verifier → version bump →
+  dev-review-cycle --auto. Flags: --all (parallel batch), --tree (worktree isolation).
+  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Not for review-only or
+  backlog browsing without intent to implement.
 ---
 
 # Next Tasks
@@ -108,9 +111,9 @@ Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any 
 Run after selecting a group, before Step 3. Evaluate whether the selected group is **trivial**:
 ALL must hold: tag is NOT `[FEAT]`, total in-scope files ≤2, no new public API/schema.
 
-If **not trivial** → skip this section entirely, proceed to Step 3 normally.
+If **not trivial** OR **`--tree` is active** → skip this section entirely, proceed to Step 3 normally.
 
-If **trivial:**
+If **trivial** (and `--tree` is NOT active):
 
 **Batch nudge** — scan for other trivial open groups (re-use the candidate list from Step 1;
 re-grep only if the list is no longer in context). If ≥1 other trivial groups exist, surface them:
@@ -267,14 +270,13 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 # merge and push
 git checkout main
+git pull origin main
 git merge --no-ff <type>/<slug> -m "Merge branch '<type>/<slug>'"
 git push origin main
 git branch -d <type>/<slug>
 ```
 
-**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule
-requires PRs), stop and inform the user — fall back to `Skill(dev-tools:dev-review-cycle)`
-with `args: --auto` on the existing branch.
+**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule requires PRs), reset local main (`git reset --hard origin/main`), check out the feature branch (`git checkout <type>/<slug>`), and fall back to `Skill(dev-tools:dev-review-cycle)` with `args: --auto`.
 
 Report on completion: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 
@@ -292,12 +294,13 @@ SLUG=<slug>            # short slug derived from item title
 BRANCH=<type>/<slug>   # derived as normal from item [type] tag + slug
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
+# if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
 worktree path** as the working directory in addition to the normal four-field format. The agent
-works entirely inside the worktree — it must NOT touch the main checkout.
+works entirely inside the worktree — it must NOT touch the main checkout or any shared file (`plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md`) in the worktree; those are edited only in the main checkout after QA.
 
 **QA (workflows.md Step 4):** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Same retry policy as Step 3 (one fix-and-re-verify cycle).
@@ -309,11 +312,12 @@ git branch -D "$BRANCH"
 ```
 Report the failure; main checkout remains on `main`.
 
-**Version bump (workflows.md Step 5):** performed in the **main checkout** (plugin.json manifests
-live there, not per-worktree). Read which files changed inside the worktree to determine which
-plugin directory to bump, then edit the manifests in the main checkout. Leave uncommitted.
+**Version bump (workflows.md Step 5):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then edit the manifests in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
 
 **Collapse after QA passes:**
+
+Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). If `git status` inside the worktree shows dirty files, commit them before proceeding — `git worktree remove` refuses on a dirty worktree.
+
 ```bash
 git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
 git checkout "$BRANCH"                   # switch main checkout onto the feature branch
