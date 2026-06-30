@@ -12,6 +12,21 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# Skills excluded at detection time — never surfaced as candidates.
+# pr-review-toolkit:review-pr: spawns named sub-agents that leak into the session.
+# caveman:caveman-review: style-compressed output, excluded by selection rules anyway.
+BLOCKLIST=(
+  "pr-review-toolkit:review-pr"
+)
+
+is_blocked() {
+  local id="$1"
+  for blocked in "${BLOCKLIST[@]}"; do
+    [[ "$id" == "$blocked" ]] && return 0
+  done
+  return 1
+}
+
 PLUGINS_CACHE="${HOME}/.claude/plugins/cache"
 SEEN_FILE=$(mktemp)
 ENTRIES_FILE=$(mktemp)
@@ -70,10 +85,13 @@ extract_description() {
 add_candidate() {
   local id="$1" kind="$2" desc="$3"
   is_new "$id" || return 0
-  local model="sonnet"
-  [[ "$id" == *security* ]] && model="opus"
-  jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" --arg model "$model" \
-    '{id: $id, kind: $kind, description: $description, model: $model}' >> "$ENTRIES_FILE" || return 0
+  is_blocked "$id" && return 0
+  local model="sonnet" domain="general"
+  [[ "$id" == *security* ]] && model="opus" && domain="security"
+  jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
+      --arg model "$model" --arg domain "$domain" \
+    '{id: $id, kind: $kind, description: $description, model: $model, domain: $domain}' \
+    >> "$ENTRIES_FILE" || return 0
 }
 
 # ──────────────────────────────────────────────
