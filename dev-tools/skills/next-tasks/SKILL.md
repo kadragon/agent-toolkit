@@ -299,8 +299,16 @@ git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
-worktree path** as the working directory in addition to the normal four-field format. The agent
-works entirely inside the worktree — it must NOT touch the main checkout or any shared file (`plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md`) in the worktree; those are edited only in the main checkout after QA.
+worktree path** AND these explicit CWD instructions (the agent spawns in the main checkout, not
+the worktree):
+
+> "Your spawn CWD is the main checkout. **First action before anything else:** `cd <absolute-worktree-path>`.
+> Every subsequent Bash command must either begin with `cd <absolute-worktree-path> &&` or use
+> absolute paths under that directory. Read/Edit/Write tool calls must use absolute paths
+> under `<absolute-worktree-path>/`. Do NOT read or edit any file outside this path."
+
+The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
+`backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
 
 **QA (workflows.md Step 4):** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Same retry policy as Step 3 (one fix-and-re-verify cycle).
@@ -388,10 +396,15 @@ git worktree add ".worktrees/<slug>" -b "wt/<slug>" origin/main   # one per unit
 ```
 
 Then fan out one implementer agent per unit in a single message (concurrency self-caps). Each
-agent's brief (four-field per `docs/delegation.md`) gives the **worktree path** and says to,
-in that path:
+agent's brief (four-field per `docs/delegation.md`) gives the **absolute worktree path** and
+these explicit CWD instructions (agents spawn in the main checkout CWD, not the worktree):
+
+> "Your spawn CWD is the main checkout. **First action:** `cd <absolute-worktree-path>`.
+> All subsequent Bash/Read/Edit/Write calls must use absolute paths under `<absolute-worktree-path>/`."
+
+Then the brief continues:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
-   or `CHANGELOG.md` — all cleanup edits (backlog deletion, tasks.md cleanup, version bump, CHANGELOG) happen once in A6.
+   or `CHANGELOG.md` — all cleanup edits happen once in A6.
 2. **Return** the Sprint Contract text (Scope / Acceptance criteria / Out of scope / Lint-test
    command per `docs/eval-criteria.md`; one acceptance checkbox per bundled item) as part of the
    agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
