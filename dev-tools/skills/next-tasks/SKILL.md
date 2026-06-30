@@ -299,19 +299,22 @@ git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
-worktree path** AND these explicit CWD instructions (the agent spawns in the main checkout, not
-the worktree):
+worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
+to the main checkout on every call; a standalone `cd` has no persistent effect):
 
-> "Your spawn CWD is the main checkout. **First action before anything else:** `cd <absolute-worktree-path>`.
-> Every subsequent Bash command must either begin with `cd <absolute-worktree-path> &&` or use
-> absolute paths under that directory. Read/Edit/Write tool calls must use absolute paths
-> under `<absolute-worktree-path>/`. Do NOT read or edit any file outside this path."
+> "Your spawn CWD is the main checkout. The Bash tool is stateless — CWD resets each call.
+> Every Bash command must begin with `cd <absolute-worktree-path> &&`
+> (e.g. `cd /path/to/worktree && git status`, `cd /path/to/worktree && npm test`).
+> Read/Edit/Write tool calls must use absolute paths under `<absolute-worktree-path>/`.
+> Do NOT read or edit any file in the main checkout."
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
 
 **QA (workflows.md Step 4):** spawn `qa-verifier` pointed at the worktree path, verifying
-against the Sprint Contract. Same retry policy as Step 3 (one fix-and-re-verify cycle).
+against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
+must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
+worktree. Same retry policy as Step 3 (one fix-and-re-verify cycle).
 
 **If QA fails after one retry:** clean up and stop.
 ```bash
@@ -399,8 +402,11 @@ Then fan out one implementer agent per unit in a single message (concurrency sel
 agent's brief (four-field per `docs/delegation.md`) gives the **absolute worktree path** and
 these explicit CWD instructions (agents spawn in the main checkout CWD, not the worktree):
 
-> "Your spawn CWD is the main checkout. **First action:** `cd <absolute-worktree-path>`.
-> All subsequent Bash/Read/Edit/Write calls must use absolute paths under `<absolute-worktree-path>/`."
+> "Your spawn CWD is the main checkout. The Bash tool is stateless — CWD resets each call.
+> Every Bash command must begin with `cd <absolute-worktree-path> &&`
+> (e.g. `cd /path/to/worktree && git commit -m '...'`).
+> Read/Edit/Write tool calls must use absolute paths under `<absolute-worktree-path>/`.
+> Do NOT read or edit any file in the main checkout."
 
 Then the brief continues:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
@@ -419,7 +425,9 @@ record it for the final report — do not abort the others.
 
 For each successfully-implemented unit, spawn a `qa-verifier` agent (separate from the
 implementer) pointed at that unit's worktree path, verifying against the Sprint Contract that
-unit returned in A4. Fan out all QA agents in one message.
+unit returned in A4. Include the same CWD instructions in each brief: every Bash command must
+begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
+worktree. Fan out all QA agents in one message.
 
 For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
 unit (all retries in one message — they are independent; do not serialize). Still blocking after
