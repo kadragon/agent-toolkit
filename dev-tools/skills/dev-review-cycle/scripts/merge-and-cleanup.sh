@@ -88,11 +88,12 @@ if [ "$MERGE_OK" = "true" ]; then
   git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
   git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
 
-  # Use -d (safe delete) — only deletes if fully merged
-  if git branch -d "$FEATURE_BRANCH" >/dev/null 2>&1; then
+  # squash/rebase merges change commit hash so -d sees "not fully merged"; -D is safe here
+  # because we already confirmed merge_ok above
+  if git branch -D "$FEATURE_BRANCH" >/dev/null 2>&1; then
     CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' deleted"
   else
-    CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}' (may not be fully merged)"
+    CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}' (may be current branch)"
   fi
 
   # Worktree cleanup if path provided
