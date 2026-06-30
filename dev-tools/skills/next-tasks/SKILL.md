@@ -1,17 +1,10 @@
 ---
 name: next-tasks
-version: 1.2.0
+version: 1.3.0
 description: >-
-  This skill should be used when the user says "start a task", "pick the next task",
-  "work the backlog", "next task", "start work", "다음 작업 시작", "백로그에서 작업 골라",
-  "작업 하나 돌려줘", "백로그 시작", "작업 시작", "백로그 작업", "태스크 시작", or
-  "태스크 골라줘". Picks an open item from backlog.md or tasks.md, drives the full code
-  cycle (branch → Sprint Contract → implement → qa-verifier → version bump), and hands off
-  to dev-review-cycle --auto for review, CI, and merge. With the `--all` flag (also "전부
-  처리", "모두 돌려", "다 처리", "batch all", "all tasks") it batches: the user multi-selects
-  bounded items, each implemented + QA'd in its own git worktree in parallel, then all merged
-  into one integration branch for a single version bump → cleanup pass → dev-review-cycle --auto
-  (one PR). Not for review-only requests or backlog browsing without intent to implement.
+  Run the full code cycle for a backlog item: pick → branch → Sprint Contract → implement →
+  qa-verifier → version bump → dev-review-cycle --auto. Flags: --all (parallel batch, one PR),
+  --tree (worktree isolation). Trivial tasks auto-offer lite path (direct merge, no PR/CI).
 ---
 
 # Next Tasks
@@ -22,7 +15,9 @@ skill is the **decision and sequencing layer**, not the implementation engine.
 
 **Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
 (or "전부 처리", "모두 돌려", "다 처리", "batch all"), run **Batch mode** instead — see the
-`## Batch mode (--all)` section. Prerequisites and the working-tree gate apply to both modes.
+`## Batch mode (--all)` section. If the invocation carries `--tree`, run single-pick but route
+the code cycle through a git worktree — see `## --tree mode`. Prerequisites and the
+working-tree gate apply to all modes.
 
 ## Prerequisites
 
@@ -107,6 +102,40 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 **Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
 
 Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
+
+## Step 2.5 — Size gate (batch nudge + lite path offer)
+
+Run after selecting a group, before Step 3. Evaluate whether the selected group is **trivial**:
+ALL must hold: tag is NOT `[FEAT]`, total in-scope files ≤2, no new public API/schema.
+
+If **not trivial** → skip this section entirely, proceed to Step 3 normally.
+
+If **trivial:**
+
+**Batch nudge** — scan for other trivial open groups (re-use the candidate list from Step 1;
+re-grep only if the list is no longer in context). If ≥1 other trivial groups exist, surface them:
+
+```
+선택한 태스크가 작습니다. 아래 항목들과 묶으면 PR·CI 오버헤드를 공유할 수 있습니다:
+  [1] <group title> (<M> items)
+  [2] <group title> (<M> items)
+  ...
+같이 처리할 항목을 번호로 선택하세요 (복수 가능). 건너뛰려면 N.
+```
+
+If the user selects ≥1 additional groups → treat the combined selection as a **Batch mode
+(`--all`)** run: skip A1–A3 (selection already done), proceed directly to **A4** with this
+confirmed unit list. End Step 2.5 here.
+
+**Lite path offer** — if the user declines the nudge (or no other trivial groups exist), offer:
+
+```
+[1] 라이트 패스 — 구현+QA 후 main에 직접 머지 (PR·CI 없음)
+[2] 풀 사이클 — dev-review-cycle (PR, CI, 코드리뷰 포함)
+```
+
+- User picks **1** → proceed to Step 3 with the **lite path** active (see `## Lite path` section).
+- User picks **2** → proceed to Step 3 normally.
 
 ## Step 3 — Run the code cycle
 
@@ -216,6 +245,82 @@ reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, wa
 the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
 If you continue on the same branch after fixing CI, the cleanup commit is already correct and
 no further action is required.
+
+## Lite path
+
+Active when the user chose "라이트 패스" in Step 2.5. Runs the code cycle without PR or CI —
+implement, QA, then merge directly to `main` in the same session.
+
+Run Step 3 sub-steps normally (branch, Sprint Contract, Implement, QA, version bump, pre-merge
+cleanup) with these overrides:
+
+**Branch:** `git checkout -b <type>/<slug>` as normal — never commit directly to `main`.
+
+**Skip dev-review-cycle entirely.** After QA passes and version bump + pre-merge cleanup are done:
+
+```bash
+# commit all staged changes (code + cleanup + version bump together)
+git add <changed files>
+git commit -m "[TYPE] <description>
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+
+# merge and push
+git checkout main
+git merge --no-ff <type>/<slug> -m "Merge branch '<type>/<slug>'"
+git push origin main
+git branch -d <type>/<slug>
+```
+
+**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule
+requires PRs), stop and inform the user — fall back to `Skill(dev-tools:dev-review-cycle)`
+with `args: --auto` on the existing branch.
+
+Report on completion: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
+
+## `--tree` mode (single task, worktree isolation)
+
+Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
+3) is modified so implementation and QA run in an isolated git worktree, keeping the main
+checkout on `main` throughout — useful when the user wants to preserve a clean working tree
+while a task is in flight.
+
+**Modified Branch step (replaces `git checkout -b` under `--tree`):**
+
+```bash
+SLUG=<slug>            # short slug derived from item title
+BRANCH=<type>/<slug>   # derived as normal from item [type] tag + slug
+git fetch
+# ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
+git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
+```
+
+**Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
+worktree path** as the working directory in addition to the normal four-field format. The agent
+works entirely inside the worktree — it must NOT touch the main checkout.
+
+**QA (workflows.md Step 4):** spawn `qa-verifier` pointed at the worktree path, verifying
+against the Sprint Contract. Same retry policy as Step 3 (one fix-and-re-verify cycle).
+
+**If QA fails after one retry:** clean up and stop.
+```bash
+git worktree remove --force ".worktrees/$SLUG"
+git branch -D "$BRANCH"
+```
+Report the failure; main checkout remains on `main`.
+
+**Version bump (workflows.md Step 5):** performed in the **main checkout** (plugin.json manifests
+live there, not per-worktree). Read which files changed inside the worktree to determine which
+plugin directory to bump, then edit the manifests in the main checkout. Leave uncommitted.
+
+**Collapse after QA passes:**
+```bash
+git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
+git checkout "$BRANCH"                   # switch main checkout onto the feature branch
+```
+
+Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on
+`$BRANCH`, then hand off: `Skill(dev-tools:dev-review-cycle)` with `args: --auto` (Step 4).
 
 ## Batch mode (`--all`)
 
