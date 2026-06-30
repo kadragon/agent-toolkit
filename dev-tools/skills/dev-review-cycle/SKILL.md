@@ -63,7 +63,7 @@ RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-p
   --pr --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 ```
 
-Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_url'`). If `pr_number` null but `pr_url` non-null, extract from URL: `basename "$PR_URL"`. Halt if both null.
+Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_url'`). Hub mode only: if `pr_number` null but `pr_url` non-null, extract from URL: `basename "$PR_URL"`. Halt if both null. `--no-hub` (`--no-push`): null PR fields are expected — do not halt.
 
 ### Step 2: Collect Reviews
 
@@ -76,7 +76,7 @@ CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
 FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || echo 0)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
-SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env' | head -1 || true)
+SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
 REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
 ```
 
@@ -131,7 +131,7 @@ If all sources fail → inline review + note in consolidation.
 
 Follow **`references/consolidation-guide.md`** for deduplication, confidence filtering (< 75 drops to low-confidence list), scope classification, and tasks.md recording.
 
-**Verifier gate (P0 only):** If any P0 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0s exist.
+**Verifier gate (P0/P1):** If any P0 or P1 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
 
 If `--auto` NOT set: STOP, present consolidated table, wait for confirmation.
 If `--auto` set: treat all in-scope (non-refuted) as approved.
