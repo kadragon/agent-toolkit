@@ -1,4 +1,15 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/*/skills/dev-review-cycle/scripts/merge-and-cleanup.sh *)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Bash(bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/*/skills/dev-review-cycle/scripts/merge-and-cleanup.sh *)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
