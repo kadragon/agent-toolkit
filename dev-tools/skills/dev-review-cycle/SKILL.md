@@ -69,7 +69,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-Launch all sources in parallel (`run_in_background: true`). Allow 600s per source. After all complete, proceed to Step 3.
+**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. After all complete, proceed to Step 3.
 
 #### 2-1: Claude Skill Reviewers
 
@@ -113,7 +113,7 @@ Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, 
 
 #### 2-2: Antigravity (agy)
 
-Skip if `agy_available=false`.
+Skip if `agy_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-3.
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH} \
   || echo '{"agy_review":"failed"}' >&2
@@ -121,7 +121,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_
 
 #### 2-3: Codex
 
-Skip if `codex_available=false`.
+Skip if `codex_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-2.
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
   || echo '{"codex_review":"failed"}' >&2
