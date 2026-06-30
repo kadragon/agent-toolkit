@@ -1,4 +1,15 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(bash */skills/dev-review-cycle/scripts/merge-and-cleanup.sh *)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Bash(bash */skills/dev-review-cycle/scripts/merge-and-cleanup.sh *)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {

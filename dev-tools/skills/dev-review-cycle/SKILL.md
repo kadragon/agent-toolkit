@@ -51,6 +51,8 @@ git checkout -b feat/short-slug
 
 ### Step 1: Commit + PR
 
+CRITICAL (hub mode only — skip when `--no-hub`): PR MUST be created in this step, before any review. Do NOT defer PR creation to Step 6 or after reviews. Use commit-and-push.sh with `--pr` flag for PR creation here.
+
 Determine commit message from context or `git diff --stat HEAD` + `git log --oneline -5`. File list is auto-detected by script.
 
 ```bash
