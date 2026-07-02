@@ -1,13 +1,13 @@
-# plan.md Template and Rules
+# tasks.md Template and Rules
 
-Rules and template for generating per-repo `plan.md` files with security fix tasks.
+Rules and template for generating per-repo `tasks.md` files with security fix tasks.
 
 ## Target Path
 
-Each affected repo gets its own plan.md:
+Each affected repo gets its own tasks.md:
 
 ```
-${WORKSPACE_DIR}/${REPO_NAME}/plan.md
+${WORKSPACE_DIR}/${REPO_NAME}/tasks.md
 ```
 
 Where `WORKSPACE_DIR` is the **parent** of the current working directory.
@@ -63,9 +63,9 @@ Do NOT create a single consolidated file.
 
 ### Idempotency
 
-If `plan.md` already exists and contains a `## Security Fixes` section:
+If `tasks.md` already exists and contains a `## Security Fixes` section:
 
-Before replacing: run `git log -1 --format=%ai plan.md`. If the file was modified by a human after last scan, prompt: "plan.md has manual edits — overwrite? [y/N]". Proceed only on "y".
+Before replacing: run `git log -1 --format=%ai tasks.md`. If the file was modified by a human after last scan, prompt: "tasks.md has manual edits — overwrite? [y/N]". Proceed only on "y".
 
 On confirmation (or if no human edit detected):
 - **Replace** that section with fresh scan results.
@@ -94,13 +94,13 @@ This prevents duplicate entries from repeated runs.
 
 ## Summary Format
 
-After generating all plan.md files, present:
+After generating all tasks.md files, present:
 
 ```
 | Repo | Path | Items |
 |------|------|-------|
-| my-webapp | ~/dev/my-webapp/plan.md | 5 |
-| api-server | ~/dev/api-server/plan.md | 2 |
+| my-webapp | ~/dev/my-webapp/tasks.md | 5 |
+| api-server | ~/dev/api-server/tasks.md | 2 |
 
 Total: 7 fix items across 2 repos.
 

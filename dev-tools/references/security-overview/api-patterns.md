@@ -49,7 +49,7 @@ The GraphQL approach fetches all repos + alerts in a single paginated call, avoi
 ### Common Issues
 
 - **Empty `vulnerabilityAlerts`**: Repo may have Dependabot disabled or no supported manifest.
-- **`firstPatchedVersion` is null**: No fix available. Plan item should use "Monitor" template.
+- **`firstPatchedVersion` is null**: No fix available. Task item should use "Monitor" template.
 
 ## Code Scanning — REST
 
@@ -70,9 +70,9 @@ gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 
 ### Severity Mapping
 
-CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to plan.md severity labels as follows:
+CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to tasks.md severity labels as follows:
 
-| `rule.severity` | plan.md severity | Notes |
+| `rule.severity` | tasks.md severity | Notes |
 |-----------------|-----------------|-------|
 | `error` | CRITICAL | Code injection, auth bypass, or similar high-impact issues |
 | `error` | HIGH | All other `error`-level rules not matching CRITICAL criteria |
