@@ -1,17 +1,17 @@
 ---
-description: "Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos and write per-repo plan.md with prioritized fix tasks"
+description: "Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos and write per-repo tasks.md with prioritized fix tasks"
 allowed-tools: ["Bash", "Read", "Write"]
 ---
 
 # Security Overview
 
-Scan all GitHub security alerts across authenticated user's repos, ensure affected repos cloned locally, produce per-repo `plan.md` with prioritized fix tasks.
+Scan all GitHub security alerts across authenticated user's repos, ensure affected repos cloned locally, produce per-repo `tasks.md` with prioritized fix tasks.
 
 Respond in user's language; technical artifacts (commits, branches, file paths) in English.
 
 ## Execution Model
 
-Single continuous flow: **Discover → Ensure Local → Generate Plans**.
+Single continuous flow: **Discover → Ensure Local → Generate Tasks**.
 
 ## Phase 1: Discovery
 
@@ -80,21 +80,21 @@ For each affected repo:
 
 Report status: already-local vs newly-cloned repos. If clone fails for one repo, log the error, continue with remaining repos. Report all failures in final summary. Do NOT abort the entire run.
 
-## Phase 3: Generate plan.md
+## Phase 3: Generate tasks.md
 
-Write **separate** `plan.md` into **each affected repo's root**. Do NOT create single consolidated file.
+Write **separate** `tasks.md` into **each affected repo's root**. Do NOT create single consolidated file.
 
 ### 3-1. Read code context
 
-Before writing fix plans, read relevant files per repo:
+Before writing fix tasks, read relevant files per repo:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files.
-- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in plan.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
+- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in tasks.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
-### 3-2. Write plan.md
+### 3-2. Write tasks.md
 
-Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/plan-template.md`**.
+Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/tasks-template.md`**.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
