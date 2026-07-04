@@ -26,6 +26,13 @@
 
 ---
 
+### PR #109 — skill-review-findings fixes (out-of-scope findings)
+
+- [ ] `scripts/ci/check_harness_drift.py:QUOTED_RE` — treats every double-quoted string in a skill description as a router trigger phrase; emphasis quotes (e.g. `for "clean" setups`) would false-fail once that skill enters HARD_FAIL_SKILLS. Design tension: quoted-strings-as-triggers is the current convention. Consider an explicit trigger manifest or `Trigger:`-scoped parsing before widening hard-fail scope. P2. (source: agy)
+- [ ] `scripts/ci/check_harness_drift.py:route()` — router invocation depends on `jq` inside trigger-router.sh; missing `jq` makes every phrase "route to nothing" and hard-fail noisily for the wrong reason. Low practical risk (ubuntu runners ship jq); add a `command -v jq` preflight or parse trigger-routes.json in Python. P2. (source: agy)
+
+---
+
 ### PR #90 — reconcile-harness strip_sprint_block review cycle (out-of-scope findings)
 
 - [x] `reconcile-harness.py:strip_sprint_block` (and `tasks_title`) — both locate the sprint block via the first `^#\s+` heading. A fenced code block under `## Review Backlog` containing a `# comment` line above the sprint would be misparsed as the sprint heading, truncating content. Pre-existing convention (mirrors `tasks_title`); agy's narrowing fix (`# (Sprint|Bundle):`) is wrong — single-item sprint headings are the raw backlog item text, not `# Sprint:`. A correct fix would gate on the `status:`-owning section. conf ~50%, P3. (source: agy)

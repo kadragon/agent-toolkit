@@ -1,6 +1,6 @@
 [
   {
-    "pattern": "(start.*task|pick.*task|work.*backlog|next.*task|start.*work|다음.*작업.*시작|백로그에서.*작업|작업.*하나.*돌려|백로그.*시작|작업.*시작|백로그.*작업)",
+    "pattern": "(start.*task|pick.*task|work.*backlog|next.*task|start work(ing)?|다음.*작업.*시작|백로그에서.*작업|작업.*하나.*돌려|백로그.*시작|작업.*시작|백로그.*작업|태스크.*(시작|골라))",
     "instruction": "Use Skill(dev-tools:next-tasks) to pick and drive the next task through the full code cycle. Do NOT skip the skill.",
     "skip_if_prompt_matches": "(review|리뷰|resume|이어서|already.*branch|already.*started|mid.*flight|진행.*중|이미.*시작|implement.*(skill|hook|agent)|스킬.*구현|훅.*구현|에이전트.*구현)"
   },
@@ -20,12 +20,12 @@
     "skip_if_prompt_matches": "(review.*cycle)"
   },
   {
-    "pattern": "(set ?up.*harness|initialize.*harness|bootstrap.*AGENTS|하네스.*초기화|하네스.*점검|validate.*harness|harness.*audit|harness.*init|에이전트.*인프라)",
+    "pattern": "(set ?up.*harness|initialize.*harness|initialize agent infrastructure|bootstrap.*AGENTS|하네스.*초기화|하네스.*점검|validate.*harness|harness.*audit|harness.*init|에이전트.*인프라|에이전트가.*자꾸.*실수해요|Claude Code.*리포지토리.*설정)",
     "instruction": "Use Skill(dev-tools:harness-init) to bootstrap or validate repo agent infrastructure.",
     "skip_if_prompt_matches": ""
   },
   {
-    "pattern": "(harness.*curator|transcript.*anal|conversation.*history|대화.*기록.*분석|harness.*friction|recurring.*(work|skill|agent|hook)|안.?쓰는.*스킬.*정리)",
+    "pattern": "(harness.*curator|transcript.*anal|conversation.*history|대화.*기록.*분석|harness.*friction|recurring.*(work|skill|agent|hook)|안.?쓰는.*스킬.*정리|task audit|audit my skills and agents|어떤.*스킬들이.*안.*뜨는지)",
     "instruction": "Use Skill(dev-tools:harness-curator) for cross-session transcript analysis.",
     "skip_if_prompt_matches": "(harness.*init|set ?up.*harness|validate.*harness)"
   },
@@ -40,7 +40,7 @@
     "skip_if_prompt_matches": "(improv|loop|iterativ|만족.*고쳐|반복.*개선)"
   },
   {
-    "pattern": "(loop.*engineer|루프.*돌려.*개선|iterative.*improv|improve.*iterativ|반복.*개선|improvement.*cycle|eval.*loop|keep.*improv|자기.*개선.*루프|루프.*엔지니어|스스로.*평가.*고쳐|만족.*때까지.*고쳐|refine.*until.*convergent|loop-engineer)",
+    "pattern": "(loop.*engineer|루프.*돌려.*개선|iterative.*improv|improve.*iterativ|반복.*개선|improvement.*cycle|eval.*loop|keep.*improv|자기.*개선.*루프|루프.*엔지니어|스스로.*평가.*고쳐|만족.*때까지.*고쳐|refine.*until.*convergent|loop-engineer|evaluate and improve)",
     "instruction": "Use Skill(dev-tools:loop-engineer) for iterative quality improvement without a test gate.",
     "skip_if_prompt_matches": "(orchestrate|verify.*fix|테스트.*있|has.*tests)"
   },
