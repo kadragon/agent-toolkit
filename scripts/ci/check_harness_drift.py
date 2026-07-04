@@ -168,10 +168,6 @@ def check_capture_before_use(text: str) -> list[str]:
 
 
 def main() -> int:
-    if shutil.which("jq") is None:
-        print("ERROR: jq not found on PATH — router drift check requires jq")
-        return 1
-
     if not ROUTER.is_file() or not ROUTES_FILE.is_file():
         print(f"ERROR: router or routes file missing ({ROUTER}, {ROUTES_FILE})")
         return 1
@@ -180,6 +176,12 @@ def main() -> int:
     if not skill_files:
         print("SKIP: no skill files found")
         return 0
+
+    # jq is only needed for routing, which runs below once skill files exist —
+    # preflight here so a no-skill-files run still exits 0 without jq installed.
+    if shutil.which("jq") is None:
+        print("ERROR: jq not found on PATH — router drift check requires jq")
+        return 1
 
     hard_fail = False
     for path in skill_files:

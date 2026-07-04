@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #111 — batch review-cycle findings fixes (out-of-scope findings)
+
+- [ ] `commit-guard/guard.py:_bare_switch_target` (`@{-N}` handling) — resetting `running_branch=None` on *every* `@{-N}` reflog ref (not just `-`/`@{-1}`) false-blocks a commit that actually lands off-main via a deeper ref, e.g. `git checkout -b tmp && git checkout @{-2} && git commit` where `@{-2}` resolves to a feature branch: live-branch fallback lands on `main` → block. Not applied: the guard deliberately fails-toward-block on statically-unknown switch targets, and codex's suggested narrowing (limit reset to `-`/`@{-1}`) reopens the `@{-2}==main` bypass this PR closed. Revisit only with real reflog resolution, not a spelling allowlist. P3, contrived chain. (source: codex/review)
+
+---
+
 ### PR #93 — commit-guard static-analysis review cycle (deferred findings)
 
 - [x] `commit-guard/guard.py` — bare switch-back is not modeled: `git checkout -b X && git checkout main && git commit` keeps `running_branch=X` across the bare `git checkout main` (only `-b/-c`/long-create flags update attribution), so a commit that lands on main is mis-attributed to X and allowed. Deferred because the fix needs bare-`checkout <ref>` handling, which is statically ambiguous (branch switch vs `checkout <pathspec>` vs `checkout -- file`) and risks false-positives that block legit commits. Contrived multi-checkout chain; dominant accidental cases stay guarded. P3, conf 95. (source: agy/codex) — **fixed v3.6.7: `_bare_switch_target` re-attributes only main/master targets (fail-toward-block), `--`/multi-positional restores excluded.**
