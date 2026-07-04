@@ -45,6 +45,15 @@ jobs:
           print("OK: executable text files use LF line endings.")
           PY
 
+  harness-drift:
+    name: Router drift + capture-before-use check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run scripts/ci/check_harness_drift.py
+        run: python3 scripts/ci/check_harness_drift.py
+
   version-bump:
     name: Plugin version bump check
     runs-on: ubuntu-latest
