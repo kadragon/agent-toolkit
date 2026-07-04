@@ -1,15 +1,8 @@
 ## Review Backlog
 
-### PR #102 — next-tasks --tree mode + size-gate lite path (out-of-scope findings)
+### PR #111 — batch review-cycle findings fixes (out-of-scope findings)
 
-- [ ] [debt] `next-tasks/SKILL.md:447` — Batch mode A7 cleanup: uses `git branch -D` on ALL units (merged, dropped, conflicted). Conflicted units that completed QA but failed merge lose their implementation. Fix: use `git branch -d` for merged units; preserve conflicted branches for manual resolution. Pre-existing batch mode code, not introduced by this PR. P1 (source: agy)
-
----
-
-### PR #96 — commit-guard bare switch-back review cycle (out-of-scope findings)
-
-- [ ] `commit-guard/guard.py:_bare_switch_target` — option-value args desync the positional count: `git switch --conflict merge main` treats `merge` (the value of `--conflict`) as a positional, so `len(positionals) == 2` → returns `None` → a real switch-back to main is missed → commit on main allowed (bypass). Fail-open-consistent (matches the never-block-on-uncertainty contract) and contrived, so not a regression of this PR's new detection. Fix needs a known value-option skip-set (`--conflict`, `-t`/`--track`, …) or a more complete checkout/switch option model. P3, conf ~70. (source: agy)
-- [ ] `commit-guard/guard.py:_bare_switch_target` — previous-branch / reflog ref spellings are not modeled: `git checkout -b X && git checkout - && git commit` (or `@{-1}`) switches back to the prior branch (possibly main) but `-`/`@{-1}` are skipped as flags / left untrusted, so the commit can land on main while attributed to X (bypass). Pre-existing-class gap (the whole unmodeled-switch-back family), not introduced or worsened by this PR; both filtered at 2/10 new-finding confidence by the security pass. A future hardening could reset `running_branch = None` on statically-unknown switch targets. P3. (source: codex/security)
+- [ ] `commit-guard/guard.py:_bare_switch_target` (`@{-N}` handling) — resetting `running_branch=None` on *every* `@{-N}` reflog ref (not just `-`/`@{-1}`) false-blocks a commit that actually lands off-main via a deeper ref, e.g. `git checkout -b tmp && git checkout @{-2} && git commit` where `@{-2}` resolves to a feature branch: live-branch fallback lands on `main` → block. Not applied: the guard deliberately fails-toward-block on statically-unknown switch targets, and codex's suggested narrowing (limit reset to `-`/`@{-1}`) reopens the `@{-2}==main` bypass this PR closed. Revisit only with real reflog resolution, not a spelling allowlist. P3, contrived chain. (source: codex/review)
 
 ---
 
@@ -23,13 +16,6 @@
 ### PR #92 — hwpx table.py append-para/toggle-check review cycle (out-of-scope findings)
 
 - [x] `table.py:_append_para_match` — re-runs `_locate_cell_sublist` twice (once to read the sibling style, then again inside `_append_para_cell`); a full `find_table`+`top_cells` scan repeats on the same unchanged XML. Micro-perf only on small cell strings; a fix would thread pre-resolved coords into an `_append_para_at` helper, adding complexity for negligible gain. P3, conf 100. (source: review) — **won't-fix 2026-06-22: negligible gain, adds complexity.**
-
----
-
-### PR #109 — skill-review-findings fixes (out-of-scope findings)
-
-- [ ] `scripts/ci/check_harness_drift.py:QUOTED_RE` — treats every double-quoted string in a skill description as a router trigger phrase; emphasis quotes (e.g. `for "clean" setups`) would false-fail once that skill enters HARD_FAIL_SKILLS. Design tension: quoted-strings-as-triggers is the current convention. Consider an explicit trigger manifest or `Trigger:`-scoped parsing before widening hard-fail scope. P2. (source: agy)
-- [ ] `scripts/ci/check_harness_drift.py:route()` — router invocation depends on `jq` inside trigger-router.sh; missing `jq` makes every phrase "route to nothing" and hard-fail noisily for the wrong reason. Low practical risk (ubuntu runners ship jq); add a `command -v jq` preflight or parse trigger-routes.json in Python. P2. (source: agy)
 
 ---
 

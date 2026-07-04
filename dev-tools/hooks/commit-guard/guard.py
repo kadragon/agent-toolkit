@@ -161,6 +161,11 @@ def _split_segments(command):
     try:
         lex = shlex.shlex(normalized, posix=False, punctuation_chars="&|;<>")
         lex.whitespace_split = False
+        # shlex's punctuation_chars mode only auto-extends wordchars with
+        # '~-./*?=' — without '@{}' a reflog ref like '@{-1}' gets split into
+        # separate one-char tokens ('@', '{', '-1', '}'), which then get
+        # rejoined with spaces and corrupt the segment text.
+        lex.wordchars += "@{}"
         tokens = list(lex)
     except ValueError:
         segs = re.split(r"&&|\|\||[;|\n&]", command)
@@ -242,6 +247,26 @@ def _git_cwd(segment, env_cwd):
 _CHECKOUT_NEW_FLAGS = {"-b", "-B", "--orphan"}
 _SWITCH_NEW_FLAGS = {"-c", "-C", "--create", "--orphan"}
 
+# checkout/switch options that ALWAYS consume a following separate-token value
+# (conservative: only options whose value is never optional, so skipping the
+# next token can never accidentally swallow the real branch positional).
+_CHECKOUT_SWITCH_VALUE_OPTS = {"--conflict"}
+
+# previous-branch-ref spellings ('-' and '@{-N}') whose actual destination is
+# statically unknown at hook time — see _UNKNOWN_SWITCH_TARGET below.
+_PREV_BRANCH_REF_RE = re.compile(r"^@\{-\d+\}$")
+
+
+def _is_prev_branch_ref(tok):
+    return tok == "-" or bool(_PREV_BRANCH_REF_RE.match(tok))
+
+
+# sentinel returned by _bare_switch_target for a switch whose target is
+# statically unresolvable ('-', '@{-1}', ...) — distinct from None (not a bare
+# switch at all), so the caller can tell "switched, but destination unknown"
+# apart from "did not switch".
+_UNKNOWN_SWITCH_TARGET = object()
+
 
 def _new_branch_created(segment):
     """If this segment creates+switches to a new branch, return its name, else None.
@@ -287,7 +312,8 @@ def _new_branch_created(segment):
 
 def _bare_switch_target(segment):
     """If this segment is a bare branch switch (no create flag) to a single
-    unambiguous branch ref, return that branch name, else None.
+    unambiguous branch ref, return that branch name; _UNKNOWN_SWITCH_TARGET if
+    it switches to a statically-unresolvable ref ('-', '@{-1}', ...); else None.
 
     Recognizes `git checkout <ref>` and `git switch <ref>` with exactly one
     positional argument and no `--` separator. Returns None for:
@@ -298,6 +324,13 @@ def _bare_switch_target(segment):
         HEAD; a commit there does NOT update the protected branch ref)
       - zero or multiple positionals (`checkout <ref> <path>` is a pathspec
         restore from <ref>, current branch unchanged)
+
+    Returns _UNKNOWN_SWITCH_TARGET for `-`/`@{-N}` (previous-branch refs): the
+    actual destination depends on switch history this function cannot see. The
+    caller must NOT trust the in-chain attribution across this switch — it
+    resets tracked attribution to unknown (None) rather than leaving it
+    pointed at the stale pre-switch branch, so the commit falls back to live
+    branch detection instead of silently passing (fail-toward-block).
 
     The caller only acts on a main/master target (re-attributing the chain to a
     protected branch — the fail-toward-block direction). A non-protected target
@@ -340,6 +373,13 @@ def _bare_switch_target(segment):
             return None  # create form — _new_branch_created owns this segment
         if tok in ("--detach", "-d"):
             return None  # detached HEAD — commit does not update the branch ref
+        if _is_prev_branch_ref(tok):
+            positionals.append(_UNKNOWN_SWITCH_TARGET)
+            i += 1
+            continue
+        if tok in _CHECKOUT_SWITCH_VALUE_OPTS:
+            i += 2  # skip the option AND its separate-token value
+            continue
         if tok.startswith("-"):
             i += 1  # other boolean flag (-f, --track, ...) → skip
             continue
@@ -591,7 +631,12 @@ def main(branch_override=None, marker_override=None):
             # pathspec), preserving the conservative "bare checkout from live main
             # does not unblock" rule.
             switched = _bare_switch_target(stripped)
-            if switched is not None and (
+            if switched is _UNKNOWN_SWITCH_TARGET:
+                # statically-unresolvable switch-back ('-', '@{-1}', ...) — drop
+                # the in-chain attribution rather than trust the stale created
+                # branch; the commit below falls back to live branch detection.
+                running_branch = None
+            elif switched is not None and (
                 switched in ("main", "master") or running_branch is not None
             ):
                 running_branch = switched
@@ -785,6 +830,27 @@ def _test():
           run("git checkout --detach main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
     check("switch --detach master then commit → passes (detached, no re-attribution)",
           run("git switch --detach master && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
+
+    # option-value desync: `--conflict <style>` takes a separate-token value that
+    # must NOT be miscounted as the switch's positional branch arg — otherwise the
+    # real target ('main') is pushed out of the len==1 positional check and the
+    # switch-back to main is silently missed (bypass).
+    check("checkout -b X then checkout --conflict merge main then commit → blocked",
+          run("git checkout -b feature/x && git checkout --conflict merge main && "
+              "git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    check("checkout --conflict=merge main (attached form) then commit on main → blocked",
+          run("git checkout --conflict=merge main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 2)
+
+    # unknown switch-back targets ('-' / '@{-1}') statically unresolvable: the
+    # in-chain attribution must be dropped (reset to None) rather than left
+    # pointing at the stale created branch, so the commit falls back to live
+    # branch detection instead of silently passing.
+    check("checkout -b X then checkout - then commit (live=main) → blocked",
+          run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    check("checkout -b X then checkout @{-1} then commit (live=main) → blocked",
+          run("git checkout -b feature/x && git checkout @{-1} && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    check("checkout -b X then checkout - then commit (live=feature/y) → passes (no false block)",
+          run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="feature/y", marker=False) == 0)
 
     # branch attribution only propagates across '&&' (guaranteed-success predecessor)
     check("checkout -b || commit on main still blocked (|| not guaranteed)",
