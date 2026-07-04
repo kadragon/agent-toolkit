@@ -448,6 +448,9 @@ any worktree.
 2. **Merge each verified unit branch in** — for each unit, `git merge --no-ff wt/<slug>`.
    Disjoint areas (A1) keep this clean. On conflict: `git merge --abort`, drop that unit (record
    it), and continue with the rest — the integration branch keeps the units that merged cleanly.
+   Keep the merged-units list and the conflicted-units list from this step — A7 consumes them
+   directly and must not re-derive merged-vs-conflicted from any later `git branch` command (the
+   integration PR is squash-merged, so post-merge branch state cannot distinguish the two).
    If every unit conflicts/drops, abandon: `git checkout main && git branch -D <type>/batch-<slug>`,
    then jump to A7 cleanup and report (do not leave the checkout stranded on a dead branch).
 3. **Collect cleanup targets — once.** For each merged unit, record what to delete:
@@ -472,12 +475,19 @@ exist, so you can re-run convergence after fixing, or fall back to single-pick p
 ### A7 — Cleanup & report
 
 The main session removes every worktree it created (`git worktree remove .worktrees/<slug>`;
-`--force` for any with leftover changes) and deletes **all** unit branches it created
-(`git branch -D wt/<slug>` for each — merged, dropped, or conflicted; none are needed once the
-integration branch holds the work). If the batch was abandoned (all units conflicted), the
-integration branch was already deleted in A6 step 2. Then emit a summary table: each unit →
-merged-into-PR / dropped (reason), plus the single PR link and final merge status. This is the
-only place per-unit outcomes are surfaced, so do not skip it.
+`--force` for any with leftover changes). For unit branches, use A6 step 2's recorded
+merged-units and conflicted-units lists to decide — do not use a `git branch -d`/`-D` exit code as
+the signal, since the integration PR is squash-merged and no `wt/<slug>` commit stays reachable by
+identity from `main` afterward (so `-d` would fail even for cleanly merged units). For every unit
+on the **merged** list, force-delete `git branch -D wt/<slug>` — its work is safely in the
+integration branch, then the PR, then `main`. Units on the **conflicted** list passed QA in A5 but
+failed the integration merge — their `wt/<slug>` branch must **not** be deleted; leave it intact
+for manual resolution. Units dropped earlier (A4/A5 implementer/QA failure) were already
+force-removed at that point and never reach A7. If the batch was abandoned (all units
+conflicted/dropped), the integration branch was already deleted in A6 step 2. Then emit a summary
+table: each unit → merged-into-PR / dropped (reason) / conflicted (branch `wt/<slug>` preserved
+for manual resolution), plus the single PR link and final merge status. This is the only place
+per-unit outcomes are surfaced, so do not skip it.
 
 ## Edge cases
 
