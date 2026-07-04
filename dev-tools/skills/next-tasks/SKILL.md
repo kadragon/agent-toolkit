@@ -318,6 +318,8 @@ worktree. Same retry policy as Step 3 (one fix-and-re-verify cycle).
 
 **If QA fails after one retry:** clean up and stop.
 ```bash
+SLUG=<slug>            # same slug used in the Branch step above
+BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove --force ".worktrees/$SLUG"
 git branch -D "$BRANCH"
 ```
@@ -330,6 +332,8 @@ Report the failure; main checkout remains on `main`.
 Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). If `git status` inside the worktree shows dirty files, commit them before proceeding — `git worktree remove` refuses on a dirty worktree.
 
 ```bash
+SLUG=<slug>            # same slug used in the Branch step above
+BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
 git checkout "$BRANCH"                   # switch main checkout onto the feature branch
 ```
@@ -386,8 +390,7 @@ applies — the parallelism must earn its cost.
 
 The **main session owns worktree lifecycle** — do NOT use the Agent `isolation: "worktree"`
 flag (that worktree is scoped to one agent's lifetime; it may not survive the later A5/A6
-steps). Derive the repo name once: `REPO=$(basename "$(git rev-parse --show-toplevel)")`. Keep
-worktrees **inside** the repo (an external `../` path can fall outside an agent's sandbox);
+steps). Keep worktrees **inside** the repo (an external `../` path can fall outside an agent's sandbox);
 ensure `.worktrees/` is git-ignored — if it is not yet, add it to `.gitignore` (this edit lands
 on the integration branch in A6). `git fetch` first, then base every worktree on the **same**
 `origin/main` the A6 integration branch will use — otherwise a stale local base inflates merge
