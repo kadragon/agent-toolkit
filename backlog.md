@@ -20,6 +20,8 @@ Items below sourced from the 2026-07-04 marketplace-wide skill review (9 skills,
 - [ ] [REFACTOR] dependabot-manager category table dedup — SKILL.md:31-40 fully duplicated in `references/triage.md:21-30`; keep one, point from the other.
 - [ ] [FIX] router coverage for generic phrases — `check_harness_drift.py` WARNs: hwpx ("회의록 만들어", "보고서 생성", "제안서 작성", "edit hwp file"), persona-debate ("여론", "다양한 관점", "사람들이 이걸 어떻게 생각할까"). Either add hwpx/persona-debate routes with skip guards, or scope the description phrasing so it stops advertising unrouted phrases.
 
+- [ ] [HARNESS] dev-review-cycle `SECURITY_HIT` filename heuristic misses security hooks — the `auth|crypto|secret|permission|network|\.env` regex in SKILL.md Step 2-1 does not match `dev-tools/hooks/commit-guard/guard.py` (a commit-guard security hook), so Slot 2 (opus security reviewer) is skipped for changes to it; reviewer had to be added manually during PR #111. Add `guard` / `hooks/commit-guard` (and consider `hook` generally) to the SECURITY_HIT pattern so security-sensitive hook changes auto-trigger the security slot. Bump dev-tools manifests on change.
+
 ## Someday
 
 - [ ] [FIX] dependabot-manager `scripts/triage.sh:14` — non-numeric PR number in an entry kills the whole batch via `set -e` on `--argjson`; add per-entry `[[ "$number" =~ ^[0-9]+$ ]]` guard reusing the existing error-category path.
