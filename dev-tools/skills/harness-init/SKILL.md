@@ -193,7 +193,7 @@ The orchestrator must include:
 4. `_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}` + `campaign-state.json`
 5. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
 
-After creation, register in CLAUDE.md: add `## Harness: {Domain}` pointer block with trigger rule and change history table. Keep CLAUDE.md thin — pointer + history only (no agent list, no skill list).
+After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## Harness: {Domain}` pointer block with trigger rule and change history table to `docs/harness-log.md`, and add one row under AGENTS.md's `## Docs Index` pointing to it. CLAUDE.md must stay a pure `@AGENTS.md` pointer (Step 8, enforced by `scripts/validate-harness.sh`) — do not append anything to it.
 
 **Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". Pair with Step 7b's router for highest reliability.
 
@@ -392,7 +392,7 @@ After a harness is in use, it should evolve based on feedback. Trigger evolution
 - Agent bypasses orchestrator (description trigger missing)
 - Repeated agent failure pattern (definition defect)
 
-Read `references/harness-evolution.md` for feedback → fix target mapping and change history protocol. Record every change in the orchestrator's CLAUDE.md pointer block.
+Read `references/harness-evolution.md` for feedback → fix target mapping and change history protocol. Record every change in the orchestrator's pointer block in `docs/harness-log.md` (see Step 4c) — never CLAUDE.md.
 
 ## Ongoing Maintenance
 
@@ -422,7 +422,7 @@ The last three scripts are repair tools, not routine ops. At Level 3, they shoul
 ## Additional Resources
 
 All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
-- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, CLAUDE.md pointer block, directive-description rule. **Read at Step 4c.**
+- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, `docs/harness-log.md` pointer block, directive-description rule. **Read at Step 4c.**
 - **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
