@@ -309,9 +309,9 @@ This prevents the second most common multi-agent failure: two agents writing to 
 
 ---
 
-## CLAUDE.md Pointer (register after orchestrator created)
+## docs/harness-log.md Pointer (register after orchestrator created)
 
-Add to project `CLAUDE.md`:
+Add to `docs/harness-log.md` (and register the file as a Docs Index row in AGENTS.md — never CLAUDE.md, which stays a pure `@AGENTS.md` pointer):
 
 ```markdown
 ## Harness: {Domain}
@@ -326,4 +326,4 @@ Add to project `CLAUDE.md`:
 | {YYYY-MM-DD} | Initial setup | all | - |
 ```
 
-Keep CLAUDE.md as a thin pointer — trigger rule + change history only. Agent list, skill list, directory structure → do NOT put here.
+Keep `docs/harness-log.md` as a thin pointer — trigger rule + change history only. Agent list, skill list, directory structure → do NOT put here.

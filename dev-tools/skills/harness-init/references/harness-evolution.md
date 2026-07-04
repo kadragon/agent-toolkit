@@ -28,7 +28,7 @@ Trigger a harness evolution pass in any of these conditions:
 
 ## Change History
 
-Record every harness change in CLAUDE.md's change history table:
+Record every harness change in the pointer block's change history table in `docs/harness-log.md` (never CLAUDE.md — it stays a pure `@AGENTS.md` pointer):
 
 ```markdown
 **Change History:**
@@ -47,7 +47,7 @@ Changes without a history entry are invisible to future sessions — this record
 2. **Diagnose**: read the failing agent/skill definition to find the gap
 3. **Fix**: apply the minimal change (don't rewrite everything)
 4. **Verify**: re-run the failing case or dry-run the changed flow
-5. **Record**: add entry to CLAUDE.md change history
+5. **Record**: add entry to the `docs/harness-log.md` change history
 
 Changes to golden principles or enforcement layers are high risk — always confirm with user before applying.
 
@@ -58,7 +58,7 @@ On explicit "harness audit" request, run this checklist:
 - [ ] Each agent's description still matches what it actually does
 - [ ] Orchestrator description covers all known user phrasings
 - [ ] `_workspace/` naming convention followed consistently
-- [ ] CLAUDE.md change history is up to date
+- [ ] `docs/harness-log.md` change history is up to date
 - [ ] No stale agent files for roles that are no longer used
 - [ ] Team size still appropriate for current workload
 

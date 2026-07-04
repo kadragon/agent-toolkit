@@ -138,8 +138,8 @@ def check_capture_before_use(text: str) -> list[str]:
         captured = set(ALLOWLIST_VARS)
         block_lines = m.group(2).splitlines()
         for line in block_lines:
-            if line.strip().startswith("#"):
-                continue
+            # Ignore full-line and inline comments — commented-out $VAR is not a use.
+            line = line.split("#", 1)[0]
             for var in VAR_USE_RE.findall(line):
                 if var not in captured:
                     problems.append(
@@ -153,8 +153,8 @@ def check_capture_before_use(text: str) -> list[str]:
 
 def main() -> int:
     if not ROUTER.is_file() or not ROUTES_FILE.is_file():
-        print(f"SKIP: router or routes file missing ({ROUTER}, {ROUTES_FILE})")
-        return 0
+        print(f"ERROR: router or routes file missing ({ROUTER}, {ROUTES_FILE})")
+        return 1
 
     skill_files = find_skill_files()
     if not skill_files:
