@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -49,6 +50,7 @@ ALLOWLIST_VARS = {"CLAUDE_PLUGIN_ROOT", "HOME", "PATH"}
 
 FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 QUOTED_RE = re.compile(r'"([^"]+)"')
+TRIGGER_MARKER_RE = re.compile(r"trigger:", re.IGNORECASE)
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 SKILL_TARGET_RE = re.compile(r"Skill\(([^)]+)\)")
@@ -115,10 +117,24 @@ def target_skill_name(router_output: str) -> str | None:
     return token.split(":")[-1]
 
 
+def trigger_scope(description: str) -> str:
+    """Return the substring of `description` at/after a `Trigger:` marker.
+
+    Router trigger phrases live after this marker by convention; emphasis
+    quotes in the prose *before* it (e.g. `handles "clean" setups`) are not
+    router phrases and must not be extracted. If no marker is present, the
+    description is returned unchanged (prior behavior: scan every quote).
+    """
+    m = TRIGGER_MARKER_RE.search(description)
+    if not m:
+        return description
+    return description[m.start():]
+
+
 def check_router_drift(skill_name: str, description: str) -> list[str]:
     """Return list of drift messages (empty = clean)."""
     problems = []
-    phrases = QUOTED_RE.findall(description)
+    phrases = QUOTED_RE.findall(trigger_scope(description))
     for phrase in phrases:
         output = route(phrase)
         target = target_skill_name(output)
@@ -152,6 +168,10 @@ def check_capture_before_use(text: str) -> list[str]:
 
 
 def main() -> int:
+    if shutil.which("jq") is None:
+        print("ERROR: jq not found on PATH — router drift check requires jq")
+        return 1
+
     if not ROUTER.is_file() or not ROUTES_FILE.is_file():
         print(f"ERROR: router or routes file missing ({ROUTER}, {ROUTES_FILE})")
         return 1
