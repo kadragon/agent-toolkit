@@ -106,9 +106,97 @@ def pack(input_dir: str, hwpx_path: str) -> None:
     print(f"  Files: {count} entries (mimetype first, ZIP_STORED; {mode})")
 
 
+def _run_tests() -> None:
+    import tempfile
+
+    failures = []
+
+    # OFFICE-1: pack() with no manifest -> mimetype first, ZIP_STORED, rest ZIP_DEFLATED
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "in"
+            root.mkdir()
+            (root / "mimetype").write_text("application/hwp+zip", encoding="utf-8")
+            (root / "Contents").mkdir()
+            (root / "Contents" / "content.hpf").write_text("<x/>", encoding="utf-8")
+            out = Path(d) / "out.hwpx"
+            pack(str(root), str(out))
+            with ZipFile(out, "r") as zf:
+                names = zf.namelist()
+                mimetype_info = zf.getinfo("mimetype")
+                content_info = zf.getinfo("Contents/content.hpf")
+            checks = [
+                names[0] == "mimetype",
+                mimetype_info.compress_type == ZIP_STORED,
+                content_info.compress_type == ZIP_DEFLATED,
+            ]
+            if all(checks):
+                print("OFFICE-1 PASS: no-manifest pack orders mimetype first, ZIP_STORED")
+            else:
+                failures.append("OFFICE-1 FAIL: %r (names=%r)" % (checks, names))
+    except Exception as e:
+        failures.append("OFFICE-1 FAIL: %r" % e)
+
+    # OFFICE-2: unpack -> pack round trip preserves entry order and compress types
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            original = Path(d) / "original.hwpx"
+            with ZipFile(original, "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip", compress_type=ZIP_STORED)
+                zf.writestr("Contents/header.xml", "<h/>", compress_type=ZIP_DEFLATED)
+                zf.writestr("Contents/section0.xml", "<s/>", compress_type=ZIP_STORED)
+            unpack_dir = Path(d) / "unpacked"
+            unpack(str(original), str(unpack_dir))
+            manifest_path = unpack_dir / ORDER_MANIFEST
+            if not manifest_path.is_file():
+                failures.append("OFFICE-2 FAIL: manifest not written")
+            else:
+                repacked = Path(d) / "repacked.hwpx"
+                pack(str(unpack_dir), str(repacked))
+                with ZipFile(original, "r") as zorig, ZipFile(repacked, "r") as zrep:
+                    orig_names = zorig.namelist()
+                    rep_names = [n for n in zrep.namelist() if n != ORDER_MANIFEST]
+                    orig_types = {i.filename: i.compress_type for i in zorig.infolist()}
+                    rep_types = {i.filename: i.compress_type for i in zrep.infolist() if i.filename != ORDER_MANIFEST}
+                if rep_names == orig_names and rep_types == orig_types:
+                    print("OFFICE-2 PASS: unpack->pack round trip preserves order + compress type")
+                else:
+                    failures.append(
+                        "OFFICE-2 FAIL: order/types not preserved: %r vs %r, %r vs %r"
+                        % (rep_names, orig_names, rep_types, orig_types)
+                    )
+    except Exception as e:
+        failures.append("OFFICE-2 FAIL: %r" % e)
+
+    # OFFICE-3: pack() raises FileNotFoundError when mimetype is missing
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "in"
+            root.mkdir()
+            (root / "Contents").mkdir()
+            (root / "Contents" / "content.hpf").write_text("<x/>", encoding="utf-8")
+            try:
+                pack(str(root), str(Path(d) / "out.hwpx"))
+                failures.append("OFFICE-3 FAIL: missing mimetype did not raise")
+            except FileNotFoundError:
+                print("OFFICE-3 PASS: missing mimetype raises FileNotFoundError")
+    except Exception as e:
+        failures.append("OFFICE-3 FAIL: %r" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All office tests passed")
+    sys.exit(0)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()
+        return
     parser = argparse.ArgumentParser(
         description="HWPX ZIP packaging operations"
     )

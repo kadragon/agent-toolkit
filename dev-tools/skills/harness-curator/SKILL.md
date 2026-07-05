@@ -53,7 +53,23 @@ Before proposing anything, know what already exists, or candidates will duplicat
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
 Two supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, or exist yet never parse):
-- **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, capture `repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel)`; if it succeeds, run `git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset"`. If output is empty (new/untracked file), treat as new asset and skip age check. Flag assets with a commit date 60+ days ago. If repo detection fails, mark the asset as `non-git` and skip the stale-code age check rather than running `git log` from the current project.
+- **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run the loop below: new/untracked files (empty `git log` output) skip the age check; assets with a commit date 60+ days ago are flagged; if repo detection fails, mark the asset `non-git` and skip the age check rather than running `git log` from the current project.
+
+  ```bash
+  for asset in "${assets[@]}"; do
+    repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel 2>/dev/null)
+    if [ -z "$repo_root" ]; then
+      echo "non-git: $asset"  # skip stale-code age check
+      continue
+    fi
+    last_commit=$(git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset")
+    if [ -z "$last_commit" ]; then
+      echo "new/untracked, skip age check: $asset"
+      continue
+    fi
+    # flag if $last_commit is 60+ days ago
+  done
+  ```
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
 
 Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
@@ -117,8 +133,7 @@ The script resolves each bare name to its `plugin@market` key in the global `ena
 - Reads global settings from `$CLAUDE_CONFIG_DIR/settings.json` (fallback `~/.claude/settings.json`).
 - Writes only to the **project** `.claude/settings.json` — never the global file.
 - Preserves all existing keys and sections; creates `enabledPlugins` if absent.
-- Disable-only: will never write `true` under any circumstance.
-- Atomic: temp file + `os.replace` so a crash leaves the project settings intact.
+- Guarantees (disable-only, atomic write) are exercised by `scripts/disable_plugins.py --test` — see Additional Resources.
 
 ### Post-write note
 

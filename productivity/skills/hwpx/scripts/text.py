@@ -231,9 +231,132 @@ def cmd_patch(args: argparse.Namespace) -> None:
             print(f"  WARNINGS: {len(errors)}")
 
 
+def _run_tests() -> None:
+    failures = []
+
+    _section_with_table = (
+        '<?xml version="1.0"?>'
+        '<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p><hp:run><hp:t>본문 텍스트</hp:t></hp:run></hp:p>'
+        '<hp:tbl id="1000000003">'
+        '<hp:tc><hp:subList>'
+        '<hp:p><hp:run><hp:t>표 안 텍스트</hp:t></hp:run></hp:p>'
+        '</hp:subList></hp:tc>'
+        '</hp:tbl>'
+        '</hp:sec>'
+    ).encode("utf-8")
+
+    # TEXT-1: table text skipped by default, counted in skipped
+    try:
+        lines, skipped = _section_lines(_section_with_table, include_tables=False)
+        if lines == ["본문 텍스트"] and skipped == 1:
+            print("TEXT-1 PASS: table text skipped and counted")
+        else:
+            failures.append("TEXT-1 FAIL: lines=%r skipped=%r" % (lines, skipped))
+    except Exception as e:
+        failures.append("TEXT-1 FAIL: %r" % e)
+
+    # TEXT-2: table text included when include_tables=True
+    try:
+        lines, skipped = _section_lines(_section_with_table, include_tables=True)
+        if lines == ["본문 텍스트", "표 안 텍스트"] and skipped == 0:
+            print("TEXT-2 PASS: table text included with include_tables=True")
+        else:
+            failures.append("TEXT-2 FAIL: lines=%r skipped=%r" % (lines, skipped))
+    except Exception as e:
+        failures.append("TEXT-2 FAIL: %r" % e)
+
+    _plain_section = (
+        '<?xml version="1.0"?>'
+        '<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p id="0" paraPrIDRef="10"><hp:run><hp:t>기존 텍스트 반복 기존</hp:t></hp:run></hp:p>'
+        '</hp:sec>'
+    ).encode("utf-8")
+
+    # TEXT-3: _patch_xml replaces one occurrence by default (count=1)
+    try:
+        new_bytes, replaced, errors = _patch_xml(_plain_section, "기존", "새로운", 1)
+        text = new_bytes.decode("utf-8")
+        if replaced == 1 and text.count("새로운") == 1 and text.count("기존") == 1 and not errors:
+            print("TEXT-3 PASS: count=1 replaces first occurrence only")
+        else:
+            failures.append("TEXT-3 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+    except Exception as e:
+        failures.append("TEXT-3 FAIL: %r" % e)
+
+    # TEXT-4: _patch_xml count=0 replaces all occurrences
+    try:
+        new_bytes, replaced, errors = _patch_xml(_plain_section, "기존", "새로운", 0)
+        text = new_bytes.decode("utf-8")
+        if replaced == 2 and "기존" not in text and not errors:
+            print("TEXT-4 PASS: count=0 replaces all occurrences")
+        else:
+            failures.append("TEXT-4 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+    except Exception as e:
+        failures.append("TEXT-4 FAIL: %r" % e)
+
+    # TEXT-5: _patch_xml with --after only replaces occurrences past the anchor
+    try:
+        new_bytes, replaced, errors = _patch_xml(
+            _plain_section, "기존", "새로운", 0, after="반복 "
+        )
+        text = new_bytes.decode("utf-8")
+        if replaced == 1 and text.count("새로운") == 1 and "기존 텍스트 반복" in text and not errors:
+            print("TEXT-5 PASS: --after scopes replacement past anchor")
+        else:
+            failures.append("TEXT-5 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+    except Exception as e:
+        failures.append("TEXT-5 FAIL: %r" % e)
+
+    # TEXT-6: _patch_xml strips linesegarray from the patched result
+    _section_with_lineseg = (
+        '<?xml version="1.0"?>'
+        '<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:linesegarray><hp:lineseg textpos="0"/></hp:linesegarray>'
+        '<hp:p id="0"><hp:run><hp:t>기존</hp:t></hp:run></hp:p>'
+        '</hp:sec>'
+    ).encode("utf-8")
+    try:
+        new_bytes, replaced, errors = _patch_xml(_section_with_lineseg, "기존", "새로운", 1)
+        text = new_bytes.decode("utf-8")
+        if replaced == 1 and "linesegarray" not in text and not errors:
+            print("TEXT-6 PASS: linesegarray stripped after patch")
+        else:
+            failures.append("TEXT-6 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+    except Exception as e:
+        failures.append("TEXT-6 FAIL: %r" % e)
+
+    # TEXT-7: _patch_xml surfaces duplicate hp:p id errors via check_para_ids
+    _section_dup_ids = (
+        '<?xml version="1.0"?>'
+        '<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:p id="5"><hp:run><hp:t>기존</hp:t></hp:run></hp:p>'
+        '<hp:p id="5"><hp:run><hp:t>다른</hp:t></hp:run></hp:p>'
+        '</hp:sec>'
+    ).encode("utf-8")
+    try:
+        _, replaced, errors = _patch_xml(_section_dup_ids, "기존", "새로운", 1)
+        if replaced == 1 and errors and "5" in errors[0]:
+            print("TEXT-7 PASS: duplicate hp:p id flagged after patch")
+        else:
+            failures.append("TEXT-7 FAIL: replaced=%r errors=%r" % (replaced, errors))
+    except Exception as e:
+        failures.append("TEXT-7 FAIL: %r" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All text tests passed")
+    sys.exit(0)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()
+        return
     parser = argparse.ArgumentParser(description="HWPX text extraction and safe replacement")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

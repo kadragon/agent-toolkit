@@ -396,7 +396,7 @@ Read `references/harness-evolution.md` for feedback → fix target mapping and c
 
 ## Ongoing Maintenance
 
-With Level 3 enforcement active, no manual sync routine is needed — hooks and CI prevent drift mechanically.
+With Level 3 enforcement active, no manual sync routine is needed — hooks and CI prevent drift mechanically. See `references/maintenance.md` for the full maintenance routine.
 
 **Regular actions:**
 
@@ -412,7 +412,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 |--------|---------|
 | `scripts/validate-harness.sh` | Full structural validation + maturity level report |
 | `scripts/reconcile-harness.py` | Sync completed tasks.md items into backlog.md |
-| `scripts/sweep.sh` | Archive stale content (copy and adapt per project in Step 5) |
+| `scripts/sweep.sh` | Five-check harness audit: lint scan, doc drift, golden principle violations, freshness, finding report (copy and adapt per project in Step 5) |
 | `scripts/sync-claude-md.sh` | Repair CLAUDE.md → @AGENTS.md (if manually broken) |
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |

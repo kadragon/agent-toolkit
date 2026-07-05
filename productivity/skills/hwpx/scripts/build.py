@@ -579,9 +579,149 @@ def cmd_next_id(args: argparse.Namespace) -> None:
     print(" ".join(str(i) for i in new_ids))
 
 
+_CONTENT_HPF = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<opf:package xmlns:opf="http://www.hancom.co.kr/hwpml/2011/opf">'
+    '<opf:metadata>'
+    '<opf:title/>'
+    '<opf:meta name="creator" content="old"/>'
+    '<opf:meta name="lastsaveby" content="old"/>'
+    '<opf:meta name="CreatedDate" content="2000-01-01T00:00:00Z"/>'
+    '<opf:meta name="ModifiedDate" content="2000-01-01T00:00:00Z"/>'
+    '<opf:meta name="date" content="2000년 01월 01일"/>'
+    '</opf:metadata>'
+    '</opf:package>'
+)
+
+_HEADER_XML = (
+    '<?xml version="1.0"?>'
+    '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">'
+    '<hh:fontfaces>'
+    '<hh:fontface lang="HANGUL">'
+    '<hh:font id="1" face="바탕"/>'
+    '</hh:fontface>'
+    '</hh:fontfaces>'
+    '<hh:charProperties>'
+    '<hh:charPr id="5" height="1000" textColor="#000000" borderFillIDRef="2">'
+    '<hh:fontRef hangul="1"/>'
+    '<hh:bold/>'
+    '</hh:charPr>'
+    '</hh:charProperties>'
+    '</hh:head>'
+)
+
+
+def _run_tests() -> None:
+    import tempfile
+
+    failures = []
+
+    # BUILD-1: _validate_xml accepts well-formed XML
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "ok.xml"
+            p.write_text('<?xml version="1.0"?><root><child/></root>', encoding="utf-8")
+            _validate_xml(p)
+        print("BUILD-1 PASS: well-formed XML accepted")
+    except Exception as e:
+        failures.append("BUILD-1 FAIL: %r" % e)
+
+    # BUILD-2: _validate_xml raises SystemExit on malformed XML
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "bad.xml"
+            p.write_text("<root><unclosed></root>", encoding="utf-8")
+            try:
+                _validate_xml(p)
+                failures.append("BUILD-2 FAIL: malformed XML did not raise")
+            except SystemExit:
+                print("BUILD-2 PASS: malformed XML raises SystemExit")
+    except Exception as e:
+        failures.append("BUILD-2 FAIL: %r" % e)
+
+    # BUILD-3: _update_metadata fills empty title, replaces creator/lastsaveby, bumps dates
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "content.hpf"
+            p.write_text(_CONTENT_HPF, encoding="utf-8")
+            _update_metadata(p, "새제목", "작성자")
+            result = p.read_text(encoding="utf-8")
+            checks = [
+                "<opf:title>새제목</opf:title>" in result,
+                result.count('content="작성자"') == 2,
+                "2000-01-01T00:00:00Z" not in result,
+            ]
+            if all(checks):
+                print("BUILD-3 PASS: title/creator/lastsaveby/date replaced")
+            else:
+                failures.append("BUILD-3 FAIL: %r not fully updated: %s" % (checks, result))
+    except Exception as e:
+        failures.append("BUILD-3 FAIL: %r" % e)
+
+    # BUILD-4: _pack_hwpx + _validate_hwpx round trip has no errors
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            work = Path(d) / "work"
+            (work / "Contents").mkdir(parents=True)
+            (work / "mimetype").write_text("application/hwp+zip", encoding="utf-8")
+            (work / "Contents" / "content.hpf").write_text(_CONTENT_HPF, encoding="utf-8")
+            (work / "Contents" / "header.xml").write_text(_HEADER_XML, encoding="utf-8")
+            (work / "Contents" / "section0.xml").write_text(
+                '<?xml version="1.0"?><hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"/>',
+                encoding="utf-8",
+            )
+            out = Path(d) / "out.hwpx"
+            _pack_hwpx(work, out)
+            errors = _validate_hwpx(out)
+            if errors:
+                failures.append("BUILD-4 FAIL: unexpected validation errors: %r" % errors)
+            else:
+                print("BUILD-4 PASS: packed archive validates clean")
+    except Exception as e:
+        failures.append("BUILD-4 FAIL: %r" % e)
+
+    # BUILD-5: _get_text concatenates run text nodes
+    try:
+        frag = (
+            '<hp:run xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:t>안녕</hp:t><hp:t>하세요</hp:t></hp:run>'
+        )
+        el = ET.fromstring(frag)
+        text = _get_text(el)
+        if text == "안녕하세요":
+            print("BUILD-5 PASS: _get_text concatenates run text")
+        else:
+            failures.append("BUILD-5 FAIL: got %r" % text)
+    except Exception as e:
+        failures.append("BUILD-5 FAIL: %r" % e)
+
+    # BUILD-6: _analyze_charprops reports pt conversion, resolved font name, bold flag
+    try:
+        FONT_MAP.clear()
+        root = ET.fromstring(_HEADER_XML)
+        _analyze_fonts(root)
+        lines = "\n".join(_analyze_charprops(root))
+        if "10.0pt 바탕" in lines and "볼드" in lines:
+            print("BUILD-6 PASS: charPr pt/font/bold reported")
+        else:
+            failures.append("BUILD-6 FAIL: unexpected output: %s" % lines)
+    except Exception as e:
+        failures.append("BUILD-6 FAIL: %r" % e)
+
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        sys.exit(1)
+    print("All build tests passed")
+    sys.exit(0)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if sys.argv[1:] == ["--test"]:
+        _run_tests()
+        return
     parser = argparse.ArgumentParser(description="HWPX document creation and analysis")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
