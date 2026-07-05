@@ -1,12 +1,12 @@
 ---
 name: orchestrate
 description: >-
-  Multi-agent delegation playbook — single sub-agent vs Agent fan-out vs Workflow, model routing, verify/fix loops, brief template. Trigger: "orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this". NOT for PR review+merge (→ dev-review-cycle).
+  Use when delegating multi-agent work — choosing single sub-agent vs Agent fan-out vs Workflow, model routing, verify/fix loops, brief template. Trigger: "orchestrate", "fan out", "parallel agents", "write a workflow", "split this across agents", "delegate this". NOT for PR review+merge (→ dev-review-cycle).
 ---
 
 # Orchestrate
 
-The main thread is the orchestrator. Default to delegation; do broad work through sub-agents, not inline. This skill is the **decision layer** — for Workflow recipe syntax (pipeline/parallel/loop), read the Workflow tool's own description; don't duplicate it here.
+The main thread is the orchestrator. Delegate when 10+ files OR 3+ independent units; do broad work through sub-agents, not inline. This skill is the **decision layer** — for Workflow recipe syntax (pipeline/parallel/loop), read the Workflow tool's own description; don't duplicate it here.
 
 ## Decision tree — task shape → tool
 
