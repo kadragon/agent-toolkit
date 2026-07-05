@@ -1,5 +1,11 @@
 ## Review Backlog
 
+### PR #115 — skill-review-batch-7 review cycle (out-of-scope findings)
+
+- [ ] `productivity/skills/persona-debate/SKILL.md:4` — router-drift WARN for the remaining double-quoted trigger phrases `"persona"` and `"how would real/ordinary people react"` (no route maps to them in `.claude/trigger-routes.json`). Pre-existing, not introduced by PR #115 (which only removed 3 other phrases from this same description). Fix: either add routes for these phrases or switch them to single quotes so `check_harness_drift.py`'s router-drift check stops treating them as target triggers. P2. (source: agy)
+
+---
+
 ### PR #93 — commit-guard static-analysis review cycle (deferred findings)
 
 - [x] `commit-guard/guard.py` — bare switch-back is not modeled: `git checkout -b X && git checkout main && git commit` keeps `running_branch=X` across the bare `git checkout main` (only `-b/-c`/long-create flags update attribution), so a commit that lands on main is mis-attributed to X and allowed. Deferred because the fix needs bare-`checkout <ref>` handling, which is statically ambiguous (branch switch vs `checkout <pathspec>` vs `checkout -- file`) and risks false-positives that block legit commits. Contrived multi-checkout chain; dominant accidental cases stay guarded. P3, conf 95. (source: agy/codex) — **fixed v3.6.7: `_bare_switch_target` re-attributes only main/master targets (fail-toward-block), `--`/multi-positional restores excluded.**

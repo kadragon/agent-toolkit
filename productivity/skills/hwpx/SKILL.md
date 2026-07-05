@@ -233,6 +233,7 @@ Many items → split into stages to catch silent failures early, verify each sta
 ```bash
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)  # or reuse the dir from step 1 (mktemp -d .hwpx_work_XXXXXX + office.py unpack)
+python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx "$HWPX_WORK/unpacked/"  # skip if reusing an already-unpacked dir from step 1
 python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
 python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
 python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx

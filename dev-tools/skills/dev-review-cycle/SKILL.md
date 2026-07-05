@@ -64,7 +64,8 @@ RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-p
   --no-push --message "${COMMIT_MESSAGE}")
 
 # hub mode:
-BASE_BRANCH="main"  # from Setup (jq -r '.base_branch' <<<"$PREFLIGHT")
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
   --pr --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 ```
@@ -78,8 +79,8 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 #### 2-1: Claude Skill Reviewers
 
 ```bash
-BASE_BRANCH="main"  # from Setup
 PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
 FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
@@ -100,8 +101,8 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   Skip `kind=command` slots unless `HUB_TYPE=github` AND PR exists.
 - **Slot 2 (security, conditional):**
   ```bash
-  BASE_BRANCH="main"  # from Setup
   PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+  BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
   CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)  # from 2-1
   SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from 2-1
   REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")  # from 2-1
@@ -128,7 +129,8 @@ Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, 
 
 Skip if `agy_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-3.
 ```bash
-BASE_BRANCH="main"  # from Setup
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH} \
   || echo '{"agy_review":"failed"}' >&2
 ```
@@ -137,9 +139,10 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_
 
 Skip if `codex_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-2.
 ```bash
-CODEX_MODE="mcp"  # from Setup (jq -r '.codex_mode' <<<"$PREFLIGHT")
-BASE_BRANCH="main"  # from Setup
-CODEX_COMPANION_PATH="/path/to/codex-companion"  # from Setup (jq -r '.codex_companion_path' <<<"$PREFLIGHT")
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")  # from Setup
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")  # from Setup
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
   || echo '{"codex_review":"failed"}' >&2
 ```
