@@ -26,6 +26,7 @@ PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight
 Stop immediately if `CLAUDE_PLUGIN_ROOT` is unset. Stop if `has_errors: true`.
 
 ```bash
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
 HUB_TYPE=$(jq -r '.hub_type' <<<"$PREFLIGHT")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
@@ -56,11 +57,15 @@ CRITICAL (hub mode only — skip when `--no-hub`): PR MUST be created in this st
 Determine commit message from context or `git diff --stat HEAD` + `git log --oneline -5`. File list is auto-detected by script.
 
 ```bash
+COMMIT_MESSAGE="<derived from git diff --stat HEAD + git log --oneline -5>"
+
 # --no-hub:
 RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
   --no-push --message "${COMMIT_MESSAGE}")
 
 # hub mode:
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
   --pr --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 ```
@@ -74,6 +79,8 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 #### 2-1: Claude Skill Reviewers
 
 ```bash
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
 FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
@@ -87,11 +94,18 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
 - **Trivial short-circuit** — `FILE_COUNT ≤ 3` AND `LINE_DELTA ≤ 10` AND `SECURITY_HIT` empty → skip all Claude skill sub-agents; do inline review (read diff, assess naming/error-handling/coverage). Record all candidates as "Reviewers Skipped: trivial diff". Skip to 2-2.
 - **Slot 1 (general, always 1):**
   ```bash
+  PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+  REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")  # from 2-1
   SLOT1=$(jq -r '[.candidates[] | select(.domain=="general")] | first | .id // empty' <<<"$REVIEW_CANDIDATES_JSON")
   ```
   Skip `kind=command` slots unless `HUB_TYPE=github` AND PR exists.
 - **Slot 2 (security, conditional):**
   ```bash
+  PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+  BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+  CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)  # from 2-1
+  SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from 2-1
+  REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")  # from 2-1
   [[ -n "$SECURITY_HIT" ]] && \
     SLOT2=$(jq -r '[.candidates[] | select(.domain=="security")] | first | .id // empty' <<<"$REVIEW_CANDIDATES_JSON")
   ```
@@ -115,6 +129,8 @@ Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, 
 
 Skip if `agy_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-3.
 ```bash
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_BRANCH} \
   || echo '{"agy_review":"failed"}' >&2
 ```
@@ -123,6 +139,10 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/agy-review.sh ${BASE_
 
 Skip if `codex_available=false`. Launch with `run_in_background: true` in the same turn as 2-1 and 2-2.
 ```bash
+PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight.sh)  # from Setup — repeated here so this block is runnable standalone
+CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")  # from Setup
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")  # from Setup
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
   || echo '{"codex_review":"failed"}' >&2
 ```
@@ -151,6 +171,9 @@ Apply accepted changes. Find test command: `package.json scripts.test`, `Makefil
 List exact files modified in Step 4. Verify against `git status --short` before staging.
 
 ```bash
+FILES_TO_STAGE="path/to/file1 path/to/file2"  # exact files modified in Step 4, verified against `git status --short`
+COMMIT_MESSAGE="<derived from git diff --stat HEAD + git log --oneline -5>"  # from Step 1
+
 # --no-hub:
 bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
   --no-push --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"

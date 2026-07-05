@@ -11,6 +11,14 @@ When you can't run `pytest` or `cargo test` to know if you're done, this skill i
 
 The canonical reference is Reflexion (Shinn et al. 2023): Actor → Evaluator → Self-Reflection → improved Actor. The key insight is that **verbal reflection stored as structured memory** beats "try again differently" because it accumulates — each round starts from a richer hypothesis, not a blank slate.
 
+## Prerequisites
+
+**Requires top-level session context.** The `Agent` spawn tool is not available in subagent threads. If loop-engineer is invoked from inside a subagent (another skill, Workflow stage, etc.), the verifier step cannot run. Stop immediately and return:
+
+> "loop-engineer requires top-level session context — no Agent tool available here. Re-invoke from the main session."
+
+Do not substitute self-grading when the Agent tool is absent. That defeats the skill's entire purpose.
+
 ## Step 1 — Define artifact + exit criteria
 
 Before the first iteration:
@@ -105,18 +113,10 @@ If the loop exits on plateau or ceiling without full PASS:
 If the loop surfaced a rule that would prevent the same failure pattern in future artifacts:
 
 - **One session:** note it in context (don't write files).
-- **Cross-session pattern:** promote to memory (`~/.claude/projects/.../memory/`) via the auto-memory system. Use feedback type.
+- **Cross-session pattern:** write it into the relevant `docs/*.md` file (see AGENTS.md docs index) — auto-memory is for user preferences only, not harness/code facts.
 - **Harness-level rule:** if this failure type appears in other skills/agents in this repo, write it into `docs/conventions.md` or `docs/eval-criteria.md` and open a PR.
 
 Promotion is optional and deliberate — not every reflection becomes a rule. The test: *"Would a new session make the same mistake if this insight weren't encoded?"* If yes, promote.
-
-## Prerequisites
-
-**Requires top-level session context.** The `Agent` spawn tool is not available in subagent threads. If loop-engineer is invoked from inside a subagent (another skill, Workflow stage, etc.), the verifier step cannot run. Stop immediately and return:
-
-> "loop-engineer requires top-level session context — no Agent tool available here. Re-invoke from the main session."
-
-Do not substitute self-grading when the Agent tool is absent. That defeats the skill's entire purpose.
 
 ## Anti-patterns
 

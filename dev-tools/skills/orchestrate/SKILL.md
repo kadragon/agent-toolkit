@@ -15,6 +15,7 @@ The main thread is the orchestrator. Default to delegation; do broad work throug
 3. **Several independent tasks, no shared state?** → `Agent` fan-out — one message, multiple Agent calls, run concurrently.
 4. **Multi-stage with control flow (find→verify→fix, migrate-each-site, audit-then-confirm)?** → `Workflow` tool. Deterministic loops/conditionals/fan-out beat model-driven juggling.
 5. **Unknown-size discovery (find all bugs / edge cases)?** → Workflow loop-until-dry: keep spawning finders until K rounds return nothing new.
+6. **Parallel tasks that need to share findings mid-flight?** → Agent Team (`TeamCreate` + `SendMessage`), not independent `Agent` fan-out — see `docs/delegation.md` Q2.
 
 Barrier rule: only put a barrier between stages (a `parallel()` step, which awaits all of stage N-1) when stage N needs **all** of stage N-1 (dedup, early-exit-on-zero, cross-item compare). Otherwise `pipeline` — no wasted wall-clock.
 
@@ -40,10 +41,12 @@ Don't set a model override unless highly confident the tier fits. When unsure, i
 
 ## Delegation brief — every sub-agent gets all four
 
-- **Goal** — the outcome, one sentence.
-- **Constraints** — what not to touch, style to match, scope ceiling.
-- **Exit criterion** — verifiable: "test X passes", "returns file:line table", "exits 0".
-- **Context/files** — paths, commands, prior findings it needs.
+Canonical contract lives in `docs/delegation.md` (Spawn Prompt Contract) — use the same four field names here, don't diverge:
+
+- **Objective** — the outcome to accomplish, one sentence.
+- **Output format** — diff / report / table / verdict.
+- **Tools to use** — subset of the role's allowlist.
+- **Boundaries** — files/modules this spawn must NOT touch.
 
 Vague brief = delegation problem, not agent problem. Sub-agent output is the return value, not a human message — ask for raw data (use a `schema` in Workflow for structured returns).
 

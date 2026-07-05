@@ -55,7 +55,7 @@
     "skip_if_prompt_matches": "(\\.csv|survey|설문|여론조사 결과|보도자료|회의록|녹취|챗봇|autogen|오케스트레이션 코드|코드 짜|소설|등장인물|마케팅 전략 문서|감성분석|주제.*추천|추천해줘|자료.*찾아|자료.*정리|통계 자료)"
   },
   {
-    "pattern": "(hwpx|한글.*문서|한글.*파일|공문.*만들|공문.*작성|hancom|owpml|\\.hwp)",
+    "pattern": "(hwpx|한글.*문서|한글.*파일|공문.*만들|공문.*작성|hancom|owpml|\\.hwp|회의록.*만들|제안서.*작성|edit hwp file)",
     "instruction": "Use Skill(productivity:hwpx) for Korean Hancom (HWPX) document tasks.",
     "skip_if_prompt_matches": "(hancom.*(느리|slow|pricing|가격|회사|company))"
   }
