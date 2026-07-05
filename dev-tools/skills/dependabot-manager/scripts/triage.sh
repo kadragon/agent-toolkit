@@ -25,7 +25,7 @@ for entry in "$@"; do
   failed=$(echo "$data" | jq '[.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT" or .conclusion == "STARTUP_FAILURE" or .state == "ERROR" or .state == "FAILURE")] | length')
   pending=$(echo "$data" | jq '[.statusCheckRollup[] | select(.status == "IN_PROGRESS" or .status == "QUEUED" or .state == "PENDING" or .state == "EXPECTED")] | length')
   total_ci=$(echo "$data" | jq '.statusCheckRollup | length')
-  failed_names=$(echo "$data" | jq -c '[.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT" or .conclusion == "STARTUP_FAILURE" or .state == "ERROR" or .state == "FAILURE") | .name]')
+  failed_names=$(echo "$data" | jq -c '[.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT" or .conclusion == "STARTUP_FAILURE" or .state == "ERROR" or .state == "FAILURE") | (.name // .context)]')
 
   if [[ "$state" == "CLOSED" || "$state" == "MERGED" ]]; then
     category="closed"

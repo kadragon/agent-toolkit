@@ -75,7 +75,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ```bash
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
-FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null)
+FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
@@ -97,7 +97,7 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   ```
 - All other candidates → "Reviewers Skipped: redundant domain".
 
-For each selected slot, launch one Agent (`run_in_background: true`, no `subagent_type`). Model: Slot 1 → `sonnet`, Slot 2 → `opus`. `${SLOT_ID}` below is that slot's value (`$SLOT1` or `$SLOT2`).
+For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2), then launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Model: Slot 1 → `sonnet`, Slot 2 → `opus`.
 
 Reviewer prompt:
 ```
