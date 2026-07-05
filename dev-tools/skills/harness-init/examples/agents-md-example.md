@@ -29,7 +29,7 @@ Delegation is a golden principle — skipping a mandatory gate is a violation. R
 
 **Mechanical enforcement.** This table is not advisory — hooks back it up:
 - `.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Default-on whenever the delegation table is non-empty.
-- `.claude/hooks/delegation-gate.sh` (PreToolUse on `Edit|Write`) blocks edits to critical paths without prior delegation evidence in `_workspace/`. **Critical-path repos only** — install when the delegation table has at least one path-based "Mandatory, blocking" row. The example here shows the maximalist case (both hooks); minimalist repos may ship only the router.
+- `.claude/hooks/delegation-gate.sh` (PreToolUse on `Edit|Write`) blocks edits to critical paths without prior delegation evidence in `.claude/tmp/`. **Critical-path repos only** — install when the delegation table has at least one path-based "Mandatory, blocking" row. The example here shows the maximalist case (both hooks); minimalist repos may ship only the router.
 
 If a mandatory row fires for your task and the agent attempts to edit anyway, the gate halts the edit. To extend coverage, update both the table here and `.claude/trigger-routes.json` in the same commit.
 
@@ -51,7 +51,7 @@ If a mandatory row fires for your task and the agent attempts to edit anyway, th
 | Every commit | Code reviewer (sonnet) | background | Background |
 | Same failure x2 | Deep investigation (opus) | sub-agent | Escalation, blocking |
 
-**Intermediate artifacts:** `_workspace/{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
+**Intermediate artifacts:** session scratchpad dir, `{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
 
 ## Token Economy
 

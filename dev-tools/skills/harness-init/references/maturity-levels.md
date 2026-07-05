@@ -51,7 +51,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] PostToolUse hooks catch golden principle violations at edit time (Layer 1 in enforcement chain)
 - [ ] Pre-commit hooks block commits with unresolved violations (Layer 2)
 - [ ] Drift detection on push — AGENTS.md checked for size and stale cross-references
-- [ ] `_workspace/` convention documented in `docs/runbook.md` (if multi-agent)
+- [ ] Scratchpad convention documented in `docs/runbook.md` (if multi-agent)
 - [ ] Orchestrator skill exists (if multi-agent project)
 - [ ] Harness evolution protocol in place: feedback → fix target → change history (see `references/harness-evolution.md`)
 

@@ -3,19 +3,21 @@
 Handoff files enable **clean context resets** between sessions or sub-agents,
 preserving continuity without preserving context rot.
 
+This works only within a single Claude Code session (scratchpad-backed). There is currently no supported mechanism for genuine multi-day/cross-session resume — don't imply otherwise.
+
 ## When to Write One
 
-- **Start of multi-session work** — write while context is fresh and the plan
-  is clear, NOT when context is already degraded. A degraded agent writes
-  degraded handoffs.
+- **Early in a long-running task, while context is fresh and the plan
+  is clear**, NOT when context is already degraded. A degraded agent writes
+  degraded handoffs. Survives compaction within the same session.
 - **Before spawning a fresh subagent** for a long-running task that the
   current session was about to hit context limits on.
 - **Before switching teammates** on a task in Agent Teams mode.
 
 ## Where
 
-- Per-feature: `handoff-{feature}.md` at repo root (gitignore-worthy; delete
-  when feature ships).
+- Per-feature: `handoff-{feature}.md` in the session scratchpad dir (path from
+  the system prompt). Gone automatically when the session ends.
 - Ad-hoc sub-agent spawn: pass inline as part of the spawn prompt, referenced
   via file path.
 
@@ -99,11 +101,8 @@ For judgment calls that future agents might second-guess:
 
 ## Lifecycle
 
-1. **Create** at start of multi-session work (Step 2 of `code` workflow if
+1. **Create** early in a long-running task (Step 2 of `code` workflow if
    scope warrants it).
 2. **Update** in-place when a phase completes — append to Completed Phases,
    replace Current Phase.
-3. **Delete** when the feature ships. Stale handoffs confuse future sessions.
-
-The maintenance routine does not manage handoff files. Garbage-collect manually during
-`sweep`.
+3. **Cleanup is automatic** — the scratchpad dies with the session. No manual delete needed.

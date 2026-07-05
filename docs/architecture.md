@@ -57,7 +57,8 @@ plugin.json
 
 - Skills within a plugin may reference that plugin's `agents/` and `references/`
 - No cross-plugin imports — `dev-tools/` skill must not reference `productivity/` paths
-- `_workspace/` at repo root: ephemeral campaign artifacts; never committed
+- Agent artifacts go to the session scratchpad directory (path given in the system prompt) — never committed, never repo-root
+- Delegation-gate evidence files live in `.claude/tmp/` (gitignored, repo-local — see `references/enforcement-template.md`)
 
 ### Boundaries
 

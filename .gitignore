@@ -15,8 +15,12 @@ __pycache__/
 .agents/.maintenance-stamp
 skills-lock.json
 
-# skill-dev-orchestrator scratch
+# legacy skill-dev-orchestrator scratch — no longer generated (artifacts moved to
+# the session scratchpad dir); directory may still contain dead leftovers, left in place
 _workspace/
+
+# delegation-gate evidence files (session-scoped, safe to delete)
+.claude/tmp/
 
 # hwpx skill temp working directory
 .hwpx_work/

@@ -70,9 +70,9 @@ Embed in every spawn prompt:
 | Strategy | Mechanism | Use when |
 |----------|-----------|----------|
 | Return value | Agent tool result | Sub-agent reports to orchestrator |
-| File-based | `_workspace/{phase:02d}_{agent}_{artifact}.{ext}` | Large artifacts, cross-phase handoff |
+| File-based | Session scratchpad dir, `{phase:02d}_{agent}_{artifact}.{ext}` | Large artifacts, cross-phase handoff |
 | Task-based | `TaskCreate`/`TaskUpdate` | Progress tracking, dependency gates |
 
-`_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}` — e.g. `01_explorer_map.md`, `02_implementer_diff.md`.
+Naming: `{phase:02d}_{agent}_{artifact}.{ext}` — e.g. `01_explorer_map.md`, `02_implementer_diff.md`.
 
-Preserve `_workspace/` across sessions (enables partial re-run). Remove only on explicit "reset".
+The orchestrator determines its scratchpad path once (from its own system prompt) and embeds the full path explicitly in every spawn prompt — sub-agents must not guess or reconstruct it. Scratchpad is ephemeral: gone when the session ends, no cross-session resume.

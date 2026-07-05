@@ -68,7 +68,7 @@ State the question → research/prototype → report options and tradeoffs → d
 
 ## Handoff Files
 
-For multi-session work, write `_workspace/handoff-{feature}.md` at the START (when context is fresh). Delete on feature completion.
+To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent/switching teammates, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). This does NOT survive a new CLI session — for genuine multi-day continuity there is currently no supported mechanism; say so explicitly rather than implying otherwise.
 
 Schema from `references/handoff-template.md`.
 
