@@ -37,7 +37,7 @@ Restore-mode page-count/completion-gate rules apply **only to reference restore 
 
 ## Environment
 
-No external packages required. Scripts use stdlib `xml.etree.ElementTree` only.
+Most scripts use stdlib `xml.etree.ElementTree` only. `validate.py` additionally requires `defusedxml` (XXE/billion-laughs hardening) — see `references/environment.md`.
 - `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`). Resolve at the top of every bash block that references it:
   ```bash
   SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
@@ -544,7 +544,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
 5. 🟡 **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
 6. 🟡 **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
-7. 🔵 **Python version**: any Python 3.8+ works (stdlib only; no external packages required)
+7. 🔵 **Python version**: any Python 3.8+ works (stdlib only, except `validate.py` which requires `defusedxml` — see `environment.md`)
 8. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`; environment/encoding → `environment.md`
 9. 🔵 **build.py build first**: use `build.py build` for new document creation (avoid calling python-hwpx API directly)
 10. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `build.py analyze` + extracted-XML-based restore/rewrite

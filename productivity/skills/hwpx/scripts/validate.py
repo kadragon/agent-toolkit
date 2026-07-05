@@ -520,8 +520,12 @@ def cmd_page_guard(args: argparse.Namespace) -> int:
     if not out_path.exists():
         print(f"Error: output not found: {out_path}", file=sys.stderr)
         return 2
-    ref = collect_metrics(ref_path)
-    out = collect_metrics(out_path)
+    try:
+        ref = collect_metrics(ref_path)
+        out = collect_metrics(out_path)
+    except (ET.ParseError, DefusedXmlException) as e:
+        print(f"Error parsing XML content: {e}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps({"reference": asdict(ref), "output": asdict(out)}, ensure_ascii=False, indent=2))
     errors = compare_metrics(ref, out,
@@ -780,6 +784,37 @@ def _run_tests() -> None:
             print("VAL-9 PASS: billion-laughs header.xml rejected as malformed/forbidden XML")
     except Exception as e:
         failures.append("VAL-9 FAIL: unhandled exception instead of reported error: %s" % e)
+
+    # VAL-10: cmd_page_guard reports a clean error (not an unhandled traceback/crash) when a
+    # section file contains a billion-laughs entity-expansion payload.
+    _section_billion_laughs = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE hp:BodyText [\n'
+        ' <!ENTITY a "lol">\n'
+        ' <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        ' <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">\n'
+        ']>\n'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">&c;</hp:BodyText>'
+    )
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            ref_arc = Path(d) / "ref.hwpx"
+            out_arc = Path(d) / "out.hwpx"
+            with ZipFile(str(ref_arc), "w") as zf:
+                zf.writestr("Contents/section0.xml", _valid_section0)
+            with ZipFile(str(out_arc), "w") as zf:
+                zf.writestr("Contents/section0.xml", _section_billion_laughs)
+            pg_args = argparse.Namespace(
+                reference=str(ref_arc), output=str(out_arc), json=False,
+                max_text_delta_ratio=0.15, max_paragraph_delta_ratio=0.25,
+            )
+            rc = cmd_page_guard(pg_args)
+        if rc != 2:
+            failures.append("VAL-10 FAIL: expected rc=2 for billion-laughs section, got %r" % rc)
+        else:
+            print("VAL-10 PASS: cmd_page_guard reports clean error for billion-laughs section (no crash)")
+    except Exception as e:
+        failures.append("VAL-10 FAIL: unhandled exception instead of reported error: %s" % e)
 
     if failures:
         for f in failures:
