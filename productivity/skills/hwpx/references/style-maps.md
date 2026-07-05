@@ -98,3 +98,46 @@ Formal docs with visual separation. Color-background header bars + number badges
 <!-- borderFillIDRef="7" + charPrIDRef="11" → 파란배경 흰색 아라비아숫자 -->
 <!-- borderFillIDRef="8" + charPrIDRef="8"  → 하단선만 검정 볼드 제목 -->
 ```
+
+## Reusable pattern: color banner / stripe title bar (any template)
+
+Korean gov/biz documents commonly wrap a title or section header in a colored 1-cell banner,
+or a 3-column stripe (accent color | title | accent color). This is not template-specific —
+add the border/char styles to whichever template's `header.xml` you're already using, following
+the `itemCnt` bump rule in "header.xml editing guide".
+
+**1. Add a background-color `borderFill` to header.xml:**
+```xml
+<hh:borderFill id="NEW_ID" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0">
+  <hc:leftBorder type="NONE" width="0.1mm" color="#000000"/>
+  <hc:rightBorder type="NONE" width="0.1mm" color="#000000"/>
+  <hc:topBorder type="NONE" width="0.1mm" color="#000000"/>
+  <hc:bottomBorder type="NONE" width="0.1mm" color="#000000"/>
+  <hc:diagonal type="NONE" width="0.1mm" color="#000000"/>
+  <hc:fillBrush>
+    <hc:winBrush faceColor="#4472C4" hatchColor="#000000" alpha="0"/>
+  </hc:fillBrush>
+</hh:borderFill>
+```
+Swap `faceColor` for the banner color (e.g. `#7B8B3D` olive, `#D6DCE4` light blue-gray). Bump
+`<hh:borderFills itemCnt="...">` to match.
+
+**2. Add a white/bold `charPr` for text sitting on the colored background** (dark banners need
+light text — reusing a body-text charPr on a dark fill is unreadable):
+```xml
+<hh:charPr id="NEW_ID" height="1400" textColor="#FFFFFF" ...>
+```
+
+**3. 1-cell full-width banner** (title bar spanning the whole table width — `rowCnt="1" colCnt="1"`):
+same single-`<hp:tc>` shape as any 1x1 table; give that one `<hp:tc>` the new `borderFillIDRef`
+and its `<hp:run>` the new white/bold `charPrIDRef`. `cellAddr` is `colAddr="0" rowAddr="0"` —
+trivially satisfies the grid check since there's only one cell.
+
+**4. 3-column stripe** (accent | title | accent — `rowCnt="1" colCnt="3"`): three `<hp:tc>` in
+one `<hp:tr>`, `cellAddr` `(0,0)`, `(1,0)`, `(2,0)` — remember each needs its **own** `colAddr`
+(see section-writing.md's cellAddr warning). Give the outer two cells the accent `borderFillIDRef`
+with no text run (or a decorative glyph), and the middle cell the title text with a plain/white
+`borderFillIDRef` background.
+
+This is exactly the `proposal` template's major/sub-item header pattern generalized — see above
+for a working column-count-2 example with concrete IDs.

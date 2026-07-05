@@ -29,7 +29,7 @@ Intent unclear → ask user, do not assume restore.
 |------|------|------------|
 | Reference restore | See Workflow 5 restore-mode checklist for full criteria. | See Workflow 5 restore-mode checklist for full criteria. |
 | Content edit | Changing is normal | `validate.py validate --baseline` + actually open in Hancom |
-| New / reference-based generation | No constraint | `validate.py validate` |
+| New / reference-based generation | No constraint | `validate.py validate` + actually open in Hancom (title-match check — see "Hancom-open verification") |
 
 Restore-mode page-count/completion-gate rules apply **only to reference restore mode** — see **Workflow 5** for the full checklist. In content edit mode, do not revert work on page count change.
 
@@ -106,6 +106,7 @@ rm -rf .hwpx_work/
 3. **(Optional) edit header.xml** (when new styles needed) → see `$SKILL_DIR/references/hwpx-format.md` § "header.xml Editing Guide"
 4. **Build with build.py build**
 5. **Validate with validate.py**
+6. **Open in Hancom, confirm `MainWindowTitle` matches the filename** (see "Hancom-open verification" under Workflow 2) — `validate.py` passing does not guarantee the file renders; a structurally-valid table with a cellAddr grid gap still opens as a blank document.
 
 > If attached reference exists and intent is restore/edit, use Workflow 5 instead.
 
@@ -296,7 +297,11 @@ finally:
 
 `validate.py` checks structure only. Completion gate for content edit = confirming it **actually opens in Hancom**.
 
-- **Launch check**: open packaged hwpx (Windows: `Start-Process`), confirm Hancom process (`Hwp`) alive. On crash, process doesn't appear or exits immediately.
+- **Launch check**: open packaged hwpx (Windows: `Start-Process`), confirm Hancom process (`Hwp`) alive. **Process-alive alone is not sufficient** — a load failure (e.g. the cellAddr-grid bug `validate.py` now catches, or any other silent-parse issue) still launches a live Hancom process showing a blank new document, with no crash and no error dialog. The real check: read the process's `MainWindowTitle` and confirm it matches the target filename. If the title reads a generic placeholder (e.g. `빈 문서 1`) instead of the filename, the load failed even though the process is alive.
+  ```powershell
+  $proc = Get-Process Hwp -ErrorAction SilentlyContinue
+  $proc.MainWindowTitle  # must contain the target filename, not "빈 문서 N"
+  ```
 - **Fully close before repackaging**: close Hancom before re-pack/re-copying same file. **Multiple documents open in Hancom: `CloseMainWindow` closes only one main window** — remaining window locks file. Confirm full close (`Stop-Process` if not closed) before proceeding.
 - **Verify copy success**: copying to locked file can fail silently as non-blocking error. After applying to real file, **confirm content match via md5** or similar.
 
@@ -533,6 +538,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
    powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp" -Force
    ```
    > ⚠️ `forceopen:true` bypasses Hancom's macro security prompt. Only call on trusted input files.
+   > ⚠️ `forceopen:true` is a mode string passed to the COM method `hwp.Open(path, "HWP", "forceopen:true")` inside `convert_hwp.ps1` — it is **not** a `Hwp.exe` command-line flag. `Start-Process ... -ArgumentList "/forceopen", path` is silently ignored; always go through `convert_hwp.ps1`, never invoke `Hwp.exe` directly with it.
 2. 🔴 **secPr required**: first run of section0.xml's first paragraph must contain secPr + colPr
 3. 🔴 **mimetype order**: when packaging HWPX, mimetype = first ZIP entry, ZIP_STORED
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
