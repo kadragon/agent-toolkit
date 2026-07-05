@@ -59,4 +59,4 @@ for entry in "$@"; do
     '{repo: $repo, number: $number, title: $title, category: $category, mergeStateStatus: $mergeStateStatus, failedChecks: $failedChecks}')")
 done
 
-printf '%s\n' "${results[@]}" | jq -s '.'
+printf '%s\n' "${results[@]+"${results[@]}"}" | jq -s '.'

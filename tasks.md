@@ -1,14 +1,8 @@
 ## Review Backlog
 
-### PR #116 — batch-skill-review-backlog-5 review cycle (out-of-scope findings)
+### PR #117 — batch-dependabot-persona-router review cycle (out-of-scope findings)
 
-- [ ] `dev-tools/skills/dependabot-manager/scripts/triage.sh:61` (and `poll-ci.sh:26`) — `${results[@]}`/`${entries[@]}` referenced directly under `set -euo pipefail`; on bash 3.2 (macOS default) an empty array reference here throws `unbound variable` and aborts. Pre-existing, not introduced by PR #116 (which only touched the guard block above). Fix: `printf '%s\n' "${results[@]+"${results[@]}"}" | jq -s '.'` (and matching change in poll-ci.sh's call site). P2. (source: agy)
-
-### PR #115 — skill-review-batch-7 review cycle (out-of-scope findings)
-
-- [ ] `productivity/skills/persona-debate/SKILL.md:4` — router-drift WARN for the remaining double-quoted trigger phrases `"persona"` and `"how would real/ordinary people react"` (no route maps to them in `.claude/trigger-routes.json`). Pre-existing, not introduced by PR #115 (which only removed 3 other phrases from this same description). Fix: either add routes for these phrases or switch them to single quotes so `check_harness_drift.py`'s router-drift check stops treating them as target triggers. P2. (source: agy)
-
----
+- [ ] [debt] `dev-tools/skills/dependabot-manager/scripts/audit-automerge.sh:74` — identical unguarded `"${results[@]}"` expansion under `set -euo pipefail` as the bug fixed in triage.sh/poll-ci.sh by this PR (bash 3.2 `unbound variable` on empty array). Pre-existing, not touched by PR #117. Same fix pattern applies: `"${results[@]+"${results[@]}"}"`. (source: review)
 
 ### PR #93 — commit-guard static-analysis review cycle (deferred findings)
 
