@@ -27,6 +27,8 @@ from typing import List, Tuple
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as DET
+from defusedxml.common import DefusedXmlException
 
 from _common import MIN_READABLE_PT, SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS
 
@@ -311,8 +313,8 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
                     data = zf.read(name)
                     if SECTION_N_RE.match(name):
                         section_bytes[name] = data
-                    parsed[name] = ET.fromstring(data)
-                except ET.ParseError as e:
+                    parsed[name] = DET.fromstring(data)
+                except (ET.ParseError, DefusedXmlException) as e:
                     errors.append(f"Malformed XML in {name}: {e}")
         header_root = parsed.get("Contents/header.xml")
         if header_root is None:
@@ -405,7 +407,7 @@ def _text_of_t(t_node: ET.Element) -> str:
 
 def _collect_one_section(section_bytes: bytes) -> Metrics:
     """Parse one section XML and return its Metrics."""
-    root = ET.parse(BytesIO(section_bytes)).getroot()
+    root = DET.parse(BytesIO(section_bytes)).getroot()
     paragraphs = root.findall(".//hp:p", NS_PG)
     page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
     column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
@@ -518,8 +520,12 @@ def cmd_page_guard(args: argparse.Namespace) -> int:
     if not out_path.exists():
         print(f"Error: output not found: {out_path}", file=sys.stderr)
         return 2
-    ref = collect_metrics(ref_path)
-    out = collect_metrics(out_path)
+    try:
+        ref = collect_metrics(ref_path)
+        out = collect_metrics(out_path)
+    except (ET.ParseError, DefusedXmlException) as e:
+        print(f"Error parsing XML content: {e}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps({"reference": asdict(ref), "output": asdict(out)}, ensure_ascii=False, indent=2))
     errors = compare_metrics(ref, out,
@@ -745,6 +751,70 @@ def _run_tests() -> None:
             print("VAL-8 PASS: correctly addressed table without rowCnt/colCnt reports no errors")
     except Exception as e:
         failures.append("VAL-8 FAIL: %s" % e)
+
+    # VAL-9: header.xml with a billion-laughs entity-expansion payload is rejected as an
+    # error, not silently parsed and expanded (XXE/billion-laughs hardening). Archive is
+    # otherwise complete/valid so the only possible error source is the malicious payload.
+    _header_billion_laughs = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE hh:head [\n'
+        ' <!ENTITY a "lol">\n'
+        ' <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        ' <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">\n'
+        ']>\n'
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" secCnt="1">&c;</hh:head>'
+    )
+    _valid_content_hpf = '<?xml version="1.0"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"/>'
+    _valid_section0 = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"/>'
+    )
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            arc = Path(d) / "xxe.hwpx"
+            with ZipFile(str(arc), "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip")
+                zf.writestr("Contents/content.hpf", _valid_content_hpf)
+                zf.writestr("Contents/header.xml", _header_billion_laughs)
+                zf.writestr("Contents/section0.xml", _valid_section0)
+            _xxe_errors, _ = do_validate(str(arc))
+        if not any("header.xml" in e for e in _xxe_errors):
+            failures.append("VAL-9 FAIL: billion-laughs header.xml parsed without error: %r" % _xxe_errors)
+        else:
+            print("VAL-9 PASS: billion-laughs header.xml rejected as malformed/forbidden XML")
+    except Exception as e:
+        failures.append("VAL-9 FAIL: unhandled exception instead of reported error: %s" % e)
+
+    # VAL-10: cmd_page_guard reports a clean error (not an unhandled traceback/crash) when a
+    # section file contains a billion-laughs entity-expansion payload.
+    _section_billion_laughs = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE hp:BodyText [\n'
+        ' <!ENTITY a "lol">\n'
+        ' <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        ' <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">\n'
+        ']>\n'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">&c;</hp:BodyText>'
+    )
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            ref_arc = Path(d) / "ref.hwpx"
+            out_arc = Path(d) / "out.hwpx"
+            with ZipFile(str(ref_arc), "w") as zf:
+                zf.writestr("Contents/section0.xml", _valid_section0)
+            with ZipFile(str(out_arc), "w") as zf:
+                zf.writestr("Contents/section0.xml", _section_billion_laughs)
+            pg_args = argparse.Namespace(
+                reference=str(ref_arc), output=str(out_arc), json=False,
+                max_text_delta_ratio=0.15, max_paragraph_delta_ratio=0.25,
+            )
+            rc = cmd_page_guard(pg_args)
+        if rc != 2:
+            failures.append("VAL-10 FAIL: expected rc=2 for billion-laughs section, got %r" % rc)
+        else:
+            print("VAL-10 PASS: cmd_page_guard reports clean error for billion-laughs section (no crash)")
+    except Exception as e:
+        failures.append("VAL-10 FAIL: unhandled exception instead of reported error: %s" % e)
 
     if failures:
         for f in failures:

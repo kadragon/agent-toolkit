@@ -8,6 +8,7 @@
 | macOS/Linux | `python3` or `.venv/bin/python` | |
 
 - venv optional. If `python -c "import lxml"` succeeds, use as-is. Otherwise `pip install lxml`.
+- `validate.py` requires `defusedxml` (XXE/billion-laughs hardening for untrusted `.hwpx` input). If `python -c "import defusedxml"` fails, run `pip install defusedxml` first.
 - Workflow examples use `python3` / `source "$VENV"`. **On Windows, use `python` and omit `source` line.**
 
 ## SKILL_DIR
