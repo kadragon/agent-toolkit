@@ -24,7 +24,7 @@ Trigger a harness evolution pass in any of these conditions:
 | Phase order wrong | Orchestrator skill | "검증을 먼저 해야 해" → Phase 순서 변경 |
 | Two agents doing the same thing | Orchestrator + agent merge | "이 둘은 합쳐도 될 듯" → 에이전트 병합 |
 | Skill doesn't trigger | Skill description | "이 표현으로는 안 돼" → description 확장 |
-| Too many tokens wasted | `_workspace/` bloat, agent scope | Tighten Boundaries in spawn prompt |
+| Too many tokens wasted | Scratchpad/`.claude/tmp/` bloat, agent scope | Tighten Boundaries in spawn prompt |
 
 ## Change History
 
@@ -57,7 +57,7 @@ On explicit "harness audit" request, run this checklist:
 
 - [ ] Each agent's description still matches what it actually does
 - [ ] Orchestrator description covers all known user phrasings
-- [ ] `_workspace/` naming convention followed consistently
+- [ ] Scratchpad naming convention followed consistently
 - [ ] `docs/harness-log.md` change history is up to date
 - [ ] No stale agent files for roles that are no longer used
 - [ ] Team size still appropriate for current workload

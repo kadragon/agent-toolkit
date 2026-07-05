@@ -113,7 +113,7 @@ Choose the right data transfer strategy based on execution mode and data size.
 |----------|-----------|----------|
 | **Message-based** | `SendMessage` between teammates | Real-time coordination, mid-flight findings |
 | **Task-based** | `TaskCreate`/`TaskUpdate` | Progress tracking, dependency gates |
-| **File-based** | `_workspace/{phase}_{agent}_{artifact}.{ext}` | Large artifacts, structured output, cross-phase handoff |
+| **File-based** | Session scratchpad dir, `{phase}_{agent}_{artifact}.{ext}` | Large artifacts, structured output, cross-phase handoff |
 | **Return-value** | `Agent(...)` tool return message | Sub-agent results reported to orchestrator |
 
 **Recommended combinations:**
@@ -121,9 +121,10 @@ Choose the right data transfer strategy based on execution mode and data size.
 - Sub-agent mode → return-value (results) + file-based (large data)
 
 File-based rules:
-- All paths under `_workspace/` (never ad-hoc temp paths)
+- All agent-artifact paths under the session scratchpad dir (path from the system prompt — never ad-hoc temp paths, never guessed)
 - Naming: `{phase:02d}_{agent}_{artifact}.{ext}` — `01_explorer_map.md`, `02_implementer_diff.patch`
-- Preserve `_workspace/` across sessions for partial re-run support
+- The orchestrator determines the scratchpad path once and embeds it explicitly in every spawn prompt
+- Ephemeral by design — gone when the session ends, no cross-session resume
 
 ## Context Manifest
 
@@ -233,6 +234,6 @@ These delegations are **embedded as named steps in `docs/workflows.md`**, not ju
 
 Define each recurring role once as `.claude/agents/{role}.md`. The routing table cites roles by name; Claude Code reuses the same file for both subagent and teammate spawns. See `references/teammate-role-template.md` for the schema and starter pack (implementer, explorer, qa-verifier, product-evaluator).
 
-## Handoff Across Sessions
+## Handoff Within a Session
 
-For work that spans sessions or approaches context limits, write a handoff file with the schema in `references/handoff-template.md`. A handoff IS a deferred Spawn Prompt Contract — its "Next Agent Contract" section mirrors the 4 fields above.
+For work approaching context limits, or before spawning a fresh subagent/switching teammates, write a handoff file (in the scratchpad) with the schema in `references/handoff-template.md`. A handoff IS a deferred Spawn Prompt Contract — its "Next Agent Contract" section mirrors the 4 fields above. This does NOT survive a new CLI session — there is currently no supported mechanism for genuine multi-day/cross-session handoff; say so plainly rather than implying otherwise.

@@ -36,7 +36,7 @@ description: |
   Trigger phrases (Korean + English):
   - "{domain} 실행해줘", "{domain} 시작", "{domain} 다시 실행"
   - "run {domain}", "start {domain}", "{domain} again"
-  Resume / partial: "{domain}의 {부분} 수정", "based on previous results, redo {부분}"
+  No cross-session resume — scratchpad artifacts are gone once the session ends.
   Validation: "{domain} 검증", "{domain} 상태", "validate {domain}"
   Skip only if user explicitly says "inline" / "직접" / "without orchestrator".
 ```
@@ -78,37 +78,18 @@ description: |
   Trigger phrases (Korean + English):
   - "{domain} 실행해줘", "{domain} 시작", "{domain} 다시 실행"
   - "run {domain}", "start {domain}", "{domain} again"
-  Resume / partial: "{domain}의 {부분} 수정", "based on previous results, redo {부분}"
-  Validation: "{domain} 검증", "{domain} 상태", "validate {domain}"
+  No cross-session resume — artifacts live in the scratchpad and are gone once the session ends.
   Skip only if user says "inline" / "직접" / "without orchestrator".
 ---
 
-## Phase 0: Context Detection
-
-Check `_workspace/campaign-state.json` before anything else.
-
-```
-campaign-state.json missing → Initial run — proceed to Phase 1
-campaign-state.json exists + new-run signal (--new flag OR input hash changed) →
-  New run — rename _workspace/ to _workspace_archive-{timestamp}/ (outside _workspace/
-  to avoid "cannot move to a subdirectory of itself"), write fresh campaign-state.json,
-  proceed to Phase 1
-campaign-state.json exists + no new-run signal → Resume — read next_entry_point,
-  skip completed_phases, continue from current_phase
-```
-
-Read `current_phase` and `tasks` from the state file. Report to user: "Resuming {domain} campaign from Phase {N} — tasks {completed} done, {in_progress} in progress."
-
 ## Phase 1: Preparation
 
-Read inputs, validate preconditions, create `_workspace/`:
-
-```bash
-mkdir -p _workspace
-```
+Determine your scratchpad path from your own system prompt (never guess or reconstruct it). Read inputs, validate preconditions.
 
 File naming convention: `{phase:02d}_{agent}_{artifact}.{ext}`
 Examples: `01_analyst_requirements.md`, `02_architect_design.json`
+
+Embed the full scratchpad path explicitly in every spawn prompt below — sub-agents/teammates must not derive it independently.
 
 ## Phase 2: Team Assembly
 
@@ -136,16 +117,16 @@ Agents run and coordinate via SendMessage. The orchestrator monitors via TaskGet
 Data transfer between agents:
 - **Coordination**: `SendMessage` (real-time findings, blocking questions)
 - **Progress**: `TaskUpdate` with status (in_progress → completed)
-- **Artifacts**: Write to `_workspace/{phase}_{agent}_{artifact}.{ext}`
+- **Artifacts**: Write to `{scratchpad}/{phase}_{agent}_{artifact}.{ext}`
 
 ## Phase 4: Integration
 
-Read agent artifacts from `_workspace/`, synthesize, produce final output.
+Read agent artifacts from the scratchpad, synthesize, produce final output.
 
 Error policy:
 - 1 agent fails → retry once
 - Retry fails → proceed without that agent's output; note omission in report
-- Majority fail → stop, report to user with `_workspace/` state preserved
+- Majority fail → stop, report to user with scratchpad artifact paths
 
 ## Phase 5: Cleanup
 
@@ -153,7 +134,7 @@ Error policy:
 TeamDelete(team_name: "{domain}-team")
 ```
 
-Preserve `_workspace/` for partial re-run support. Remove only on explicit "reset" request.
+No cleanup needed — the scratchpad is session-scoped and self-cleaning.
 ```
 
 ---
@@ -169,13 +150,9 @@ description: |
   Skip only if user says "inline" / "직접" / "without orchestrator".
 ---
 
-## Phase 0: Context Detection
-
-Same as Template A — read `_workspace/campaign-state.json`.
-
 ## Phase 1: Spawn Sub-agents
 
-Launch independent agents in parallel in a single turn:
+Determine your scratchpad path from your own system prompt. Launch independent agents in parallel in a single turn, embedding the full scratchpad path in each spawn prompt:
 
 ```
 Agent(subagent_type: "{agent-1}", prompt: """
@@ -183,13 +160,13 @@ Agent(subagent_type: "{agent-1}", prompt: """
   Output format: {format}
   Tools to use: {subset}
   Boundaries: {must not touch}
-  Save output to: _workspace/01_{agent-1}_result.md
+  Save output to: {scratchpad}/01_{agent-1}_result.md
 """, run_in_background: true)
 
 Agent(subagent_type: "{agent-2}", prompt: """
   Objective: {specific task}
   ...
-  Save output to: _workspace/01_{agent-2}_result.md
+  Save output to: {scratchpad}/01_{agent-2}_result.md
 """, run_in_background: true)
 ```
 
@@ -197,7 +174,7 @@ All four Spawn Prompt Contract fields are mandatory (Objective / Output format /
 
 ## Phase 2: Collect and Integrate
 
-Read artifacts from `_workspace/`, produce final output.
+Read artifacts from the scratchpad, produce final output.
 
 Error policy: (same as Template A Phase 4)
 ```
@@ -214,69 +191,39 @@ Use when phases have distinct coordination needs. Common combinations:
 | Design → Verify | Team (collaborative design) | Sub-agent (independent verification) | — |
 | Explore → Build → QA | Sub-agent (explore) | Sub-agent (build) | Sub-agent (QA) |
 
-Between phases, save artifacts to `_workspace/`, then switch mode:
+Between phases, save artifacts to the scratchpad, then switch mode:
 
 ```markdown
 ## Phase 2: Parallel Gathering (sub-agent)
-[spawn sub-agents, collect to _workspace/]
+[spawn sub-agents, collect to {scratchpad}]
 
 ## Phase 3: Team Synthesis (team)
 TeamCreate(...)
-[read _workspace/ artifacts, coordinate via SendMessage]
+[read {scratchpad} artifacts, coordinate via SendMessage]
 TeamDelete(...)
 
 ## Phase 4: Independent Verification (sub-agent)
-[spawn verifier sub-agent reading _workspace/ artifacts]
+[spawn verifier sub-agent reading {scratchpad} artifacts]
 ```
 
 ---
 
-## _workspace/ Convention
+## Scratchpad Convention
 
 ```
-_workspace/
-  campaign-state.json                                  ← session-persistent campaign state
-  {phase:02d}_{agent}_{area}_{session_id}_{artifact}.{ext}
-  01_analyst_auth_sess-abc123_requirements.md
-  02_architect_auth_sess-abc123_design.json
-  03_implementer_billing_sess-abc123_diff.patch
+{scratchpad}/
+  {phase:02d}_{agent}_{artifact}.{ext}
+  01_analyst_requirements.md
+  02_architect_design.json
+  03_implementer_billing_diff.patch
 ```
 
 Rules:
-- All paths use `_workspace/` as root
-- Never use relative paths without `_workspace/` prefix
-- Final deliverables go to user-specified path; intermediates stay in `_workspace/`
-- Preserve across sessions for partial re-run support
-- **Include `{area}` and `{session_id}` in the filename** when the delegation gate (`references/enforcement-template.md`) is installed. The gate's evidence glob is `_workspace/*_{area}_{session_id}_*.md`; omitting either field will leave the gate unable to verify your delegation and block the next edit. If you omit them deliberately, also relax the gate's glob.
-
-### Campaign State File (`_workspace/campaign-state.json`)
-
-Write this file at the end of every phase. Phase 0 reads it to determine resume point.
-
-```json
-{
-  "domain": "{domain}",
-  "started_at": "{ISO-8601}",
-  "last_updated": "{ISO-8601}",
-  "current_phase": 3,
-  "completed_phases": [1, 2],
-  "tasks": {
-    "task-1": "completed",
-    "task-2": "completed",
-    "task-3": "in_progress"
-  },
-  "next_entry_point": "Phase 3 — resume from task-3",
-  "artifacts": [
-    "_workspace/01_analyst_requirements.md",
-    "_workspace/02_architect_design.json"
-  ],
-  "notes": "{anything blocking or worth preserving across sessions}"
-}
-```
-
-**Phase 0 reads this file.** If `campaign-state.json` exists and `current_phase > 0`, it's a resume — skip completed phases, jump to `next_entry_point`. If the file is absent or malformed, treat as initial run.
-
-Update `campaign-state.json` atomically at the end of each phase (write to a temp file, rename). Never update mid-phase — a partial write corrupts resume state.
+- All agent-artifact paths under the session scratchpad dir (path from the system prompt — never guess it)
+- The orchestrator determines the path once and embeds it explicitly in every spawn prompt; sub-agents/teammates must not derive it themselves
+- Final deliverables go to user-specified path; intermediates stay in the scratchpad
+- Ephemeral by design — gone when the session ends, no cross-session resume
+- **This is a different mechanism from the delegation gate's evidence files.** If `references/enforcement-template.md`'s PreToolUse gate is installed, its evidence files live in the repo-local `.claude/tmp/` (not the scratchpad) and still require `{area}_{session_id}` stamping — see that file for the naming convention. Do not conflate the two.
 
 ---
 
@@ -292,8 +239,8 @@ For team mode with multiple agents that could race to claim tasks, use an explic
 3. TaskUpdate(task_id, status: "in_progress", claimed_by: "{this-agent}")
 4. Do the work
 5. TaskUpdate(task_id, status: "completed")
-6. Write artifact to _workspace/
-7. SendMessage to orchestrator: "task-{id} done, artifact: _workspace/..."
+6. Write artifact to {scratchpad}
+7. SendMessage to orchestrator: "task-{id} done, artifact: {scratchpad}/..."
 ```
 
 **If agent stops unexpectedly:**

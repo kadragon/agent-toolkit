@@ -78,8 +78,13 @@ FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
 
 
 def encode_project(path):
-    """Map an absolute project path to its transcript dir name: '/' and '.' -> '-'."""
-    return re.sub(r"[/.]", "-", path)
+    """Map a project path to its transcript dir name: '/', '.', '\\', ':' -> '-'.
+
+    Normalizes to an absolute, case-folded path first so Windows drive-letter
+    case differences (`C:` vs `c:`) don't fragment state across sessions.
+    """
+    path = os.path.normcase(os.path.abspath(path))
+    return re.sub(r"[/.:\\]", "-", path)
 
 
 def keep_prompt(d):

@@ -98,13 +98,14 @@ bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harne
 | `tools/sweep.sh` | Garbage collection sweep |
 | Validate: see above | Structural validation |
 
-## _workspace/ Convention
+## Scratchpad Convention
 
-Intermediate artifacts live under `_workspace/` at repo root.
+Intermediate artifacts live in the session scratchpad directory (path given in the system prompt).
 Naming: `{phase:02d}_{agent}_{artifact}.{ext}`
 
-Preserve across sessions — enables partial re-run without full restart.
-Remove only on explicit "reset" request.
+Ephemeral — gone at session end, no cross-session resume.
+
+Separate mechanism: delegation-gate evidence files live in `.claude/tmp/` (gitignored, session_id-stamped — see `references/enforcement-template.md`). Do not conflate the two.
 
 ## Sweep Trigger Policy
 

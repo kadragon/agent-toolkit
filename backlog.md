@@ -1,8 +1,7 @@
 # Backlog
 
-Items below sourced from the 2026-07-04 marketplace-wide skill review (9 skills, per-skill evaluator agents); PR #109 fixed the top-priority findings, these are the remainder.
+## Review Backlog
 
-## History
+### PR #119 — replace _workspace/ convention with scratchpad (2026-07-05)
 
-- [x] [HARNESS] `commit-guard/guard.py` — branch guard now models in-chain `git checkout -b/-B/--orphan <n>` / `git switch -c/-C/--create/--orphan <n>`: a `git checkout -b X && git commit ...` one-liner on main is allowed (commit lands on the new branch). Attribution carries only across `&&` and is dropped across `||`/`;`/`|`/`&`/newline/`cd`, closing the `||`/`;`/cross-repo mis-attribution holes. (v3.6.5)
-- [x] [HARNESS] `commit-guard/guard.py` — type guard now fails open on statically-undecidable messages: a `-m "$(...)"` / backtick command-substitution message skips the type check instead of blocking, per the hook's fail-open contract. (v3.6.5)
+- [ ] [debt] Adopt `defusedxml.ElementTree` in `productivity/skills/hwpx/scripts/validate.py` to mitigate XXE/billion-laughs risk from parsing untrusted `.hwpx` files (source: security-guidance hook) — flagged on `_check_table_grid`, applies to the whole file's `xml.etree.ElementTree` usage, out of scope for this PR (pre-existing pattern, needs a new dependency decision)

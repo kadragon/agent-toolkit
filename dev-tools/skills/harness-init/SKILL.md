@@ -168,9 +168,9 @@ Create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses th
 
 Read `references/teammate-role-template.md` for full schema and starter pack (implementer, explorer, qa-verifier, product-evaluator).
 
-**Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and `_workspace/` artifact path. Without it, inter-agent coordination degrades to guessing.
+**Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
 
-Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for multi-session work. Handoff files are deferred Spawn Prompt Contracts.
+Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
 
 ### Step 4c: Create Orchestrator Skill
 
@@ -187,11 +187,12 @@ Read `references/orchestrator-template.md` and choose one of:
 - **Template C (hybrid)** — phase-dependent: different modes per phase
 
 The orchestrator must include:
-1. Phase 0 context detection — read `_workspace/campaign-state.json`; resume from `next_entry_point` if present
-2. Explicit data transfer strategy (see `references/delegation-template.md` → Data Transfer Protocols)
-3. Error policy (1 retry, graceful degradation, report omissions)
-4. `_workspace/` naming: `{phase:02d}_{agent}_{artifact}.{ext}` + `campaign-state.json`
-5. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
+1. Explicit data transfer strategy (see `references/delegation-template.md` → Data Transfer Protocols) — determine the scratchpad path from the system prompt and embed it in every spawn prompt
+2. Error policy (1 retry, graceful degradation, report omissions)
+3. Scratchpad naming: `{phase:02d}_{agent}_{artifact}.{ext}`
+4. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
+
+No cross-session resume — that mechanism was removed; scratchpad artifacts do not survive a new CLI session.
 
 After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## Harness: {Domain}` pointer block with trigger rule and change history table to `docs/harness-log.md`, and add one row under AGENTS.md's `## Docs Index` pointing to it. CLAUDE.md must stay a pure `@AGENTS.md` pointer (Step 8, enforced by `scripts/validate-harness.sh`) — do not append anything to it.
 
@@ -201,18 +202,19 @@ After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## H
 
 **Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same bar as Step 4b (default-on per Step 0).
 
-### Step 4d: _workspace Pattern
+### Step 4d: Scratchpad Pattern
 
-If Step 4c created an orchestrator, add a `_workspace/` section to `docs/runbook.md`:
+If Step 4c created an orchestrator, add a Scratchpad section to `docs/runbook.md`:
 
 ```markdown
-## _workspace/ Convention
+## Scratchpad Convention
 
-Intermediate artifacts live under `_workspace/` at repo root.
+Intermediate artifacts live in the session scratchpad directory (path given in the system prompt).
 Naming: `{phase:02d}_{agent}_{artifact}.{ext}`
 
-Preserve across sessions — enables partial re-run without full restart.
-Remove only on explicit "reset" request.
+Ephemeral — gone at session end, no cross-session resume.
+
+Separate mechanism: delegation-gate evidence files live in `.claude/tmp/` (gitignored, session_id-stamped — see `references/enforcement-template.md`).
 ```
 
 This makes the convention discoverable to future sessions and new contributors.
@@ -279,7 +281,7 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
    - `.claude/trigger-routes.json` (one route per orchestrator skill + per high-leverage agent role)
    - Add `UserPromptSubmit` hook to `.claude/settings.json`
 
-2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `_workspace/`. Forces the orchestrator/explorer to run first. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
+2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. Forces the orchestrator/explorer to run first. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
@@ -422,7 +424,7 @@ The last three scripts are repair tools, not routine ops. At Level 3, they shoul
 ## Additional Resources
 
 All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
-- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), `_workspace/` convention, `docs/harness-log.md` pointer block, directive-description rule. **Read at Step 4c.**
+- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), scratchpad convention, `docs/harness-log.md` pointer block, directive-description rule. **Read at Step 4c.**
 - **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**

@@ -11,7 +11,7 @@ Transcript dir name = the absolute project path with **both `/` and `.` replaced
 /Users/me/.claude       → -Users-me--claude   (note the doubled dash from the dot)
 ```
 
-The scanner encodes via `re.sub(r"[/.]", "-", path)`. The reverse is lossy (a dash could be `/`, `.`, or a literal `-`), so `all` scope reports the **encoded dir name** as the project label, not a reconstructed path.
+The scanner encodes via `re.sub(r"[/.:\\]", "-", os.path.normcase(os.path.abspath(path)))` — normalizing to an absolute, case-folded path first avoids Windows drive-letter case (`C:` vs `c:`) fragmenting state across sessions. The reverse is lossy (a dash could be `/`, `.`, `\`, `:`, or a literal `-`), so `all` scope reports the **encoded dir name** as the project label, not a reconstructed path.
 
 ## Record types (`.type`)
 

@@ -160,7 +160,7 @@ Record the run and candidate state so the staleness nudge stays accurate. Set `H
 HARNESS_PENDING=1 python3 - <<'PY'   # ← replace 1 with 0 for empty/Watch-only reports
 import json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.]", "-", os.getcwd()))
+state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.:\\]", "-", os.getcwd()))
 os.makedirs(state_dir, exist_ok=True)
 p = os.path.join(state_dir, ".harness-curator-state.json")
 now = int(time.time() * 1000)

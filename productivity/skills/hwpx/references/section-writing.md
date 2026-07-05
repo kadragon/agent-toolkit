@@ -69,7 +69,7 @@ First `<hp:p>` of section0.xml — first `<hp:run>` must contain `<hp:secPr>` an
                      linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0"
                      hasTextRef="0" hasNumRef="0">
             <hp:p paraPrIDRef="21" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0" id="고유ID">
-              <hp:run charPrIDRef="9"><hp:t>헤더 셀</hp:t></hp:run>
+              <hp:run charPrIDRef="9"><hp:t>헤더1</hp:t></hp:run>
             </hp:p>
           </hp:subList>
           <hp:cellAddr colAddr="0" rowAddr="0"/>
@@ -77,12 +77,54 @@ First `<hp:p>` of section0.xml — first `<hp:run>` must contain `<hp:secPr>` an
           <hp:cellSz width="열너비" height="행높이"/>
           <hp:cellMargin left="0" right="0" top="0" bottom="0"/>
         </hp:tc>
-        <!-- 나머지 셀... -->
+        <hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="4">
+          <hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER"
+                     linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0"
+                     hasTextRef="0" hasNumRef="0">
+            <hp:p paraPrIDRef="21" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0" id="고유ID">
+              <hp:run charPrIDRef="9"><hp:t>헤더2</hp:t></hp:run>
+            </hp:p>
+          </hp:subList>
+          <hp:cellAddr colAddr="1" rowAddr="0"/>
+          <hp:cellSpan colSpan="1" rowSpan="1"/>
+          <hp:cellSz width="열너비" height="행높이"/>
+          <hp:cellMargin left="0" right="0" top="0" bottom="0"/>
+        </hp:tc>
+      </hp:tr>
+      <hp:tr>
+        <hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="3">
+          <hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER"
+                     linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0"
+                     hasTextRef="0" hasNumRef="0">
+            <hp:p paraPrIDRef="22" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0" id="고유ID">
+              <hp:run charPrIDRef="0"><hp:t>값1</hp:t></hp:run>
+            </hp:p>
+          </hp:subList>
+          <hp:cellAddr colAddr="0" rowAddr="1"/>
+          <hp:cellSpan colSpan="1" rowSpan="1"/>
+          <hp:cellSz width="열너비" height="행높이"/>
+          <hp:cellMargin left="0" right="0" top="0" bottom="0"/>
+        </hp:tc>
+        <hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="3">
+          <hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER"
+                     linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0"
+                     hasTextRef="0" hasNumRef="0">
+            <hp:p paraPrIDRef="22" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0" id="고유ID">
+              <hp:run charPrIDRef="0"><hp:t>값2</hp:t></hp:run>
+            </hp:p>
+          </hp:subList>
+          <hp:cellAddr colAddr="1" rowAddr="1"/>
+          <hp:cellSpan colSpan="1" rowSpan="1"/>
+          <hp:cellSz width="열너비" height="행높이"/>
+          <hp:cellMargin left="0" right="0" top="0" bottom="0"/>
+        </hp:tc>
       </hp:tr>
     </hp:tbl>
   </hp:run>
 </hp:p>
 ```
+
+> **`colAddr`/`rowAddr` must be distinct per cell — this is the #1 cause of "blank document in Hancom" for hand-written tables.** Every `<hp:tc>` needs its own `(colAddr, rowAddr)` matching its actual grid position; copy-pasting the first cell's block for the remaining cells without updating these two values leaves every cell at `(0,0)`, which is structurally valid XML (passes ZIP/well-formed/ID-ref checks) but renders as an empty document. `validate.py` checks that every `rowCnt × colCnt` grid cell is covered exactly once — run it before opening in Hancom.
 
 ## Table placement patterns
 
