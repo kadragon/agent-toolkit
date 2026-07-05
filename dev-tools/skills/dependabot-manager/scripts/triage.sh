@@ -14,7 +14,8 @@ for entry in "$@"; do
   number="${entry##*:}"
 
   if [[ ! "$number" =~ ^[0-9]+$ ]]; then
-    results+=("{\"repo\":\"$repo\",\"number\":\"$number\",\"category\":\"error\",\"error\":\"invalid PR number\"}")
+    results+=("$(jq -n --arg repo "$repo" --arg number "$number" \
+      '{repo: $repo, number: $number, category: "error", error: "invalid PR number"}')")
     continue
   fi
 
