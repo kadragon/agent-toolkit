@@ -30,7 +30,7 @@ Before the first iteration:
 
 3. **Set an exit condition.** State it as a verifiable sentence: *"Verifier scores all 5 criteria green for two consecutive rounds"* or *"User accepts the output."*
 
-4. **Set a loop ceiling.** Default: stop after 4 rounds of no improvement or 8 rounds total. Loops without ceilings drift; ceilings force reflection on whether the rubric itself is wrong.
+4. **Set a loop ceiling.** Default: stop after 2 consecutive rounds of no improvement (plateau, see Step 5) or 8 rounds total. Loops without ceilings drift; ceilings force reflection on whether the rubric itself is wrong.
 
 5. **Open a loop ledger.** This skill's value is *accumulated structured reflection* — each round builds on the last round's hypotheses. But an 8-round loop that spawns a verifier subagent every round can hit context compaction mid-loop, which silently erases the reflections the skill depends on. So the ledger lives on disk, not in context.
 
