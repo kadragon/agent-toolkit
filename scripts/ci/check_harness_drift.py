@@ -41,6 +41,10 @@ ROUTER = REPO_ROOT / ".claude" / "hooks" / "trigger-router.sh"
 ROUTES_FILE = REPO_ROOT / ".claude" / "trigger-routes.json"
 
 SKILL_GLOBS = ["dev-tools/skills/*/SKILL.md", "productivity/skills/*/SKILL.md"]
+REFERENCE_GLOBS = [
+    "dev-tools/skills/*/references/*.md",
+    "productivity/skills/*/references/*.md",
+]
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
 # All other skills are warn-only until brought into compliance separately.
@@ -60,6 +64,20 @@ def find_skill_files() -> list[Path]:
     files: list[Path] = []
     for pattern in SKILL_GLOBS:
         files.extend(sorted(REPO_ROOT.glob(pattern)))
+    return files
+
+
+def find_reference_files() -> list[tuple[str, Path]]:
+    """Return (skill_name, path) pairs for `references/*.md` docs split out of a SKILL.md.
+
+    These aren't matched by SKILL_GLOBS (no frontmatter, live in a subdir) but can carry
+    fenced bash moved out of a HARD_FAIL_SKILLS SKILL.md — check capture-before-use here too.
+    """
+    files: list[tuple[str, Path]] = []
+    for pattern in REFERENCE_GLOBS:
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            skill_name = path.parent.parent.name
+            files.append((skill_name, path))
     return files
 
 
@@ -208,6 +226,22 @@ def main() -> int:
 
         if severity == "ERROR" and (drift or capture):
             hard_fail = True
+
+    # WARN-only: these files weren't scanned at all before (no frontmatter, glob
+    # miss), so surfacing them is new visibility. Promoting straight to hard-fail
+    # would retroactively block CI on pre-existing debt in untouched reference
+    # docs (e.g. hwpx's $SKILL_DIR pattern) — track those via backlog, not here.
+    for skill_name, path in find_reference_files():
+        text = path.read_text()
+        rel = path.relative_to(REPO_ROOT)
+        capture = check_capture_before_use(text)
+
+        if not capture:
+            print(f"OK   {rel} ({skill_name}): capture-before-use clean")
+            continue
+
+        for msg in capture:
+            print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
 
     print("----")
     if hard_fail:

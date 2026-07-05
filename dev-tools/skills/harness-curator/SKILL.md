@@ -56,6 +56,7 @@ Two supplementary file-lenses complement the transcript firing data (a skill can
 - **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run the loop below: new/untracked files (empty `git log` output) skip the age check; assets with a commit date 60+ days ago are flagged; if repo detection fails, mark the asset `non-git` and skip the age check rather than running `git log` from the current project.
 
   ```bash
+  assets=("path/to/skill/SKILL.md" "path/to/agent.md")  # populate from Step 2 Glob results
   for asset in "${assets[@]}"; do
     repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel 2>/dev/null)
     if [ -z "$repo_root" ]; then
@@ -133,7 +134,7 @@ The script resolves each bare name to its `plugin@market` key in the global `ena
 - Reads global settings from `$CLAUDE_CONFIG_DIR/settings.json` (fallback `~/.claude/settings.json`).
 - Writes only to the **project** `.claude/settings.json` — never the global file.
 - Preserves all existing keys and sections; creates `enabledPlugins` if absent.
-- Guarantees (disable-only, atomic write) are exercised by `scripts/disable_plugins.py --test` — see Additional Resources.
+- Guarantees are checked by `scripts/disable_plugins.py --test` — disable-only behavior and write correctness; the test does not inject a mid-write crash, so it does not itself prove atomicity under failure. See Additional Resources.
 
 ### Post-write note
 
