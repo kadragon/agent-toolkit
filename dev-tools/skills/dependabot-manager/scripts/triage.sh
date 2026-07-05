@@ -13,6 +13,12 @@ for entry in "$@"; do
   repo="${entry%%:*}"
   number="${entry##*:}"
 
+  if [[ ! "$number" =~ ^[0-9]+$ ]]; then
+    results+=("$(jq -n --arg repo "$repo" --arg number "$number" \
+      '{repo: $repo, number: $number, category: "error", error: "invalid PR number"}')")
+    continue
+  fi
+
   data=$(gh pr view "$number" --repo "$repo" \
     --json number,title,state,mergeStateStatus,statusCheckRollup 2>/dev/null) || {
     results+=("{\"repo\":\"$repo\",\"number\":$number,\"category\":\"error\",\"error\":\"gh pr view failed\"}")

@@ -15,8 +15,8 @@ levers, output template, the why. Read it before running.
 `references/dataset.md` — fields + exact Korean filter literals.
 All deterministic steps (sampling, depth→plan, roster) are in this skill's
 `scripts/sample_personas.py` (no project install, no local dataset — queries HF
-parquet over HTTP in ~2s). **Requires `uv` on PATH and network access to
-huggingface.co over HTTP.** If `uv` is missing or HF is unreachable (the script
+parquet over HTTPS in ~2s). **Requires `uv` on PATH and network access to
+huggingface.co over HTTPS.** If `uv` is missing or HF is unreachable (the script
 errors / hangs), tell the user the prerequisite that failed and stop — do not
 fabricate personas. **`…` below means** `uv run --with duckdb python sample_personas.py`
 run from the skill's `scripts/` directory — e.g. `cd <this-skill-dir>/scripts`
@@ -31,7 +31,7 @@ Tell the user your plan in one short message, recommend a default, let them adju
   - **Targeted** (a WHERE filter) — default when the question implicitly concerns a specific group. Say plainly: a targeted panel no longer represents the public and raises caricature risk.
 - **N + rounds + models** — get the deterministic plan: `… plan --depth simple|normal|deep` (add `--n` if the user gave a number). Returns N, whether to run Round 1, and the per-round model. **Never opus.** Classify depth yourself; the script maps it.
 
-Validate any Korean categorical literals with `… distinct --field <name>` (or `references/dataset.md`) before filtering — guessed strings silently match zero rows.
+Validate any Korean categorical literals with `… distinct --field <name>` (or `references/dataset.md`) before filtering — guessed strings silently match zero rows. `distinct` scans shard 0 only by default (add `--shard all` for a full scan) — a value present only in other shards won't show up.
 
 ### 2. Sample
 ```bash
@@ -39,7 +39,7 @@ Validate any Korean categorical literals with `… distinct --field <name>` (or 
 … sample --n 6 --where "age BETWEEN 25 AND 39 AND province IN ('서울','경기')"   # targeted
 … sample --n 6 --fields "persona,professional_persona,age,sex,province,occupation"  # trim to topic
 ```
-Returns a JSON array. Check stderr: if matched-rows < N, the filter is too narrow — loosen it, add `--shard all` (full 1M scan, ~18s), or tell the user you're proceeding with fewer. Never debate a silently-truncated panel.
+Returns a JSON array. Check stderr: if matched-rows < N, the filter is too narrow — loosen it, add `--shard all` (full 1M scan, ~18s), or tell the user you're proceeding with fewer. Never debate a silently-truncated panel. When trimming `--fields`, always keep `age,sex,province,occupation` — these are the core fields the debate needs and shouldn't be dropped.
 
 ### 3. Round 0 — independent openings (parallel subagents)
 Spawn the **`productivity:persona-actor`** agent (tool-less → far fewer per-spawn tokens; falls back to `general-purpose` if unavailable), one **per persona, same turn, isolated** — each sees ONLY its own persona + the question, never the others (seeing others first manufactures consensus). For each spawn:

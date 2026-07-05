@@ -143,7 +143,7 @@ PREFLIGHT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/preflight
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")  # from Setup
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")  # from Setup
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh ${CODEX_MODE} ${BASE_BRANCH} ${CODEX_COMPANION_PATH} \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/codex-review.sh "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" \
   || echo '{"codex_review":"failed"}' >&2
 ```
 
@@ -206,6 +206,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Review sub-agent fails | Log skill id, proceed with remaining |
 | No actionable suggestions | Skip Steps 4–5, still run Step 6 |
 | Push fails | Report, suggest manual resolution |
+| `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
 | CI fails 3× | Stop, ask user |
 | Merge fails | Report `merge_ok`, do not force-delete |
 
