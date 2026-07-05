@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 start=$SECONDS
 
 while true; do
-  result=$("$SCRIPT_DIR/triage.sh" "${entries[@]}")
+  result=$("$SCRIPT_DIR/triage.sh" "${entries[@]+"${entries[@]}"}")
 
   pending=$(echo "$result" | jq '[.[] | select(.category == "ci_pending")] | length')
 
