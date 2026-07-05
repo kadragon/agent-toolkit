@@ -473,13 +473,31 @@ def _resolve_prev_ref(n, chain_stack, cwd, stack_reliable, branch_override, refl
     return resolved
 
 
-def _is_git_checkout_or_switch(segment):
-    """True if this segment is a `git checkout`/`git switch` invocation of any
-    form. Used to poison chain-stack reliability for switch forms that are not
-    individually modeled (detach, pathspec restore, multi-positional) — those
-    are already ignored by the attribution loop for `running_branch`, but a
-    later '@{-N}' in the same chain must not trust chain_stack's depth past an
-    unmodeled switch, since it may or may not have moved HEAD at runtime.
+# git subcommands statically known to never change which branch HEAD points
+# at (so a segment invoking one of these cannot silently move the chain off
+# the depth _resolve_prev_ref assumes). Deliberately conservative and NOT an
+# exhaustive list of "safe" commands — anything absent from it (including an
+# unrecognized token, which may be a configured alias like `co = checkout`
+# that literal "checkout"/"switch" matching can never see) is treated as
+# potentially HEAD-moving and poisons chain-stack reliability instead.
+_HEAD_NEUTRAL_SUBCOMMANDS = {"commit"}
+
+
+def _is_unmodeled_git_segment(segment):
+    """True if this segment is a `git` invocation whose effect on HEAD is not
+    provably modeled by `_new_branch_created`/`_bare_switch_target` (called
+    before this in the attribution loop) or known to be HEAD-neutral.
+
+    Covers: `checkout`/`switch` forms not caught by the two functions above
+    (detach, pathspec restore, multi-positional — already left untrusted for
+    `running_branch`, but chain_stack's DEPTH must also stop being trusted
+    past them); and — critically — any OTHER subcommand, since a git alias
+    (`git -c alias.co=checkout co X`, or a persisted `co = checkout` in
+    .gitconfig) invokes checkout/switch under a name this file's literal
+    token matching cannot recognize. Poisoning on every unrecognized
+    subcommand closes that gap without needing to resolve aliases: a later
+    '@{-N}' just falls back to live branch detection instead of trusting a
+    chain_stack depth that may not reflect what actually ran.
     """
     toks = _tokens(segment)
     i = 0
@@ -497,7 +515,9 @@ def _is_git_checkout_or_switch(segment):
             i += 1
             continue
         break
-    return i < len(toks) and toks[i] in ("checkout", "switch")
+    if i >= len(toks):
+        return False  # bare 'git', no subcommand — nothing to poison over
+    return toks[i] not in _HEAD_NEUTRAL_SUBCOMMANDS
 
 
 def _marker_present(git_cwd, _override=None):
@@ -746,8 +766,13 @@ def main(branch_override=None, marker_override=None, reflog_override=None):
             switched = _bare_switch_target(stripped)
             if isinstance(switched, _PrevRef):
                 any_switch_seen = True
+                # Resolve against THIS segment's own effective cwd (honors a
+                # `-C <path>` on the switch itself), not the shell-cd-tracked
+                # running_cwd — otherwise a `-C`-scoped switch/commit chain
+                # resolves against the wrong repository's reflog.
+                switch_cwd = _git_cwd(stripped, running_cwd)
                 resolved = _resolve_prev_ref(
-                    switched.n, chain_stack, running_cwd, stack_reliable,
+                    switched.n, chain_stack, switch_cwd, stack_reliable,
                     branch_override, reflog_override,
                 )
                 if resolved is None:
@@ -771,9 +796,11 @@ def main(branch_override=None, marker_override=None, reflog_override=None):
                 stack_reliable = False
                 if switched in ("main", "master") or running_branch is not None:
                     running_branch = switched
-            elif _is_git_checkout_or_switch(stripped):
-                # detach / pathspec restore / multi-positional — not modeled
-                # above, so chain_stack depth is unprovable past this segment.
+            elif _is_unmodeled_git_segment(stripped):
+                # detach / pathspec restore / multi-positional checkout-or-switch
+                # form, an unrecognized subcommand (possibly a git alias for
+                # checkout/switch), or any other unmodeled git invocation —
+                # chain_stack depth is unprovable past this segment.
                 any_switch_seen = True
                 stack_reliable = False
         effective_cwd_at[idx] = running_cwd
@@ -1044,6 +1071,33 @@ def _test():
           run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="feature/w") == 0)
     check("bare checkout @{-1} then commit (no prior switch, reflog=main) → blocked",
           run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="main") == 2)
+
+    # A `-C <path>` on the switch/commit segments must be honored when resolving
+    # prev-refs — using the hook's own (unrelated) cwd instead of the segment's
+    # real `-C` target would query the wrong repository's branch/reflog and
+    # could allow a commit that actually lands on main in the REAL target repo.
+    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → blocked",
+          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
+              "git -C /repoA commit -m '[FEAT] y'",
+              cwd="/hostcwd",
+              branch=lambda cwd: "main" if cwd == "/repoA" else "decoy-live",
+              reflog=lambda cwd, n: "main" if cwd == "/repoA" else "decoy-reflog") == 2)
+    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → passes when non-main",
+          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
+              "git -C /repoA commit -m '[FEAT] y'",
+              cwd="/hostcwd",
+              branch=lambda cwd: "feature/real" if cwd == "/repoA" else "decoy-live",
+              reflog=lambda cwd, n: "decoy-reflog") == 0)
+
+    # A git ALIAS for checkout/switch (inline `-c alias.X=checkout` or a
+    # persisted `.gitconfig` alias) is invisible to literal "checkout"/"switch"
+    # token matching — it must poison chain-stack reliability just like an
+    # unmodeled checkout form, so a later '@{-N}' falls back to live detection
+    # instead of resolving against a chain_stack depth the alias may have
+    # silently shifted.
+    check("git alias for checkout (-c alias.co=checkout) poisons stack → blocked",
+          run("git -c alias.co=checkout co feature/foo && git checkout @{-1} && git commit -m '[FEAT] x'",
+              branch="main", reflog="feature/bar") == 2)
 
     # branch attribution only propagates across '&&' (guaranteed-success predecessor)
     check("checkout -b || commit on main still blocked (|| not guaranteed)",
