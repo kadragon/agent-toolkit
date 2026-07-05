@@ -75,7 +75,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ```bash
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
-FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || echo 0)
+FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
@@ -97,15 +97,15 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   ```
 - All other candidates → "Reviewers Skipped: redundant domain".
 
-For each selected slot, launch one Agent (`run_in_background: true`, no `subagent_type`). Model: Slot 1 → `sonnet`, Slot 2 → `opus`.
+For each selected slot, launch one Agent (`run_in_background: true`, no `subagent_type`). Model: Slot 1 → `sonnet`, Slot 2 → `opus`. `${SLOT_ID}` below is that slot's value (`$SLOT1` or `$SLOT2`).
 
 Reviewer prompt:
 ```
 Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
-2. Invoke Skill "${SKILL_ID}" to review.
+2. Invoke Skill "${SLOT_ID}" to review.
 3. Return findings as JSON array:
-   [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SKILL_ID}"}]
+   [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
 Only flag issues introduced or made significantly worse by this PR.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.

@@ -2,14 +2,6 @@
 
 Items below sourced from the 2026-07-04 marketplace-wide skill review (9 skills, per-skill evaluator agents); PR #109 fixed the top-priority findings, these are the remainder.
 
-## Now
-
-- [ ] [FIX] dependabot-manager `scripts/triage.sh:25` — failed detection only matches `conclusion == "FAILURE"`; `CANCELLED`/`TIMED_OUT`/`STARTUP_FAILURE` checks are neither failed nor pending, so mergeStateStatus CLEAN misclassifies them as `ready` (timed-out CI → auto-merge candidate). Also handle StatusContext-style entries (`state` field only, e.g. legacy Jenkins) in both failed and pending detection.
-- [ ] [FIX] dev-review-cycle `SKILL.md:78` — `FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || echo 0)`: on empty diff `grep -c` prints "0" then exits 1, so `|| echo 0` appends a second line → `FILE_COUNT="0\n0"` breaks the trivial short-circuit numeric compare. Drop the `|| echo 0`.
-- [ ] [FIX] dev-review-cycle `SKILL.md:108` — reviewer prompt references `${SKILL_ID}` which is never defined (captured vars are `SLOT1`/`SLOT2`); define it or use `${SLOT1}` directly.
-- [ ] [FIX] loop-engineer exit-condition contradiction — `SKILL.md:33` says "stop after 4 rounds of no improvement" but `SKILL.md:88` plateau-exits after 2 flat rounds, making the 4-round rule unreachable; keep one norm (Step 5) and delete/align the other.
-- [ ] [FIX] harness-curator six-vs-seven signals — `SKILL.md:61` says "six signals" but the table (SKILL.md:65-73) has 7 rows; `references/signal-taxonomy.md` still says six and lacks detection rules/threshold/brief for "Recurring failure". Pick one resolution and apply to both files.
-
 ## Next
 
 - [ ] [FIX] hwpx `$SKILL_DIR` capture-before-use — add an executable resolution snippet in the Environment section and a `SKILL_DIR=...` capture line at the top of each workflow's first bash block (~22 WARN sites in `check_harness_drift.py` output); then add `hwpx` to `HARD_FAIL_SKILLS`.

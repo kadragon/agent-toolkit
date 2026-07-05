@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-The scanner emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Six output blocks, six classification signals — `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
+The scanner emits seven blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `FAILED-COMMANDS`, `PROMPTS`. Seven output blocks, seven classification signals — `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -67,6 +67,17 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **No scanner change needed:** Signal 6 is detected by model judgment over the same `PROMPTS` block that drives Signal 1. The scanner produces no separate output block for it.
 
+## 7. Recurring failure
+
+**Detect:** Lines in `FAILED-COMMANDS` — a failure signature (command/error pair) repeating **≥3×**. Each recurrence means the agent re-derives the same broken assumption instead of learning it once.
+
+**Route:**
+- Typo / wrong flag repeated → CLAUDE.md/AGENTS.md note, or a PreToolUse block via `hookify` / `update-config` if mechanically detectable.
+- Missing dependency/tool → setup doc (`docs/`) or a guard that fails fast with the fix.
+- Systematic wrong flag/pattern → CLAUDE.md/AGENTS.md guardrail; surface the exact line for the user to decide — never auto-edit global instructions.
+
+**Caution:** distinguish a genuine recurring gap from transient flakiness (network blip, rate limit) — the latter isn't a harness gap.
+
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
@@ -77,5 +88,6 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 | Harness friction (over-protection) | 2 (or 1 with systematic cause) |
 | Domain knowledge candidate | 2 (lower than Signal 1 — atomic facts never form large clusters) |
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
+| Recurring failure | 3 |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.
