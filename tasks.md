@@ -1,9 +1,5 @@
 ## Review Backlog
 
-### PR #117 — batch-dependabot-persona-router review cycle (out-of-scope findings)
-
-- [ ] [debt] `dev-tools/skills/dependabot-manager/scripts/audit-automerge.sh:74` — identical unguarded `"${results[@]}"` expansion under `set -euo pipefail` as the bug fixed in triage.sh/poll-ci.sh by this PR (bash 3.2 `unbound variable` on empty array). Pre-existing, not touched by PR #117. Same fix pattern applies: `"${results[@]+"${results[@]}"}"`. (source: review)
-
 ### PR #93 — commit-guard static-analysis review cycle (deferred findings)
 
 - [x] `commit-guard/guard.py` — bare switch-back is not modeled: `git checkout -b X && git checkout main && git commit` keeps `running_branch=X` across the bare `git checkout main` (only `-b/-c`/long-create flags update attribution), so a commit that lands on main is mis-attributed to X and allowed. Deferred because the fix needs bare-`checkout <ref>` handling, which is statically ambiguous (branch switch vs `checkout <pathspec>` vs `checkout -- file`) and risks false-positives that block legit commits. Contrived multi-checkout chain; dominant accidental cases stay guarded. P3, conf 95. (source: agy/codex) — **fixed v3.6.7: `_bare_switch_target` re-attributes only main/master targets (fail-toward-block), `--`/multi-positional restores excluded.**
