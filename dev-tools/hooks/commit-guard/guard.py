@@ -261,11 +261,21 @@ def _is_prev_branch_ref(tok):
     return tok == "-" or bool(_PREV_BRANCH_REF_RE.match(tok))
 
 
-# sentinel returned by _bare_switch_target for a switch whose target is
-# statically unresolvable ('-', '@{-1}', ...) — distinct from None (not a bare
-# switch at all), so the caller can tell "switched, but destination unknown"
-# apart from "did not switch".
-_UNKNOWN_SWITCH_TARGET = object()
+# carrier returned by _bare_switch_target for a switch to a previous-branch ref
+# ('-', '@{-N}') — distinct from None (not a bare switch at all) and from a
+# plain str (a known branch name), so the caller can attempt real resolution
+# (virtual chain-stack + reflog) instead of unconditionally treating it as
+# unresolvable. See _resolve_prev_ref.
+class _PrevRef:
+    __slots__ = ("n",)
+
+    def __init__(self, n):
+        self.n = n
+
+
+def _prev_ref_n(tok):
+    """'-' -> 1; '@{-N}' -> N."""
+    return 1 if tok == "-" else int(tok[3:-1])
 
 
 def _new_branch_created(segment):
@@ -312,8 +322,8 @@ def _new_branch_created(segment):
 
 def _bare_switch_target(segment):
     """If this segment is a bare branch switch (no create flag) to a single
-    unambiguous branch ref, return that branch name; _UNKNOWN_SWITCH_TARGET if
-    it switches to a statically-unresolvable ref ('-', '@{-1}', ...); else None.
+    unambiguous branch ref, return that branch name; a _PrevRef(n) if it
+    switches to a previous-branch ref ('-', '@{-N}'); else None.
 
     Recognizes `git checkout <ref>` and `git switch <ref>` with exactly one
     positional argument and no `--` separator. Returns None for:
@@ -325,12 +335,11 @@ def _bare_switch_target(segment):
       - zero or multiple positionals (`checkout <ref> <path>` is a pathspec
         restore from <ref>, current branch unchanged)
 
-    Returns _UNKNOWN_SWITCH_TARGET for `-`/`@{-N}` (previous-branch refs): the
-    actual destination depends on switch history this function cannot see. The
-    caller must NOT trust the in-chain attribution across this switch — it
-    resets tracked attribution to unknown (None) rather than leaving it
-    pointed at the stale pre-switch branch, so the commit falls back to live
-    branch detection instead of silently passing (fail-toward-block).
+    Returns _PrevRef(n) for `-`/`@{-n}` (previous-branch refs): the caller
+    resolves the actual destination via _resolve_prev_ref (in-chain virtual
+    stack + real reflog), falling back to unknown (None) attribution — and
+    thus live branch detection — only when that resolution cannot be proven
+    correct (fail-toward-block).
 
     The caller only acts on a main/master target (re-attributing the chain to a
     protected branch — the fail-toward-block direction). A non-protected target
@@ -374,7 +383,7 @@ def _bare_switch_target(segment):
         if tok in ("--detach", "-d"):
             return None  # detached HEAD — commit does not update the branch ref
         if _is_prev_branch_ref(tok):
-            positionals.append(_UNKNOWN_SWITCH_TARGET)
+            positionals.append(_PrevRef(_prev_ref_n(tok)))
             i += 1
             continue
         if tok in _CHECKOUT_SWITCH_VALUE_OPTS:
@@ -408,6 +417,107 @@ def _current_branch(cwd, _override=None):
     except Exception:
         pass
     return ""
+
+
+def _prev_branch(cwd, n, _override=None):
+    """Return the real reflog '@{-n}' branch name, or '' on failure.
+
+    _override may be a string (returned as-is) or a callable (cwd, n) -> str
+    (used by tests that need per-cwd/per-n reflog injection).
+    """
+    if _override is not None:
+        if callable(_override):
+            return _override(cwd, n)
+        return _override
+    try:
+        out = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", f"@{{-{n}}}"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _resolve_prev_ref(n, chain_stack, cwd, stack_reliable, branch_override, reflog_override):
+    """Resolve a previous-branch ref ('-'=@{-1}, '@{-n}') to its real target
+    branch, or None if it cannot be proven (caller must fail-toward-block).
+
+    Combines the in-chain simulated switch history (chain_stack, most-recent
+    last) with the real pre-chain state:
+      - n <= depth-1  → chain_stack[depth-1-n]      (statically known)
+      - n == depth    → pre-chain current branch    (_current_branch shell-out)
+      - n > depth     → real reflog '@{-(n-depth)}'  (_prev_branch shell-out)
+
+    stack_reliable must be True — once any bare switch to a known (statically
+    ambiguous) target has occurred, chain_stack's depth can no longer be
+    trusted to match git's real reflog depth, and resolving further would risk
+    a bypass (a commit landing on main getting allowed). Returns None in that
+    case, and also when the resolved target is "HEAD" (detached — a commit
+    there does not update the protected branch, so there is no branch name to
+    trust).
+    """
+    if not stack_reliable:
+        return None
+    depth = len(chain_stack)
+    if n <= depth - 1:
+        resolved = chain_stack[depth - 1 - n]
+    elif n == depth:
+        resolved = _current_branch(cwd, _override=branch_override)
+    else:
+        resolved = _prev_branch(cwd, n - depth, _override=reflog_override)
+    if not resolved or resolved == "HEAD":
+        return None
+    return resolved
+
+
+# git subcommands statically known to never change which branch HEAD points
+# at (so a segment invoking one of these cannot silently move the chain off
+# the depth _resolve_prev_ref assumes). Deliberately conservative and NOT an
+# exhaustive list of "safe" commands — anything absent from it (including an
+# unrecognized token, which may be a configured alias like `co = checkout`
+# that literal "checkout"/"switch" matching can never see) is treated as
+# potentially HEAD-moving and poisons chain-stack reliability instead.
+_HEAD_NEUTRAL_SUBCOMMANDS = {"commit"}
+
+
+def _is_unmodeled_git_segment(segment):
+    """True if this segment is a `git` invocation whose effect on HEAD is not
+    provably modeled by `_new_branch_created`/`_bare_switch_target` (called
+    before this in the attribution loop) or known to be HEAD-neutral.
+
+    Covers: `checkout`/`switch` forms not caught by the two functions above
+    (detach, pathspec restore, multi-positional — already left untrusted for
+    `running_branch`, but chain_stack's DEPTH must also stop being trusted
+    past them); and — critically — any OTHER subcommand, since a git alias
+    (`git -c alias.co=checkout co X`, or a persisted `co = checkout` in
+    .gitconfig) invokes checkout/switch under a name this file's literal
+    token matching cannot recognize. Poisoning on every unrecognized
+    subcommand closes that gap without needing to resolve aliases: a later
+    '@{-N}' just falls back to live branch detection instead of trusting a
+    chain_stack depth that may not reflect what actually ran.
+    """
+    toks = _tokens(segment)
+    i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    if i >= len(toks) or os.path.basename(toks[i]) != "git":
+        return False
+    i += 1
+    while i < len(toks):
+        tok = toks[i]
+        if tok in GIT_VALUE_OPTS:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        break
+    if i >= len(toks):
+        return False  # bare 'git', no subcommand — nothing to poison over
+    return toks[i] not in _HEAD_NEUTRAL_SUBCOMMANDS
 
 
 def _marker_present(git_cwd, _override=None):
@@ -571,13 +681,20 @@ def _block(reason):
     raise SystemExit(2)
 
 
-def main(branch_override=None, marker_override=None):
-    """Main hook logic. branch_override / marker_override for test injection.
+def main(branch_override=None, marker_override=None, reflog_override=None):
+    """Main hook logic. branch_override / marker_override / reflog_override for
+    test injection.
 
     branch_override may be:
       - None       → real git subprocess call
       - str        → returned for ALL cwds (legacy test interface)
       - callable   → called as branch_override(cwd) → str (per-cwd injection)
+
+    reflog_override (used to resolve real '@{-n}' refs beyond the in-chain
+    simulated depth) may be:
+      - None       → real git subprocess call
+      - str        → returned for ALL (cwd, n) (legacy test interface)
+      - callable   → called as reflog_override(cwd, n) → str
     """
     try:
         data = json.load(sys.stdin)
@@ -599,6 +716,11 @@ def main(branch_override=None, marker_override=None):
     effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
     running_cwd = env_cwd
     running_branch = None  # None = no in-chain branch creation seen → use live detection
+    # chain_stack / stack_reliable back '@{-N}'/'-' resolution only — they are
+    # independent of running_branch's own trust rules (see _resolve_prev_ref).
+    chain_stack = []       # ordered in-chain "current branch" history, most-recent last
+    stack_reliable = True  # False once chain_stack's depth can no longer be proven exact
+    any_switch_seen = False  # True once any HEAD-moving switch has appeared in the chain
     for idx, seg in enumerate(segments):
         # Branch attribution may only carry across '&&' (predecessor guaranteed to
         # have succeeded). After '||', ';', '|', '&' or a newline the earlier
@@ -606,6 +728,12 @@ def main(branch_override=None, marker_override=None):
         # back to live branch detection.
         if operators[idx] is not None and operators[idx] != "&&":
             running_branch = None
+            chain_stack = []
+            if any_switch_seen:
+                # an earlier switch (trusted or not) may have run at runtime and
+                # mutated the real reflog — a later '@{-N}' resolved against the
+                # hook-time (pre-chain) reflog would be stale, so stop resolving.
+                stack_reliable = False
         stripped = seg.strip()
         toks = _tokens(stripped)
         if len(toks) >= 2 and toks[0] == "cd":
@@ -614,9 +742,14 @@ def main(branch_override=None, marker_override=None):
             # different repo where the earlier checkout never applied.
             running_cwd = os.path.abspath(os.path.join(running_cwd, toks[1]))
             running_branch = None
+            chain_stack = []
+            if any_switch_seen:
+                stack_reliable = False
         created = _new_branch_created(stripped)
         if created is not None:
             running_branch = created
+            chain_stack.append(created)
+            any_switch_seen = True
         else:
             # A bare switch re-attributes the chain to its target when EITHER:
             #   (a) the target is a protected branch — `checkout -b X && checkout
@@ -631,15 +764,45 @@ def main(branch_override=None, marker_override=None):
             # pathspec), preserving the conservative "bare checkout from live main
             # does not unblock" rule.
             switched = _bare_switch_target(stripped)
-            if switched is _UNKNOWN_SWITCH_TARGET:
-                # statically-unresolvable switch-back ('-', '@{-1}', ...) — drop
-                # the in-chain attribution rather than trust the stale created
-                # branch; the commit below falls back to live branch detection.
-                running_branch = None
-            elif switched is not None and (
-                switched in ("main", "master") or running_branch is not None
-            ):
-                running_branch = switched
+            if isinstance(switched, _PrevRef):
+                any_switch_seen = True
+                # Resolve against THIS segment's own effective cwd (honors a
+                # `-C <path>` on the switch itself), not the shell-cd-tracked
+                # running_cwd — otherwise a `-C`-scoped switch/commit chain
+                # resolves against the wrong repository's reflog.
+                switch_cwd = _git_cwd(stripped, running_cwd)
+                resolved = _resolve_prev_ref(
+                    switched.n, chain_stack, switch_cwd, stack_reliable,
+                    branch_override, reflog_override,
+                )
+                if resolved is None:
+                    # unresolvable (or resolution proven unreliable) — drop the
+                    # in-chain attribution and stop trusting chain_stack depth,
+                    # so the commit falls back to live branch detection
+                    # (fail-toward-block).
+                    running_branch = None
+                    chain_stack = []
+                    stack_reliable = False
+                else:
+                    running_branch = resolved
+                    chain_stack.append(resolved)
+            elif switched is not None:
+                # bare switch to a statically-known (but branch-vs-pathspec
+                # ambiguous) target — chain_stack's depth can no longer be
+                # proven exact past this point, so poison future '@{-N}'
+                # resolution even though running_branch's own trust rule
+                # (below) is unaffected.
+                any_switch_seen = True
+                stack_reliable = False
+                if switched in ("main", "master") or running_branch is not None:
+                    running_branch = switched
+            elif _is_unmodeled_git_segment(stripped):
+                # detach / pathspec restore / multi-positional checkout-or-switch
+                # form, an unrecognized subcommand (possibly a git alias for
+                # checkout/switch), or any other unmodeled git invocation —
+                # chain_stack depth is unprovable past this segment.
+                any_switch_seen = True
+                stack_reliable = False
         effective_cwd_at[idx] = running_cwd
         effective_branch_at[idx] = running_branch
 
@@ -719,7 +882,7 @@ def _test():
         if not cond:
             fails.append(name)
 
-    def run(command, branch="feature/x", marker=False, cwd=None, tool_name="Bash"):
+    def run(command, branch="feature/x", marker=False, cwd=None, tool_name="Bash", reflog=None):
         """Simulate a hook invocation. Returns exit code (0=allow, 2=block)."""
         payload = json.dumps({
             "tool_name": tool_name,
@@ -729,7 +892,7 @@ def _test():
         old_stdin, sys.stdin = sys.stdin, io.StringIO(payload)
         old_stderr, sys.stderr = sys.stderr, io.StringIO()
         try:
-            main(branch_override=branch, marker_override=marker)
+            main(branch_override=branch, marker_override=marker, reflog_override=reflog)
             return 0
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 0
@@ -841,16 +1004,100 @@ def _test():
     check("checkout --conflict=merge main (attached form) then commit on main → blocked",
           run("git checkout --conflict=merge main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 2)
 
-    # unknown switch-back targets ('-' / '@{-1}') statically unresolvable: the
-    # in-chain attribution must be dropped (reset to None) rather than left
-    # pointing at the stale created branch, so the commit falls back to live
-    # branch detection instead of silently passing.
+    # previous-branch-ref switch-back targets ('-' / '@{-N}') are resolved via
+    # the virtual chain-stack + real reflog (_resolve_prev_ref). At depth 1,
+    # '-'/'@{-1}' resolve through _current_branch (the pre-chain live branch)
+    # — the same value the old always-unknown fallback reached, so these
+    # existing cases keep their original expected outcome unchanged.
     check("checkout -b X then checkout - then commit (live=main) → blocked",
           run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
     check("checkout -b X then checkout @{-1} then commit (live=main) → blocked",
           run("git checkout -b feature/x && git checkout @{-1} && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
     check("checkout -b X then checkout - then commit (live=feature/y) → passes (no false block)",
           run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="feature/y", marker=False) == 0)
+    # N == depth uses the pre-chain live branch (_current_branch), NOT the real
+    # reflog — a decoy reflog value must not override it.
+    check("checkout -b X then checkout @{-1} then commit (reflog decoy ignored) → blocked",
+          run("git checkout -b feature/x && git checkout @{-1} && git commit -m '[FEAT] y'",
+              branch="main", marker=False, reflog="feature/decoy") == 2)
+
+    # N > depth resolves via the REAL reflog ('@{-(N-depth)}'): the task's
+    # motivating false-block — `checkout -b tmp && checkout @{-2}` — where
+    # @{-2} actually lands on a feature branch must now be allowed instead of
+    # falling back to live (main) detection.
+    check("checkout -b tmp then checkout @{-2} (reflog=feature) → passes (real target, no false block)",
+          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
+              branch="main", marker=False, reflog="feature/z") == 0)
+    check("checkout -b tmp then checkout @{-2} (reflog=main) → still blocked",
+          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
+              branch="main", marker=False, reflog="main") == 2)
+    check("checkout -b tmp then checkout @{-5} (reflog resolution fails) → blocked (fail-toward-block)",
+          run("git checkout -b tmp && git checkout @{-5} && git commit -m '[FEAT] y'",
+              branch="main", marker=False, reflog="") == 2)
+    check("checkout -b tmp then checkout @{-2}/@{-3} (reflog varies by n) → resolves per-n",
+          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
+              branch="main", marker=False,
+              reflog=lambda _cwd, n: "feature/z" if n == 1 else "main") == 0)
+    check("checkout -b tmp then checkout @{-3} (reflog varies by n, n=2→main) → blocked",
+          run("git checkout -b tmp && git checkout @{-3} && git commit -m '[FEAT] y'",
+              branch="main", marker=False,
+              reflog=lambda _cwd, n: "feature/z" if n == 1 else "main") == 2)
+
+    # N <= depth-1 resolves statically from chain_stack — no shell-out at all.
+    # (depth=3 chain; decoy branch/reflog prove the shell-outs are never consulted.)
+    check("checkout -b X, main, Y then checkout @{-2} (chain_stack[0]=X) → passes",
+          run("git checkout -b X && git checkout -b main && git checkout -b Y && "
+              "git checkout @{-2} && git commit -m '[FEAT] z'",
+              branch="feature/decoy-live", marker=False, reflog="feature/decoy-reflog") == 0)
+    check("checkout -b X, main, Y then checkout @{-1} (chain_stack[1]=main) → blocked",
+          run("git checkout -b X && git checkout -b main && git checkout -b Y && "
+              "git checkout @{-1} && git commit -m '[FEAT] z'",
+              branch="feature/decoy-live", marker=False, reflog="feature/decoy-reflog") == 2)
+
+    # Bypass guards: a bare switch to a KNOWN target, or an unmodeled
+    # checkout/switch (detach/pathspec/multi-positional), poisons chain_stack
+    # depth — a later '@{-N}' must NOT trust it (would risk allowing a commit
+    # that actually lands on main).
+    check("checkout -b A then bare checkout main then checkout @{-1} then commit → blocked (poisoned)",
+          run("git checkout -b A && git checkout main && git checkout @{-1} && git commit -m '[FEAT] y'",
+              branch="main", marker=False) == 2)
+    check("checkout -b A ; checkout @{-1} then commit (reflog decoy) → blocked (reset+switch poisons)",
+          run("git checkout -b A ; git checkout @{-1} && git commit -m '[FEAT] y'",
+              branch="main", marker=False, reflog="feature/decoy") == 2)
+
+    # No prior switch in the chain: real reflog is still pristine at hook time,
+    # so '@{-1}' resolves reliably straight from it.
+    check("bare checkout @{-1} then commit (no prior switch, reflog=feature) → passes",
+          run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="feature/w") == 0)
+    check("bare checkout @{-1} then commit (no prior switch, reflog=main) → blocked",
+          run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="main") == 2)
+
+    # A `-C <path>` on the switch/commit segments must be honored when resolving
+    # prev-refs — using the hook's own (unrelated) cwd instead of the segment's
+    # real `-C` target would query the wrong repository's branch/reflog and
+    # could allow a commit that actually lands on main in the REAL target repo.
+    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → blocked",
+          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
+              "git -C /repoA commit -m '[FEAT] y'",
+              cwd="/hostcwd",
+              branch=lambda cwd: "main" if cwd == "/repoA" else "decoy-live",
+              reflog=lambda cwd, n: "main" if cwd == "/repoA" else "decoy-reflog") == 2)
+    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → passes when non-main",
+          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
+              "git -C /repoA commit -m '[FEAT] y'",
+              cwd="/hostcwd",
+              branch=lambda cwd: "feature/real" if cwd == "/repoA" else "decoy-live",
+              reflog=lambda cwd, n: "decoy-reflog") == 0)
+
+    # A git ALIAS for checkout/switch (inline `-c alias.X=checkout` or a
+    # persisted `.gitconfig` alias) is invisible to literal "checkout"/"switch"
+    # token matching — it must poison chain-stack reliability just like an
+    # unmodeled checkout form, so a later '@{-N}' falls back to live detection
+    # instead of resolving against a chain_stack depth the alias may have
+    # silently shifted.
+    check("git alias for checkout (-c alias.co=checkout) poisons stack → blocked",
+          run("git -c alias.co=checkout co feature/foo && git checkout @{-1} && git commit -m '[FEAT] x'",
+              branch="main", reflog="feature/bar") == 2)
 
     # branch attribution only propagates across '&&' (guaranteed-success predecessor)
     check("checkout -b || commit on main still blocked (|| not guaranteed)",
