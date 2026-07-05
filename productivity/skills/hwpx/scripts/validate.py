@@ -131,7 +131,13 @@ def _check_table_grid(root: ET.Element) -> list[str]:
     Hancom — this is the check that catches that class of error before the file ever reaches HWP.
     Only direct tr/tc children of each tbl are scanned, so a nested table (inside a cell's
     subList) is checked independently against its own rowCnt/colCnt, not folded into the parent grid.
+
+    rowCnt/colCnt are declared attributes on <hp:tbl>, but real documents (including this repo's
+    own `minutes` template) sometimes omit them — HWP itself doesn't require them to render. When
+    missing or non-positive, the grid bounds are inferred from the actual cellAddr/cellSpan extent
+    instead of skipping the table outright, so overlap/duplicate-address bugs are still caught.
     """
+    MAX_GRID_DIM = 1000
     errors: list[str] = []
     tbl_tag = f"{{{NS_HP}}}tbl"
     tr_tag = f"{{{NS_HP}}}tr"
@@ -141,16 +147,8 @@ def _check_table_grid(root: ET.Element) -> list[str]:
 
     for tbl in root.iter(tbl_tag):
         tbl_id = tbl.get("id", "?")
-        try:
-            row_cnt = int(tbl.get("rowCnt", "0"))
-            col_cnt = int(tbl.get("colCnt", "0"))
-        except ValueError:
-            continue
-        if row_cnt <= 0 or col_cnt <= 0:
-            continue
 
-        occupied: dict[tuple[int, int], int] = {}
-        out_of_range: set[tuple[int, int]] = set()
+        cells: list[tuple[int, int, int, int]] = []  # (row0, col0, row_span, col_span)
         for tr in tbl.findall(tr_tag):
             for tc in tr.findall(tc_tag):
                 addr = tc.find(addr_tag)
@@ -169,12 +167,37 @@ def _check_table_grid(root: ET.Element) -> list[str]:
                         row_span = int(span.get("rowSpan", "1"))
                     except ValueError:
                         pass
-                for r in range(row0, row0 + row_span):
-                    for c in range(col0, col0 + col_span):
-                        if r < 0 or c < 0 or r >= row_cnt or c >= col_cnt:
-                            out_of_range.add((r, c))
-                            continue
-                        occupied[(r, c)] = occupied.get((r, c), 0) + 1
+                cells.append((row0, col0, row_span, col_span))
+
+        if not cells:
+            continue
+
+        try:
+            row_cnt = int(tbl.get("rowCnt", "0"))
+            col_cnt = int(tbl.get("colCnt", "0"))
+        except ValueError:
+            row_cnt = col_cnt = 0
+
+        if row_cnt <= 0 or col_cnt <= 0:
+            row_cnt = max(row0 + row_span for row0, _, row_span, _ in cells)
+            col_cnt = max(col0 + col_span for _, col0, _, col_span in cells)
+
+        if row_cnt > MAX_GRID_DIM or col_cnt > MAX_GRID_DIM:
+            errors.append(
+                f"table {tbl_id}: rowCnt/colCnt ({row_cnt}x{col_cnt}) exceeds "
+                f"maximum supported grid size of {MAX_GRID_DIM}x{MAX_GRID_DIM}"
+            )
+            continue
+
+        occupied: dict[tuple[int, int], int] = {}
+        out_of_range: set[tuple[int, int]] = set()
+        for row0, col0, row_span, col_span in cells:
+            for r in range(row0, row0 + row_span):
+                for c in range(col0, col0 + col_span):
+                    if r < 0 or c < 0 or r >= row_cnt or c >= col_cnt:
+                        out_of_range.add((r, c))
+                        continue
+                    occupied[(r, c)] = occupied.get((r, c), 0) + 1
 
         overlaps = sorted(cell for cell, n in occupied.items() if n > 1)
         missing = sorted(
@@ -682,6 +705,46 @@ def _run_tests() -> None:
             print("VAL-6 PASS: correctly addressed grid (with colSpan) reports no errors")
     except Exception as e:
         failures.append("VAL-6 FAIL: %s" % e)
+
+    # VAL-7: table with no rowCnt/colCnt attrs at all (e.g. this repo's own `minutes` template)
+    # infers grid bounds from cellAddr/cellSpan instead of being skipped outright, so a
+    # duplicate-cellAddr bug in such a table is still caught.
+    _no_grid_dupe = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:tbl id="1">'
+        f'{_tr(_tc(0, 0) + _tc(0, 0))}'
+        '</hp:tbl>'
+        '</hp:BodyText>'
+    )
+    try:
+        errs = _check_table_grid(ET.fromstring(_no_grid_dupe))
+        if not any("overlap" in e for e in errs):
+            failures.append("VAL-7 FAIL: expected overlap error for undeclared-grid dupe, got: %r" % errs)
+        else:
+            print("VAL-7 PASS: table without rowCnt/colCnt still reports overlap")
+    except Exception as e:
+        failures.append("VAL-7 FAIL: %s" % e)
+
+    # VAL-8: correctly addressed table with no rowCnt/colCnt attrs (mirrors the real `minutes`
+    # template) reports no false positive from the inferred-bounds path.
+    _no_grid_valid = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:tbl id="1">'
+        f'{_tr(_tc(0, 0) + _tc(1, 0))}'
+        f'{_tr(_tc(0, 1) + _tc(1, 1))}'
+        '</hp:tbl>'
+        '</hp:BodyText>'
+    )
+    try:
+        errs = _check_table_grid(ET.fromstring(_no_grid_valid))
+        if errs:
+            failures.append("VAL-8 FAIL: valid undeclared-grid table reported errors: %r" % errs)
+        else:
+            print("VAL-8 PASS: correctly addressed table without rowCnt/colCnt reports no errors")
+    except Exception as e:
+        failures.append("VAL-8 FAIL: %s" % e)
 
     if failures:
         for f in failures:

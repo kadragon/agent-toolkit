@@ -37,6 +37,7 @@ THROTTLE_MS = DAY_MS   # at most one nudge per 24h, even while stale
 
 
 def encode_project(path):
+    path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)
 
 
