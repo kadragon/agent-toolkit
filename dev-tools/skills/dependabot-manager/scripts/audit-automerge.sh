@@ -71,4 +71,4 @@ for repo in "$@"; do
   results+=("$(audit_repo "$repo")")
 done
 
-printf '%s\n' "${results[@]}" | jq -s '.'
+printf '%s\n' "${results[@]+"${results[@]}"}" | jq -s '.'
