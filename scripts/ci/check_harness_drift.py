@@ -44,7 +44,7 @@ SKILL_GLOBS = ["dev-tools/skills/*/SKILL.md", "productivity/skills/*/SKILL.md"]
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
 # All other skills are warn-only until brought into compliance separately.
-HARD_FAIL_SKILLS = {"harness-init", "next-tasks"}
+HARD_FAIL_SKILLS = {"harness-init", "next-tasks", "hwpx", "dev-review-cycle"}
 
 ALLOWLIST_VARS = {"CLAUDE_PLUGIN_ROOT", "HOME", "PATH"}
 

@@ -1,7 +1,7 @@
 ---
 name: hwpx
 description: >-
-  Create, edit, or read HWPX (Hancom/한글) documents. "hwpx 만들어", "한글 문서 작성", "공문 만들어", "보고서 생성", "회의록 만들어", "제안서 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text from hwpx, OWPML, Hancom document conversion, Korean gov/biz document without saying "hwpx". NOT for Hancom product/company discussion without a document task.
+  Create, edit, or read HWPX (Hancom/한글) documents. "hwpx 만들어", "한글 문서 작성", "공문 만들어", "회의록 만들어", "제안서 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text from hwpx, OWPML, Hancom document conversion, Korean gov/biz document without saying "hwpx". NOT for Hancom product/company discussion without a document task.
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -27,18 +27,21 @@ Intent unclear → ask user, do not assume restore.
 
 | Mode | Page count | Completion gate |
 |------|------|------------|
-| Reference restore | Must match reference | `validate.py validate --baseline` + `validate.py page-guard` |
+| Reference restore | See Workflow 5 restore-mode checklist for full criteria. | See Workflow 5 restore-mode checklist for full criteria. |
 | Content edit | Changing is normal | `validate.py validate --baseline` + actually open in Hancom |
 | New / reference-based generation | No constraint | `validate.py validate` |
 
-"Same page count", `validate.py page-guard`, "compress/summarize text" rules apply **only to reference restore mode**. In content edit mode, do not revert work on page count change. For restore-mode steps and checklist, see **Workflow 5**.
+Restore-mode page-count/completion-gate rules apply **only to reference restore mode** — see **Workflow 5** for the full checklist. In content edit mode, do not revert work on page count change.
 
 > **`validate.py validate --baseline` scope**: real-world HWPX originals often contain duplicate `hp:p` IDs that HWP allows. Validating without `--baseline` flags these pre-existing duplicates as `INVALID` (false positive). **`--baseline` is required when validating against an original attached document (Workflows 2, 5); omit for new documents (Workflow 1).**
 
 ## Environment
 
 No external packages required. Scripts use stdlib `xml.etree.ElementTree` only.
-- `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`)
+- `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`). Resolve at the top of every bash block that references it:
+  ```bash
+  SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+  ```
 - OS-specific Python invocation, encoding gotchas (Windows cp949/UTF-8, codepoint escaping), subprocess encoding, and temp-file placement: see `$SKILL_DIR/references/environment.md`
 
 ## 임시 작업 디렉토리
@@ -109,6 +112,7 @@ rm -rf .hwpx_work/
 ### Basic usage
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 빈 문서 (base 템플릿)
 python3 "$SKILL_DIR/scripts/build.py" build --output result.hwpx
 
@@ -130,6 +134,7 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 
 ```bash
 set -euo pipefail
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 1. section0.xml을 임시파일로 작성 (per-session unique dir — parallel-safe)
 HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
 trap 'rm -rf "$HWPX_WORK"' EXIT  # error-path cleanup: fires on any set -e trigger or normal exit
@@ -193,6 +198,7 @@ Pick template → look up `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef` in style
 > **Prerequisite**: read `$SKILL_DIR/references/editing-gotchas.md` before any edits — covers FORMULA fields, substring collision, count verification, paragraph deletion, and other silent-failure traps.
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 1. HWPX → 디렉토리 (raw bytes 추출, .hwpx_pack_order manifest 기록)
 python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx ./unpacked/
 
@@ -222,14 +228,16 @@ Many items → split into stages to catch silent failures early, verify each sta
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`. On failure, the dir is preserved for artifact inspection — clean manually when done.
 
-> **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
-> ```bash
-> # HWPX_WORK must be set from step 1 (mktemp -d .hwpx_work_XXXXXX + office.py unpack)
-> python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
-> python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
-> python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
-> ```
->
+**Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
+
+```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)  # or reuse the dir from step 1 (mktemp -d .hwpx_work_XXXXXX + office.py unpack)
+python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
+python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 3,1 --para 0 0 "값2"
+python3 "$SKILL_DIR/scripts/office.py" pack "$HWPX_WORK/unpacked/" result.hwpx
+```
+
 > ⚠️ `--para 0 0 ""` resets charPrIDRef to 0 (default style) — original run styling is lost. To replace cell text while preserving the original character style, prefer `--preserve-style --text "새내용"` — it reads the existing paraPrIDRef and charPrIDRef from the cell automatically. For clearing a single contiguous text run, `--set-text OLD ""` also works (requires text to be contiguous in a single `<hp:t>` node).
 
 ### Bulk File Edit — N files simultaneously
@@ -298,10 +306,12 @@ finally:
 **When skill receives a filepath argument** (e.g. `read path/to/file.hwpx`, bare `path/to/file.hwpx`, or user requests "read file.hwpx" / "file.hwpx 읽어줘"): interpret any filepath as a text-extraction request regardless of the `read` keyword → run `text.py extract`. Skill does not auto-execute on invoke — run the commands below explicitly.
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 python3 "$SKILL_DIR/scripts/text.py" extract path/to/file.hwpx --format markdown
 ```
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 순수 텍스트
 python3 "$SKILL_DIR/scripts/text.py" extract document.hwpx
 
@@ -315,6 +325,7 @@ python3 "$SKILL_DIR/scripts/text.py" extract document.hwpx --format markdown
 ### Batch extraction (multiple folders × multiple files)
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # Batch extraction from folder list (bash)
 for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
   echo "=== $f ==="
@@ -343,6 +354,7 @@ Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
 ## Workflow 4: validation
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 단독 새 문서
 python3 "$SKILL_DIR/scripts/validate.py" validate document.hwpx
 # 첨부 원본을 편집/복원한 결과 — 기존 중복 ID 오탐 방지
@@ -390,6 +402,7 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 ### Usage
 
 ```bash
+SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
 # 1. 심층 분석 (구조 청사진 출력)
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx
 
@@ -528,9 +541,9 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 8. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`; environment/encoding → `environment.md`
 9. 🔵 **build.py build first**: use `build.py build` for new document creation (avoid calling python-hwpx API directly)
 10. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `build.py analyze` + extracted-XML-based restore/rewrite
-11. 🟡 **Same page count required (reference restore mode only)**: in restore mode, keep final result's page count identical to reference. Does not apply to content-edit / new-creation modes
-12. 🟡 **No unauthorized page increase (reference restore mode only)**: in restore mode, no structure changes causing page increase without explicit user request/approval
-13. 🟡 **page-guard must pass (reference restore mode only)**: in restore mode, `validate.py page-guard` must also pass — separate from `validate.py validate` — to mark complete. In content-edit mode, `validate.py page-guard` is reference info, and `validate.py validate --baseline` + actually opening in Hancom is completion gate
+11. 🟡 **Same page count required (reference restore mode only)**: see Workflow 5 restore-mode checklist for full criteria.
+12. 🟡 **No unauthorized page increase (reference restore mode only)**: see Workflow 5 restore-mode checklist for full criteria.
+13. 🟡 **page-guard must pass (reference restore mode only)**: see Workflow 5 restore-mode checklist for full criteria.
 14. 🔴 **No XML re-serialization**: do not `ET.fromstring()` then `ET.tostring()` existing section0.xml/header.xml — pretty-print / standalone removal / xmlns addition cause HWP parser crashes. **Same applies to content.hpf** (contains 14 Hancom namespace declarations)
 15. 🟡 **Text modification via str.replace()**: apply `str.replace()` directly on raw XML string for text changes — **except table cell text: use `table.py replace` instead (see rule 24)**
 16. 🔴 **Compact required on new-paragraph insertion**: after extracting element content, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion

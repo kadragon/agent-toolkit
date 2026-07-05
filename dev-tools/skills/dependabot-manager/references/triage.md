@@ -18,16 +18,7 @@ Check for: `groups:` block with `update-types: [minor, patch]`. Report status (c
 gh pr view {number} -R {owner}/{repo} --json number,title,mergeable,mergeStateStatus,statusCheckRollup,headRefName
 ```
 
-| Emoji | Category | Condition |
-|---|---|---|
-| ✅ | Ready to merge | CI passed + `mergeStateStatus: CLEAN` |
-| 🔄 | Needs rebase | `CONFLICTING` or `BEHIND` |
-| ❌ | CI failed | Any check failed |
-| ⏳ | CI pending | Checks still running |
-| ⚪ | No CI | No status checks configured |
-| — | Closed | PR already merged/closed — skip silently |
-| — | Error | `gh pr view` call failed — report repo:number and continue |
-| — | Unknown | `mergeStateStatus` not CLEAN/CONFLICTING/BEHIND — treat as `needs_rebase` for safety |
+See SKILL.md category table for the full emoji/category/condition mapping.
 
 ## 2c. Auto-Merge Readiness Audit
 
