@@ -76,6 +76,22 @@ if [ "$NO_HUB" = "false" ]; then
   BASE_BRANCH=$(jq -r '.default_branch // ""' <<<"$REPO_INFO")
   [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
   MERGE_INFO=$(jq -c '.merge_strategy // {}' <<<"$REPO_INFO")
+
+  # --- Keep local base branch current so downstream `git diff base...HEAD` isn't
+  # --- scoped against a stale ref (picks up already-merged commits otherwise).
+  # --- Only fast-forward: skip if it's checked out, has diverged, or fetch fails.
+  if [ "$BASE_BRANCH" != "$FEATURE_BRANCH" ] \
+    && git show-ref --verify --quiet "refs/heads/${BASE_BRANCH}" 2>/dev/null \
+    && git fetch -q origin "${BASE_BRANCH}" 2>/dev/null; then
+    LOCAL_SHA=$(git rev-parse "refs/heads/${BASE_BRANCH}" 2>/dev/null || true)
+    REMOTE_SHA=$(git rev-parse "FETCH_HEAD" 2>/dev/null || true)
+    if [ -n "$LOCAL_SHA" ] && [ -n "$REMOTE_SHA" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+      MERGE_BASE=$(git merge-base "$LOCAL_SHA" "$REMOTE_SHA" 2>/dev/null || true)
+      if [ "$MERGE_BASE" = "$LOCAL_SHA" ]; then
+        git fetch -q origin "${BASE_BRANCH}:${BASE_BRANCH}" 2>/dev/null || true
+      fi
+    fi
+  fi
 else
   # Detect base branch purely locally — no remote references
   BASE_BRANCH=$(git config init.defaultBranch 2>/dev/null || true)

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] preflight.sh base_branch staleness fix — fast-forward local base branch before scoping diffs (2026-07-07)
 - [done] PR #119 review backlog — hwpx validate.py XXE/billion-laughs hardening via defusedxml (2026-07-05)
 - [done] Now: 5 skill FIX findings (2026-07-05)
 - [done] Next: hwpx/dev-review-cycle drift ratchet + doc dedup (7 items) (2026-07-05)
