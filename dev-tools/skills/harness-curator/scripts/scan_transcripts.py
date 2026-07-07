@@ -108,10 +108,12 @@ def resolve_project_dir(path, proj_root):
     data' reporting is unchanged when truly nothing matches.
     """
     exact = os.path.join(proj_root, encode_project(path))
+    if os.path.isdir(exact):
+        return exact
     if not os.path.isdir(proj_root):
         return exact
     target_key = _loose_key(encode_project(path))
-    best, best_count = (exact if os.path.isdir(exact) else None), (0 if os.path.isdir(exact) else -1)
+    best, best_count = None, -1
     for n in os.listdir(proj_root):
         d = os.path.join(proj_root, n)
         if not os.path.isdir(d) or _loose_key(n) != target_key:
