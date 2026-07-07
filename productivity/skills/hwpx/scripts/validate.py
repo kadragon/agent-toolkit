@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
-from _common import MIN_READABLE_PT, SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS
+from _common import MIN_READABLE_PT, SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS, TBL_ID_RE
 
 REQUIRED_FILES = [
     "mimetype",
@@ -58,6 +58,19 @@ def _dup_para_ids(hwpx_path: str) -> set[str]:
             for name in zf.namelist():
                 if SECTION_N_RE.match(name):
                     ids.extend(_ids_from_xml_str(zf.read(name).decode("utf-8")))
+    except (BadZipFile, OSError):
+        return set()
+    return {i for i, n in Counter(ids).items() if n > 1}
+
+
+def _dup_table_ids(hwpx_path: str) -> set[str]:
+    ids: list[str] = []
+    try:
+        with ZipFile(hwpx_path, "r") as zf:
+            for name in zf.namelist():
+                if SECTION_N_RE.match(name):
+                    xml_str = zf.read(name).decode("utf-8")
+                    ids.extend(i for i in TBL_ID_RE.findall(xml_str) if i not in PLACEHOLDER_IDS)
     except (BadZipFile, OSError):
         return set()
     return {i for i, n in Counter(ids).items() if n > 1}
@@ -281,7 +294,12 @@ def _charpr_font_warnings(root: ET.Element, heights: dict[str, int], min_pt: flo
     return warns
 
 
-def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: float | None = None) -> tuple[list[str], list[str]]:
+def do_validate(
+    hwpx_path: str,
+    baseline_dupes: set[str] | None = None,
+    min_pt: float | None = None,
+    baseline_table_dupes: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     path = Path(hwpx_path)
@@ -340,12 +358,14 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
                     charpr_heights[cid] = h
         eff_min_pt = min_pt if min_pt is not None else MIN_READABLE_PT
         all_para_ids: list[str] = []
+        all_table_ids: list[str] = []
         for sec_name in actual_sections:
             sec_root = parsed.get(sec_name)
             if sec_root is None:
                 continue
             xml_str = section_bytes[sec_name].decode("utf-8")
             all_para_ids.extend(_ids_from_xml_str(xml_str))
+            all_table_ids.extend(i for i in TBL_ID_RE.findall(xml_str) if i not in PLACEHOLDER_IDS)
             errors.extend(_check_idref(sec_root, defined_ids, sec_name))
             errors.extend(_check_table_grid(sec_root))
             warnings.extend(_charpr_font_warnings(sec_root, charpr_heights, eff_min_pt))
@@ -360,12 +380,24 @@ def do_validate(hwpx_path: str, baseline_dupes: set[str] | None = None, min_pt: 
                 warnings.append(
                     f"Pre-existing duplicate hp:p IDs (shared with baseline, HWP tolerates): {preexisting}"
                 )
+        table_dupes = {i for i, n in Counter(all_table_ids).items() if n > 1}
+        if table_dupes:
+            table_base = baseline_table_dupes or set()
+            new_table_dupes = sorted(table_dupes - table_base)
+            preexisting_table = sorted(table_dupes & table_base)
+            if new_table_dupes:
+                errors.append(f"Duplicate hp:tbl id values introduced (not in baseline): {new_table_dupes}")
+            if preexisting_table:
+                warnings.append(
+                    f"Pre-existing duplicate hp:tbl id values (shared with baseline, --table-id may resolve the wrong table): {preexisting_table}"
+                )
     return errors, warnings
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
     baseline_dupes = _dup_para_ids(args.baseline) if args.baseline else None
-    errors, warnings = do_validate(args.input, baseline_dupes, getattr(args, "min_pt", None))
+    baseline_table_dupes = _dup_table_ids(args.baseline) if args.baseline else None
+    errors, warnings = do_validate(args.input, baseline_dupes, getattr(args, "min_pt", None), baseline_table_dupes)
     if warnings:
         print(f"WARNINGS: {args.input}")
         for w in warnings:
@@ -815,6 +847,59 @@ def _run_tests() -> None:
             print("VAL-10 PASS: cmd_page_guard reports clean error for billion-laughs section (no crash)")
     except Exception as e:
         failures.append("VAL-10 FAIL: unhandled exception instead of reported error: %s" % e)
+
+    # VAL-11/VAL-12: duplicate hp:tbl id values, mirroring the hp:p baseline-downgrade
+    # pattern (VAL uses the same _dup_para_ids/dupes convention -- see do_validate).
+    _header_minimal = (
+        '<?xml version="1.0"?>'
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" secCnt="1"/>'
+    )
+    _section_dup_tables = (
+        '<?xml version="1.0"?>'
+        '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+        '<hp:tbl id="5"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/></hp:tc></hp:tr></hp:tbl>'
+        '<hp:tbl id="5"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/></hp:tc></hp:tr></hp:tbl>'
+        '</hp:BodyText>'
+    )
+
+    # VAL-11: duplicate hp:tbl id with no baseline is reported as a new-dupe error
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            arc = Path(d) / "dup_tbl.hwpx"
+            with ZipFile(str(arc), "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip")
+                zf.writestr("Contents/content.hpf", _valid_content_hpf)
+                zf.writestr("Contents/header.xml", _header_minimal)
+                zf.writestr("Contents/section0.xml", _section_dup_tables)
+            _tbl_errs, _tbl_warns = do_validate(str(arc))
+        if not any("hp:tbl id" in e and "5" in e for e in _tbl_errs):
+            failures.append(
+                "VAL-11 FAIL: expected error for duplicate hp:tbl id, got errors=%r warnings=%r"
+                % (_tbl_errs, _tbl_warns)
+            )
+        else:
+            print("VAL-11 PASS: duplicate hp:tbl id (no baseline) reported as error")
+    except Exception as e:
+        failures.append("VAL-11 FAIL: %s" % e)
+
+    # VAL-12: duplicate hp:tbl id shared with baseline is downgraded to a warning
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            arc = Path(d) / "dup_tbl2.hwpx"
+            with ZipFile(str(arc), "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip")
+                zf.writestr("Contents/content.hpf", _valid_content_hpf)
+                zf.writestr("Contents/header.xml", _header_minimal)
+                zf.writestr("Contents/section0.xml", _section_dup_tables)
+            _tbl_errs2, _tbl_warns2 = do_validate(str(arc), baseline_table_dupes={"5"})
+        if any("introduced" in e for e in _tbl_errs2):
+            failures.append("VAL-12 FAIL: baseline-shared hp:tbl id dupe still reported as new error: %r" % _tbl_errs2)
+        elif not any("hp:tbl id" in w for w in _tbl_warns2):
+            failures.append("VAL-12 FAIL: expected downgraded warning for baseline-shared hp:tbl id dupe, got: %r" % _tbl_warns2)
+        else:
+            print("VAL-12 PASS: hp:tbl id dupe shared with baseline downgraded to warning")
+    except Exception as e:
+        failures.append("VAL-12 FAIL: %s" % e)
 
     if failures:
         for f in failures:

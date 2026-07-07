@@ -461,15 +461,23 @@ def _list_rows_insert(xml: str, table_id: str) -> None:
 
 def cmd_insert(args: argparse.Namespace) -> None:
     inp = Path(args.input)
-    if not inp.is_file():
-        print("Error: file not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    is_dir_mode = inp.is_dir()
     target = "Contents/section%d.xml" % args.section
-    with zipfile.ZipFile(inp, "r") as zin:
-        if target not in zin.namelist():
-            print("Error: %s not in archive" % target, file=sys.stderr)
+    if is_dir_mode:
+        section_file = inp / target
+        if not section_file.is_file():
+            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
             sys.exit(1)
-        xml = zin.read(target).decode("utf-8")
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print("Error: %s not in archive" % target, file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print("Error: not found: %s" % args.input, file=sys.stderr)
+        sys.exit(1)
     if args.list:
         _list_rows_insert(xml, args.table_id)
         sys.exit(0)
@@ -477,8 +485,8 @@ def cmd_insert(args: argparse.Namespace) -> None:
         print("Error: --at or --after-row required (or use --list)", file=sys.stderr)
         sys.exit(1)
     at_index = args.at if args.at is not None else args.after_row + 1
-    if not args.row_file or not args.output:
-        print("Error: --row-file and --output required", file=sys.stderr)
+    if not args.row_file or (not is_dir_mode and not args.output):
+        print("Error: --row-file required (and --output required for .hwpx input)", file=sys.stderr)
         sys.exit(1)
     row_xml = Path(args.row_file).read_text(encoding="utf-8")
     grow: set[tuple[int, int]] = set()
@@ -495,15 +503,20 @@ def cmd_insert(args: argparse.Namespace) -> None:
         print("Error: %s" % e, file=sys.stderr)
         sys.exit(1)
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
-    with zipfile.ZipFile(inp, "r") as zin:
-        entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-    with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-        for zi, data in entries:
-            if zi.filename == target:
-                data = new_xml.encode("utf-8")
-            ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-            zout.writestr(zi.filename, data, compress_type=ct)
-    print("DONE: %s" % args.output)
+    if is_dir_mode:
+        section_file = inp / target
+        section_file.write_text(new_xml, encoding="utf-8")
+        print("DONE (in-place): %s" % section_file)
+    else:
+        with zipfile.ZipFile(inp, "r") as zin:
+            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
+        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi, data in entries:
+                if zi.filename == target:
+                    data = new_xml.encode("utf-8")
+                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
+                zout.writestr(zi.filename, data, compress_type=ct)
+        print("DONE: %s" % args.output)
     for line in info:
         print("  %s" % line)
     print("  linesegarray stripped: %d" % n_ls)
@@ -611,7 +624,10 @@ def _set_text_cell(xml: str, table_id: str, col: int, row: int,
     if count == 0:
         raise ValueError(
             "--set-text: '%s' not found in cell %d,%d subList; "
-            "text may be split across runs — use --para or --content-file instead."
+            "OLD must match the *entire* content of a single <hp:t> element, not a "
+            "substring — check for a partial/substring mismatch first. If OLD really is "
+            "the full text of a run, the text may instead be split across runs; "
+            "use --para or --content-file in that case."
             % (old_text, col, row)
         )
     if count > 1:
@@ -1235,20 +1251,28 @@ def _list_rows_delete(xml: str, table_id: str) -> None:
 
 def cmd_delete(args: argparse.Namespace) -> None:
     inp = Path(args.input)
-    if not inp.is_file():
-        print(f"Error: file not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+    is_dir_mode = inp.is_dir()
     target = f"Contents/section{args.section}.xml"
-    with zipfile.ZipFile(inp, "r") as zin:
-        if target not in zin.namelist():
-            print(f"Error: {target} not in archive", file=sys.stderr)
+    if is_dir_mode:
+        section_file = inp / target
+        if not section_file.is_file():
+            print(f"Error: {target} not found in {inp}", file=sys.stderr)
             sys.exit(1)
-        xml = zin.read(target).decode("utf-8")
+        xml = section_file.read_text(encoding="utf-8")
+    elif inp.is_file():
+        with zipfile.ZipFile(inp, "r") as zin:
+            if target not in zin.namelist():
+                print(f"Error: {target} not in archive", file=sys.stderr)
+                sys.exit(1)
+            xml = zin.read(target).decode("utf-8")
+    else:
+        print(f"Error: not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
     if args.list:
         _list_rows_delete(xml, args.table_id)
         sys.exit(0)
-    if not args.rows or not args.output:
-        print("Error: --rows and --output required (or use --list)", file=sys.stderr)
+    if not args.rows or (not is_dir_mode and not args.output):
+        print("Error: --rows required (and --output required for .hwpx input, or use --list)", file=sys.stderr)
         sys.exit(1)
     del_idx = {int(x) for x in args.rows.split(",") if x.strip() != ""}
     try:
@@ -1257,15 +1281,20 @@ def cmd_delete(args: argparse.Namespace) -> None:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
-    with zipfile.ZipFile(inp, "r") as zin:
-        entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-    with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-        for zi, data in entries:
-            if zi.filename == target:
-                data = new_xml.encode("utf-8")
-            ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-            zout.writestr(zi.filename, data, compress_type=ct)
-    print(f"DONE: {args.output}")
+    if is_dir_mode:
+        section_file = inp / target
+        section_file.write_text(new_xml, encoding="utf-8")
+        print(f"DONE (in-place): {section_file}")
+    else:
+        with zipfile.ZipFile(inp, "r") as zin:
+            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
+        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi, data in entries:
+                if zi.filename == target:
+                    data = new_xml.encode("utf-8")
+                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
+                zout.writestr(zi.filename, data, compress_type=ct)
+        print(f"DONE: {args.output}")
     for line in info:
         print(f"  {line}")
     print(f"  linesegarray stripped: {n_ls}")
@@ -1506,6 +1535,38 @@ _FIXTURE_CHECK_2PARA = '''\
               <hp:subList id="101">
                 <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>[  ] 기타</hp:t></hp:run></hp:p>
                 <hp:p id="201" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>승인 여부</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+        </hp:tbl>
+      </hp:SubList>
+    </hp:SectionDef>
+  </hp:BodyText>
+</hpf:HWPFDocumentFile>'''
+
+
+# two-row table (rowCnt="2") used to test the insert/delete dir-mode CLI path
+_FIXTURE_DIR_MODE = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<hpf:HWPFDocumentFile xmlns:hpf="urn:schemas:hwpml:2.0:hpf" xmlns:hp="urn:schemas:hwpml:2.0:body-text">
+  <hp:BodyText>
+    <hp:SectionDef SubListIDRef="0">
+      <hp:SecPr><hp:ColumnDef Type="0" Count="1" Gap="0"/></hp:SecPr>
+      <hp:SubList id="100">
+        <hp:tbl id="1" tableIDRef="1" cellIDRef="0" borderFillIDRef="1" rowCnt="2" colCnt="1">
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:subList id="101">
+                <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>행0</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:tc>
+          </hp:tr>
+          <hp:tr>
+            <hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="1"/>
+              <hp:subList id="102">
+                <hp:p id="201" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>행1</hp:t></hp:run></hp:p>
               </hp:subList>
             </hp:tc>
           </hp:tr>
@@ -1765,6 +1826,67 @@ def _run_tests() -> None:
     except Exception as e:
         failures.append("AC-TC-5 FAIL: unexpected exception: %s" % e)
 
+    # AC-DIR-1: cmd_insert dir-mode writes the new row into the unpacked
+    # section file in place, with no --output required.
+    try:
+        import tempfile as _tempfile
+        with _tempfile.TemporaryDirectory() as _td:
+            _td_path = Path(_td)
+            (_td_path / "Contents").mkdir()
+            _section_file = _td_path / "Contents" / "section0.xml"
+            _section_file.write_text(_FIXTURE_DIR_MODE, encoding="utf-8")
+            _row_file = _td_path / "row.xml"
+            _row_file.write_text(
+                '<hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="1"/>'
+                '<hp:subList id="103"><hp:p id="0" paraPrIDRef="10" styleIDRef="0" '
+                'pageBreak="0" columnBreak="0" merged="0">'
+                '<hp:run charPrIDRef="5"><hp:t>새행</hp:t></hp:run></hp:p></hp:subList>'
+                "</hp:tc></hp:tr>",
+                encoding="utf-8",
+            )
+            _ns = argparse.Namespace(
+                input=str(_td_path), table_id="1", at=1, after_row=None,
+                row_file=str(_row_file), grow=[], section=0, list=False, output=None,
+            )
+            cmd_insert(_ns)
+            _result = _section_file.read_text(encoding="utf-8")
+        if "새행" not in _result:
+            failures.append("AC-DIR-1 FAIL: cmd_insert dir-mode did not write new row into section file")
+        elif 'rowCnt="3"' not in _result:
+            failures.append("AC-DIR-1 FAIL: rowCnt not updated after dir-mode insert")
+        else:
+            print("AC-DIR-1 PASS: cmd_insert dir-mode writes new row in place (no --output)")
+    except SystemExit as e:
+        failures.append("AC-DIR-1 FAIL: cmd_insert exited unexpectedly (code %r)" % (e.code,))
+    except Exception as e:
+        failures.append("AC-DIR-1 FAIL: %s" % e)
+
+    # AC-DIR-2: cmd_delete dir-mode writes the row removal into the unpacked
+    # section file in place, with no --output required.
+    try:
+        with _tempfile.TemporaryDirectory() as _td:
+            _td_path = Path(_td)
+            (_td_path / "Contents").mkdir()
+            _section_file = _td_path / "Contents" / "section0.xml"
+            _section_file.write_text(_FIXTURE_DIR_MODE, encoding="utf-8")
+            _ns = argparse.Namespace(
+                input=str(_td_path), table_id="1", rows="1", section=0, list=False, output=None,
+            )
+            cmd_delete(_ns)
+            _result = _section_file.read_text(encoding="utf-8")
+        if "행1" in _result:
+            failures.append("AC-DIR-2 FAIL: cmd_delete dir-mode did not remove deleted row from section file")
+        elif "행0" not in _result:
+            failures.append("AC-DIR-2 FAIL: cmd_delete dir-mode removed the wrong row")
+        elif 'rowCnt="1"' not in _result:
+            failures.append("AC-DIR-2 FAIL: rowCnt not updated after dir-mode delete")
+        else:
+            print("AC-DIR-2 PASS: cmd_delete dir-mode removes row in place (no --output)")
+    except SystemExit as e:
+        failures.append("AC-DIR-2 FAIL: cmd_delete exited unexpectedly (code %r)" % (e.code,))
+    except Exception as e:
+        failures.append("AC-DIR-2 FAIL: %s" % e)
+
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
@@ -1805,7 +1927,7 @@ def main() -> None:
 
     # insert
     p_ins = sub.add_parser("insert", help="Insert a table row, fixing rowAddr/rowCnt/rowSpan")
-    p_ins.add_argument("input", help="Input .hwpx file")
+    p_ins.add_argument("input", help="Input .hwpx file or unpacked directory")
     p_ins.add_argument("--table-id", required=True, help="HWP table id attribute")
     p_ins.add_argument("--at", type=int, help="Final 0-based index of the new row")
     p_ins.add_argument("--after-row", type=int, help="Insert after this 0-based row index (= --at N+1)")
@@ -1842,7 +1964,7 @@ def main() -> None:
 
     # delete
     p_del = sub.add_parser("delete", help="Delete table rows, fixing rowAddr/rowCnt/rowSpan")
-    p_del.add_argument("input", help="Input .hwpx file")
+    p_del.add_argument("input", help="Input .hwpx file or unpacked directory")
     p_del.add_argument("--table-id", required=True, help="HWP table id attribute")
     p_del.add_argument("--rows", help="Comma-separated 0-based row indices to delete")
     p_del.add_argument("--section", type=int, default=0, help="Section index (default 0)")
