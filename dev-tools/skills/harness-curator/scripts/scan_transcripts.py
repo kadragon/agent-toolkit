@@ -87,6 +87,44 @@ def encode_project(path):
     return re.sub(r"[/.:\\]", "-", path)
 
 
+def _loose_key(name):
+    """Case/underscore/hyphen-insensitive key for fuzzy-matching an encoded dir name.
+
+    Claude Code's own project-dir naming has drifted across versions (e.g. some
+    transcripts landed under 'C--Dev-workspace-knue-patis', others under
+    'c--dev-workspace_knue-patis' for the SAME repo) — different case and different
+    treatment of '_' vs '-'. encode_project() only produces one exact candidate, so
+    an exact-match lookup silently misses real data sitting under a sibling encoding.
+    """
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def resolve_project_dir(path, proj_root):
+    """Find the transcript dir for `path`, tolerating the case/separator drift above.
+
+    Prefers an exact encode_project() match if it exists; otherwise scans proj_root
+    for directories whose loose key matches and picks the one with the most session
+    files. Falls back to the exact (possibly nonexistent) path so downstream 'no
+    data' reporting is unchanged when truly nothing matches.
+    """
+    exact = os.path.join(proj_root, encode_project(path))
+    if not os.path.isdir(proj_root):
+        return exact
+    target_key = _loose_key(encode_project(path))
+    best, best_count = (exact if os.path.isdir(exact) else None), (0 if os.path.isdir(exact) else -1)
+    for n in os.listdir(proj_root):
+        d = os.path.join(proj_root, n)
+        if not os.path.isdir(d) or _loose_key(n) != target_key:
+            continue
+        try:
+            count = len(os.listdir(d))
+        except OSError:
+            count = 0
+        if count > best_count:
+            best, best_count = d, count
+    return best if best is not None else exact
+
+
 def keep_prompt(d):
     d = (d or "").strip()
     if not d:
@@ -287,7 +325,7 @@ def main():
             print("--project requires an absolute path")
             sys.exit(2)
         path = args[i + 1]
-        scope, dirs = "named", [(os.path.join(proj_root, encode_project(path)), path)]
+        scope, dirs = "named", [(resolve_project_dir(path, proj_root), path)]
     elif "all" in args:
         if not os.path.isdir(proj_root):
             print(f"No projects dir at {proj_root} — nothing to scan.")
@@ -298,7 +336,7 @@ def main():
                 if os.path.isdir(os.path.join(proj_root, n))]
     else:
         cwd = os.getcwd()
-        scope, dirs = "current", [(os.path.join(proj_root, encode_project(cwd)), cwd)]
+        scope, dirs = "current", [(resolve_project_dir(cwd, proj_root), cwd)]
 
     summaries = [s for s in (scan_dir(d, label) for d, label in dirs) if s and (s["prompts"] or s["frictions"] or s["corrections"])]
     if not summaries:
