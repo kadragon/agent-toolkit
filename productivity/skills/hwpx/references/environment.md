@@ -7,8 +7,15 @@
 | Windows | `python` (system) or `.venv\Scripts\python` | `python3` alias usually absent |
 | macOS/Linux | `python3` or `.venv/bin/python` | |
 
-- venv optional. If `python -c "import lxml"` succeeds, use as-is. Otherwise `pip install lxml`.
-- `validate.py` requires `defusedxml` (XXE/billion-laughs hardening for untrusted `.hwpx` input). If `python -c "import defusedxml"` fails, run `pip install defusedxml` first.
+**Install required packages first** (`validate.py` needs `defusedxml`; the OLE `.hwp` fallback recipe below needs `olefile`):
+
+```bash
+python -m pip install olefile defusedxml
+```
+
+> ⚠️ **Use `python -m pip install`, not bare `pip install`.** `python` and `pip` can resolve to *different* interpreters (e.g. a Windows Store Python alias for `pip` vs. a separately-installed `python`) — a reported-successful `pip install` can still leave the `python` you actually run with `ModuleNotFoundError`. `python -m pip install ...` guarantees the install target matches the interpreter that will import it. If this recurs, cross-check with `pip --version` (shows which interpreter it's bound to) vs. `where.exe python` / `which python3`.
+
+- venv optional. If `python -c "import lxml"` succeeds, use as-is. Otherwise `python -m pip install lxml`.
 - Workflow examples use `python3` / `source "$VENV"`. **On Windows, use `python` and omit `source` line.**
 
 ## SKILL_DIR
@@ -82,3 +89,56 @@ Putting non-ASCII characters (`■`, `○`, Korean) into `python -c "..."` sourc
 Use the **working document's folder** for temp files (e.g. `.hwpx_work/`), not `/tmp`.
 
 Windows `python` interprets `/tmp` as a drive-relative path, which diverges from the Bash tool's `/tmp` — use project-relative paths only.
+
+## Fallback: extracting text from a legacy OLE `.hwp` without Hancom (reference only)
+
+This is a documented workaround for when Hancom/COM isn't available or `convert_hwp.ps1` fails (see the magic-bytes note in SKILL.md Workflow 2/3) — not a new supported script or workflow. Requires `olefile` (`python -m pip install olefile`, see above).
+
+**Fast preview** — the `PrvText` OLE stream holds a plain-text preview capped at roughly the first 1000 characters:
+
+```python
+import olefile
+
+with olefile.OleFileIO("file.hwp") as ole:
+    if ole.exists("PrvText"):
+        data = ole.openstream("PrvText").read()
+        print(data.decode("utf-16-le"))
+```
+
+**Full body text** — `BodyText/SectionN` streams are raw-deflate compressed (`zlib.decompressobj(-15)`, no zlib header) and contain a sequence of HWPTAG records; walk them and pull text from `HWPTAG_PARA_TEXT` (`0x42`) records:
+
+```python
+import zlib
+import olefile
+
+HWPTAG_PARA_TEXT = 0x42
+
+def _records(buf: bytes):
+    pos = 0
+    while pos + 4 <= len(buf):
+        header = int.from_bytes(buf[pos:pos + 4], "little")
+        tag_id = header & 0x3FF
+        length = (header >> 20) & 0xFFF
+        pos += 4
+        if length == 0xFFF:  # extended length marker
+            length = int.from_bytes(buf[pos:pos + 4], "little")
+            pos += 4
+        yield tag_id, buf[pos:pos + length]
+        pos += length
+
+with olefile.OleFileIO("file.hwp") as ole:
+    section_names = sorted(
+        n for n in ole.listdir() if len(n) == 2 and n[0] == "BodyText" and n[1].startswith("Section")
+    )
+    text_parts = []
+    for name in section_names:
+        raw = ole.openstream(name).read()
+        data = zlib.decompressobj(-15).decompress(raw)
+        for tag_id, payload in _records(data):
+            if tag_id == HWPTAG_PARA_TEXT:
+                # UTF-16LE, with occasional control/inline-object marker code points to filter
+                text_parts.append(payload.decode("utf-16-le", errors="ignore"))
+    print("\n".join(text_parts))
+```
+
+This is best-effort text extraction only — no formatting/table structure, and inline control characters (footnotes, field markers) need extra filtering for clean output. For anything beyond a quick text preview, prefer `convert_hwp.ps1` (Hancom COM) when available.

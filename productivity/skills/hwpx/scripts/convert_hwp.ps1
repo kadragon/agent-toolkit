@@ -48,7 +48,9 @@ $hwp = $null
 try {
     $hwp = New-Object -ComObject HWPFrame.HwpObject
     $reg = $hwp.RegisterModule("FilePathCheckDLL", "SecurityModule")
-    if (-not $reg) { throw "RegisterModule('FilePathCheckDLL') failed" }
+    if (-not $reg) {
+        Write-Warning "RegisterModule('FilePathCheckDLL') failed — proceeding anyway; Open() with forceopen:true works without it on non-macro documents."
+    }
 
     $opened = $hwp.Open($hwpPath, "HWP", "forceopen:true")
     if (-not $opened) { throw "HWP Open() returned false for: $hwpPath" }
