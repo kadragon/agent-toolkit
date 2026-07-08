@@ -133,11 +133,7 @@ def resolve_project_dir(path, proj_root):
         count = _jsonl_count(d)
         if count > best_count:
             best, best_count = d, count
-    if best is not None:
-        return best
-    if exact_count >= 0:
-        return exact
-    return exact
+    return best if best is not None else exact
 
 
 def keep_prompt(d):
