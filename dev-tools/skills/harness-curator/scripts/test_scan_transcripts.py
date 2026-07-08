@@ -69,6 +69,50 @@ def test_resolve_falls_back_to_fuzzy_when_exact_absent():
         )
 
 
+def test_resolve_skips_empty_exact_dir_in_favor_of_populated_fuzzy_sibling():
+    """Exact dir exists but has 0 jsonl files → resolver falls through to the
+    populated fuzzy sibling instead of trusting the empty exact-match slot."""
+    with tempfile.TemporaryDirectory() as proj_root:
+        path = "/dev/workspace/knue-patis"
+        exact_name = mod.encode_project(path)
+        exact_dir = os.path.join(proj_root, exact_name)
+        os.mkdir(exact_dir)  # exists but empty — e.g. created solely by Step 6's state write
+
+        fuzzy_name = exact_name.replace("-", "_", 1)
+        fuzzy_dir = os.path.join(proj_root, fuzzy_name)
+        os.mkdir(fuzzy_dir)
+        open(os.path.join(fuzzy_dir, "session0.jsonl"), "w").close()
+
+        resolved = mod.resolve_project_dir(path, proj_root)
+        check(
+            "resolve_project_dir returns fuzzy sibling when exact dir has no jsonl files",
+            resolved == fuzzy_dir,
+            f"expected {fuzzy_dir!r}, got {resolved!r}",
+        )
+
+
+def test_resolve_prefers_empty_exact_dir_over_equally_empty_fuzzy_sibling():
+    """Exact dir exists but empty, and a loose-key-matching sibling is ALSO empty →
+    the empty exact dir is the floor (best_count seeded from exact_count), not an
+    arbitrary equally-empty sibling."""
+    with tempfile.TemporaryDirectory() as proj_root:
+        path = "/dev/workspace/knue-patis"
+        exact_name = mod.encode_project(path)
+        exact_dir = os.path.join(proj_root, exact_name)
+        os.mkdir(exact_dir)  # exists but empty
+
+        fuzzy_name = exact_name.replace("-", "_", 1)
+        fuzzy_dir = os.path.join(proj_root, fuzzy_name)
+        os.mkdir(fuzzy_dir)  # also empty — no jsonl files
+
+        resolved = mod.resolve_project_dir(path, proj_root)
+        check(
+            "resolve_project_dir returns empty exact dir over equally-empty fuzzy sibling",
+            resolved == exact_dir,
+            f"expected {exact_dir!r}, got {resolved!r}",
+        )
+
+
 def test_resolve_falls_back_to_exact_path_when_nothing_matches():
     """No exact dir, no fuzzy sibling → returns the (nonexistent) exact path."""
     with tempfile.TemporaryDirectory() as proj_root:
@@ -91,6 +135,14 @@ SUITES = [
     (
         "resolve_project_dir: falls back to fuzzy match when exact absent",
         test_resolve_falls_back_to_fuzzy_when_exact_absent,
+    ),
+    (
+        "resolve_project_dir: skips empty exact dir for populated fuzzy sibling",
+        test_resolve_skips_empty_exact_dir_in_favor_of_populated_fuzzy_sibling,
+    ),
+    (
+        "resolve_project_dir: empty exact dir is floor over equally-empty fuzzy sibling",
+        test_resolve_prefers_empty_exact_dir_over_equally_empty_fuzzy_sibling,
     ),
     (
         "resolve_project_dir: falls back to exact path when nothing matches",

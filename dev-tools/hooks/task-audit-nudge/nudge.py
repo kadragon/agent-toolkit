@@ -14,10 +14,13 @@ stays set — the message instructs them to "act on them OR re-run to refresh," 
 self-corrects on next curator run.
 
 State:
-  Claude: $CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/.harness-curator-state.json
-  Codex:  $CODEX_HOME/projects/<encoded-cwd>/.harness-curator-state.json
+  Claude: $CLAUDE_CONFIG_DIR/projects/<resolved-cwd-dir>/.harness-curator-state.json
+  Codex:  $CODEX_HOME/projects/<resolved-cwd-dir>/.harness-curator-state.json
   Per-project isolation: running the audit in project A no longer suppresses
-  nudges for project B. Encoded path mirrors the transcript directory layout.
+  nudges for project B. resolve_state_dir() mirrors scan_transcripts.py's
+  resolve_project_dir() (exact-match dir if it holds *.jsonl, else the fuzzy
+  case/underscore-drift sibling with the most jsonl files) so this always reads
+  the SAME dir harness-curator's Step 6 wrote lastRunMs/lastCandidateMs into.
   lastRunMs       - written by the harness-curator skill's Step 6
   lastCandidateMs - written by Step 6 when HARNESS_PENDING=1, cleared when 0
   lastNudgeMs     - written here, throttles the nudge to once per THROTTLE window
@@ -25,6 +28,7 @@ State:
 Never raises - a reminder must never block session start.
 """
 
+import glob
 import json
 import os
 import re
@@ -41,6 +45,40 @@ def encode_project(path):
     return re.sub(r"[/.:\\]", "-", path)
 
 
+def _loose_key(name):
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _jsonl_count(d):
+    try:
+        return len(glob.glob(os.path.join(d, "*.jsonl")))
+    except OSError:
+        return 0
+
+
+def resolve_state_dir(cwd, proj_root):
+    """Mirror scan_transcripts.py's resolve_project_dir so this nudge reads/writes
+    state at the SAME dir harness-curator's Step 6 uses — otherwise a curator run
+    that resolves to a fuzzy sibling (exact dir empty of *.jsonl) leaves this nudge
+    reading a stale/empty exact dir forever, nagging even right after a real run."""
+    exact = os.path.join(proj_root, encode_project(cwd))
+    exact_count = _jsonl_count(exact) if os.path.isdir(exact) else -1
+    if exact_count > 0:
+        return exact
+    if not os.path.isdir(proj_root):
+        return exact
+    target_key = _loose_key(encode_project(cwd))
+    best, best_count = None, exact_count
+    for n in os.listdir(proj_root):
+        d = os.path.join(proj_root, n)
+        if not os.path.isdir(d) or _loose_key(n) != target_key:
+            continue
+        count = _jsonl_count(d)
+        if count > best_count:
+            best, best_count = d, count
+    return best if best is not None else exact
+
+
 def config_dir():
     if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -55,7 +93,8 @@ def config_dir():
 
 def main():
     cwd = os.getcwd()
-    state_dir = os.path.join(config_dir(), "projects", encode_project(cwd))
+    proj_root = os.path.join(config_dir(), "projects")
+    state_dir = resolve_state_dir(cwd, proj_root)
     state_path = os.path.join(state_dir, ".harness-curator-state.json")
     now = int(time.time() * 1000)
 
