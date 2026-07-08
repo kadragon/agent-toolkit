@@ -158,9 +158,30 @@ Record the run and candidate state so the staleness nudge stays accurate. Set `H
 # HARNESS_PENDING=0 (or omit the prefix entirely) if the report was empty or Watch-only.
 # Do NOT blindly copy HARNESS_PENDING=1 — an empty-report run must clear lastCandidateMs.
 HARNESS_PENDING=1 python3 - <<'PY'   # ← replace 1 with 0 for empty/Watch-only reports
-import json, os, re, time
+import glob, json, os, re, time
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-state_dir = os.path.join(config_dir, "projects", re.sub(r"[/.:\\]", "-", os.getcwd()))
+proj_root = os.path.join(config_dir, "projects")
+# Must land in the SAME dir Step 1's scanner reads for this cwd (see scan_transcripts.py
+# resolve_project_dir) — a raw, non-normcased substitution here can mint a case/underscore
+# sibling directory that then poisons that resolver's exact-match short-circuit on a future
+# run, silently hiding real transcript data under a different-cased sibling.
+def encode_project(path):
+    return re.sub(r"[/.:\\]", "-", os.path.normcase(os.path.abspath(path)))
+def loose_key(name):
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+exact = os.path.join(proj_root, encode_project(os.getcwd()))
+state_dir = exact
+if os.path.isdir(proj_root) and len(glob.glob(os.path.join(exact, "*.jsonl"))) == 0:
+    target_key = loose_key(encode_project(os.getcwd()))
+    best, best_count = None, -1
+    for n in os.listdir(proj_root):
+        d = os.path.join(proj_root, n)
+        if os.path.isdir(d) and loose_key(n) == target_key:
+            count = len(glob.glob(os.path.join(d, "*.jsonl")))
+            if count > best_count:
+                best, best_count = d, count
+    if best is not None:
+        state_dir = best
 os.makedirs(state_dir, exist_ok=True)
 p = os.path.join(state_dir, ".harness-curator-state.json")
 now = int(time.time() * 1000)

@@ -99,32 +99,45 @@ def _loose_key(name):
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def _jsonl_count(d):
+    try:
+        return len(glob.glob(os.path.join(d, "*.jsonl")))
+    except OSError:
+        return 0
+
+
 def resolve_project_dir(path, proj_root):
     """Find the transcript dir for `path`, tolerating the case/separator drift above.
 
-    Prefers an exact encode_project() match if it exists; otherwise scans proj_root
-    for directories whose loose key matches and picks the one with the most session
-    files. Falls back to the exact (possibly nonexistent) path so downstream 'no
-    data' reporting is unchanged when truly nothing matches.
+    Prefers an exact encode_project() match, but only when it actually holds
+    transcripts — a directory can exist with zero *.jsonl files (e.g. created solely
+    by this skill's own Step 6 state-file write, which uses a raw, non-normcased
+    substitution that can diverge from encode_project() and spuriously "claim" the
+    exact-match slot). When the exact dir has no jsonl data, scan proj_root for
+    directories whose loose key matches and pick whichever (exact or fuzzy sibling)
+    has the most *.jsonl files. Falls back to the exact (possibly nonexistent) path
+    so downstream 'no data' reporting is unchanged when truly nothing matches.
     """
     exact = os.path.join(proj_root, encode_project(path))
-    if os.path.isdir(exact):
+    exact_count = _jsonl_count(exact) if os.path.isdir(exact) else -1
+    if exact_count > 0:
         return exact
     if not os.path.isdir(proj_root):
         return exact
     target_key = _loose_key(encode_project(path))
-    best, best_count = None, -1
+    best, best_count = None, exact_count
     for n in os.listdir(proj_root):
         d = os.path.join(proj_root, n)
         if not os.path.isdir(d) or _loose_key(n) != target_key:
             continue
-        try:
-            count = len(os.listdir(d))
-        except OSError:
-            count = 0
+        count = _jsonl_count(d)
         if count > best_count:
             best, best_count = d, count
-    return best if best is not None else exact
+    if best is not None:
+        return best
+    if exact_count >= 0:
+        return exact
+    return exact
 
 
 def keep_prompt(d):
