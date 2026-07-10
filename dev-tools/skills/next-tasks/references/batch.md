@@ -66,7 +66,11 @@ these explicit CWD instructions (agents spawn in the main checkout CWD, not the 
 > Every Bash command must begin with `cd <absolute-worktree-path> &&`
 > (e.g. `cd /path/to/worktree && git commit -m '...'`).
 > Read/Edit/Write tool calls must use absolute paths under `<absolute-worktree-path>/`.
-> Do NOT read or edit any file in the main checkout."
+> Do NOT read or edit any file in the main checkout.
+> Never run `git push --force`/`--force-with-lease`, `git reset --hard`, `git clean -f`/`-fd`,
+> or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
+> If the same fix is attempted 3+ times on the same file without the lint/test command
+> passing, stop and report to the user instead of continuing to retry."
 
 Then the brief continues:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
@@ -87,7 +91,9 @@ For each successfully-implemented unit, spawn a `qa-verifier` agent (separate fr
 implementer) pointed at that unit's worktree path, verifying against the Sprint Contract that
 unit returned in A4. Include the same CWD instructions in each brief: every Bash command must
 begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
-worktree. Fan out all QA agents in one message.
+worktree; the same destructive-command guard applies — QA must not run
+`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Fan out all QA agents in one
+message.
 
 For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
 unit (all retries in one message — they are independent; do not serialize). Still blocking after

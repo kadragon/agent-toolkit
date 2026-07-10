@@ -74,7 +74,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. After all complete, proceed to Step 3.
+**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. On a 600s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>600s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 600s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
 
 #### 2-1: Claude Skill Reviewers
 
@@ -191,8 +191,9 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/commit-and-push.sh \
 ### Step 6: CI + Merge
 
 Follow **`references/ci-failure-handling.md`**. Summary:
-1. `scripts/ci-wait.sh <PR_NUMBER>` — wait up to 15 min, check `passed`.
-2. On failure: `scripts/ci-failure-logs.sh` → classify fix. Trivial → apply directly. Logic change → re-run Steps 2–3. Hard stop after 3 failures.
+1. `scripts/ci-wait.sh <PR_NUMBER>` — wait up to 15 min, check `passed` and `reason`.
+2. On failure with no `reason` (real CI failure): `scripts/ci-failure-logs.sh` → classify fix. Trivial → apply directly. Logic change → re-run Steps 2–3. Hard stop after 3 failures.
+   On failure with `reason:"timeout"` (CI still running after 15 min): NOT a failure — do not fetch logs, does not count toward 3×. Stop and ask the user (keep waiting / check dashboard / abandon PR). See ci-failure-handling.md for detail.
 3. Merge (all 4 args required; `MERGE_STRATEGY` is a JSON object, not a bare word):
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/merge-and-cleanup.sh \
@@ -207,10 +208,12 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Preflight `has_errors: true` | Stop, report (suggest `gh auth login` or set token) |
 | Step 1 fails | Stop, report |
 | Review sub-agent fails | Log skill id, proceed with remaining |
+| Review source >600s | Skip that source, proceed with the rest; note "timeout (>600s)" |
 | No actionable suggestions | Skip Steps 4–5, still run Step 6 |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
 | CI fails 3× | Stop, ask user |
+| CI timeout (`reason:"timeout"`) | Stop, ask user — does not count toward 3× |
 | Merge fails | Report `merge_ok`, do not force-delete |
 
 ## Scripts Reference
