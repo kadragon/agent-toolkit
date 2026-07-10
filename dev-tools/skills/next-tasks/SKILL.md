@@ -40,6 +40,15 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 
 **Fast path (single-pick only):** Read a minimal slice of each file to surface the top candidates — do NOT scan the full backlog unless the user explicitly asks for more.
 
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/skills/next-tasks/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md
+```
+
+Prints one line per candidate — `[N] <source>: <heading> (<M> items)` (h1 sprint blocks omit
+the item count) — already applying the Phase A → B → C order, per-phase caps, and the combined
+cap-5 truncation described below. **If the script is unavailable or errors, fall back to
+hand-grepping per the Phase A/B/C rules below** (kept in this doc for that purpose).
+
 **Phase A — h1 sprint blocks (tasks.md):**
 
 ```bash
@@ -72,7 +81,16 @@ Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 o
 | 1 | Announce the group and proceed directly to Step 3 |
 | 2–5 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
 
-**Full scan (fast path found nothing, or `--all` batch mode):** Run both greps to build the complete candidate list:
+**Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/skills/next-tasks/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md --full-scan
+```
+
+This applies rules 1–5 below in order, uncapped — note rules 4+5 use type priority (all
+qualifying h3 headings first, then all qualifying h2 headings), which is a different ordering
+from Phase C's type-agnostic document-order scan above. **If the script is unavailable or
+errors, fall back to hand-grepping** (kept in this doc for that purpose):
 
 ```bash
 grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
@@ -200,6 +218,17 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Objective / Output format / Tools to use / Boundaries). List each item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
+- **Stuck-fix stop condition:** if the same fix is attempted 3+ times on the same file without
+  the lint/test command passing (inline edits or implementer briefs alike), stop and report to
+  the user instead of continuing to retry. This is a prompted constraint, not a mechanically
+  enforced cap — no loop-counter tooling exists for implementer sub-agents.
+- **Destructive-command guard:** never run `git push --force`/`--force-with-lease`,
+  `git reset --hard`, `git clean -f`/`-fd`, or `git branch -D` while implementing (inline edits
+  or implementer briefs alike). If a fix seems to require one, stop and ask the user instead.
+  This does NOT restrict the orchestrator's own documented worktree-cleanup steps in
+  `--tree`/`--all` mode (see `references/tree.md`, `references/batch.md`), which already
+  deliberately use `-D`/`--force` on failure paths — those are separate, orchestrator-only
+  operations, not implementer actions.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
   Do not proceed to qa-verifier.
 
@@ -294,9 +323,44 @@ Implements multiple units in parallel worktrees, then collapses them onto one in
 
 **Work already in flight** — feature branch with uncommitted changes from a previous session.
 This is the routing target when the Prerequisites "Working tree gate" finds an in-flight branch
-rather than stray dirty files. Offer: "I see uncommitted changes on `<branch>`. Skip to
-`dev-review-cycle --auto`?"
-- **Yes:** invoke `dev-review-cycle --auto` directly (skip Steps 1–3).
+rather than stray dirty files. Run 3 ordered, cheap checks to produce a specific diagnosis
+before asking for confirmation — this only automates the *diagnosis* text, not the resume
+action itself; always still ask yes/no.
+
+1. **Commits already ahead of `main`?**
+   ```bash
+   commits=$(git log main..HEAD --oneline 2>/dev/null)
+   [[ -n "$commits" ]] && echo "commits exist — dev-review-cycle Step 1 already ran"
+   ```
+   If `$commits` is non-empty, `dev-review-cycle` Step 1 (commit) already ran. Diagnosis:
+   offer `dev-review-cycle --auto` directly.
+
+2. **No commits ahead, but an active Sprint Contract?**
+   ```bash
+   active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
+   ```
+   If `$active_block` is non-zero, check what's already changed to distinguish stage. Include
+   untracked files (`git diff --stat` alone misses new files an implementer created but never
+   staged — e.g. a brand-new script):
+   ```bash
+   code_diff=$(git diff --stat -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
+   untracked=$(git ls-files --others --exclude-standard -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
+   bump_diff=$(git diff --stat -- '**/plugin.json' 2>/dev/null)
+   ```
+   - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
+     implementation yet. Diagnosis: resume at **Step 3 – Implement**.
+   - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
+     version bump yet. Diagnosis: resume at **Step 3 – QA**.
+   - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
+     **Step 4 – Handoff**.
+
+3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
+   back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
+   `dev-review-cycle --auto`?"
+
+Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
+- **Yes:** resume at the diagnosed step (or invoke `dev-review-cycle --auto` directly for
+  check 1 / the generic fallback).
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.
 
