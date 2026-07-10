@@ -64,6 +64,11 @@ git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugi
 **Cause:** Modified files in `dev-tools/` or `productivity/` but didn't bump `plugin.json`
 **Fix:** `bash scripts/bump-version.sh <plugin> patch` (or minor/major per semver table in `docs/conventions.md`)
 
+### plugin.json version conflict after pulling remote changes
+
+**Symptom:** `git stash pop` (or rebase) conflicts on the `"version"` line in `plugin.json` — local had an uncommitted bump, remote advanced the same file further.
+**Fix:** resolve to remote's version, then re-run `bash scripts/bump-version.sh <plugin> <patch|minor|major>` from that new base — don't hand-pick a version number.
+
 ### Trigger router not firing
 
 **Symptom:** Skill not auto-invoked on matching prompt
