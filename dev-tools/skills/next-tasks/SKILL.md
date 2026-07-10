@@ -339,17 +339,20 @@ action itself; always still ask yes/no.
    ```bash
    active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
    ```
-   If `$active_block` is non-zero, check what's already changed to distinguish stage:
+   If `$active_block` is non-zero, check what's already changed to distinguish stage. Include
+   untracked files (`git diff --stat` alone misses new files an implementer created but never
+   staged — e.g. a brand-new script):
    ```bash
-   code_diff=$(git diff --stat -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!*/plugin.json' 2>/dev/null)
-   bump_diff=$(git diff --stat -- '*/plugin.json' 2>/dev/null)
+   code_diff=$(git diff --stat -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
+   untracked=$(git ls-files --others --exclude-standard -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
+   bump_diff=$(git diff --stat -- '**/plugin.json' 2>/dev/null)
    ```
-   - `$code_diff` empty AND `$bump_diff` empty → Sprint Contract written, no implementation
-     yet. Diagnosis: resume at **Step 3 – Implement**.
-   - `$code_diff` non-empty AND `$bump_diff` empty → implementation in progress, no version
-     bump yet. Diagnosis: resume at **Step 3 – QA**.
-   - `$code_diff` non-empty AND `$bump_diff` non-empty → implementation and version bump both
-     done. Diagnosis: resume at **Step 4 – Handoff**.
+   - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
+     implementation yet. Diagnosis: resume at **Step 3 – Implement**.
+   - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
+     version bump yet. Diagnosis: resume at **Step 3 – QA**.
+   - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
+     **Step 4 – Handoff**.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to

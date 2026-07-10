@@ -7,7 +7,8 @@ Usage:
 
   --tasks PATH    path to tasks.md (optional file; absent path is treated as empty input,
                    same as the `2>/dev/null` grep fallback it replaces)
-  --backlog PATH  path to backlog.md
+  --backlog PATH  path to backlog.md (required — this repo's prereqs guarantee it exists,
+                   so a missing/unreadable file here is treated as a real error, not "no candidates")
   --full-scan     run the full-scan algorithm instead of the fast path (see below)
   --json          emit a JSON array of candidate objects instead of the plain-text list
 
@@ -56,6 +57,8 @@ Self-check (--test):
   interleaving. All fixtures are in-memory strings — no real files touched. Exits 0 on PASS,
   1 on FAIL.
 """
+
+from __future__ import annotations
 
 import json
 import math
@@ -283,13 +286,24 @@ def format_candidates(candidates: list[dict]) -> list[str]:
 # CLI
 # ---------------------------------------------------------------------------
 
-def _read_file(path: str | None) -> str:
+def _read_file(path: str | None, *, required: bool = False) -> str:
+    """Read `path`, or return "" if absent — matching the `2>/dev/null` grep fallback
+    this script replaces. `required=True` (backlog.md) treats a missing/unreadable file
+    as fatal instead of silently returning "" — tasks.md stays optional (required=False),
+    per next-tasks' own "absent in the idle state" semantics.
+    """
     if not path:
+        if required:
+            sys.stderr.write("Error: --backlog PATH is required\n")
+            sys.exit(1)
         return ""
     try:
         with open(path, "r", encoding="utf-8") as fh:
             return fh.read()
-    except OSError:
+    except OSError as e:
+        if required:
+            sys.stderr.write(f"Error: could not read required file {path}: {e}\n")
+            sys.exit(1)
         return ""
 
 
@@ -305,10 +319,13 @@ def main(argv: list[str]) -> int:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--tasks" and i + 1 < len(argv):
+        if a in ("--tasks", "--backlog") and i + 1 >= len(argv):
+            sys.stderr.write(f"Error: {a} requires a path argument\n")
+            sys.exit(1)
+        if a == "--tasks":
             tasks_path = argv[i + 1]
             i += 2
-        elif a == "--backlog" and i + 1 < len(argv):
+        elif a == "--backlog":
             backlog_path = argv[i + 1]
             i += 2
         elif a == "--full-scan":
@@ -321,7 +338,7 @@ def main(argv: list[str]) -> int:
             i += 1
 
     tasks_tokens = tokenize(_read_file(tasks_path))
-    backlog_tokens = tokenize(_read_file(backlog_path))
+    backlog_tokens = tokenize(_read_file(backlog_path, required=True))
 
     candidates = full_scan(tasks_tokens, backlog_tokens) if full_scan_flag else fast_path(tasks_tokens, backlog_tokens)
 
