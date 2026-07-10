@@ -151,11 +151,12 @@ If all sources fail → inline review + note in consolidation.
 
 ### Step 3: Consolidate + Confirm
 
-Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 or disputed findings), confidence filtering (< 50 drops to low-confidence list), scope classification, and tasks.md recording.
+Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 band), confidence filtering (< 50 drops to low-confidence list), scope classification, and tasks.md recording.
 
-**Verifier gate (P0/P1):** If any P0 or P1 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
+**Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding.
 
-**Contest Round (bounded, single pass — see consolidation-guide.md Step 3):** After the verifier gate, collect contestable findings — confidence 50–74, OR disputed (exactly one source flagged it, but another source's diff coverage included that file). If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one Sonnet sub-agent (`run_in_background: true`, same pattern as the verifier gate) with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
+- **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
+- **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one Sonnet sub-agent with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
 
 If `--auto` NOT set: STOP, present consolidated table, wait for confirmation.
 If `--auto` set: treat all in-scope (non-refuted) as approved.

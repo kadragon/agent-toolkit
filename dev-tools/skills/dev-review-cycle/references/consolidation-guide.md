@@ -34,13 +34,13 @@ Keep findings that survive direct inspection. A finding with a concrete file:lin
 
 ### 3. Contest Round
 
-A bounded, single extra round for borderline or disputed findings — not an iterative convergence loop. An unbounded "iterate until findings stabilize" mechanism was considered and explicitly rejected (cost/latency); this step runs at most once per PR.
+A bounded, single extra round for borderline-confidence findings — not an iterative convergence loop. An unbounded "iterate until findings stabilize" mechanism was considered and explicitly rejected (cost/latency); this step runs at most once per PR.
 
-**Contestable findings** — a finding enters the contest round if either:
-- Its `confidence` is in the 50–74 band (below 50 stays auto-dropped in Step 4 — no meaningful signal worth contesting), OR
-- It is **disputed**: exactly one source flagged it, but at least one other review source's diff coverage included that same file (i.e. another reviewer looked at the file and didn't flag that line) — meaning disagreement, not merely "didn't look."
+**Contestable findings** — a finding enters the contest round if its `confidence` is in the 50–74 band. Below 50 stays auto-dropped in Step 4 — no meaningful signal worth contesting.
 
-Findings below confidence 50, and findings already resolved by the P0/P1 verifier gate (Step 2), do NOT enter the contest round.
+(An earlier draft of this trigger also fired on "disputed" findings — flagged by one source but supposedly covered by another. Dropped: no reviewer in this pipeline reports which files it examined, only which files it flagged — see SKILL.md Step 2-1's findings-only JSON contract and the free-form prose agy/Codex emit. Without coverage data, "disputed" could only be evaluated by guessing, which this repo's own agent-integrity rule forbids. The confidence-band trigger alone uses only data the reviewers actually emit.)
+
+Findings already resolved by the P0/P1 verifier gate (Section 2 of this guide) do NOT enter the contest round — the two gates target disjoint severities (P0/P1 vs the 50–74 confidence band) and never compete for the same finding, so they can run in parallel (see SKILL.md Step 3).
 
 **Mechanic — one batched agent call, no loop:**
 - Collect ALL contestable findings from the PR into a single list. If the list is empty, skip the round entirely — do not spawn an agent for zero work.
@@ -101,7 +101,7 @@ Present the consolidated list as a table with:
 - Priority (P0-P3) — rows sorted by severity (P0 first) so critical items are visible at the top
 - Title
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
-- Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate; `contest-confirmed` — upgraded via the Contest Round)
+- Verdict column: `confirmed` / `uncertain` for P0/P1 candidates (from the verifier gate); `contest-confirmed` for any severity upgraded via the Contest Round
 - Scope column (In / Out)
 - Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope
 - Recommendation (apply / skip with reason)
