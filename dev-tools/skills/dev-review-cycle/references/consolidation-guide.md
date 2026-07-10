@@ -32,9 +32,29 @@ Drop a finding if:
 
 Keep findings that survive direct inspection. A finding with a concrete file:line in the diff and a clear mechanism is worth surfacing. A plausible-sounding pattern match without a traceable path is not.
 
-### 3. Drop Low-Confidence and Excluded Findings
+### 3. Contest Round
 
-Reviewers emit a `confidence` score (0–100) per finding. Drop findings with confidence below 75 from the action table — list them in a collapsed "Low confidence (not actioned)" note instead, so the signal isn't silently lost. Also drop findings a reviewer itself hedged as speculative or unconfirmed regardless of score. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
+A bounded, single extra round for borderline or disputed findings — not an iterative convergence loop. An unbounded "iterate until findings stabilize" mechanism was considered and explicitly rejected (cost/latency); this step runs at most once per PR.
+
+**Contestable findings** — a finding enters the contest round if either:
+- Its `confidence` is in the 50–74 band (below 50 stays auto-dropped in Step 4 — no meaningful signal worth contesting), OR
+- It is **disputed**: exactly one source flagged it, but at least one other review source's diff coverage included that same file (i.e. another reviewer looked at the file and didn't flag that line) — meaning disagreement, not merely "didn't look."
+
+Findings below confidence 50, and findings already resolved by the P0/P1 verifier gate (Step 2), do NOT enter the contest round.
+
+**Mechanic — one batched agent call, no loop:**
+- Collect ALL contestable findings from the PR into a single list. If the list is empty, skip the round entirely — do not spawn an agent for zero work.
+- Otherwise spawn exactly one fresh sub-agent for the whole batch (not one agent per finding), using the same `run_in_background: true` pattern and Sonnet model as the P0/P1 verifier gate (SKILL.md Step 3).
+- Prompt: give the agent the diff and the full list of contestable findings; ask it to argue for or against each, independent of the original reviewer's framing ("is this a real issue introduced by this diff — yes/no — with file:line evidence"). Fresh eyes, same principle as the P0/P1 verifier.
+- This is a single round. It does not iterate until findings stabilize — do not re-run it, and do not spawn a second contest round even if the agent's verdicts seem uncertain.
+
+**Outcome routing:**
+- `confirmed` → promote into the normal action table alongside other findings, tagged in the Verdict column (e.g. `contest-confirmed`) so the user can see it was upgraded via the contest round.
+- `refuted` → route to a "Refuted by contest round" section in the Step 10 output (mirrors "Refuted by verifier"), visible so the user can override — never silently dropped.
+
+### 4. Drop Low-Confidence and Excluded Findings
+
+Reviewers emit a `confidence` score (0–100) per finding. Findings in the 50–74 band were already routed through the Contest Round (Step 3) — confirmed ones are already in the action table, refuted ones are already in the "Refuted by contest round" section. What's left here is confidence below 50: drop these from the action table — list them in a collapsed "Low confidence (not actioned)" note instead, so the signal isn't silently lost. Also drop findings a reviewer itself hedged as speculative or unconfirmed regardless of score. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
 
 Also drop findings in these excluded categories — surfacing them adds noise without actionable value:
 
@@ -47,19 +67,19 @@ Also drop findings in these excluded categories — surfacing them adds noise wi
 
 These categories exist because every reviewer has a tendency to surface low-confidence, catch-all patterns. Dropping them at consolidation keeps the output focused on what the engineer can and should act on now.
 
-### 4. Resolve Conflicts
+### 5. Resolve Conflicts
 
 When reviewers disagree, prefer the suggestion aligned with project conventions (CLAUDE.md / AGENTS.md). If conventions are silent, prefer the more conservative option and note the disagreement.
 
-### 5. Categorize
+### 6. Categorize
 
 Categorize each remaining suggestion: bug fix, performance, readability, style, architecture.
 
-### 6. Discard Convention Conflicts
+### 7. Discard Convention Conflicts
 
 Remove suggestions that conflict with project conventions.
 
-### 7. Scope Classification
+### 8. Scope Classification
 
 For each remaining suggestion, determine whether it falls within the current PR's scope:
 
@@ -68,26 +88,27 @@ For each remaining suggestion, determine whether it falls within the current PR'
 
 When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
 
-### 8. Apply / Skip Gate
+### 9. Apply / Skip Gate
 
 All in-scope findings are applied before merge, regardless of severity. Sort by severity so critical items are addressed first:
 
 - **P0 / P1 (correctness bugs, concrete security risk, broken tests)** — must be resolved before merge. These are findings with a clear, demonstrable path to breakage or exploit.
 - **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — apply inline along with P0/P1. The reviewer already reviewed this PR's files — fixing while context is live is cheaper than deferring.
 
-### 9. Present to User
+### 10. Present to User
 
 Present the consolidated list as a table with:
 - Priority (P0-P3) — rows sorted by severity (P0 first) so critical items are visible at the top
 - Title
 - Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
-- Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate)
+- Verdict column for P0/P1 (confirmed / uncertain — from the verifier gate; `contest-confirmed` — upgraded via the Contest Round)
 - Scope column (In / Out)
 - Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope
 - Recommendation (apply / skip with reason)
 
 After the findings table, add:
 - A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
+- A "Refuted by contest round" section listing contestable findings (Step 3) the contest round rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
