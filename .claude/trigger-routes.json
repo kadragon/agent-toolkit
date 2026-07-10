@@ -10,7 +10,7 @@
     "skip_if_prompt_matches": "(inline|직접|without orchestrator|오타|typo|한 줄|one line|one-line)"
   },
   {
-    "pattern": "(dev.*review|review.*cycle|리뷰.*사이클|dev-review|dev review|리뷰.*돌려|리뷰.*머지|review.*(and.*)?merge|run.*review)",
+    "pattern": "(dev.*review|review.*cycle|리뷰.*사이클|dev-review|dev review|리뷰.*돌려|리뷰.*머지|review.*(and.*)?merge|run.*review|open.*pr.*merge|wait.*ci.*merge)",
     "instruction": "Use Skill(dev-tools:dev-review-cycle) to run the review cycle. Do NOT inline-manage review.",
     "skip_if_prompt_matches": "(skip|no review|without review|review.*only|리뷰만|don't merge|do not merge|머지.*하지|머지하지)"
   },
