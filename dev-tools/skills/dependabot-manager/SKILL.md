@@ -7,9 +7,13 @@ description: Bulk dependabot PR triage — "manage dependabot PRs", "merge depen
 
 Manage dependabot PRs across all repos owned by authenticated GitHub user. Three phases: **Discovery → Triage → Action**.
 
-Phases 1–2: `gh` CLI only (no clone). Only Phase 3 actions **3g (configure grouped updates)** and **3h (consolidate ungrouped PRs)** require a local clone; all other Phase 3 actions (merge, rebase, CI-fix, auto-merge) use `gh` CLI only.
+Phases 1–2 and most of Phase 3 use `gh` CLI only, no clone — only **3g** (configure grouped updates) and **3h** (consolidate ungrouped PRs) need one.
 
-Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
+**Setup** (once per session, before any bundled script): resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn — don't infer it from a plugin-root env var.
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+```
 
 ## Phase 1: Discovery
 
@@ -17,20 +21,15 @@ Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent dire
 gh search prs --author app/dependabot --state open --owner @me --json repository,number,title,url --limit 200
 ```
 
-Group by repo, show count summary. None found → exit early. If returned count == 200 (the `--limit`), warn user results may be truncated — more open PRs may exist beyond this page.
+Group by repo, show count summary. None found → exit early. Count == 200 (the `--limit`) → warn results may be truncated.
 
 ## Phase 2: Triage
 
-Triage all PRs in one pass — no per-repo agents needed:
-
 ```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-bash "$SKILL_DIR/scripts/triage.sh" \
-  "owner/repo1:123" "owner/repo2:456" ...
+bash "$SKILL_DIR/scripts/triage.sh" "owner/repo1:123" "owner/repo2:456" ...
 ```
 
-Script returns JSON array with `category` per PR:
+Returns a JSON array with `category` per PR:
 
 | Emoji | Category | Condition |
 |---|---|---|
@@ -39,22 +38,15 @@ Script returns JSON array with `category` per PR:
 | ❌ | `ci_failed` | Any check `FAILURE` |
 | ⏳ | `ci_pending` | Checks still running |
 | ⚪ | `no_ci` | No status checks configured |
-| — | `closed` | PR already merged/closed — skip silently |
-| — | `error` | `gh pr view` call failed — report repo:number and continue |
-| — | `unknown` | `mergeStateStatus` not CLEAN/CONFLICTING/BEHIND — treat as `needs_rebase` for safety |
+| — | `closed` / `error` / `unknown` | Skip / report and continue / treat as `needs_rebase` |
 
-Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Then run `audit-automerge.sh` **after** `triage.sh` completes to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks):
+Also audit dependabot config per repo (`groups:` block, `github-actions` ecosystem present?). Then, **after** triage, check auto-merge readiness:
 
 ```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-bash "$SKILL_DIR/scripts/audit-automerge.sh" \
-  "owner/repo1" "owner/repo2" ...
+bash "$SKILL_DIR/scripts/audit-automerge.sh" "owner/repo1" "owner/repo2" ...
 ```
 
-See **`references/triage.md`** for details.
-
-Show categorized results per repo with emoji prefix.
+See **`references/triage.md`** for field details. Show categorized results per repo with emoji prefix.
 
 ## Phase 3: Action
 
@@ -89,21 +81,11 @@ Never pause for:
 
 ## Known Gotchas
 
-- **Rebase not automatic**: After merging CI infra fix (e.g., Node.js version bump), Dependabot does NOT auto-rebase blocked PRs — always send `@dependabot rebase` explicitly. After sending the rebase command, wait and re-list PRs (`gh pr list --author app/dependabot --state open`) until the rebased PR appears before proceeding to Phase 3 actions.
-- **Dependabot may replace PRs**: After rebase, Dependabot sometimes closes the stale PR and opens a new one with a different number and updated scope. Re-list with `--author app/dependabot --state open` after rebase and confirm new PR numbers before any merge or further action — never use original PR numbers from pre-rebase triage.
-- **Branch protection needs GitHub Pro on private repos**: `enable-automerge.sh` on a private repo on the free plan gets `403 Upgrade to GitHub Pro` from the protection API. The script reports `protection_action: "unsupported_plan"` and exits 0 (so a batch run survives) — but `allow_auto_merge` is on with NO required checks, so any later `gh pr merge --auto` fires immediately. Treat these repos as merge-on-manual-confirm, not auto.
-- **No CI signal = same immediate-merge risk**: when `enable-automerge.sh` finds no CI checks it returns `protection_action: "skipped"` — `allow_auto_merge` on, no required checks. Identical risk to `unsupported_plan`: `--auto` would merge immediately. Treat `skipped` repos as merge-on-manual-confirm too.
-- **Same-repo parallel merge causes "Base branch was modified"**: when a repo has multiple ready PRs, merging them in parallel background processes fails because the first merge advances the base branch before the second can land. Merge PRs from the **same repo sequentially**; PRs across different repos can run in parallel.
-- **Deferred same-repo PRs go stale too**: the same-repo rule above only protects PRs merged *within one batch*. A PR from the same repo held back for a later action (major-bump changelog review, CI-fix queue, manual confirm) goes stale the moment any other same-repo PR merges in an earlier batch — its merge later fails with "cannot be cleanly created" / merge conflict, not just "base branch modified". Before merging any held-back PR, re-check if a same-repo PR merged since triage; if so, treat it as `needs_rebase` and send `@dependabot rebase` first rather than attempting the merge directly.
-- **Major PR excluded from grouping can deadlock its own group**: when a `groups:` config only covers `minor`/`patch` updates, a major-version bump (e.g. `@cloudflare/workers-types` 4.x→5.x) opens as a separate ungrouped PR. If another package in the grouped PR (e.g. `wrangler`) has a peer-dependency range tied to that major version, neither PR installs cleanly alone — `npm ci`/`npm install` fails ERESOLVE in both directions (grouped PR wants the new peer, major PR's package.json still has the old dependent pinned, or vice versa) until both land together. Symptom: `ci_failed` on both the major-bump PR and the sibling grouped PR in the same repo, with mirrored "Conflicting peer dependency" errors naming each other's package. Fix: don't treat as two independent CI failures — combine both diffs into one branch, `npm install` to regenerate the lockfile, verify against the real CI command, push as one PR, and close both originals referencing it (see §3e).
+Rebase timing, PR replacement, auto-merge risk tiers, same-repo merge ordering, and major/grouped-PR peer-dep deadlocks — see **`references/gotchas.md`** before any merge/rebase/auto-merge action.
 
-## Subagent Model Selection
+## Subagents
 
-Spawn subagents only for tasks needing read + reasoning (CI log analysis, multi-step git workflows). Scripts handle rest.
-
-Spawn `sonnet` subagents for CI log analysis, config fix PR creation, and PR consolidation.
-
-A fix subagent's analysis is a hypothesis, not a fix — it must verify against the actual failing command (re-run the failing lint/test/build to exit 0, using the tool's own migration helper for config changes) before pushing. Never push an analysis-only proposal. See `references/actions.md` §3e Step 2.
+Spawn `sonnet` subagents only for read+reasoning work (CI log analysis, fix-PR creation, consolidation) — scripts handle the rest. A subagent's fix is a hypothesis, not a fix: it must re-run the actual failing command and confirm exit 0 before pushing. Never push an analysis-only proposal. See `references/actions.md` §3e Step 2.
 
 ## Scripts
 
@@ -116,7 +98,7 @@ scripts/consolidate-deps.cjs — consolidate npm/Node.js dependabot PRs
 scripts/consolidate-deps.py  — consolidate Python dependabot PRs
 ```
 
-Invoke via the concrete resolved path `$SKILL_DIR/scripts/<name>` after capturing and validating `SKILL_DIR` in the same command block.
+Invoke as `$SKILL_DIR/scripts/<name>` (see Setup above).
 
 ## Interaction
 
