@@ -63,13 +63,27 @@ trap 'rm -f "$FJ_CODE_FILE"' EXIT
 fj_code() { cat "$FJ_CODE_FILE" 2>/dev/null || printf '000'; }
 fj_api() {
   local method="$1" path="$2" body="${3:-}"
-  local resp code
-  resp=$(curl -sS -X "$method" \
-    -H "Authorization: token ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    ${body:+-d "$body"} \
-    -w $'\n%{http_code}' \
-    "${API_URL}${path}") || { printf '000' >"$FJ_CODE_FILE"; return 1; }
+  local resp code body_file
+  # Non-ASCII (e.g. Korean) passed via -d "$body" gets mangled by this
+  # environment's native curl.exe through an ANSI codepage reencode.
+  # Route the body through a temp file + --data-binary to preserve raw UTF-8 bytes.
+  if [ -n "$body" ]; then
+    body_file="$(mktemp)"
+    printf '%s' "$body" >"$body_file"
+    resp=$(curl -sS -X "$method" \
+      -H "Authorization: token ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data-binary "@${body_file}" \
+      -w $'\n%{http_code}' \
+      "${API_URL}${path}") || { rm -f "$body_file"; printf '000' >"$FJ_CODE_FILE"; return 1; }
+    rm -f "$body_file"
+  else
+    resp=$(curl -sS -X "$method" \
+      -H "Authorization: token ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      -w $'\n%{http_code}' \
+      "${API_URL}${path}") || { printf '000' >"$FJ_CODE_FILE"; return 1; }
+  fi
   code="${resp##*$'\n'}"
   printf '%s' "$code" >"$FJ_CODE_FILE"
   printf '%s' "${resp%$'\n'*}"
