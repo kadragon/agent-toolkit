@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harness ratchet checks for shipped plugin skills (dev-tools/, productivity/).
 
-Two independent checks, run over every `{plugin}/skills/*/SKILL.md`:
+Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
 (a) Router drift — every double-quoted trigger phrase in a skill's
     frontmatter `description` must route (via `.claude/hooks/trigger-router.sh`
@@ -9,16 +9,18 @@ Two independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     skill advertises but the router never learned (see trigger-routes.json
     fix history).
 
-(b) Capture-before-use — every `$VAR` / `${VAR}` (uppercase) referenced
-    inside a fenced ```bash/```sh code block must have a `VAR=` capture
-    earlier in the *same* block. Platform env vars (CLAUDE_PLUGIN_ROOT, HOME,
-    PATH) are allowlisted.
+(b) Plugin-root portability — shared skill instructions and references must not
+    depend on hook-only plugin root variables to locate bundled files.
 
-Scope note: violations are HARD-FAIL only for HARD_FAIL_SKILLS (skills fixed
-in this sprint). All other skills report WARN only — pre-existing violations
-elsewhere (e.g. hwpx `$SKILL_DIR`, dev-review-cycle `${COMMIT_MESSAGE}`) are
-tracked as separate backlog items, not blocked here. Extend HARD_FAIL_SKILLS
-as each skill is brought into compliance.
+(c) Capture-before-use — every `$VAR` / `${VAR}` (uppercase) referenced
+    inside a fenced ```bash/```sh code block must have a `VAR=` capture
+    earlier in the *same* block. Platform env vars (HOME, PATH) are allowlisted.
+
+Scope note: plugin-root portability violations are unconditional errors.
+Router-drift and capture-before-use violations are HARD-FAIL only for
+HARD_FAIL_SKILLS (skills fixed in an earlier sprint). Other skills report WARN
+for those two checks so pre-existing debt remains visible without blocking CI.
+Extend HARD_FAIL_SKILLS as each skill is brought into compliance.
 
 Usage: python3 scripts/ci/check_harness_drift.py
 Exit: 0 if no hard-fail violations, 1 otherwise. Always prints a full report.
@@ -50,7 +52,8 @@ REFERENCE_GLOBS = [
 # All other skills are warn-only until brought into compliance separately.
 HARD_FAIL_SKILLS = {"harness-init", "next-tasks", "hwpx", "dev-review-cycle"}
 
-ALLOWLIST_VARS = {"CLAUDE_PLUGIN_ROOT", "HOME", "PATH"}
+ALLOWLIST_VARS = {"HOME", "PATH"}
+FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
 
 FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 QUOTED_RE = re.compile(r'"([^"]+)"')
@@ -185,6 +188,15 @@ def check_capture_before_use(text: str) -> list[str]:
     return problems
 
 
+def check_plugin_root_portability(text: str) -> list[str]:
+    """Reject hook-only root variables from shared skill instructions."""
+    return [
+        f"hook-only root variable {token!r} is not portable in shared skill instructions"
+        for token in FORBIDDEN_SKILL_ROOT_VARS
+        if re.search(rf"(?<![A-Z0-9_]){re.escape(token)}(?![A-Z0-9_])", text)
+    ]
+
+
 def main() -> int:
     if not ROUTER.is_file() or not ROUTES_FILE.is_file():
         print(f"ERROR: router or routes file missing ({ROUTER}, {ROUTES_FILE})")
@@ -213,17 +225,25 @@ def main() -> int:
         severity = "ERROR" if name in HARD_FAIL_SKILLS else "WARN"
 
         drift = check_router_drift(name, description)
+        portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
 
-        if not drift and not capture:
-            print(f"OK   {rel} ({name}): router phrases + capture-before-use clean")
+        if not drift and not portability and not capture:
+            print(
+                f"OK   {rel} ({name}): router phrases + plugin-root portability "
+                "+ capture-before-use clean"
+            )
             continue
 
         for msg in drift:
             print(f"{severity} {rel} ({name}) [router-drift]: {msg}")
+        for msg in portability:
+            print(f"ERROR {rel} ({name}) [plugin-root-portability]: {msg}")
         for msg in capture:
             print(f"{severity} {rel} ({name}) [capture-before-use]: {msg}")
 
+        if portability:
+            hard_fail = True
         if severity == "ERROR" and (drift or capture):
             hard_fail = True
 
@@ -234,18 +254,27 @@ def main() -> int:
     for skill_name, path in find_reference_files():
         text = path.read_text()
         rel = path.relative_to(REPO_ROOT)
+        portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
 
-        if not capture:
-            print(f"OK   {rel} ({skill_name}): capture-before-use clean")
+        if not portability and not capture:
+            print(
+                f"OK   {rel} ({skill_name}): plugin-root portability "
+                "+ capture-before-use clean"
+            )
             continue
 
+        for msg in portability:
+            print(f"ERROR {rel} ({skill_name}) [plugin-root-portability]: {msg}")
         for msg in capture:
             print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
 
+        if portability:
+            hard_fail = True
+
     print("----")
     if hard_fail:
-        print("FAIL: hard-fail violations in sprint-fixed skills (see ERROR lines above).")
+        print("FAIL: portability or hard-fail violations found (see ERROR lines above).")
         return 1
     print("OK: no hard-fail violations (WARN-only items are tracked separately).")
     return 0

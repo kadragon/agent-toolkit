@@ -9,6 +9,8 @@ Manage dependabot PRs across all repos owned by authenticated GitHub user. Three
 
 Phases 1–2: `gh` CLI only (no clone). Only Phase 3 actions **3g (configure grouped updates)** and **3h (consolidate ungrouped PRs)** require a local clone; all other Phase 3 actions (merge, rebase, CI-fix, auto-merge) use `gh` CLI only.
 
+Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
+
 ## Phase 1: Discovery
 
 ```bash
@@ -22,7 +24,9 @@ Group by repo, show count summary. None found → exit early. If returned count 
 Triage all PRs in one pass — no per-repo agents needed:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/triage.sh \
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/triage.sh" \
   "owner/repo1:123" "owner/repo2:456" ...
 ```
 
@@ -42,7 +46,9 @@ Script returns JSON array with `category` per PR:
 Also audit dependabot config per repo (one `gh api` call each) — check for `groups:` block and `github-actions` ecosystem. Then run `audit-automerge.sh` **after** `triage.sh` completes to check auto-merge readiness (`allow_auto_merge`, branch protection, required checks):
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/audit-automerge.sh \
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/audit-automerge.sh" \
   "owner/repo1" "owner/repo2" ...
 ```
 
@@ -109,7 +115,7 @@ scripts/consolidate-deps.cjs — consolidate npm/Node.js dependabot PRs
 scripts/consolidate-deps.py  — consolidate Python dependabot PRs
 ```
 
-Invoke via `${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/<name>`.
+Invoke via the concrete resolved path `$SKILL_DIR/scripts/<name>` after capturing and validating `SKILL_DIR` in the same command block.
 
 ## Interaction
 

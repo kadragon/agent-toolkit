@@ -55,8 +55,9 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 
 ### Plugin Hook Root Variables
 
-- In `hooks.json` command fields, use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` for shared Claude/Codex hooks — Claude Code's canonical var takes precedence; Codex works because it also sets `$CLAUDE_PLUGIN_ROOT` as a compat alias.
-- Script bodies (`.sh` / `.py`) that use `$CLAUDE_PLUGIN_ROOT` directly are also correct for both platforms.
+- In `hooks.json` command fields, use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` for shared Claude/Codex hooks. This guarantee is limited to the plugin hook command environment.
+- Hook script bodies derive adjacent assets from `BASH_SOURCE[0]` (shell) or `__file__` (Python), so they remain runnable outside the hook launcher.
+- Shared skills resolve bundled files from the absolute location of the `SKILL.md` loaded for that turn. Skill-executed shells must not assume plugin hook root variables are present.
 
 ## Plugin Version Bump Rules
 

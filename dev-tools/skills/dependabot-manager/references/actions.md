@@ -27,7 +27,9 @@ Show the user the affected repos and their `missing` items. One confirmation cov
 For each repo needing activation, run:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/enable-automerge.sh "owner/repo"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/enable-automerge.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/enable-automerge.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/enable-automerge.sh" "owner/repo"
 ```
 
 Interpret `protection_action`:
@@ -136,7 +138,9 @@ After the user confirms the fix strategy, execute this pipeline autonomously wit
    - Only push once the failing command is green locally. If it can't be made green (needs secrets, env, or a design decision), stop and report — do not push a still-red branch.
 2. **Poll CI on fix PRs**:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/poll-ci.sh \
+   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+   [[ -f "$SKILL_DIR/scripts/poll-ci.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/poll-ci.sh" >&2; exit 1; }
+   bash "$SKILL_DIR/scripts/poll-ci.sh" \
      --timeout 600 "owner/repo1:{fix-pr}" "owner/repo2:{fix-pr}" ...
    ```
 3. **Merge fix PRs** — once all show `ready`:
@@ -153,7 +157,9 @@ After the user confirms the fix strategy, execute this pipeline autonomously wit
    ```
 6. **Poll CI on rebased dependabot PRs**:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/poll-ci.sh \
+   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+   [[ -f "$SKILL_DIR/scripts/poll-ci.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/poll-ci.sh" >&2; exit 1; }
+   bash "$SKILL_DIR/scripts/poll-ci.sh" \
      --timeout 600 "owner/repo1:{new-dep-pr}" ...
    ```
 7. **Merge dependabot PRs** — once all show `ready`. If auto-merge is enabled for the repo (see 3b), apply `gh pr merge --auto --squash` and skip the polling step; the merge fires automatically when CI passes.
@@ -191,8 +197,8 @@ If repo uses Actions but lacks `github-actions` ecosystem, also add:
 
 For repos with 3+ individual PRs and no grouped updates, offer consolidation using bundled scripts:
 
-- **npm**: `${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/consolidate-deps.cjs`
-- **Python**: `${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/consolidate-deps.py`
+- **npm**: `$SKILL_DIR/scripts/consolidate-deps.cjs`
+- **Python**: `$SKILL_DIR/scripts/consolidate-deps.py`
 - **Other ecosystems**: Manual workflow via Edit tool. Requires local clone.
 
 Both scripts: fetch dependabot PRs → parse versions → create branch → apply bumps → test → commit → push → create consolidated PR → close originals.

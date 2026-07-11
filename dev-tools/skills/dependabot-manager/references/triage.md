@@ -33,7 +33,9 @@ See SKILL.md category table for the full emoji/category/condition mapping.
 Run after PR triage — one call covers all repos discovered in Phase 1:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dependabot-manager/scripts/audit-automerge.sh \
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/audit-automerge.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/audit-automerge.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/audit-automerge.sh" \
   "owner/repo1" "owner/repo2" ...
 ```
 

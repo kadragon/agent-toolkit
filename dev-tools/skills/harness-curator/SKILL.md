@@ -9,6 +9,8 @@ version: 1.3.2
 
 Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds into seven signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
+Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
+
 Replaces the old `/dev-tools:task-audit` command, which mined only `history.jsonl` prompts (good for new-asset candidates, blind to triggering misses and underperforming skills).
 
 ## When to use which scope
@@ -22,7 +24,9 @@ Replaces the old `/dev-tools:task-audit` command, which mined only `history.json
 Run the scanner with the scope tokens passed as real arguments (not a single combined string). It caps output and prints every dropped count (no silent truncation):
 
 ```bash
-SCAN="${CLAUDE_PLUGIN_ROOT}/skills/harness-curator/scripts/scan_transcripts.py"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+SCAN="$SKILL_DIR/scripts/scan_transcripts.py"
 python3 "$SCAN"                              # current project (cwd)
 python3 "$SCAN" all                          # every project
 python3 "$SCAN" --project "/abs/path"        # one named project — quote paths with spaces
@@ -35,7 +39,9 @@ If the scan volume is large (`all` scope, or thousands of prompts), do NOT read 
 Also fold in the **per-repo failed-command log** (written by the `failure-log` PostToolUse hook to `<root>/.claude/logs/failed-commands.jsonl` — genuinely-failed Bash commands, noise already filtered). Cluster it with the bundled summarizer:
 
 ```bash
-FLOG="${CLAUDE_PLUGIN_ROOT}/hooks/failure-log/summarize.py"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/../../hooks/failure-log" ]] || { echo "Bundled hook helper unavailable: $SKILL_DIR/../../hooks/failure-log" >&2; exit 1; }
+FLOG="$SKILL_DIR/../../hooks/failure-log/summarize.py"
 python3 "$FLOG"                              # current repo (cwd → git root)
 python3 "$FLOG" /abs/path/to/repo           # one named repo
 ```
@@ -124,7 +130,9 @@ Present the candidate list (plugin key + evidence summary) and ask the user to c
 After per-plugin confirmation, call the helper once with all confirmed bare plugin names:
 
 ```bash
-DISABLE="${CLAUDE_PLUGIN_ROOT}/skills/harness-curator/scripts/disable_plugins.py"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+DISABLE="$SKILL_DIR/scripts/disable_plugins.py"
 python3 "$DISABLE" dev-tools frontend-design   # example — use confirmed names
 # auditing a repo other than cwd (`all` / `--project` scope)? name it explicitly:
 python3 "$DISABLE" --project=/abs/path/to/repo dev-tools

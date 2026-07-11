@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 TARGET="../.claude/skills"
 LINK=".agents/skills"
 
@@ -54,5 +56,5 @@ fi
 # Case 5: unexpected state (wrong-content file, directory, etc.) — do not destroy, report
 echo "symlink-guard: .agents/skills is in an unexpected state (not a symlink or git text-symlink)."
 echo "  Current: $(ls -ld "$LINK" 2>&1 || true)"
-echo "  Manual fix: rm -rf .agents/skills && bash \$CLAUDE_PLUGIN_ROOT/skills/harness-init/scripts/symlink-guard.sh"
+echo "  Manual fix: rm -rf .agents/skills && bash '$SCRIPT_PATH'"
 exit 1

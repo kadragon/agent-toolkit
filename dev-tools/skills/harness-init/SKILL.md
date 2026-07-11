@@ -330,10 +330,12 @@ Prevents token burn on vendored deps, build outputs, generated artifacts. Compos
 Tooling looks up project-local skills via `.agents/` while files live under `.claude/skills/`. Create once at init; repair with `scripts/symlink-guard.sh` if broken:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/symlink-guard.sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/symlink-guard.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/symlink-guard.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/symlink-guard.sh"
 ```
 
-If skills repo is not cloned or `CLAUDE_PLUGIN_ROOT` is unset, run directly:
+If the bundled script cannot be resolved from the loaded `SKILL.md`, run directly:
 
 ```bash
 mkdir -p .agents && ln -s ../.claude/skills .agents/skills

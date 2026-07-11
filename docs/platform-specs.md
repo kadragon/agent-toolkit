@@ -12,7 +12,7 @@ This repo ships plugins for **both** platforms. Any skill, hook, or agent added 
 | Hooks | `hooks.json` (plugin.json `hooks` field) | `hooks.json` (same field, fewer events) |
 | Commands | `commands/*.md` | NOT supported |
 | MCP | `.mcp.json` via `mcpServers` field | Same |
-| Env var | `$CLAUDE_PLUGIN_ROOT` | `$PLUGIN_ROOT` (canonical), `$CLAUDE_PLUGIN_ROOT` compatibility fallback |
+| Plugin hook root env | `$CLAUDE_PLUGIN_ROOT` | `$PLUGIN_ROOT` (canonical), `$CLAUDE_PLUGIN_ROOT` compatibility fallback |
 | Instruction file | `CLAUDE.md` (Anthropic-specific) | `AGENTS.md` (cross-tool standard) |
 
 ---
@@ -203,6 +203,8 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 3. Use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` in shared hook commands — `CLAUDE_PLUGIN_ROOT` wins (canonical for Claude Code; Codex sets it as compat alias), with `PLUGIN_ROOT` as fallback
 4. Test hook with both `$CLAUDE_PLUGIN_ROOT` and `$PLUGIN_ROOT` paths
 
+These variables belong to the plugin hook command environment. They are not guaranteed in shells launched while following a shared `SKILL.md`.
+
 ### When adding an agent
 
 1. Add agent `.md` to `{plugin}/agents/` — **Claude Code only**
@@ -215,7 +217,7 @@ Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.
 
 ---
 
-## Environment Variables
+## Plugin Hook Command Environment
 
 | Var | Codex | Claude Code |
 |-----|-------|-------------|
@@ -225,7 +227,9 @@ Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.
 | `$CLAUDE_PLUGIN_DATA` | Compatibility fallback for existing plugin hooks | Writable plugin data directory |
 | `$CLAUDE_PROJECT_DIR` | Not documented | Project directory |
 
-For shared Claude/Codex hook definitions, prefer `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` — `CLAUDE_PLUGIN_ROOT` is canonical for Claude Code and also set by Codex as a compat alias, so it is safe to prefer it in both environments.
+For shared Claude/Codex hook definitions, prefer `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` — `CLAUDE_PLUGIN_ROOT` is canonical for Claude Code and also set by Codex as a compat alias in plugin hooks.
+
+Do not use these root variables to locate files from shared skill instructions. Resolve bundled scripts and references from the absolute parent directory of the `SKILL.md` actually loaded for the turn. Hook script bodies that need adjacent assets should resolve from `BASH_SOURCE[0]` or `__file__`.
 
 ## Executable Line Endings
 

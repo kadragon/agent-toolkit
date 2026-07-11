@@ -41,7 +41,9 @@ in the idle state. If absent, only `backlog.md` candidates are offered.
 **Fast path (single-pick only):** Read a minimal slice of each file to surface the top candidates — do NOT scan the full backlog unless the user explicitly asks for more.
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/skills/next-tasks/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+python3 "$SKILL_DIR/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md
 ```
 
 Prints one line per candidate — `[N] <source>: <heading> (<M> items)` (h1 sprint blocks omit
@@ -84,7 +86,9 @@ Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 o
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/skills/next-tasks/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md --full-scan
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+python3 "$SKILL_DIR/scripts/backlog_candidates.py" --tasks tasks.md --backlog backlog.md --full-scan
 ```
 
 This applies rules 1–5 below in order, uncapped — note rules 4+5 use type priority (all
