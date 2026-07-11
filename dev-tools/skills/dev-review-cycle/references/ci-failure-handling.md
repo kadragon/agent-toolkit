@@ -8,7 +8,9 @@ Run the CI wait script and check the result:
 
 ```bash
 # timeout: 900000
-RESULT=$(bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/ci-wait.sh <PR_NUMBER>)
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/ci-wait.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/ci-wait.sh" >&2; exit 1; }
+RESULT=$(bash "$SKILL_DIR/scripts/ci-wait.sh" <PR_NUMBER>)
 PASSED=$(echo "$RESULT" | jq -r '.passed')
 REASON=$(echo "$RESULT" | jq -r '.reason // empty')
 ```
@@ -27,7 +29,9 @@ Allow up to 15 minutes (900000ms). Branch on both `PASSED` and `REASON`:
 Use the bundled script:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/ci-failure-logs.sh <PR_NUMBER>
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/ci-failure-logs.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/ci-failure-logs.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/ci-failure-logs.sh" <PR_NUMBER>
 ```
 
 The script identifies failed checks and returns JSON with logs for each failure (last 200 lines per job on GitHub). On Forgejo remotes the response has `logs_available: false` — the API exposes no job logs (≤ v15), only the failed check names and `target_url` links. In that case: report each failed check's name and link to the user, then reproduce the failure locally (run the project's test/lint command) and diagnose from local output instead of CI logs.
@@ -54,13 +58,15 @@ Return to the CI wait step. If CI fails **3 consecutive times** (no passing run 
 After CI passes, merge the PR and clean up:
 
 ```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
 # All 4 positional args are REQUIRED. Values come from pre-flight JSON output.
 # merge_strategy must be a JSON object, NOT a bare word like "squash".
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/merge-and-cleanup.sh \
+bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
   <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [worktree_path]
 
 # Concrete example:
-bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-review-cycle/scripts/merge-and-cleanup.sh \
+bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
   9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
 ```
 

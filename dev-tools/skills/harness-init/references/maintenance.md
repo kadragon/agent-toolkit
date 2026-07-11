@@ -59,7 +59,9 @@ Unsure → add short inline `TODO:` comment, don't invent guidance.
 ## B) CLAUDE.md Deterministic Sync
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/sync-claude-md.sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/sync-claude-md.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/sync-claude-md.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/sync-claude-md.sh"
 ```
 
 Exit codes:
@@ -84,7 +86,9 @@ Exit codes:
 Run silently. Script syncs `tasks.md` status into `backlog.md`, prints one status line.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/reconcile-harness.py
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/reconcile-harness.py" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/reconcile-harness.py" >&2; exit 1; }
+python3 "$SKILL_DIR/scripts/reconcile-harness.py"
 ```
 
 Output:
@@ -143,7 +147,9 @@ opening a sprint is a separate, deliberate act the user starts explicitly.
 ## E) Skills Symlink Guard
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/symlink-guard.sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/symlink-guard.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/symlink-guard.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/symlink-guard.sh"
 ```
 
 Ensures `.agents/skills` symlinks to `../.claude/skills`.
@@ -154,7 +160,9 @@ Silent on success; prints one line on change.
 ## F) Context Size Check
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/harness-init/scripts/check-context-size.sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/check-context-size.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/check-context-size.sh" >&2; exit 1; }
+bash "$SKILL_DIR/scripts/check-context-size.sh"
 ```
 
 Warns when file Claude reloads every message grows past hard-warn threshold (default 200 lines; see `harness-invariants.md` → "AGENTS.md Size Policy"). `harness-init` targets ≤100 lines — 100–200 band is soft zone; `validate-harness.sh` flags at init time; sync check silent until >200. Resolves effective file automatically:

@@ -45,9 +45,10 @@ python -m pip install olefile defusedxml
 
 > ⚠️ Use `python -m pip install`, not bare `pip install` — `python` and `pip` can resolve to different interpreters, so a "successful" `pip install` can still leave `ModuleNotFoundError` when you actually run the script. Details: `references/environment.md`.
 
-- `SKILL_DIR` = absolute path of directory holding this SKILL.md (`.../skills/hwpx`). Resolve at the top of every bash block that references it:
+- `SKILL_DIR` = absolute parent directory of the `SKILL.md` loaded this turn (`.../skills/hwpx`). Resolve the concrete path from the loaded file, not from a plugin-root environment variable, at the top of every bash block that references it:
   ```bash
-  SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
   ```
 - OS-specific Python invocation, encoding gotchas (Windows cp949/UTF-8, codepoint escaping), subprocess encoding, and temp-file placement: see `$SKILL_DIR/references/environment.md`
 
@@ -120,7 +121,8 @@ rm -rf .hwpx_work/
 ### Basic usage
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 빈 문서 (base 템플릿)
 python3 "$SKILL_DIR/scripts/build.py" build --output result.hwpx
 
@@ -142,7 +144,8 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 
 ```bash
 set -euo pipefail
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 1. section0.xml을 임시파일로 작성 (per-session unique dir — parallel-safe)
 HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
 trap 'rm -rf "$HWPX_WORK"' EXIT  # error-path cleanup: fires on any set -e trigger or normal exit
@@ -210,7 +213,8 @@ Pick template → look up `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef` in style
 >   - Python: `open(path, 'rb').read(4)`
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 1. HWPX → 디렉토리 (raw bytes 추출, .hwpx_pack_order manifest 기록)
 python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx ./unpacked/
 
@@ -243,7 +247,8 @@ Many items → split into stages to catch silent failures early, verify each sta
 **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)  # or reuse the dir from step 1 (mktemp -d .hwpx_work_XXXXXX + office.py unpack)
 python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx "$HWPX_WORK/unpacked/"  # skip if reusing an already-unpacked dir from step 1
 python3 "$SKILL_DIR/scripts/table.py" replace "$HWPX_WORK/unpacked/" --table-id TABLE_ID --cell 2,1 --para 0 0 "값1"
@@ -333,12 +338,14 @@ Deleting a table row (`table.py delete`) removes that `<hp:tr>` only — the sam
 > If `text.py extract` fails with a ZIP error, the same magic-bytes check from Workflow 2 applies — the `.hwpx`-named file may actually be a legacy OLE `.hwp` binary; see the note there and the olefile-based fallback in `references/environment.md`.
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 python3 "$SKILL_DIR/scripts/text.py" extract path/to/file.hwpx --format markdown
 ```
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 순수 텍스트
 python3 "$SKILL_DIR/scripts/text.py" extract document.hwpx
 
@@ -352,7 +359,8 @@ python3 "$SKILL_DIR/scripts/text.py" extract document.hwpx --format markdown
 ### Batch extraction (multiple folders × multiple files)
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # Batch extraction from folder list (bash)
 for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
   echo "=== $f ==="
@@ -381,7 +389,8 @@ Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
 ## Workflow 4: validation
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 단독 새 문서
 python3 "$SKILL_DIR/scripts/validate.py" validate document.hwpx
 # 첨부 원본을 편집/복원한 결과 — 기존 중복 ID 오탐 방지
@@ -429,7 +438,8 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 ### Usage
 
 ```bash
-SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/hwpx"
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 1. 심층 분석 (구조 청사진 출력)
 python3 "$SKILL_DIR/scripts/build.py" analyze reference.hwpx
 
