@@ -51,6 +51,35 @@ The GraphQL approach fetches all repos + alerts in a single paginated call, avoi
 - **Empty `vulnerabilityAlerts`**: Repo may have Dependabot disabled or no supported manifest.
 - **`firstPatchedVersion` is null**: No fix available. Task item should use "Monitor" template.
 
+## Cross-referencing Open PRs
+
+Before writing a manual "Upgrade" task, check whether an open Dependabot PR already covers the alert's package. One call per affected repo (the set from Phase 1), not all repos.
+
+### Query Structure
+
+```bash
+gh search prs --author app/dependabot --state open --repo "${OWNER}/${REPO}" \
+  --json number,title,url
+```
+
+### Response Fields
+
+| Field | Purpose |
+|-------|---------|
+| `number` | PR number, used in the pointer item |
+| `title` | Match against alert's package name (substring match) |
+| `url` | PR URL, used in the pointer item |
+
+### Matching Logic
+
+Dependabot PR titles follow `bump <package> from X to Y` (Go/JS ecosystems) or `build(deps): bump <package> ...` (Actions/other configs) conventions. Substring-match the alert's `securityVulnerability.package.name` against `title` — no need for exact semver comparison. First match wins.
+
+### Common Issues
+
+- **Title format varies by ecosystem/config**: some configs prefix with `build(deps):` or `build(deps-dev):`, others don't. Substring match on package name tolerates this.
+- **Closed/merged PRs must not match**: `--state open` already excludes these; do not drop the flag.
+- **Rate limits**: run once per affected repo (already scoped by Phase 1), never per-alert — an N+1 pattern here burns REST quota fast.
+
 ## Code Scanning — REST
 
 ```bash
