@@ -88,7 +88,7 @@ Write **separate** `tasks.md` into **each affected repo's root**. Do NOT create 
 
 Before writing fix tasks, read relevant files per repo:
 
-- **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files.
+- **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files. Before writing items, check for already-open Dependabot PRs: run `gh search prs --author app/dependabot --state open --repo <owner>/<repo> --limit 100 --json number,title,url` once per affected repo (not per-alert), then match each alert's package name exactly (not by substring) against the package token in PR titles. Pattern details → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`** § Cross-referencing Open PRs.
 - **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in tasks.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
@@ -100,6 +100,7 @@ Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
+- If an alert's package matches an open Dependabot PR, write the PR-pointer item instead of the manual upgrade item — format → tasks-template.md.
 
 ### 3-3. Present result
 

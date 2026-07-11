@@ -24,6 +24,7 @@ Do NOT create a single consolidated file.
 
 - [ ] Upgrade <package> from <current> to <patched> (<severity>) — <advisory summary>
 - [ ] Monitor <package> for patch release (<severity>) — <advisory summary> (no patched version available yet)
+- [ ] PR #<number> already open for <package> — use dependabot-manager to triage/merge (<url>)
 
 ### Code Scanning Alerts
 
@@ -48,6 +49,7 @@ Do NOT create a single consolidated file.
 - Include the specific version to upgrade to (from `firstPatchedVersion`).
 - If `firstPatchedVersion` is null, use the **"Monitor"** template instead of "Upgrade".
 - Read the dependency manifest (package.json, requirements.txt, pyproject.toml, go.mod, etc.) to determine the current version. Do NOT read lock files.
+- If an open Dependabot PR matches the package name exactly (see api-patterns.md § Cross-referencing Open PRs), use the **"PR already open"** template instead of "Upgrade"/"Monitor". Otherwise fall back to the existing Upgrade/Monitor logic.
 
 ### Code Scanning Items
 
@@ -82,8 +84,8 @@ This prevents duplicate entries from repeated runs.
 
 ### Dependabot Alerts
 
-- [ ] Upgrade express from 4.17.1 to 4.21.2 (HIGH) — Prototype Pollution in qs
 - [ ] Upgrade jsonwebtoken from 8.5.1 to 9.0.0 (CRITICAL) — JWT signature bypass
+- [ ] PR #42 already open for express — use dependabot-manager to triage/merge (https://github.com/kadragon/my-webapp/pull/42)
 - [ ] Monitor lodash for patch release (MODERATE) — ReDoS vulnerability (no patched version available yet)
 
 ### Code Scanning Alerts
