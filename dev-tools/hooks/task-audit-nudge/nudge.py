@@ -31,6 +31,15 @@ State:
   lastCandidateMs - written by Step 6 when HARNESS_PENDING=1, cleared when 0
   lastNudgeMs     - written here, throttles the nudge to once per THROTTLE window
 
+  New-session counting differs by platform: for Claude, the resolved state_dir IS the
+  project's real transcript directory, so counting *.jsonl there directly works
+  (_new_session_count). For Codex, state_dir is ONLY this hook's own bookkeeping
+  location — real sessions live under $CODEX_HOME/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl
+  (date-partitioned, matched by each file's session_meta.cwd), so a separate counter
+  (_codex_new_session_count) is required. Using the Claude-side counter under Codex
+  would always return 0 and permanently suppress analysis_stale regardless of real
+  activity — caught by review before shipping; see config_dir()'s is_codex flag.
+
 Never raises - a reminder must never block session start.
 """
 
@@ -66,7 +75,16 @@ def _jsonl_count(d):
 
 
 def _new_session_count(d, since_ms):
-    """Count *.jsonl files modified after since_ms (0 = count all, i.e. never run)."""
+    """Count *.jsonl files modified after since_ms (0 = count all, i.e. never run).
+
+    Only valid when real session transcripts live directly in `d` — true for Claude
+    (`d` IS the project's transcript dir) but NOT for Codex, where `d` is purely this
+    hook's own state-bookkeeping directory and real sessions live elsewhere entirely
+    (date-partitioned under <codex_home>/sessions/, matched by session_meta.cwd — see
+    _codex_new_session_count). Calling this on a Codex state dir always returns 0 and
+    permanently suppresses the nudge, regardless of real activity — use the Codex
+    variant when running under Codex.
+    """
     try:
         files = glob.glob(os.path.join(d, "*.jsonl"))
     except OSError:
@@ -76,6 +94,42 @@ def _new_session_count(d, since_ms):
         try:
             if os.path.getmtime(f) * 1000 > since_ms:
                 count += 1
+        except OSError:
+            continue
+    return count
+
+
+def _codex_new_session_count(codex_home, since_ms, cwd):
+    """Codex equivalent of _new_session_count. Real session files live under
+    <codex_home>/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl (date-partitioned, not
+    project-partitioned), so a file only counts if BOTH its mtime is newer than
+    since_ms AND its leading session_meta.payload.cwd matches this project — mirrors
+    scan_transcripts.py's find_codex_session_files(). The mtime check runs first (cheap
+    stat, filters out the vast majority) before opening/reading any file's content."""
+    root = os.path.join(codex_home, "sessions")
+    if not os.path.isdir(root):
+        return 0
+    target = os.path.normcase(os.path.abspath(cwd))
+    count = 0
+    for fp in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(fp) * 1000 <= since_ms:
+                continue
+        except OSError:
+            continue
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                for _, line in zip(range(5), fh):
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    if r.get("type") == "session_meta":
+                        payload = r.get("payload")
+                        session_cwd = payload.get("cwd") if isinstance(payload, dict) else None
+                        if session_cwd and os.path.normcase(os.path.abspath(session_cwd)) == target:
+                            count += 1
+                        break
         except OSError:
             continue
     return count
@@ -105,20 +159,24 @@ def resolve_state_dir(cwd, proj_root):
 
 
 def config_dir():
+    """(dir, is_codex). is_codex tells the caller which session-counting strategy applies
+    — Claude's real sessions live in `dir`'s own projects tree, Codex's don't (see
+    _codex_new_session_count)."""
     if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), False
     if os.environ.get("CODEX_HOME"):
-        return os.environ["CODEX_HOME"]
+        return os.environ["CODEX_HOME"], True
 
     script_path = os.path.realpath(__file__)
     if "/.codex/" in script_path:
-        return os.path.expanduser("~/.codex")
-    return os.path.expanduser("~/.claude")
+        return os.path.expanduser("~/.codex"), True
+    return os.path.expanduser("~/.claude"), False
 
 
 def main():
     cwd = os.getcwd()
-    proj_root = os.path.join(config_dir(), "projects")
+    cdir, is_codex = config_dir()
+    proj_root = os.path.join(cdir, "projects")
     state_dir = resolve_state_dir(cwd, proj_root)
     state_path = os.path.join(state_dir, ".harness-curator-state.json")
     now = int(time.time() * 1000)
@@ -136,7 +194,8 @@ def main():
     candidate_age_ms = (now - last_candidate_ms) if last_candidate_ms else None
 
     last_run_ms = state.get("lastRunMs") or 0
-    new_sessions = _new_session_count(state_dir, last_run_ms)
+    new_sessions = (_codex_new_session_count(cdir, last_run_ms, cwd) if is_codex
+                    else _new_session_count(state_dir, last_run_ms))
     analysis_stale = stale_ms > STALE_DAYS * DAY_MS and new_sessions >= MIN_NEW_SESSIONS
     candidates_pending = candidate_age_ms is not None and candidate_age_ms >= STALE_DAYS * DAY_MS
 
