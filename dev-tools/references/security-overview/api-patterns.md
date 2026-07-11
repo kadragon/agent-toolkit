@@ -59,7 +59,7 @@ Before writing a manual "Upgrade" task, check whether an open Dependabot PR alre
 
 ```bash
 gh search prs --author app/dependabot --state open --repo "${OWNER}/${REPO}" \
-  --json number,title,url
+  --limit 100 --json number,title,url
 ```
 
 ### Response Fields
@@ -67,17 +67,19 @@ gh search prs --author app/dependabot --state open --repo "${OWNER}/${REPO}" \
 | Field | Purpose |
 |-------|---------|
 | `number` | PR number, used in the pointer item |
-| `title` | Match against alert's package name (substring match) |
+| `title` | Match against alert's package name (exact match on extracted package token) |
 | `url` | PR URL, used in the pointer item |
 
 ### Matching Logic
 
-Dependabot PR titles follow `bump <package> from X to Y` (Go/JS ecosystems) or `build(deps): bump <package> ...` (Actions/other configs) conventions. Substring-match the alert's `securityVulnerability.package.name` against `title` — no need for exact semver comparison. First match wins.
+Dependabot PR titles follow `bump <package> from X to Y` (Go/JS ecosystems) or `build(deps): bump <package> ...` (Actions/other configs) conventions. Extract the package token after `bump ` (up to ` from`) and compare it against the alert's `securityVulnerability.package.name` for an **exact match**, not a raw substring — a plain substring check false-matches e.g. `react` against a PR for `react-router`, or `flask` against `flask-cors`, causing a real alert to be silently skipped as already-covered. First exact match wins.
 
 ### Common Issues
 
-- **Title format varies by ecosystem/config**: some configs prefix with `build(deps):` or `build(deps-dev):`, others don't. Substring match on package name tolerates this.
+- **Title format varies by ecosystem/config**: some configs prefix with `build(deps):` or `build(deps-dev):`, others don't. Strip the prefix before extracting the package token.
+- **Substring false positives**: never match on raw substring — `<package>` vs `<package>-<suffix>` pairs (`aws-sdk`/`aws-sdk-mock`, `vue`/`vue-router`, `glob`/`glob-parent`) are common in the wild. Always compare the extracted package token exactly.
 - **Closed/merged PRs must not match**: `--state open` already excludes these; do not drop the flag.
+- **Result limit**: default `gh search prs` caps at 30 results; pass `--limit 100` so repos with many open Dependabot PRs aren't silently truncated.
 - **Rate limits**: run once per affected repo (already scoped by Phase 1), never per-alert — an N+1 pattern here burns REST quota fast.
 
 ## Code Scanning — REST
