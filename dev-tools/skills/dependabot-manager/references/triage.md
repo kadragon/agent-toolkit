@@ -12,6 +12,14 @@ Check for: `groups:` block with `update-types: [minor, patch]`. Report status (c
 
 **GitHub Actions check:** If `.github/workflows/` exists, verify `package-ecosystem: "github-actions"` is in dependabot config. Actions without version tracking miss security patches — flag as warning if missing.
 
+**404 on standard path ≠ "missing" if active dependabot PRs exist.** Before reporting `no file`, confirm with a full-tree search — the config may live at a non-standard path, or the repo may have no committed config at all (UI-only Dependabot version-updates setup):
+
+```bash
+gh api repos/{owner}/{repo}/git/trees/{default_branch}?recursive=true --jq '.tree[].path' | grep -i dependabot
+```
+
+Empty result + active dependabot PRs → report as "no committed config (possibly UI-enabled)", not a silent miss.
+
 ## 2b. PR Status Check
 
 ```bash
