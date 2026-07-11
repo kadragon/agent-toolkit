@@ -4,10 +4,16 @@
 Honest B-tier automation: does NOT detect "X done 5x" (that needs per-session
 LLM clustering, which the on-demand harness-curator skill deliberately avoids).
 Instead it tracks two staleness signals and emits a one-line nudge when either fires:
-  1. Analysis-stale: curator hasn't run in >STALE_DAYS
+  1. Analysis-stale: curator hasn't run in >STALE_DAYS AND at least MIN_NEW_SESSIONS
+     sessions have accumulated since the last run (or ever, if never run). Elapsed
+     time alone does not fire this — a project reopened after a long dormant
+     stretch with few/no new sessions has nothing new worth analyzing, so it must
+     not nag just because the clock ran out.
   2. Candidates-pending: curator ran and produced recommendations that haven't been
      acted on or refreshed in >STALE_DAYS (lastCandidateMs is set by the skill's
-     Step 6 when HARNESS_PENDING=1, cleared when HARNESS_PENDING=0/unset)
+     Step 6 when HARNESS_PENDING=1, cleared when HARNESS_PENDING=0/unset). This one
+     is time-only by design — unactioned recommendations don't need fresh sessions
+     to still be worth a reminder.
 
 False-positive accepted: if the user acts on candidates without re-running, lastCandidateMs
 stays set — the message instructs them to "act on them OR re-run to refresh," which
@@ -38,6 +44,9 @@ import time
 DAY_MS = 86_400_000
 STALE_DAYS = 7         # nudge once audit is older than this
 THROTTLE_MS = DAY_MS   # at most one nudge per 24h, even while stale
+MIN_NEW_SESSIONS = 3   # need this many sessions since lastRunMs before "stale" fires —
+                       # a dormant project reopened after a long break has 0 new sessions;
+                       # elapsed time alone must not nag when there's nothing new to analyze
 
 
 def encode_project(path):
@@ -54,6 +63,22 @@ def _jsonl_count(d):
         return len(glob.glob(os.path.join(d, "*.jsonl")))
     except OSError:
         return 0
+
+
+def _new_session_count(d, since_ms):
+    """Count *.jsonl files modified after since_ms (0 = count all, i.e. never run)."""
+    try:
+        files = glob.glob(os.path.join(d, "*.jsonl"))
+    except OSError:
+        return 0
+    count = 0
+    for f in files:
+        try:
+            if os.path.getmtime(f) * 1000 > since_ms:
+                count += 1
+        except OSError:
+            continue
+    return count
 
 
 def resolve_state_dir(cwd, proj_root):
@@ -110,7 +135,9 @@ def main():
     last_candidate_ms = state.get("lastCandidateMs") or 0
     candidate_age_ms = (now - last_candidate_ms) if last_candidate_ms else None
 
-    analysis_stale = stale_ms > STALE_DAYS * DAY_MS
+    last_run_ms = state.get("lastRunMs") or 0
+    new_sessions = _new_session_count(state_dir, last_run_ms)
+    analysis_stale = stale_ms > STALE_DAYS * DAY_MS and new_sessions >= MIN_NEW_SESSIONS
     candidates_pending = candidate_age_ms is not None and candidate_age_ms >= STALE_DAYS * DAY_MS
 
     if (not analysis_stale and not candidates_pending) or since_nudge <= THROTTLE_MS:

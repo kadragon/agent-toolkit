@@ -53,3 +53,61 @@ grep -h '"type":"user"' "$DIR"/*.jsonl | grep -i 'you keep\|every.time\|자꾸\|
 ## Bounds
 
 `history.jsonl` (one line per prompt, all projects) is the cheap prompt-only source. Transcripts are orders of magnitude heavier (dozens of records per session × dozens of sessions × dozens of projects). For `all` scope or large projects, **delegate raw reading to a subagent** and analyze the returned summary inline — do not pull full transcripts into the main context. The scanner already bounds output (`PROMPT_CAP`, `CORRECTION_CAP`, `PROJECT_CAP`) and prints dropped counts.
+
+## Codex CLI sessions
+
+Codex stores one `*.jsonl` per session too, but under a completely different scheme —
+**date-partitioned**, not project-partitioned: `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<uuid>.jsonl`. `~/.codex/archived_sessions/` also exists (retention overflow) and is deliberately excluded from scanning.
+
+There is no project-encoded directory name to key on — the project path lives *inside*
+each file, in its first record. The scanner reads only the leading few lines of every
+Codex session file to check this before deciding whether to parse the rest (benchmarked
+at ~0.1s for 1400+ files on a real machine).
+
+### Record types (`.type` / `.payload.type`)
+
+| `.type` | `.payload.type` | carries |
+|---|---|---|
+| `session_meta` | — | `.payload.cwd` — the project path. Always (in practice) the first line of the file. |
+| `turn_context` | — | turn-level metadata — ignore for analysis. |
+| `event_msg` | `sub_agent_activity` | Codex's closest analog to Claude's Agent/Task delegation. `.payload.agent_path` identifies the sub-task (a slug or thread id, NOT a named `subagent_type` like Claude's), `.payload.kind` is `started` / `interacted` (only `started` is counted, to mirror "was this agent invoked in this session"). |
+| `event_msg` | `token_count`, `task_started`, `task_complete`, `patch_apply_end`, `entered_review_mode`, `exited_review_mode`, `web_search_end`, `mcp_tool_call_end`, `turn_aborted`, `thread_settings_applied`, `thread_rolled_back` | other lifecycle/telemetry events — not currently mined. |
+| `response_item` | `message` | `.payload.role` (`user` / `assistant` / `developer`), `.payload.content[]` — blocks of `type: input_text` (user) or `output_text` (assistant). |
+| `response_item` | `function_call` / `function_call_output` | tool calls (`exec_command`, `write_stdin`, MCP tool names) and their output — not currently mined for signals. |
+| `response_item` | `custom_tool_call` / `custom_tool_call_output` | e.g. `apply_patch` — not currently mined. |
+| `inter_agent_communication_metadata` | — | seen alongside `sub_agent_activity`; not currently mined. |
+
+### Key signals
+
+- **Skill load** — Codex has no dedicated attribution field. Instead, loading a skill
+  injects a *synthetic* `role: "user"` message shaped like:
+  ```
+  <skill>
+  <name>dev-tools:next-tasks</name>
+  <path>/Users/.../SKILL.md</path>
+  ---
+  name: next-tasks
+  ...
+  ```
+  Confirmed by reading real session files (found `caveman`, `vault-cleanup`,
+  `dev-tools:next-tasks` loads on this machine) — re-verify against real files if this
+  format stops matching after a Codex CLI upgrade. Parsed by `_CODEX_SKILL_LOAD_RE`.
+- **Harness-injected noise** — several other things also arrive as synthetic `role: "user"`
+  messages instead of a separate field: `<environment_context>`, `<user_action>` (e.g.
+  review-request scaffolding with the reviewer's output embedded), `<turn_aborted>`,
+  `<recommended_plugins>`, `<image>`, `<user_shell_command>`, `<hook_prompt ...>` (Stop-hook
+  feedback), `<subagent_notification>` (redundant with `sub_agent_activity`), and a
+  repeated `# AGENTS.md instructions for <path>` reinjection every session. None of these
+  are free-text human intent — filtered by `_CODEX_NOISE_RE`, mirroring how `keep_prompt()`
+  already filters Claude's `<command-message>`/`<system-reminder>`/etc. Found by sampling
+  ~400 real session files; re-verify if new tag names appear.
+- **Correction / harness-friction** — same `CORRECTION_RE` / `FRICTION_RE` patterns as
+  Claude (platform-agnostic, since they just match free text), applied to genuine
+  (non-synthetic) `role: "user"` turns.
+
+### Per-project state
+
+Codex has no project directory to hold `.harness-curator-state.json` in, so the scanner
+mints one under the same `encode_project()` scheme Claude's side uses, rooted at
+`<codex_home>/projects/<encoded>/` — this directory holds only this skill's own
+bookkeeping, never real Codex session data (that stays under `sessions/`).
