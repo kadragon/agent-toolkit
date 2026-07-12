@@ -14,7 +14,7 @@ usage() {
   cat >&2 <<EOF
 Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 
-  plugin:     dev-tools | productivity | all
+  plugin:     dev-tools | productivity | team-standards | all
   bump type:  major | minor | patch
 
   --skill <name> [major|minor|patch]
@@ -24,6 +24,7 @@ Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 Examples:
   $0 dev-tools patch
   $0 productivity minor --skill harness-curator patch
+  $0 team-standards patch
   $0 all patch
 EOF
   exit 1
@@ -127,7 +128,7 @@ fi
 echo "Bumping versions (${BUMP_TYPE}):"
 
 case "$PLUGIN" in
-  dev-tools|productivity)
+  dev-tools|productivity|team-standards)
     bump_plugin "$PLUGIN" "$BUMP_TYPE"
     if [[ -n "$SKILL_NAME" ]]; then
       bump_skill "$PLUGIN" "$SKILL_NAME" "$SKILL_BUMP"
@@ -136,6 +137,7 @@ case "$PLUGIN" in
   all)
     bump_plugin "dev-tools" "$BUMP_TYPE"
     bump_plugin "productivity" "$BUMP_TYPE"
+    bump_plugin "team-standards" "$BUMP_TYPE"
     ;;
   *) usage ;;
 esac

@@ -61,7 +61,7 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 
 ## Plugin Version Bump Rules
 
-Both `dev-tools/.claude-plugin/plugin.json` and `productivity/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
+`dev-tools/.claude-plugin/plugin.json`, `productivity/.claude-plugin/plugin.json`, and `team-standards/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
 
 | Change type | Bump |
 |-------------|------|
