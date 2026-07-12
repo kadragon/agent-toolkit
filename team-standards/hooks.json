@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/inject-standards/run.sh\"",
+            "timeout": 5,
+            "statusMessage": "Loading team agent standards..."
+          }
+        ]
+      }
+    ]
+  }
+}
