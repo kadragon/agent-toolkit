@@ -56,6 +56,8 @@ ALLOWLIST_VARS = {"HOME", "PATH"}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
 
 FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
+CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
+INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 QUOTED_RE = re.compile(r'"([^"]+)"')
 TRIGGER_MARKER_RE = re.compile(r"trigger:", re.IGNORECASE)
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
@@ -189,11 +191,17 @@ def check_capture_before_use(text: str) -> list[str]:
 
 
 def check_plugin_root_portability(text: str) -> list[str]:
-    """Reject hook-only root variables from shared skill instructions."""
+    """Reject hook-only root variables from shared skill instructions.
+
+    Scoped to fenced code blocks + inline code spans — a prose-only mention
+    (e.g. migration notes) must not hard-fail CI.
+    """
+    code_text = "\n".join(m.group(1) for m in CODE_FENCE_RE.finditer(text))
+    code_text += "\n" + "\n".join(m.group(1) for m in INLINE_CODE_RE.finditer(text))
     return [
         f"hook-only root variable {token!r} is not portable in shared skill instructions"
         for token in FORBIDDEN_SKILL_ROOT_VARS
-        if re.search(rf"(?<![A-Z0-9_]){re.escape(token)}(?![A-Z0-9_])", text)
+        if re.search(rf"(?<![A-Z0-9_]){re.escape(token)}(?![A-Z0-9_])", code_text)
     ]
 
 
