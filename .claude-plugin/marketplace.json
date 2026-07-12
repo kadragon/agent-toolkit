@@ -14,6 +14,11 @@
       "name": "productivity",
       "source": "./productivity",
       "description": "Personal Claude Code productivity skills by kadragon"
+    },
+    {
+      "name": "team-standards",
+      "source": "./team-standards",
+      "description": "Injects shared agent working standards at session start"
     }
   ]
 }

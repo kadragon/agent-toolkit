@@ -32,6 +32,12 @@ productivity/
     hwpx/
     persona-debate/
 
+team-standards/
+  .claude-plugin/plugin.json   # single SessionStart hook, no skills/agents
+  hooks.json
+  hooks/inject-standards/run.sh
+  standards/AGENT-STANDARDS.md # injected verbatim as SessionStart context
+
 .claude/
   agents/                      # project-level agent roles (not shipped)
   skills/                      # project-level orchestrator skills
