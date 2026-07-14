@@ -83,7 +83,7 @@ _STATUS_RE = re.compile(r"^status:\s*(\S+)")
 _CHECKBOX_RE = re.compile(r"^-\s*\[([ xX>])\]\s*(.*)$")
 # Generalized skip marker: `*(deferred: ...)*` or `*(blocked by: <n>-<slug>)*` — both mean
 # "otherwise-open item is not actually actionable yet", same treatment as a `[>]` checkbox.
-_BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:[^)]*\)\*", re.IGNORECASE)
+_BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:.*?\)\*", re.IGNORECASE)
 
 
 def _is_blocked(text: str) -> bool:
@@ -502,6 +502,10 @@ status: open
     _assert(_is_blocked("plain item, no marker") is False, "_is_blocked is False for unmarked text")
     _assert(_is_blocked("item *(deferred: reason)*") is True, "_is_blocked is True for deferred marker")
     _assert(_is_blocked("item *(blocked by: 2-slug)*") is True, "_is_blocked is True for blocked-by marker")
+    _assert(
+        _is_blocked("item *(deferred: waiting on (infra) service)*") is True,
+        "_is_blocked is True when the reason text has nested parens (non-greedy match, not [^)]*)",
+    )
 
     # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
     print("\nTest 4: fast_path — cap 5 total across Phase A + B + C")

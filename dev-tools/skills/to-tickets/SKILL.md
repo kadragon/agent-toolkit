@@ -46,10 +46,14 @@ items from approved spec").
 4. **Draft numbered ticket titles + one-line scope each**, and **confirm with the user**
    before writing anything: granularity (is this too coarse/fine?) and blocking order (does
    the dependency chain look right?). Do not write to `backlog.md` until the user confirms.
-5. **Write to `backlog.md`.** Append each confirmed ticket as a `- [ ]` item under the
-   appropriate heading (existing domain heading if one fits, otherwise a new `## ` group).
-   Use the item text to carry the `[type]` tag per `docs/conventions.md` (e.g. `[FEAT]`,
-   `[FIX]`).
+5. **Write to `backlog.md`.** Give each confirmed ticket its **own** new `## ` heading — never
+   append a to-tickets-generated ticket into an existing heading that already owns other open
+   items, and never put two new tickets under one shared heading. `next-tasks` treats a
+   heading as a single candidate whose *entire* open-item set becomes one Sprint Contract, so
+   sharing a heading across tickets would silently merge their scope and break the "one ticket
+   = one Sprint Contract" guarantee this skill promises. Each heading gets exactly one `- [ ]`
+   item — the ticket itself — carrying the `[type]` tag per `docs/conventions.md` (e.g.
+   `[FEAT]`, `[FIX]`).
 6. **Mark blocked items.** Any ticket that must not start before another ticket in this same
    batch (or an existing unresolved backlog item) completes gets the marker appended to its
    item line, verbatim format:

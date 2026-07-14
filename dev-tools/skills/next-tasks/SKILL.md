@@ -46,11 +46,16 @@ Triggers only when free text describing a task is appended after the skill invoc
 `backlog.md`/`tasks.md`. The plain no-argument invocation (just "start a task" / "태스크
 시작") never enters this step — it always proceeds straight to Step 1 unchanged.
 
-1. **Size-gate classification.** Reuse the Step 2.5 trivial check verbatim: trivial iff ALL
-   hold — tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2, no new public
-   API/schema. If the file count isn't obvious from the request text, run a quick scoped
-   scan (or spawn `explorer` per the `docs/delegation.md` >3-file gate) to estimate it before
-   classifying.
+1. **Classify, then size-gate.** Free text carries no `[type]` tag yet, so infer one from what
+   the request describes before gating — adds/changes user-visible behavior → `[FEAT]`;
+   restructures existing behavior without changing it → `[REFACTOR]`; fixes broken behavior →
+   `[FIX]`; anything else → leave untagged. Then apply the same trivial definition as Step 3's
+   plan-mode gate (not Step 2.5, which only excludes `[FEAT]`): trivial iff ALL hold —
+   inferred/explicit tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2, no new public
+   API/schema. An untagged one-file typo fix stays trivial; an untagged one-file behavioral
+   addition ("로그인 버튼 추가해줘") is not, because it infers to `[FEAT]`. If the file count
+   isn't obvious from the request text, run a quick scoped scan (or spawn `explorer` per the
+   `docs/delegation.md` >3-file gate) to estimate it before classifying.
 2. **Trivial** → skip grill/`to-spec`/`to-tickets` entirely. Build the Sprint Contract
    directly from the free-text request and proceed to Step 3 exactly as a normal
    backlog-picked trivial item would — Step 2.5's batch-nudge and lite-path offer still apply
@@ -105,7 +110,7 @@ Locate the `## Review Backlog` line in the output; collect up to **3** h3 sub-he
 grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
 ```
 
-Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]` or `[>]`.
+Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker.
 
 **Fast-path selection (A+B+C combined, cap = 5):**
 
@@ -146,7 +151,7 @@ Skip h1 blocks with `status: active` (already in flight) or `status: done`.
 4. h3 (`### `) sub-headings under any h2 container that directly own ≥1 open `- [ ]`.
 5. h2 (`## `) headings that directly own ≥1 open `- [ ]` (domain groups, `## Now`, `## Next`).
 
-Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
+Skip headings where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
 
 ## Step 2 — Select
 
@@ -158,7 +163,7 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
-**Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
+**Deferred/blocked items:** a group where every open item has `*(deferred: ...)*` or `*(blocked by: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred/blocked with unresolved blockers, report and stop.
 
 Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
 

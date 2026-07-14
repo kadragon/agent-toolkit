@@ -135,7 +135,7 @@ Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 3. Return findings as JSON array:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
-If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories/Acceptance criteria and flag scope creep or missing requirements as additional findings.
+If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this PR.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
 ```
