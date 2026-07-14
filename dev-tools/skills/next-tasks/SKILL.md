@@ -6,7 +6,9 @@ description: >-
   시작", "태스크 골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full
   code cycle: pick → branch → Sprint Contract → implement → qa-verifier → version bump →
   dev-review-cycle --auto. Flags: --all (parallel batch), --tree (worktree isolation).
-  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Not for review-only or
+  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Also accepts free-text task
+  descriptions not yet in backlog.md/tasks.md — ad-hoc entry (Step 0.5) routes through
+  grill/to-spec/to-tickets as needed, then joins the same cycle. Not for review-only or
   backlog browsing without intent to implement.
 ---
 
@@ -19,8 +21,9 @@ skill is the **decision and sequencing layer**, not the implementation engine.
 **Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
 (or "전부 처리", "모두 돌려", "다 처리", "batch all"), run **Batch mode** instead — see the
 `## Batch mode (--all)` section. If the invocation carries `--tree`, run single-pick but route
-the code cycle through a git worktree — see `## --tree mode`. Prerequisites and the
-working-tree gate apply to all modes.
+the code cycle through a git worktree — see `## --tree mode`. If the invocation carries free
+text describing a task not present in `backlog.md`/`tasks.md`, route to `## Step 0.5 — Ad-hoc
+entry` before Step 1. Prerequisites and the working-tree gate apply to all modes.
 
 ## Prerequisites
 
@@ -35,6 +38,40 @@ dirty tree turns out to be an in-flight feature branch (not stray dirty files), 
 
 `tasks.md` is optional: present in an active sprint or as a review-backlog accumulator; absent
 in the idle state. If absent, only `backlog.md` candidates are offered.
+
+## Step 0.5 — Ad-hoc entry (free-text task)
+
+Triggers only when free text describing a task is appended after the skill invocation (e.g.
+"next-tasks 로그인 리팩터링해줘") **and** that task is not already present in
+`backlog.md`/`tasks.md`. The plain no-argument invocation (just "start a task" / "태스크
+시작") never enters this step — it always proceeds straight to Step 1 unchanged.
+
+1. **Classify, then size-gate.** Free text carries no `[type]` tag yet, so infer one from what
+   the request describes before gating — adds/changes user-visible behavior → `[FEAT]`;
+   restructures existing behavior without changing it → `[REFACTOR]`; fixes broken behavior →
+   `[FIX]`; anything else → leave untagged. Then apply the same trivial definition as Step 3's
+   plan-mode gate (not Step 2.5, which only excludes `[FEAT]`): trivial iff ALL hold —
+   inferred/explicit tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2, no new public
+   API/schema. An untagged one-file typo fix stays trivial; an untagged one-file behavioral
+   addition ("로그인 버튼 추가해줘") is not, because it infers to `[FEAT]`. If the file count
+   isn't obvious from the request text, run a quick scoped scan (or spawn `explorer` per the
+   `docs/delegation.md` >3-file gate) to estimate it before classifying.
+2. **Trivial** → skip grill/`to-spec`/`to-tickets` entirely. Build the Sprint Contract
+   directly from the free-text request and proceed to Step 3 exactly as a normal
+   backlog-picked trivial item would — Step 2.5's batch-nudge and lite-path offer still apply
+   unchanged.
+3. **Non-trivial and ambiguous** (scope, requirements, or design decision is not already
+   clear from the request) → `Skill(dev-tools:grill)` to resolve scope. Do not proceed until
+   grill reports the open questions resolved.
+4. **After resolution, judge size:**
+   - **Single-session-sized** → build the Sprint Contract directly from the grill output (or
+     directly from the request, if step 3 was skipped because it was already unambiguous but
+     not trivial) and proceed to Step 3.
+   - **Multi-session or architecturally significant** → `Skill(dev-tools:to-spec)` to write
+     `docs/design/{slug}.md`, then `Skill(dev-tools:to-tickets)` to break the approved spec
+     into ordered `backlog.md` items. Once `to-tickets` has written the items, fall through
+     into Step 1 below — the freshly written items are picked up there like any other
+     backlog candidate, in the order `to-tickets` wrote them.
 
 ## Step 1 — Gather candidate groups
 
@@ -73,7 +110,7 @@ Locate the `## Review Backlog` line in the output; collect up to **3** h3 sub-he
 grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
 ```
 
-Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]` or `[>]`.
+Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker.
 
 **Fast-path selection (A+B+C combined, cap = 5):**
 
@@ -114,7 +151,7 @@ Skip h1 blocks with `status: active` (already in flight) or `status: done`.
 4. h3 (`### `) sub-headings under any h2 container that directly own ≥1 open `- [ ]`.
 5. h2 (`## `) headings that directly own ≥1 open `- [ ]` (domain groups, `## Now`, `## Next`).
 
-Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
+Skip headings where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
 
 ## Step 2 — Select
 
@@ -126,7 +163,7 @@ Skip headings where every item is `[x]` or `[>]`. Note: all h2/h3 headings with 
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
-**Deferred items:** a group where every open item has `*(deferred: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred with unresolved blockers, report and stop.
+**Deferred/blocked items:** a group where every open item has `*(deferred: ...)*` or `*(blocked by: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred/blocked with unresolved blockers, report and stop.
 
 Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
 
