@@ -25,6 +25,13 @@ reinterpret it):
   h1 (or EOF) — NOT literally the next line in the file. Body content commonly sits between
   the heading and its status line.
 
+  Blocked/deferred marker exclusion (applies everywhere "direct open items" are counted): an
+  otherwise-open `- [ ]` item whose text contains a `*(deferred: ...)*` or
+  `*(blocked by: <n>-<slug>)*` marker is excluded from the open-item count entirely — same
+  effect as if it were `[>]`. A heading whose open items are ALL marked is therefore not a
+  candidate (matches `SKILL.md` Step 2 "Deferred items"/"blocked" rules); a heading with a mix
+  of marked and unmarked open items is still a candidate, counting only the unmarked ones.
+
   "Directly owns" (Phase B/C, full-scan rules 2-5): open `- [ ]` checkbox items collected
   from just after a heading up to (not including) the next heading of ANY level 1-3 — not
   just the next heading of the same or broader level. A checkbox sitting after a nested h3
@@ -53,9 +60,10 @@ Self-check (--test):
   Exercises the status-line-gap case (Phase A), the direct-items heading-boundary case
   (nested h3 item must not count toward its h2 parent), the all-parked-skip case (every item
   `[x]`/`[>]` under a heading is not a candidate), Phase-B/C limit truncation (cap 5 total
-  across A+B+C), and the Phase-C-vs-full-scan ordering divergence on backlog.md h2/h3
-  interleaving. All fixtures are in-memory strings — no real files touched. Exits 0 on PASS,
-  1 on FAIL.
+  across A+B+C), the Phase-C-vs-full-scan ordering divergence on backlog.md h2/h3
+  interleaving, and the blocked/deferred-marker exclusion case (all-marked heading is not a
+  candidate; mixed marked+unmarked heading counts only the unmarked items). All fixtures are
+  in-memory strings — no real files touched. Exits 0 on PASS, 1 on FAIL.
 """
 
 from __future__ import annotations
@@ -73,6 +81,14 @@ import sys
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
 _STATUS_RE = re.compile(r"^status:\s*(\S+)")
 _CHECKBOX_RE = re.compile(r"^-\s*\[([ xX>])\]\s*(.*)$")
+# Generalized skip marker: `*(deferred: ...)*` or `*(blocked by: <n>-<slug>)*` — both mean
+# "otherwise-open item is not actually actionable yet", same treatment as a `[>]` checkbox.
+_BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:[^)]*\)\*", re.IGNORECASE)
+
+
+def _is_blocked(text: str) -> bool:
+    """True if `text` (the checkbox item body) carries a deferred/blocked-by marker."""
+    return bool(_BLOCK_MARKER_RE.search(text))
 
 
 def tokenize(text: str) -> list[dict]:
@@ -120,7 +136,7 @@ def _direct_open_items(tokens: list[dict], heading: dict, all_headings: list[dic
         for t in tokens
         if t["type"] == "checkbox" and heading["line"] < t["line"] < end
     ]
-    return [t for t in items if t["state"] == " "]
+    return [t for t in items if t["state"] == " " and not _is_blocked(t["text"])]
 
 
 # ---- Phase A: tasks.md h1 sprint blocks ------------------------------------------------
@@ -454,6 +470,38 @@ status: open
         result == [{"source": "backlog.md", "kind": "h2", "title": "Mixed group", "line": 1, "items": 1}],
         "heading with >=1 open item alongside parked items is a candidate, counting only open items",
     )
+
+    # ---- Test 3b: blocked/deferred-marker exclusion ----
+    print("\nTest 3b: blocked/deferred-marker exclusion — generalizes the [>] skip to inline markers")
+    all_deferred = """## Deferred group
+- [ ] item one *(deferred: waiting on infra)*
+- [ ] item two *(deferred: waiting on infra)*
+"""
+    tokens = tokenize(all_deferred)
+    result = backlog_fast_candidates(tokens)
+    _assert(result == [], "heading whose only open items are ALL *(deferred: ...)* is not a candidate")
+
+    all_blocked = """## Blocked group
+- [ ] item one *(blocked by: 3-add-auth)*
+"""
+    tokens = tokenize(all_blocked)
+    result = backlog_fast_candidates(tokens)
+    _assert(result == [], "heading whose only open item is *(blocked by: <n>-<slug>)* is not a candidate")
+
+    mixed_blocked = """## Mixed blocked group
+- [ ] item one *(blocked by: 3-add-auth)*
+- [ ] item two
+"""
+    tokens = tokenize(mixed_blocked)
+    result = backlog_fast_candidates(tokens)
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Mixed blocked group", "line": 1, "items": 1}],
+        "heading with one blocked + one unblocked open item is a candidate, counting only the unblocked item",
+    )
+
+    _assert(_is_blocked("plain item, no marker") is False, "_is_blocked is False for unmarked text")
+    _assert(_is_blocked("item *(deferred: reason)*") is True, "_is_blocked is True for deferred marker")
+    _assert(_is_blocked("item *(blocked by: 2-slug)*") is True, "_is_blocked is True for blocked-by marker")
 
     # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
     print("\nTest 4: fast_path — cap 5 total across Phase A + B + C")
