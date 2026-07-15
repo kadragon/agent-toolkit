@@ -81,7 +81,7 @@ Never pause for:
 
 ## Known Gotchas
 
-Rebase timing, PR replacement, auto-merge risk tiers, same-repo merge ordering, and major/grouped-PR peer-dep deadlocks — see **`references/gotchas.md`** before any merge/rebase/auto-merge action.
+Rebase timing, PR replacement, auto-merge risk tiers, same-repo merge ordering, major/grouped-PR peer-dep deadlocks, and toolchain-plugin version lag — see **`references/gotchas.md`** before any merge/rebase/auto-merge action, and before proposing a CI-failure fix strategy (Phase 3e Step 1).
 
 ## Subagents
 
