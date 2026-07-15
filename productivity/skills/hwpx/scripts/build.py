@@ -268,7 +268,12 @@ def _analyze_charprops(root: Element) -> list[str]:
         spacing_el = cp.find("hh:spacing", NS)
         spacing = int(spacing_el.get("hangul", "0")) if spacing_el is not None else 0
         ratio_el = cp.find("hh:ratio", NS)
-        ratio = int(ratio_el.get("hangul", "100")) if ratio_el is not None else 100
+        ratio_drift = []
+        if ratio_el is not None:
+            for script in ("hangul", "latin", "hanja", "japanese", "other", "symbol", "user"):
+                val = ratio_el.get(script, "100")
+                if val != "100":
+                    ratio_drift.append(f"{script}:{val}")
         flags = []
         if cp.find("hh:bold", NS) is not None:
             flags.append("볼드")
@@ -281,7 +286,7 @@ def _analyze_charprops(root: Element) -> list[str]:
         if so is not None and so.get("shape", "NONE") != "NONE":
             flags.append("취소선")
         spacing_str = f" spacing={spacing}" if spacing != 0 else ""
-        ratio_str = f" ratio={ratio}%" if ratio != 100 else ""
+        ratio_str = f" ratio={','.join(ratio_drift)}%" if ratio_drift else ""
         lines.append(f"  [{cid}] {pt}pt {font_name} {color}{spacing_str}{ratio_str} {' '.join(flags)}".rstrip())
         lines.append(f"       fontRef=hangul:{font_id} borderFillIDRef={bfref}")
     lines.append("")
