@@ -116,6 +116,8 @@ gh run view {run-id} --repo {owner}/{repo} --log-failed 2>&1 | head -100
 
 Spawn parallel `sonnet` subagents for repos with different failure patterns. For repos with the same root cause, analyze one and apply the pattern to the rest.
 
+Before proposing a fix strategy, check `references/gotchas.md` — some failures (e.g. a downstream plugin's `peerDependencies` not yet supporting a just-bumped core tool's new major) aren't fixable by a config change at all; a fix-PR cycle spent on those is wasted.
+
 **Analysis alone is not a fix — it is a hypothesis.** Reading logs and the dependency changelog tells you what *probably* broke, but the new tool version is the only authority on its own config schema and rule set. A confident, well-reasoned proposal can still be wrong: a config key placed at the wrong nesting level, or a real error masked behind the one you spotted. So whoever applies the fix must verify it against the actual tool (see Step 2) before pushing — never push an analysis-only proposal.
 
 Common failure patterns:
