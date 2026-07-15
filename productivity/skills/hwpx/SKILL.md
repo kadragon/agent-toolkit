@@ -111,6 +111,7 @@ rm -rf .hwpx_work/
 
 1. **Pick template** (base/gonmun/report/minutes/proposal) → look up style IDs in `$SKILL_DIR/references/style-maps.md`
 2. **Write section0.xml** (body content)
+   > ⚠️ **Don't hand-author `<hp:linesegarray>`/`<hp:lineseg>` for real content.** `hp:lineseg`'s `vertsize`/`textheight`/`horzsize` is a line-break geometry cache sized for the exact text present when Hancom last saved it — every paragraph in the overlay templates (`templates/gonmun|report|minutes|proposal/section0.xml`) carries one tuned to its short placeholder text. If you copy that paragraph structure and substitute real content (especially a longer sentence that wraps to 2+ lines), the cache still describes the placeholder's geometry and Hancom renders the text visibly compressed instead of recomputing it. New paragraphs you write from scratch: omit `<hp:linesegarray>` entirely (Hancom computes it on open). Paragraphs adapted from a template overlay: after substituting real text, run `table.py strip-lineseg` on the section XML before `build.py build` — it strips `<hp:linesegarray>` document-wide despite living in `table.py`. Same discipline as rule 19 / Workflow 2, now required here too.
 3. **(Optional) edit header.xml** (when new styles needed) → see `$SKILL_DIR/references/hwpx-format.md` § "header.xml Editing Guide"
 4. **Build with build.py build**
 5. **Validate with validate.py**
@@ -161,6 +162,8 @@ cat > "$SECTION" << 'XMLEOF'
       <hp:t>본문 내용</hp:t>
     </hp:run>
   </hp:p>
+  <!-- 새 문단은 <hp:linesegarray> 없이 작성 — Hancom이 열 때 자동 계산.
+       템플릿 오버레이 문단을 복사해 온 경우에만 strip-lineseg 필요 (Workflow 1 flow step 2 참고) -->
 </hs:sec>
 XMLEOF
 
@@ -480,7 +483,7 @@ rm -rf .hwpx_work/
 |------|------|
 | Font definitions | hangul/latin font mapping |
 | borderFill | border type/thickness + background color (detail per side) |
-| charPr | font size (pt), font name, color, bold/italic/underline/strikeout, fontRef |
+| charPr | font size (pt), font name, color, ratio(장평)/spacing(자간) when non-default, bold/italic/underline/strikeout, fontRef |
 | paraPr | align, line spacing, margin (left/right/prev/next/intent), heading, borderFillIDRef |
 | Document structure | page size, margin, page border, body width |
 | Body detail | every paragraph's id/paraPr/charPr + text content |
@@ -489,6 +492,7 @@ rm -rf .hwpx_work/
 ### Core principles
 
 - **Use charPrIDRef/paraPrIDRef as-is**: do not change style IDs of extracted header.xml
+- **Reusing header.xml wholesale imports every charPr's ratio/spacing drift, not just size/font/color**: each `hh:charPr` carries `<hh:ratio>` (장평, character width %) and `<hh:spacing>` (자간, letter spacing) alongside size/font/color — `build.py analyze` reports both (only when non-default: ratio≠100%, spacing≠0). A one-off hand-adjustment the original author made to fit a fixed-width cell (e.g. ratio=95%) carries into the new document unless you notice it in the analyze output. Before treating "identical charPrIDRef reference system" as satisfied, scan the analyze output for any `ratio=`/`spacing=` annotation and confirm it's a deliberate style choice worth preserving in the new document, not stray drift from the original author's manual squeeze.
 - **Sum of column widths = body width**: copy analyzed column-width array exactly
 - **Keep rowSpan/colSpan patterns**: reproduce analyzed cell-merge structure exactly
 - **Preserve cellMargin**: apply analyzed cell margin values identically

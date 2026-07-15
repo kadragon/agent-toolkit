@@ -30,6 +30,8 @@ First `<hp:p>` of section0.xml — first `<hp:run>` must contain `<hp:secPr>` an
 </hp:p>
 ```
 
+> **No `<hp:linesegarray>` here — intentional, not an omission.** `hp:lineseg` caches line-break geometry (`vertsize`/`textheight`/`horzsize`) for whatever text was in the paragraph at last save; Hancom recomputes it fresh for a paragraph that has none. The overlay templates (`templates/gonmun|report|minutes|proposal/section0.xml`) do carry a hand-set `<hp:linesegarray>` per paragraph, but each one is sized for that template's short placeholder text — copying that structure and dropping in real content (especially a sentence long enough to wrap) leaves a stale cache and Hancom renders the text visibly compressed. If you're adapting a template-overlay paragraph rather than writing fresh, strip the copied `<hp:linesegarray>` (or run `table.py strip-lineseg` on the finished section XML before `build.py build`) once real text replaces the placeholder.
+
 ## Empty line
 
 ```xml
