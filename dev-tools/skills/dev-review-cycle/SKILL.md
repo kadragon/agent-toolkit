@@ -136,6 +136,7 @@ For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (S
   [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
   PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
   BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+  SLOT_ID="<the selected slot's review skill id — Slot 1's general or Slot 2's security, chosen above>"
   bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${SLOT_ID}" \
     || echo '[]'
   ```
