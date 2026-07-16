@@ -9,12 +9,5 @@
       "$defaults",
       "Bash(bash */skills/dev-review-cycle/scripts/merge-and-cleanup.sh *)"
     ]
-  },
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [{"type": "command", "command": "bash .claude/hooks/trigger-router.sh"}]
-      }
-    ]
   }
 }

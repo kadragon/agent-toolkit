@@ -10,13 +10,13 @@ Does the skill fire when it should, and not fire when it shouldn't?
 
 | Score | Description |
 |-------|-------------|
-| 5 | Description uses directive phrasing + concrete trigger phrases; router entry exists |
-| 4 | Directive phrasing; no router entry (~50% fire rate) |
+| 5 | Directive phrasing + concrete, distinctive trigger phrases + explicit `NOT for …` exclusions that fence off neighbor skills |
+| 4 | Directive phrasing + concrete triggers; minor gaps or a phrasing a user would plausibly use is missing |
 | 3 | Descriptive phrasing; fires inconsistently |
 | 2 | Description too vague; frequently missed |
 | 1 | Never triggers automatically |
 
-**How to test:** Run skill trigger router: `echo '{"prompt": "<phrase>", "session_id": "t"}' | bash .claude/hooks/trigger-router.sh`
+**How to test:** Auto-invocation is description-driven and model-judged (no mechanical router in this repo). Draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills.
 
 ### 2. Correctness (weight: 40%)
 

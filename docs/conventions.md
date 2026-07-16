@@ -5,7 +5,7 @@
 | Element | Pattern | Example |
 |---------|---------|---------|
 | Skill directories | `kebab-case` | `harness-init`, `dev-review-cycle` |
-| Shell scripts | `kebab-case.sh` | `trigger-router.sh`, `sweep.sh` |
+| Shell scripts | `kebab-case.sh` | `bump-version.sh`, `sweep.sh` |
 | Python scripts | `snake_case.py` | `scan_transcripts.py` |
 | Agent role files | `kebab-case.md` | `qa-verifier.md`, `skill-evaluator.md` |
 | Shell variables | `SCREAMING_SNAKE` | `ROUTES_FILE`, `MAX_LINES` |
