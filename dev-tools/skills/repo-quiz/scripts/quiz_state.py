@@ -284,7 +284,11 @@ def _fsrs_review(concept, grade, today):
     else:
         card = fsrs.Card()
 
-    scheduler = fsrs.Scheduler()
+    # This quiz schedules at whole-day granularity (one review round per day), so
+    # drop FSRS's sub-day learning/relearning steps — otherwise a freshly-answered
+    # card is due again in minutes (same calendar date) and re-surfaces the same day.
+    # With empty steps the first "good" schedules days out, matching the SM-2 fallback.
+    scheduler = fsrs.Scheduler(learning_steps=(), relearning_steps=())
     y, m, d = (int(part) for part in today.split("-"))
     review_dt = datetime.datetime(y, m, d, tzinfo=datetime.timezone.utc)
     card, _review_log = scheduler.review_card(card, rating, review_datetime=review_dt)
