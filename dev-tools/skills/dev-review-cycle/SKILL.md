@@ -125,7 +125,7 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   ```
 - All other candidates → "Reviewers Skipped: redundant domain".
 
-For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2), then launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Model: Slot 1 → `sonnet`, Slot 2 → `opus`.
+For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2), then launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Do not pin a model — omit the `model` field so each reviewer inherits the session's model.
 
 Reviewer prompt:
 ```
@@ -174,8 +174,8 @@ Follow **`references/consolidation-guide.md`** for deduplication, the Contest Ro
 
 **Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding.
 
-- **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
-- **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one Sonnet sub-agent with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
+- **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one verifier sub-agent (do not pin a model — inherit the session's model) to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
+- **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one sub-agent (do not pin a model — inherit the session's model) with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
 
 If `--auto` NOT set: STOP, present consolidated table, wait for confirmation.
 If `--auto` set: treat all in-scope (non-refuted) as approved.

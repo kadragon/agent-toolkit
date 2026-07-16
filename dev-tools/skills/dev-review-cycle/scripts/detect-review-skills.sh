@@ -86,11 +86,11 @@ add_candidate() {
   local id="$1" kind="$2" desc="$3"
   is_new "$id" || return 0
   is_blocked "$id" && return 0
-  local model="sonnet" domain="general"
-  [[ "$id" == *security* ]] && model="opus" && domain="security"
+  local domain="general"
+  [[ "$id" == *security* ]] && domain="security"
   jq -cn --arg id "$id" --arg kind "$kind" --arg description "$desc" \
-      --arg model "$model" --arg domain "$domain" \
-    '{id: $id, kind: $kind, description: $description, model: $model, domain: $domain}' \
+      --arg domain "$domain" \
+    '{id: $id, kind: $kind, description: $description, domain: $domain}' \
     >> "$ENTRIES_FILE" || return 0
 }
 

@@ -44,7 +44,7 @@ Findings already resolved by the P0/P1 verifier gate (Section 2 of this guide) d
 
 **Mechanic — one batched agent call, no loop:**
 - Collect ALL contestable findings from the PR into a single list. If the list is empty, skip the round entirely — do not spawn an agent for zero work.
-- Otherwise spawn exactly one fresh sub-agent for the whole batch (not one agent per finding), using the same `run_in_background: true` pattern and Sonnet model as the P0/P1 verifier gate (SKILL.md Step 3).
+- Otherwise spawn exactly one fresh sub-agent for the whole batch (not one agent per finding), using the same `run_in_background: true` pattern as the P0/P1 verifier gate and, like it, no pinned model — inherit the session's model (SKILL.md Step 3).
 - Prompt: give the agent the diff and the full list of contestable findings; ask it to argue for or against each, independent of the original reviewer's framing ("is this a real issue introduced by this diff — yes/no — with file:line evidence"). Fresh eyes, same principle as the P0/P1 verifier.
 - This is a single round. It does not iterate until findings stabilize — do not re-run it, and do not spawn a second contest round even if the agent's verdicts seem uncertain.
 
