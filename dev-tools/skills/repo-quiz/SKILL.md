@@ -9,8 +9,9 @@ description: >-
   "내 XP/스트릭 보여줘", "onboard me with questions", "review what I got wrong".
   Runs a 5-question round by default (user can ask for more), mixing multiple-choice,
   bug-hunt, code-trace, fill-in-the-blank, free-recall, and elaborative-why questions,
-  scheduled via FSRS (SM-2 fallback), with XP/level/streak/achievements in a gitignored
-  .repo-quiz/ folder.
+  scheduled via FSRS — install the optional `py-fsrs` package (`pip install fsrs`) for the
+  better scheduler; without it the skill falls back to built-in SM-2 — with
+  XP/level/streak/achievements in a gitignored .repo-quiz/ folder.
   NOT for generating docs or a written onboarding guide (that is a summary task, not a
   quiz) — and NOT for quizzing on general programming trivia unrelated to the current repo.
 version: 1.1.0
