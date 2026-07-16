@@ -55,12 +55,6 @@ Every `Agent(...)` call must include:
 
 Missing any field → reject and rewrite the spawn prompt.
 
-**Known gap (2026-07-08):** `explorer`, `implementer`, `qa-verifier`, `skill-evaluator` are routing
-targets above but have no backing `.claude/agents/*.md` definitions anywhere in this repo —
-`Agent({subagent_type: "implementer", ...})` fails with "Agent type not found". Until those role
-files exist, fall back to `general-purpose` (or `Explore` for the explorer gate) and note the
-substitution in the spawn's context. See backlog.
-
 ## Effort Tier
 
 Embed in every spawn prompt:
