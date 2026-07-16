@@ -15,9 +15,9 @@ Skip for trivial features (one-line skill fix, comment update).
 Steps 1-2 are automated by `dev-tools:to-spec` (synthesizes conversation + `dev-tools:grill`
 output into `docs/design/{slug}.md`; does not interview the user). Step 3 is automated by
 `dev-tools:to-tickets` (breaks an approved spec into vertical-slice `backlog.md` items in
-dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev-tools:next-tasks`
-Step 0.5 routes ad-hoc, non-trivial free-text requests through this same
-grill → to-spec → to-tickets chain automatically.
+dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev-tools:new-task`
+routes ad-hoc, non-trivial free-text requests through this same
+grill → to-spec → to-tickets chain automatically, then runs the resulting work through `code`.
 
 ## `code` — Implementation
 

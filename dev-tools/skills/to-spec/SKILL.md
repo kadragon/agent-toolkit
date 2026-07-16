@@ -17,7 +17,7 @@ version: 1.0.0
 
 Synthesizes an approved scope into a spec document. This skill does **not** ask the user
 questions — if scope is still ambiguous when this skill is invoked, call
-`Skill(dev-tools:grill)` first (or let the caller, e.g. `next-tasks` Step 0.5, do so) and only
+`Skill(dev-tools:grill)` first (or let the caller, e.g. `new-task`, do so) and only
 invoke `to-spec` once the open questions are resolved.
 
 ## When to use
@@ -74,7 +74,7 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 4. **Review with user.** Present the written spec (or a summary + file path) and wait for
    explicit approval before any downstream skill (`to-tickets`, or direct implementation)
    proceeds. This mirrors `plan` workflow step 2 — do not skip it.
-5. **Hand off.** Once approved, the caller (typically `next-tasks` Step 0.5) proceeds to
+5. **Hand off.** Once approved, the caller (typically `new-task`) proceeds to
    `Skill(dev-tools:to-tickets)` to break the spec into backlog items.
 
 ## Boundaries
