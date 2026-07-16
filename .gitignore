@@ -24,3 +24,6 @@ _workspace/
 
 # hwpx skill temp working directory
 .hwpx_work/
+
+# repo-quiz local progress (personal, not shared)
+.repo-quiz/
