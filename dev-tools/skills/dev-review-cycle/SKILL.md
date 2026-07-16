@@ -41,6 +41,8 @@ AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
+NATIVE_ENGINE=$(jq -r '.native_engine' <<<"$PREFLIGHT")           # "claude" → in-process Agent; else → claude CLI companion (2-1)
+CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
 NO_HUB=$(jq -r '.no_hub' <<<"$PREFLIGHT")
 ```
@@ -125,9 +127,21 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   ```
 - All other candidates → "Reviewers Skipped: redundant domain".
 
-For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2), then launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Do not pin a model — omit the `model` field so each reviewer inherits the session's model.
+For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2). How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_ENGINE`, from Setup) — the goal is that a **Claude** engine is always in the panel, alongside agy (2-2) and Codex (2-3), no matter which runtime drives:
 
-Reviewer prompt:
+- **`NATIVE_ENGINE == "claude"`** (Claude Code is driving) — launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Do not pin a model — omit the `model` field so each reviewer inherits the session's model (an Opus session reviews with Opus, a Sonnet session with Sonnet).
+- **otherwise** (a non-Claude runtime such as Codex is driving) — the in-process agent would review as that runtime's own engine, not Claude, so shell out to the `claude` CLI to keep a Claude reviewer in the panel (mirror of how 2-2/2-3 summon their engines via companion scripts). If `CLAUDE_CLI_AVAILABLE == false`, skip this slot and record "Reviewers Skipped: claude CLI unavailable". Otherwise launch in the same turn with `run_in_background: true`:
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
+  PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
+  BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${SLOT_ID}" \
+    || echo '[]'
+  ```
+  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt), so Step 3 consolidates both identically.
+
+Reviewer prompt (Agent path):
 ```
 Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only

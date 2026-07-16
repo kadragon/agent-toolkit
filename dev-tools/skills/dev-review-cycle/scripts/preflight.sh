@@ -63,6 +63,18 @@ elif command -v codex >/dev/null 2>&1; then
   CODEX_MODE="cli"
 fi
 
+# --- Native runtime engine + Claude CLI (cross-runtime Claude review) ---
+# CLAUDECODE is set only when Claude Code is the driver; it does NOT leak into
+# Codex sessions. (The inverse test is unreliable: the codex plugin sets
+# CODEX_COMPANION_SESSION_ID even under Claude Code, so only the positive Claude
+# test can be trusted.) Step 2-1 uses this: driver is Claude → in-process Agent
+# (inherits the live session model); otherwise → `claude` CLI companion, so the
+# review panel keeps a Claude engine no matter which runtime drives the cycle.
+NATIVE_ENGINE="other"
+[ -n "${CLAUDECODE:-}" ] && NATIVE_ENGINE="claude"
+CLAUDE_CLI_AVAILABLE=false
+command -v claude >/dev/null 2>&1 && CLAUDE_CLI_AVAILABLE=true
+
 # --- Repository metadata ---
 FEATURE_BRANCH=$(git branch --show-current)
 
@@ -127,6 +139,8 @@ jq -n \
   --argjson codex_available "$CODEX_AVAILABLE" \
   --arg codex_mode "$CODEX_MODE" \
   --arg codex_companion_path "$CODEX_COMPANION_PATH" \
+  --arg native_engine "$NATIVE_ENGINE" \
+  --argjson claude_cli_available "$CLAUDE_CLI_AVAILABLE" \
   --arg feature_branch "$FEATURE_BRANCH" \
   --arg base_branch "$BASE_BRANCH" \
   --arg owner_repo "$OWNER_REPO" \
@@ -141,6 +155,8 @@ jq -n \
     codex_available: $codex_available,
     codex_mode: $codex_mode,
     codex_companion_path: $codex_companion_path,
+    native_engine: $native_engine,
+    claude_cli_available: $claude_cli_available,
     feature_branch: $feature_branch,
     base_branch: $base_branch,
     owner_repo: $owner_repo,
