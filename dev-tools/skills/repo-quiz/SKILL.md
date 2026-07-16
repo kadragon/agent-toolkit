@@ -8,8 +8,9 @@ description: >-
   "코드베이스 퀴즈 내줘", "이 repo 이해도 테스트", "오답노트 보여줘", "복습 문제",
   "내 XP/스트릭 보여줘", "onboard me with questions", "review what I got wrong".
   Runs a 5-question round by default (user can ask for more), mixing multiple-choice,
-  bug-hunt, code-trace, fill-in-the-blank, free-recall, and "why" questions, scheduled via
-  FSRS (SM-2 fallback) with XP/level/streak/achievements in a gitignored .repo-quiz/ folder.
+  bug-hunt, code-trace, fill-in-the-blank, free-recall, and elaborative-why questions,
+  scheduled via FSRS (SM-2 fallback), with XP/level/streak/achievements in a gitignored
+  .repo-quiz/ folder.
   NOT for generating docs or a written onboarding guide (that is a summary task, not a
   quiz) — and NOT for quizzing on general programming trivia unrelated to the current repo.
 version: 1.1.0
@@ -56,21 +57,30 @@ SKILL.md (its parent dir), and always pass `--repo` pointing at the repo being q
 
 ```sh
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
-python "$Q" --repo <repo-root> <subcommand> [flags]
+python3 "$Q" --repo <repo-root> <subcommand> [flags]
 ```
+
+Use **`python3`**, not bare `python` — many systems (current macOS included) ship only
+`python3`, and `python` there exits "command not found" before the script ever runs. Also
+note that **each tool call runs in a fresh shell**, so a `Q=...` assignment does not persist
+across blocks: re-capture `Q` (or inline the absolute path) at the top of *every* shell block
+that calls the script — the `python3 "$Q" …` lines below assume `Q` is defined in that same
+block. This is the repo's capture-before-use convention.
 
 Never do the date math or scheduler arithmetic yourself — call the script. Its `--test` flag
 self-checks the logic if you ever suspect it's misbehaving. FSRS is used automatically when
 `py-fsrs` is importable; if it isn't (or a review call errors for any reason), the script
-falls back to SM-2 for that review with no visible difference to you or the user.
+falls back to SM-2 for that review — scheduling still works, just less optimally. When
+`py-fsrs` is missing entirely, surface the one-time install offer described in *Running a
+round → step 1* so the user can opt into the better scheduler.
 
 | Command | Use |
 |---------|-----|
 | `init` | First run: creates `.repo-quiz/` and adds it to `.gitignore`. Idempotent. |
-| `status` | Dashboard JSON: xp, level, xp_to_next, streak, freezes, total_concepts, due_count, due[], `config` (persona, daily_goal), `achievements`. |
+| `status` | Dashboard JSON: xp, level, xp_to_next, streak, freezes, total_concepts, due_count, due[], `config` (persona, daily_goal), `achievements`, `scheduler` (`fsrs`\|`sm2`), `fsrs_available`, `fsrs_notice_seen`. |
 | `due --count N` | Concepts due for review today, most-overdue first (JSON). |
 | `record --concept SLUG --correct true\|false [--grade again\|hard\|good\|easy] [--type TYPE] [--title T] [--note N] [--session ID]` | Apply one answer: schedule + XP + streak + achievements + logs. Prints the new schedule/score. |
-| `config [--get] [--set-persona junior\|mid\|senior] [--set-daily-goal N]` | Read or update persona and daily goal. With no flags, prints current config. |
+| `config [--get] [--set-persona junior\|mid\|senior] [--set-daily-goal N] [--seen-fsrs-notice]` | Read or update persona/daily goal, or mark the one-time FSRS install notice as shown. With no flags, prints current config. |
 
 `--type` is the question-type slug (see below); defaults to `mc` if omitted. `--grade`
 overrides the correct/wrong → schedule-quality mapping for self-graded free-recall answers
@@ -123,8 +133,9 @@ convenient.
 ### 1. Set up and read the state
 
 ```sh
-python "$Q" --repo <repo-root> init      # first time only; harmless to repeat
-python "$Q" --repo <repo-root> status
+Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
+python3 "$Q" --repo <repo-root> init      # first time only; harmless to repeat
+python3 "$Q" --repo <repo-root> status
 ```
 
 `status` tells you the streak (and freezes), XP/level, config (persona/daily_goal),
@@ -132,6 +143,29 @@ achievements, and — crucially — which concepts are **due** for review. Defau
 **`daily_goal` from config** (5 by default); honor any count the user asks for ("10문제",
 "quiz me on 3 things") and honor an explicit `config --set-daily-goal N` if the user wants a
 different standing default.
+
+**Offer the FSRS upgrade once.** `status` also reports `fsrs_available`. If it's `false` and
+`fsrs_notice_seen` is `false`, the script is running on the SM-2 fallback — tell the user, one
+time, that installing FSRS gives measurably better scheduling (fewer reviews for the same
+retention) and offer to install it before the round:
+
+> 📈 지금은 SM-2 스케줄러로 진행 중입니다. FSRS(`py-fsrs`)를 설치하면 같은 암기 효과에
+> 리뷰 횟수가 줄어듭니다. 설치할까요? — `python3 -m pip install --user fsrs`
+
+Install into **the same interpreter that runs the quiz** so `import fsrs` will resolve —
+derive it from the `python`/`python3` you invoke `$Q` with (e.g. `<that-python> -m pip install
+--user fsrs`; on an externally-managed environment add `--break-system-packages`, or use the
+user's venv/`uv pip install fsrs`). This needs the user's go-ahead — installing a package is
+their call, so ask, don't run it silently. After they install, no code change is needed: the
+next `status`/`record` picks FSRS up automatically. Whether they install or decline, mark the
+notice so you don't nag next time, then proceed with the round either way:
+
+```sh
+Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
+python3 "$Q" --repo <repo-root> config --seen-fsrs-notice
+```
+
+If `fsrs_available` is already `true`, skip all of this — FSRS is in use.
 
 ### 2. Build the whole round up front — all N questions before asking any
 
@@ -208,7 +242,8 @@ After each answer, immediately record it — don't batch, so a mid-round interru
 saves progress:
 
 ```sh
-python "$Q" --repo <repo-root> record \
+Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
+python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct true --type mc \
   --title "Version bump on dev-tools edit" --session <round-id>
 ```
@@ -218,7 +253,8 @@ answer, *why*, and a file pointer — that note is what the user rereads later, 
 teach.
 
 ```sh
-python "$Q" --repo <repo-root> record \
+Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
+python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct false --type mc \
   --title "Version bump on dev-tools edit" \
   --note "Correct: **B**. Editing anything under dev-tools/ requires bumping BOTH dev-tools/.claude-plugin/plugin.json AND dev-tools/.codex-plugin/plugin.json (kept in sync). See AGENTS.md 'Golden Principles' #1 — CI blocks the merge otherwise." \
@@ -229,7 +265,8 @@ For a self-graded free-recall question, pass the user's self-rating as `--grade`
 `--correct` too — `true` unless the user says they got it flatly wrong):
 
 ```sh
-python "$Q" --repo <repo-root> record \
+Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
+python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct true --type free-recall --grade hard \
   --title "Version bump on dev-tools edit" --session <round-id>
 ```

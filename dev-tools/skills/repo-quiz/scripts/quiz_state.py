@@ -169,7 +169,10 @@ def current_streak(state, today):
     if not last:
         return 0
     gap = (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(last)).days
-    return state.get("streak", 0) if gap in (0, 1) else 0
+    # A pending freeze keeps the streak alive on the first missed day (gap==2),
+    # matching update_streak(), so status doesn't read as broken before today's round.
+    alive = gap in (0, 1) or (gap == 2 and state.get("freezes", 1) > 0)
+    return state.get("streak", 0) if alive else 0
 
 
 def unlock_achievements(state, correct, qtype):
@@ -276,7 +279,7 @@ def _fsrs_review(concept, grade, today):
     }
     rating = rating_map[grade]
 
-    if concept.get("fsrs"):
+    if concept.get("sched") == "fsrs" and concept.get("fsrs"):
         card = fsrs.Card.from_dict(concept["fsrs"])
     else:
         card = fsrs.Card()
@@ -311,6 +314,7 @@ def apply_schedule(concept, sm2_quality, grade, today):
         except Exception:
             pass  # fall through to SM-2; never let a scheduler error reach stdout
     concept["sched"] = "sm2"
+    concept.pop("fsrs", None)  # drop stale FSRS card so a later FSRS review starts fresh
     sm2(concept, sm2_quality, today)
 
 
@@ -363,6 +367,9 @@ def cmd_status(repo, today):
         "due": due,
         "config": config,
         "achievements": state.get("achievements", []),
+        "scheduler": "fsrs" if _fsrs_available() else "sm2",
+        "fsrs_available": _fsrs_available(),
+        "fsrs_notice_seen": bool(state.get("config", {}).get("fsrs_notice_seen", False)),
     }, ensure_ascii=False))
 
 
@@ -384,6 +391,9 @@ def cmd_config(repo, args):
     if getattr(args, "set_daily_goal", None) is not None:
         config["daily_goal"] = args.set_daily_goal
         changed = True
+    if getattr(args, "seen_fsrs_notice", False):
+        config["fsrs_notice_seen"] = True
+        changed = True
 
     if changed:
         save_progress(repo, state)
@@ -398,7 +408,7 @@ def cmd_record(repo, args, today):
         concept["title"] = args.title
     concept.setdefault("title", args.concept)
 
-    correct = args.correct.lower() in ("true", "1", "yes", "y")
+    correct = args.correct == "true"  # argparse choices already restrict to true|false
     qtype = getattr(args, "type", None) or "mc"
     grade_arg = getattr(args, "grade", None)
     grade = resolve_grade(grade_arg, correct)
@@ -533,6 +543,17 @@ def run_tests():
               stf_big_gap["streak"] == 1)
         check("freeze not consumed on gap>2", stf_big_gap["freezes"] == 1)
 
+        # current_streak (read-only display): a pending freeze keeps gap==2 alive
+        check("display keeps streak alive at gap==2 with a freeze",
+              current_streak({"streak": 4, "last_active": "2026-07-14", "freezes": 1},
+                             "2026-07-16") == 4)
+        check("display drops streak at gap==2 without a freeze",
+              current_streak({"streak": 4, "last_active": "2026-07-14", "freezes": 0},
+                             "2026-07-16") == 0)
+        check("display drops streak at gap>2 even with a freeze",
+              current_streak({"streak": 4, "last_active": "2026-07-12", "freezes": 1},
+                             "2026-07-16") == 0)
+
         # status: a streak expires when no activity occurred yesterday or today
         expired = {
             "xp": 0, "streak": 3, "last_active": "2026-07-10", "concepts": {}
@@ -545,6 +566,22 @@ def run_tests():
         check("status expires stale streak", status["streak"] == 0)
         check("status includes config", status.get("config", {}).get("persona") == "mid")
         check("status includes achievements", status.get("achievements") == [])
+        check("status exposes fsrs_available bool",
+              isinstance(status.get("fsrs_available"), bool))
+        check("status scheduler matches availability",
+              status.get("scheduler") == ("fsrs" if status.get("fsrs_available") else "sm2"))
+        check("status fsrs_notice_seen defaults false",
+              status.get("fsrs_notice_seen") is False)
+
+        # config: the one-time FSRS install notice can be marked seen, and it persists
+        seen_args = argparse.Namespace(get=False, set_persona=None,
+                                       set_daily_goal=None, seen_fsrs_notice=True)
+        cmd_config(repo, seen_args)
+        seen_status = io.StringIO()
+        with contextlib.redirect_stdout(seen_status):
+            cmd_status(repo, "2026-07-16")
+        check("fsrs notice persists as seen",
+              json.loads(seen_status.getvalue()).get("fsrs_notice_seen") is True)
 
         # level thresholds
         check("level 1 at 0 xp", level_for(0) == 1)
@@ -618,6 +655,13 @@ def run_tests():
             apply_schedule(fb, sm2_quality_for("again", False), "again", "2026-07-23")
             check("forced fallback again -> interval resets to 1", fb.get("interval") == 1)
             check("forced fallback again -> sched stays sm2", fb.get("sched") == "sm2")
+            # a fallback review must discard a stale FSRS payload so a later FSRS
+            # review can't restore pre-fallback state and drop the SM-2 answer
+            stale = {"sched": "fsrs", "fsrs": {"card_id": 1, "due": "2026-07-10T00:00:00+00:00"}}
+            apply_schedule(stale, sm2_quality_for(None, True), resolve_grade(None, True),
+                           "2026-07-16")
+            check("fallback drops stale fsrs payload", "fsrs" not in stale)
+            check("fallback retags concept sm2", stale.get("sched") == "sm2")
         finally:
             if forced_backup is None:
                 os.environ.pop("REPO_QUIZ_NO_FSRS", None)
@@ -655,6 +699,20 @@ def run_tests():
             check("invalid --correct exits nonzero", result.returncode != 0)
             check("invalid --correct leaves progress unchanged",
                   not os.path.exists(os.path.join(invalid_repo, STATE_DIR, PROGRESS)))
+
+            bad_type = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--repo", invalid_repo,
+                 "record", "--concept", "x", "--correct", "true", "--type", "code_trace"],
+                capture_output=True, text=True, check=False,
+            )
+            check("unknown --type exits nonzero", bad_type.returncode != 0)
+
+            bad_goal = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--repo", invalid_repo,
+                 "config", "--set-daily-goal", "0"],
+                capture_output=True, text=True, check=False,
+            )
+            check("non-positive --set-daily-goal exits nonzero", bad_goal.returncode != 0)
         finally:
             shutil.rmtree(invalid_repo, ignore_errors=True)
 
@@ -759,6 +817,14 @@ def run_tests():
 
 # ---------- entry ----------
 
+def _positive_int(value):
+    """argparse type: a daily goal must be a positive integer (>= 1)."""
+    ivalue = int(value)
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer (>= 1)")
+    return ivalue
+
+
 def main(argv):
     if "--test" in argv:
         print("=== quiz_state.py --test ===\n")
@@ -779,7 +845,7 @@ def main(argv):
     pr.add_argument("--concept", required=True)
     pr.add_argument("--correct", required=True, choices=("true", "false"))
     pr.add_argument("--grade", default=None, choices=("again", "hard", "good", "easy"))
-    pr.add_argument("--type", default=None,
+    pr.add_argument("--type", default=None, choices=tuple(TYPE_XP_WEIGHTS),
                     help="question type slug, e.g. mc/fill-blank/code-trace/"
                          "bug-hunt/why/free-recall (default: mc)")
     pr.add_argument("--title", default=None)
@@ -789,7 +855,9 @@ def main(argv):
     pc = sub.add_parser("config")
     pc.add_argument("--get", action="store_true", help="print current config (default action)")
     pc.add_argument("--set-persona", default=None, choices=("junior", "mid", "senior"))
-    pc.add_argument("--set-daily-goal", type=int, default=None)
+    pc.add_argument("--set-daily-goal", type=_positive_int, default=None)
+    pc.add_argument("--seen-fsrs-notice", action="store_true",
+                    help="mark the one-time FSRS install notice as shown")
 
     args = p.parse_args(argv)
     today = today_str(args.today)

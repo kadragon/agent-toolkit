@@ -63,5 +63,10 @@
     "pattern": "(새 기능|새로운 기능|기능.*추가해|리팩터링.*해줘|리팩토링.*해줘|refactor (this|the|that)|이 버그.*(고쳐|수정)|버그.*고쳐줘|add (a|an) (feature|button|endpoint|page|command)|implement (a|the) feature)",
     "instruction": "Use Skill(dev-tools:new-task) to intake this NEW request and run it through the code cycle. Do NOT inline-implement.",
     "skip_if_prompt_matches": "(backlog|백로그|스킬|훅|에이전트|skill|hook|agent|공문|한글|hwpx|토론|persona|dependabot|리뷰|review|start.*task|작업.*시작|다음.*작업)"
+  },
+  {
+    "pattern": "(quiz me on this repo|test my understanding|onboard me with questions|review what i got wrong|레포 퀴즈|코드베이스 퀴즈|이해도 테스트|오답노트|복습 문제|스트릭)",
+    "instruction": "Use Skill(dev-tools:repo-quiz) to run or track the codebase-understanding quiz. Do NOT write a summary instead.",
+    "skip_if_prompt_matches": ""
   }
 ]
