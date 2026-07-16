@@ -41,6 +41,8 @@ AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
+NATIVE_ENGINE=$(jq -r '.native_engine' <<<"$PREFLIGHT")           # "claude" → in-process Agent; else → claude CLI companion (2-1)
+CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
 NO_HUB=$(jq -r '.no_hub' <<<"$PREFLIGHT")
 ```
@@ -125,9 +127,22 @@ REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
   ```
 - All other candidates → "Reviewers Skipped: redundant domain".
 
-For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2), then launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Model: Slot 1 → `sonnet`, Slot 2 → `opus`.
+For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2). How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_ENGINE`, from Setup) — the goal is that a **Claude** engine is always in the panel, alongside agy (2-2) and Codex (2-3), no matter which runtime drives:
 
-Reviewer prompt:
+- **`NATIVE_ENGINE == "claude"`** (Claude Code is driving) — launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Do not pin a model — omit the `model` field so each reviewer inherits the session's model (an Opus session reviews with Opus, a Sonnet session with Sonnet).
+- **otherwise** (a non-Claude runtime such as Codex is driving) — the in-process agent would review as that runtime's own engine, not Claude, so shell out to the `claude` CLI to keep a Claude reviewer in the panel (mirror of how 2-2/2-3 summon their engines via companion scripts). If `CLAUDE_CLI_AVAILABLE == false`, skip this slot and record "Reviewers Skipped: claude CLI unavailable". Otherwise launch in the same turn with `run_in_background: true`:
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
+  PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
+  BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+  SLOT_ID="<the selected slot's review skill id — Slot 1's general or Slot 2's security, chosen above>"
+  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${SLOT_ID}" \
+    || echo '[]'
+  ```
+  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt), so Step 3 consolidates both identically.
+
+Reviewer prompt (Agent path):
 ```
 Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
@@ -174,8 +189,8 @@ Follow **`references/consolidation-guide.md`** for deduplication, the Contest Ro
 
 **Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding.
 
-- **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one Sonnet verifier sub-agent to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
-- **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one Sonnet sub-agent with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
+- **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one verifier sub-agent (do not pin a model — inherit the session's model) to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
+- **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one sub-agent (do not pin a model — inherit the session's model) with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.
 
 If `--auto` NOT set: STOP, present consolidated table, wait for confirmation.
 If `--auto` set: treat all in-scope (non-refuted) as approved.

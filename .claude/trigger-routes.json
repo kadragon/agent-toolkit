@@ -58,5 +58,10 @@
     "pattern": "(hwpx|한글.*문서|한글.*파일|공문.*만들|공문.*작성|hancom|owpml|\\.hwp|회의록.*만들|제안서.*작성|edit hwp file)",
     "instruction": "Use Skill(productivity:hwpx) for Korean Hancom (HWPX) document tasks.",
     "skip_if_prompt_matches": "(hancom.*(느리|slow|pricing|가격|회사|company))"
+  },
+  {
+    "pattern": "(새 기능|새로운 기능|기능.*추가해|리팩터링.*해줘|리팩토링.*해줘|refactor (this|the|that)|이 버그.*(고쳐|수정)|버그.*고쳐줘|add (a|an) (feature|button|endpoint|page|command)|implement (a|the) feature)",
+    "instruction": "Use Skill(dev-tools:new-task) to intake this NEW request and run it through the code cycle. Do NOT inline-implement.",
+    "skip_if_prompt_matches": "(backlog|백로그|스킬|훅|에이전트|skill|hook|agent|공문|한글|hwpx|토론|persona|dependabot|리뷰|review|start.*task|작업.*시작|다음.*작업)"
   }
 ]

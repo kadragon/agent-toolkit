@@ -1,15 +1,14 @@
 ---
 name: next-tasks
-version: 1.3.0
+version: 1.4.0
 description: >-
   Use when user says "start a task", "next task", "work the backlog", "start work", "태스크
   시작", "태스크 골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full
   code cycle: pick → branch → Sprint Contract → implement → qa-verifier → version bump →
   dev-review-cycle --auto. Flags: --all (parallel batch), --tree (worktree isolation).
-  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Also accepts free-text task
-  descriptions not yet in backlog.md/tasks.md — ad-hoc entry (Step 0.5) routes through
-  grill/to-spec/to-tickets as needed, then joins the same cycle. Not for review-only or
-  backlog browsing without intent to implement.
+  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Operates only on work ALREADY
+  in backlog.md/tasks.md — for a NEW free-text feature/request not yet on the queue, use
+  new-task instead. Not for review-only or backlog browsing without intent to implement.
 ---
 
 # Next Tasks
@@ -21,9 +20,9 @@ skill is the **decision and sequencing layer**, not the implementation engine.
 **Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
 (or "전부 처리", "모두 돌려", "다 처리", "batch all"), run **Batch mode** instead — see the
 `## Batch mode (--all)` section. If the invocation carries `--tree`, run single-pick but route
-the code cycle through a git worktree — see `## --tree mode`. If the invocation carries free
-text describing a task not present in `backlog.md`/`tasks.md`, route to `## Step 0.5 — Ad-hoc
-entry` before Step 1. Prerequisites and the working-tree gate apply to all modes.
+the code cycle through a git worktree — see `## --tree mode`. A NEW free-text request not yet in
+`backlog.md`/`tasks.md` is out of scope here — that is `new-task`'s job; this skill only picks
+work already on the queue. Prerequisites and the working-tree gate apply to all modes.
 
 ## Prerequisites
 
@@ -38,40 +37,6 @@ dirty tree turns out to be an in-flight feature branch (not stray dirty files), 
 
 `tasks.md` is optional: present in an active sprint or as a review-backlog accumulator; absent
 in the idle state. If absent, only `backlog.md` candidates are offered.
-
-## Step 0.5 — Ad-hoc entry (free-text task)
-
-Triggers only when free text describing a task is appended after the skill invocation (e.g.
-"next-tasks 로그인 리팩터링해줘") **and** that task is not already present in
-`backlog.md`/`tasks.md`. The plain no-argument invocation (just "start a task" / "태스크
-시작") never enters this step — it always proceeds straight to Step 1 unchanged.
-
-1. **Classify, then size-gate.** Free text carries no `[type]` tag yet, so infer one from what
-   the request describes before gating — adds/changes user-visible behavior → `[FEAT]`;
-   restructures existing behavior without changing it → `[REFACTOR]`; fixes broken behavior →
-   `[FIX]`; anything else → leave untagged. Then apply the same trivial definition as Step 3's
-   plan-mode gate (not Step 2.5, which only excludes `[FEAT]`): trivial iff ALL hold —
-   inferred/explicit tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2, no new public
-   API/schema. An untagged one-file typo fix stays trivial; an untagged one-file behavioral
-   addition ("로그인 버튼 추가해줘") is not, because it infers to `[FEAT]`. If the file count
-   isn't obvious from the request text, run a quick scoped scan (or spawn `explorer` per the
-   `docs/delegation.md` >3-file gate) to estimate it before classifying.
-2. **Trivial** → skip grill/`to-spec`/`to-tickets` entirely. Build the Sprint Contract
-   directly from the free-text request and proceed to Step 3 exactly as a normal
-   backlog-picked trivial item would — Step 2.5's batch-nudge and lite-path offer still apply
-   unchanged.
-3. **Non-trivial and ambiguous** (scope, requirements, or design decision is not already
-   clear from the request) → `Skill(dev-tools:grill)` to resolve scope. Do not proceed until
-   grill reports the open questions resolved.
-4. **After resolution, judge size:**
-   - **Single-session-sized** → build the Sprint Contract directly from the grill output (or
-     directly from the request, if step 3 was skipped because it was already unambiguous but
-     not trivial) and proceed to Step 3.
-   - **Multi-session or architecturally significant** → `Skill(dev-tools:to-spec)` to write
-     `docs/design/{slug}.md`, then `Skill(dev-tools:to-tickets)` to break the approved spec
-     into ordered `backlog.md` items. Once `to-tickets` has written the items, fall through
-     into Step 1 below — the freshly written items are picked up there like any other
-     backlog candidate, in the order `to-tickets` wrote them.
 
 ## Step 1 — Gather candidate groups
 

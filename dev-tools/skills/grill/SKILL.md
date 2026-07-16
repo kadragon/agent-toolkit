@@ -26,7 +26,7 @@ feeds directly into whichever document is being built next: a Sprint Contract
 
 ## When to use
 
-Call this skill (directly, or via `Skill(dev-tools:grill)` from `next-tasks`/`to-spec`) only
+Call this skill (directly, or via `Skill(dev-tools:grill)` from `new-task`/`to-spec`) only
 when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
 If the answer is discoverable by reading a file, running a command, or checking a manifest,
 look it up instead of asking.
