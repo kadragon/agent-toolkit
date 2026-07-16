@@ -17,7 +17,7 @@
   {
     "pattern": "(orchestrate|fan out|fan-out|parallel agents|split.*across agents|delegate this|write a workflow|run a workflow|병렬.*에이전트|에이전트.*팬아웃)",
     "instruction": "Use Skill(dev-tools:orchestrate) for the delegation decision (single agent vs fan-out vs Workflow).",
-    "skip_if_prompt_matches": "(review.*cycle)"
+    "skip_if_prompt_matches": ""
   },
   {
     "pattern": "(set ?up.*harness|initialize.*harness|initialize agent infrastructure|bootstrap.*AGENTS|하네스.*초기화|하네스.*점검|validate.*harness|harness.*audit|harness.*init|에이전트.*인프라|에이전트가.*자꾸.*실수해요|Claude Code.*리포지토리.*설정)",
