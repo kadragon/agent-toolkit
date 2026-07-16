@@ -27,9 +27,12 @@ Grade mapping (SM-2 quality 0-5): correct -> 5, wrong -> 2.
 XP: +10 correct, +3 wrong (participation). Level = 1 + xp // 100.
 """
 import argparse
+import contextlib
 import datetime
+import io
 import json
 import os
+import subprocess
 import sys
 
 STATE_DIR = ".repo-quiz"
@@ -71,6 +74,18 @@ def append_line(repo, filename, line):
         f.write(line + "\n")
 
 
+def prepend_line(repo, filename, line):
+    os.makedirs(state_dir(repo), exist_ok=True)
+    path = os.path.join(state_dir(repo), filename)
+    existing = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            existing = f.read()
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(line + "\n")
+        f.write(existing)
+
+
 # ---------- core logic ----------
 
 def today_str(override=None):
@@ -94,6 +109,15 @@ def update_streak(state, today):
     else:
         state["streak"] = 1
     state["last_active"] = today
+
+
+def current_streak(state, today):
+    """Return the active streak without mutating persisted progress."""
+    last = state.get("last_active")
+    if not last:
+        return 0
+    gap = (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(last)).days
+    return state.get("streak", 0) if gap in (0, 1) else 0
 
 
 def sm2(concept, quality, today):
@@ -163,7 +187,7 @@ def cmd_status(repo, today):
         "xp": xp,
         "level": level_for(xp),
         "xp_to_next": XP_PER_LEVEL - (xp % XP_PER_LEVEL),
-        "streak": state.get("streak", 0),
+        "streak": current_streak(state, today),
         "last_active": state.get("last_active"),
         "total_concepts": len(state.get("concepts", {})),
         "due_count": len(due),
@@ -213,9 +237,9 @@ def cmd_record(repo, args, today):
             block.append("")
             block.append(args.note.strip())
         block.append("")
-        append_line(repo, MISTAKES, "\n".join(block))
+        prepend_line(repo, MISTAKES, "\n".join(block))
     elif was_wrong:
-        append_line(repo, MISTAKES,
+        prepend_line(repo, MISTAKES,
                     f"> ✓ {today}: got `{args.concept}` right after a previous miss.\n")
 
     save_progress(repo, state)
@@ -285,6 +309,17 @@ def run_tests():
         update_streak(st, "2026-07-20")
         check("gap resets streak", st["streak"] == 1)
 
+        # status: a streak expires when no activity occurred yesterday or today
+        expired = {
+            "xp": 0, "streak": 3, "last_active": "2026-07-10", "concepts": {}
+        }
+        save_progress(repo, expired)
+        status_output = io.StringIO()
+        with contextlib.redirect_stdout(status_output):
+            cmd_status(repo, "2026-07-16")
+        status = json.loads(status_output.getvalue())
+        check("status expires stale streak", status["streak"] == 0)
+
         # level thresholds
         check("level 1 at 0 xp", level_for(0) == 1)
         check("level 2 at 100 xp", level_for(100) == 2)
@@ -300,6 +335,29 @@ def run_tests():
         check("mistakes.md records wrong answer", "auth-flow" in mistakes)
         check("mistakes.md keeps the note", "middleware/auth.ts" in mistakes)
 
+        args_newer = argparse.Namespace(concept="routing", correct="false",
+                                        title="Request routing", note="Newer miss.",
+                                        session="s1")
+        cmd_record(repo, args_newer, "2026-07-17")
+        with open(os.path.join(repo, STATE_DIR, MISTAKES), encoding="utf-8") as f:
+            mistakes = f.read()
+        check("mistakes.md stores newest miss first",
+              mistakes.index("routing") < mistakes.index("auth-flow"))
+
+        # CLI: malformed boolean input must fail before state is changed
+        invalid_repo = tempfile.mkdtemp(prefix="quiz-invalid-")
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--repo", invalid_repo,
+                 "record", "--concept", "typo", "--correct", "ture"],
+                capture_output=True, text=True, check=False,
+            )
+            check("invalid --correct exits nonzero", result.returncode != 0)
+            check("invalid --correct leaves progress unchanged",
+                  not os.path.exists(os.path.join(invalid_repo, STATE_DIR, PROGRESS)))
+        finally:
+            shutil.rmtree(invalid_repo, ignore_errors=True)
+
         due = due_concepts(load_progress(repo), "2026-07-17", 5)
         check("wrong concept becomes due next day", any(d["concept"] == "auth-flow" for d in due))
 
@@ -308,7 +366,8 @@ def run_tests():
                                    title="Build pipeline", note=None, session="s1")
         cmd_record(repo, args2, "2026-07-16")
         state = load_progress(repo)
-        check("xp accrues (3 wrong + 10 correct)", state["xp"] == XP_WRONG + XP_CORRECT)
+        check("xp accrues (6 wrong + 10 correct)",
+              state["xp"] == 2 * XP_WRONG + XP_CORRECT)
 
         # a concept answered correctly today is not due today
         due_today = due_concepts(state, "2026-07-16", 5)
@@ -345,7 +404,7 @@ def main(argv):
 
     pr = sub.add_parser("record")
     pr.add_argument("--concept", required=True)
-    pr.add_argument("--correct", required=True)
+    pr.add_argument("--correct", required=True, choices=("true", "false"))
     pr.add_argument("--title", default=None)
     pr.add_argument("--note", default=None)
     pr.add_argument("--session", default=None)
