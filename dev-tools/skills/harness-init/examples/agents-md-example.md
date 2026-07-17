@@ -27,11 +27,11 @@ Invariants enforced mechanically. Violations block commits.
 
 Delegation is a golden principle — skipping a mandatory gate is a violation. Read `docs/delegation.md` for full routing table, context manifests, and orchestrator patterns. All triggers are objective and measurable.
 
-**Mechanical enforcement.** This table is not advisory — hooks back it up:
-- `.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Default-on whenever the delegation table is non-empty.
-- `.claude/hooks/delegation-gate.sh` (PreToolUse on `Edit|Write`) blocks edits to critical paths without prior delegation evidence in `.claude/tmp/`. **Critical-path repos only** — install when the delegation table has at least one path-based "Mandatory, blocking" row. The example here shows the maximalist case (both hooks); minimalist repos may ship only the router.
+**Mechanical enforcement.** Auto-delegation is description-driven first — every agent/orchestrator this table names carries a directive `description:` ("ALWAYS invoke when X — do NOT inline-execute"). Two optional hooks back it up only where evidence warrants:
+- `.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. **Fallback only** — add routes for delegations that measurably misfire, not preemptively.
+- `.claude/hooks/delegation-gate.sh` (PreToolUse on `Edit|Write`) blocks edits to critical paths without prior delegation evidence in `.claude/tmp/`. **Critical-path repos only** — install when the delegation table has at least one path-based "Mandatory, blocking" row. This example shows the maximalist case (both hooks); most repos ship neither and rely on the directive descriptions.
 
-If a mandatory row fires for your task and the agent attempts to edit anyway, the gate halts the edit. To extend coverage, update both the table here and `.claude/trigger-routes.json` in the same commit.
+If you installed the gate, a mandatory row that fires halts an inline edit. If you installed the router, update both the table here and `.claude/trigger-routes.json` in the same commit.
 
 **Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
 - Sub-agents share findings mid-flight → Agent Team (`TeamCreate` + `SendMessage`)
@@ -65,11 +65,13 @@ Rules that apply every message — keep the context window lean.
 
 ## Working with Existing Code
 
-- Components in `src/components/ui/` are shadcn/ui primitives — modify via `npx shadcn-ui add`, never edit directly
-- Database schema changes require a Prisma migration (`npx prisma migrate dev --name {desc}`)
-- Server actions live alongside their page in `app/`, not in a shared actions file
-- Test with `npm test` before every commit; integration tests need `DATABASE_URL` pointing to test DB
-- Styling uses Tailwind utility classes only — no CSS modules, no styled-components
+Boundaries the linter can't express — ✅ do / ⚠️ do carefully / 🚫 never (test/build commands live in `docs/runbook.md`):
+
+| | |
+|---|---|
+| ✅ | Style with Tailwind utility classes; put server actions beside their page in `app/` |
+| ⚠️ | `src/components/ui/` are shadcn primitives — regenerate via `npx shadcn-ui add`, never hand-edit; schema changes need `npx prisma migrate dev --name {desc}` |
+| 🚫 | CSS modules or styled-components; a shared cross-page actions file |
 
 ## Language Policy
 

@@ -53,9 +53,11 @@ catches them):
 
 If a role appears in the AGENTS.md delegation table as "Mandatory, blocking",
 its description MUST contain `ALWAYS` and an explicit "do NOT inline" or
-"do NOT skip" clause. Register the role in `.claude/trigger-routes.json` too
-(see `references/trigger-router-template.md`) so the UserPromptSubmit hook
-emits an explicit `Spawn Agent(subagent_type={role}) ...` instruction on match.
+"do NOT skip" clause — this directive description is the primary trigger. Only
+if the repo runs the trigger-router *fallback* (Step 7b — installed on a
+measured miss-rate, not by default), also register the role in
+`.claude/trigger-routes.json` (see `references/trigger-router-template.md`) so
+the hook emits an explicit `Spawn Agent(subagent_type={role}) ...` on match.
 
 **Notes:**
 
