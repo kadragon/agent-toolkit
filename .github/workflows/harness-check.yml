@@ -46,7 +46,7 @@ jobs:
           PY
 
   harness-drift:
-    name: Router drift + capture-before-use check
+    name: Plugin-root portability + capture-before-use check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,16 +1,17 @@
 ---
 name: new-task
-version: 1.0.0
+version: 1.0.1
 description: >-
-  Use when the user describes a NEW concrete task, feature, or change request that is NOT yet
-  tracked in `backlog.md`/`tasks.md` — e.g. "add a logout button", "refactor the auth module",
-  "fix the timezone bug in reports", "이거 만들어줘", "새 기능 추가해줘", "X 리팩터링해줘",
-  "이 버그 고쳐줘". Classifies the request, resolves ambiguity via grill, and for larger work
-  breaks it into a spec (to-spec) and tickets (to-tickets); then runs the full code cycle
-  (branch → Sprint Contract → implement → qa-verifier → version bump → dev-review-cycle --auto)
-  on it. Trivial requests get a lite-path offer (direct merge, no PR/CI). For picking up work
-  ALREADY in `backlog.md`/`tasks.md` use `next-tasks` instead — this skill is the intake for
-  requests not yet on the queue.
+  Intake for a NEW concrete task the user's prompt itself DESCRIBES — the request spells out
+  the work to build or fix (a feature, bug, or change), not a reference to the existing queue.
+  e.g. "add a logout button", "refactor the auth module", "fix the timezone bug in reports",
+  "이거 만들어줘", "새 기능 추가해줘", "X 리팩터링해줘", "이 버그 고쳐줘". Classifies the request,
+  resolves ambiguity via grill, and for larger work breaks it into a spec (to-spec) and tickets
+  (to-tickets); then runs the full code cycle (branch → Sprint Contract → implement →
+  qa-verifier → version bump → dev-review-cycle --auto) on it. Trivial requests get a lite-path
+  offer (direct merge, no PR/CI). Discriminator vs `next-tasks`: use new-task when the prompt
+  states WHAT to do; use `next-tasks` when the prompt asks to pull the next item FROM
+  `backlog.md`/`tasks.md` without naming specific new work.
 ---
 
 # New Task

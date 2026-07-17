@@ -56,7 +56,7 @@ disable-model-invocation: false
 ---
 ```
 
-Key: `description` field + trigger router (`trigger-router.sh`) together drive auto-invocation.
+Key: the `description` field drives auto-invocation (description-driven; no router hook in this repo).
 
 ### hooks.json (Claude Code)
 

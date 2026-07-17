@@ -27,7 +27,7 @@ Invariants enforced mechanically. Violations block merges.
 
 Read `docs/delegation.md` for full routing table. All triggers are objective.
 
-`.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions.
+Delegation is description-driven: skill/agent auto-invocation relies on each `SKILL.md`/agent `description:` field plus the objective triggers below — there is no prompt-matching router hook in this repo.
 
 | Trigger (objective) | Delegate | Model |
 |---------------------|----------|-------|

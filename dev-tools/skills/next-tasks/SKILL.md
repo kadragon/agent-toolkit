@@ -1,14 +1,17 @@
 ---
 name: next-tasks
-version: 1.4.0
+version: 1.4.1
 description: >-
-  Use when user says "start a task", "next task", "work the backlog", "start work", "태스크
-  시작", "태스크 골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full
-  code cycle: pick → branch → Sprint Contract → implement → qa-verifier → version bump →
-  dev-review-cycle --auto. Flags: --all (parallel batch), --tree (worktree isolation).
-  Trivial tasks auto-offer lite path (direct merge, no PR/CI). Operates only on work ALREADY
-  in backlog.md/tasks.md — for a NEW free-text feature/request not yet on the queue, use
-  new-task instead. Not for review-only or backlog browsing without intent to implement.
+  Use when the prompt asks to pull the next item FROM the queue without describing specific new
+  work — "start a task", "next task", "work the backlog", "start work", "태스크 시작", "태스크
+  골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full code cycle: pick →
+  branch → Sprint Contract → implement → qa-verifier → version bump → dev-review-cycle --auto.
+  Flags: --all (parallel batch), --tree (worktree isolation). Trivial tasks auto-offer lite path
+  (direct merge, no PR/CI). Operates only on work ALREADY in backlog.md/tasks.md; if the queue is
+  empty, reports nothing-open and points to `new-task` for describing fresh work. Discriminator vs new-task: next-tasks
+  when the prompt references the queue abstractly; `new-task` when the prompt itself spells out a
+  specific new feature/bug/change. Not for review-only or backlog browsing without intent to
+  implement.
 ---
 
 # Next Tasks
@@ -122,7 +125,7 @@ Skip headings where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`
 
 | Groups found | Action |
 |-------------|--------|
-| 0 | Report "backlog and tasks are clear — nothing open." Stop. |
+| 0 | Report "backlog and tasks are clear — nothing open." If the user has specific new work in mind, point them to `new-task` (describe the work and it runs the code cycle). Stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 

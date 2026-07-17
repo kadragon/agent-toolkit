@@ -30,16 +30,6 @@ codex plugin add productivity@kadragon
 |---------|---------|
 | `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
-| `bash .claude/hooks/trigger-router.sh` | Test trigger routing (pipe JSON prompt) |
-
-### Test trigger routing
-
-```bash
-# Capture prompt JSON, then test routing
-PROMPT='{"prompt": "implement backlog item", "session_id": "test"}'
-echo "$PROMPT" | bash .claude/hooks/trigger-router.sh
-# Expected: "INSTRUCTION (auto-delegation router): Use Skill(...) ..."
-```
 
 ## Release Workflow
 
@@ -69,17 +59,11 @@ git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugi
 **Symptom:** `git stash pop` (or rebase) conflicts on the `"version"` line in `plugin.json` — local had an uncommitted bump, remote advanced the same file further.
 **Fix:** resolve to remote's version, then re-run `bash scripts/bump-version.sh <plugin> <patch|minor|major>` from that new base — don't hand-pick a version number.
 
-### Trigger router not firing
+### Skill not auto-invoking
 
-**Symptom:** Skill not auto-invoked on matching prompt
-**Cause:** Route missing from `.claude/trigger-routes.json` or pattern mismatch
-**Fix:**
-```bash
-# Test each route
-PROMPT='{"prompt": "your test phrase here", "session_id": "test"}'
-echo "$PROMPT" | bash .claude/hooks/trigger-router.sh
-```
-Add/fix route in `.claude/trigger-routes.json`
+**Symptom:** Skill not auto-invoked on a matching prompt
+**Cause:** Auto-invocation is description-driven (no router in this repo) — the `description:` triggers are too vague, collide with a neighbor skill, or lack the user's phrasing
+**Fix:** Sharpen the skill's `description:` — add the concrete trigger phrases and explicit `NOT for …` exclusions that distinguish it from neighbors. See `docs/eval-criteria.md` Trigger Accuracy.
 
 ### `validate-harness.sh` reports FAIL
 
