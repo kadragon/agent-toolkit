@@ -8,7 +8,7 @@
 | Shell scripts | `kebab-case.sh` | `bump-version.sh`, `sweep.sh` |
 | Python scripts | `snake_case.py` | `scan_transcripts.py` |
 | Agent role files | `kebab-case.md` | `qa-verifier.md`, `skill-evaluator.md` |
-| Shell variables | `SCREAMING_SNAKE` | `ROUTES_FILE`, `MAX_LINES` |
+| Shell variables | `SCREAMING_SNAKE` | `SKILL_DIR`, `MAX_LINES` |
 
 ## Git Conventions
 
