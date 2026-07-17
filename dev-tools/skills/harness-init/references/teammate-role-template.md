@@ -133,8 +133,8 @@ only return values to the orchestrator.
 ---
 name: implementer
 description: |
-  Trigger when the backlog contains an implementation task with a Sprint
-  Contract and ≥1 file to edit. Does NOT self-evaluate — hands off to
+  ALWAYS invoke for an implementation task that has a Sprint Contract and ≥1
+  file to edit — do NOT inline-implement. Does NOT self-evaluate; hands off to
   qa-verifier afterwards.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
@@ -171,8 +171,9 @@ role first.
 ---
 name: explorer
 description: |
-  Trigger on first edit in a directory this session, OR target module >5
-  files / >500 LOC. Read-only — produces a map, not a change.
+  ALWAYS invoke before the first edit in a directory this session, OR when the
+  target module has >5 files / >500 LOC — do NOT skip straight to editing.
+  Read-only: produces a map, not a change.
 tools: Read, Grep, Glob
 model: sonnet
 ---
@@ -204,8 +205,9 @@ return a partial report with "further exploration needed" and stop.
 ---
 name: qa-verifier
 description: |
-  Trigger after every implementer run. NEVER the same agent instance that
-  implemented. Verifies against Sprint Contract criteria, not impressions.
+  ALWAYS invoke after every implementer run — do NOT skip verification. NEVER
+  the same agent instance that implemented. Verifies against Sprint Contract
+  criteria, not impressions.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -253,8 +255,9 @@ Non-high-stakes features: single pass is sufficient.
 ---
 name: product-evaluator
 description: |
-  Trigger at feature completion. Opus-level judgment for subjective quality.
-  Independent from implementer and qa-verifier.
+  ALWAYS invoke at feature completion — do NOT declare done without it.
+  Opus-level judgment for subjective quality. Independent from implementer and
+  qa-verifier.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
