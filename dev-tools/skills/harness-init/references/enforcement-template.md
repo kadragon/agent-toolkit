@@ -468,7 +468,7 @@ Wire in `.claude/settings.json`:
 
 **Skip this hook if:** the delegation table has no path-based critical patterns, or the orchestrator pattern isn't used (single-agent repo).
 
-**Layer composition.** This gate is the *blocking* enforcement; the UserPromptSubmit trigger router (`references/trigger-router-template.md`) is the *discovery* enforcement. Use both: the router gets the agent to spawn the delegate; the gate prevents skipping the delegation entirely if the router missed.
+**Layer composition.** This gate is the *blocking* enforcement; directive skill/agent descriptions are the primary *discovery* mechanism, with the UserPromptSubmit trigger router (`references/trigger-router-template.md`) as an optional discovery *fallback*. The gate stands on its own — install it wherever an inline edit to a critical path is genuinely dangerous, regardless of whether the router is present. Where the router fallback is also installed, the two compose: the router nudges the agent to spawn the delegate; the gate prevents skipping the delegation entirely if discovery missed.
 
 ## Circuit Breaker (Layer 1 Extension)
 

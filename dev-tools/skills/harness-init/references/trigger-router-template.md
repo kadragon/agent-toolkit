@@ -12,13 +12,11 @@ Source: Anthropic Claude Code docs → "Create custom subagents" (auto-delegatio
 
 ## When to install this hook
 
-Install when **any** of these are true after init:
+This hook is an **evidence-gated fallback, not a default** (Step 7b). The primary delegation mechanism is directive skill/agent descriptions ("ALWAYS invoke when … — do NOT inline-execute"); write those first. This repo's own harness ships **no** router and relies on descriptions alone — sufficient for the large majority of repos.
 
-- Step 4c created at least one orchestrator skill
-- Step 4b created at least one `.claude/agents/{role}.md`
-- AGENTS.md delegation table has any "Mandatory, blocking" row
+Install a route **only** when, after the description is already directive, a specific high-value delegation still measurably misfires often enough to hurt. Add the route for *that* delegation — not one per orchestrator/agent, and not preemptively. A stale routes file is worse than none.
 
-Skip only on single-session, single-agent repos with no orchestrator or specialized roles.
+Do **not** install the hook merely because an orchestrator skill, an agent role, or a "Mandatory, blocking" delegation row exists — those are covered by the directive description alone.
 
 ---
 

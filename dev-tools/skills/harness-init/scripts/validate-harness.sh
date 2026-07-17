@@ -38,6 +38,7 @@ FAIL=0
 pass()  { PASS=$((PASS + 1)); echo -e "  ${GREEN}PASS${NC}  $1"; }
 warn()  { WARN=$((WARN + 1)); echo -e "  ${YELLOW}WARN${NC}  $1"; }
 fail()  { FAIL=$((FAIL + 1)); echo -e "  ${RED}FAIL${NC}  $1"; }
+info()  { echo -e "  INFO  $1"; }
 
 echo "=== Harness Validation ==="
 echo "  Project: $(pwd)"
@@ -238,9 +239,9 @@ if $has_orchestrator || $has_agents; then
         jq -e '.hooks.UserPromptSubmit' .claude/settings.json >/dev/null 2>&1 && has_router=true
     fi
     if $has_router && [[ -f ".claude/trigger-routes.json" ]]; then
-        pass "Auto-delegation router installed (Step 7b)"
+        pass "Auto-delegation router installed (Step 7b fallback)"
     else
-        warn "Orchestrator/agents present but no UserPromptSubmit trigger router — see references/trigger-router-template.md (Step 7b)"
+        info "No UserPromptSubmit trigger router — expected default. Step 7b relies on directive skill/agent descriptions; add the router only if a delegation measurably misfires (references/trigger-router-template.md)."
     fi
 fi
 

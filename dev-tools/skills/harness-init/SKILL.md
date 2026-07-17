@@ -42,7 +42,7 @@ Before acting, determine mode AND maturity level.
 
 > **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
 
-**Default toward orchestration infrastructure.** When unsure whether a repo "needs" Step 4b/4c (agents + orchestrator), build them. Empirical failure mode: repos initialized without orchestrator + agents never auto-delegate downstream — the router (Step 7b) has nothing to route to, and the model does everything inline. The override cost of unused role files is ~50 lines on disk; the cost of skipping is a permanently inline workflow that floods the main context. Skip only for genuinely trivial repos (single script, docs-only, one-file library).
+**Default toward orchestration infrastructure.** When unsure whether a repo "needs" Step 4b/4c (agents + orchestrator), build them. Empirical failure mode: repos initialized without orchestrator + agents never auto-delegate downstream — auto-delegation (Step 7b) has nothing to fire at, and the model does everything inline. The override cost of unused role files is ~50 lines on disk; the cost of skipping is a permanently inline workflow that floods the main context. Skip only for genuinely trivial repos (single script, docs-only, one-file library).
 
 **Mode selection:**
 
@@ -106,6 +106,13 @@ Ask user: "What rules, if broken, cause most pain in this codebase?" Answer seed
 ### Step 3: Create AGENTS.md
 
 AGENTS.md is **map, not encyclopedia** (target ≤100 lines; hard warn at >200 — keeps harness within agent context window). Must fit in agent's context window without crowding actual work.
+
+**Non-inferability filter — the primary anti-bloat gate.** The target is redundant *description*: prose that restates what the agent would independently discover by reading the code — architecture summaries, style rules the linter already owns, a paraphrase of the README. This is not a style preference: an ETH Zurich study ([arxiv 2602.11988](https://arxiv.org/abs/2602.11988)) found LLM-generated context files *reduced* task success in 5 of 8 settings (+2.45–3.92 steps/task, +20–23% inference cost) precisely because they restated facts the agent already reads from code; human-curated, non-inferable files instead gained ~4pp. So before writing a *descriptive* line, ask "would the agent already know this from the repo?" — if yes, delete it. This does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.md` when …") or a concrete non-obvious command/example — those name real files but earn their tokens by cutting discovery cost, which is the whole point of the map. It is the empirical backing for "map, not encyclopedia," and applies to the AGENTS.md body even though the Step 0 default still builds out the orchestration scaffolding (that lives in on-demand `docs/`, not the always-loaded map).
+
+Three patterns make the map earn its tokens:
+- **Code example > prose.** One real snippet of the convention beats three sentences describing it — show the pattern, don't narrate it.
+- **Critical rules first.** Order sections so load-bearing invariants (golden principles, hard stops) sit near the top; long-context models drop middle content ("lost in the middle").
+- **Tiered boundaries.** Where the agent needs permission cues, a compact table reads faster than prose — ✅ Allowed / ⚠️ Ask first / 🚫 Never. Reserve it for genuinely non-obvious boundaries; obvious ones are inferable and fail the filter above.
 
 See `examples/agents-md-example.md` for complete reference.
 
@@ -174,9 +181,9 @@ Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema 
 
 ### Step 4c: Create Orchestrator Skill
 
-**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo) (default-on per Step 0). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that the UserPromptSubmit router (Step 7b) routes prompts to.
+**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo) (default-on per Step 0). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that auto-delegation (Step 7b — directive description first, router fallback) points at.
 
-If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) or C (hybrid). For single-agent domains, use Template B with one sub-agent — it is still worth creating because the orchestrator gives the router a target and the model an explicit "spawn the agent, do not inline" instruction.
+If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) or C (hybrid). For single-agent domains, use Template B with one sub-agent — it is still worth creating because the orchestrator gives auto-delegation a target and the model an explicit "spawn the agent, do not inline" instruction.
 
 Create at:
 `.claude/skills/{domain}-orchestrator/SKILL.md`
@@ -196,7 +203,7 @@ No cross-session resume — that mechanism was removed; scratchpad artifacts do 
 
 After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## Harness: {Domain}` pointer block with trigger rule and change history table to `docs/harness-log.md`, and add one row under AGENTS.md's `## Docs Index` pointing to it. CLAUDE.md must stay a pure `@AGENTS.md` pointer (Step 8, enforced by `scripts/validate-harness.sh`) — do not append anything to it.
 
-**Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". Pair with Step 7b's router for highest reliability.
+**Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". This is Step 7b's primary mechanism — get it right before considering the router fallback.
 
 **Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `model` / `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). See `references/orchestrator-template.md` → "Skill frontmatter reference".
 
@@ -270,33 +277,31 @@ Build multi-layer enforcement chain so golden principles are mechanically guaran
 
 Match enforcement depth to maturity level target: Level 1 → no hooks required; Level 2 → Layer 1 + 3; Level 3 → all layers + circuit breaker, with Layer 0 deny rules for any high-risk repo (auth/billing/migrations/infra) at any level. Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
 
-### Step 7b: Auto-Delegation Routing (when orchestrator or specialized agents exist)
+### Step 7b: Make Delegation Non-Optional
 
-**Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Official Anthropic docs say auto-invocation is description-driven; field testing ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) reports it works ~50% of the time even with well-written descriptions. The result: init produces a beautiful delegation harness, then the agent does the work inline anyway.
+**Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Auto-invocation is description-driven, and field reports put it well below 100% even with good descriptions ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). The failure mode: init produces a beautiful delegation harness, then the agent does the work inline anyway.
 
-**Fix.** Two mechanical mechanisms that make delegation non-optional:
+**Primary mechanism — directive descriptions (do this always).** The highest-leverage, lowest-cost lever is the `description:` field of every orchestrator skill and high-leverage agent role. Directive phrasing ("ALWAYS invoke when X — do NOT inline-execute") measurably out-triggers descriptive phrasing ("Triggers on X"). This is where auto-delegation is won or lost — get the descriptions right first (template: `references/orchestrator-template.md` → "Description writing rule"). This repo's own harness relies on description-driven invocation with **no router hook** — dogfooded, and sufficient for the large majority of repos.
 
-1. **UserPromptSubmit trigger router** — pattern-matches each prompt, emits an explicit `Use Skill(X)` or `Spawn Agent(subagent_type=X)` instruction when a registered phrase matches. Explicit instructions outperform description discovery. Read `references/trigger-router-template.md` and install:
+**Fallback — trigger router (only when you've measured a real miss-rate).** If, after directive descriptions are in place, a specific high-value delegation still misfires often enough to hurt, add a mechanical backstop. Do not install it preemptively — it costs a hook on every prompt plus a routes file to keep in sync, and a stale router is worse than none.
+
+1. **UserPromptSubmit trigger router** — pattern-matches each prompt, emits an explicit `Use Skill(X)` / `Spawn Agent(subagent_type=X)` instruction when a registered phrase matches. Read `references/trigger-router-template.md` and install for the routes that actually miss:
    - `.claude/hooks/trigger-router.sh`
-   - `.claude/trigger-routes.json` (one route per orchestrator skill + per high-leverage agent role)
+   - `.claude/trigger-routes.json` (one route per delegation you watched misfire)
    - Add `UserPromptSubmit` hook to `.claude/settings.json`
 
-2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. Forces the orchestrator/explorer to run first. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
+2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. This is a hard block justified wherever an inline edit is genuinely dangerous — independent of the router, install it on evidence of risk, not of miss-rate. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
-**Default: install** (default-on per Step 0). With Step 4b/4c defaults on, the router has targets to fire at.
+**Default:** ship directive descriptions for every orchestrator/agent (default-on per Step 0). Add the router or gate only on evidence — a route you watched misfire, or a critical path that must never be touched inline. This mirrors this repo's own conclusion: description-driven first, router only if the miss-rate proves it necessary.
 
-**Skip only when** both Step 4b and Step 4c were skipped (i.e., truly trivial single-script / docs-only / one-file library repos). For everything else, install — even with one orchestrator and one agent role, the router earns its keep.
-
-**Validation:** test each route after creation:
+**Validation (if you install the router):** test each route after creation:
 
 ```bash
 echo '{"prompt": "<sample trigger phrase>", "session_id": "test"}' | bash .claude/hooks/trigger-router.sh
 # Expected: "INSTRUCTION (auto-delegation router): Use Skill(...) ..."
 ```
-
-This is the **single highest-leverage step** for projects where orchestrators exist but are not being invoked. Without it, the rest of the harness is documentation; with it, delegation has a mechanical discovery path (router) and a mechanical block (gate).
 
 ### Step 8: Create Repo Root Configs
 
@@ -427,7 +432,7 @@ The last three scripts are repair tools, not routine ops. At Level 3, they shoul
 
 All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
 - **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), scratchpad convention, `docs/harness-log.md` pointer block, directive-description rule. **Read at Step 4c.**
-- **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. Lifts skill auto-invocation from the ~50% baseline ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts. **Read at Step 7b.**
+- **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. **Fallback only** — Step 7b's primary mechanism is directive skill descriptions; reach for the router when a specific delegation still misfires often enough to hurt ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). **Read at Step 7b.**
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**

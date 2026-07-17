@@ -24,7 +24,7 @@ Cost note: Team mode carries 3–5× token overhead vs a single session. Default
 
 ## Description writing rule (applies to all three templates)
 
-The `description:` field is the **primary discovery mechanism** for skill auto-invocation. Anthropic's own skill-creator testing reports directive phrasing ("ALWAYS invoke when …") improves trigger rate on 5 of 6 public skills compared to descriptive phrasing ("Triggers on …"). Combined with the UserPromptSubmit router (`references/trigger-router-template.md`), this raises observed auto-invocation from the ~50% baseline ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)) toward deterministic on matched prompts.
+The `description:` field is the **primary discovery mechanism** for skill auto-invocation — get it right first; everything else is a fallback. Anthropic's own skill-creator testing reports directive phrasing ("ALWAYS invoke when …") improves trigger rate on 5 of 6 public skills compared to descriptive phrasing ("Triggers on …"). Description discovery is imperfect (~50% baseline for weak descriptions, [Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)); the UserPromptSubmit router (`references/trigger-router-template.md`) is the **optional fallback** for a specific delegation that still measurably misfires after the description is directive — not a default companion.
 
 **Localization note.** Templates below include Korean trigger phrases (e.g. `"{domain} 실행해줘"`) because this harness is authored for a bilingual KO/EN user. For **English-only repos, drop the Korean lines** when copying the template — leaving them in pollutes the description with unused tokens and may confuse the model's matcher. For other-language repos, translate the trigger phrases to the target language. Keep the English lines in every case (they're the lingua franca for Claude's auto-invocation).
 
@@ -41,7 +41,7 @@ description: |
   Skip only if user explicitly says "inline" / "직접" / "without orchestrator".
 ```
 
-Also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match — descriptions handle the long tail, the router handles the high-leverage phrases.
+Only if you are running the trigger-router *fallback* (Step 7b — installed on a measured miss-rate, not by default), also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match. Absent that, the directive description above is the whole mechanism.
 
 ## Skill frontmatter reference (2026)
 
