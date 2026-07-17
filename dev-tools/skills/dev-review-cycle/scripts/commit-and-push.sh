@@ -72,7 +72,21 @@ if [ "$NO_PUSH" = "true" ]; then
 fi
 
 # --- Push ---
-git push -u origin HEAD
+# stdout is a pure-JSON contract, but a first push of a new branch pollutes it:
+# `git push -u` prints "branch '<x>' set up to track 'origin/<x>'." to STDOUT
+# (the new-branch / PR-hint lines go to stderr). Command substitution captures
+# stdout, so even a correct `RESULT=$(...)` caller gets that tracking line ahead
+# of the JSON and jq exits 5 on the parse error. On a re-run the upstream is
+# already set, no tracking line prints, and stdout is clean — which is why the
+# failure looks intermittent and clears on retry. Route push output away from
+# both streams on success (2>&1 >/dev/null: stdout→/dev/null, stderr→capture);
+# surface it only on failure.
+if ! PUSH_OUT=$(git push -u origin HEAD 2>&1 >/dev/null); then
+  # Encode via jq: git error output routinely contains quotes/newlines that
+  # would produce malformed JSON under raw interpolation.
+  jq -n --arg e "push failed: $PUSH_OUT" '{error: $e}' >&2
+  exit 1
+fi
 
 PR_NUMBER=""
 PR_URL=""
