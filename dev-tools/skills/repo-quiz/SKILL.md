@@ -14,7 +14,7 @@ description: >-
   XP/level/streak/achievements in a gitignored .repo-quiz/ folder.
   NOT for generating docs or a written onboarding guide (that is a summary task, not a
   quiz) — and NOT for quizzing on general programming trivia unrelated to the current repo.
-version: 1.1.0
+version: 1.1.1
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 
@@ -29,6 +29,16 @@ The point is **retrieval practice against ground truth**: every question must be
 by reading files in this repo, and every answer is checked against what the code actually
 says — never against your own assumptions. A quiz that rewards plausible-but-wrong answers
 teaches the wrong thing, so grounding each question in a file you've read is the whole game.
+
+## Language
+
+Ask in **Korean**. Everything you present to the user — question stems, `mc` options,
+free-recall prompts, the reveal, and the post-answer explanation — is user-facing text, so
+write it in Korean. Keep code, identifiers, file paths, and quoted snippets verbatim in their
+original language (English): a `fill-blank` cloze or a `code-trace` still shows the real code
+untranslated; only the surrounding prose is Korean. Concept slugs passed to `--type`/`--concept`
+and every `record`/`config` flag stay English — they're internal state, not shown to the user.
+The illustrative examples below are written in Korean for this reason; mirror that.
 
 ## Credits
 
@@ -232,11 +242,11 @@ self-rate 1–4 (map 1→again, 2→hard, 3→good, 4→easy). Keep the stem sho
 `mc`, make options parallel in form and vary which position is correct.
 
 ```
-[Q2/5]  In this repo, what must change whenever you edit a file under dev-tools/?
-  A  Only dev-tools/.claude-plugin/plugin.json version
-  B  Both .claude-plugin and .codex-plugin plugin.json versions   ← correct
-  C  The root AGENTS.md version header
-  D  Nothing — CI bumps it automatically
+[Q2/5]  이 레포에서 dev-tools/ 아래 파일을 수정하면 반드시 무엇을 함께 바꿔야 하나요?
+  A  dev-tools/.claude-plugin/plugin.json 버전만
+  B  .claude-plugin과 .codex-plugin의 plugin.json 버전 둘 다   ← correct
+  C  루트 AGENTS.md의 버전 헤더
+  D  아무것도 — CI가 자동으로 올려줌
 ```
 
 After each answer, immediately record it — don't batch, so a mid-round interruption still
@@ -296,13 +306,13 @@ rather than asserting it. One good pointer beats a paragraph of filler; don't pa
 
 Example spoken follow-up (correct answer):
 
-> ✅ Right — **B**. Both `plugin.json` files bump together because the marketplace ships the
-> skill to Claude Code *and* Codex from one release, so a drifted version would desync them
-> (`AGENTS.md` Golden Principle #1; CI's `harness-check.yml` enforces it).
-> **Broader context:** this is the standard "single source of truth for release version"
-> practice — monorepos with multiple publish targets (npm workspaces, Cargo workspaces) hit
-> the same class of bug, which is why tools like Changesets exist to keep sibling versions in
-> lockstep. Worth a look if you ever wire up automated version bumps here.
+> ✅ 정답 — **B**. `plugin.json` 두 파일이 함께 올라가는 이유는, 마켓플레이스가 하나의
+> 릴리스로 스킬을 Claude Code *와* Codex 양쪽에 배포하기 때문입니다. 버전이 어긋나면 둘이
+> desync되죠 (`AGENTS.md` Golden Principle #1; CI의 `harness-check.yml`가 강제).
+> **Broader context:** 이건 "릴리스 버전의 단일 진실 공급원(single source of truth)"이라는
+> 표준 관행입니다 — 배포 타깃이 여럿인 모노레포(npm workspaces, Cargo workspaces)도 같은
+> 부류의 버그를 겪고, 그래서 Changesets 같은 도구가 형제 버전을 lockstep으로 유지합니다.
+> 나중에 자동 버전 범프를 붙일 일이 있으면 한 번 볼 만합니다.
 
 Deliver this out loud between questions; the `--note` above is the *persisted* short form for
 `mistakes.md`, the spoken version is the fuller teach. If the extra tip is genuinely useful to
