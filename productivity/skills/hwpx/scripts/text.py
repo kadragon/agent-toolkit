@@ -11,6 +11,8 @@ Usage:
     python text.py patch input.hwpx "기존" "새" --after "앵커" --output result.hwpx
     python text.py patch input.hwpx "기존" "새" --dry-run
 """
+from __future__ import annotations
+
 import argparse
 import sys
 import xml.etree.ElementTree as ET

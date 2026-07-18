@@ -8,6 +8,8 @@ Usage:
     python validate.py page-guard --reference ref.hwpx --output result.hwpx
     python validate.py page-guard --reference ref.hwpx --output result.hwpx --json
 """
+from __future__ import annotations
+
 import argparse
 import json
 import sys

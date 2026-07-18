@@ -9,6 +9,8 @@ Usage:
     python build.py next-id document.hwpx
     python build.py next-id document.hwpx --count 5
 """
+from __future__ import annotations
+
 import argparse
 import xml.etree.ElementTree as ET
 from xml.etree.ElementTree import Element

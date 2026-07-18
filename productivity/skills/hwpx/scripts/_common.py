@@ -1,4 +1,6 @@
 """Shared utilities for hwpx scripts."""
+from __future__ import annotations
+
 import re
 import sys
 import xml.etree.ElementTree as ET

@@ -17,6 +17,8 @@ Usage:
     python table.py calc-widths 1:4
     python table.py strip-lineseg input.hwpx --output clean.hwpx
 """
+from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -139,7 +141,7 @@ def _dump_table(tbl_xml: str, table_id: str) -> None:
     print(f"  {'-' * 60}")
     for row, col, cs, rs, text in cells:
         display = text[:55] + ("…" if len(text) > 55 else "")
-        print(f"  {int(row):-6} {int(col):-6} {int(cs):-6} {int(rs):-6}  {display}")
+        print(f"  {row:<6} {col:<6} {cs:<6} {rs:<6}  {display}")
     print("  [col,row for --cell: e.g. row=1 col=2 → --cell 2,1]")
 
 

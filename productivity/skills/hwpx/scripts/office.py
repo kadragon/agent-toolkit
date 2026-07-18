@@ -5,6 +5,8 @@ Usage:
     python office.py unpack input.hwpx output_dir/
     python office.py pack input_dir/ output.hwpx
 """
+from __future__ import annotations
+
 import argparse
 import os
 import sys
