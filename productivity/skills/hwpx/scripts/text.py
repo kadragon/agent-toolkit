@@ -11,15 +11,6 @@ Usage:
     python text.py patch input.hwpx "기존" "새" --after "앵커" --output result.hwpx
     python text.py patch input.hwpx "기존" "새" --dry-run
 """
-from __future__ import annotations
-
-import sys as _sys
-try:
-    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
-
 import argparse
 import sys
 import xml.etree.ElementTree as ET
@@ -27,7 +18,7 @@ import zipfile
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
-from _common import LINESEG_RE, check_para_ids, SECTION_N_RE as SECTION_RE
+from _common import LINESEG_RE, SECTION_RE, check_para_ids, configure_io, die
 
 
 # ── extract ───────────────────────────────────────────────────────────────────
@@ -101,8 +92,7 @@ def extract_markdown(hwpx_path: str) -> str:
 
 def cmd_extract(args: argparse.Namespace) -> None:
     if not Path(args.input).is_file():
-        print(f"Error: File not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+        die(f"File not found: {args.input}")
     try:
         if args.format == "markdown":
             result = extract_markdown(args.input)
@@ -110,11 +100,9 @@ def cmd_extract(args: argparse.Namespace) -> None:
         else:
             result, skipped = extract_plain(args.input, include_tables=args.include_tables)
     except BadZipFile:
-        print(f"Error: not a valid HWPX (ZIP) file: {args.input}", file=sys.stderr)
-        sys.exit(1)
+        die(f"not a valid HWPX (ZIP) file: {args.input}")
     except ET.ParseError as e:
-        print(f"Error: malformed section XML: {e}", file=sys.stderr)
-        sys.exit(1)
+        die(f"malformed section XML: {e}")
     if args.format != "markdown" and skipped > 0:
         print(f"[warn] {skipped} table text node(s) omitted; pass --include-tables to include", file=sys.stderr)
     if args.output:
@@ -186,17 +174,14 @@ def patch_hwpx(
 def cmd_patch(args: argparse.Namespace) -> None:
     input_path = Path(args.input)
     if not input_path.is_file():
-        print(f"Error: File not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+        die(f"File not found: {args.input}")
     if not args.dry_run and not args.output:
-        print("Error: --output required (or use --dry-run)", file=sys.stderr)
-        sys.exit(1)
+        die("--output required (or use --dry-run)")
     target = f"Contents/section{args.section}.xml"
     if args.dry_run:
         with zipfile.ZipFile(input_path, "r") as zin:
             if target not in zin.namelist():
-                print(f"Error: {target} not found in archive", file=sys.stderr)
-                sys.exit(1)
+                die(f"{target} not found in archive")
             xml_str = zin.read(target).decode("utf-8")
         scope = xml_str
         if args.after:
@@ -252,9 +237,9 @@ def _run_tests() -> None:
         if lines == ["본문 텍스트"] and skipped == 1:
             print("TEXT-1 PASS: table text skipped and counted")
         else:
-            failures.append("TEXT-1 FAIL: lines=%r skipped=%r" % (lines, skipped))
+            failures.append(f"TEXT-1 FAIL: lines={lines!r} skipped={skipped!r}")
     except Exception as e:
-        failures.append("TEXT-1 FAIL: %r" % e)
+        failures.append(f"TEXT-1 FAIL: {e!r}")
 
     # TEXT-2: table text included when include_tables=True
     try:
@@ -262,9 +247,9 @@ def _run_tests() -> None:
         if lines == ["본문 텍스트", "표 안 텍스트"] and skipped == 0:
             print("TEXT-2 PASS: table text included with include_tables=True")
         else:
-            failures.append("TEXT-2 FAIL: lines=%r skipped=%r" % (lines, skipped))
+            failures.append(f"TEXT-2 FAIL: lines={lines!r} skipped={skipped!r}")
     except Exception as e:
-        failures.append("TEXT-2 FAIL: %r" % e)
+        failures.append(f"TEXT-2 FAIL: {e!r}")
 
     _plain_section = (
         '<?xml version="1.0"?>'
@@ -280,9 +265,9 @@ def _run_tests() -> None:
         if replaced == 1 and text.count("새로운") == 1 and text.count("기존") == 1 and not errors:
             print("TEXT-3 PASS: count=1 replaces first occurrence only")
         else:
-            failures.append("TEXT-3 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+            failures.append(f"TEXT-3 FAIL: replaced={replaced!r} errors={errors!r} text={text}")
     except Exception as e:
-        failures.append("TEXT-3 FAIL: %r" % e)
+        failures.append(f"TEXT-3 FAIL: {e!r}")
 
     # TEXT-4: _patch_xml count=0 replaces all occurrences
     try:
@@ -291,9 +276,9 @@ def _run_tests() -> None:
         if replaced == 2 and "기존" not in text and not errors:
             print("TEXT-4 PASS: count=0 replaces all occurrences")
         else:
-            failures.append("TEXT-4 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+            failures.append(f"TEXT-4 FAIL: replaced={replaced!r} errors={errors!r} text={text}")
     except Exception as e:
-        failures.append("TEXT-4 FAIL: %r" % e)
+        failures.append(f"TEXT-4 FAIL: {e!r}")
 
     # TEXT-5: _patch_xml with --after only replaces occurrences past the anchor
     try:
@@ -304,9 +289,9 @@ def _run_tests() -> None:
         if replaced == 1 and text.count("새로운") == 1 and "기존 텍스트 반복" in text and not errors:
             print("TEXT-5 PASS: --after scopes replacement past anchor")
         else:
-            failures.append("TEXT-5 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+            failures.append(f"TEXT-5 FAIL: replaced={replaced!r} errors={errors!r} text={text}")
     except Exception as e:
-        failures.append("TEXT-5 FAIL: %r" % e)
+        failures.append(f"TEXT-5 FAIL: {e!r}")
 
     # TEXT-6: _patch_xml strips linesegarray from the patched result
     _section_with_lineseg = (
@@ -322,9 +307,9 @@ def _run_tests() -> None:
         if replaced == 1 and "linesegarray" not in text and not errors:
             print("TEXT-6 PASS: linesegarray stripped after patch")
         else:
-            failures.append("TEXT-6 FAIL: replaced=%r errors=%r text=%s" % (replaced, errors, text))
+            failures.append(f"TEXT-6 FAIL: replaced={replaced!r} errors={errors!r} text={text}")
     except Exception as e:
-        failures.append("TEXT-6 FAIL: %r" % e)
+        failures.append(f"TEXT-6 FAIL: {e!r}")
 
     # TEXT-7: _patch_xml surfaces duplicate hp:p id errors via check_para_ids
     _section_dup_ids = (
@@ -339,9 +324,9 @@ def _run_tests() -> None:
         if replaced == 1 and errors and "5" in errors[0]:
             print("TEXT-7 PASS: duplicate hp:p id flagged after patch")
         else:
-            failures.append("TEXT-7 FAIL: replaced=%r errors=%r" % (replaced, errors))
+            failures.append(f"TEXT-7 FAIL: replaced={replaced!r} errors={errors!r}")
     except Exception as e:
-        failures.append("TEXT-7 FAIL: %r" % e)
+        failures.append(f"TEXT-7 FAIL: {e!r}")
 
     if failures:
         for f in failures:
@@ -354,6 +339,7 @@ def _run_tests() -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    configure_io()
     if sys.argv[1:] == ["--test"]:
         _run_tests()
         return

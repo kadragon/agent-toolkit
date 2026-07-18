@@ -5,18 +5,13 @@ Usage:
     python office.py unpack input.hwpx output_dir/
     python office.py pack input_dir/ output.hwpx
 """
-import sys as _sys
-try:
-    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
-
 import argparse
 import os
 import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
+
+from _common import configure_io, die
 
 ORDER_MANIFEST = ".hwpx_pack_order"
 
@@ -133,9 +128,9 @@ def _run_tests() -> None:
             if all(checks):
                 print("OFFICE-1 PASS: no-manifest pack orders mimetype first, ZIP_STORED")
             else:
-                failures.append("OFFICE-1 FAIL: %r (names=%r)" % (checks, names))
+                failures.append(f"OFFICE-1 FAIL: {checks!r} (names={names!r})")
     except Exception as e:
-        failures.append("OFFICE-1 FAIL: %r" % e)
+        failures.append(f"OFFICE-1 FAIL: {e!r}")
 
     # OFFICE-2: unpack -> pack round trip preserves entry order and compress types
     try:
@@ -162,11 +157,11 @@ def _run_tests() -> None:
                     print("OFFICE-2 PASS: unpack->pack round trip preserves order + compress type")
                 else:
                     failures.append(
-                        "OFFICE-2 FAIL: order/types not preserved: %r vs %r, %r vs %r"
-                        % (rep_names, orig_names, rep_types, orig_types)
+                        f"OFFICE-2 FAIL: order/types not preserved: {rep_names!r} vs {orig_names!r}, "
+                        f"{rep_types!r} vs {orig_types!r}"
                     )
     except Exception as e:
-        failures.append("OFFICE-2 FAIL: %r" % e)
+        failures.append(f"OFFICE-2 FAIL: {e!r}")
 
     # OFFICE-3: pack() raises FileNotFoundError when mimetype is missing
     try:
@@ -181,7 +176,7 @@ def _run_tests() -> None:
             except FileNotFoundError:
                 print("OFFICE-3 PASS: missing mimetype raises FileNotFoundError")
     except Exception as e:
-        failures.append("OFFICE-3 FAIL: %r" % e)
+        failures.append(f"OFFICE-3 FAIL: {e!r}")
 
     if failures:
         for f in failures:
@@ -194,6 +189,7 @@ def _run_tests() -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    configure_io()
     if sys.argv[1:] == ["--test"]:
         _run_tests()
         return
@@ -214,19 +210,16 @@ def main() -> None:
 
     if args.cmd == "unpack":
         if not os.path.isfile(args.input):
-            print(f"Error: File not found: {args.input}", file=sys.stderr)
-            sys.exit(1)
+            die(f"File not found: {args.input}")
         unpack(args.input, args.output)
 
     elif args.cmd == "pack":
         if not os.path.isdir(args.input):
-            print(f"Error: Directory not found: {args.input}", file=sys.stderr)
-            sys.exit(1)
+            die(f"Directory not found: {args.input}")
         try:
             pack(args.input, args.output)
         except FileNotFoundError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
 
 
 if __name__ == "__main__":

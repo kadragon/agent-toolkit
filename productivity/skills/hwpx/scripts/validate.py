@@ -8,13 +8,6 @@ Usage:
     python validate.py page-guard --reference ref.hwpx --output result.hwpx
     python validate.py page-guard --reference ref.hwpx --output result.hwpx --json
 """
-import sys as _sys
-try:
-    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
-
 import argparse
 import json
 import sys
@@ -23,14 +16,23 @@ from collections import Counter
 from dataclasses import dataclass, asdict
 from io import BytesIO
 from pathlib import Path
-from typing import List, Tuple
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
-from _common import MIN_READABLE_PT, SECTION_N_RE, PARA_ID_RE, PLACEHOLDER_IDS, TBL_ID_RE
+from _common import (
+    MIN_READABLE_PT,
+    NS_HH,
+    NS_HP,
+    NS_HS,
+    PARA_ID_RE,
+    PLACEHOLDER_IDS,
+    SECTION_RE,
+    TBL_ID_RE,
+    configure_io,
+)
 
 REQUIRED_FILES = [
     "mimetype",
@@ -39,9 +41,6 @@ REQUIRED_FILES = [
     "Contents/section0.xml",
 ]
 EXPECTED_MIMETYPE = "application/hwp+zip"
-NS_HH = "http://www.hancom.co.kr/hwpml/2011/head"
-NS_HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
-NS_HS = "http://www.hancom.co.kr/hwpml/2011/section"
 NS = {"hh": NS_HH, "hp": NS_HP, "hs": NS_HS}
 
 
@@ -56,7 +55,7 @@ def _dup_para_ids(hwpx_path: str) -> set[str]:
     try:
         with ZipFile(hwpx_path, "r") as zf:
             for name in zf.namelist():
-                if SECTION_N_RE.match(name):
+                if SECTION_RE.match(name):
                     ids.extend(_ids_from_xml_str(zf.read(name).decode("utf-8")))
     except (BadZipFile, OSError):
         return set()
@@ -68,7 +67,7 @@ def _dup_table_ids(hwpx_path: str) -> set[str]:
     try:
         with ZipFile(hwpx_path, "r") as zf:
             for name in zf.namelist():
-                if SECTION_N_RE.match(name):
+                if SECTION_RE.match(name):
                     xml_str = zf.read(name).decode("utf-8")
                     ids.extend(i for i in TBL_ID_RE.findall(xml_str) if i not in PLACEHOLDER_IDS)
     except (BadZipFile, OSError):
@@ -283,13 +282,11 @@ def _charpr_font_warnings(root: ET.Element, heights: dict[str, int], min_pt: flo
             col = cell[0] if cell else "?"
             row = cell[1] if cell else "?"
             warns.append(
-                "WARN: table %s cell(%s,%s) charPr=%s height=%d(%spt) — 가독 불가 크기"
-                % (tbl_id, col, row, cid, height, "%g" % (height / 100))
+                f"WARN: table {tbl_id} cell({col},{row}) charPr={cid} height={height}({height / 100:g}pt) — 가독 불가 크기"
             )
         else:
             warns.append(
-                "WARN: (body text) charPr=%s height=%d(%spt) — 가독 불가 크기"
-                % (cid, height, "%g" % (height / 100))
+                f"WARN: (body text) charPr={cid} height={height}({height / 100:g}pt) — 가독 불가 크기"
             )
     return warns
 
@@ -329,7 +326,7 @@ def do_validate(
             if name.endswith(".xml") or name.endswith(".hpf"):
                 try:
                     data = zf.read(name)
-                    if SECTION_N_RE.match(name):
+                    if SECTION_RE.match(name):
                         section_bytes[name] = data
                     parsed[name] = DET.fromstring(data)
                 except (ET.ParseError, DefusedXmlException) as e:
@@ -338,7 +335,7 @@ def do_validate(
         if header_root is None:
             return errors, warnings
         sec_cnt_declared = int(header_root.get("secCnt", "0"))
-        actual_sections = sorted(n for n in names if SECTION_N_RE.match(n))
+        actual_sections = sorted(n for n in names if SECTION_RE.match(n))
         if sec_cnt_declared != len(actual_sections):
             errors.append(
                 f"secCnt mismatch: header declares secCnt={sec_cnt_declared}, "
@@ -415,10 +412,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
 
 # ── page-guard ────────────────────────────────────────────────────────────────
 
-NS_PG = {
-    "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
-    "hs": "http://www.hancom.co.kr/hwpml/2011/section",
-}
+NS_PG = {"hp": NS_HP, "hs": NS_HS}
 
 
 @dataclass
@@ -427,10 +421,10 @@ class Metrics:
     page_break_count: int
     column_break_count: int
     table_count: int
-    table_shapes: List[Tuple[str, str, str, str, str, str]]
+    table_shapes: list[tuple[str, str, str, str, str, str]]
     text_char_total: int
     text_char_total_nospace: int
-    paragraph_text_lengths: List[int]
+    paragraph_text_lengths: list[int]
 
 
 def _text_of_t(t_node: ET.Element) -> str:
@@ -444,7 +438,7 @@ def _collect_one_section(section_bytes: bytes) -> Metrics:
     page_break_count = sum(1 for p in paragraphs if p.get("pageBreak") == "1")
     column_break_count = sum(1 for p in paragraphs if p.get("columnBreak") == "1")
     tables = root.findall(".//hp:tbl", NS_PG)
-    table_shapes: List[Tuple[str, str, str, str, str, str]] = []
+    table_shapes: list[tuple[str, str, str, str, str, str]] = []
     for t in tables:
         sz = t.find("hp:sz", NS_PG)
         width = sz.get("width", "") if sz is not None else ""
@@ -464,7 +458,7 @@ def _collect_one_section(section_bytes: bytes) -> Metrics:
         s = _text_of_t(t)
         text_char_total += len(s)
         text_char_total_nospace += len("".join(s.split()))
-    paragraph_text_lengths: List[int] = []
+    paragraph_text_lengths: list[int] = []
     for p in paragraphs:
         plen = sum(len(_text_of_t(t)) for t in p.findall(".//hp:t", NS_PG))
         paragraph_text_lengths.append(plen)
@@ -484,8 +478,8 @@ def collect_metrics(hwpx_path: Path) -> Metrics:
     """Aggregate Metrics across all sections in an HWPX file."""
     with zipfile.ZipFile(hwpx_path, "r") as zf:
         section_names = sorted(
-            [n for n in zf.namelist() if SECTION_N_RE.match(n)],
-            key=lambda n: int(SECTION_N_RE.match(n).group(1)),  # type: ignore[union-attr]
+            [n for n in zf.namelist() if SECTION_RE.match(n)],
+            key=lambda n: int(SECTION_RE.match(n).group(1)),  # type: ignore[union-attr]
         )
         if not section_names:
             return Metrics(0, 0, 0, 0, [], 0, 0, [])
@@ -511,8 +505,8 @@ def compare_metrics(
     out: Metrics,
     max_text_delta_ratio: float,
     max_paragraph_delta_ratio: float,
-) -> List[str]:
-    errors: List[str] = []
+) -> list[str]:
+    errors: list[str] = []
     if ref.paragraph_count != out.paragraph_count:
         errors.append(f"문단 수 불일치: ref={ref.paragraph_count}, out={out.paragraph_count}")
     if ref.page_break_count != out.page_break_count:
@@ -604,17 +598,17 @@ def _run_tests() -> None:
         else:
             print("VAL-1 PASS: 3pt charPr triggers warning")
     except Exception as e:
-        failures.append("VAL-1 FAIL: %s" % e)
+        failures.append(f"VAL-1 FAIL: {e}")
 
     # VAL-1b: only warns for small charPr (not 10pt)
     try:
         warns = _charpr_font_warnings(ET.fromstring(_section_with_text), _heights, 5.0)
         if len(warns) > 1:
-            failures.append("VAL-1b FAIL: expected 1 warning, got %d: %r" % (len(warns), warns))
+            failures.append(f"VAL-1b FAIL: expected 1 warning, got {len(warns)}: {warns!r}")
         else:
             print("VAL-1b PASS: only small charPr warns (10pt not warned)")
     except Exception as e:
-        failures.append("VAL-1b FAIL: %s" % e)
+        failures.append(f"VAL-1b FAIL: {e}")
 
     # VAL-2: empty run excluded from warning
     _section_empty_run = (
@@ -635,11 +629,11 @@ def _run_tests() -> None:
     try:
         warns_empty = _charpr_font_warnings(ET.fromstring(_section_empty_run), _heights, 5.0)
         if warns_empty:
-            failures.append("VAL-2 FAIL: empty run should not warn, got: %r" % warns_empty)
+            failures.append(f"VAL-2 FAIL: empty run should not warn, got: {warns_empty!r}")
         else:
             print("VAL-2 PASS: empty run excluded from warning")
     except Exception as e:
-        failures.append("VAL-2 FAIL: %s" % e)
+        failures.append(f"VAL-2 FAIL: {e}")
 
     # VAL-3: <hp:t> not the immediate first child of <hp:run> still warns
     _section_ctrl_before_text = (
@@ -657,7 +651,7 @@ def _run_tests() -> None:
         else:
             print("VAL-3 PASS: non-first-child <hp:t> still warns")
     except Exception as e:
-        failures.append("VAL-3 FAIL: %s" % e)
+        failures.append(f"VAL-3 FAIL: {e}")
 
     # VAL-4: malformed non-numeric charPr height in header must not raise, AND a valid
     # charPr is still captured alongside it (parity with _common COMMON-1: bad skipped, good kept).
@@ -689,13 +683,13 @@ def _run_tests() -> None:
                 zf.writestr("Contents/section0.xml", _section_small_font)
             _, _warns = do_validate(str(arc))
         if not _warns:
-            failures.append("VAL-4 FAIL: valid charPr id=5 (3pt) not captured; expected font warning, got: %r" % _warns)
+            failures.append(f"VAL-4 FAIL: valid charPr id=5 (3pt) not captured; expected font warning, got: {_warns!r}")
         else:
             print("VAL-4 PASS: malformed charPr height skipped, valid charPr still captured")
     except ValueError as e:
-        failures.append("VAL-4 FAIL: malformed height raised ValueError: %s" % e)
+        failures.append(f"VAL-4 FAIL: malformed height raised ValueError: {e}")
     except Exception as e:
-        failures.append("VAL-4 FAIL: %s" % e)
+        failures.append(f"VAL-4 FAIL: {e}")
 
     # VAL-5: 2x2 table with every cell left at colAddr="0" rowAddr="0" (the actual bug this
     # check exists to catch) reports a grid gap error.
@@ -724,11 +718,11 @@ def _run_tests() -> None:
     try:
         errs = _check_table_grid(ET.fromstring(_all_zero))
         if not any("gap" in e for e in errs) or not any("overlap" in e for e in errs):
-            failures.append("VAL-5 FAIL: expected gap+overlap errors for all-zero cellAddr, got: %r" % errs)
+            failures.append(f"VAL-5 FAIL: expected gap+overlap errors for all-zero cellAddr, got: {errs!r}")
         else:
             print("VAL-5 PASS: all-cells-at-(0,0) grid reports gap and overlap")
     except Exception as e:
-        failures.append("VAL-5 FAIL: %s" % e)
+        failures.append(f"VAL-5 FAIL: {e}")
 
     # VAL-6: correctly addressed 2x2 grid (including a colSpan=2 merged header row) passes clean.
     _valid_grid = _tbl_xml(
@@ -738,11 +732,11 @@ def _run_tests() -> None:
     try:
         errs = _check_table_grid(ET.fromstring(_valid_grid))
         if errs:
-            failures.append("VAL-6 FAIL: valid grid (with colSpan) reported errors: %r" % errs)
+            failures.append(f"VAL-6 FAIL: valid grid (with colSpan) reported errors: {errs!r}")
         else:
             print("VAL-6 PASS: correctly addressed grid (with colSpan) reports no errors")
     except Exception as e:
-        failures.append("VAL-6 FAIL: %s" % e)
+        failures.append(f"VAL-6 FAIL: {e}")
 
     # VAL-7: table with no rowCnt/colCnt attrs at all (e.g. this repo's own `minutes` template)
     # infers grid bounds from cellAddr/cellSpan instead of being skipped outright, so a
@@ -758,11 +752,11 @@ def _run_tests() -> None:
     try:
         errs = _check_table_grid(ET.fromstring(_no_grid_dupe))
         if not any("overlap" in e for e in errs):
-            failures.append("VAL-7 FAIL: expected overlap error for undeclared-grid dupe, got: %r" % errs)
+            failures.append(f"VAL-7 FAIL: expected overlap error for undeclared-grid dupe, got: {errs!r}")
         else:
             print("VAL-7 PASS: table without rowCnt/colCnt still reports overlap")
     except Exception as e:
-        failures.append("VAL-7 FAIL: %s" % e)
+        failures.append(f"VAL-7 FAIL: {e}")
 
     # VAL-8: correctly addressed table with no rowCnt/colCnt attrs (mirrors the real `minutes`
     # template) reports no false positive from the inferred-bounds path.
@@ -778,11 +772,11 @@ def _run_tests() -> None:
     try:
         errs = _check_table_grid(ET.fromstring(_no_grid_valid))
         if errs:
-            failures.append("VAL-8 FAIL: valid undeclared-grid table reported errors: %r" % errs)
+            failures.append(f"VAL-8 FAIL: valid undeclared-grid table reported errors: {errs!r}")
         else:
             print("VAL-8 PASS: correctly addressed table without rowCnt/colCnt reports no errors")
     except Exception as e:
-        failures.append("VAL-8 FAIL: %s" % e)
+        failures.append(f"VAL-8 FAIL: {e}")
 
     # VAL-9: header.xml with a billion-laughs entity-expansion payload is rejected as an
     # error, not silently parsed and expanded (XXE/billion-laughs hardening). Archive is
@@ -811,11 +805,11 @@ def _run_tests() -> None:
                 zf.writestr("Contents/section0.xml", _valid_section0)
             _xxe_errors, _ = do_validate(str(arc))
         if not any("header.xml" in e for e in _xxe_errors):
-            failures.append("VAL-9 FAIL: billion-laughs header.xml parsed without error: %r" % _xxe_errors)
+            failures.append(f"VAL-9 FAIL: billion-laughs header.xml parsed without error: {_xxe_errors!r}")
         else:
             print("VAL-9 PASS: billion-laughs header.xml rejected as malformed/forbidden XML")
     except Exception as e:
-        failures.append("VAL-9 FAIL: unhandled exception instead of reported error: %s" % e)
+        failures.append(f"VAL-9 FAIL: unhandled exception instead of reported error: {e}")
 
     # VAL-10: cmd_page_guard reports a clean error (not an unhandled traceback/crash) when a
     # section file contains a billion-laughs entity-expansion payload.
@@ -842,11 +836,11 @@ def _run_tests() -> None:
             )
             rc = cmd_page_guard(pg_args)
         if rc != 2:
-            failures.append("VAL-10 FAIL: expected rc=2 for billion-laughs section, got %r" % rc)
+            failures.append(f"VAL-10 FAIL: expected rc=2 for billion-laughs section, got {rc!r}")
         else:
             print("VAL-10 PASS: cmd_page_guard reports clean error for billion-laughs section (no crash)")
     except Exception as e:
-        failures.append("VAL-10 FAIL: unhandled exception instead of reported error: %s" % e)
+        failures.append(f"VAL-10 FAIL: unhandled exception instead of reported error: {e}")
 
     # VAL-11/VAL-12: duplicate hp:tbl id values, mirroring the hp:p baseline-downgrade
     # pattern (VAL uses the same _dup_para_ids/dupes convention -- see do_validate).
@@ -874,13 +868,12 @@ def _run_tests() -> None:
             _tbl_errs, _tbl_warns = do_validate(str(arc))
         if not any("hp:tbl id" in e and "5" in e for e in _tbl_errs):
             failures.append(
-                "VAL-11 FAIL: expected error for duplicate hp:tbl id, got errors=%r warnings=%r"
-                % (_tbl_errs, _tbl_warns)
+                f"VAL-11 FAIL: expected error for duplicate hp:tbl id, got errors={_tbl_errs!r} warnings={_tbl_warns!r}"
             )
         else:
             print("VAL-11 PASS: duplicate hp:tbl id (no baseline) reported as error")
     except Exception as e:
-        failures.append("VAL-11 FAIL: %s" % e)
+        failures.append(f"VAL-11 FAIL: {e}")
 
     # VAL-12: duplicate hp:tbl id shared with baseline is downgraded to a warning
     try:
@@ -893,13 +886,13 @@ def _run_tests() -> None:
                 zf.writestr("Contents/section0.xml", _section_dup_tables)
             _tbl_errs2, _tbl_warns2 = do_validate(str(arc), baseline_table_dupes={"5"})
         if any("introduced" in e for e in _tbl_errs2):
-            failures.append("VAL-12 FAIL: baseline-shared hp:tbl id dupe still reported as new error: %r" % _tbl_errs2)
+            failures.append(f"VAL-12 FAIL: baseline-shared hp:tbl id dupe still reported as new error: {_tbl_errs2!r}")
         elif not any("hp:tbl id" in w for w in _tbl_warns2):
-            failures.append("VAL-12 FAIL: expected downgraded warning for baseline-shared hp:tbl id dupe, got: %r" % _tbl_warns2)
+            failures.append(f"VAL-12 FAIL: expected downgraded warning for baseline-shared hp:tbl id dupe, got: {_tbl_warns2!r}")
         else:
             print("VAL-12 PASS: hp:tbl id dupe shared with baseline downgraded to warning")
     except Exception as e:
-        failures.append("VAL-12 FAIL: %s" % e)
+        failures.append(f"VAL-12 FAIL: {e}")
 
     if failures:
         for f in failures:
@@ -912,6 +905,7 @@ def _run_tests() -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    configure_io()
     if sys.argv[1:] == ["--test"]:
         _run_tests()
         return
@@ -928,7 +922,7 @@ def main() -> None:
     )
     p_val.add_argument(
         "--min-pt", type=float, dest="min_pt", default=None,
-        help="Minimum readable font size in pt (default: %g). Runs below this threshold warn." % MIN_READABLE_PT,
+        help=f"Minimum readable font size in pt (default: {MIN_READABLE_PT:g}). Runs below this threshold warn.",
     )
 
     # page-guard
