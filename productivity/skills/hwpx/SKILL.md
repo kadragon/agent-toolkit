@@ -1,7 +1,7 @@
 ---
 name: hwpx
 description: >-
-  Create, edit, or read HWPX (Hancom/한글) documents. Use for "hwpx 만들어", "한글 문서 작성", "공문 만들어", "회의록 만들어", "제안서 작성", "별지 서식 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text/tables from hwpx, analyze hwpx structure/styles, table row/cell edits, OWPML, Korean gov/biz forms even without saying "hwpx". NOT for: Hancom product/company/stock discussion; other document formats (.docx/Word, .xlsx/Excel, PDF, Google Docs, Markdown) even when they mention tables or "문서"; 한글 app GUI how-to questions; parsing legacy binary .hwp files; or content-only text ops (translate/summarize) that produce no .hwpx file.
+  Create, edit, or read HWPX (Hancom/한글) documents. Use for "hwpx 만들어", "한글 문서 작성", "공문 만들어", "회의록 만들어", "제안서 작성", "별지 서식 작성", "hwpx 편집", "create hwpx", "make a hancom document", "edit hwp file". Also: .hwpx attachment, extract text/tables from hwpx, analyze hwpx structure/styles, table row/cell edits, OWPML, Korean gov/biz forms even without saying "hwpx". NOT for: Hancom product/company/stock discussion; other document formats (.docx/Word, .xlsx/Excel, PDF, Google Docs, Markdown) even when they mention tables or "문서"; 한글 app GUI how-to questions; parsing legacy binary .hwp files; or translate/summarize requests over plain text with no .hwpx file involved (translating or summarizing an attached .hwpx DOES use this skill — it is the only path that reads the .hwpx content first).
 ---
 
 # HWPX Document Skill — XML-first Workflow
