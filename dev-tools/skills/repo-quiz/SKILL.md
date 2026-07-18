@@ -36,9 +36,13 @@ Ask in **Korean**. Everything you present to the user — question stems, `mc` o
 free-recall prompts, the reveal, and the post-answer explanation — is user-facing text, so
 write it in Korean. Keep code, identifiers, file paths, and quoted snippets verbatim in their
 original language (English): a `fill-blank` cloze or a `code-trace` still shows the real code
-untranslated; only the surrounding prose is Korean. Concept slugs passed to `--type`/`--concept`
-and every `record`/`config` flag stay English — they're internal state, not shown to the user.
-The illustrative examples below are written in Korean for this reason; mirror that.
+untranslated; only the surrounding prose is Korean. Internal state stays English — the
+`--concept` concept slug, the `--type` question-type slug (`mc`/`code-trace`/…, never a concept
+slug), and the other `record`/`config` flag values are never shown to the user. The one
+exception is the human-readable text you pass to `--title` and `--note`: it lands in
+`mistakes.md`, which the user rereads, so write it in Korean too (keeping any code, paths, and
+identifiers inside it verbatim). The illustrative examples below are written in Korean for this
+reason; mirror that.
 
 ## Credits
 
@@ -256,7 +260,7 @@ saves progress:
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
 python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct true --type mc \
-  --title "Version bump on dev-tools edit" --session <round-id>
+  --title "dev-tools 수정 시 버전 범프" --session <round-id>
 ```
 
 On a **wrong** answer, pass a `--note` that will land in `mistakes.md`: state the correct
@@ -267,8 +271,8 @@ teach.
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
 python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct false --type mc \
-  --title "Version bump on dev-tools edit" \
-  --note "Correct: **B**. Editing anything under dev-tools/ requires bumping BOTH dev-tools/.claude-plugin/plugin.json AND dev-tools/.codex-plugin/plugin.json (kept in sync). See AGENTS.md 'Golden Principles' #1 — CI blocks the merge otherwise." \
+  --title "dev-tools 수정 시 버전 범프" \
+  --note "정답: **B**. dev-tools/ 아래 파일을 수정하면 dev-tools/.claude-plugin/plugin.json 과 dev-tools/.codex-plugin/plugin.json 버전을 **둘 다** 올려야 합니다(동기화 유지). AGENTS.md 'Golden Principles' #1 참고 — 안 그러면 CI가 머지를 막습니다." \
   --session <round-id>
 ```
 
@@ -279,7 +283,7 @@ For a self-graded free-recall question, pass the user's self-rating as `--grade`
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
 python3 "$Q" --repo <repo-root> record \
   --concept version-bump-rule --correct true --type free-recall --grade hard \
-  --title "Version bump on dev-tools edit" --session <round-id>
+  --title "dev-tools 수정 시 버전 범프" --session <round-id>
 ```
 
 Use one `--session` id for the whole round (a short label like `2026-07-16a`) so the history
