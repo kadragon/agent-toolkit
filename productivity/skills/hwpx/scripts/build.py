@@ -11,13 +11,6 @@ Usage:
 """
 from __future__ import annotations
 
-import sys as _sys
-try:
-    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
-
 import argparse
 import xml.etree.ElementTree as ET
 from xml.etree.ElementTree import Element
@@ -31,9 +24,12 @@ from pathlib import Path
 
 from _common import (
     collect_ids,
+    configure_io,
+    die,
     get_ids_from_hwpx,
     MIN_USER_ID,
-    SECTION_N_RE,
+    NS,
+    SECTION_RE,
     xml_escape,
 )
 
@@ -50,7 +46,7 @@ def _validate_xml(filepath: Path) -> None:
     try:
         ET.parse(str(filepath))
     except ET.ParseError as e:
-        raise SystemExit(f"Malformed XML in {filepath.name}: {e}")
+        die(f"Malformed XML in {filepath.name}: {e}")
 
 
 def _update_metadata(content_hpf: Path, title: str | None, creator: str | None) -> None:
@@ -85,7 +81,7 @@ def _pack_hwpx(input_dir: Path, output_path: Path) -> None:
     from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
     mimetype_file = input_dir / "mimetype"
     if not mimetype_file.is_file():
-        raise SystemExit(f"Missing 'mimetype' in {input_dir}")
+        die(f"Missing 'mimetype' in {input_dir}")
     all_files = sorted(
         p.relative_to(input_dir).as_posix()
         for p in input_dir.rglob("*")
@@ -136,10 +132,9 @@ def _update_preview(work_dir: Path) -> None:
     prv_text_path = work_dir / "Preview" / "PrvText.txt"
     if not section_path.is_file() or not prv_text_path.is_file():
         return
-    ns = {"hp": "http://www.hancom.co.kr/hwpml/2011/paragraph"}
     try:
         root = ET.fromstring(section_path.read_bytes())
-        texts = [t.text for t in root.findall(".//hp:t", ns) if t.text]
+        texts = [t.text for t in root.findall(".//hp:t", NS) if t.text]
         prv_text_path.write_text("".join(texts)[:500], encoding="utf-8")
     except ET.ParseError:
         pass
@@ -147,7 +142,7 @@ def _update_preview(work_dir: Path) -> None:
 
 def cmd_build(args: argparse.Namespace) -> None:
     if not BASE_DIR.is_dir():
-        raise SystemExit(f"Base template not found: {BASE_DIR}")
+        die(f"Base template not found: {BASE_DIR}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         work = Path(tmpdir) / "build"
@@ -156,7 +151,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         if args.template:
             overlay_dir = TEMPLATES_DIR / args.template
             if not overlay_dir.is_dir():
-                raise SystemExit(
+                die(
                     f"Template '{args.template}' not found. "
                     f"Available: {', '.join(AVAILABLE_TEMPLATES)}"
                 )
@@ -167,13 +162,13 @@ def cmd_build(args: argparse.Namespace) -> None:
         if args.header:
             header_path = Path(args.header)
             if not header_path.is_file():
-                raise SystemExit(f"Header file not found: {args.header}")
+                die(f"Header file not found: {args.header}")
             shutil.copy2(header_path, work / "Contents" / "header.xml")
 
         if args.section:
             section_path = Path(args.section)
             if not section_path.is_file():
-                raise SystemExit(f"Section file not found: {args.section}")
+                die(f"Section file not found: {args.section}")
             shutil.copy2(section_path, work / "Contents" / "section0.xml")
 
         _update_metadata(work / "Contents" / "content.hpf", args.title, args.creator)
@@ -204,12 +199,6 @@ def cmd_build(args: argparse.Namespace) -> None:
 
 # ── analyze ───────────────────────────────────────────────────────────────────
 
-NS = {
-    "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
-    "hs": "http://www.hancom.co.kr/hwpml/2011/section",
-    "hc": "http://www.hancom.co.kr/hwpml/2011/core",
-    "hh": "http://www.hancom.co.kr/hwpml/2011/head",
-}
 FONT_MAP: dict[tuple[str, str], str] = {}
 
 
@@ -491,8 +480,7 @@ def _analyze_section(section_root: Element, table_id_filter: str | None = None) 
 def cmd_analyze(args: argparse.Namespace) -> None:
     FONT_MAP.clear()
     if not os.path.exists(args.input):
-        print(f"Error: {args.input} not found", file=sys.stderr)
-        sys.exit(1)
+        die(f"{args.input} not found")
 
     tmpdir = tempfile.mkdtemp()
     try:
@@ -502,16 +490,14 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
         header_path = os.path.join(tmpdir, "Contents", "header.xml")
         if not os.path.exists(header_path):
-            print("Error: Contents/header.xml not found", file=sys.stderr)
-            sys.exit(1)
+            die("Contents/header.xml not found")
 
         section_names = sorted(
-            [n for n in all_names if SECTION_N_RE.match(n)],
-            key=lambda n: int(SECTION_N_RE.match(n).group(1)),  # type: ignore[union-attr]
+            [n for n in all_names if SECTION_RE.match(n)],
+            key=lambda n: int(SECTION_RE.match(n).group(1)),  # type: ignore[union-attr]
         )
         if not section_names:
-            print("Error: no section XML files found in archive", file=sys.stderr)
-            sys.exit(1)
+            die("no section XML files found in archive")
 
         header_root = ET.parse(header_path).getroot()
 
@@ -557,7 +543,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                 sec_path = os.path.join(tmpdir, sec_name.replace("/", os.sep))
                 section_root = ET.parse(sec_path).getroot()
                 if len(section_names) > 1:
-                    sec_idx = SECTION_N_RE.match(sec_name).group(1)  # type: ignore[union-attr]
+                    sec_idx = SECTION_RE.match(sec_name).group(1)  # type: ignore[union-attr]
                     print(f"\n── section {sec_idx} ──")
                 print(_analyze_section(section_root))
     finally:
@@ -569,8 +555,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 def cmd_next_id(args: argparse.Namespace) -> None:
     input_path = Path(args.input)
     if not input_path.is_file():
-        print(f"Error: File not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+        die(f"File not found: {args.input}")
 
     is_hwpx = input_path.suffix.lower() == ".hwpx"
     existing = get_ids_from_hwpx(input_path) if is_hwpx else collect_ids(input_path.read_bytes().decode("utf-8"))
@@ -632,7 +617,7 @@ def _run_tests() -> None:
             _validate_xml(p)
         print("BUILD-1 PASS: well-formed XML accepted")
     except Exception as e:
-        failures.append("BUILD-1 FAIL: %r" % e)
+        failures.append(f"BUILD-1 FAIL: {e!r}")
 
     # BUILD-2: _validate_xml raises SystemExit on malformed XML
     try:
@@ -645,7 +630,7 @@ def _run_tests() -> None:
             except SystemExit:
                 print("BUILD-2 PASS: malformed XML raises SystemExit")
     except Exception as e:
-        failures.append("BUILD-2 FAIL: %r" % e)
+        failures.append(f"BUILD-2 FAIL: {e!r}")
 
     # BUILD-3: _update_metadata fills empty title, replaces creator/lastsaveby, bumps dates
     try:
@@ -662,9 +647,9 @@ def _run_tests() -> None:
             if all(checks):
                 print("BUILD-3 PASS: title/creator/lastsaveby/date replaced")
             else:
-                failures.append("BUILD-3 FAIL: %r not fully updated: %s" % (checks, result))
+                failures.append(f"BUILD-3 FAIL: {checks!r} not fully updated: {result}")
     except Exception as e:
-        failures.append("BUILD-3 FAIL: %r" % e)
+        failures.append(f"BUILD-3 FAIL: {e!r}")
 
     # BUILD-4: _pack_hwpx + _validate_hwpx round trip has no errors
     try:
@@ -682,11 +667,11 @@ def _run_tests() -> None:
             _pack_hwpx(work, out)
             errors = _validate_hwpx(out)
             if errors:
-                failures.append("BUILD-4 FAIL: unexpected validation errors: %r" % errors)
+                failures.append(f"BUILD-4 FAIL: unexpected validation errors: {errors!r}")
             else:
                 print("BUILD-4 PASS: packed archive validates clean")
     except Exception as e:
-        failures.append("BUILD-4 FAIL: %r" % e)
+        failures.append(f"BUILD-4 FAIL: {e!r}")
 
     # BUILD-5: _get_text concatenates run text nodes
     try:
@@ -699,9 +684,9 @@ def _run_tests() -> None:
         if text == "안녕하세요":
             print("BUILD-5 PASS: _get_text concatenates run text")
         else:
-            failures.append("BUILD-5 FAIL: got %r" % text)
+            failures.append(f"BUILD-5 FAIL: got {text!r}")
     except Exception as e:
-        failures.append("BUILD-5 FAIL: %r" % e)
+        failures.append(f"BUILD-5 FAIL: {e!r}")
 
     # BUILD-6: _analyze_charprops reports pt conversion, resolved font name, bold flag
     try:
@@ -712,9 +697,9 @@ def _run_tests() -> None:
         if "10.0pt 바탕" in lines and "볼드" in lines:
             print("BUILD-6 PASS: charPr pt/font/bold reported")
         else:
-            failures.append("BUILD-6 FAIL: unexpected output: %s" % lines)
+            failures.append(f"BUILD-6 FAIL: unexpected output: {lines}")
     except Exception as e:
-        failures.append("BUILD-6 FAIL: %r" % e)
+        failures.append(f"BUILD-6 FAIL: {e!r}")
 
     if failures:
         for f in failures:
@@ -727,6 +712,7 @@ def _run_tests() -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    configure_io()
     if sys.argv[1:] == ["--test"]:
         _run_tests()
         return

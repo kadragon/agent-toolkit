@@ -17,12 +17,7 @@ Usage:
     python table.py calc-widths 1:4
     python table.py strip-lineseg input.hwpx --output clean.hwpx
 """
-import sys as _sys
-try:
-    _sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    _sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
+from __future__ import annotations
 
 import argparse
 import json
@@ -38,9 +33,12 @@ from _common import (
     PLACEHOLDER_IDS,
     SECTION_RE,
     charpr_pt,
+    configure_io,
+    die,
     find_table,
     load_charpr_heights,
-    load_section_xml,
+    load_section,
+    save_section,
     strip_linesegarray,
     top_cells,
     top_trs,
@@ -138,12 +136,12 @@ def _dump_table(tbl_xml: str, table_id: str) -> None:
         text = _cell_text(tc)
         cells.append((row_addr, col_addr, col_span, row_span, text))
     cells.sort(key=lambda x: (x[0], x[1]))
-    print("table id=%s: %d cells" % (table_id, len(cells)))
-    print("  %-6s %-6s %-6s %-6s  %s" % ("row", "col", "cSpan", "rSpan", "text"))
-    print("  " + "-" * 60)
+    print(f"table id={table_id}: {len(cells)} cells")
+    print(f"  {'row':6} {'col':6} {'cSpan':6} {'rSpan':6}  text")
+    print(f"  {'-' * 60}")
     for row, col, cs, rs, text in cells:
         display = text[:55] + ("…" if len(text) > 55 else "")
-        print("  %-6d %-6d %-6d %-6d  %s" % (row, col, cs, rs, display))
+        print(f"  {row:<6} {col:<6} {cs:<6} {rs:<6}  {display}")
     print("  [col,row for --cell: e.g. row=1 col=2 → --cell 2,1]")
 
 
@@ -155,9 +153,8 @@ def _dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
             continue
         col_span, row_span = _cell_span(tc)
         has_lineseg = bool(re.search(r"<hp:linesegarray>", tc))
-        print("table id=%s  cell col=%d row=%d  cSpan=%d rSpan=%d"
-              % (table_id, col, row, col_span, row_span))
-        print("  linesegarray: %s" % ("YES (replace will strip)" if has_lineseg else "no"))
+        print(f"table id={table_id}  cell col={col} row={row}  cSpan={col_span} rSpan={row_span}")
+        print(f"  linesegarray: {'YES (replace will strip)' if has_lineseg else 'no'}")
         sublist_m = re.search(r"<hp:subList\b[^>]*>", tc)
         if sublist_m is None:
             print("  (no hp:subList found)")
@@ -188,7 +185,7 @@ def _dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
             elif g == "</hp:p>" and tbl_depth == 0 and stack:
                 ps = stack.pop()
                 para_spans.append((ps, m.end()))
-        print("  paragraphs: %d" % len(para_spans))
+        print(f"  paragraphs: {len(para_spans)}")
         for i, (ps, pe) in enumerate(para_spans):
             para_xml = sublist_content[ps:pe]
             para_pr_m = re.search(r'paraPrIDRef="(\d+)"', para_xml)
@@ -198,39 +195,32 @@ def _dump_cell_verbose(tbl_xml: str, table_id: str, col: int, row: int) -> None:
             runs_t_empty = re.findall(r'charPrIDRef="(\d+)"[^>]*><hp:t/>', para_xml)
             run_desc = []
             for cpr, txt in runs:
-                display = txt[:30] + "..." if len(txt) > 30 else txt
-                run_desc.append("charPr=%s:%r" % (cpr, display))
+                display = f"{txt[:30]}..." if len(txt) > 30 else txt
+                run_desc.append(f"charPr={cpr}:{display!r}")
             for cpr in runs_empty:
-                run_desc.append("charPr=%s:(empty)" % cpr)
+                run_desc.append(f"charPr={cpr}:(empty)")
             for cpr in runs_t_empty:
-                run_desc.append("charPr=%s:(empty)" % cpr)
+                run_desc.append(f"charPr={cpr}:(empty)")
             run_str = " + ".join(run_desc) if run_desc else "(empty)"
-            print("  P[%d] paraPr=%s  %s" % (i, para_pr, run_str))
+            print(f"  P[{int(i)}] paraPr={para_pr}  {run_str}")
         return
-    print("Error: cell col=%d row=%d not found in table %s" % (col, row, table_id), file=sys.stderr)
-    sys.exit(1)
+    die(f"cell col={col} row={row} not found in table {table_id}")
 
 
 def cmd_dump(args: argparse.Namespace) -> None:
     if args.cell and not args.table_id:
-        print("Error: --cell requires --table-id", file=sys.stderr)
-        sys.exit(1)
+        die("--cell requires --table-id")
     inp = Path(args.input)
-    if not inp.exists():
-        print("Error: not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
-    xml = load_section_xml(inp, args.section)
+    xml, _ = load_section(inp, args.section)
     if args.table_id:
         span = find_table(xml, args.table_id)
         if span is None:
-            print("Error: table id=%s not found" % args.table_id, file=sys.stderr)
-            sys.exit(1)
+            die(f"table id={args.table_id} not found")
         if args.cell:
             try:
                 col, row = (int(x) for x in args.cell.split(","))
             except ValueError:
-                print("Error: --cell expects col,row (got %r)" % args.cell, file=sys.stderr)
-                sys.exit(1)
+                die(f"--cell expects col,row (got {args.cell!r})")
             _dump_cell_verbose(xml[span[0]:span[1]], args.table_id, col, row)
         elif args.style_map:
             heights = load_charpr_heights(inp)
@@ -251,13 +241,12 @@ def cmd_dump(args: argparse.Namespace) -> None:
                        for _, s2, e2 in matches)
         ]
         if not matches:
-            print("No table found containing: %s" % ", ".join(args.contains), file=sys.stderr)
-            sys.exit(2)
+            die(f"no table found containing: {', '.join(args.contains)}", 2)
         for tid, s, e in matches:
             _dump_table(xml[s:e], tid)
             print()
         return
-    print("%d table(s) in section %d:" % (len(all_tables), args.section))
+    print(f"{len(all_tables)} table(s) in section {int(args.section)}:")
     for tid, s, e in all_tables:
         tbl = xml[s:e]
         cells = top_cells(tbl)
@@ -271,7 +260,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
             if t:
                 preview_texts.append(t)
         preview = " | ".join(preview_texts[:3])[:60]
-        print("  id=%-12s  %s×%s cells  %s" % (tid, rows, cols, preview))
+        print(f"  id={tid:12}  {rows}×{cols} cells  {preview}")
     print("\nRe-run with --table-id ID or --contains TEXT to dump cell map.")
 
 
@@ -279,9 +268,9 @@ def cmd_dump(args: argparse.Namespace) -> None:
 
 def _matched_spans(xml: str, tag: str) -> list[tuple[int, int, int]]:
     events: list[tuple[int, str, int | None]] = []
-    for m in re.finditer(r"<%s\b" % tag, xml):
+    for m in re.finditer(rf"<{tag}\b", xml):
         events.append((m.start(), "o", None))
-    for m in re.finditer(r"</%s>" % tag, xml):
+    for m in re.finditer(rf"</{tag}>", xml):
         events.append((m.start(), "c", m.end()))
     events.sort(key=lambda x: x[0])
     stack: list[int] = []
@@ -291,12 +280,12 @@ def _matched_spans(xml: str, tag: str) -> list[tuple[int, int, int]]:
             stack.append(pos)
         else:
             if not stack:
-                raise ValueError("unbalanced </%s> at offset %d" % (tag, pos))
+                raise ValueError(f"unbalanced </{tag}> at offset {int(pos)}")
             start = stack.pop()
             assert end is not None
             out.append((start, end, len(stack)))
     if stack:
-        raise ValueError("unclosed <%s> at offset %d" % (tag, stack[-1]))
+        raise ValueError(f"unclosed <{tag}> at offset {int(stack[-1])}")
     out.sort(key=lambda x: x[0])
     return out
 
@@ -309,27 +298,11 @@ def _text_preview(fragment: str, limit: int = 70) -> str:
 
 def cmd_locate(args: argparse.Namespace) -> None:
     inp = Path(args.input)
-    target = "Contents/section%d.xml" % args.section
-    if inp.is_dir():
-        section_file = inp / target
-        if not section_file.is_file():
-            print("Error: %s not found in directory %s" % (target, inp), file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print("Error: %s not in archive" % target, file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print("Error: not found (file or directory): %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     try:
         spans = _matched_spans(xml, args.tag)
     except ValueError as e:
-        print("Error: %s" % e, file=sys.stderr)
-        sys.exit(1)
+        die(str(e))
     matches = []
     for start, end, depth in spans:
         if args.depth is not None and depth != args.depth:
@@ -337,18 +310,17 @@ def cmd_locate(args: argparse.Namespace) -> None:
         frag = xml[start:end]
         if all(c in frag for c in args.contains):
             matches.append((start, end, depth, frag))
-    print("%d match(es) for <%s> in %s" % (len(matches), args.tag, target))
+    print(f"{len(matches)} match(es) for <{args.tag}> in {target}")
     for i, (start, end, depth, frag) in enumerate(matches):
-        print("  [%d] span=%d:%d depth=%d len=%d  %s"
-              % (i, start, end, depth, end - start, _text_preview(frag)))
+        print(f"  [{i}] span={start}:{end} depth={depth} len={end - start}  {_text_preview(frag)}")
     if args.extract_dir and matches:
         out_dir = Path(args.extract_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         for i, (_s, _e, _d, frag) in enumerate(matches):
             if args.pretty:
                 frag = re.sub(r"><", ">\n<", frag)
-            (out_dir / ("match_%d.xml" % i)).write_text(frag, encoding="utf-8")
-        print("  extracted %d file(s) to %s" % (len(matches), out_dir))
+            (out_dir / (f"match_{int(i)}.xml")).write_text(frag, encoding="utf-8")
+        print(f"  extracted {len(matches)} file(s) to {out_dir}")
     sys.exit(0 if matches else 2)
 
 
@@ -372,7 +344,7 @@ def _set_row_addr(row: str, new_idx: int) -> str:
         else:
             result.append(row[last:m.start()])
             last = m.end()
-            result.append('rowAddr="%d"' % new_idx if depth == 0 else g)
+            result.append(f'rowAddr="{int(new_idx)}"' if depth == 0 else g)
     result.append(row[last:])
     return "".join(result)
 
@@ -387,13 +359,13 @@ def _insert_row(xml: str, table_id: str, at_index: int,
                 row_xml: str, grow: set[tuple[int, int]]) -> tuple[str, list[str]]:
     span = find_table(xml, table_id)
     if span is None:
-        raise ValueError("table id=%s not found" % table_id)
+        raise ValueError(f"table id={table_id} not found")
     ti, tend = span
     tbl = xml[ti:tend]
     trs = top_trs(tbl)
     n = len(trs)
     if at_index < 0 or at_index > n:
-        raise ValueError("--at %d out of range (table has %d rows; 0..%d)" % (at_index, n, n))
+        raise ValueError(f"--at {int(at_index)} out of range (table has {int(n)} rows; 0..{int(n)})")
     row_xml = LINESEG_RE.sub("", row_xml).strip()
     if not (row_xml.startswith("<hp:tr") and row_xml.endswith("</hp:tr>")):
         raise ValueError("row file must contain exactly one <hp:tr>...</hp:tr>")
@@ -401,7 +373,7 @@ def _insert_row(xml: str, table_id: str, at_index: int,
     incoming = [i for i in PARA_ID_RE.findall(row_xml) if i not in PLACEHOLDER_IDS]
     clash = sorted(set(incoming) & existing)
     if clash:
-        raise ValueError("inserted row reuses hp:p id(s) %s — renumber them in the row file (or set to placeholder 0)" % clash)
+        raise ValueError(f"inserted row reuses hp:p id(s) {clash} — renumber them in the row file (or set to placeholder 0)")
     if len(incoming) != len(set(incoming)):
         raise ValueError("inserted row has duplicate hp:p id(s) internally")
     prefix = tbl[:trs[0][0]]
@@ -438,8 +410,8 @@ def _insert_row(xml: str, table_id: str, at_index: int,
     new_tbl = new_prefix + "".join(new_rows) + suffix
     new_xml = xml[:ti] + new_tbl + xml[tend:]
     info = [
-        "inserted row at index %d (rowCnt %d -> %d)" % (at_index, n, n + 1),
-        "rowSpan cells extended: %d" % grown,
+        f"inserted row at index {int(at_index)} (rowCnt {int(n)} -> {int(n + 1)})",
+        f"rowSpan cells extended: {int(grown)}",
     ]
     return new_xml, info
 
@@ -447,79 +419,47 @@ def _insert_row(xml: str, table_id: str, at_index: int,
 def _list_rows_insert(xml: str, table_id: str) -> None:
     span = find_table(xml, table_id)
     if span is None:
-        print("table id=%s not found" % table_id, file=sys.stderr)
-        sys.exit(1)
+        die(f"table id={table_id} not found")
     tbl = xml[span[0]:span[1]]
     trs = top_trs(tbl)
-    print("table id=%s: %d rows" % (table_id, len(trs)))
+    print(f"table id={table_id}: {len(trs)} rows")
     for i, (s, e) in enumerate(trs):
         row = tbl[s:e]
         txt = " ".join(re.findall(r"<hp:t>(.*?)</hp:t>", row))
         spans = [m[6] for m in CELL_RE.findall(row)]
-        print("  [%d] cells=%d rowSpans=%s  %s" % (i, len(spans), spans, txt[:60]))
+        print(f"  [{int(i)}] cells={len(spans)} rowSpans={spans}  {txt[:60]}")
 
 
 def cmd_insert(args: argparse.Namespace) -> None:
     inp = Path(args.input)
     is_dir_mode = inp.is_dir()
-    target = "Contents/section%d.xml" % args.section
-    if is_dir_mode:
-        section_file = inp / target
-        if not section_file.is_file():
-            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print("Error: %s not in archive" % target, file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print("Error: not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     if args.list:
         _list_rows_insert(xml, args.table_id)
         sys.exit(0)
     if args.at is None and args.after_row is None:
-        print("Error: --at or --after-row required (or use --list)", file=sys.stderr)
-        sys.exit(1)
+        die("--at or --after-row required (or use --list)")
     at_index = args.at if args.at is not None else args.after_row + 1
     if not args.row_file or (not is_dir_mode and not args.output):
-        print("Error: --row-file required (and --output required for .hwpx input)", file=sys.stderr)
-        sys.exit(1)
+        die("--row-file required (and --output required for .hwpx input)")
     row_xml = Path(args.row_file).read_text(encoding="utf-8")
     grow: set[tuple[int, int]] = set()
     for g in args.grow:
         try:
             r, c = (int(x) for x in g.split(","))
         except ValueError:
-            print("Error: --grow expects rowAddr,colAddr (got %r)" % g, file=sys.stderr)
-            sys.exit(1)
+            die(f"--grow expects rowAddr,colAddr (got {g!r})")
         grow.add((r, c))
     try:
         new_xml, info = _insert_row(xml, args.table_id, at_index, row_xml, grow)
     except ValueError as e:
-        print("Error: %s" % e, file=sys.stderr)
-        sys.exit(1)
+        die(str(e))
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
-    if is_dir_mode:
-        section_file = inp / target
-        section_file.write_text(new_xml, encoding="utf-8")
-        print("DONE (in-place): %s" % section_file)
-    else:
-        with zipfile.ZipFile(inp, "r") as zin:
-            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-            for zi, data in entries:
-                if zi.filename == target:
-                    data = new_xml.encode("utf-8")
-                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-                zout.writestr(zi.filename, data, compress_type=ct)
-        print("DONE: %s" % args.output)
+    out_path = save_section(inp, target, new_xml, args.output)
+    print(f"DONE (in-place): {out_path}" if is_dir_mode else f"DONE: {out_path}")
     for line in info:
-        print("  %s" % line)
-    print("  linesegarray stripped: %d" % n_ls)
+        print(f"  {line}")
+    print(f"  linesegarray stripped: {n_ls}")
 
 
 # ── replace ───────────────────────────────────────────────────────────────────
@@ -548,21 +488,21 @@ def _direct_sublist(tc: str) -> tuple[int, int] | None:
 
 def _build_run(char_pr: str, text: str) -> str:
     if not text:
-        return '<hp:run charPrIDRef="%s"><hp:t/></hp:run>' % char_pr
-    return '<hp:run charPrIDRef="%s"><hp:t>%s</hp:t></hp:run>' % (char_pr, xml_escape(text))
+        return f'<hp:run charPrIDRef="{char_pr}"><hp:t/></hp:run>'
+    return f'<hp:run charPrIDRef="{char_pr}"><hp:t>{xml_escape(text)}</hp:t></hp:run>'
 
 
 def _build_para_runs(para_pr: str, runs: list[tuple[str, str]]) -> str:
     run_xml = "".join(_build_run(c, t) for c, t in runs)
-    return ('<hp:p id="0" paraPrIDRef="%s" styleIDRef="0" pageBreak="0" '
-            'columnBreak="0" merged="0">%s</hp:p>' % (para_pr, run_xml))
+    return (f'<hp:p id="0" paraPrIDRef="{para_pr}" styleIDRef="0" pageBreak="0" '
+            f'columnBreak="0" merged="0">{run_xml}</hp:p>')
 
 
 def _replace_cell(xml: str, table_id: str, col: int, row: int,
                   content: str) -> tuple[str, list[str]]:
     span = find_table(xml, table_id)
     if span is None:
-        raise ValueError("table id=%s not found" % table_id)
+        raise ValueError(f"table id={table_id} not found")
     ti, tend = span
     tbl = xml[ti:tend]
     target = None
@@ -570,36 +510,36 @@ def _replace_cell(xml: str, table_id: str, col: int, row: int,
         addr = _own_cell_addr(tbl[cs:ce])
         if addr == (col, row):
             if target is not None:
-                raise ValueError("cell %d,%d is not unique in table" % (col, row))
+                raise ValueError(f"cell {int(col)},{int(row)} is not unique in table")
             target = (cs, ce)
     if target is None:
-        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+        raise ValueError(f"cell colAddr={int(col)} rowAddr={int(row)} not found")
     cs, ce = target
     tc = tbl[cs:ce]
     sl = _direct_sublist(tc)
     if sl is None:
-        raise ValueError("cell %d,%d has no <hp:subList>" % (col, row))
+        raise ValueError(f"cell {int(col)},{int(row)} has no <hp:subList>")
     in_s, in_e = sl
     rest = xml[:ti] + xml[tend:] + tbl[:cs] + tc[:in_s] + tc[in_e:] + tbl[ce:]
     existing = {i for i in PARA_ID_RE.findall(rest) if i not in PLACEHOLDER_IDS}
     incoming = [i for i in PARA_ID_RE.findall(content) if i not in PLACEHOLDER_IDS]
     clash = sorted(set(incoming) & existing)
     if clash:
-        raise ValueError("new content reuses hp:p id(s) %s — set them to placeholder 0 or renumber" % clash)
+        raise ValueError(f"new content reuses hp:p id(s) {clash} — set them to placeholder 0 or renumber")
     if len(incoming) != len(set(incoming)):
         raise ValueError("new content has duplicate hp:p id(s) internally")
     new_tc = tc[:in_s] + content + tc[in_e:]
     new_tbl = tbl[:cs] + new_tc + tbl[ce:]
     new_xml = xml[:ti] + new_tbl + xml[tend:]
     n_para = content.count("<hp:p ")
-    return new_xml, ["cell %d,%d content replaced (%d paragraph(s))" % (col, row, n_para)]
+    return new_xml, [f"cell {int(col)},{int(row)} content replaced ({int(n_para)} paragraph(s))"]
 
 
 def _set_text_cell(xml: str, table_id: str, col: int, row: int,
                    old_text: str, new_text: str) -> tuple[str, list[str]]:
     span = find_table(xml, table_id)
     if span is None:
-        raise ValueError("table id=%s not found" % table_id)
+        raise ValueError(f"table id={table_id} not found")
     ti, tend = span
     tbl = xml[ti:tend]
     target = None
@@ -607,45 +547,43 @@ def _set_text_cell(xml: str, table_id: str, col: int, row: int,
         addr = _own_cell_addr(tbl[cs:ce])
         if addr == (col, row):
             if target is not None:
-                raise ValueError("cell %d,%d is not unique in table" % (col, row))
+                raise ValueError(f"cell {int(col)},{int(row)} is not unique in table")
             target = (cs, ce)
     if target is None:
-        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+        raise ValueError(f"cell colAddr={int(col)} rowAddr={int(row)} not found")
     cs, ce = target
     tc = tbl[cs:ce]
     sl = _direct_sublist(tc)
     if sl is None:
-        raise ValueError("cell %d,%d has no <hp:subList>" % (col, row))
+        raise ValueError(f"cell {int(col)},{int(row)} has no <hp:subList>")
     in_s, in_e = sl
     cell_content = tc[in_s:in_e]
     escaped_old = xml_escape(old_text)
-    t_matches = re.findall(r"<hp:t>%s</hp:t>" % re.escape(escaped_old), cell_content)
+    t_matches = re.findall(rf"<hp:t>{re.escape(escaped_old)}</hp:t>", cell_content)
     count = len(t_matches)
     if count == 0:
         raise ValueError(
-            "--set-text: '%s' not found in cell %d,%d subList; "
+            f"--set-text: '{old_text}' not found in cell {col},{row} subList; "
             "OLD must match the *entire* content of a single <hp:t> element, not a "
             "substring — check for a partial/substring mismatch first. If OLD really is "
             "the full text of a run, the text may instead be split across runs; "
             "use --para or --content-file in that case."
-            % (old_text, col, row)
         )
     if count > 1:
         raise ValueError(
-            "--set-text: '%s' found %d times in cell %d,%d subList (ambiguous); "
+            f"--set-text: '{old_text}' found {count} times in cell {col},{row} subList (ambiguous); "
             "provide a more specific old_text or use --content-file."
-            % (old_text, count, col, row)
         )
     new_content = cell_content.replace(
-        "<hp:t>%s</hp:t>" % escaped_old,
-        "<hp:t>%s</hp:t>" % xml_escape(new_text),
+        f"<hp:t>{escaped_old}</hp:t>",
+        f"<hp:t>{xml_escape(new_text)}</hp:t>",
         1,
     )
     new_content, _ = strip_linesegarray(new_content)
     new_tc = tc[:in_s] + new_content + tc[in_e:]
     new_tbl = tbl[:cs] + new_tc + tbl[ce:]
     new_xml = xml[:ti] + new_tbl + xml[tend:]
-    msg = "cell %d,%d text '%s' -> '%s' (charPr preserved)" % (col, row, old_text, new_text)
+    msg = f"cell {int(col)},{int(row)} text '{old_text}' -> '{new_text}' (charPr preserved)"
     return new_xml, [msg]
 
 
@@ -661,22 +599,22 @@ def _locate_cell_sublist(
     """
     span = find_table(xml, table_id)
     if span is None:
-        raise ValueError("table id=%s not found" % table_id)
+        raise ValueError(f"table id={table_id} not found")
     ti, tend = span
     tbl = xml[ti:tend]
     target = None
     for cs, ce in top_cells(tbl):
         if _own_cell_addr(tbl[cs:ce]) == (col, row):
             if target is not None:
-                raise ValueError("cell %d,%d is not unique in table" % (col, row))
+                raise ValueError(f"cell {int(col)},{int(row)} is not unique in table")
             target = (cs, ce)
     if target is None:
-        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+        raise ValueError(f"cell colAddr={int(col)} rowAddr={int(row)} not found")
     cs, ce = target
     tc = tbl[cs:ce]
     sl = _direct_sublist(tc)
     if sl is None:
-        raise ValueError("cell %d,%d has no <hp:subList>" % (col, row))
+        raise ValueError(f"cell {int(col)},{int(row)} has no <hp:subList>")
     in_s, in_e = sl
     return ti, tend, tbl, cs, ce, tc, in_s, in_e
 
@@ -707,7 +645,7 @@ def _append_para_cell(
     new_para = _build_para_runs(para_pr, [(char_pr, text)])
     inner, _ = strip_linesegarray(inner + new_para)
     new_xml = _splice_cell_inner(xml, ti, tend, tbl, cs, ce, tc, in_s, in_e, inner)
-    msg = "cell %d,%d: appended 1 paragraph (paraPr=%s charPr=%s)" % (col, row, para_pr, char_pr)
+    msg = f"cell {int(col)},{int(row)}: appended 1 paragraph (paraPr={para_pr} charPr={char_pr})"
     return new_xml, [msg]
 
 
@@ -775,11 +713,10 @@ def _append_para_match(
     inner = tc[in_s:in_e]
     paras = _direct_paras(inner)
     if not paras:
-        raise ValueError("cell %d,%d has no paragraph to match style from" % (col, row))
+        raise ValueError(f"cell {int(col)},{int(row)} has no paragraph to match style from")
     if n < 0 or n >= len(paras):
         raise ValueError(
-            "cell %d,%d has %d paragraph(s); --match-style index %d out of range"
-            % (col, row, len(paras), n)
+            f"cell {col},{row} has {len(paras)} paragraph(s); --match-style index {n} out of range"
         )
     sib = inner[paras[n][0]:paras[n][1]]
     pm = re.search(r'paraPrIDRef="(\d+)"', sib)
@@ -817,13 +754,13 @@ def _toggle_check_cell(
             target = (ps, pe, segs, concat)
             break
     if target is None:
-        raise ValueError("toggle-check: label %r not found in cell %d,%d" % (label, col, row))
+        raise ValueError(f"toggle-check: label {label!r} not found in cell {int(col)},{int(row)}")
     ps, pe, segs, concat = target
     li = concat.find(label)
     before = [m for m in _CHECK_RE.finditer(concat) if m.end() <= li]
     if not before:
         raise ValueError(
-            "toggle-check: no checkbox precedes label %r in cell %d,%d" % (label, col, row))
+            f"toggle-check: no checkbox precedes label {label!r} in cell {int(col)},{int(row)}")
     box = before[-1]
     new_tok = _CHECK_DONE if box.group() == _CHECK_EMPTY else _CHECK_EMPTY
     raw_s = _concat_to_raw(segs, box.start())
@@ -834,7 +771,7 @@ def _toggle_check_cell(
     new_inner, _ = strip_linesegarray(new_inner)
     new_xml = _splice_cell_inner(xml, ti, tend, tbl, cs, ce, tc, in_s, in_e, new_inner)
     state = "checked" if new_tok == _CHECK_DONE else "cleared"
-    return new_xml, ["cell %d,%d: %r %s" % (col, row, label, state)]
+    return new_xml, [f"cell {int(col)},{int(row)}: {label!r} {state}"]
 
 
 def _read_cell_style(tc: str) -> tuple[str, str]:
@@ -854,7 +791,7 @@ def _replace_cell_preserve_style(
 ) -> tuple[str, list[str]]:
     span = find_table(xml, table_id)
     if span is None:
-        raise ValueError("table id=%s not found" % table_id)
+        raise ValueError(f"table id={table_id} not found")
     ti, tend = span
     tbl = xml[ti:tend]
     tc = None
@@ -863,15 +800,14 @@ def _replace_cell_preserve_style(
             tc = tbl[cs:ce]
             break
     if tc is None:
-        raise ValueError("cell colAddr=%d rowAddr=%d not found" % (col, row))
+        raise ValueError(f"cell colAddr={int(col)} rowAddr={int(row)} not found")
     para_pr, char_pr = _read_cell_style(tc)
     if charpr_override is not None:
         char_pr = charpr_override
     info: list[str] = []
     height = heights.get(char_pr, 0)
     if height > 0 and charpr_pt(height) < MIN_READABLE_PT:
-        warn = "WARN: cell(%d,%d) charPr=%s height=%d(%spt) — 가독 불가 크기" % (
-            col, row, char_pr, height, "%g" % charpr_pt(height))
+        warn = f"WARN: cell({col},{row}) charPr={char_pr} height={height}({charpr_pt(height):g}pt) — 가독 불가 크기"
         info.append(warn)
     content = _build_para_runs(para_pr, [(char_pr, text)])
     new_xml, replace_info = _replace_cell(xml, table_id, col, row, content)
@@ -893,29 +829,14 @@ def _dump_style_map(tbl_xml: str, table_id: str, heights: dict[str, int]) -> Non
         rows.setdefault(row, []).append((col, para_pr, char_pr, pt))
     for row_idx in sorted(rows.keys()):
         cells = sorted(rows[row_idx], key=lambda x: x[0])
-        parts = ["c%d=p%s/c%s(%spt)" % (col, pp, cp, "%g" % pt) for col, pp, cp, pt in cells]
-        print("row%d: %s" % (row_idx, " ".join(parts)))
+        parts = [f"c{col}=p{pp}/c{cp}({pt:g}pt)" for col, pp, cp, pt in cells]
+        print(f"row{int(row_idx)}: {' '.join(parts)}")
 
 
 def cmd_fill(args: argparse.Namespace) -> None:
     inp = Path(args.input)
     is_dir_mode = inp.is_dir()
-    target = "Contents/section%d.xml" % args.section
-    if is_dir_mode:
-        section_file = inp / target
-        if not section_file.is_file():
-            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print("Error: %s not in archive" % target, file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print("Error: not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     heights = load_charpr_heights(inp)
     data = json.loads(Path(args.data).read_text(encoding="utf-8"))
     all_warns: list[str] = []
@@ -925,47 +846,35 @@ def cmd_fill(args: argparse.Namespace) -> None:
                 col_s, row_s = cell_key.split(",")
                 col, row = int(col_s), int(row_s)
             except ValueError:
-                print("Error: invalid cell key %r (expected col,row)" % cell_key, file=sys.stderr)
-                sys.exit(1)
+                die(f"invalid cell key {cell_key!r} (expected col,row)")
             try:
                 xml, info = _replace_cell_preserve_style(xml, table_id, col, row, text, None, heights)
                 all_warns.extend(i for i in info if i.startswith("WARN"))
             except ValueError as e:
-                print("Error: table %s cell %s: %s" % (table_id, cell_key, e), file=sys.stderr)
-                sys.exit(1)
+                die(f"table {table_id} cell {cell_key}: {e}")
     xml, n_ls = LINESEG_RE.subn("", xml)
     if is_dir_mode:
-        section_file = inp / target
-        section_file.write_text(xml, encoding="utf-8")
-        print("DONE (in-place): %s" % section_file)
+        out_path = save_section(inp, target, xml, None)
+        print(f"DONE (in-place): {out_path}")
     else:
         if not args.output and inp.suffix.lower() != ".hwpx":
-            print("Error: --output required for non-.hwpx archive input", file=sys.stderr)
-            sys.exit(1)
-        out = args.output or str(inp.with_stem(inp.stem + "_filled"))
+            die("--output required for non-.hwpx archive input")
+        out = args.output or str(inp.with_stem(f"{inp.stem}_filled"))
         if not args.output:
-            print("Warning: no --output specified, writing to %s" % out, file=sys.stderr)
-        with zipfile.ZipFile(inp, "r") as zin:
-            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
-            for zi, data_bytes in entries:
-                if zi.filename == target:
-                    data_bytes = xml.encode("utf-8")
-                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-                zout.writestr(zi.filename, data_bytes, compress_type=ct)
-        print("DONE: %s" % out)
-    print("  linesegarray stripped: %d" % n_ls)
+            print(f"Warning: no --output specified, writing to {out}", file=sys.stderr)
+        out_path = save_section(inp, target, xml, out)
+        print(f"DONE: {out_path}")
+    print(f"  linesegarray stripped: {n_ls}")
     if all_warns:
-        print("WARNINGS (%d):" % len(all_warns))
+        print(f"WARNINGS ({len(all_warns)}):")
         for w in all_warns:
-            print("  %s" % w)
+            print(f"  {w}")
 
 
 def _list_cells(xml: str, table_id: str) -> None:
     span = find_table(xml, table_id)
     if span is None:
-        print("table id=%s not found" % table_id, file=sys.stderr)
-        sys.exit(1)
+        die(f"table id={table_id} not found")
     tbl = xml[span[0]:span[1]]
     cells = []
     for cs, ce in top_cells(tbl):
@@ -974,101 +883,73 @@ def _list_cells(xml: str, table_id: str) -> None:
         txt = " ".join(re.findall(r"<hp:t>(.*?)</hp:t>", tc))
         cells.append((addr, txt))
     cells.sort(key=lambda x: (x[0][1], x[0][0]) if x[0] else (0, 0))
-    print("table id=%s: %d cells" % (table_id, len(cells)))
+    print(f"table id={table_id}: {len(cells)} cells")
     for addr, txt in cells:
         if addr:
-            print("  col=%s row=%s  %s" % (addr[0], addr[1], txt[:55]))
+            print(f"  col={addr[0]} row={addr[1]}  {txt[:55]}")
 
 
 def cmd_replace(args: argparse.Namespace) -> None:
     inp = Path(args.input)
     is_dir_mode = inp.is_dir()
-    target = "Contents/section%d.xml" % args.section
-    if is_dir_mode:
-        section_file = inp / target
-        if not section_file.is_file():
-            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print("Error: %s not in archive" % target, file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print("Error: not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     if args.list:
         _list_cells(xml, args.table_id)
         sys.exit(0)
     if not args.cell or (not is_dir_mode and not args.output):
-        print("Error: --cell required (and --output required for .hwpx input)", file=sys.stderr)
-        sys.exit(1)
+        die("--cell required (and --output required for .hwpx input)")
     mode_append = args.append_para is not None
     mode_match = args.match_style is not None
     if mode_append and mode_match:
-        print("Error: --append-para and --match-style are mutually exclusive", file=sys.stderr)
-        sys.exit(1)
+        die("--append-para and --match-style are mutually exclusive")
     if (mode_append or mode_match) and (
         args.preserve_style or args.set_text or args.content_file or args.para or args.run):
-        print("Error: --append-para/--match-style cannot combine with other replace modes", file=sys.stderr)
-        sys.exit(1)
+        die("--append-para/--match-style cannot combine with other replace modes")
     if mode_append or mode_match:
         pass
     elif args.preserve_style:
         if args.set_text or args.content_file or args.para or args.run:
-            print("Error: --preserve-style is mutually exclusive with --set-text/--content-file/--para/--run", file=sys.stderr)
-            sys.exit(1)
+            die("--preserve-style is mutually exclusive with --set-text/--content-file/--para/--run")
         if args.text is None:
-            print("Error: --preserve-style requires --text (use --text \"\" to clear)", file=sys.stderr)
-            sys.exit(1)
+            die("--preserve-style requires --text (use --text \"\" to clear)")
     elif args.set_text:
         if args.content_file or args.para or args.run:
-            print("Error: --set-text cannot be combined with --content-file, --para, or --run", file=sys.stderr)
-            sys.exit(1)
+            die("--set-text cannot be combined with --content-file, --para, or --run")
     elif bool(args.content_file) == (bool(args.para) or bool(args.run)):
-        print("Error: provide exactly one of --content-file / --para[+--run]", file=sys.stderr)
-        sys.exit(1)
+        die("provide exactly one of --content-file / --para[+--run]")
     try:
         col, row = (int(x) for x in args.cell.split(","))
     except ValueError:
-        print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
-        sys.exit(1)
+        die(f"--cell expects colAddr,rowAddr (got {args.cell!r})")
     if mode_append:
         para_pr, char_pr, text = args.append_para
         try:
             new_xml, info = _append_para_cell(xml, args.table_id, col, row, para_pr, char_pr, text)
         except ValueError as e:
-            print("Error: %s" % e, file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
     elif mode_match:
         n_s, text = args.match_style
         try:
             n = int(n_s)
         except ValueError:
-            print("Error: --match-style N must be an integer (got %r)" % n_s, file=sys.stderr)
-            sys.exit(1)
+            die(f"--match-style N must be an integer (got {n_s!r})")
         try:
             new_xml, info = _append_para_match(xml, args.table_id, col, row, n, text)
         except ValueError as e:
-            print("Error: %s" % e, file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
     elif args.preserve_style:
         heights = load_charpr_heights(inp)
         try:
             new_xml, info = _replace_cell_preserve_style(
                 xml, args.table_id, col, row, args.text or "", args.charpr, heights)
         except ValueError as e:
-            print("Error: %s" % e, file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
     elif args.set_text:
         old_text, new_text = args.set_text
         try:
             new_xml, info = _set_text_cell(xml, args.table_id, col, row, old_text, new_text)
         except ValueError as e:
-            print("Error: %s" % e, file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
     else:
         if args.content_file:
             content = Path(args.content_file).read_text(encoding="utf-8")
@@ -1076,8 +957,7 @@ def cmd_replace(args: argparse.Namespace) -> None:
             content = re.sub(r">[ \t\r\n]+<", "><", content).strip()
         else:
             if args.run and not args.para:
-                print("Error: --run requires at least one --para", file=sys.stderr)
-                sys.exit(1)
+                die("--run requires at least one --para")
             paras = [(p[0], [(p[1], p[2])]) for p in args.para]
             for char_pr, text in args.run:
                 paras[-1][1].append((char_pr, text))
@@ -1085,76 +965,33 @@ def cmd_replace(args: argparse.Namespace) -> None:
         try:
             new_xml, info = _replace_cell(xml, args.table_id, col, row, content)
         except ValueError as e:
-            print("Error: %s" % e, file=sys.stderr)
-            sys.exit(1)
+            die(str(e))
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
-    if is_dir_mode:
-        section_file = inp / target
-        section_file.write_text(new_xml, encoding="utf-8")
-        print("DONE (in-place): %s" % section_file)
-    else:
-        with zipfile.ZipFile(inp, "r") as zin:
-            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-            for zi, data in entries:
-                if zi.filename == target:
-                    data = new_xml.encode("utf-8")
-                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-                zout.writestr(zi.filename, data, compress_type=ct)
-        print("DONE: %s" % args.output)
+    out_path = save_section(inp, target, new_xml, args.output)
+    print(f"DONE (in-place): {out_path}" if is_dir_mode else f"DONE: {out_path}")
     for line in info:
-        print("  %s" % line)
-    print("  linesegarray stripped: %d" % n_ls)
+        print(f"  {line}")
+    print(f"  linesegarray stripped: {n_ls}")
 
 
 def cmd_toggle_check(args: argparse.Namespace) -> None:
     inp = Path(args.input)
     is_dir_mode = inp.is_dir()
-    target = "Contents/section%d.xml" % args.section
-    if is_dir_mode:
-        section_file = inp / target
-        if not section_file.is_file():
-            print("Error: %s not found in %s" % (target, inp), file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print("Error: %s not in archive" % target, file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print("Error: not found: %s" % args.input, file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     if not is_dir_mode and not args.output:
-        print("Error: --output required for .hwpx input", file=sys.stderr)
-        sys.exit(1)
+        die("--output required for .hwpx input")
     try:
         col, row = (int(x) for x in args.cell.split(","))
     except ValueError:
-        print("Error: --cell expects colAddr,rowAddr (got %r)" % args.cell, file=sys.stderr)
-        sys.exit(1)
+        die(f"--cell expects colAddr,rowAddr (got {args.cell!r})")
     try:
         new_xml, info = _toggle_check_cell(xml, args.table_id, col, row, args.label)
     except ValueError as e:
-        print("Error: %s" % e, file=sys.stderr)
-        sys.exit(1)
-    if is_dir_mode:
-        section_file = inp / target
-        section_file.write_text(new_xml, encoding="utf-8")
-        print("DONE (in-place): %s" % section_file)
-    else:
-        with zipfile.ZipFile(inp, "r") as zin:
-            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-            for zi, data in entries:
-                if zi.filename == target:
-                    data = new_xml.encode("utf-8")
-                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-                zout.writestr(zi.filename, data, compress_type=ct)
-        print("DONE: %s" % args.output)
+        die(str(e))
+    out_path = save_section(inp, target, new_xml, args.output)
+    print(f"DONE (in-place): {out_path}" if is_dir_mode else f"DONE: {out_path}")
     for line in info:
-        print("  %s" % line)
+        print(f"  {line}")
 
 
 # ── delete ────────────────────────────────────────────────────────────────────
@@ -1236,8 +1073,7 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
 def _list_rows_delete(xml: str, table_id: str) -> None:
     span = find_table(xml, table_id)
     if span is None:
-        print(f"table id={table_id} not found", file=sys.stderr)
-        sys.exit(1)
+        die(f"table id={table_id} not found")
     tbl = xml[span[0]:span[1]]
     trs = top_trs(tbl)
     print(f"table id={table_id}: {len(trs)} rows")
@@ -1252,49 +1088,20 @@ def _list_rows_delete(xml: str, table_id: str) -> None:
 def cmd_delete(args: argparse.Namespace) -> None:
     inp = Path(args.input)
     is_dir_mode = inp.is_dir()
-    target = f"Contents/section{args.section}.xml"
-    if is_dir_mode:
-        section_file = inp / target
-        if not section_file.is_file():
-            print(f"Error: {target} not found in {inp}", file=sys.stderr)
-            sys.exit(1)
-        xml = section_file.read_text(encoding="utf-8")
-    elif inp.is_file():
-        with zipfile.ZipFile(inp, "r") as zin:
-            if target not in zin.namelist():
-                print(f"Error: {target} not in archive", file=sys.stderr)
-                sys.exit(1)
-            xml = zin.read(target).decode("utf-8")
-    else:
-        print(f"Error: not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+    xml, target = load_section(inp, args.section)
     if args.list:
         _list_rows_delete(xml, args.table_id)
         sys.exit(0)
     if not args.rows or (not is_dir_mode and not args.output):
-        print("Error: --rows required (and --output required for .hwpx input, or use --list)", file=sys.stderr)
-        sys.exit(1)
+        die("--rows required (and --output required for .hwpx input, or use --list)")
     del_idx = {int(x) for x in args.rows.split(",") if x.strip() != ""}
     try:
         new_xml, info = _delete_rows(xml, args.table_id, del_idx)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        die(str(e))
     new_xml, n_ls = LINESEG_RE.subn("", new_xml)
-    if is_dir_mode:
-        section_file = inp / target
-        section_file.write_text(new_xml, encoding="utf-8")
-        print(f"DONE (in-place): {section_file}")
-    else:
-        with zipfile.ZipFile(inp, "r") as zin:
-            entries = [(zi, zin.read(zi.filename)) for zi in zin.infolist()]
-        with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as zout:
-            for zi, data in entries:
-                if zi.filename == target:
-                    data = new_xml.encode("utf-8")
-                ct = zipfile.ZIP_STORED if zi.filename == "mimetype" else zi.compress_type
-                zout.writestr(zi.filename, data, compress_type=ct)
-        print(f"DONE: {args.output}")
+    out_path = save_section(inp, target, new_xml, args.output)
+    print(f"DONE (in-place): {out_path}" if is_dir_mode else f"DONE: {out_path}")
     for line in info:
         print(f"  {line}")
     print(f"  linesegarray stripped: {n_ls}")
@@ -1327,14 +1134,12 @@ def cmd_calc_widths(args: argparse.Namespace) -> None:
             print(f"OK: sum={total} == body width {args.body}")
         else:
             diff = total - args.body
-            print(f"ERROR: sum={total}, body={args.body}, diff={diff:+d}", file=sys.stderr)
-            sys.exit(1)
+            die(f"sum={total}, body={args.body}, diff={diff:+d}")
         return
     try:
         ratios = _parse_width_spec(args.spec)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        die(str(e))
     widths = _calc_widths(ratios, args.body)
     print(" ".join(str(w) for w in widths))
     print(f"# {len(widths)} columns, sum={sum(widths)}, body={args.body}", file=sys.stderr)
@@ -1366,19 +1171,16 @@ def cmd_strip_lineseg(args: argparse.Namespace) -> None:
     import shutil
     input_path = Path(args.input)
     if not input_path.is_file():
-        print(f"Error: File not found: {args.input}", file=sys.stderr)
-        sys.exit(1)
+        die(f"File not found: {args.input}")
     if args.inplace and args.output:
-        print("Error: --inplace and --output are mutually exclusive", file=sys.stderr)
-        sys.exit(1)
+        die("--inplace and --output are mutually exclusive")
     tmp = input_path.with_suffix(".tmp")
     if args.inplace:
         output_path = tmp
     elif args.output:
         output_path = Path(args.output)
     else:
-        print("Error: specify --output or --inplace", file=sys.stderr)
-        sys.exit(1)
+        die("specify --output or --inplace")
     is_hwpx = input_path.suffix.lower() == ".hwpx"
     if is_hwpx:
         count = _strip_hwpx(input_path, output_path)
@@ -1588,7 +1390,7 @@ def _run_tests() -> None:
         else:
             print("AC-1a PASS: charPr preserved")
     except Exception as e:
-        failures.append("AC-1a FAIL: %s" % e)
+        failures.append(f"AC-1a FAIL: {e}")
 
     # AC-1b: linesegarray stripped after --set-text
     try:
@@ -1598,7 +1400,7 @@ def _run_tests() -> None:
         else:
             print("AC-1b PASS: linesegarray removed")
     except Exception as e:
-        failures.append("AC-1b FAIL: %s" % e)
+        failures.append(f"AC-1b FAIL: {e}")
 
     # AC-1c: --set-text OLD "" clears text, preserves charPr
     try:
@@ -1606,11 +1408,11 @@ def _run_tests() -> None:
         if 'charPrIDRef="5"' not in result:
             failures.append("AC-1c FAIL: charPrIDRef='5' not preserved after clearing text")
         elif "<hp:t></hp:t>" not in result and "<hp:t/>" not in result:
-            failures.append("AC-1c FAIL: expected empty hp:t after clear, result: %r" % result[result.find("<hp:t"):result.find("<hp:t") + 40])
+            failures.append(f"AC-1c FAIL: expected empty hp:t after clear, result: {result[result.find('<hp:t'):result.find('<hp:t') + 40]!r}")
         else:
             print("AC-1c PASS: empty text with charPr preserved")
     except Exception as e:
-        failures.append("AC-1c FAIL: %s" % e)
+        failures.append(f"AC-1c FAIL: {e}")
 
     # AC-1d: fragmented text (split across runs) raises ValueError
     try:
@@ -1621,9 +1423,9 @@ def _run_tests() -> None:
         if "contiguously" in msg or "split across runs" in msg:
             print("AC-1d PASS: ValueError with correct message")
         else:
-            failures.append("AC-1d FAIL: ValueError raised but message lacks expected keyword: %s" % msg)
+            failures.append(f"AC-1d FAIL: ValueError raised but message lacks expected keyword: {msg}")
     except Exception as e:
-        failures.append("AC-1d FAIL: unexpected exception: %s" % e)
+        failures.append(f"AC-1d FAIL: unexpected exception: {e}")
 
     # Regression: _replace_cell (--para path) still works
     try:
@@ -1634,7 +1436,7 @@ def _run_tests() -> None:
         else:
             print("Regression PASS: _replace_cell --para path intact")
     except Exception as e:
-        failures.append("Regression FAIL: %s" % e)
+        failures.append(f"Regression FAIL: {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:
@@ -1646,7 +1448,7 @@ def _run_tests() -> None:
         else:
             print("AC-2a PASS: preserve-style reuses existing charPr/paraPr")
     except Exception as e:
-        failures.append("AC-2a FAIL: %s" % e)
+        failures.append(f"AC-2a FAIL: {e}")
 
     # AC-2c: 5pt WARN for 3pt charPr
     try:
@@ -1654,11 +1456,11 @@ def _run_tests() -> None:
         result, info = _replace_cell_preserve_style(_FIXTURE, "1", 0, 0, "새글", None, heights_3pt)
         warns = [i for i in info if "WARN" in i]
         if not warns:
-            failures.append("AC-2c FAIL: expected WARN for 3pt charPr, info=%r" % info)
+            failures.append(f"AC-2c FAIL: expected WARN for 3pt charPr, info={info!r}")
         else:
             print("AC-2c PASS: 3pt charPr triggers WARN")
     except Exception as e:
-        failures.append("AC-2c FAIL: %s" % e)
+        failures.append(f"AC-2c FAIL: {e}")
 
     # AC-2d: --charpr override
     try:
@@ -1668,7 +1470,7 @@ def _run_tests() -> None:
         else:
             print("AC-2d PASS: --charpr override applied")
     except Exception as e:
-        failures.append("AC-2d FAIL: %s" % e)
+        failures.append(f"AC-2d FAIL: {e}")
 
     # AC-3: style-map format
     try:
@@ -1684,13 +1486,13 @@ def _run_tests() -> None:
             sys.stdout = _old
         _out = _buf.getvalue()
         if not _out.startswith("row0:"):
-            failures.append("AC-3 FAIL: style-map does not start with 'row0:', got %r" % _out[:60])
+            failures.append(f"AC-3 FAIL: style-map does not start with 'row0:', got {_out[:60]!r}")
         elif "c0=p10/c5" not in _out:
-            failures.append("AC-3 FAIL: style-map missing c0=p10/c5, got %r" % _out[:80])
+            failures.append(f"AC-3 FAIL: style-map missing c0=p10/c5, got {_out[:80]!r}")
         else:
             print("AC-3 PASS: style-map format correct")
     except Exception as e:
-        failures.append("AC-3 FAIL: %s" % e)
+        failures.append(f"AC-3 FAIL: {e}")
 
     # AC-4: fill-style multi-cell
     try:
@@ -1707,7 +1509,7 @@ def _run_tests() -> None:
         else:
             print("AC-4 PASS: fill inserts text with style preserved")
     except Exception as e:
-        failures.append("AC-4 FAIL: %s" % e)
+        failures.append(f"AC-4 FAIL: {e}")
 
     # AC-AP-1: append-para keeps existing paragraph and adds a new one
     try:
@@ -1717,13 +1519,13 @@ def _run_tests() -> None:
         elif "신규" not in result:
             failures.append("AC-AP-1 FAIL: appended text '신규' missing")
         elif result.count("<hp:p ") < 2:
-            failures.append("AC-AP-1 FAIL: expected >=2 paragraphs, got %d" % result.count("<hp:p "))
+            failures.append(f"AC-AP-1 FAIL: expected >=2 paragraphs, got {int(result.count('<hp:p '))}")
         elif 'charPrIDRef="5"' not in result or 'charPrIDRef="7"' not in result:
             failures.append("AC-AP-1 FAIL: charPr 5 (old) and 7 (new) not both present")
         else:
             print("AC-AP-1 PASS: append-para preserves siblings, adds styled para")
     except Exception as e:
-        failures.append("AC-AP-1 FAIL: %s" % e)
+        failures.append(f"AC-AP-1 FAIL: {e}")
 
     # AC-AP-2: append-para strips a stray linesegarray in the cell
     try:
@@ -1733,7 +1535,7 @@ def _run_tests() -> None:
         else:
             print("AC-AP-2 PASS: linesegarray removed on append")
     except Exception as e:
-        failures.append("AC-AP-2 FAIL: %s" % e)
+        failures.append(f"AC-AP-2 FAIL: {e}")
 
     # AC-AP-3: match-style inherits paraPr/charPr from the Nth sibling paragraph
     try:
@@ -1741,25 +1543,25 @@ def _run_tests() -> None:
         if "상속" not in result:
             failures.append("AC-AP-3 FAIL: appended text '상속' missing")
         elif result.count('paraPrIDRef="10"') < 2:
-            failures.append("AC-AP-3 FAIL: paraPr 10 not inherited (count=%d)" % result.count('paraPrIDRef="10"'))
+            failures.append(f"AC-AP-3 FAIL: paraPr 10 not inherited (count={result.count('paraPrIDRef=\"10\"')})")
         elif result.count('charPrIDRef="5"') < 2:
-            failures.append("AC-AP-3 FAIL: charPr 5 not inherited (count=%d)" % result.count('charPrIDRef="5"'))
+            failures.append(f"AC-AP-3 FAIL: charPr 5 not inherited (count={result.count('charPrIDRef=\"5\"')})")
         else:
             print("AC-AP-3 PASS: match-style inherits sibling para style")
     except Exception as e:
-        failures.append("AC-AP-3 FAIL: %s" % e)
+        failures.append(f"AC-AP-3 FAIL: {e}")
 
     # AC-TC-1: toggle-check flips the box belonging to the named label only
     try:
         result, info = _toggle_check_cell(_FIXTURE_CHECK, "1", 0, 0, "승인")
         if "[√] 승인" not in result:
-            failures.append("AC-TC-1 FAIL: 승인 box not checked, got %r" % result[result.find("[") : result.find("[") + 30])
+            failures.append(f"AC-TC-1 FAIL: 승인 box not checked, got {result[result.find('['):result.find('[') + 30]!r}")
         elif "[  ] 불가" not in result or "[  ] 조건부" not in result:
             failures.append("AC-TC-1 FAIL: other boxes (불가/조건부) were altered")
         else:
             print("AC-TC-1 PASS: toggle-check checks only the matched label")
     except Exception as e:
-        failures.append("AC-TC-1 FAIL: %s" % e)
+        failures.append(f"AC-TC-1 FAIL: {e}")
 
     # AC-TC-2: toggle-check is reversible (checked -> empty)
     try:
@@ -1770,7 +1572,7 @@ def _run_tests() -> None:
         else:
             print("AC-TC-2 PASS: toggle-check reverses an already-checked box")
     except Exception as e:
-        failures.append("AC-TC-2 FAIL: %s" % e)
+        failures.append(f"AC-TC-2 FAIL: {e}")
 
     # AC-TC-3: unknown label raises ValueError
     try:
@@ -1779,7 +1581,7 @@ def _run_tests() -> None:
     except ValueError:
         print("AC-TC-3 PASS: missing label raises ValueError")
     except Exception as e:
-        failures.append("AC-TC-3 FAIL: unexpected exception: %s" % e)
+        failures.append(f"AC-TC-3 FAIL: unexpected exception: {e}")
 
     # AC-AP-4: match-style counts only DIRECT paragraphs (ignores nested table)
     try:
@@ -1800,21 +1602,21 @@ def _run_tests() -> None:
             else:
                 print("AC-AP-4 PASS: match-style ignores nested-table paragraphs")
         except Exception as e:
-            failures.append("AC-AP-4 FAIL: index 0 path: %s" % e)
+            failures.append(f"AC-AP-4 FAIL: index 0 path: {e}")
     except Exception as e:
-        failures.append("AC-AP-4 FAIL: unexpected exception: %s" % e)
+        failures.append(f"AC-AP-4 FAIL: unexpected exception: {e}")
 
     # AC-TC-4: toggle-check works when box and label are in separate runs
     try:
         result, _ = _toggle_check_cell(_FIXTURE_CHECK_MULTI, "1", 0, 0, "승인")
         if result.count("[√]") != 1:
-            failures.append("AC-TC-4 FAIL: expected exactly 1 checked box, got %d" % result.count("[√]"))
+            failures.append(f"AC-TC-4 FAIL: expected exactly 1 checked box, got {int(result.count('[√]'))}")
         elif result.count("[  ]") != 1:
             failures.append("AC-TC-4 FAIL: 불가 box should stay empty (one [  ] expected)")
         else:
             print("AC-TC-4 PASS: toggle-check handles box/label split across runs")
     except Exception as e:
-        failures.append("AC-TC-4 FAIL: %s" % e)
+        failures.append(f"AC-TC-4 FAIL: {e}")
 
     # AC-TC-5: toggle-check stays inside the label's own paragraph
     try:
@@ -1824,7 +1626,7 @@ def _run_tests() -> None:
     except ValueError:
         print("AC-TC-5 PASS: toggle-check confined to the label's paragraph")
     except Exception as e:
-        failures.append("AC-TC-5 FAIL: unexpected exception: %s" % e)
+        failures.append(f"AC-TC-5 FAIL: unexpected exception: {e}")
 
     # AC-DIR-1: cmd_insert dir-mode writes the new row into the unpacked
     # section file in place, with no --output required.
@@ -1857,9 +1659,9 @@ def _run_tests() -> None:
         else:
             print("AC-DIR-1 PASS: cmd_insert dir-mode writes new row in place (no --output)")
     except SystemExit as e:
-        failures.append("AC-DIR-1 FAIL: cmd_insert exited unexpectedly (code %r)" % (e.code,))
+        failures.append(f"AC-DIR-1 FAIL: cmd_insert exited unexpectedly (code {e.code!r})")
     except Exception as e:
-        failures.append("AC-DIR-1 FAIL: %s" % e)
+        failures.append(f"AC-DIR-1 FAIL: {e}")
 
     # AC-DIR-2: cmd_delete dir-mode writes the row removal into the unpacked
     # section file in place, with no --output required.
@@ -1883,9 +1685,9 @@ def _run_tests() -> None:
         else:
             print("AC-DIR-2 PASS: cmd_delete dir-mode removes row in place (no --output)")
     except SystemExit as e:
-        failures.append("AC-DIR-2 FAIL: cmd_delete exited unexpectedly (code %r)" % (e.code,))
+        failures.append(f"AC-DIR-2 FAIL: cmd_delete exited unexpectedly (code {e.code!r})")
     except Exception as e:
-        failures.append("AC-DIR-2 FAIL: %s" % e)
+        failures.append(f"AC-DIR-2 FAIL: {e}")
 
     if failures:
         for f in failures:
@@ -1898,6 +1700,7 @@ def _run_tests() -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    configure_io()
     if sys.argv[1:] == ["--test"]:
         _run_tests()
         return
