@@ -57,7 +57,15 @@ if [ -n "$FILES" ]; then
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
   git add -- $FILES
-  git commit -m "$MESSAGE"
+  # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
+  # STDOUT, which pollutes the pure-JSON contract exactly like the new-branch
+  # push tracking line did (see Push below). Route stdout→/dev/null and surface
+  # captured output only on failure — this also stops a failed commit from
+  # silently continuing to the push/PR with a stale HEAD.
+  if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1 >/dev/null); then
+    jq -n --arg e "commit failed: $COMMIT_OUT" '{error: $e}' >&2
+    exit 1
+  fi
   COMMITTED=true
 elif [ "$NO_PUSH" = "true" ]; then
   echo '{"error": "No changed files detected — nothing to commit"}' >&2
