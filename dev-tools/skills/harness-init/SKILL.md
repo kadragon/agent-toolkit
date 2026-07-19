@@ -184,6 +184,8 @@ Result is typically **1–3 roles, not a fixed set.** Zero is itself a smell for
 
 Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
 
+**Propagate the pruned roster downstream.** The generated `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `references/delegation-template.md`) hardcode `explorer`/`implementer`/`product-evaluator` in mandatory gates. For every role you skip here, drop or rewrite the gate row that names it — never leave a mandatory gate pointing at an agent you didn't create.
+
 Read `references/teammate-role-template.md` for the full schema and per-role templates.
 
 **Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
@@ -218,7 +220,7 @@ After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## H
 
 **Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `model` / `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). See `references/orchestrator-template.md` → "Skill frontmatter reference".
 
-**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same bar as Step 4b (default-on per Step 0).
+**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same trivial-repo bar that lets Step 4b skip roles entirely (the orchestrator itself stays default-on per Step 0).
 
 ### Step 4d: Scratchpad Pattern
 
