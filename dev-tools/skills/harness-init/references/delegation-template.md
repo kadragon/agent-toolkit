@@ -232,7 +232,7 @@ These delegations are **embedded as named steps in `docs/workflows.md`**, not ju
 
 ## Reusable Roles
 
-Define each recurring role once as `.claude/agents/{role}.md`. The routing table cites roles by name; Claude Code reuses the same file for both subagent and teammate spawns. See `references/teammate-role-template.md` for the schema and starter pack (implementer, explorer, qa-verifier, product-evaluator).
+Define each recurring role once as `.claude/agents/{role}.md`. The routing table cites roles by name; Claude Code reuses the same file for both subagent and teammate spawns. See `references/teammate-role-template.md` for the schema and role templates; create only the roles whose triggers are reachable in the target repo (reachability gate in `SKILL.md` Step 4b).
 
 ## Handoff Within a Session
 

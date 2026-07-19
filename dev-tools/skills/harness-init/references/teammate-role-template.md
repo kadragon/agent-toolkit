@@ -125,7 +125,11 @@ Block on input from {upstream agent} before proceeding. If no message within
 in a `TeamCreate`-based orchestration. Omit for purely sub-agent roles that
 only return values to the orchestrator.
 
-## Starter Pack (create these on `harness-init`)
+## Role Templates (create the reachable ones on `harness-init`)
+
+These are templates, not a mandatory set. Create a role only if its delegation
+trigger is reachable in the target repo — see the reachability gate in
+`SKILL.md` Step 4b. Most repos keep 1–3.
 
 ### `implementer.md`
 

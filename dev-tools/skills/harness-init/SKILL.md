@@ -42,7 +42,7 @@ Before acting, determine mode AND maturity level.
 
 > **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
 
-**Default toward orchestration infrastructure.** When unsure whether a repo "needs" Step 4b/4c (agents + orchestrator), build them. Empirical failure mode: repos initialized without orchestrator + agents never auto-delegate downstream — auto-delegation (Step 7b) has nothing to fire at, and the model does everything inline. The override cost of unused role files is ~50 lines on disk; the cost of skipping is a permanently inline workflow that floods the main context. Skip only for genuinely trivial repos (single script, docs-only, one-file library).
+**Default toward orchestration infrastructure — but size the agent roster by reachable triggers, not by default.** The **orchestrator** (Step 4c) is worth building whenever unsure: without it, auto-delegation (Step 7b) has no named target and the model does everything inline, and an unused orchestrator skill costs little. **Agent roles** (Step 4b) are different — apply the reachability gate there. An agent whose trigger never fires is not cheap insurance; it is the "made it, never used it" dead weight that trains the operator to ignore the harness. Build every reachable role, skip unreachable ones. Skip both entirely only for genuinely trivial repos (single script, docs-only, one-file library).
 
 **Mode selection:**
 
@@ -167,13 +167,24 @@ Both files follow **Reconciliation Contract** documented in `references/harness-
 
 ### Step 4b: Define Reusable Roles
 
-**Default: create the starter pack** (implementer, explorer, qa-verifier, product-evaluator) for any repo with >1 source file (default-on per Step 0).
+**Create a role only when its delegation trigger can actually fire in this repo's normal work.** A role file earns its place by giving the main loop a pre-scoped target so it delegates instead of working inline. A role whose trigger never fires is the opposite: it shows up in the session's agent list, sets an unmet expectation in AGENTS.md, and produces the "made it, never used it" smell that trains the operator to distrust the harness.
 
-**Skip only if** the repo is genuinely trivial: a single-script tool, a docs-only repo, or a one-file library with no meaningful module boundaries. When unsure, create the starter pack — the override cost is low.
+Apply the **reachability gate** to each candidate — keep it only if reachable here:
 
-Create `.claude/agents/{role}.md` for each recurring role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
+| Role | Trigger | Reachable when |
+|------|---------|----------------|
+| `qa-verifier` | after any source edit | almost always — any repo with editable source |
+| `explorer` | unexplored area >3 files | repo has real modules/dirs, not one flat file |
+| `implementer` | backlog item w/ Sprint Contract | repo actually runs a `backlog.md` sprint flow |
+| `product-evaluator` | subjective quality judgment | repo ships a user-facing artifact that gets judged |
 
-Read `references/teammate-role-template.md` for full schema and starter pack (implementer, explorer, qa-verifier, product-evaluator).
+A backlog-driven `implementer` is dead weight in a repo with no backlog; a `product-evaluator` is dead weight where nothing has a subjective quality bar. Swap in a domain-specific role when it matches recurring work better than the generic one (this marketplace uses `skill-evaluator` in place of `product-evaluator`).
+
+Result is typically **1–3 roles, not a fixed set.** Zero is itself a smell for any repo with editable source — at minimum create `qa-verifier` so post-edit verification has a target. If you create none, state why.
+
+Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
+
+Read `references/teammate-role-template.md` for the full schema and per-role templates.
 
 **Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
 
