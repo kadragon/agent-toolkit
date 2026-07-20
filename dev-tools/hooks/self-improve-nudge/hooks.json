@@ -1,14 +1,26 @@
 {
-  "description": "Stop hook: per-session learning-capture nudge. Detects complex tasks, error-recovery, and user corrections; blocks Stop once per session to nudge Claude to write lessons before context expires. Distinct from harness-curator (cross-session retrospective).",
+  "description": "Per-session learning-capture nudge. Stop hook (nudge.py) detects complex tasks, error-recovery, and user corrections, then records the signals to a per-project pending file WITHOUT blocking Stop — so the session's work summary stays visible. SessionStart hook (surface.py) replays that nudge once at the next session start in the same project, then deletes it. Distinct from harness-curator (cross-session retrospective).",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/self-improve-nudge/nudge.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/self-improve-nudge/nudge.py\"",
             "timeout": 10,
             "statusMessage": "Checking session for capture signals..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/self-improve-nudge/surface.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking for deferred capture nudge..."
           }
         ]
       }

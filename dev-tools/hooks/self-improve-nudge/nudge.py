@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """self-improve-nudge — Stop hook: per-session learning-capture nudge.
 
-Purpose: fires ONCE at session end when capture signals are present.
-         Blocks Stop so Claude captures lessons before they evaporate.
+Purpose: fires ONCE at session end when capture signals are present. Instead of
+         blocking Stop (which forced an extra Claude turn that buried the work
+         summary), it records the signals to a per-project pending file and exits
+         cleanly. surface.py replays it at the NEXT SessionStart in the same
+         project, where there is no summary to bury.
 
 Distinct from harness-curator (cold-path cross-session retrospective):
-this is hot-path — single session, fired automatically, captures the delta
-while context is still live.
+this is warm-path — fired automatically per session, surfaced at the very next
+session start rather than mid-transcript.
 
 Signals:
   A  complex-task     >= 10 action tool calls (Edit/Write/Bash/Agent etc.)
@@ -16,9 +19,11 @@ Signals:
 
 import json
 import os
-import pathlib
 import re
 import sys
+import time
+
+from _common import config_dir, pending_path
 
 ACTION_TOOLS = re.compile(
     r"^(Edit|Write|Bash|Agent|Task|Workflow|NotebookEdit|WebSearch)"
@@ -164,14 +169,11 @@ def main():
     if not session_id:
         sys.exit(0)
 
-    config_dir = (
-        os.environ.get("CLAUDE_CONFIG_DIR")
-        or os.path.expanduser("~/.claude")
-    )
-    marker_dir = os.path.join(config_dir, "tmp", "nudge-markers")
+    cdir = config_dir()
+    marker_dir = os.path.join(cdir, "tmp", "nudge-markers")
     os.makedirs(marker_dir, exist_ok=True)
 
-    # Guard 2: session-once marker (sufficient — per-session hot-path needs no cross-session throttle)
+    # Guard 2: session-once marker (sufficient — per-session warm-path needs no cross-session throttle)
     marker = os.path.join(marker_dir, f"{session_id}.nudged")
     if os.path.exists(marker):
         sys.exit(0)
@@ -189,23 +191,36 @@ def main():
     if not signals:
         sys.exit(0)
 
-    # Mark fired before output so a crash in print doesn't re-fire
+    # Mark fired before writing so a crash below doesn't re-fire this session.
     try:
-        pathlib.Path(marker).touch()
+        open(marker, "a").close()
     except Exception:
         pass
 
-    signal_list = ", ".join(signals)
-    lines = [
-        f"[self-improve-nudge] Signals: {signal_list}.",
-        "Apply §Harness ratchet §Write-back gate — capture what passed an objective check, then stop normally.",
-        "",
-    ] + parts + ["", "Then stop normally."]
+    # Record the signals for surface.py to replay at the next SessionStart in
+    # this project. Do NOT block Stop — blocking forced an extra Claude turn that
+    # buried the session's work summary. cwd keys the file; the reader derives the
+    # same path from its own cwd next session.
+    cwd = inp.get("cwd") or os.getcwd()
+    payload = {
+        "signals": signals,
+        "parts": parts,
+        "written_ms": int(time.time() * 1000),
+        "session_id": session_id,
+    }
+    try:
+        path = pending_path(cwd, cdir)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass
 
-    print(json.dumps({"decision": "block", "reason": "\n".join(lines)}))
-
-
-try:
-    main()
-except Exception:
     sys.exit(0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        sys.exit(0)
