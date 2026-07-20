@@ -55,6 +55,24 @@ check("pending_path differs by cwd",
       common.pending_path("/repo/x", "/cfg") != common.pending_path("/repo/y", "/cfg"))
 check("pending_path under projects/", os.sep + "projects" + os.sep in p1)
 
+# --- config_dir: Codex must win over the CLAUDE_PLUGIN_ROOT compat alias ------
+# Codex sets CLAUDE_PLUGIN_ROOT as a compat alias, so config_dir must NOT treat
+# it as a Claude signal — else a Codex pending file lands in ~/.claude and a
+# Claude session on the same project consumes it (cross-platform leakage).
+_saved_env = dict(os.environ)
+try:
+    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    os.environ["CLAUDE_PLUGIN_ROOT"] = "/plugin"
+    os.environ["CODEX_HOME"] = "/tmp/codex-home-test"
+    check("config_dir: CODEX_HOME wins over CLAUDE_PLUGIN_ROOT alias",
+          common.config_dir() == "/tmp/codex-home-test")
+    os.environ["CLAUDE_CONFIG_DIR"] = "/explicit-claude"
+    check("config_dir: explicit CLAUDE_CONFIG_DIR always wins",
+          common.config_dir() == "/explicit-claude")
+finally:
+    os.environ.clear()
+    os.environ.update(_saved_env)
+
 # --- detect_signals: complex-task threshold ----------------------------------
 recs = []
 for _ in range(nudge.ACTION_THRESHOLD):

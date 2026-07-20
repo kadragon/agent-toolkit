@@ -21,9 +21,15 @@ def encode_project(path):
 
 def config_dir():
     """Root config dir for the active platform (~/.claude or ~/.codex).
-    Both platforms store per-project state under <dir>/projects/<encoded>."""
-    if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    Both platforms store per-project state under <dir>/projects/<encoded>.
+
+    Codex sets CLAUDE_PLUGIN_ROOT as a compat alias (docs/platform-specs.md), so
+    its presence does NOT mean Claude — detect Codex via CODEX_HOME / script path
+    BEFORE the Claude default. Keying off CLAUDE_PLUGIN_ROOT here would send a
+    Codex session's pending file to ~/.claude, where a Claude session on the same
+    project would consume it (cross-platform leakage)."""
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        return os.environ["CLAUDE_CONFIG_DIR"]
     if os.environ.get("CODEX_HOME"):
         return os.environ["CODEX_HOME"]
     if "/.codex/" in os.path.realpath(__file__):
