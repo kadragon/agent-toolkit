@@ -64,6 +64,12 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/task-audit-nudge/nudge.py\"",
             "timeout": 5,
             "statusMessage": "Checking harness-curator staleness..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/self-improve-nudge/surface.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking for deferred capture nudge..."
           }
         ]
       }
