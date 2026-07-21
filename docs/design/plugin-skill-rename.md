@@ -1,6 +1,6 @@
 # Design: Plugin + Skill Naming Unification
 
-**Status:** proposed (awaiting approval before execution)
+**Status:** implemented (`eeb1084`, PR #161)
 **Branch:** `refactor/plugin-skill-rename`
 **Type:** `[REFACTOR]` — rename only, no behavior change. Major version bump on both renamed plugins.
 
@@ -115,8 +115,9 @@ resume. The rename commit must include this workflow edit so CI is green in the 
 ## Verification gate (all must hold before merge)
 
 - `grep -rI 'dev-tools\|productivity\|<renamed skill names>\|orchestrate\|loop-engineer'` over
-  tracked files returns **0**, excluding: this spec, `CHANGELOG.md` history, and the known false
-  positive `conventions-template.md` ("views orchestrate"). No stale name survives.
+  tracked files returns **0**, excluding: this spec, `CHANGELOG.md` history, the migration-continuity
+  names `.harness-curator-state.json` and `task-audit-nudge/`, and the known false positive
+  `conventions-template.md` ("views orchestrate"). No other stale name survives.
 - `grep -rI 'dev-tools:\|productivity:'` returns 0 (no stale invocation prefix).
 - `dev/skills/orchestrate` and `dev/skills/loop-engineer` no longer exist.
 - Every `SKILL.md` `name:` matches its new directory name.

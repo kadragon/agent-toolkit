@@ -875,6 +875,11 @@ def _test():
     """Embedded test suite. Run: python3 guard.py --test"""
     import io
     import tempfile
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     fails = []
 
     def check(name, cond):
@@ -1076,17 +1081,18 @@ def _test():
     # prev-refs — using the hook's own (unrelated) cwd instead of the segment's
     # real `-C` target would query the wrong repository's branch/reflog and
     # could allow a commit that actually lands on main in the REAL target repo.
+    native_repo_a = os.path.abspath(os.path.join("/hostcwd", "/repoA"))
     check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → blocked",
           run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
               "git -C /repoA commit -m '[FEAT] y'",
               cwd="/hostcwd",
-              branch=lambda cwd: "main" if cwd == "/repoA" else "decoy-live",
-              reflog=lambda cwd, n: "main" if cwd == "/repoA" else "decoy-reflog") == 2)
+              branch=lambda cwd: "main" if cwd == native_repo_a else "decoy-live",
+              reflog=lambda cwd, n: "main" if cwd == native_repo_a else "decoy-reflog") == 2)
     check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → passes when non-main",
           run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
               "git -C /repoA commit -m '[FEAT] y'",
               cwd="/hostcwd",
-              branch=lambda cwd: "feature/real" if cwd == "/repoA" else "decoy-live",
+              branch=lambda cwd: "feature/real" if cwd == native_repo_a else "decoy-live",
               reflog=lambda cwd, n: "decoy-reflog") == 0)
 
     # A git ALIAS for checkout/switch (inline `-c alias.X=checkout` or a
@@ -1152,13 +1158,13 @@ def _test():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as fh:
         fh.write("[FEAT] from file\n")
         fpath = fh.name
-    check("-F valid msg passes", run(f"git commit -F {fpath}", branch="feature/x") == 0)
+    check("-F valid msg passes", run(f"git commit -F {shlex.quote(fpath)}", branch="feature/x") == 0)
     os.unlink(fpath)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as fh:
         fh.write("bad msg\n")
         fpath = fh.name
-    check("-F invalid msg blocked", run(f"git commit -F {fpath}", branch="feature/x") == 2)
+    check("-F invalid msg blocked", run(f"git commit -F {shlex.quote(fpath)}", branch="feature/x") == 2)
     os.unlink(fpath)
 
     check("-F nonexistent: fail-open", run("git commit -F /nonexistent/msg.txt", branch="feature/x") == 0)

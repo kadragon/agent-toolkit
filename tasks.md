@@ -2,6 +2,10 @@
 
 Deferred items surfaced during task-review. Not blocking; triage later.
 
+## Plugin validation
+
+- [ ] **[P2] `dev/skills/task-review/SKILL.md` frontmatter fails Claude plugin validation** — `claude plugin validate ./dev` reports a YAML parse error and drops all metadata. Quote or fold the `description:` scalar, then add validator coverage.
+
 ## task-audit-nudge
 
 The self-improve-nudge hook was retired for the manual `harness-capture` skill,

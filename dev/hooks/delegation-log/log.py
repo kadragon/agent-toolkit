@@ -57,7 +57,7 @@ except (ImportError, AttributeError):
 
         def _unlock(f):  # type: ignore[misc]
             os.lseek(f.fileno(), 0, os.SEEK_SET)
-            _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLK, _LOCK_BYTES)  # type: ignore[attr-defined]
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLCK, _LOCK_BYTES)  # type: ignore[attr-defined]
 
     except (ImportError, AttributeError):
         # neither fcntl nor msvcrt: locking skipped (safe for serial use)

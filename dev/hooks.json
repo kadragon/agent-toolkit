@@ -7,6 +7,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/commit-guard/guard.py\"",
+            "commandWindows": "python \"$env:PLUGIN_ROOT/hooks/commit-guard/guard.py\"",
             "timeout": 5,
             "statusMessage": "Checking commit guard..."
           }
@@ -20,6 +21,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/failure-log/log.py\"",
+            "commandWindows": "python \"$env:PLUGIN_ROOT/hooks/failure-log/log.py\"",
             "timeout": 5,
             "statusMessage": "Logging failed command..."
           }
@@ -31,6 +33,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/delegation-log/log.py\"",
+            "commandWindows": "python \"$env:PLUGIN_ROOT/hooks/delegation-log/log.py\"",
             "timeout": 5,
             "statusMessage": "Logging delegation..."
           }
@@ -44,12 +47,14 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/harness-maintenance/run.sh\"",
+            "commandWindows": "bash \"$env:PLUGIN_ROOT/hooks/harness-maintenance/run.sh\"",
             "timeout": 15,
             "statusMessage": "Checking harness..."
           },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/task-audit-nudge/nudge.py\"",
+            "commandWindows": "python \"$env:PLUGIN_ROOT/hooks/task-audit-nudge/nudge.py\"",
             "timeout": 5,
             "statusMessage": "Checking harness-curate staleness..."
           }
