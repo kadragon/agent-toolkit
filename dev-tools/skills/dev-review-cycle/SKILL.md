@@ -1,6 +1,6 @@
 ---
 name: dev-review-cycle
-description: Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply → CI → merge. --no-hub: local only. --auto: skip confirmation. Trigger: "리뷰 돌려줘", "review cycle", "run review", "dev review", "리뷰 머지", "open pr merge", "wait ci merge".
+description: Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply → retrospect → CI → merge. --no-hub: local only. --auto: skip confirmation. Trigger: "리뷰 돌려줘", "review cycle", "run review", "dev review", "리뷰 머지", "open pr merge", "wait ci merge".
 ---
 
 # Dev Review Cycle
@@ -197,20 +197,38 @@ If `--auto` set: treat all in-scope (non-refuted) as approved.
 
 Before proceeding:
 1. Write out-of-scope items to `tasks.md` (format in consolidation-guide.md).
-2. If no in-scope items: skip Steps 4–5. If `tasks.md` modified, still run Step 5 to commit it. Step 6 always runs (unless `--no-hub`).
+2. If no in-scope items: skip Step 4, but still run Step 4.5 (retrospect). Run Step 5 if `tasks.md` was modified or Step 4.5 edited any repo file. Step 6 always runs (unless `--no-hub`).
 
 ### Step 4: Apply Improvements
 
 Apply accepted changes. Find test command: `package.json scripts.test`, `Makefile`, `pytest.ini`, `pyproject.toml`, `go.mod`, `Cargo.toml`. Run tests. On failure: revert via `git restore --staged <files> && git restore <files>`, report which suggestion failed, ask user to skip or retry.
 
+### Step 4.5: Retrospect (pre-merge, signal-gated)
+
+Reflect on this cycle **before committing**, so any durable lesson lands *inside this PR* instead of becoming a stray change on `main` after merge. This is the only in-cycle retrospect point — cheap, skippable, and a no-op for most cycles.
+
+Quick self-check: did this cycle surface a **user correction**, a **recurring gotcha / setup fix**, or a **reusable workflow**? If none, skip and go to Step 5 — silence is the normal outcome, not a failure.
+
+If a signal exists, invoke `Skill(dev-tools:capture-learnings)` and route its write-back **by weight** so the PR stays scoped:
+
+| Lesson | Write-back |
+|--------|-----------|
+| Preference / approach correction | **auto-memory** — outside the repo, so write now with no merge impact |
+| Small doc or gotcha tied to this change | inline edit to `docs/*.md` / `AGENTS.md` / `CLAUDE.md` → rides into the Step 5 commit, validated by Step 6 CI |
+| New skill, skill overhaul, or multi-file doc rewrite | record to `tasks.md` as a follow-up (same channel as an out-of-scope finding) — do **not** inline: it would balloon the PR, and a skill edit would force a mid-cycle version re-bump |
+
+`--auto`: `capture-learnings` runs **non-interactively** (its cycle-tail `--auto` path) — it writes the light memory/doc delta directly, with this PR's review + CI as the veto, and defers any destructive memory prune to `tasks.md` instead of pausing. Interactive: it shows the proposed delta and waits for confirm. Heavy items always defer to `tasks.md`, never inline.
+
+Any repo file edited here rides into Step 5 — add it to `FILES_TO_STAGE` below.
+
 ### Step 5: Commit Improvements
 
-List exact files modified in Step 4. Verify against `git status --short` before staging.
+List exact files modified in Step 4 **and any repo files edited in Step 4.5**. Verify against `git status --short` before staging.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
-FILES_TO_STAGE="path/to/file1 path/to/file2"  # exact files modified in Step 4, verified against `git status --short`
+FILES_TO_STAGE="path/to/file1 path/to/file2"  # exact files modified in Step 4 and Step 4.5, verified against `git status --short`
 COMMIT_MESSAGE="<derived from git diff --stat HEAD + git log --oneline -5>"  # from Step 1
 
 # --no-hub:
@@ -247,7 +265,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Step 1 fails | Stop, report |
 | Review sub-agent fails | Log skill id, proceed with remaining |
 | Review source >600s | Skip that source, proceed with the rest; note "timeout (>600s)" |
-| No actionable suggestions | Skip Steps 4–5, still run Step 6 |
+| No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
 | CI fails 3× | Stop, ask user |

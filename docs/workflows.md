@@ -44,7 +44,7 @@ Always delegate to `qa-verifier`. The agent that implemented must NOT verify its
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Use `dev-tools:dev-review-cycle` skill. Do NOT inline-manage review cycle.
+Use `dev-tools:dev-review-cycle` skill. Do NOT inline-manage review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev-tools:capture-learnings`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
 
 ## `draft` — Documentation
 
