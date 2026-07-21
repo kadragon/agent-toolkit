@@ -14,7 +14,6 @@
 ## Delegation
 - Default inline. Delegate only for: 10+ files to read/summarize · 3+ truly independent units · output would flood main context. Coupled/sequential/judgment-heavy → inline.
 - Scope uncertain → check yourself first (1–2 searches), then decide. Brief = goal · constraints · exit criterion (+ files/cmds).
-- Detailed routing/model recipes → `dev-tools:orchestrate`.
 
 ## Coding discipline
 - State exit criterion in one sentence before implementing — "test X passes", "exits 0", "screenshot matches".
@@ -26,7 +25,7 @@
 
 ## Harness ratchet
 - Same mistake 2× or recurring work → encode mechanically (hook/lint/test) or promote to skill/docs. Persist only objectively verified findings (test/exit-0/verifier); delta append. On `docs/` change, sync AGENTS.md index.
-- Periodic review/retirement (unused assets, post-model-upgrade guardrail re-exam) → `dev-tools:harness-curator`.
+- Periodic review/retirement (unused assets, post-model-upgrade guardrail re-exam) → `dev:harness-curate`.
 
 ## Hard stops — pause and ask
 - Material ambiguity affecting scope, irreversible effects, external communication, or expected output → Grill: one question at a time, each with recommended answer + rationale; answer in code → read, don't ask.

@@ -13,22 +13,22 @@
 
 ```bash
 # Install plugins from local path
-claude plugin install ./dev-tools
-claude plugin install ./productivity
+claude plugin install ./dev
+claude plugin install ./prod
 ```
 
 ### Codex Plugin Install
 
 ```bash
-codex plugin add dev-tools@kadragon
-codex plugin add productivity@kadragon
+codex plugin add dev@kadragon
+codex plugin add prod@kadragon
 ```
 
 ## Validate
 
 | Command | Purpose |
 |---------|---------|
-| `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
+| `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev/3.0.7/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 
 ## Release Workflow
@@ -36,14 +36,14 @@ codex plugin add productivity@kadragon
 1. Make changes to skill/agent files
 2. Bump versions: `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (see `docs/conventions.md` — semver rules)
 3. Run harness validate
-4. Commit + push + PR via `dev-tools:dev-review-cycle`
+4. Commit + push + PR via `dev:task-review`
 5. Merge triggers marketplace update
 
 ### Version bump check
 
 ```bash
 # Check which plugin.json versions are on this branch vs main
-git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugin/plugin.json
+git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
 ```
 
 ## Common Failures
@@ -51,7 +51,7 @@ git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugi
 ### CI fails: "plugin.json version unchanged"
 
 **Symptom:** `harness-check.yml` exits 1 with "version not bumped"
-**Cause:** Modified files in `dev-tools/` or `productivity/` but didn't bump `plugin.json`
+**Cause:** Modified files in `dev/` or `prod/` but didn't bump `plugin.json`
 **Fix:** `bash scripts/bump-version.sh <plugin> patch` (or minor/major per semver table in `docs/conventions.md`)
 
 ### plugin.json version conflict after pulling remote changes
@@ -76,7 +76,7 @@ git diff main -- dev-tools/.claude-plugin/plugin.json productivity/.claude-plugi
 **Symptom:** Skill lookup fails; `validate-harness.sh` reports symlink warning
 **Fix:**
 ```bash
-bash /Users/kadragon/.claude/plugins/cache/kadragon/dev-tools/3.0.7/skills/harness-init/scripts/symlink-guard.sh
+bash /Users/kadragon/.claude/plugins/cache/kadragon/dev/3.0.7/skills/harness-init/scripts/symlink-guard.sh
 ```
 
 ## Harness Scripts

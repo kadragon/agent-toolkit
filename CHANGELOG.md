@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Naming unification — plugins `dev-tools`→`dev` (v4.0.0), `productivity`→`prod` (v3.0.0); dev skills regrouped into `task-*`/`harness-*`/`repo-*` families; `repo-quiz` moved to prod; retired `orchestrate` + `loop-engineer`; harness-check.yml made rename-tolerant (2026-07-21)
 - [done] Scrub router-var remnant — conventions.md SCREAMING_SNAKE example ROUTES_FILE → SKILL_DIR; sweep.sh exclusion kept for live trigger-router-template.md (2026-07-17)
 - [done] preflight.sh base_branch staleness fix — fast-forward local base branch before scoping diffs (2026-07-07)
 - [done] PR #119 review backlog — hwpx validate.py XXE/billion-laughs hardening via defusedxml (2026-07-05)

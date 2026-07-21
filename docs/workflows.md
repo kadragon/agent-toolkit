@@ -12,12 +12,12 @@ Expand a short prompt into a concrete spec.
 
 Skip for trivial features (one-line skill fix, comment update).
 
-Steps 1-2 are automated by `dev-tools:to-spec` (synthesizes conversation + `dev-tools:grill`
+Steps 1-2 are automated by `dev:task-spec` (synthesizes conversation + `dev:task-grill`
 output into `docs/design/{slug}.md`; does not interview the user). Step 3 is automated by
-`dev-tools:to-tickets` (breaks an approved spec into vertical-slice `backlog.md` items in
-dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev-tools:new-task`
+`dev:task-tickets` (breaks an approved spec into vertical-slice `backlog.md` items in
+dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev:task-new`
 routes ad-hoc, non-trivial free-text requests through this same
-grill → to-spec → to-tickets chain automatically, then runs the resulting work through `code`.
+task-grill → task-spec → task-tickets chain automatically, then runs the resulting work through `code`.
 
 ## `code` — Implementation
 
@@ -44,7 +44,7 @@ Always delegate to `qa-verifier`. The agent that implemented must NOT verify its
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Use `dev-tools:dev-review-cycle` skill. Do NOT inline-manage review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev-tools:capture-learnings`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
+Use `dev:task-review` skill. Do NOT inline-manage review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
 
 ## `draft` — Documentation
 

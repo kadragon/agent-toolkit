@@ -32,8 +32,8 @@ All triggers are objective and measurable — no subjective conditions.
 
 | Trigger | Delegate to | Context |
 |---------|-------------|---------|
-| Every PR | `dev-tools:dev-review-cycle` skill | PR number or current branch |
-| Harness check request | `dev-tools:harness-curator` skill | — |
+| Every PR | `dev:task-review` skill | PR number or current branch |
+| Harness check request | `dev:harness-curate` skill | — |
 
 ### Escalation
 

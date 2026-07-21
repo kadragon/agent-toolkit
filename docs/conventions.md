@@ -4,7 +4,7 @@
 
 | Element | Pattern | Example |
 |---------|---------|---------|
-| Skill directories | `kebab-case` | `harness-init`, `dev-review-cycle` |
+| Skill directories | `kebab-case` | `harness-init`, `task-review` |
 | Shell scripts | `kebab-case.sh` | `bump-version.sh`, `sweep.sh` |
 | Python scripts | `snake_case.py` | `scan_transcripts.py` |
 | Agent role files | `kebab-case.md` | `qa-verifier.md`, `skill-evaluator.md` |
@@ -61,7 +61,7 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 
 ## Plugin Version Bump Rules
 
-`dev-tools/.claude-plugin/plugin.json`, `productivity/.claude-plugin/plugin.json`, and `team-standards/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
+`dev/.claude-plugin/plugin.json`, `prod/.claude-plugin/plugin.json`, and `team-standards/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
 
 | Change type | Bump |
 |-------------|------|
@@ -69,16 +69,16 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 | Skill or agent modified | patch: `x.y.Z → x.y.(Z+1)` |
 | Skill or agent removed or renamed | major: `X.y.z → (X+1).0.0` |
 
-Rule: if any file under `dev-tools/` changed in the diff → `dev-tools/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
+Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 
 Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):
 
 ```bash
-# patch bump for dev-tools
-bash scripts/bump-version.sh dev-tools patch
+# patch bump for dev
+bash scripts/bump-version.sh dev patch
 
 # minor bump + skill version
-bash scripts/bump-version.sh dev-tools minor --skill harness-curator patch
+bash scripts/bump-version.sh dev minor --skill harness-curate patch
 
 # bump both plugins
 bash scripts/bump-version.sh all patch

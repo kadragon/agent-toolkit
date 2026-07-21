@@ -14,7 +14,7 @@ usage() {
   cat >&2 <<EOF
 Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 
-  plugin:     dev-tools | productivity | team-standards | all
+  plugin:     dev | prod | team-standards | all
   bump type:  major | minor | patch
 
   --skill <name> [major|minor|patch]
@@ -22,8 +22,8 @@ Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
     Defaults to 'patch' if bump type omitted.
 
 Examples:
-  $0 dev-tools patch
-  $0 productivity minor --skill harness-curator patch
+  $0 dev patch
+  $0 prod minor --skill harness-curate patch
   $0 team-standards patch
   $0 all patch
 EOF
@@ -128,15 +128,15 @@ fi
 echo "Bumping versions (${BUMP_TYPE}):"
 
 case "$PLUGIN" in
-  dev-tools|productivity|team-standards)
+  dev|prod|team-standards)
     bump_plugin "$PLUGIN" "$BUMP_TYPE"
     if [[ -n "$SKILL_NAME" ]]; then
       bump_skill "$PLUGIN" "$SKILL_NAME" "$SKILL_BUMP"
     fi
     ;;
   all)
-    bump_plugin "dev-tools" "$BUMP_TYPE"
-    bump_plugin "productivity" "$BUMP_TYPE"
+    bump_plugin "dev" "$BUMP_TYPE"
+    bump_plugin "prod" "$BUMP_TYPE"
     bump_plugin "team-standards" "$BUMP_TYPE"
     ;;
   *) usage ;;

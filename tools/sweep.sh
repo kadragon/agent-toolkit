@@ -67,26 +67,26 @@ fi
 # ── 3. Golden principle spot-check ───────────────────────────
 echo -e "${CYAN}[3/5] Golden principles...${NC}"
 
-# Check: any file under dev-tools/ or productivity/ changed vs main, but plugin.json unchanged
-DEVTOOLS_CHANGED=$(git diff main -- dev-tools/ 2>/dev/null | grep -c '^+\|^-' || true)
+# Check: any file under dev/ or prod/ changed vs main, but plugin.json unchanged
+DEVTOOLS_CHANGED=$(git diff main -- dev/ 2>/dev/null | grep -c '^+\|^-' || true)
 if [[ "$DEVTOOLS_CHANGED" -gt 0 ]]; then
-    BUMP=$(git diff main -- dev-tools/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
+    BUMP=$(git diff main -- dev/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
     if [[ "$BUMP" -eq 0 ]]; then
-        FINDINGS+=("[constraint] VIOLATION: dev-tools/ changed vs main but plugin.json version not bumped")
-        echo -e "  ${RED}FAIL${NC} dev-tools/ changed but plugin.json not bumped (vs main)"
+        FINDINGS+=("[constraint] VIOLATION: dev/ changed vs main but plugin.json version not bumped")
+        echo -e "  ${RED}FAIL${NC} dev/ changed but plugin.json not bumped (vs main)"
     else
-        echo -e "  ${GREEN}OK${NC} dev-tools version bumped"
+        echo -e "  ${GREEN}OK${NC} dev version bumped"
     fi
 fi
 
-PRODUCTIVITY_CHANGED=$(git diff main -- productivity/ 2>/dev/null | grep -c '^+\|^-' || true)
+PRODUCTIVITY_CHANGED=$(git diff main -- prod/ 2>/dev/null | grep -c '^+\|^-' || true)
 if [[ "$PRODUCTIVITY_CHANGED" -gt 0 ]]; then
-    BUMP=$(git diff main -- productivity/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
+    BUMP=$(git diff main -- prod/.claude-plugin/plugin.json 2>/dev/null | grep '^\+.*"version"' | wc -l | tr -d ' ' || true)
     if [[ "$BUMP" -eq 0 ]]; then
-        FINDINGS+=("[constraint] VIOLATION: productivity/ changed vs main but plugin.json version not bumped")
-        echo -e "  ${RED}FAIL${NC} productivity/ changed but plugin.json not bumped (vs main)"
+        FINDINGS+=("[constraint] VIOLATION: prod/ changed vs main but plugin.json version not bumped")
+        echo -e "  ${RED}FAIL${NC} prod/ changed but plugin.json not bumped (vs main)"
     else
-        echo -e "  ${GREEN}OK${NC} productivity version bumped"
+        echo -e "  ${GREEN}OK${NC} prod version bumped"
     fi
 fi
 

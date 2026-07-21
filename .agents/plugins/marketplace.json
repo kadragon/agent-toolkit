@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "dev-tools",
+      "name": "dev",
       "source": {
         "source": "local",
-        "path": "./dev-tools"
+        "path": "./dev"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -17,10 +17,10 @@
       "category": "Developer Tools"
     },
     {
-      "name": "productivity",
+      "name": "prod",
       "source": {
         "source": "local",
-        "path": "./productivity"
+        "path": "./prod"
       },
       "policy": {
         "installation": "AVAILABLE",

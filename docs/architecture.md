@@ -13,7 +13,7 @@
 ## Source Layout
 
 ```
-dev-tools/
+dev/
   .claude-plugin/plugin.json   # semver manifest — bump before merge
   agents/                      # plugin-shipped agent roles
   hooks/                       # hook scripts (references/)
@@ -25,7 +25,7 @@ dev-tools/
       examples/
   commands/                    # slash commands
 
-productivity/
+prod/
   .claude-plugin/plugin.json
   agents/
   skills/
@@ -60,14 +60,14 @@ plugin.json
 ```
 
 - Skills within a plugin may reference that plugin's `agents/` and `references/`
-- No cross-plugin imports — `dev-tools/` skill must not reference `productivity/` paths
+- No cross-plugin imports — `dev/` skill must not reference `prod/` paths
 - Agent artifacts go to the session scratchpad directory (path given in the system prompt) — never committed, never repo-root
 - Delegation-gate evidence files live in `.claude/tmp/` (gitignored, repo-local — see `references/enforcement-template.md`)
 
 ### Boundaries
 
 - Each plugin is independently installable — no shared deps at runtime
-- `dev-tools/skills/harness-init/references/` is internal to harness-init; do not reference from other skills
+- `dev/skills/harness-init/references/` is internal to harness-init; do not reference from other skills
 
 ## Key Abstractions
 

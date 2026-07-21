@@ -23,7 +23,7 @@ This repo ships plugins for **both** platforms. Any skill, hook, or agent added 
 
 ```json
 {
-  "name": "dev-tools",
+  "name": "dev",
   "version": "3.0.7",
   "skills": "./skills/",
   "hooks": "./hooks.json",
@@ -122,7 +122,7 @@ Plugin-shipped agents **cannot** declare `hooks`, `mcpServers`, or `permissionMo
 
 ```json
 {
-  "name": "dev-tools",
+  "name": "dev",
   "version": "X.Y.Z",
   "skills": "./skills/",
   "hooks": "./hooks.json",
@@ -177,8 +177,8 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
   "name": "kadragon",
   "plugins": [
     {
-      "name": "dev-tools",
-      "source": { "source": "local", "path": "./dev-tools" },
+      "name": "dev",
+      "source": { "source": "local", "path": "./dev" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Developer Tools"
     }
@@ -213,7 +213,7 @@ These variables belong to the plugin hook command environment. They are not guar
 
 ### Version bumps
 
-Both `dev-tools/.claude-plugin/plugin.json` AND `dev-tools/.codex-plugin/plugin.json` must be bumped together. CI enforces both — version mismatch between manifests blocks merge.
+Both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` must be bumped together. CI enforces both — version mismatch between manifests blocks merge.
 
 ---
 
