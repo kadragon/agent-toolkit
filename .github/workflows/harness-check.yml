@@ -62,7 +62,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check dev-tools version bumped
+      - name: Check dev version bumped
         run: |
           ver_gt() {
             local IFS=.
@@ -74,43 +74,47 @@ jobs:
             [ "$a2" -lt "$b2" ] && return 1
             [ "$a3" -gt "$b3" ]
           }
-          CHANGED=$(git diff origin/main...HEAD -- dev-tools/ | grep -c '^+\|^-' || true)
+          CHANGED=$(git diff origin/main...HEAD -- dev/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
-            OLD_CLAUDE=$(git show origin/main:dev-tools/.claude-plugin/plugin.json | jq -r .version)
-            OLD_CODEX=$(git show origin/main:dev-tools/.codex-plugin/plugin.json | jq -r .version)
-            NEW_CLAUDE=$(jq -r .version dev-tools/.claude-plugin/plugin.json)
-            NEW_CODEX=$(jq -r .version dev-tools/.codex-plugin/plugin.json)
+            if ! git cat-file -e "origin/main:dev/.claude-plugin/plugin.json" 2>/dev/null; then
+              echo "OK: dev/ is new or renamed on this branch (no manifest on origin/main) - skipping version-increment check."
+              exit 0
+            fi
+            OLD_CLAUDE=$(git show origin/main:dev/.claude-plugin/plugin.json | jq -r .version)
+            OLD_CODEX=$(git show origin/main:dev/.codex-plugin/plugin.json | jq -r .version)
+            NEW_CLAUDE=$(jq -r .version dev/.claude-plugin/plugin.json)
+            NEW_CODEX=$(jq -r .version dev/.codex-plugin/plugin.json)
             for v in OLD_CLAUDE OLD_CODEX NEW_CLAUDE NEW_CODEX; do
               eval "val=\$$v"
-              [ "$val" = "null" ] && { echo "ERROR: dev-tools $v version key missing in manifest."; exit 1; }
+              [ "$val" = "null" ] && { echo "ERROR: dev $v version key missing in manifest."; exit 1; }
             done
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ] && [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
-              echo "ERROR: dev-tools/ changed but neither manifest bumped ($NEW_CLAUDE)."
+              echo "ERROR: dev/ changed but neither manifest bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ]; then
-              echo "ERROR: dev-tools Codex bumped ($OLD_CODEX->$NEW_CODEX) but Claude manifest not ($NEW_CLAUDE). Bump both in sync."
+              echo "ERROR: dev Codex bumped ($OLD_CODEX->$NEW_CODEX) but Claude manifest not ($NEW_CLAUDE). Bump both in sync."
               exit 1
             fi
             if [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
-              echo "ERROR: dev-tools Claude bumped ($OLD_CLAUDE->$NEW_CLAUDE) but Codex manifest not ($NEW_CODEX). Bump both in sync."
+              echo "ERROR: dev Claude bumped ($OLD_CLAUDE->$NEW_CLAUDE) but Codex manifest not ($NEW_CODEX). Bump both in sync."
               exit 1
             fi
             if [ "$NEW_CLAUDE" != "$NEW_CODEX" ]; then
-              echo "ERROR: dev-tools manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
+              echo "ERROR: dev manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
               exit 1
             fi
             if ! ver_gt "$NEW_CLAUDE" "$OLD_CLAUDE"; then
-              echo "ERROR: dev-tools version did not increase ($OLD_CLAUDE -> $NEW_CLAUDE). Bumps must be a strict SemVer increment."
+              echo "ERROR: dev version did not increase ($OLD_CLAUDE -> $NEW_CLAUDE). Bumps must be a strict SemVer increment."
               exit 1
             fi
-            echo "OK: dev-tools version bumped ($OLD_CLAUDE -> $NEW_CLAUDE), both manifests in sync."
+            echo "OK: dev version bumped ($OLD_CLAUDE -> $NEW_CLAUDE), both manifests in sync."
           else
-            echo "SKIP: dev-tools/ not changed."
+            echo "SKIP: dev/ not changed."
           fi
 
-      - name: Check productivity version bumped
+      - name: Check prod version bumped
         run: |
           ver_gt() {
             local IFS=.
@@ -122,40 +126,44 @@ jobs:
             [ "$a2" -lt "$b2" ] && return 1
             [ "$a3" -gt "$b3" ]
           }
-          CHANGED=$(git diff origin/main...HEAD -- productivity/ | grep -c '^+\|^-' || true)
+          CHANGED=$(git diff origin/main...HEAD -- prod/ | grep -c '^+\|^-' || true)
           if [ "$CHANGED" -gt 0 ]; then
-            OLD_CLAUDE=$(git show origin/main:productivity/.claude-plugin/plugin.json | jq -r .version)
-            OLD_CODEX=$(git show origin/main:productivity/.codex-plugin/plugin.json | jq -r .version)
-            NEW_CLAUDE=$(jq -r .version productivity/.claude-plugin/plugin.json)
-            NEW_CODEX=$(jq -r .version productivity/.codex-plugin/plugin.json)
+            if ! git cat-file -e "origin/main:prod/.claude-plugin/plugin.json" 2>/dev/null; then
+              echo "OK: prod/ is new or renamed on this branch (no manifest on origin/main) - skipping version-increment check."
+              exit 0
+            fi
+            OLD_CLAUDE=$(git show origin/main:prod/.claude-plugin/plugin.json | jq -r .version)
+            OLD_CODEX=$(git show origin/main:prod/.codex-plugin/plugin.json | jq -r .version)
+            NEW_CLAUDE=$(jq -r .version prod/.claude-plugin/plugin.json)
+            NEW_CODEX=$(jq -r .version prod/.codex-plugin/plugin.json)
             for v in OLD_CLAUDE OLD_CODEX NEW_CLAUDE NEW_CODEX; do
               eval "val=\$$v"
-              [ "$val" = "null" ] && { echo "ERROR: productivity $v version key missing in manifest."; exit 1; }
+              [ "$val" = "null" ] && { echo "ERROR: prod $v version key missing in manifest."; exit 1; }
             done
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ] && [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
-              echo "ERROR: productivity/ changed but neither manifest bumped ($NEW_CLAUDE)."
+              echo "ERROR: prod/ changed but neither manifest bumped ($NEW_CLAUDE)."
               echo "See docs/conventions.md for semver rules."
               exit 1
             fi
             if [ "$OLD_CLAUDE" = "$NEW_CLAUDE" ]; then
-              echo "ERROR: productivity Codex bumped ($OLD_CODEX->$NEW_CODEX) but Claude manifest not ($NEW_CLAUDE). Bump both in sync."
+              echo "ERROR: prod Codex bumped ($OLD_CODEX->$NEW_CODEX) but Claude manifest not ($NEW_CLAUDE). Bump both in sync."
               exit 1
             fi
             if [ "$OLD_CODEX" = "$NEW_CODEX" ]; then
-              echo "ERROR: productivity Claude bumped ($OLD_CLAUDE->$NEW_CLAUDE) but Codex manifest not ($NEW_CODEX). Bump both in sync."
+              echo "ERROR: prod Claude bumped ($OLD_CLAUDE->$NEW_CLAUDE) but Codex manifest not ($NEW_CODEX). Bump both in sync."
               exit 1
             fi
             if [ "$NEW_CLAUDE" != "$NEW_CODEX" ]; then
-              echo "ERROR: productivity manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
+              echo "ERROR: prod manifests out of sync: .claude-plugin ($NEW_CLAUDE) != .codex-plugin ($NEW_CODEX)."
               exit 1
             fi
             if ! ver_gt "$NEW_CLAUDE" "$OLD_CLAUDE"; then
-              echo "ERROR: productivity version did not increase ($OLD_CLAUDE -> $NEW_CLAUDE). Bumps must be a strict SemVer increment."
+              echo "ERROR: prod version did not increase ($OLD_CLAUDE -> $NEW_CLAUDE). Bumps must be a strict SemVer increment."
               exit 1
             fi
-            echo "OK: productivity version bumped ($OLD_CLAUDE -> $NEW_CLAUDE), both manifests in sync."
+            echo "OK: prod version bumped ($OLD_CLAUDE -> $NEW_CLAUDE), both manifests in sync."
           else
-            echo "SKIP: productivity/ not changed."
+            echo "SKIP: prod/ not changed."
           fi
 
       - name: Check team-standards version bumped

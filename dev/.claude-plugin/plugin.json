@@ -1,0 +1,39 @@
+{
+  "name": "dev",
+  "description": "Personal development skills and workflows for agent-assisted engineering.",
+  "version": "4.0.0",
+  "author": {
+    "name": "kadragon"
+  },
+  "homepage": "https://github.com/kadragon/agent-toolkit",
+  "repository": "https://github.com/kadragon/agent-toolkit",
+  "license": "MIT",
+  "keywords": [
+    "development",
+    "harness",
+    "review",
+    "dependabot",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "hooks": "./hooks.json",
+  "interface": {
+    "displayName": "Dev Tools",
+    "shortDescription": "Development workflows for agent-assisted engineering",
+    "longDescription": "Use development skills for harness setup, review cycles, orchestration, Dependabot management, and session-history curation.",
+    "developerName": "kadragon",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set up a repo harness",
+      "Run a development review cycle",
+      "Manage Dependabot PRs"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

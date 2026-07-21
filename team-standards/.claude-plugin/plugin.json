@@ -1,7 +1,7 @@
 {
   "name": "team-standards",
   "description": "Injects shared agent working standards into every session at startup, so teammates get the same baseline behavior without maintaining their own global CLAUDE.md.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "kadragon"
   },

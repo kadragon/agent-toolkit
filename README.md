@@ -4,16 +4,14 @@ Personal agent plugin marketplace by kadragon.
 
 Two plugins:
 
-### `dev-tools` — development
+### `dev` — development
 
 | Skill | Description | Claude Code | Codex |
 |---|---|---|---|
 | `harness-init` | Bootstraps agent infrastructure (AGENTS.md, docs/, hooks) | ✅ | ❌ |
-| `dev-review-cycle` | Orchestrates Claude/Antigravity/Codex reviewers, merges | ✅ | ❌ |
-| `orchestrate` | Multi-agent delegation playbook | ✅ | ❌ |
-| `harness-curator` | Mines transcripts to manage harness assets | ✅ | ❌ |
-| `loop-engineer` | Iterative quality-improvement loop (Reflexion + independent verifier) for artifacts with no test gate | ✅ | ❌ |
-| `dependabot-manager` | Bulk Dependabot PR operations | ✅ | ⚠️ |
+| `task-review` | Orchestrates Claude/Antigravity/Codex reviewers, merges | ✅ | ❌ |
+| `harness-curate` | Mines transcripts to manage harness assets | ✅ | ❌ |
+| `repo-dependabot` | Bulk Dependabot PR operations | ✅ | ⚠️ |
 
 **Commands:**
 
@@ -21,7 +19,7 @@ Two plugins:
 |---|---|---|---|
 | `/security-overview` | Scans GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos, writes per-repo `plan.md` | ✅ | ❌ |
 
-### `productivity` — document authoring
+### `prod` — document authoring
 
 | Skill | Description | Claude Code | Codex |
 |---|---|---|---|
@@ -31,10 +29,10 @@ Two plugins:
 ## Installation
 
 > **Migrating from `toolkit@kadragon`?** The former single plugin is now split into
-> `dev-tools@kadragon` and `productivity@kadragon`. Remove the old plugin
+> `dev@kadragon` and `prod@kadragon`. Remove the old plugin
 > (`claude plugin uninstall toolkit@kadragon`) and install both below.
 > Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
-> the hook now ships as `dev-tools:harness-maintenance`.
+> the hook now ships as `dev:harness-maintenance`.
 
 ### npx skills
 
@@ -45,18 +43,16 @@ npx skills add kadragon/agent-toolkit
 # Specific skills
 npx skills add kadragon/agent-toolkit --skill hwpx
 npx skills add kadragon/agent-toolkit --skill persona-debate
-npx skills add kadragon/agent-toolkit --skill dev-review-cycle
+npx skills add kadragon/agent-toolkit --skill task-review
 npx skills add kadragon/agent-toolkit --skill harness-init
-npx skills add kadragon/agent-toolkit --skill orchestrate
-npx skills add kadragon/agent-toolkit --skill loop-engineer
 ```
 
 ### Claude Code
 
 ```bash
 claude plugin marketplace add kadragon/agent-toolkit
-claude plugin install dev-tools@kadragon
-claude plugin install productivity@kadragon
+claude plugin install dev@kadragon
+claude plugin install prod@kadragon
 ```
 
 Via `~/.claude/settings.json`:
@@ -64,8 +60,8 @@ Via `~/.claude/settings.json`:
 ```json
 {
   "enabledPlugins": {
-    "dev-tools@kadragon": true,
-    "productivity@kadragon": true
+    "dev@kadragon": true,
+    "prod@kadragon": true
   },
   "extraKnownMarketplaces": {
     "kadragon": {
@@ -85,8 +81,8 @@ Codex uses `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json` ma
 
 ```bash
 codex plugin marketplace add kadragon/agent-toolkit
-codex plugin add dev-tools@kadragon
-codex plugin add productivity@kadragon
+codex plugin add dev@kadragon
+codex plugin add prod@kadragon
 ```
 
 Install only ✅/⚠️ skills from table above.

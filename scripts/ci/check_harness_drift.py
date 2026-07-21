@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harness ratchet checks for shipped plugin skills (dev-tools/, productivity/).
+"""Harness ratchet checks for shipped plugin skills (dev/, prod/).
 
 Two independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
@@ -31,15 +31,15 @@ REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
 )
 
-SKILL_GLOBS = ["dev-tools/skills/*/SKILL.md", "productivity/skills/*/SKILL.md"]
+SKILL_GLOBS = ["dev/skills/*/SKILL.md", "prod/skills/*/SKILL.md"]
 REFERENCE_GLOBS = [
-    "dev-tools/skills/*/references/*.md",
-    "productivity/skills/*/references/*.md",
+    "dev/skills/*/references/*.md",
+    "prod/skills/*/references/*.md",
 ]
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
 # All other skills are warn-only until brought into compliance separately.
-HARD_FAIL_SKILLS = {"harness-init", "next-tasks", "hwpx", "dev-review-cycle"}
+HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review"}
 
 ALLOWLIST_VARS = {"HOME", "PATH"}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")

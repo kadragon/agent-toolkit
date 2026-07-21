@@ -37,5 +37,5 @@ cache/
 
 # Codex-specific dirs (not Claude Code context)
 .agents/plugins/
-dev-tools/.codex-plugin/
-productivity/.codex-plugin/
+dev/.codex-plugin/
+prod/.codex-plugin/
