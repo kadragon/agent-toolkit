@@ -72,7 +72,9 @@ When `dev-review-cycle` calls this skill just before merge, you are on a feature
 branch with an open PR — so repo write-backs are *welcome* here (they ride into
 the PR and CI validates them), provided you keep them **light and in-scope**:
 
-- Preference / correction → auto-memory, as usual — it lives outside the repo.
+- Preference / correction → auto-memory (Claude Code) or `AGENTS.md` (Codex) —
+  see the platform note under **Writing to auto-memory**; both live where the
+  runtime can read them back.
 - Small doc or gotcha directly tied to this change → inline edit to
   `docs/*.md` / `AGENTS.md` / `CLAUDE.md`; it merges with the PR.
 - Anything heavy — a new skill, a skill overhaul, a multi-file doc rewrite —
@@ -80,10 +82,23 @@ the PR and CI validates them), provided you keep them **light and in-scope**:
   same channel out-of-scope review findings use. Inlining it would balloon the
   PR and, for a skill, force a mid-cycle version re-bump.
 
+**Under `--auto` (the non-interactive path `dev-review-cycle` uses):** do not
+pause for the per-write veto or hygiene approval described below — the open PR's
+review and CI are the safety net. Write the light memory/doc delta directly, and
+for any *destructive* memory prune (deleting an entry) defer it to `tasks.md`
+rather than blocking, so the review cycle's `--auto` guarantee holds.
+
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,
 this is a no-op — say so in one line and let the merge proceed.
 
 ## Writing to auto-memory
+
+**Platform note:** auto-memory — the `# Memory` store plus its `MEMORY.md` index
+— is a **Claude Code** mechanism. If your runtime doesn't provide it (e.g. Codex,
+which has no auto-memory store), route the same preference/correction to the
+instruction file (`AGENTS.md`) instead; the dedup, minimality, and
+show-before-write rules below apply identically to that edit, and the **Memory
+hygiene** pass simply doesn't run (there's no store to tidy).
 
 When step 2 routes a lesson to auto-memory, don't just append a fresh file — a
 memory store that accumulates near-duplicates decays the same way a bloated

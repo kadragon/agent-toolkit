@@ -217,7 +217,7 @@ If a signal exists, invoke `Skill(dev-tools:capture-learnings)` and route its wr
 | Small doc or gotcha tied to this change | inline edit to `docs/*.md` / `AGENTS.md` / `CLAUDE.md` → rides into the Step 5 commit, validated by Step 6 CI |
 | New skill, skill overhaul, or multi-file doc rewrite | record to `tasks.md` as a follow-up (same channel as an out-of-scope finding) — do **not** inline: it would balloon the PR, and a skill edit would force a mid-cycle version re-bump |
 
-`--auto`: apply the light inline delta automatically (CI validates it). Interactive: show the proposed delta and wait for confirm. Heavy items always defer to `tasks.md`, never inline.
+`--auto`: `capture-learnings` runs **non-interactively** (its cycle-tail `--auto` path) — it writes the light memory/doc delta directly, with this PR's review + CI as the veto, and defers any destructive memory prune to `tasks.md` instead of pausing. Interactive: it shows the proposed delta and waits for confirm. Heavy items always defer to `tasks.md`, never inline.
 
 Any repo file edited here rides into Step 5 — add it to `FILES_TO_STAGE` below.
 
@@ -228,7 +228,7 @@ List exact files modified in Step 4 **and any repo files edited in Step 4.5**. V
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
-FILES_TO_STAGE="path/to/file1 path/to/file2"  # exact files modified in Step 4, verified against `git status --short`
+FILES_TO_STAGE="path/to/file1 path/to/file2"  # exact files modified in Step 4 and Step 4.5, verified against `git status --short`
 COMMIT_MESSAGE="<derived from git diff --stat HEAD + git log --oneline -5>"  # from Step 1
 
 # --no-hub:
