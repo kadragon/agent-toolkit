@@ -56,14 +56,14 @@ except (ImportError, AttributeError):
         # best-effort logging prefers dropping over stalling. Lock and unlock anchor at
         # offset 0 via os.lseek (raw fd — avoids TextIOWrapper buffer-state exceptions)
         # so the [0, _LOCK_BYTES) region is identical. The unlock seek is load-bearing:
-        # writelines advances the position, and LK_UNLK must release the locked region.
+        # writelines advances the position, and LK_UNLCK must release the locked region.
         def _lock(f):  # type: ignore[misc]
             os.lseek(f.fileno(), 0, os.SEEK_SET)
             _msvcrt.locking(f.fileno(), _msvcrt.LK_NBLCK, _LOCK_BYTES)  # type: ignore[attr-defined]
 
         def _unlock(f):  # type: ignore[misc]
             os.lseek(f.fileno(), 0, os.SEEK_SET)
-            _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLK, _LOCK_BYTES)  # type: ignore[attr-defined]
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLCK, _LOCK_BYTES)  # type: ignore[attr-defined]
 
     except (ImportError, AttributeError):
         # neither fcntl nor msvcrt: locking skipped (safe for serial use)

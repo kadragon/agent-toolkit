@@ -22,10 +22,16 @@ Exit: 0 if no hard-fail violations, 1 otherwise. Always prints a full report.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
@@ -43,6 +49,7 @@ HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review"}
 
 ALLOWLIST_VARS = {"HOME", "PATH"}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
+HOOKS_FILE = REPO_ROOT / "dev/hooks.json"
 
 FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
@@ -145,6 +152,31 @@ def check_plugin_root_portability(text: str) -> list[str]:
     ]
 
 
+def check_windows_hook_commands() -> list[str]:
+    """Require an explicit PowerShell-safe override for every dev command hook."""
+    try:
+        data = json.loads(HOOKS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"cannot read {HOOKS_FILE.relative_to(REPO_ROOT)}: {exc}"]
+
+    problems = []
+    for event, groups in data.get("hooks", {}).items():
+        for group_index, group in enumerate(groups):
+            for hook_index, hook in enumerate(group.get("hooks", [])):
+                if hook.get("type") != "command":
+                    continue
+                location = f"{event}[{group_index}].hooks[{hook_index}]"
+                command = hook.get("commandWindows")
+                if not isinstance(command, str) or not command.strip():
+                    problems.append(f"{location}: commandWindows missing")
+                    continue
+                if "${" in command:
+                    problems.append(f"{location}: commandWindows contains Bash parameter expansion")
+                if "$env:PLUGIN_ROOT" not in command:
+                    problems.append(f"{location}: commandWindows must use $env:PLUGIN_ROOT")
+    return problems
+
+
 def main() -> int:
     skill_files = find_skill_files()
     if not skill_files:
@@ -152,8 +184,15 @@ def main() -> int:
         return 0
 
     hard_fail = False
+    windows_hook_problems = check_windows_hook_commands()
+    for msg in windows_hook_problems:
+        print(f"ERROR {HOOKS_FILE.relative_to(REPO_ROOT)} [commandWindows]: {msg}")
+    if windows_hook_problems:
+        hard_fail = True
+    else:
+        print(f"OK   {HOOKS_FILE.relative_to(REPO_ROOT)}: PowerShell command overrides clean")
     for path in skill_files:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         name, _ = parse_frontmatter(text)
         rel = path.relative_to(REPO_ROOT)
         if not name:
@@ -187,7 +226,7 @@ def main() -> int:
     # would retroactively block CI on pre-existing debt in untouched reference
     # docs (e.g. hwpx's $SKILL_DIR pattern) — track those via backlog, not here.
     for skill_name, path in find_reference_files():
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         rel = path.relative_to(REPO_ROOT)
         portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)

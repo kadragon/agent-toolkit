@@ -23,7 +23,7 @@ Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 
 Examples:
   $0 dev patch
-  $0 prod minor --skill harness-curate patch
+  $0 dev minor --skill harness-curate patch
   $0 team-standards patch
   $0 all patch
 EOF

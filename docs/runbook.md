@@ -28,7 +28,7 @@ codex plugin add prod@kadragon
 
 | Command | Purpose |
 |---------|---------|
-| `bash /Users/kadragon/.claude/plugins/cache/kadragon/dev/3.0.7/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
+| `bash dev/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 
 ## Release Workflow
@@ -76,7 +76,7 @@ git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
 **Symptom:** Skill lookup fails; `validate-harness.sh` reports symlink warning
 **Fix:**
 ```bash
-bash /Users/kadragon/.claude/plugins/cache/kadragon/dev/3.0.7/skills/harness-init/scripts/symlink-guard.sh
+bash dev/skills/harness-init/scripts/symlink-guard.sh
 ```
 
 ## Harness Scripts

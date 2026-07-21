@@ -24,7 +24,7 @@ This repo ships plugins for **both** platforms. Any skill, hook, or agent added 
 ```json
 {
   "name": "dev",
-  "version": "3.0.7",
+  "version": "X.Y.Z",
   "skills": "./skills/",
   "hooks": "./hooks.json",
   "agents": "./agents/",
@@ -70,6 +70,7 @@ Key: the `description` field drives auto-invocation (description-driven; no rout
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/foo/run.sh",
+            "commandWindows": "bash \"$env:PLUGIN_ROOT/hooks/foo/run.sh\"",
             "timeout": 15,
             "statusMessage": "Running..."
           }
@@ -201,7 +202,8 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 1. Add to `{plugin}/hooks.json` (both platforms read it)
 2. Use only the **8 Codex events** if the hook should work cross-platform; Claude-only hooks (e.g., `PreCompact`, `WorktreeCreate`) are fine but will silently no-op on Codex
 3. Use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` in shared hook commands — `CLAUDE_PLUGIN_ROOT` wins (canonical for Claude Code; Codex sets it as compat alias), with `PLUGIN_ROOT` as fallback
-4. Test hook with both `$CLAUDE_PLUGIN_ROOT` and `$PLUGIN_ROOT` paths
+4. Add `commandWindows` to every command hook. Use PowerShell syntax and Codex's canonical `$env:PLUGIN_ROOT`; never copy Bash parameter expansion into it
+5. Test hook with both `$CLAUDE_PLUGIN_ROOT` and `$PLUGIN_ROOT` paths
 
 These variables belong to the plugin hook command environment. They are not guaranteed in shells launched while following a shared `SKILL.md`.
 
@@ -230,6 +232,8 @@ Both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` must b
 For shared Claude/Codex hook definitions, prefer `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` — `CLAUDE_PLUGIN_ROOT` is canonical for Claude Code and also set by Codex as a compat alias in plugin hooks.
 
 Do not use these root variables to locate files from shared skill instructions. Resolve bundled scripts and references from the absolute parent directory of the `SKILL.md` actually loaded for the turn. Hook script bodies that need adjacent assets should resolve from `BASH_SOURCE[0]` or `__file__`.
+
+Every command hook also needs a PowerShell-safe `commandWindows` using Codex's canonical `$env:PLUGIN_ROOT`.
 
 ## Executable Line Endings
 

@@ -5,9 +5,15 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("guard", os.path.join(HERE, "guard.py"))
@@ -21,6 +27,11 @@ def check(name, cond):
     print(("PASS" if cond else "FAIL") + f" — {name}")
     if not cond:
         fails.append(name)
+
+
+def native_abs(path, cwd=None):
+    """Expected path after the hook applies host-platform path semantics."""
+    return os.path.abspath(os.path.join(cwd or os.getcwd(), path))
 
 
 def run_hook(command, branch="feature/x", marker=False, cwd=None, tool_name="Bash"):
@@ -47,7 +58,10 @@ check("_is_git_commit: git commit", guard._is_git_commit("git commit"))
 check("_is_git_commit: git -C /p commit", guard._is_git_commit("git -C /p commit"))
 check("_is_git_commit: git status → False", not guard._is_git_commit("git status"))
 check("_is_git_commit: echo hi → False", not guard._is_git_commit("echo hi"))
-check("_git_cwd: uses -C", guard._git_cwd("git -C /mypath commit", "/cwd") == "/mypath")
+check(
+    "_git_cwd: uses -C",
+    guard._git_cwd("git -C /mypath commit", "/cwd") == native_abs("/mypath", "/cwd"),
+)
 check("_git_cwd: no -C → env_cwd", guard._git_cwd("git commit", "/cwd") == "/cwd")
 
 # --- _parse_commit_args -------------------------------------------------------
@@ -67,7 +81,7 @@ check("parse: -m overrides editor_mode", _parse("git commit -m 'x'")["editor_mod
 with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as _fh:
     _fh.write("[FEAT] from file\nsecond line\n")
     _fpath = _fh.name
-_parsed_f = _parse(f"git commit -F {_fpath}")
+_parsed_f = _parse(f"git commit -F {shlex.quote(_fpath)}")
 check("-F: reads first line", _parsed_f["message"] == "[FEAT] from file")
 check("-F: editor_mode False", _parsed_f["editor_mode"] is False)
 os.unlink(_fpath)
@@ -133,13 +147,13 @@ check("chained &&: valid msg passes", run_hook("git add . && git commit -m '[FIX
 with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as _fh:
     _fh.write("[FEAT] from file\n")
     _fpath = _fh.name
-check("-F valid msg passes", run_hook(f"git commit -F {_fpath}", branch="feature/x") == 0)
+check("-F valid msg passes", run_hook(f"git commit -F {shlex.quote(_fpath)}", branch="feature/x") == 0)
 os.unlink(_fpath)
 
 with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as _fh:
     _fh.write("bad msg\n")
     _fpath = _fh.name
-check("-F invalid msg blocked", run_hook(f"git commit -F {_fpath}", branch="feature/x") == 2)
+check("-F invalid msg blocked", run_hook(f"git commit -F {shlex.quote(_fpath)}", branch="feature/x") == 2)
 os.unlink(_fpath)
 
 check("-F nonexistent: fail-open", run_hook("git commit -F /nonexistent/msg.txt", branch="feature/x") == 0)
@@ -247,7 +261,7 @@ check(
     "regression #1: cd→commit uses cd-target cwd for branch guard (blocks on main)",
     run_hook_branch_fn(
         "cd /main-repo && git commit -m '[FEAT] x'",
-        branch_fn=_branch_by_cwd({"/main-repo": "main"}),
+        branch_fn=_branch_by_cwd({native_abs("/main-repo", "/tmp"): "main"}),
         marker=False,
         cwd="/tmp",
     ) == 2,
@@ -257,7 +271,7 @@ check(
     "regression #1: cd→commit uses cd-target cwd for branch guard (allows feature)",
     run_hook_branch_fn(
         "cd /feature-repo && git commit -m '[FEAT] x'",
-        branch_fn=_branch_by_cwd({"/feature-repo": "feature/x"}),
+        branch_fn=_branch_by_cwd({native_abs("/feature-repo", "/tmp"): "feature/x"}),
         marker=False,
         cwd="/tmp",
     ) == 0,
@@ -334,7 +348,7 @@ check(
     "regression #7: git -C relative path resolved against env_cwd for branch guard",
     run_hook_branch_fn(
         "git -C subdir commit -m '[FEAT] x'",
-        branch_fn=_branch_by_cwd({"/tmp/subdir": "main"}),
+        branch_fn=_branch_by_cwd({native_abs("subdir", "/tmp"): "main"}),
         marker=False,
         cwd="/tmp",
     ) == 2,
