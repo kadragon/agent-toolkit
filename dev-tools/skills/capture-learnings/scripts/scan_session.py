@@ -16,9 +16,12 @@ Usage:
   python3 scan_session.py [--cwd PATH]   scan the project at PATH (default: cwd)
   python3 scan_session.py --test         run self-tests
 
-Honors CLAUDE_CONFIG_DIR / CODEX_HOME to locate the transcript root, so it works
-under both Claude Code and Codex. Never raises for a missing transcript — prints
-a plain 'nothing to scan' line and exits 0.
+Claude Code only. It reads Claude's project-partitioned transcript tree
+(<config>/projects/<encoded>/*.jsonl, honoring CLAUDE_CONFIG_DIR). Codex stores
+sessions in a different, date-partitioned layout with a different record format,
+so under Codex this prints a clear notice and does nothing — use harness-curator
+for Codex sessions. Never raises for a missing transcript — prints a plain
+message and exits 0.
 """
 
 import glob
@@ -44,19 +47,19 @@ ACTION_THRESHOLD = 10
 
 # --- transcript location (tolerates Claude's project-dir case/separator drift) --
 
-def config_dir():
-    """Root config dir for the active platform (~/.claude or ~/.codex).
-
-    Codex sets CLAUDE_PLUGIN_ROOT as a compat alias, so its presence does NOT
-    mean Claude — detect Codex via CODEX_HOME / script path BEFORE the Claude
-    default (mirrors self-improve-nudge/_common.py)."""
-    if os.environ.get("CLAUDE_CONFIG_DIR"):
-        return os.environ["CLAUDE_CONFIG_DIR"]
+def _under_codex():
+    """True when running under Codex rather than Claude Code. Codex sets
+    CODEX_HOME and installs the plugin under a /.codex/ path. Used to bail with a
+    clear notice instead of silently scanning a Claude tree that Codex never
+    populates (its sessions live in a date-partitioned rollout layout)."""
     if os.environ.get("CODEX_HOME"):
-        return os.environ["CODEX_HOME"]
-    if "/.codex/" in os.path.realpath(__file__):
-        return os.path.expanduser("~/.codex")
-    return os.path.expanduser("~/.claude")
+        return True
+    return "/.codex/" in os.path.realpath(__file__).replace("\\", "/")
+
+
+def config_dir():
+    """Claude Code config root (~/.claude), honoring CLAUDE_CONFIG_DIR."""
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 
 
 def encode_project(path):
@@ -246,6 +249,13 @@ def report(signals, parts):
 
 
 def main(argv):
+    if _under_codex():
+        sys.stdout.write(
+            "capture-learnings scans Claude Code transcripts only. Under Codex, "
+            "use the harness-curator skill — it handles Codex session rollouts."
+        )
+        return
+
     cwd = os.getcwd()
     if "--cwd" in argv:
         cwd = argv[argv.index("--cwd") + 1]
@@ -332,6 +342,15 @@ def _test():
             out = buf.getvalue()
             check("main reports complex-task", "complex-task" in out)
 
+            # Codex platform -> loud Claude-only notice, never a silent scan.
+            os.environ["CODEX_HOME"] = os.path.join(cfg, "codex-home")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                main(["--cwd", proj])
+            check("main bails with a notice under Codex",
+                  "Claude Code transcripts only" in buf.getvalue())
+            os.environ.pop("CODEX_HOME", None)
+
         # No transcript dir at all -> graceful message.
         with tempfile.TemporaryDirectory() as empty_proj:
             buf = io.StringIO()
@@ -348,12 +367,14 @@ def _test():
 
 
 if __name__ == "__main__":
-    try:
-        if "--test" in sys.argv:
-            _test()
-        else:
+    if "--test" in sys.argv:
+        # Test mode must NOT swallow: a crashed fixture has to surface as a
+        # non-zero exit so CI / verification can't read it as a pass.
+        _test()
+    else:
+        try:
             main(sys.argv[1:])
-    except Exception as e:
-        # Never hard-fail the invoking skill; surface the reason and move on.
-        sys.stdout.write(f"capture-learnings scan error: {e}")
-    sys.exit(0)
+        except Exception as e:
+            # Runtime only: never hard-fail the invoking skill — surface and move on.
+            sys.stdout.write(f"capture-learnings scan error: {e}")
+        sys.exit(0)

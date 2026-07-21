@@ -21,6 +21,11 @@ reusable lesson worth persisting. It does **not** fire on its own — that was t
 old `self-improve-nudge` hook, retired because auto-surfacing interrupted tasks
 mid-flow and polluted context.
 
+**Claude Code only.** The scan reads Claude's project-partitioned transcript
+tree; Codex stores sessions in a different layout and record format, so under
+Codex the script prints a notice and does nothing — use `harness-curator` there
+(it parses Codex rollouts and covers cross-session mining anyway).
+
 Distinct from `harness-curator`: this is the **warm path** — one session, three
 objective signals, a quick write-back decision. `harness-curator` is the **cold
 path** — cross-session/cross-project mining that routes to creators/optimizers.
@@ -48,9 +53,11 @@ specific named asset — route those to `harness-curator` / `skill-creator`.
    python3 "$SKILL_DIR/scripts/scan_session.py"
    ```
 
-   The script reads this project's newest Claude Code transcript and prints the
-   detected signals (or a "nothing to capture" line). It tolerates Claude's
-   project-dir case/separator drift and honors `CLAUDE_CONFIG_DIR` / `CODEX_HOME`.
+   The script reads this project's newest Claude Code transcript (by mtime) and
+   prints the detected signals (or a "nothing to capture" line). It tolerates
+   Claude's project-dir case/separator drift and honors `CLAUDE_CONFIG_DIR`.
+   Caveat: with two concurrent Claude sessions in the same project it scans
+   whichever transcript was written most recently, which may be the other one.
 
 3. Apply the **§Harness ratchet write-back gate** to each reported signal. Capture
    a lesson **only** if it is reusable **and** passed an objective check
