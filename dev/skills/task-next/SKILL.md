@@ -287,7 +287,7 @@ force a full scan just to annotate. Sync **both** directions:
   `*(blocked by: ...)*`/`*(deferred: ...)*` marker → append a marker to that line:
   `*(blocked by: <n>-<slug>)*` when the blocker is another queue item, else
   `*(deferred: <short reason>)*`. Only when you verified the blocker is unresolved this session
-  — never guess (Golden Principle 4).
+  — verify, never guess.
 - **Clear stale markers.** An item carrying `*(blocked by: <n>-<slug>)*` whose referenced
   blocker `<n>-<slug>` is no longer an open item (it landed or was removed), or a
   `*(deferred: ...)*` whose reason you confirmed resolved this run → delete the marker so the

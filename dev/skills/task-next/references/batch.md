@@ -125,6 +125,7 @@ any worktree.
    - **tasks.md findings**: delete each completed `- [ ]` line. Remove the h3/h2 heading if no open items remain. Remove `## Review Backlog` if it becomes empty. If `tasks.md` is now entirely empty, delete the file.
    - **backlog.md**: delete each completed item line. Remove h2/h3 headings that have no remaining open `- [ ]` items.
    - **CHANGELOG.md**: append one entry under `## Unreleased`: `- [done] <batch-slug> (<N> units) (<date>)`.
+   - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
    Leave all edits uncommitted — `task-review` Step 1 commits them.
 6. **Hand off — once.** `Skill(dev:task-review)` with `args: --auto`. Running from the
