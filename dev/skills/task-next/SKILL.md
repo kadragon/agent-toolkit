@@ -131,7 +131,7 @@ Skip headings where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`
 
 **Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
 
-**Deferred/blocked items:** a group where every open item has `*(deferred: ...)*` or `*(blocked by: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred/blocked with unresolved blockers, report and stop.
+**Deferred/blocked items:** a group where every open item has `*(deferred: ...)*` or `*(blocked by: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred/blocked with unresolved blockers, report and stop. Any item you *newly* judge blocked this run (no marker yet) — or whose marker you find is now stale — is persisted at pre-merge cleanup (see **Blocked-analysis sync** in Step 3) so you don't re-analyze it next run. That sync rides the selected task's cleanup commit; in the all-blocked → stop case there is no task to ride, so it does not run.
 
 Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any list size without the 4-option cap.
 
@@ -274,6 +274,29 @@ initial PR commit alongside the code.
 1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
 2. In `backlog.md`: **delete** each item line listed in `## Covers` of the Sprint Contract. Also delete any h2/h3 heading that has no remaining open `- [ ]` items after the deletion.
 3. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased` (create the section if absent).
+
+*Blocked-analysis sync (runs for every source type):*
+
+While selecting (Step 1/2) you inspect items and judge some blocked. Persist that judgment so
+the next run's `backlog_candidates.py` filters them deterministically instead of you
+re-analyzing them each run. **Scope: only items you actually inspected this run** — do NOT
+force a full scan just to annotate. Sync **both** directions:
+
+- **Mark newly-found blocked items.** An open `- [ ]` item you confirmed this run is blocked by
+  an unresolved dependency (or otherwise non-actionable) and that carries NO
+  `*(blocked by: ...)*`/`*(deferred: ...)*` marker → append a marker to that line:
+  `*(blocked by: <n>-<slug>)*` when the blocker is another queue item, else
+  `*(deferred: <short reason>)*`. Only when you verified the blocker is unresolved this session
+  — verify, never guess.
+- **Clear stale markers.** An item carrying `*(blocked by: <n>-<slug>)*` whose referenced
+  blocker `<n>-<slug>` is no longer an open item (it landed or was removed), or a
+  `*(deferred: ...)*` whose reason you confirmed resolved this run → delete the marker so the
+  item becomes a candidate again next run. Only when the resolution is verifiable from files/
+  command output read this session — never guess.
+
+These edits ride the same cleanup commit. Disclose them in the PR body (or lite-path commit
+message), e.g. "synced N blocked markers in backlog.md", so review does not read them as scope
+creep. If nothing was synced, skip silently.
 
 Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or stale sprint markers.
 
