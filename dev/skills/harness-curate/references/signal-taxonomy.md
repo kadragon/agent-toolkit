@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-Step 1's scan (`scan_transcripts.py`) emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. The failure-log summarizer (`summarize.py`) emits a seventh, `FAILED-COMMANDS`. Seven output blocks, seven classification signals — `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
+Step 1's scan (`scan_transcripts.py`) emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. The failure-log summarizer (`summarize.py`) emits a seventh, `FAILED-COMMANDS`. Signal 8 has no scan block at all — it is read directly off the instruction files in Step 2. `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -78,6 +78,28 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **Caution:** distinguish a genuine recurring gap from transient flakiness (network blip, rate limit) — the latter isn't a harness gap.
 
+## 8. Instruction-layer overlap (global ↔ repo)
+
+**Detect:** from Step 2's overlap lens, not from any scan block. Read the global `~/.claude/CLAUDE.md` and the repo's `CLAUDE.md` / `AGENTS.md` (plus any parent-directory `AGENTS.md`) **in full this session**, then pair rules that govern the same behavior. Two subtypes:
+
+- **Duplicate** — both layers state the same rule with no scope or strictness delta. Cost isn't just tokens: the two copies drift, and after one is edited the other silently contradicts it (which becomes the next conflict).
+- **Conflict** — the layers give incompatible instructions for the same situation (global "never commit to `main` — branch first" vs. repo "commit fixes straight to `main`"). The agent resolves it by luck, differently each session.
+
+**Not a finding:**
+- Local **specializes** global — narrower scope, stricter threshold, or a repo-specific value filling a global placeholder. That's refinement, and deleting it loses information.
+- Local is an **explicit opt-out the global rule itself grants** (e.g. global's "Exception: repo AGENTS.md/CLAUDE.md opts in"). That's the designed mechanism working, not a conflict.
+- Blocks marked `<!-- harness:verbatim … -->` — mandated deliberately, out of scope (same carve-out `harness-init` uses).
+- Similar phrasing, different subject.
+
+**Evidence requirement (hard):** every finding carries both sides quoted verbatim with `file:line`. Golden Principle 4 — if you can't quote both, you haven't verified the pair, so drop it entirely (not even `Watch:`). This is the exact trap `harness-init` warns about: "some higher-precedence file already covers this" is the easiest claim to get wrong, because that file isn't in front of you while you edit.
+
+**Route by ownership.** The boundary is the one the global file itself sets: global holds cross-repo behavior; repo facts belong to the owning repo (`docs/`, indexed from AGENTS.md).
+- Duplicate, rule is cross-repo behavior → propose deleting the **repo** copy. Apply on confirmation.
+- Duplicate, rule is repo-specific → the global file is the wrong owner. Surface the exact global line and let the user edit it; propose the repo-side home (`docs/<topic>.md` + index pointer, per Signal 6). **Never auto-edit `~/.claude/CLAUDE.md`.**
+- Conflict → surface both quoted lines side by side, state which layer currently wins in practice, and ask which is authoritative. If the user keeps the local override, propose labeling it explicitly ("Overrides global: …") so the next agent doesn't re-derive the precedence. Never resolve a conflict silently.
+
+**Scope limit:** `current` / `--project` only — the lens needs a resolvable repo path, which `all` scope doesn't have (same limitation as the Codex fold-in). For cross-repo coverage, run `--project` per repo.
+
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
@@ -89,5 +111,6 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 | Domain knowledge candidate | 2 (lower than Signal 1 — atomic facts never form large clusters) |
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
 | Recurring failure | 3 |
+| Instruction-layer overlap | 1 — static defect, but **only** with both sides quoted (`file:line`); unquotable → dropped |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.

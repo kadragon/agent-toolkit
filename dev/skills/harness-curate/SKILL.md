@@ -1,13 +1,13 @@
 ---
 name: harness-curate
 description: >-
-  Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
-version: 1.3.3
+  Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". Also audits global `~/.claude/CLAUDE.md` against repo `CLAUDE.md`/`AGENTS.md` for duplicated or conflicting rules — "글로벌 지침이랑 레포 지침 충돌 정리해줘", "중복된 지침 찾아줘", "check my global vs repo instructions". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
+version: 1.4.0
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds into seven signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into eight signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
 Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
 
@@ -63,7 +63,7 @@ Before proposing anything, know what already exists, or candidates will duplicat
 
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
-Two supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, or exist yet never parse):
+Three supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, exist yet never parse, or be contradicted by a rule one layer up):
 - **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run the loop below: new/untracked files (empty `git log` output) skip the age check; assets with a commit date 60+ days ago are flagged; if repo detection fails, mark the asset `non-git` and skip the age check rather than running `git log` from the current project.
 
   ```bash
@@ -83,10 +83,11 @@ Two supplementary file-lenses complement the transcript firing data (a skill can
   done
   ```
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
+- **Instruction-layer overlap** — read the global `~/.claude/CLAUDE.md` and the repo's `CLAUDE.md` / `AGENTS.md` (plus any parent-directory `AGENTS.md`) in full, then pair rules that govern the same behavior. A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta) or a **conflict** (incompatible instructions for the same situation) — see `references/signal-taxonomy.md` §8 for the non-findings list and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line`; unquotable pairs are dropped, not reported. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
 
-Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+Feed all three into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 8. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
-## Step 3 — Classify into seven signals
+## Step 3 — Classify into eight signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
 
@@ -99,8 +100,9 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
 | **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
+| **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, or contradicted between, global `~/.claude/CLAUDE.md` and repo `CLAUDE.md`/`AGENTS.md` | duplicate → propose deleting the copy in the layer that doesn't own it; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file** |
 
-Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Before any **delete**, run the adversarial check (Step 7).
+Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. Before any **delete**, run the adversarial check (Step 7).
 
 ## Step 4 — Decide asset scope (per candidate)
 
@@ -242,6 +244,7 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
 - New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook, or loosen an over-firing hook/permission gate (harness-friction) → `hookify` or `update-config`. For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.
+- Instruction-layer overlap → show the quoted pair (`file:line` both sides) and the ownership call. A repo-side edit (deleting a duplicate from `CLAUDE.md`/`AGENTS.md`, or labeling a deliberate override) is applied only on confirmation; a global-side edit is never applied — surface the line and let the user change `~/.claude/CLAUDE.md` themselves.
 - Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
 
 When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that plugin's `.claude-plugin/plugin.json` version (project CLAUDE.md rule).

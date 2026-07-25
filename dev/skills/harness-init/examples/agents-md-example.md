@@ -53,6 +53,7 @@ If you installed the gate, a mandatory row that fires halts an inline edit. If y
 
 **Intermediate artifacts:** session scratchpad dir, `{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
 
+<!-- harness:verbatim — mandated block, exempt from the non-inferability filter. Do not trim or paraphrase. -->
 ## Token Economy
 
 Rules that apply every message — keep the context window lean.
@@ -92,6 +93,7 @@ If the team uses more than one AI coding tool, add this section so each tool's a
 
 **Skip this section** on single-tool repos — it adds noise with no benefit.
 
+<!-- harness:verbatim — mandated block, exempt from the non-inferability filter. Do not trim or paraphrase. -->
 ## Maintenance
 
 Update this file **only** when ALL of the following are true:
