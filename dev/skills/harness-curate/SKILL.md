@@ -88,16 +88,20 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
   done
   ```
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
-- **Instruction-layer overlap** — read these layers in full, then pair rules that govern the same behavior. **Read set (bounded):** global `~/.claude/CLAUDE.md`; `~/.codex/AGENTS.md` if present (Codex's global layer); the repo's `CLAUDE.md` / `AGENTS.md` at the repo root and any `AGENTS.md` in directories between cwd and that root — **stop at `git rev-parse --show-toplevel`, never walk into `$HOME` or `/`**; `./.claude/rules/*.md` (Claude-only path-scoped rules). A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta) or a **conflict** (incompatible instructions for the same situation) — see `references/signal-taxonomy.md` §8 for the non-findings list (starting with cross-tool reach, the main false positive) and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line`; unquotable pairs are dropped, not reported. Then filter the surviving pairs through the dismissal state so resolved-or-kept pairs don't re-fire every run:
+- **Instruction-layer overlap** — read these layers in full, then pair rules that govern the same behavior. **Read set (bounded):** global `~/.claude/CLAUDE.md`; `~/.codex/AGENTS.md` if present (Codex's global layer); the repo's `CLAUDE.md` / `AGENTS.md` at the repo root and any `AGENTS.md` in directories between cwd and that root — **stop at `git rev-parse --show-toplevel`, never walk into `$HOME` or `/`**; `<repo root>/.claude/rules/*.md` (Claude-only path-scoped rules — resolve from that same repo root, not from cwd, or a run started in a subdirectory silently drops them). A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta) or a **conflict** (incompatible instructions for the same situation) — see `references/signal-taxonomy.md` §8 for the non-findings list (starting with cross-tool reach, the main false positive) and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line`; unquotable pairs are dropped, not reported. Then filter the surviving pairs through the dismissal state so resolved-or-kept pairs don't re-fire every run:
 
   ```bash
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
   [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
   OSTATE="$SKILL_DIR/scripts/overlap_state.py"
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
   # Write pairs.json first — one entry per candidate pair, the SAME verbatim lines you
   # quoted above: [{"global": "<verbatim line>", "repo": "<verbatim line>"}, ...]
-  python3 "$OSTATE" --check < pairs.json          # prints NEW / DISMISSED per pair + counts
+  python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json   # NEW / DISMISSED per pair + counts
   ```
+
+  `--project` is required, not optional: the script defaults to `os.getcwd()`, so a `--project /other/repo` run launched from anywhere else would read the *current* repo's dismissals. `REPO_ROOT` is the same root the read set above is bounded by — reuse it for both.
 
   Report only `NEW` rows, and carry the printed `suppressed=` count into the report. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
 
@@ -268,8 +272,12 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
   [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
   OSTATE="$SKILL_DIR/scripts/overlap_state.py"
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
   # Reuse (or rewrite) the same pairs.json from Step 2 — dismiss only the decided pairs.
-  python3 "$OSTATE" --dismiss < pairs.json
+  # Same --project as the Step 2 --check, or the dismissal lands under the wrong project
+  # and the pair re-fires next run.
+  python3 "$OSTATE" --dismiss --project "$REPO_ROOT" < pairs.json
   ```
 - Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
 
