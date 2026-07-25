@@ -27,6 +27,8 @@ Default auto-compaction fires around 95% context usage — by which point qualit
 - Does not always trigger at the exact configured threshold — some reports of drift to 67-80% before compaction fires. See anthropics/claude-code#36381.
 - `/context` display ignores the override and still shows the default buffer. See anthropics/claude-code#27189.
 
+**Not for long-context models.** The whole premise is "quality degrades before the window fills." On a ~1M-window model that is told by its own base instructions to keep working through summarization, compacting at 75% throws away live context to pre-empt a degradation you have not measured — and 75% of 1M is more context than most sessions ever reach. Leave it unset unless you have watched quality drop in this repo's own long sessions; then set it just below where it dropped.
+
 **Why not auto-apply**: 75 is aggressive for debugging sessions that legitimately need long context; 83 is wasteful on short tasks. No single value fits everyone, and the bugs above mean the benefit is probabilistic.
 
 ## Extended-thinking budget
@@ -34,11 +36,14 @@ Default auto-compaction fires around 95% context usage — by which point qualit
 Extended thinking ("thinking hard") is a token sink that's easy to forget is on. `/effort` switches per-session:
 
 - `low` — minimal thinking, fastest, cheapest
-- `medium` — default
+- `medium` — balanced
 - `high` — deeper reasoning, more tokens
+- `xhigh` — above `high`, below `max`
 - `max` — maximum thinking budget
 
-**Guidance**: Pin `medium` as the session default for normal coding. Bump to `high`/`max` only for architectural decisions or deep debugging. Drop to `low` for mechanical edits and glue-code tasks.
+`auto` also exists (settable as `CLAUDE_CODE_EFFORT_LEVEL` in `settings.json` `env`) and lets the model pick per turn — the sane default now. Verify the tier list against `/effort` in the installed CLI before documenting it in a repo; the set has grown at least once.
+
+**Guidance**: leave it on `auto` for normal coding. Pin `high`/`max` per session only for architectural decisions or deep debugging, `low` for mechanical edits and glue-code tasks.
 
 Not something harness-init should force — it's a per-task decision.
 
@@ -79,9 +84,9 @@ A code fact that belongs in `docs/` should never live only in auto-memory (it wo
 
 ## Autocompact-aware handoff
 
-When autocompaction is imminent, agents often preemptively wrap up work prematurely ("context anxiety" — see `workflows-template.md`). Companion pattern: write a `handoff-<feature>.md` file at the start of multi-session work, containing goals, constraints, and current state. Reload it in the next session to pick up cleanly instead of relying on compaction recovery.
+Write a `handoff-<feature>.md` at the **start** of work that genuinely spans sessions — goals, constraints, current state — and reload it next session. That value is model-independent: a new CLI session starts cold no matter how large the window.
 
-This is a process habit, not a setting — but pairs naturally with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=75` since it acknowledges compaction is a brute operation better avoided than tuned.
+What is *not* model-independent is the older framing of this pattern as a compaction escape hatch (agents "wrap up prematurely" when autocompaction looms — see `workflows-template.md` → Context Anxiety). Long-context models are instructed to work through summarization, so do not write handoffs mid-task to pre-empt compaction, and do not read this section as an endorsement of `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=75`.
 
 ## Sources
 

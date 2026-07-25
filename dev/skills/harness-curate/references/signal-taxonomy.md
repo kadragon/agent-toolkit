@@ -86,17 +86,20 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 - **Conflict** — the layers give incompatible instructions for the same situation (global "never commit to `main` — branch first" vs. repo "commit fixes straight to `main`"). The agent resolves it by luck, differently each session.
 
 **Not a finding:**
+- **Cross-tool reach.** Repo `AGENTS.md` restating a global `~/.claude/CLAUDE.md` rule is *not* a duplicate. `~/.claude/CLAUDE.md` is Claude-only; `AGENTS.md` is the file every other tool reads (`docs/platform-specs.md`). The repo copy is that rule's only reach on Codex and friends — deleting it silently drops the rule for those sessions. Same for content synced from a shipped standard (`team-standards/standards/*`), where the copy is the delivery mechanism.
 - Local **specializes** global — narrower scope, stricter threshold, or a repo-specific value filling a global placeholder. That's refinement, and deleting it loses information.
 - Local is an **explicit opt-out the global rule itself grants** (e.g. global's "Exception: repo AGENTS.md/CLAUDE.md opts in"). That's the designed mechanism working, not a conflict.
-- Blocks marked `<!-- harness:verbatim … -->` — mandated deliberately, out of scope (same carve-out `harness-init` uses).
+- Blocks marked `<!-- harness:verbatim … -->`, **and** the AGENTS.md blocks `harness-init` mandates verbatim whether or not the marker is present (`harness-init/SKILL.md` → "Two embedded blocks mandatory in AGENTS.md") — mandated deliberately, out of scope. Marker coverage in generated files is incomplete, so match on the mandate, not just the comment.
 - Similar phrasing, different subject.
 
 **Evidence requirement (hard):** every finding carries both sides quoted verbatim with `file:line`. Golden Principle 4 — if you can't quote both, you haven't verified the pair, so drop it entirely (not even `Watch:`). This is the exact trap `harness-init` warns about: "some higher-precedence file already covers this" is the easiest claim to get wrong, because that file isn't in front of you while you edit.
 
-**Route by ownership.** The boundary is the one the global file itself sets: global holds cross-repo behavior; repo facts belong to the owning repo (`docs/`, indexed from AGENTS.md).
-- Duplicate, rule is cross-repo behavior → propose deleting the **repo** copy. Apply on confirmation.
+**Route by ownership.** The boundary is the one the global file itself sets: global holds cross-repo behavior; repo facts belong to the owning repo (`docs/`, indexed from AGENTS.md). **Deletion is never the default** — the two layers reach different tools, so report first, delete only when reach is proven redundant.
+- Duplicate, rule is cross-repo behavior → default is **reach-justified: report, don't delete**. Propose deleting the repo copy only after verifying the repo is Claude-only (no `.codex-plugin/`, no `~/.codex/` sessions for this path, no other tool's config in the repo) — state that check's result in the finding. Otherwise the repo copy is what carries the rule to Codex.
 - Duplicate, rule is repo-specific → the global file is the wrong owner. Surface the exact global line and let the user edit it; propose the repo-side home (`docs/<topic>.md` + index pointer, per Signal 6). **Never auto-edit `~/.claude/CLAUDE.md`.**
-- Conflict → surface both quoted lines side by side, state which layer currently wins in practice, and ask which is authoritative. If the user keeps the local override, propose labeling it explicitly ("Overrides global: …") so the next agent doesn't re-derive the precedence. Never resolve a conflict silently.
+- Conflict → surface both quoted lines side by side and ask which is authoritative. Precedence between layers is **not documented in this repo and is model judgment, not spec**: if you cannot establish the winning layer from a quotable source, write `[unknown — precedence not verifiable]` rather than asserting one (Golden Principle 4). If the user keeps the local override, propose labeling it explicitly ("Overrides global: …") so the next agent doesn't re-derive it. Never resolve a conflict silently.
+
+**Cross-run suppression (required).** A static finding re-fires every run until a file changes, which would keep `lastCandidateMs` fresh forever and turn the staleness nudge into noise. So: filter candidate pairs through `scripts/overlap_state.py --check` before reporting, and after the user resolves a pair **or decides to keep it as-is**, record it with `--dismiss`. The key is a hash of both quoted lines — edit either line and the pair resurfaces, so dismissal suppresses that exact pair, not the topic. Report the `suppressed=` count so nothing drops silently.
 
 **Scope limit:** `current` / `--project` only — the lens needs a resolvable repo path, which `all` scope doesn't have (same limitation as the Codex fold-in). For cross-repo coverage, run `--project` per repo.
 

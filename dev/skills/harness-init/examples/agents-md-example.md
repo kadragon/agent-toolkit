@@ -38,11 +38,13 @@ If you installed the gate, a mandatory row that fires halts an inline edit. If y
 - Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
 - Phase-dependent → Hybrid (see `references/orchestrator-template.md`)
 
+**This table is the maximalist case — most repos ship 2–4 rows, not ten.** A `Mandatory, blocking` row with no hook behind it is prose, and a blocking row that contradicts `~/.claude/CLAUDE.md` (or the platform's base instructions) loses to that layer — keep such rows a subset of what it permits and demote the rest to `Optional`.
+
 | Trigger (objective) | Delegate | Mode | Gate |
 |---------------------|----------|------|------|
 | Target module has >5 files or >500 LOC | Explore agent (sonnet) | sub-agent | Mandatory, blocking |
 | Change touches ≥3 directories | Architecture analysis (opus) | sub-agent | Mandatory, blocking |
-| First edit in a directory this session | Explore agent (sonnet) | sub-agent | Mandatory, blocking |
+| First edit in a directory this session | Explore agent (sonnet) | sub-agent | Optional |
 | File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent (sonnet) | sub-agent | Mandatory, blocking |
 | After implementation (always) | QA verification (sonnet) | sub-agent | Mandatory, blocking |
 | Feature complete | Product evaluator (opus) | sub-agent | Mandatory, blocking |

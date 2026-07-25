@@ -128,9 +128,11 @@ Models lose coherence on lengthy tasks as context fills. Some exhibit **context 
 - Suddenly summarizing remaining work instead of doing it
 - Dropping quality noticeably in later parts of a long session
 
+**Confirm the pattern on your model before installing any countermeasure below.** This section encodes a model limitation, and long-context models (Opus-5 class, ~1M window) are told by their own base instructions that context is summarized and handed back so work continues — explicitly, that they need not wrap up early or hand off mid-task. Forcing resets on such a model subtracts: you pay the handoff write plus a cold reload to solve a behavior it is not exhibiting. Install countermeasures on observed symptoms (the three above, in this repo's own transcripts), not on principle.
+
 ### Countermeasures
 
-1. **Context resets over compaction.** When context fills during large tasks, prefer a full reset with a structured handoff file over in-place compaction. A reset provides a clean slate; compaction preserves continuity but doesn't resolve the anxiety behavior.
+1. **Context resets over compaction — only for models that show the pattern.** Where the symptoms are real, prefer a full reset with a structured handoff file over in-place compaction: a reset gives a clean slate, while compaction preserves continuity without resolving the anxiety behavior. Where they are not, let the platform summarize and keep working; a mid-task handoff is the more expensive option and loses live context.
 
 2. **Handoff files for multi-session work.** Write `handoff-{feature}.md` at the **start** of multi-session work (when context is fresh and the plan is clear), not when context is already degraded. Delete when the feature is complete.
 
