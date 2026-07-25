@@ -1,16 +1,10 @@
 ---
 name: harness-capture
 description: >-
-  Retrospective on the CURRENT conversation: decide whether the work just done
-  holds a reusable lesson and route it via the §Harness ratchet gate (docs/,
-  auto-memory, or CLAUDE.md/AGENTS.md). Also tidies the auto-memory store — dedup
-  before writing, prune stale/redundant entries, keep MEMORY.md in sync. Also
-  the pre-merge retrospect invoked by task-review Step 4.5. Trigger:
-  "capture learnings", "회고", "이번 세션 배운 점 정리", "self 갱신", "reflect on
-  this session", "메모리 정리", "clean up memory". NOT for cross-session /
-  cross-project mining or skill/agent/hook proposals (→ harness-curate); NOT for
-  building a specific named skill (→ skill-creator).
-version: 2.1.0
+  Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
+  auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
+  pre-merge retrospect in task-review. Cross-session mining → harness-curate.
+version: 2.1.1
 ---
 
 # Capture Learnings — on-demand session retrospective

@@ -1,17 +1,11 @@
 ---
 name: task-new
-version: 1.0.1
+version: 1.0.2
 description: >-
-  Intake for a NEW concrete task the user's prompt itself DESCRIBES — the request spells out
-  the work to build or fix (a feature, bug, or change), not a reference to the existing queue.
-  e.g. "add a logout button", "refactor the auth module", "fix the timezone bug in reports",
-  "이거 만들어줘", "새 기능 추가해줘", "X 리팩터링해줘", "이 버그 고쳐줘". Classifies the request,
-  resolves ambiguity via task-grill, and for larger work breaks it into a spec (task-spec) and tickets
-  (task-tickets); then runs the full code cycle (branch → Sprint Contract → implement →
-  qa-verifier → version bump → task-review --auto) on it. Trivial requests get a lite-path
-  offer (direct merge, no PR/CI). Discriminator vs `task-next`: use task-new when the prompt
-  states WHAT to do; use `task-next` when the prompt asks to pull the next item FROM
-  `backlog.md`/`tasks.md` without naming specific new work.
+  Intake for NEW work the prompt itself describes: classify → grill → spec and
+  tickets if large → full code cycle (branch → Sprint Contract → implement →
+  qa-verifier → version bump → task-review). Trivial work gets a lite path.
+  Pulling the next item from the existing queue instead → task-next.
 ---
 
 # New Task

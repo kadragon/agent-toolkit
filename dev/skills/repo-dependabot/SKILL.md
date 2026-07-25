@@ -1,6 +1,8 @@
 ---
 name: repo-dependabot
-description: Bulk dependabot PR triage — "manage dependabot PRs", "merge dependabot PRs", "clean up dependabot", "too many dependabot PRs", "consolidate dependency PRs", "batch update dependencies", "configure grouped updates", "audit dependabot config", "check dependabot status", "dependabot rebase", or multiple open dependency-update PRs — even without saying "dependabot". NOT for single-PR rebase only (use `@dependabot rebase`) unless full triage is also requested.
+description: >-
+  Bulk dependabot PR triage across owned repos — batch merge, grouped-update
+  config, status audit. Not for a single-PR rebase (use `@dependabot rebase`).
 ---
 
 # Dependabot Manager
