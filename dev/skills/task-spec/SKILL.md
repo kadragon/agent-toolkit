@@ -1,14 +1,11 @@
 ---
 name: task-spec
 description: >-
-  Use for multi-session or architecturally significant work to synthesize what's already
-  known — conversation context plus any `Skill(dev:task-grill)` output — into
-  `docs/design/{slug}.md`. Does NOT interview the user; if scope is still ambiguous, call
-  `Skill(dev:task-grill)` first. Automates `docs/workflows.md` `plan` workflow steps 1-2.
-  Trigger: "spec this out", "write a design doc", "스펙 문서 만들어줘", "설계 문서 작성해줘".
-  NOT for trivial or single-session work — skip straight to a Sprint Contract
-  (`docs/eval-criteria.md`) instead.
-version: 1.0.0
+  Synthesize known context into a `docs/design/{slug}.md` design doc for
+  multi-session or architecturally significant work. Does NOT interview — run
+  `Skill(dev:task-grill)` first if scope is still ambiguous. Trivial work skips
+  straight to a Sprint Contract.
+version: 1.0.1
 ---
 
 # To Spec

@@ -1,20 +1,11 @@
 ---
 name: repo-quiz
 description: >-
-  ALWAYS invoke when the user wants to test, build, or track their understanding of THIS
-  repository through questions — an interactive quiz about the codebase's architecture,
-  conventions, data flow, entry points, or gotchas, with progress that persists across
-  sessions. Triggers: "quiz me on this repo", "test my understanding", "레포 퀴즈",
-  "코드베이스 퀴즈 내줘", "이 repo 이해도 테스트", "오답노트 보여줘", "복습 문제",
-  "내 XP/스트릭 보여줘", "onboard me with questions", "review what I got wrong".
-  Runs a 5-question round by default (user can ask for more), mixing multiple-choice,
-  bug-hunt, code-trace, fill-in-the-blank, free-recall, and elaborative-why questions,
-  scheduled via FSRS — install the optional `py-fsrs` package (`pip install fsrs`) for the
-  better scheduler; without it the skill falls back to built-in SM-2 — with
-  XP/level/streak/achievements in a gitignored .repo-quiz/ folder.
-  NOT for generating docs or a written onboarding guide (that is a summary task, not a
-  quiz) — and NOT for quizzing on general programming trivia unrelated to the current repo.
-version: 1.1.1
+  Interactive spaced-repetition quiz on THIS repository — architecture,
+  conventions, data flow, gotchas — plus the wrong-answer log and XP/streak
+  progress persisted in `.repo-quiz/`. NOT for writing docs or an onboarding
+  guide, NOT for general programming trivia.
+version: 1.1.2
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 

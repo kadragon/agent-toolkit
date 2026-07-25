@@ -1,14 +1,11 @@
 ---
 name: task-tickets
 description: >-
-  Use to break an approved `docs/design/{slug}.md` spec (or a conversation, for smaller
-  multi-ticket work) into vertical-slice `backlog.md` items, each sized for exactly one
-  Sprint Contract, written in dependency (topological) order. Confirms ticket
-  granularity/blocking order with the user before writing. Automates `docs/workflows.md`
-  `plan` workflow step 3. Trigger: "break this into tickets", "write backlog items for this",
-  "티켓으로 쪼개줘", "백로그 항목 만들어줘". NOT for a single trivial task — write one Sprint
-  Contract directly instead.
-version: 1.0.0
+  Break an approved `docs/design/{slug}.md` spec into vertical-slice
+  `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
+  order. Confirms granularity with the user first. A single trivial task skips
+  this — write one Sprint Contract directly.
+version: 1.0.1
 ---
 
 # To Tickets

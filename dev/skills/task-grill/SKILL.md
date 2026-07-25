@@ -1,15 +1,11 @@
 ---
 name: task-grill
 description: >-
-  Use when there is material ambiguity in scope, requirements, or a design decision that
-  blocks non-trivial work — before writing a Sprint Contract, a `docs/design/{slug}.md` spec,
-  or backlog tickets. Interviews the user one question at a time, each with a recommended
-  answer + rationale, and waits for confirmation before proceeding. Trigger: "grill me on
-  this", "clarify scope", "resolve ambiguity", "질문해줘", "범위 확인해줘", "모호한 부분
-  물어봐줘". Reusable from other skills via `Skill(dev:task-grill)`. NOT for facts
-  discoverable from the repo/environment (look those up instead of asking) — NOT for trivial,
-  already-specified, or single-obvious-answer decisions.
-version: 1.0.0
+  Resolve material ambiguity before a spec, tickets, or a Sprint Contract by
+  interviewing the user one question at a time, each with a recommended answer +
+  rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
+  facts discoverable from the repo — look those up instead of asking.
+version: 1.0.1
 ---
 
 # Grill

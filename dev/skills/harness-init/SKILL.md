@@ -1,7 +1,8 @@
 ---
 name: harness-init
 description: >-
-  Use when setting up or validating repo agent infrastructure — "set up a harness", "initialize agent infrastructure", "bootstrap AGENTS.md", "validate harness", "harness audit", "하네스 초기화", "에이전트가 자꾸 실수해요", "Claude Code 리포지토리 설정", "하네스 점검", or repo has no AGENTS.md/docs/ structure. Does NOT modify ~/.claude/CLAUDE.md.
+  Set up or validate a repo's agent infrastructure — AGENTS.md, docs/ index,
+  harness audit. Does NOT modify ~/.claude/CLAUDE.md.
 ---
 
 # Harness Init
@@ -12,7 +13,7 @@ Set up complete harness for repo so Claude Code (and other AI agents) do reliabl
 
 Three sources inform harness design:
 
-1. **Anthropic** — Generator-Evaluator separation, context reset over compaction, every harness component encodes model-limitation assumption for periodic re-examination
+1. **Anthropic** — Generator-Evaluator separation, every harness component encodes model-limitation assumption for periodic re-examination (the "context reset over compaction" guidance from the same source is one such assumption — re-check it per model, see `references/workflows-template.md` → Context Anxiety)
 2. **OpenAI** — AGENTS.md is map not encyclopedia (~100 lines), repo is system of record, golden principles enforced mechanically, automated garbage collection
 3. **Practical experience** — Progressive disclosure (INDEX -> detail), agent-readable lint errors, sub-agent context manifests
 
@@ -43,6 +44,8 @@ Before acting, determine mode AND maturity level.
 > **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
 
 **Default toward orchestration infrastructure — but size the agent roster by reachable triggers, not by default.** The **orchestrator** (Step 4c) is worth building whenever unsure: without it, auto-delegation (Step 7b) has no named target and the model does everything inline, and an unused orchestrator skill costs little. **Agent roles** (Step 4b) are different — apply the reachability gate there. An agent whose trigger never fires is not cheap insurance; it is the "made it, never used it" dead weight that trains the operator to ignore the harness. Build every reachable role, skip unreachable ones. Skip both entirely only for genuinely trivial repos (single script, docs-only, one-file library).
+
+**Second sizing input — the operator's own instruction layer.** Read `~/.claude/CLAUDE.md` (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
 **Mode selection:**
 
@@ -109,6 +112,8 @@ AGENTS.md is **map, not encyclopedia** (target ≤100 lines; hard warn at >200 �
 
 **Non-inferability filter — the primary anti-bloat gate.** The target is redundant *description*: prose that restates what the agent would independently discover by reading the code — architecture summaries, style rules the linter already owns, a paraphrase of the README. This is not a style preference: an ETH Zurich study ([arxiv 2602.11988](https://arxiv.org/abs/2602.11988)) found LLM-generated context files *reduced* task success in 5 of 8 settings (+2.45–3.92 steps/task, +20–23% inference cost) precisely because they restated facts the agent already reads from code; human-curated, non-inferable files instead gained ~4pp. So before writing a *descriptive* line, ask "would the agent already know this from the repo?" — if yes, delete it. This does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.md` when …") or a concrete non-obvious command/example — those name real files but earn their tokens by cutting discovery cost, which is the whole point of the map. It is the empirical backing for "map, not encyclopedia," and applies to the AGENTS.md body even though the Step 0 default still builds out the orchestration scaffolding (that lives in on-demand `docs/`, not the always-loaded map).
 
+**Two limits on the filter — both are places it has actually misfired.** First, a block carrying `<!-- harness:verbatim … -->` is out of scope: it was mandated deliberately, so "the agent already knows this" is not an argument against it. Second, the filter licenses cutting what the agent would rediscover *from the repo* — it does not license cutting a line because some higher-precedence instruction file (the base harness, `~/.claude/CLAUDE.md`, a parent AGENTS.md) supposedly already says it. That is a different claim and a far easier one to get wrong, because those files are not in front of you while you edit. If you cut on those grounds, quote the covering text in the proposal; if you cannot quote it, you have not verified it, so keep the line. And a quote only settles it on a **single-tool** repo: AGENTS.md is read by Codex/Cursor/Copilot too, each carrying its own base instructions, so "Claude's base harness already says this" leaves the line load-bearing for every other reader.
+
 Three patterns make the map earn its tokens:
 - **Code example > prose.** One real snippet of the convention beats three sentences describing it — show the pattern, don't narrate it.
 - **Critical rules first.** Order sections so load-bearing invariants (golden principles, hard stops) sit near the top; long-context models drop middle content ("lost in the middle").
@@ -118,7 +123,9 @@ See `examples/agents-md-example.md` for complete reference.
 
 **Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`.
 
-**Three embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): `## Maintenance` edit policy, `## Token Economy` rules, context-anxiety note.
+**Two embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): `## Maintenance` edit policy, `## Token Economy` rules. Copy the `<!-- harness:verbatim … -->` comment that precedes each one too. The mandate lives here, in a skill that only loads when harness-init runs, so an AGENTS.md carrying these blocks unmarked reads to any later trimming pass (`claude-md-improver`, `/doctor`, a human editor) as generic boilerplate — exactly the shape that filter is built to delete. The marker is what travels with the file and makes the block defend itself; it renders invisibly in Markdown and costs ~8 tokens.
+
+**Token Economy overlaps Claude's base instructions — keep it anyway on a multi-tool repo.** Current Claude models are already told to batch independent tool calls, not to re-read a file they just edited, and not to restate the user; so on a **Claude-Code-only** repo, trim those items and keep only the repo-specific ones (what to delegate, what "conclusion only" means here). On a multi-tool repo the block stays whole per the cross-tool limit above. Either way, drop any item whose entire content is "the model already behaves this way on every tool you target" — that is the same load-bearing test Step 5's sweep applies to the rest of the harness.
 
 **What NOT to put in AGENTS.md:** workflow details, delegation details, evaluation criteria, architecture deep dives, API references. These belong in `docs/`.
 
@@ -453,4 +460,4 @@ All `references/*.md` files cited inline at point of use — consult there. File
 
 ### Examples
 
-- **`examples/agents-md-example.md`** — Complete AGENTS.md for Next.js SaaS project with all three mandatory embedded blocks
+- **`examples/agents-md-example.md`** — Complete AGENTS.md for Next.js SaaS project with both mandatory embedded blocks

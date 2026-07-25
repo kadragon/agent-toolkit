@@ -1,17 +1,11 @@
 ---
 name: task-next
-version: 1.4.1
+version: 1.4.2
 description: >-
-  Use when the prompt asks to pull the next item FROM the queue without describing specific new
-  work — "start a task", "next task", "work the backlog", "start work", "태스크 시작", "태스크
-  골라줘", "다음 작업 시작", "백로그 작업", "작업 시작", or similar. Runs full code cycle: pick →
-  branch → Sprint Contract → implement → qa-verifier → version bump → task-review --auto.
-  Flags: --all (parallel batch), --tree (worktree isolation). Trivial tasks auto-offer lite path
-  (direct merge, no PR/CI). Operates only on work ALREADY in backlog.md/tasks.md; if the queue is
-  empty, reports nothing-open and points to `task-new` for describing fresh work. Discriminator vs task-new: task-next
-  when the prompt references the queue abstractly; `task-new` when the prompt itself spells out a
-  specific new feature/bug/change. Not for review-only or backlog browsing without intent to
-  implement.
+  Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
+  pick → branch → Sprint Contract → implement → qa-verifier → version bump →
+  task-review. Flags: --all (parallel batch), --tree (worktree isolation).
+  Trivial tasks get a lite path. New work the prompt describes → task-new.
 ---
 
 # Next Tasks

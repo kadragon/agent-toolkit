@@ -1,13 +1,16 @@
 ---
 name: harness-curate
 description: >-
-  Mine session transcripts to propose/prune harness assets. Trigger: "analyze my conversation history", "task audit", "what recurring work should become a skill/agent/hook", "audit my skills and agents", "대화 기록 분석해서 뭘 스킬로 만들지 봐줘", "어떤 스킬들이 안 뜨는지/안 쓰는지 분석해줘", "안 쓰는 스킬 정리". NOT when specific skill is known ("create skill X", "기존 스킬 개선해줘" → skill-creator). NOT for repo structure/AGENTS.md validation ("harness audit", "하네스 점검", "하네스 초기화" → harness-init).
-version: 1.3.3
+  Mine session transcripts across projects to propose or prune harness assets
+  (skills/agents/hooks), and audit global vs repo instruction files for duplicate
+  or conflicting rules. Routes to the owning creator — never generates itself.
+  Repo structure validation → harness-init.
+version: 1.4.2
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds into seven signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into eight signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
 Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
 
@@ -18,6 +21,8 @@ Replaces the old `/dev:task-audit` command, which mined only `history.jsonl` pro
 - **current** (default) — analyze the project at cwd. Use for "audit this project's harness".
 - **all** — every project. Use for "what should I build across all my work" and to detect cross-project recurrence (drives the scope decision in Step 4).
 - **--project `<abs path>`** — one named project.
+
+**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "check my global vs repo instructions" asks for Signal 8 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
 
 ## Step 1 — Scan (bounded, deterministic)
 
@@ -63,7 +68,7 @@ Before proposing anything, know what already exists, or candidates will duplicat
 
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
-Two supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, or exist yet never parse):
+Three supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, exist yet never parse, or be contradicted by a rule one layer up):
 - **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run the loop below: new/untracked files (empty `git log` output) skip the age check; assets with a commit date 60+ days ago are flagged; if repo detection fails, mark the asset `non-git` and skip the age check rather than running `git log` from the current project.
 
   ```bash
@@ -83,10 +88,26 @@ Two supplementary file-lenses complement the transcript firing data (a skill can
   done
   ```
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
+- **Instruction-layer overlap** — read these layers in full, then pair rules that govern the same behavior. **Read set (bounded):** global `~/.claude/CLAUDE.md`; `~/.codex/AGENTS.md` if present (Codex's global layer); the repo's `CLAUDE.md` / `AGENTS.md` at the repo root and any `AGENTS.md` in directories between cwd and that root — **stop at `git rev-parse --show-toplevel`, never walk into `$HOME` or `/`**; `<repo root>/.claude/rules/*.md` (Claude-only path-scoped rules — resolve from that same repo root, not from cwd, or a run started in a subdirectory silently drops them). A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta) or a **conflict** (incompatible instructions for the same situation) — see `references/signal-taxonomy.md` §8 for the non-findings list (starting with cross-tool reach, the main false positive) and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line`; unquotable pairs are dropped, not reported. Then filter the surviving pairs through the dismissal state so resolved-or-kept pairs don't re-fire every run:
 
-Feed both into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+  OSTATE="$SKILL_DIR/scripts/overlap_state.py"
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
+  # Write pairs.json first — one entry per candidate pair, the SAME verbatim lines you
+  # quoted above: [{"global": "<verbatim line>", "repo": "<verbatim line>"}, ...]
+  python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json   # NEW / DISMISSED per pair + counts
+  ```
 
-## Step 3 — Classify into seven signals
+  `--project` is required, not optional: the script defaults to `os.getcwd()`, so a `--project /other/repo` run launched from anywhere else would read the *current* repo's dismissals. `REPO_ROOT` is the same root the read set above is bounded by — reuse it for both.
+
+  Report only `NEW` rows, and carry the printed `suppressed=` count into the report. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
+
+Feed all three into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 8. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+
+## Step 3 — Classify into eight signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
 
@@ -99,8 +120,9 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
 | **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
+| **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, or contradicted between, global `~/.claude/CLAUDE.md` and repo `CLAUDE.md`/`AGENTS.md` | duplicate → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified Claude-only repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file** |
 
-Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Before any **delete**, run the adversarial check (Step 7).
+Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. Before any **delete**, run the adversarial check (Step 7).
 
 ## Step 4 — Decide asset scope (per candidate)
 
@@ -164,7 +186,9 @@ Output one ranked table, candidates only:
 
 Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
 
-Record the run and candidate state so the staleness nudge stays accurate. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
+Instruction-layer overlap rows are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from `overlap_state.py --check` under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
+
+Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
 ```bash
 # Choose the prefix: HARNESS_PENDING=1 if ≥1 non-Watch candidate was produced;
@@ -242,6 +266,19 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
 - New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook, or loosen an over-firing hook/permission gate (harness-friction) → `hookify` or `update-config`. For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.
+- Instruction-layer overlap → show the quoted pair (`file:line` both sides) and the ownership call. A repo-side edit (deleting a duplicate from `CLAUDE.md`/`AGENTS.md`, or labeling a deliberate override) is applied only on confirmation; a global-side edit is never applied — surface the line and let the user change `~/.claude/CLAUDE.md` themselves. Once the user has resolved a pair **or decided to keep it as-is**, record the dismissal so it stops re-firing:
+
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+  OSTATE="$SKILL_DIR/scripts/overlap_state.py"
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
+  # Reuse (or rewrite) the same pairs.json from Step 2 — dismiss only the decided pairs.
+  # Same --project as the Step 2 --check, or the dismissal lands under the wrong project
+  # and the pair re-fires next run.
+  python3 "$OSTATE" --dismiss --project "$REPO_ROOT" < pairs.json
+  ```
 - Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
 
 When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that plugin's `.claude-plugin/plugin.json` version (project CLAUDE.md rule).
@@ -251,4 +288,5 @@ When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that
 - **`references/signal-taxonomy.md`** — detection rules, thresholds, and per-signal delegate brief.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes (`attributionSkill`, tool_use, corrections), grep patterns, project-path encoding.
 - **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
+- **`scripts/overlap_state.py`** — Signal 8 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
 - **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.

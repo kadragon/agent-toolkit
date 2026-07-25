@@ -43,6 +43,19 @@ For each harness component, ask:
 1. **Is this still compensating for a real limitation?** Run the task without the component. If the output quality is the same, the component is no longer load-bearing.
 2. **Has the cost/benefit shifted?** A sprint decomposition that added 2 hours overhead was worth it when it prevented context anxiety. If the model now sustains 3-hour sessions coherently, the overhead is pure waste.
 3. **Is this solving a problem that no longer exists?** Explicit "don't use any type" rules made sense when models defaulted to `any`. If the model now generates strict types by default, the enforcement is noise.
+4. **Does the model's own base instruction layer already say it?** Read the new model's base/system guidance and `~/.claude/CLAUDE.md` after an upgrade. A harness line the model is already given every turn is redundant on that tool — though on a multi-tool repo it may still be load-bearing for the others (see `harness-init` SKILL.md → Step 3, cross-tool limit). This is the one check where you must quote the covering text; "I think the base prompt covers it" is how correct rules get deleted.
+
+### On a model upgrade, re-examine these first
+
+They expire earliest because each encodes a capability ceiling rather than a repo fact:
+
+| Component | Expires when |
+|---|---|
+| Context-anxiety countermeasures, forced resets, mid-task handoffs | window grows / model is told to work through summarization |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and similar early-compaction tuning | same |
+| Sprint decomposition with QA gates between every feature | model sustains multi-hour coherence |
+| Blocking delegation gates, per-role model pinning | main-loop model handles inline what a sub-agent was spawned for |
+| Token-economy micro-rules (batch tool calls, don't re-read files) | behavior ships in the model's base instructions |
 
 ### Assessment template
 

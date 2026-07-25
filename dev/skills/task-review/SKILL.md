@@ -1,6 +1,9 @@
 ---
 name: task-review
-description: Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply → retrospect → CI → merge. --no-hub: local only. --auto: skip confirmation. Trigger: "리뷰 돌려줘", "review cycle", "run review", "dev review", "리뷰 머지", "open pr merge", "wait ci merge".
+description: >-
+  Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply →
+  retrospect → CI → merge. Flags: --no-hub (local only), --auto (skip
+  confirmation).
 ---
 
 # Dev Review Cycle
