@@ -83,7 +83,7 @@ Every `<hp:p id="...">` in document must be unique. Duplicate ID → HWP crash.
 ## linesegarray removal
 
 When modifying text in existing `section0.xml`, remove `<hp:linesegarray>` elements.
-`linesegarray` = layout engine's line-break cache; stale values after text edit trigger "document corrupted or modified" warning.
+`linesegarray` = layout engine's line-break cache; stale values after a text edit trigger a "document corrupted or modified" warning — and when the new text is shorter than the cached geometry (2 lines → 1), HWP silently fails to load the file and opens an empty `빈 문서` instead. Prefer `table.py strip-lineseg <section0.xml> --inplace` over the regex below (same effect, handles `.hwpx` and unpacked dirs, idempotent).
 
 ```python
 import re

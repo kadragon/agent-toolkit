@@ -22,13 +22,17 @@ python3 "$SKILL_DIR/scripts/text.py" patch input.hwpx "기존" "새" --dry-run
 
 ## Bulk linesegarray removal (table.py strip-lineseg)
 
-Bulk-remove when section XML heavily modified after reference extraction.
+Run after **any** text substitution in an existing section — not only heavy edits. A carried-over cache makes Hancom refuse to load the file (blank `빈 문서`) whenever the new text occupies fewer lines than the cache describes.
 
 ```bash
 python3 "$SKILL_DIR/scripts/table.py" strip-lineseg result.hwpx --output clean.hwpx
 # 또는 in-place
 python3 "$SKILL_DIR/scripts/table.py" strip-lineseg result.hwpx --inplace
+# unpack된 디렉토리에서 pack 전에 (권장)
+python3 "$SKILL_DIR/scripts/table.py" strip-lineseg ./unpacked/Contents/section0.xml --inplace
 ```
+
+`--output`/`--inplace` 중 하나는 필수. 이 실수를 스크립트로 잡으려면 `validate.py validate <out> --baseline <원본>` — baseline 대비 텍스트가 바뀐 문단에 캐시가 그대로 남아 있으면 ERROR로 보고한다.
 
 ## Column-width calculation (table.py calc-widths)
 

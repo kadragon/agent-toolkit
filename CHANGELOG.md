@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] task-next HTML-comment false positives (dev v4.0.3) — `backlog_candidates.py` now blanks out `<!-- ... -->` spans before tokenizing (line count preserved), so a commented-out `## Feature Name` / `- [ ] Simplest case` template no longer surfaces as a candidate group; SKILL.md hand-grep fallback documents the same rule (2026-07-27)
+- [done] hwpx stale-linesegarray guard (prod v3.0.2) — `validate.py validate --baseline` now reports paragraphs whose text changed while the line-break cache was carried over (positional alignment; Hancom reuses the placeholder id `2147483648`), the failure mode that makes Hancom silently open a blank `빈 문서`; Bulk File Edit recipe gained the missing `strip-lineseg` step; rule 19 raised 🟡→🔴; dead script names fixed in editing-gotchas.md (2026-07-27)
 - [done] Fix Windows Codex hook commands and hook test portability; clean stale plugin rename references and global legacy installations (2026-07-21)
 - [done] Naming unification — plugins `dev-tools`→`dev` (v4.0.0), `productivity`→`prod` (v3.0.0); dev skills regrouped into `task-*`/`harness-*`/`repo-*` families; `repo-quiz` moved to prod; retired `orchestrate` + `loop-engineer`; harness-check.yml made rename-tolerant (2026-07-21)
 - [done] Scrub router-var remnant — conventions.md SCREAMING_SNAKE example ROUTES_FILE → SKILL_DIR; sweep.sh exclusion kept for live trigger-router-template.md (2026-07-17)
