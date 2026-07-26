@@ -45,6 +45,36 @@ jobs:
           print("OK: executable text files use LF line endings.")
           PY
 
+  json-encoding:
+    name: JSON BOM check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JSON files carry no UTF-8 BOM
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          paths = subprocess.check_output(
+              ["git", "-c", "core.quotePath=false", "ls-files", "--", "*.json"],
+              text=True,
+          ).splitlines()
+
+          bad = [p for p in paths if open(p, "rb").read(3) == b"\xef\xbb\xbf"]
+
+          if bad:
+              print("ERROR: JSON files must be UTF-8 with no BOM — strict parsers reject the leading EF BB BF:")
+              for path in bad:
+                  print(f"  {path}")
+              print("Cause: Windows PowerShell 5.1 Out-File/Set-Content -Encoding utf8 writes a BOM.")
+              print("Fix: rewrite the file without the first 3 bytes (git bash, or an editor set to UTF-8 without BOM).")
+              sys.exit(1)
+
+          print(f"OK: {len(paths)} tracked JSON files are BOM-free.")
+          PY
+
   harness-drift:
     name: Plugin-root portability + capture-before-use check
     runs-on: ubuntu-latest
