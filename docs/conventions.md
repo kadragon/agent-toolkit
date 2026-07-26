@@ -52,6 +52,7 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 - Validation scripts (`validate-harness.sh`, CI checks): `exit 1` on failure, `0` on success
 - Use `set -u` (unbound var error); avoid `set -e` in hook scripts (one bad regex should not kill the hook)
 - Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
+- Tracked `*.json` must be UTF-8 **without** BOM — strict parsers reject the leading `EF BB BF`, which silently breaks manifest loading. Windows PowerShell 5.1 `Out-File`/`Set-Content -Encoding utf8` writes one; edit JSON through the file tools or git bash instead. CI rejects any BOM-carrying JSON.
 
 ### Plugin Hook Root Variables
 

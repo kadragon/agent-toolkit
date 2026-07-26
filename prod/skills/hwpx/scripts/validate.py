@@ -364,7 +364,7 @@ def do_validate(
     baseline_dupes: set[str] | None = None,
     min_pt: float | None = None,
     baseline_table_dupes: set[str] | None = None,
-    baseline_paras: dict[str, tuple[str, str]] | None = None,
+    baseline_paras: dict[str, list[tuple[str, str]]] | None = None,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
