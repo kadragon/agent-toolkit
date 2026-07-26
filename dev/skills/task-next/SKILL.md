@@ -50,6 +50,10 @@ the item count) — already applying the Phase A → B → C order, per-phase ca
 cap-5 truncation described below. **If the script is unavailable or errors, fall back to
 hand-grepping per the Phase A/B/C rules below** (kept in this doc for that purpose).
 
+When hand-grepping (fast path and full scan alike), discard any heading or `- [ ]` line that
+sits inside an `<!-- ... -->` block — commented-out format templates are markup, not work. The
+script already strips them.
+
 **Phase A — h1 sprint blocks (tasks.md):**
 
 ```bash

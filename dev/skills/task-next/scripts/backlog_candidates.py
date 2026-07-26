@@ -20,6 +20,11 @@ Output (plain text, one line per candidate, in the algorithm's selection order):
 Parsing semantics (must match `SKILL.md` Step 1 prose exactly — this script does not
 reinterpret it):
 
+  HTML comments: `<!-- ... -->` spans are blanked out before tokenizing (line count preserved,
+  so line numbers stay grep-compatible). Format templates parked in a comment — e.g. the
+  `## Feature Name` / `- [ ] Simplest case` block harness-init seeds `backlog.md` with — are
+  markup, not work, and must never be reported as candidates.
+
   Phase A (tasks.md h1 sprint blocks): an `# ` heading is a candidate if `status: open`
   is the FIRST `status:` line whose line number falls strictly between this h1 and the next
   h1 (or EOF) — NOT literally the next line in the file. Body content commonly sits between
@@ -62,7 +67,9 @@ Self-check (--test):
   `[x]`/`[>]` under a heading is not a candidate), Phase-B/C limit truncation (cap 5 total
   across A+B+C), the Phase-C-vs-full-scan ordering divergence on backlog.md h2/h3
   interleaving, and the blocked/deferred-marker exclusion case (all-marked heading is not a
-  candidate; mixed marked+unmarked heading counts only the unmarked items). All fixtures are
+  candidate; mixed marked+unmarked heading counts only the unmarked items), and the
+  HTML-comment case (a commented-out template heading + item is not a candidate, and line
+  numbers of the real content after it are unshifted). All fixtures are
   in-memory strings — no real files touched. Exits 0 on PASS, 1 on FAIL.
 """
 
@@ -84,6 +91,9 @@ _CHECKBOX_RE = re.compile(r"^-\s*\[([ xX>])\]\s*(.*)$")
 # Generalized skip marker: `*(deferred: ...)*` or `*(blocked by: <n>-<slug>)*` — both mean
 # "otherwise-open item is not actually actionable yet", same treatment as a `[>]` checkbox.
 _BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:.*?\)\*", re.IGNORECASE)
+# HTML comments hold format templates (`## Feature Name` / `- [ ] Simplest case`) that must
+# never surface as candidates.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def _is_blocked(text: str) -> bool:
@@ -91,14 +101,22 @@ def _is_blocked(text: str) -> bool:
     return bool(_BLOCK_MARKER_RE.search(text))
 
 
+def _strip_html_comments(text: str) -> str:
+    """Blank out `<!-- ... -->` spans, preserving line count so token line numbers stay 1-based."""
+    return _HTML_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
 def tokenize(text: str) -> list[dict]:
     """Classify each line into a typed token: heading / status / checkbox.
 
     Unrecognized lines (body prose) are dropped — only the three token types matter for
     candidate detection. Line numbers are 1-based to match grep -n output.
+
+    `<!-- ... -->` spans are blanked out first: template/example markup inside a comment is
+    not real content, so it must not produce headings or checkbox items.
     """
     tokens: list[dict] = []
-    for i, line in enumerate(text.splitlines(), start=1):
+    for i, line in enumerate(_strip_html_comments(text).splitlines(), start=1):
         m = _HEADING_RE.match(line)
         if m:
             tokens.append(
@@ -505,6 +523,44 @@ status: open
     _assert(
         _is_blocked("item *(deferred: waiting on (infra) service)*") is True,
         "_is_blocked is True when the reason text has nested parens (non-greedy match, not [^)]*)",
+    )
+
+    # ---- Test 3c: HTML-comment stripping ----
+    print("\nTest 3c: HTML comments — commented-out template markup is not a candidate")
+    commented_template = """# Backlog
+
+Ordered by priority.
+
+<!--
+## Feature Name
+> Goal: what and why.
+
+- [ ] Simplest case
+- [ ] Next case builds on previous
+-->
+
+## Real group
+- [ ] real item
+"""
+    tokens = tokenize(commented_template)
+    result = backlog_fast_candidates(tokens)
+    _assert(
+        [c["title"] for c in result] == ["Real group"],
+        "heading + items inside <!-- --> are ignored; only real content is a candidate",
+    )
+    _assert(
+        result[0]["line"] == 13,
+        "line numbers after a stripped comment are unshifted (comment blanked, not deleted)",
+    )
+
+    inline_comment = """## <!-- draft --> Live group
+- [ ] item one <!-- - [ ] ghost item -->
+"""
+    tokens = tokenize(inline_comment)
+    result = backlog_fast_candidates(tokens)
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Live group", "line": 1, "items": 1}],
+        "single-line comments are stripped in place without dropping the surrounding line",
     )
 
     # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
