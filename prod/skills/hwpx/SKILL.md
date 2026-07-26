@@ -114,7 +114,7 @@ rm -rf .hwpx_work/
 
 1. **Pick template** (base/gonmun/report/minutes/proposal) → look up style IDs in `$SKILL_DIR/references/style-maps.md`
 2. **Write section0.xml** (body content)
-   > ⚠️ **Don't hand-author `<hp:linesegarray>`/`<hp:lineseg>` for real content.** `hp:lineseg`'s `vertsize`/`textheight`/`horzsize` is a line-break geometry cache sized for the exact text present when Hancom last saved it. Coverage varies by overlay — `report`/`minutes` set one on every body paragraph, `gonmun` on only 1 of 26, `proposal` on none — so check the specific template file rather than assuming presence. Where a paragraph does carry one and you substitute real content into it (especially a longer sentence that wraps to 2+ lines), the cache still describes the placeholder's geometry and Hancom renders the text visibly compressed instead of recomputing it. New paragraphs you write from scratch: omit `<hp:linesegarray>` entirely (Hancom computes it on open). Paragraphs adapted from a template overlay: after substituting real text, run `table.py strip-lineseg` on the section XML before `build.py build` — it strips `<hp:linesegarray>` document-wide despite living in `table.py`, and is a no-op on paragraphs that never had one. Same discipline as rule 19 / Workflow 2, now required here too.
+   > ⚠️ **Don't hand-author `<hp:linesegarray>`/`<hp:lineseg>` for real content.** `hp:lineseg`'s `vertsize`/`textheight`/`horzsize` is a line-break geometry cache sized for the exact text present when Hancom last saved it. Coverage varies by overlay — `report`/`minutes` set one on every body paragraph, `gonmun` on only 1 of 26, `proposal` on none — so check the specific template file rather than assuming presence. Where a paragraph does carry one and you substitute real content into it (especially a longer sentence that wraps to 2+ lines), the cache still describes the placeholder's geometry and Hancom renders the text visibly compressed instead of recomputing it — or, when the substituted text is *shorter* and the cached line count no longer matches, refuses to load the document at all and opens an empty `빈 문서`. New paragraphs you write from scratch: omit `<hp:linesegarray>` entirely (Hancom computes it on open). Paragraphs adapted from a template overlay: after substituting real text, run `table.py strip-lineseg <section0.xml> --inplace` (or `--output`; one of the two is required) before `build.py build` — it strips `<hp:linesegarray>` document-wide despite living in `table.py`, and is a no-op on paragraphs that never had one. Same discipline as rule 19 / Workflow 2, now required here too.
 3. **(Optional) edit header.xml** (when new styles needed) → see `$SKILL_DIR/references/hwpx-format.md` § "header.xml Editing Guide"
 4. **Build with build.py build**
 5. **Validate with validate.py**
@@ -226,7 +226,8 @@ python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx ./unpacked/
 
 # 2. XML 편집 — 편집 유형별 도구 선택:
 #    - 표 셀 내용 수정 → table.py replace 필수 (lineseg + ID 충돌 자동 처리)
-#      str.replace()로 셀 직접 수정 금지 — linesegarray 미제거로 "문서 변경됨" 경고 발생
+#      str.replace()로 셀 직접 수정 금지 — linesegarray 미제거로 "문서 변경됨" 경고,
+#      텍스트가 짧아진 경우엔 한글 로드 실패(빈 문서)까지 발생
 #    - 일반 텍스트 (표 外) → text.py patch (safe str.replace + lineseg strip)
 #    - 행 삽입/삭제 → table.py insert / table.py delete
 #    본문: ./unpacked/Contents/section0.xml
@@ -301,6 +302,14 @@ try:
 
         section_path.write_text(s, encoding="utf-8")
 
+        # 필수: 텍스트를 바꿨으면 줄바꿈 캐시를 버린다 (rule 19).
+        # 생략하면 치환 텍스트가 원본보다 짧아 줄 수가 줄었을 때 한글이 로드에
+        # 실패하고 빈 문서를 띄운다 — validate.py는 --baseline 없이는 못 잡는다.
+        subprocess.run(
+            ["python3", str(SKILL_DIR / "scripts/table.py"), "strip-lineseg", str(section_path), "--inplace"],
+            check=True,
+        )
+
         tmp_out = Path(f".hwpx_work/{slug}_tmp.hwpx")
         subprocess.run(["python3", PACK_PY, "pack", str(unpack_dir), str(tmp_out)], check=True)
         subprocess.run(["python3", VALIDATE_PY, "validate", str(tmp_out), "--baseline", cfg["src"]], check=True)  # do NOT add capture_output=True here — stderr must be visible for debugging
@@ -313,13 +322,14 @@ finally:
 
 - Include slug in `unpack_dir` — prevents directory collision in N-file parallel runs
 - `validate --baseline` first, overwrite second — maintain order (see §"Validate timing when overwriting original")
+- `--baseline` is what makes the stale-linesegarray check run at all: it flags paragraphs whose text changed while the line-break cache was carried over unchanged. Without it that failure is invisible to `validate.py`
 - After each stage, open at least one file in Hancom to verify — `validate.py` checks structure only
 
 ### Hancom-open verification (content-edit completion gate)
 
 `validate.py` checks structure only. Completion gate for content edit = confirming it **actually opens in Hancom**.
 
-- **Launch check**: open packaged hwpx (Windows: `Start-Process`), confirm Hancom process (`Hwp`) alive. **Process-alive alone is not sufficient** — a load failure (e.g. the cellAddr-grid bug `validate.py` now catches, or any other silent-parse issue) still launches a live Hancom process showing a blank new document, with no crash and no error dialog. The real check: read the process's `MainWindowTitle` and confirm it matches the target filename. If the title reads a generic placeholder (e.g. `빈 문서 1`) instead of the filename, the load failed even though the process is alive.
+- **Launch check**: open packaged hwpx (Windows: `Start-Process`), confirm Hancom process (`Hwp`) alive. **Process-alive alone is not sufficient** — a load failure (the cellAddr-grid bug, a stale `<hp:linesegarray>` left on a paragraph whose text got shorter, or any other silent-parse issue) still launches a live Hancom process showing a blank new document, with no crash and no error dialog. Both of those two are caught by `validate.py` — the grid check always, the stale cache only with `--baseline`. The real check: read the process's `MainWindowTitle` and confirm it matches the target filename. If the title reads a generic placeholder (e.g. `빈 문서 1`) instead of the filename, the load failed even though the process is alive.
   ```powershell
   $proc = Get-Process Hwp -ErrorAction SilentlyContinue
   $proc.MainWindowTitle  # must contain the target filename, not "빈 문서 N"
@@ -405,7 +415,7 @@ python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline origina
 python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline original.hwpx --min-pt 6
 ```
 
-Validation items: ZIP validity, required files present, mimetype content/position/compression method, XML well-formedness, secCnt/itemCnt/IDRef, `hp:p` ID duplicates and `hp:tbl` id duplicates (with `--baseline`, only new duplicates are errors — pre-existing dupes shared with baseline are downgraded to warnings), charPr font-size check — texted runs with charPr height below `--min-pt` (default 5pt) emit `WARN`.
+Validation items: ZIP validity, required files present, mimetype content/position/compression method, XML well-formedness, secCnt/itemCnt/IDRef, `hp:p` ID duplicates and `hp:tbl` id duplicates (with `--baseline`, only new duplicates are errors — pre-existing dupes shared with baseline are downgraded to warnings), stale `<hp:linesegarray>` (**`--baseline` only**: paragraphs aligned positionally against the baseline — Hancom reuses the placeholder id `2147483648` everywhere, so ids cannot align them — and reported as errors when the text changed but the cache did not; sections whose paragraph count differs from the baseline are skipped), charPr font-size check — texted runs with charPr height below `--min-pt` (default 5pt) emit `WARN`.
 
 ---
 
@@ -524,7 +534,7 @@ rm -rf .hwpx_work/
 | `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs; `--preserve-style` to reuse existing charPr/paraPr (with optional `--charpr` override); `--append-para PARAPR CHARPR TEXT` / `--match-style N TEXT` to **add** a paragraph keeping existing ones (공문 "밑에 한 줄 추가") |
 | `scripts/table.py toggle-check` | toggle a checkbox `[  ]` ↔ `[√]` next to a `--label` in a cell — flips only the box preceding the label, leaves sibling boxes (KR 정부/별지 서식 다중 체크박스) untouched; reversible |
 | `scripts/table.py fill` | bulk-fill multiple cells from JSON data (`{table_id: {col,row: text}}`) using preserve-style logic — WARN on unreadable font sizes, collects all warnings before summary |
-| `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` — prevent "document corrupted" warning after text edits |
+| `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` (`--inplace` or `--output` required) — prevents both the "document corrupted" warning and the silent load failure (blank `빈 문서`) after text edits |
 | `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |
 | `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
 
@@ -596,7 +606,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 16. 🔴 **Compact required on new-paragraph insertion**: after extracting element content, apply `re.sub(r'>[ \t\r\n]+<', '><', xml)` compact before string insertion
 17. 🟡 **Compute insertion position last**: recompute `insert_pos` after all `str.replace()` done (computing before modification gives wrong offset)
 18. 🔴 **No duplicate hp:p IDs**: when copying paragraph from another document, must check for ID duplication — duplicate IDs cause HWP crashes
-19. 🟡 **linesegarray removal required**: when modifying text in existing section, remove that paragraph's `<hp:linesegarray>` — stale line-break cache makes HWP show "document corrupted/modified" warning (HWP auto-recalculates on open)
+19. 🔴 **linesegarray removal required**: when modifying text in an existing section, remove the affected paragraph's `<hp:linesegarray>` — the stale line-break cache makes HWP show a "document corrupted/modified" warning, and when the new text is shorter than the cached geometry (2 lines → 1) HWP **silently fails to load the file and opens an empty `빈 문서`** with no error dialog. HWP recalculates the cache on open, so stripping is always safe. Cheapest correct habit: `table.py strip-lineseg <section0.xml> --inplace` once after all text edits, before packing. `validate.py validate --baseline <original>` catches the stale case mechanically
 20. 🔵 **unpack.py raw-bytes guarantee**: `unpack.py` extracts raw bytes with no XML re-serialization. When modifying script directly, this invariant must be kept
 
 > Rules 14–20 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.

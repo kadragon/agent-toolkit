@@ -77,6 +77,72 @@ def _dup_table_ids(hwpx_path: str) -> set[str]:
     return {i for i, n in Counter(ids).items() if n > 1}
 
 
+def _para_lineseg_map(section_bytes: dict[str, bytes]) -> dict[str, list[tuple[str, str]]]:
+    """section name -> per-paragraph (own text, serialized direct-child linesegarray).
+
+    Paragraphs are keyed by document order, not by `hp:p id`: Hancom-saved files
+    routinely reuse the placeholder id `2147483648` for every paragraph, so ids
+    cannot align a document against its baseline.
+
+    Own text counts only <hp:t> under runs that are *direct* children of the
+    paragraph, so a paragraph anchoring a table is not conflated with the cell
+    paragraphs nested inside it (those are separate entries in the same list).
+    """
+    out: dict[str, list[tuple[str, str]]] = {}
+    for name, data in section_bytes.items():
+        try:
+            root = DET.fromstring(data)
+        except (ET.ParseError, DefusedXmlException):
+            continue
+        paras: list[tuple[str, str]] = []
+        for p in root.iter(f"{{{NS_HP}}}p"):
+            texts = [
+                "".join(t.itertext())
+                for run in p.findall(f"{{{NS_HP}}}run")
+                for t in run.findall(f"{{{NS_HP}}}t")
+            ]
+            seg_el = p.find(f"{{{NS_HP}}}linesegarray")
+            seg = ET.tostring(seg_el, encoding="unicode") if seg_el is not None else ""
+            paras.append(("".join(texts), seg))
+        out[name] = paras
+    return out
+
+
+def _baseline_para_map(hwpx_path: str) -> dict[str, list[tuple[str, str]]]:
+    try:
+        with ZipFile(hwpx_path, "r") as zf:
+            sections = {n: zf.read(n) for n in zf.namelist() if SECTION_RE.match(n)}
+    except (BadZipFile, OSError):
+        return {}
+    return _para_lineseg_map(sections)
+
+
+def _stale_lineseg_paras(
+    section_bytes: dict[str, bytes], baseline_paras: dict[str, list[tuple[str, str]]]
+) -> list[str]:
+    """Paragraphs whose text changed vs. baseline while keeping the same lineseg cache.
+
+    `<hp:linesegarray>` is the layout engine's line-break cache. When text is
+    substituted and the cache is carried over unchanged, Hancom can silently
+    fail to load the document (it opens an empty "빈 문서" with no error dialog),
+    so this is an error rather than a warning.
+
+    Sections whose paragraph count differs from the baseline are skipped:
+    paragraphs were added or removed, so positional alignment would be
+    meaningless. Replace-first edits (the documented workflow) keep the count.
+    """
+    stale: list[str] = []
+    for name, paras in _para_lineseg_map(section_bytes).items():
+        base = baseline_paras.get(name)
+        if base is None or len(base) != len(paras):
+            continue
+        for idx, (text, seg) in enumerate(paras):
+            base_text, base_seg = base[idx]
+            if seg and text != base_text and seg == base_seg:
+                stale.append(f"{name}#{idx}")
+    return stale
+
+
 def _check_itemcnt(root: ET.Element) -> list[str]:
     errors = []
     checks = [
@@ -298,6 +364,7 @@ def do_validate(
     baseline_dupes: set[str] | None = None,
     min_pt: float | None = None,
     baseline_table_dupes: set[str] | None = None,
+    baseline_paras: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -390,13 +457,32 @@ def do_validate(
                 warnings.append(
                     f"Pre-existing duplicate hp:tbl id values (shared with baseline, --table-id may resolve the wrong table): {preexisting_table}"
                 )
+        if baseline_paras:
+            stale = _stale_lineseg_paras(section_bytes, baseline_paras)
+            if stale:
+                shown = stale[:10]
+                more = f" (+{len(stale) - len(shown)} more)" if len(stale) > len(shown) else ""
+                errors.append(
+                    f"Stale hp:linesegarray on paragraph(s) {shown}{more} (section#index): "
+                    "text changed vs baseline but the "
+                    "line-break cache was carried over unchanged. Hancom may silently fail to load the file "
+                    "(opens an empty '빈 문서' with no error dialog). Run "
+                    "`table.py strip-lineseg <section0.xml> --inplace` before packing."
+                )
     return errors, warnings
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
     baseline_dupes = _dup_para_ids(args.baseline) if args.baseline else None
     baseline_table_dupes = _dup_table_ids(args.baseline) if args.baseline else None
-    errors, warnings = do_validate(args.input, baseline_dupes, getattr(args, "min_pt", None), baseline_table_dupes)
+    baseline_paras = _baseline_para_map(args.baseline) if args.baseline else None
+    errors, warnings = do_validate(
+        args.input,
+        baseline_dupes,
+        getattr(args, "min_pt", None),
+        baseline_table_dupes,
+        baseline_paras,
+    )
     if warnings:
         print(f"WARNINGS: {args.input}")
         for w in warnings:
@@ -896,6 +982,120 @@ def _run_tests() -> None:
     except Exception as e:
         failures.append(f"VAL-12 FAIL: {e}")
 
+    # VAL-13/14/15: stale linesegarray after a baseline-relative text substitution.
+    # Regression case: text swapped in an unpacked section without stripping the
+    # line-break cache -> Hancom opens an empty "빈 문서" while every structural
+    # check still passes.
+    _lineseg = (
+        "<hp:linesegarray>"
+        '<hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" '
+        'baseline="850" spacing="600" horzpos="0" horzsize="42520" flags="393216"/>'
+        "</hp:linesegarray>"
+    )
+
+    def _lineseg_section(text: str, seg: str, pid: str = "1000000002", extra: str = "") -> str:
+        return (
+            '<?xml version="1.0"?>'
+            '<hp:BodyText xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            f'<hp:p id="{pid}">'
+            f"<hp:run><hp:t>{text}</hp:t></hp:run>"
+            f"{seg}"
+            "</hp:p>"
+            f"{extra}"
+            "</hp:BodyText>"
+        )
+
+    _SEC = "Contents/section0.xml"
+
+    _base_sections = {
+        "Contents/section0.xml": _lineseg_section(
+            "디지털 교육 교직소양 교육과정 운영 (국립대학 육성사업)", _lineseg
+        ).encode("utf-8")
+    }
+    _baseline_map = _para_lineseg_map(_base_sections)
+
+    # VAL-13: shortened text + carried-over cache is an error, surfaced through do_validate
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            arc = Path(d) / "stale_lineseg.hwpx"
+            with ZipFile(str(arc), "w") as zf:
+                zf.writestr("mimetype", "application/hwp+zip")
+                zf.writestr("Contents/content.hpf", _valid_content_hpf)
+                zf.writestr("Contents/header.xml", _header_minimal)
+                zf.writestr(
+                    "Contents/section0.xml", _lineseg_section("가상화 서버 윈도우 OS", _lineseg)
+                )
+            _ls_errs, _ = do_validate(str(arc), baseline_paras=_baseline_map)
+        if not any("linesegarray" in e for e in _ls_errs):
+            failures.append(f"VAL-13 FAIL: expected stale linesegarray error, got: {_ls_errs!r}")
+        else:
+            print("VAL-13 PASS: stale linesegarray after text change reported as error")
+    except Exception as e:
+        failures.append(f"VAL-13 FAIL: {e}")
+
+    # VAL-14: same text change with the cache stripped is clean
+    try:
+        stale = _stale_lineseg_paras(
+            {_SEC: _lineseg_section("가상화 서버 윈도우 OS", "").encode("utf-8")}, _baseline_map
+        )
+        if stale:
+            failures.append(f"VAL-14 FAIL: stripped linesegarray should not flag, got: {stale!r}")
+        else:
+            print("VAL-14 PASS: stripped linesegarray after text change is clean")
+    except Exception as e:
+        failures.append(f"VAL-14 FAIL: {e}")
+
+    # VAL-15: untouched paragraph keeps its cache without being flagged (no false positive)
+    try:
+        stale = _stale_lineseg_paras(
+            {
+                _SEC: _lineseg_section(
+                    "디지털 교육 교직소양 교육과정 운영 (국립대학 육성사업)", _lineseg
+                ).encode("utf-8")
+            },
+            _baseline_map,
+        )
+        if stale:
+            failures.append(f"VAL-15 FAIL: unchanged paragraph flagged as stale: {stale!r}")
+        else:
+            print("VAL-15 PASS: unchanged paragraph with linesegarray not flagged")
+    except Exception as e:
+        failures.append(f"VAL-15 FAIL: {e}")
+
+    # VAL-16: real Hancom files reuse the placeholder id 2147483648 on every paragraph,
+    # so alignment must be positional -- id-keyed matching silently checks nothing.
+    try:
+        ph_base = _para_lineseg_map(
+            {_SEC: _lineseg_section("긴 원본 사업명 문장", _lineseg, pid="2147483648").encode("utf-8")}
+        )
+        stale = _stale_lineseg_paras(
+            {_SEC: _lineseg_section("짧은 사업명", _lineseg, pid="2147483648").encode("utf-8")},
+            ph_base,
+        )
+        if not stale:
+            failures.append("VAL-16 FAIL: placeholder-id paragraphs not compared (positional alignment lost)")
+        else:
+            print("VAL-16 PASS: placeholder-id paragraphs aligned positionally and flagged")
+    except Exception as e:
+        failures.append(f"VAL-16 FAIL: {e}")
+
+    # VAL-17: paragraph added/removed -> positional alignment is meaningless, check skips
+    try:
+        stale = _stale_lineseg_paras(
+            {
+                _SEC: _lineseg_section(
+                    "가상화 서버 윈도우 OS", _lineseg, extra="<hp:p><hp:run><hp:t>추가</hp:t></hp:run></hp:p>"
+                ).encode("utf-8")
+            },
+            _baseline_map,
+        )
+        if stale:
+            failures.append(f"VAL-17 FAIL: paragraph-count mismatch should skip, got: {stale!r}")
+        else:
+            print("VAL-17 PASS: paragraph-count mismatch skips positional comparison")
+    except Exception as e:
+        failures.append(f"VAL-17 FAIL: {e}")
+
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
@@ -920,7 +1120,11 @@ def main() -> None:
     p_val.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     p_val.add_argument(
         "--baseline",
-        help="Reference .hwpx (source document); duplicate hp:p IDs shared with it are downgraded to warnings",
+        help=(
+            "Reference .hwpx (source document); duplicate hp:p IDs shared with it are downgraded to "
+            "warnings, and paragraphs whose text changed while keeping the baseline's linesegarray "
+            "cache are reported as errors"
+        ),
     )
     p_val.add_argument(
         "--min-pt", type=float, dest="min_pt", default=None,

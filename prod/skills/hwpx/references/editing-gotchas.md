@@ -175,7 +175,7 @@ assert s.count(old) == 1
 s = s.replace(old, new)
 ```
 
-**주의**: 새 ID(`1000000099`)는 `next_id.py`로 충돌 없는 값 확보. 표 셀 내부라면 `replace_cell.py --content-file`로 처리하는 것이 더 안전 (linesegarray 자동 처리).
+**주의**: 새 ID(`1000000099`)는 `build.py next-id`로 충돌 없는 값 확보. 표 셀 내부라면 `table.py replace`로 처리하는 것이 더 안전 (linesegarray 자동 처리).
 
 ## 11. Script re-run safety (idempotency)
 
@@ -209,12 +209,16 @@ assert s.count(old_empty) + s.count(old_filled) == 1  # 어느 상태든 정확�
 `<hp:linesegarray>` 제거는 **편집 완료 후 파일 전체에 한 번** 실행이 원칙:
 
 ```bash
-# 편집 완료 후 pack → strip
-python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ tmp.hwpx
-python3 "$SKILL_DIR/scripts/strip_linesegarray.py" tmp.hwpx --output result.hwpx
-python3 "$SKILL_DIR/scripts/validate.py" result.hwpx --baseline original.hwpx
+# 편집 완료 후 strip → pack → validate
+python3 "$SKILL_DIR/scripts/table.py" strip-lineseg ./unpacked/Contents/section0.xml --inplace
+python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ result.hwpx
+python3 "$SKILL_DIR/scripts/validate.py" validate result.hwpx --baseline original.hwpx
 ```
 
-셀 단위로 수동 제거하면 다른 셀의 stale lineseg가 남을 수 있음. `replace_cell.py` 사용 시에는 해당 셀만 자동 처리 — 다른 셀에 직접 str.replace 편집이 있다면 마지막에 `strip_linesegarray.py` 한 번 더 실행.
+`strip-lineseg`는 `--inplace` 또는 `--output` 중 하나가 필수 (없이 실행하면 `Error: specify --output or --inplace`). 인자로 unpack된 `section0.xml`과 `.hwpx` 둘 다 받는다.
+
+셀 단위로 수동 제거하면 다른 셀의 stale lineseg가 남을 수 있음. `table.py replace` 사용 시에는 해당 셀만 자동 처리 — 다른 셀이나 표 밖 문단에 직접 str.replace 편집이 있다면 마지막에 `strip-lineseg`를 한 번 더 실행.
 
 **strip은 idempotent** — 여러 번 실행해도 안전. `<hp:linesegarray>` 없는 문서에 실행해도 no-op.
+
+**생략 시 결과 (2026-07 실측)**: 원본을 unpack해 텍스트만 치환하고 lineseg를 남기면, 치환 텍스트가 원본보다 짧아 줄 수가 줄었을 때(2줄→1줄) 한글이 **문서를 아예 로드하지 못하고 빈 문서를 띄운다**. 오류 대화상자 없음, `validate.py validate`(baseline 없이) 통과, ZIP 엔트리·header.xml·content.hpf 전부 원본과 동일 — 즉 `--baseline`을 주지 않으면 어떤 검사로도 안 잡힌다. 같은 서식으로 만든 형제 문서 중 사업명이 긴 것만 우연히 열리는 식이라 표본 하나만 열어보는 검증으로는 놓친다.
