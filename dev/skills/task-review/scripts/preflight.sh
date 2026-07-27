@@ -64,9 +64,17 @@ CODEX_AVAILABLE=false
 CODEX_MODE="none"
 CODEX_COMPANION_PATH=""
 # Use globs instead of find for predictable plugin structure
-CODEX_COMPANION=$(ls ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs 2>/dev/null \
-  | awk -F/ '{print $(NF-2) "\t" $0}' \
-  | sort -V -k1,1 | tail -1 | cut -f2- || true)
+CODEX_CACHED=$(ls ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs 2>/dev/null \
+  | awk -F/ '{print $(NF-2) "\t" $0}' || true)
+CODEX_COMPANION=""
+if [ -n "$CODEX_CACHED" ]; then
+  # `sort -V` is absent on some BSD/macOS sorts. Falling through to CLI mode there would be the
+  # exact silent degradation this block exists to stop, so retry with a plain lexical sort —
+  # wrong only when versions cross a digit-count boundary, still better than no companion.
+  CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -V -k1,1 2>/dev/null | tail -1 | cut -f2-)
+  [ -z "$CODEX_COMPANION" ] && \
+    CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -k1,1 | tail -1 | cut -f2-)
+fi
 if [ -z "$CODEX_COMPANION" ]; then
   CODEX_COMPANION=$(ls ~/.claude/plugins/marketplaces/*/plugins/codex/scripts/codex-companion.mjs \
     ~/.claude/plugins/*/codex/*/codex-companion.mjs 2>/dev/null | head -1 || true)

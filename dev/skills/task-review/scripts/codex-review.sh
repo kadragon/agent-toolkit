@@ -27,12 +27,24 @@ DIAG_TAIL_LINES=40
 # its whole reasoning trace on one physical line, so a line-only tail can still emit ~150 KB.
 DIAG_TAIL_BYTES=2000
 
-LOG_FILE=$(mktemp -t codex-review.XXXXXX) || { printf 'ERROR: mktemp failed\n' >&2; exit 1; }
+# One private directory per run holds the captured transcript and every diagnostic sidecar.
+# `mktemp -d` is 0700, so the payloads — which carry repo content and reasoning traces — are
+# never left world-readable in a shared /tmp the way plain redirection under umask 022 would.
+# The trap covers abnormal exits (the caller runs this as a long-lived background task, so an
+# interrupt is a realistic path); paths that deliberately point the reader at a file set
+# KEEP_RUN_DIR first.
+RUN_DIR=$(mktemp -d -t codex-review.XXXXXX) || { printf 'ERROR: mktemp failed\n' >&2; exit 1; }
+LOG_FILE="$RUN_DIR/codex-stderr.log"
+: >"$LOG_FILE"
+KEEP_RUN_DIR=""
+cleanup() { [ -n "$KEEP_RUN_DIR" ] || rm -rf "$RUN_DIR"; }
+trap cleanup EXIT INT TERM
 
 # Bounded diagnostic: last N lines of a file, prefixed so the caller can tell it apart from
 # review text. The full file is left on disk and named, so nothing is actually lost.
 emit_log_tail() {
   local file="$1" label="$2"
+  KEEP_RUN_DIR=1
   printf 'WARN: %s (last %s lines / %s bytes; full log: %s)\n' \
     "$label" "$DIAG_TAIL_LINES" "$DIAG_TAIL_BYTES" "$file" >&2
   tail -n "$DIAG_TAIL_LINES" "$file" | tail -c "$DIAG_TAIL_BYTES" >&2 || true
@@ -42,7 +54,8 @@ emit_log_tail() {
 # Same idea for an in-memory blob (companion JSON / failure payload). Persisted first so the
 # bounded excerpt always names a file holding the discarded remainder.
 emit_blob_tail() {
-  local blob="$1" label="$2" file="${LOG_FILE}.payload.txt"
+  local blob="$1" label="$2" file="$RUN_DIR/payload.txt"
+  KEEP_RUN_DIR=1
   printf '%s\n' "$blob" >"$file"
   printf 'WARN: %s (last %s bytes; full payload: %s)\n' "$label" "$DIAG_TAIL_BYTES" "$file" >&2
   tail -c "$DIAG_TAIL_BYTES" "$file" >&2 || true
@@ -52,15 +65,13 @@ emit_blob_tail() {
 emit_review() {
   local text="$1"
   local size
-  # Past this point the captured transcript is no longer needed on either branch: a review was
-  # extracted, so the log holds nothing but Codex's own chatter.
-  rm -f "$LOG_FILE"
   size=$(printf '%s' "$text" | wc -c)
   if [ "$size" -le "$MAX_REVIEW_BYTES" ]; then
     printf '%s\n' "$text"
     return
   fi
-  local full="${LOG_FILE}.review.txt"
+  local full="$RUN_DIR/review.txt"
+  KEEP_RUN_DIR=1
   printf '%s\n' "$text" >"$full"
   printf 'WARN: review text is %s bytes (> %s); emitting head+tail. Full text: %s\n' \
     "$size" "$MAX_REVIEW_BYTES" "$full" >&2
@@ -73,7 +84,6 @@ case "$CODEX_MODE" in
   plugin)
     if [ -z "$CODEX_COMPANION_PATH" ]; then
       echo "ERROR: codex_companion_path is required for plugin mode" >&2
-      rm -f "$LOG_FILE"
       exit 1
     fi
     # --json disables the companion's live reasoning stream (stderr) and the reasoning section
@@ -90,8 +100,8 @@ case "$CODEX_MODE" in
     if [ "$codex_status" -ne 0 ]; then
       printf 'WARN: codex companion exited %s\n' "$codex_status" >&2
       [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
-      # Keep the log only when it holds something a reader was pointed at.
-      if [ -s "$LOG_FILE" ]; then emit_log_tail "$LOG_FILE" "companion stderr"; else rm -f "$LOG_FILE"; fi
+      # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
+      [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
       exit "$codex_status"
     fi
     # Extract `.codex.stdout` and nothing else. jq is the workflow-wide requirement
@@ -101,13 +111,13 @@ case "$CODEX_MODE" in
     # `reasoningSummary`), which is precisely the flood this script exists to prevent.
     # Both parsers emit `.codex.status` on the first line and `.codex.stdout` on the rest, so
     # an empty review body can be told apart from a failed parse: status 0 with no body is the
-    # companion's "review completed without any stdout output" case (a real, finding-free
-    # review), while an unparseable payload or a non-zero status is a genuine failure.
+    # companion's "review completed without any stdout output" case (inconclusive — see below),
+    # while an unparseable payload or a non-zero status is a genuine failure.
     PARSED=""
     PAYLOAD=""
     JQ_ERR=""
     if command -v jq >/dev/null 2>&1; then
-      _jq_err_file="${LOG_FILE}.jq"
+      _jq_err_file="$RUN_DIR/jq.err"
       PAYLOAD=$(printf '%s' "$RAW" \
         | jq -r '((.codex.status // "none") | tostring), (.codex.stdout // "")' 2>"$_jq_err_file") || PAYLOAD=""
       JQ_ERR=$(cat "$_jq_err_file")
@@ -137,21 +147,32 @@ case "$CODEX_MODE" in
     PAYLOAD_STATUS=""
     TEXT=""
     if [ -n "$PARSED" ]; then
-      PAYLOAD_STATUS=$(printf '%s' "$PAYLOAD" | head -n 1)
-      TEXT=$(printf '%s' "$PAYLOAD" | tail -n +2)
+      # Split with parameter expansion, never `printf ... | head -n 1`: under `pipefail` the
+      # early-exiting `head` SIGPIPEs the writer once the payload passes the pipe buffer
+      # (~64 KB), and `set -e` then kills the script with 141 — silently, and precisely on the
+      # oversized payloads the truncation path below exists to handle.
+      PAYLOAD_STATUS=${PAYLOAD%%$'\n'*}
+      case "$PAYLOAD" in
+        *$'\n'*) TEXT=${PAYLOAD#*$'\n'} ;;
+        *) TEXT="" ;;
+      esac
     fi
     if [ -z "$TEXT" ] && [ "$PAYLOAD_STATUS" = "0" ]; then
-      # Successful run, no review body — report it as a result, not as a dead reviewer, so
-      # consolidation records "no findings" instead of "codex_review: failed".
-      TEXT="Codex review completed with no findings (empty review body)."
+      # Companion ran to completion but carried no review body. `buildResultStatus` returns 0
+      # for any completed turn, and `reviewText` is only filled from an `exitedReviewMode`
+      # item — so this means the review item arrived empty, NOT that Codex found nothing.
+      # Exit 0 so the source isn't recorded as a dead reviewer, but keep the companion's own
+      # neutral wording: consolidation must read this as inconclusive, not as a clean bill.
+      TEXT="Codex review completed without any review output (empty review body) — inconclusive, not a finding-free review."
     fi
     if [ -z "$TEXT" ]; then
       [ -n "$JQ_ERR" ] && printf 'WARN: jq parse error: %s\n' "$JQ_ERR" >&2
       printf 'ERROR: could not extract .codex.stdout from companion JSON (payload status: %s)\n' \
         "${PAYLOAD_STATUS:-unparsed}" >&2
       emit_blob_tail "$RAW" "companion stdout"
-      # Keep the log only when it holds something a reader was pointed at.
-      if [ -s "$LOG_FILE" ]; then emit_log_tail "$LOG_FILE" "companion stderr"; else rm -f "$LOG_FILE"; fi
+      # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
+      [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
+
       exit 1
     fi
     emit_review "$TEXT"
@@ -175,7 +196,6 @@ case "$CODEX_MODE" in
     ;;
   *)
     echo "ERROR: Unknown codex_mode '$CODEX_MODE'. Expected 'plugin' or 'cli'." >&2
-    rm -f "$LOG_FILE"
     exit 1
     ;;
 esac

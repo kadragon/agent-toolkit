@@ -54,6 +54,15 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 - Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
 - Tracked `*.json` must be UTF-8 **without** BOM — strict parsers reject the leading `EF BB BF`, which silently breaks manifest loading. Windows PowerShell 5.1 `Out-File`/`Set-Content -Encoding utf8` writes one; edit JSON through the file tools or git bash instead. CI rejects any BOM-carrying JSON.
 
+### Piping Large Variables (`pipefail` + SIGPIPE)
+
+Under `set -euo pipefail`, never split a captured variable with an early-exiting reader:
+`printf '%s' "$VAR" | head -n 1` works until `$VAR` passes the pipe buffer (~64 KB), then
+`head` exits, `printf` dies of SIGPIPE, `pipefail` propagates 141, and `set -e` kills the
+script — silently, and only on the large inputs the code was written to handle. Use
+parameter expansion (`${VAR%%$'\n'*}`, `${VAR#*$'\n'}`) for string surgery; reserve pipes for
+readers that consume all input (`tail`, `wc`, `jq`) or read from a file rather than a pipe.
+
 ### Plugin Hook Root Variables
 
 - In `hooks.json` command fields, use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` for shared Claude/Codex hooks. This guarantee is limited to the plugin hook command environment.
