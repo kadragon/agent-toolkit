@@ -17,6 +17,14 @@ Output (plain text, one line per candidate, in the algorithm's selection order):
   h1 sprint blocks (tasks.md Phase A) omit the "(<M> items)" suffix — they are a scope
   announcement, not an item-counted group.
 
+Empty result (stdout stays empty / `[]`; a diagnosis goes to STDERR): zero candidates has
+three very different meanings and silently printing nothing conflates them — the queue is
+genuinely clear, every open item is parked, or the file uses a shape this parser cannot see
+(prose bullets instead of `- [ ]`, or items sitting above the first heading). Only the first
+means "no work". The other two are false negatives that read as "nothing to do" while real
+work sits in the file, so `zero_candidate_diagnosis()` names which one applies per source
+file. Diagnostics go to stderr specifically so `--json` stdout stays machine-parseable.
+
 Parsing semantics (must match `SKILL.md` Step 1 prose exactly — this script does not
 reinterpret it):
 
@@ -94,6 +102,10 @@ _BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:.*?\)\*", re.I
 # HTML comments hold format templates (`## Feature Name` / `- [ ] Simplest case`) that must
 # never surface as candidates.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# A plain list bullet that is NOT a checkbox. Never used for candidate selection — it exists
+# only so an empty result can tell "this heading has no work" apart from "this heading's work
+# is written as prose bullets, which the selector cannot see".
+_BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
 
 
 def _is_blocked(text: str) -> bool:
@@ -107,10 +119,11 @@ def _strip_html_comments(text: str) -> str:
 
 
 def tokenize(text: str) -> list[dict]:
-    """Classify each line into a typed token: heading / status / checkbox.
+    """Classify each line into a typed token: heading / status / checkbox / bullet.
 
-    Unrecognized lines (body prose) are dropped — only the three token types matter for
-    candidate detection. Line numbers are 1-based to match grep -n output.
+    Unrecognized lines (body prose) are dropped — only heading/status/checkbox matter for
+    candidate detection, and every selector filters on `type`, so the diagnosis-only `bullet`
+    token is inert to them. Line numbers are 1-based to match grep -n output.
 
     `<!-- ... -->` spans are blanked out first: template/example markup inside a comment is
     not real content, so it must not produce headings or checkbox items.
@@ -131,11 +144,22 @@ def tokenize(text: str) -> list[dict]:
         if m:
             tokens.append({"type": "checkbox", "state": m.group(1), "text": m.group(2), "line": i})
             continue
+        if _BULLET_RE.match(line):
+            tokens.append({"type": "bullet", "line": i})
+            continue
     return tokens
 
 
 def _headings(tokens: list[dict], levels: tuple[int, ...] = (1, 2, 3)) -> list[dict]:
     return [t for t in tokens if t["type"] == "heading" and t["level"] in levels]
+
+
+def _region_end(heading: dict, all_headings: list[dict]) -> float:
+    """Line of the next level-1..3 heading after `heading`, or infinity — the region boundary."""
+    for h in all_headings:
+        if h["line"] > heading["line"]:
+            return h["line"]
+    return math.inf
 
 
 def _direct_open_items(tokens: list[dict], heading: dict, all_headings: list[dict]) -> list[dict]:
@@ -144,11 +168,7 @@ def _direct_open_items(tokens: list[dict], heading: dict, all_headings: list[dic
     all_headings must be the full sorted (by line) list of level-1..3 headings in the same
     token stream — this is what makes a nested h3's items NOT count toward its h2 parent.
     """
-    end = math.inf
-    for h in all_headings:
-        if h["line"] > heading["line"]:
-            end = h["line"]
-            break
+    end = _region_end(heading, all_headings)
     items = [
         t
         for t in tokens
@@ -316,6 +336,127 @@ def format_candidates(candidates: list[dict]) -> list[str]:
     return lines
 
 
+def _prose_only_headings(tokens: list[dict]) -> list[dict]:
+    """Headings that directly own prose bullets but not one checkbox — invisible work.
+
+    This must be judged PER HEADING, not per file. A file-wide "are there any checkboxes?"
+    test is wrong on the common real shape: a backlog whose `## Completed` section is full of
+    `- [x]` while its open section is written as prose tickets. That file has plenty of
+    checkboxes, so a global test reports "all done" — a confidently wrong answer, worse than
+    silence, on exactly the case this diagnosis exists to catch.
+    """
+    headings = _headings(tokens)
+    drifted = []
+    for h in headings:
+        end = _region_end(h, headings)
+        has_box = any(
+            t["type"] == "checkbox" and h["line"] < t["line"] < end for t in tokens
+        )
+        has_bullet = any(
+            t["type"] == "bullet" and h["line"] < t["line"] < end for t in tokens
+        )
+        if has_bullet and not has_box:
+            drifted.append(h)
+    return drifted
+
+
+def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
+    """Reasons `label` contributed no candidates — empty list if it has nothing to say."""
+    headings = _headings(tokens)
+    boxes = [t for t in tokens if t["type"] == "checkbox"]
+    bullets = [t for t in tokens if t["type"] == "bullet"]
+    if not headings and not boxes and not bullets:
+        return []
+
+    msgs = []
+    drifted = _prose_only_headings(tokens)
+    if drifted:
+        shown = ", ".join(f"{h['title']!r} (line {h['line']})" for h in drifted[:3])
+        more = f", +{len(drifted) - 3} more" if len(drifted) > 3 else ""
+        msgs.append(
+            f"{label}: {len(drifted)} heading(s) own prose bullets but no `- [ ]` item — "
+            f"{shown}{more}. Only checkbox lines are selectable, and `####`-or-deeper headings "
+            "are not headings to this parser (their items attribute to the enclosing "
+            "`#`–`###` heading)."
+        )
+
+    open_boxes = [t for t in boxes if t["state"] == " "]
+    actionable = [t for t in open_boxes if not _is_blocked(t["text"])]
+    first = min((h["line"] for h in headings), default=None)
+    # "Unattributed" means literally above the first heading — every item after one sits in
+    # some region. Do not describe an attributed-but-unselected item as unattributed: that is
+    # a false statement about the file, and the reader acts on it.
+    stray = [t for t in actionable if first is None or t["line"] < first]
+    attributed = [t for t in actionable if t not in stray]
+    if stray:
+        where = (
+            f" (that heading is at line {first})"
+            if first
+            else " (the file has no `#`–`###` heading at all)"
+        )
+        # Say `#`–`###` explicitly: a `####` line may well sit above the item and look like a
+        # heading to the reader, so "no heading above it" would be false as written.
+        msgs.append(
+            f"{label}: {len(stray)} actionable item(s) sit above the first `#`–`###` "
+            f"heading{where} — only levels 1–3 count here, so a `####`-or-deeper line above an "
+            "item does not attribute it."
+        )
+    if attributed:
+        # The reachability gap differs per file — naming tasks.md's causes while diagnosing
+        # backlog.md would be a false statement about the file in front of the reader.
+        cause = (
+            "a `###` outside `## Review Backlog`, or an h1 block whose `status:` is not `open`, "
+            "is reachable by no rule"
+            if label == "tasks.md"
+            else "the backlog.md rules cover h2/h3 groups only, so items under a top-level "
+            "`# ` heading are reachable by no rule"
+        )
+        msgs.append(
+            f"{label}: {len(attributed)} actionable item(s) are attributed to a heading but no "
+            f"phase selected them — {cause}."
+        )
+    if not actionable:
+        # Only reachable when nothing actionable exists, so these never contradict the
+        # stray/attributed lines above.
+        if open_boxes:
+            msgs.append(
+                f"{label}: {len(open_boxes)} open item(s), all parked by a "
+                "`*(blocked by: …)*` / `*(deferred: …)*` marker — clear a blocker to make one "
+                "actionable."
+            )
+        elif boxes and not drifted:
+            msgs.append(f"{label}: no open items (all `[x]`/`[>]`).")
+    return msgs
+
+
+def zero_candidate_diagnosis(
+    tasks_tokens: list[dict], backlog_tokens: list[dict], *, full_scan_used: bool = False
+) -> list[str]:
+    """Human-readable reasons an otherwise-valid run produced zero candidates.
+
+    When the fast path came up empty, the single most useful answer is whether `--full-scan`
+    would find anything — so run it and report the verified result rather than guessing. The
+    fast path deliberately covers fewer rules (no tasks.md h2-outside-Review-Backlog), so
+    "fast path found nothing" and "there is nothing" are different facts.
+    """
+    lines = []
+    if not full_scan_used:
+        reachable = full_scan(tasks_tokens, backlog_tokens)
+        if reachable:
+            names = ", ".join(f"{c['title']!r}" for c in reachable[:3])
+            more = f", +{len(reachable) - 3} more" if len(reachable) > 3 else ""
+            lines.append(
+                f"{len(reachable)} candidate(s) ARE reachable with --full-scan — {names}{more}. "
+                "The fast path reads only tasks.md h1 `status: open` blocks, h3s under "
+                "`## Review Backlog`, and backlog.md h2/h3 groups."
+            )
+    for label, tokens in (("tasks.md", tasks_tokens), ("backlog.md", backlog_tokens)):
+        lines.extend(_diagnose_source(label, tokens))
+    if not lines:
+        return ["No candidates: tasks.md and backlog.md have no headings or items at all."]
+    return ["No candidates found. Why:"] + [f"  - {m}" for m in lines]
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -381,6 +522,14 @@ def main(argv: list[str]) -> int:
     else:
         for line in format_candidates(candidates):
             print(line)
+
+    # Zero candidates is ambiguous — say which kind of empty this is, on stderr so `--json`
+    # stdout stays machine-parseable. Exit code stays 0: an empty queue is not an error.
+    if not candidates:
+        for line in zero_candidate_diagnosis(
+            tasks_tokens, backlog_tokens, full_scan_used=full_scan_flag
+        ):
+            sys.stderr.write(line + "\n")
     return 0
 
 
@@ -678,6 +827,221 @@ status: open
     lines = format_candidates(candidates)
     _assert(lines[0] == "[1] tasks.md: Sprint X", "h1 line has no item count suffix")
     _assert(lines[1] == "[2] backlog.md: Group Y (3 items)", "non-h1 line includes item count suffix")
+
+    # ---- Test 8: zero_candidate_diagnosis — an empty result says WHICH empty it is ----
+    print("\nTest 8: zero_candidate_diagnosis — distinguishes the kinds of empty")
+
+    # 8a: prose-ticket format drift. REGRESSION GUARD — the open section is prose while the
+    # Completed section is full of `- [x]`, which is the real shape this was first got wrong
+    # on: a file-wide "any checkboxes?" test sees the [x]s and reports "all done", a
+    # confidently wrong answer on the exact case the diagnosis exists to catch.
+    prose_open_with_done_section = """# Backlog
+
+## Open
+
+### Phase 5 — Audit
+
+#### SEC-5-1: header spoofing
+- Done when: obtain the trusted proxy IP, then implement.
+
+#### PERF-5-2: pool params
+- Done when: record the prod values in docs/.
+
+## Completed
+
+### Phase 4 — Architecture
+
+- [x] extract the service layer
+- [x] drop the CDN dependency
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(prose_open_with_done_section))
+    _assert(
+        any("prose bullets but no `- [ ]` item" in line for line in out),
+        "prose-ticket open work is reported as format drift even when a Completed section has [x]s",
+    )
+    _assert(
+        any("'Phase 5 — Audit' (line 5)" in line for line in out),
+        "the drifted heading is named with its line so the reader can go straight to it",
+    )
+    _assert(
+        not any("no open items" in line for line in out),
+        "REGRESSION: the [x]-heavy Completed section must not produce an 'all done' verdict",
+    )
+    _assert(
+        not any(line.startswith("  - tasks.md") for line in out),
+        "an absent/empty tasks.md contributes no diagnosis line",
+    )
+    _assert(
+        backlog_fast_candidates(tokenize(prose_open_with_done_section)) == [],
+        "the fixture really does yield zero candidates (diagnosis is not masking a hit)",
+    )
+
+    # 8a-bis: a `####` heading's checkbox attributes to the enclosing `###`, so the `###` is
+    # NOT drifted — guards against flagging correctly-formatted h4-nested work.
+    h4_nested = """## Open
+
+### Phase 5
+
+#### TICKET-1
+- some prose context
+- [ ] Done when: the thing works
+"""
+    _assert(
+        _prose_only_headings(tokenize(h4_nested)) == [],
+        "a heading whose region holds both prose and a checkbox is not reported as drifted",
+    )
+    _assert(
+        [c["title"] for c in backlog_fast_candidates(tokenize(h4_nested))] == ["Phase 5"],
+        "the h4-nested checkbox really does attribute to the enclosing h3",
+    )
+
+    # 8b: every open item parked by a blocked/deferred marker
+    all_parked = """## Open
+- [ ] fix the thing *(blocked by: 3-upstream-api)*
+- [ ] other thing *(deferred: needs ops values)*
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(all_parked))
+    _assert(
+        any("2 open item(s), all parked" in line for line in out),
+        "all-parked is reported as parked, with the count, not as an empty queue",
+    )
+
+    # 8c: actionable items exist but sit above the first heading
+    orphan_items = """- [ ] stray item one
+- [ ] stray item two
+
+## Group with nothing
+- [x] done
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(orphan_items))
+    _assert(
+        any("sit above the first `#`–`###` heading" in line for line in out),
+        "items above the first heading are reported as unattributed, not as absent",
+    )
+
+    # 8g: fast path empty but --full-scan would hit. REGRESSION GUARD — a tasks.md h2 outside
+    # `## Review Backlog` is a full-scan-only rule, so its items ARE attributed to a heading.
+    # Reporting them as "not attributed to a heading" is a false statement about the file.
+    full_scan_only = """# Out-of-Scope Findings
+
+## Plugin validation
+
+- [ ] fix the frontmatter parse error
+"""
+    tasks_tok = tokenize(full_scan_only)
+    _assert(
+        fast_path(tasks_tok, tokenize("")) == [] and len(full_scan(tasks_tok, tokenize(""))) == 1,
+        "fixture really is fast-path-empty but full-scan-reachable",
+    )
+    out = zero_candidate_diagnosis(tasks_tok, tokenize(""))
+    _assert(
+        any("reachable with --full-scan" in line and "'Plugin validation'" in line for line in out),
+        "the fast path names the candidates --full-scan would find, verified by running it",
+    )
+    _assert(
+        not any("above the first heading" in line for line in out),
+        "REGRESSION: an attributed-but-unselected item must not be called unattributed",
+    )
+    _assert(
+        any("no phase selected them" in line for line in out),
+        "attributed-but-unselected is named as its own distinct cause",
+    )
+    _assert(
+        not any("no open items" in line for line in out),
+        "REGRESSION: 'no open items' must never accompany a line reporting actionable items",
+    )
+
+    # 8h: REGRESSION GUARD (qa-verifier) — the unselected-cause clause must describe the file
+    # actually being diagnosed. A backlog.md h1 is unreachable for a completely different
+    # reason than a tasks.md `###`, and printing tasks.md's causes here is simply false.
+    backlog_h1 = """# Top-level backlog.md heading
+
+- [ ] real actionable item directly under an h1
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(backlog_h1))
+    _assert(
+        any("backlog.md rules cover h2/h3 groups only" in line for line in out),
+        "a backlog.md h1 is explained by the backlog.md rule set, not tasks.md's",
+    )
+    _assert(
+        not any("Review Backlog" in line for line in out),
+        "REGRESSION: tasks.md-only causes must not be cited while diagnosing backlog.md",
+    )
+    tasks_h3 = """## Some group
+
+### Nested outside Review Backlog
+
+- [ ] real actionable item
+"""
+    out = zero_candidate_diagnosis(tokenize(tasks_h3), tokenize(""))
+    _assert(
+        any("Review Backlog" in line for line in out),
+        "the tasks.md explanation is still given when tasks.md is the file being diagnosed",
+    )
+
+    # 8i: REGRESSION GUARD (qa-verifier) — "above the first heading" must disclose that only
+    # levels 1–3 count, since a `####` line can visually sit above the item.
+    h4_above_item = """#### h4 preamble, not a heading to this parser
+- [ ] stray item that visually sits under an h4
+
+## Real heading
+- [x] done already
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(h4_above_item))
+    _assert(
+        any("only levels 1–3 count here" in line for line in out),
+        "REGRESSION: the stray-item message discloses the levels-1-3 restriction",
+    )
+    _assert(
+        not any("items with no heading above them" in line for line in out),
+        "REGRESSION: the message no longer claims there is no heading above the item",
+    )
+
+    # 8j: the drift message must not name a heading level it did not check
+    h4_under_h2 = """## Group directly enclosing an h4
+
+#### TICKET
+- prose only, no checkbox
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(h4_under_h2))
+    _assert(
+        any("enclosing `#`–`###` heading" in line for line in out)
+        and not any("enclosing `###`)" in line for line in out),
+        "the drift message names the enclosing level generically, not a hardcoded `###`",
+    )
+    _assert(
+        not any(
+            "reachable with --full-scan" in line
+            for line in zero_candidate_diagnosis(tasks_tok, tokenize(""), full_scan_used=True)
+        ),
+        "the --full-scan suggestion is suppressed when full scan is what already ran",
+    )
+
+    # 8d: genuinely clear queue — everything closed
+    all_done = """## Group
+- [x] done one
+- [>] moved on
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(all_done))
+    _assert(
+        any("no open items" in line for line in out),
+        "an all-closed file is reported as genuinely clear",
+    )
+
+    # 8e: both files diagnosed independently in one run
+    out = zero_candidate_diagnosis(tokenize(all_parked), tokenize(prose_open_with_done_section))
+    _assert(
+        any(line.startswith("  - tasks.md") for line in out)
+        and any(line.startswith("  - backlog.md") for line in out),
+        "each source file gets its own diagnosis line when both have something to say",
+    )
+
+    # 8f: truly empty inputs still produce a sentence rather than nothing
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(""))
+    _assert(
+        len(out) == 1 and "no headings or items at all" in out[0],
+        "empty-in still yields one explanatory line, never an empty diagnosis",
+    )
 
     print(f"\n=== Results: {PASS_COUNT} PASS, {FAIL_COUNT} FAIL ===")
     return 0 if FAIL_COUNT == 0 else 1
