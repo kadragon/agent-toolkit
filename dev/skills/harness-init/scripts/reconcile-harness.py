@@ -235,15 +235,30 @@ def remove_empty_headings(backlog: str) -> str:
     return '\n'.join(result)
 
 
+MAX_CHANGELOG_LINE = 160
+
+
 def append_changelog(title: str) -> None:
-    """Insert one `- [done]` line under `## Unreleased`.
+    """Insert one `- [done]` line as the first entry under `## Unreleased`.
 
     Per the CHANGELOG Entry Contract (references/harness-invariants.md), the entry is a
     single line — no summary block. Detail belongs in the owning docs/*.md or the PR body.
+    This recovery path cannot know which plugin was bumped, so it writes the version-less
+    form; the skill-driven cycle tails add the `(<plugin> vX.Y.Z)` clause themselves.
     """
     if not CHANGELOG.exists():
         return
     entry = f"- [done] {title} ({date.today()})"
+    if len(entry) > MAX_CHANGELOG_LINE:
+        # The contract's cap is the point of the entry — clamp the title rather than
+        # emit a line that violates the rule this script is supposed to uphold.
+        keep = MAX_CHANGELOG_LINE - (len(entry) - len(title)) - 1
+        entry = f"- [done] {title[:keep].rstrip()}… ({date.today()})"
+        print(
+            f"WARNING: sprint title exceeds the {MAX_CHANGELOG_LINE}-char CHANGELOG cap; "
+            "truncated in the entry. Shorten the tasks.md title.",
+            file=sys.stderr,
+        )
     body = CHANGELOG.read_text(encoding="utf-8")
     lines = body.splitlines()
     mask = _fence_mask(lines)  # a `## Unreleased` inside a fenced example is not the section
@@ -258,7 +273,14 @@ def append_changelog(title: str) -> None:
                 lines[insert_at:insert_at] = ["", entry]
             CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
             return
-    # No Unreleased section — create one at the end.
+    # No Unreleased section — create one directly under the file's h1 title. Placing it at
+    # EOF would sit it below every released section and stay mis-ordered on every later run,
+    # since the next call finds it there (changelogs are newest-first).
+    for i, line in enumerate(lines):
+        if mask[i] and re.match(r'^#\s+\S', line):
+            lines[i + 1:i + 1] = ["", "## Unreleased", "", entry]
+            CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
+            return
     CHANGELOG.write_text(body.rstrip('\n') + f"\n\n## Unreleased\n\n{entry}\n", encoding="utf-8")
 
 

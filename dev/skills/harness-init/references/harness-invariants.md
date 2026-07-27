@@ -93,15 +93,18 @@ exact schema above.
 ## CHANGELOG Entry Contract
 
 `CHANGELOG.md` is an **index, not a record**. Every cycle tail — `task-new`, `task-next`
-(single, batch, or worktree), `reconcile-harness.py` — appends exactly one line under
-`## Unreleased`:
+(single, batch, or worktree), `reconcile-harness.py` — writes exactly one line, inserted as
+the **first entry under `## Unreleased`** (newest first; all tails write from the same end):
 
 ```
 - [done] <title> (<plugin> v<X.Y.Z>) (<date>)
 - [done] <title> (<plugin> v<X.Y.Z>) (<date>) → <path/to/owning-doc>.md
 ```
 
-Drop the `(<plugin> v<X.Y.Z>)` clause in repos that ship no versioned plugin.
+Drop the `(<plugin> v<X.Y.Z>)` clause in repos that ship no versioned plugin. The
+skill-driven tails add it because they performed the bump and know which plugin moved;
+`reconcile-harness.py` is a recovery path with no way to know either, so it writes the
+version-less form — add the clause by hand if the entry matters.
 
 **Hard limits.** One line. **≤160 characters.** At most **one** `→ <path/to/owning-doc>.md`
 link — the repo-relative path of the doc that actually holds the detail (usually `docs/*.md`;

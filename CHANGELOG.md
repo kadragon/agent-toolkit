@@ -4,7 +4,7 @@
 
 - [done] CHANGELOG entry contract + named-agent result handoff (dev v4.0.10) (2026-07-27) → docs/conventions.md
 - [done] task-review: capture only Codex's final review (dev v4.0.9) (2026-07-27)
-- [done] task-next: ignore HTML-commented markup in backlog candidate scan (dev v4.0.3) (2026-07-27)
+- [done] task-next: ignore HTML-commented markup in backlog candidate scan (dev v4.0.7) (2026-07-27)
 - [done] hwpx: detect stale linesegarray after text edits (prod v3.0.2) (2026-07-27) → prod/skills/hwpx/references/editing-gotchas.md
 - [done] Windows Codex hook commands and hook test portability fixed (dev v4.0.1) (2026-07-21)
 - [done] Naming unification: plugins renamed to dev and prod (dev v4.0.0, prod v3.0.0) (2026-07-21) → docs/design/plugin-skill-rename.md

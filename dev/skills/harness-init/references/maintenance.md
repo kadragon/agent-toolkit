@@ -127,7 +127,8 @@ call; you must.
 
 Signal to judge from (tasks.md is already deleted by C):
 - the `done` line C printed (`Sprint '<title>' done. tasks.md removed.`)
-- the latest `CHANGELOG.md` entry (acceptance-criteria summary), if present
+- the latest `CHANGELOG.md` entry — title only, per the CHANGELOG Entry Contract; it names
+  the change but carries no detail, so lean the judgment on the git bullet below
 - `git log origin/main..HEAD` / `git diff origin/main..HEAD` for the sprint's commits
 
 If doc-worthy → extract it into the relevant `docs/*.md` (the file named in the

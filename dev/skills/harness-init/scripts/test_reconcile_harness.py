@@ -520,6 +520,23 @@ def test_main_done_changelog_creates_unreleased_when_absent():
           len([ln for ln in body.splitlines() if ln.startswith("- [done] Sprint:")]) == 1, body)
     check("changelog-new-section: existing release untouched",
           "## 1.0.0" in body and "- [done] shipped (2026-01-01)" in body, body)
+    check("changelog-new-section: Unreleased placed above released sections",
+          body.index("## Unreleased") < body.index("## 1.0.0"), body)
+
+
+def test_main_done_changelog_title_over_cap_is_clamped():
+    """A tasks.md title long enough to blow the 160-char cap is truncated, not emitted raw."""
+    long_title = "Sprint: " + ("verbose " * 30).strip()
+    tasks = TASKS_ONLY_SPRINT.replace("# Sprint: solo", f"# {long_title}")
+    backlog = f"## Now\n- [>] {long_title}\n"
+    before = "# Changelog\n\n## Unreleased\n"
+    r = _run_main_in_tmp(tasks, backlog, changelog_text=before)
+    entries = [ln for ln in r["changelog_body"].splitlines() if ln.startswith("- [done] ")]
+    check("changelog-cap: one entry written", len(entries) == 1, repr(entries))
+    check("changelog-cap: entry within the 160-char cap",
+          bool(entries) and len(entries[0]) <= 160,
+          f"{len(entries[0]) if entries else 0} chars")
+    check("changelog-cap: truncation reported on stderr", "160-char" in r["stderr"], r["stderr"])
 
 
 def test_main_done_changelog_skips_fenced_unreleased():
@@ -537,8 +554,11 @@ def test_main_done_changelog_skips_fenced_unreleased():
     lines = r["changelog_body"].splitlines()
     added = [ln for ln in lines if ln.startswith("- [done] Sprint:")]
     check("changelog-fence: entry added once", len(added) == 1, repr(added))
-    check("changelog-fence: entry lands after the fenced block",
-          bool(added) and lines.index(added[0]) > lines.index("```", 1), r["changelog_body"])
+    # Anchor on the REAL heading, not the fenced one. Anchoring on the opening fence would
+    # pass even when the entry lands inside the fenced example — the exact bug being guarded.
+    real_heading = len(lines) - 1 - lines[::-1].index("## Unreleased")
+    check("changelog-fence: entry lands under the real Unreleased, not the fenced example",
+          bool(added) and lines.index(added[0]) > real_heading, r["changelog_body"])
     check("changelog-fence: fenced example untouched",
           "- [done] example (2026-01-01)" in r["changelog_body"], r["changelog_body"])
 
@@ -621,6 +641,7 @@ SUITES = [
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
     ("main: done changelog creates Unreleased", test_main_done_changelog_creates_unreleased_when_absent),
     ("main: done changelog skips fenced Unreleased", test_main_done_changelog_skips_fenced_unreleased),
+    ("main: done changelog clamps over-cap title", test_main_done_changelog_title_over_cap_is_clamped),
     ("main: done without CHANGELOG is no-op", test_main_done_no_changelog_is_noop),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
