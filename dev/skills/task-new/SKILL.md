@@ -129,8 +129,11 @@ Leave these uncommitted so they land in the initial PR commit:
    content, delete the file.
 2. If a `## Covers` ticket was set (multi-session path): delete that item's `- [ ]` line from
    `backlog.md`. Also delete any now-empty h2/h3 heading left behind.
-3. Append to `CHANGELOG.md` under `## Unreleased`: `- [done] <title> (<date>)` (create the section
-   if absent).
+3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
+   `- [done] <title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
+   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — reusable detail belongs in the
+   owning `docs/*.md` (link it), narrative belongs in the commit and PR body. Full rules: the
+   *CHANGELOG Entry Contract* in `harness-invariants.md` (bundled with `dev:harness-init`).
 
 ## Step 4 — Hand off
 

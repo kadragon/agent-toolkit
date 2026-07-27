@@ -27,6 +27,24 @@ Commit types (mandatory prefix):
 
 Never commit directly to `main` — branch first (`git checkout -b <type>/<slug>`).
 
+### CHANGELOG Entries
+
+`CHANGELOG.md` is an index, not a record. One line per completed cycle, inserted as the first
+entry under `## Unreleased` (newest first):
+
+```
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>)
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>) → <path/to/owning-doc>.md
+```
+
+**≤160 characters, at most one `docs/` link, no explanatory clauses** — no `—`/`;`-chained
+descriptions, no file lists, no failure-mode narration. Reusable knowledge goes to the owning
+`docs/*.md` (linked from the entry); the story of what changed already lives in `git log` and the
+PR body. If the line alone doesn't identify the change, fix the title rather than append prose.
+
+Canonical rule and rationale: *CHANGELOG Entry Contract* in the `dev:harness-init` skill's
+`references/harness-invariants.md`.
+
 ## Shell Script Conventions
 
 ### Capture-Before-Use (mandatory)
@@ -97,6 +115,17 @@ bash scripts/bump-version.sh all patch
 Files updated per plugin: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and optionally `skills/{name}/SKILL.md`.
 
 **Stale local bump on sync**: if uncommitted local changes already bumped a plugin version (e.g. `3.7.34 → 3.7.35`) and `git pull` brings in a merged PR that bumped the same manifest further (e.g. `3.7.34 → 3.8.0`), the two edits conflict on the version line. Resolve by re-deriving the bump from the new base, not by keeping either literal value — e.g. local was a patch-level change, so the correct resolution is `3.8.0 → 3.8.1`, not `3.7.35`.
+
+## Regression Test Rules
+
+A regression test must **fail against the bug it names**. Before claiming coverage, remove the
+guard the test targets, re-run, and confirm the test goes red — then restore. A green suite is
+not evidence; an assertion can hold for both the fixed and the broken behavior and read as
+coverage while providing none.
+
+Typical trap: anchoring an ordering assertion on the wrong landmark. `lines.index("```", 1)`
+finds the *opening* fence, so "inserted after the fence" is satisfied by an insertion *inside*
+the fenced block — the exact defect under test. Anchor on the real target instead.
 
 ## Skill Doc Rules
 

@@ -156,7 +156,18 @@ Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this PR.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
+Do not end silently: when finished, deliver the JSON array to the orchestrator with
+SendMessage(to: "main"). Do not assume the final report is returned on its own —
+skip this and the whole review is lost after the work is already done.
+Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled.
 ```
+
+**Result-handoff rule (applies to every agent this skill spawns).** Any agent launched with a
+`name` — and, as cheap insurance, any launched with `run_in_background: true` — must be told
+**in its initial prompt** to report via `SendMessage(to: "main")`. For a named agent, messaging
+is the delivery channel: it finishes the review and the findings are silently dropped otherwise.
+There is no way to add the instruction after the spawn. Full rule: *Result-handoff rule* in
+`delegation-template.md` (bundled with `dev:harness-init`).
 
 #### 2-2: Antigravity (agy)
 
@@ -190,7 +201,7 @@ If all sources fail → inline review + note in consolidation.
 
 Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 band), confidence filtering (< 50 drops to low-confidence list), scope classification, and tasks.md recording.
 
-**Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding.
+**Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding. Both prompts are subject to the **result-handoff rule** from Step 2 — each must end with an explicit instruction to return its verdicts via `SendMessage(to: "main")`, including when the verdict list is empty.
 
 - **Verifier gate:** If any P0 or P1 in-scope candidates survived, spawn one verifier sub-agent (do not pin a model — inherit the session's model) to re-check each at file:line — confirm (a) exists in working tree, (b) introduced by this branch's diff, (c) concrete path to breakage. Return `confirmed | refuted | uncertain` with one-line evidence. Refuted → "Refuted by verifier" section, never applied. Skip verifier when no P0/P1s exist.
 - **Contest Round (bounded, single pass — see consolidation-guide.md Section 3):** Collect contestable findings — confidence 50–74. If the set is empty, skip — do not spawn an agent. Otherwise spawn exactly one sub-agent (do not pin a model — inherit the session's model) with the diff and the full batch of contestable findings; it returns `confirmed | refuted` per finding with file:line evidence. This is one round only — it does not loop or re-run to convergence. `confirmed` → promoted into the action table (tagged `contest-confirmed` in the Verdict column). `refuted` → "Refuted by contest round" section, never applied.

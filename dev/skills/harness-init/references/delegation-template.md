@@ -114,11 +114,23 @@ Choose the right data transfer strategy based on execution mode and data size.
 | **Message-based** | `SendMessage` between teammates | Real-time coordination, mid-flight findings |
 | **Task-based** | `TaskCreate`/`TaskUpdate` | Progress tracking, dependency gates |
 | **File-based** | Session scratchpad dir, `{phase}_{agent}_{artifact}.{ext}` | Large artifacts, structured output, cross-phase handoff |
-| **Return-value** | `Agent(...)` tool return message | Sub-agent results reported to orchestrator |
+| **Return-value** | `Agent(...)` tool return message | Sub-agent results reported to orchestrator — **unnamed spawns; a named spawn must SendMessage instead** |
+
+**Result-handoff rule (mandatory).** An agent spawned with a `name` must be told **in its
+initial prompt** to report back with `SendMessage(to: "main")`. For a named agent, messaging
+*is* the delivery channel — observed failure mode: the agent completes a full review and the
+findings are silently dropped, work already spent. Apply the same instruction to any
+`run_in_background: true` spawn as cheap insurance: it is a no-op when the result does arrive
+on its own, and the only recovery when it does not.
+
+The instruction cannot be added after the spawn, so it belongs in the prompt template, never in
+a follow-up message. Require the report even when the result set is empty, so the orchestrator
+can distinguish "finished with nothing" from "still running".
 
 **Recommended combinations:**
 - Team mode → task-based (coordination) + file-based (artifacts) + message-based (real-time)
-- Sub-agent mode → return-value (results) + file-based (large data)
+- Sub-agent mode → return-value (results) + file-based (large data); add the SendMessage
+  report-back instruction whenever the spawn is named or backgrounded (see the rule above)
 
 File-based rules:
 - All agent-artifact paths under the session scratchpad dir (path from the system prompt — never ad-hoc temp paths, never guessed)

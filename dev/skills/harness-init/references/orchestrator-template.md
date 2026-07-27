@@ -161,16 +161,20 @@ Agent(subagent_type: "{agent-1}", prompt: """
   Tools to use: {subset}
   Boundaries: {must not touch}
   Save output to: {scratchpad}/01_{agent-1}_result.md
+  When done, report completion and the artifact path with SendMessage(to: "main") —
+  send it even if you found nothing.
 """, run_in_background: true)
 
 Agent(subagent_type: "{agent-2}", prompt: """
   Objective: {specific task}
   ...
   Save output to: {scratchpad}/01_{agent-2}_result.md
+  When done, report completion and the artifact path with SendMessage(to: "main") —
+  send it even if you found nothing.
 """, run_in_background: true)
 ```
 
-All four Spawn Prompt Contract fields are mandatory (Objective / Output format / Tools to use / Boundaries).
+All four Spawn Prompt Contract fields are mandatory (Objective / Output format / Tools to use / Boundaries). The report-back line is mandatory too — see the *Result-handoff rule* in `delegation-template.md`.
 
 ## Phase 2: Collect and Integrate
 

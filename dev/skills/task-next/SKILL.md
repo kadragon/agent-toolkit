@@ -277,7 +277,11 @@ initial PR commit alongside the code.
 
 *Task came from tasks.md h1 block:*
 1. Delete the entire h1 block from `tasks.md` (the `# heading`, `status:` line, and all body content). If `tasks.md` has no remaining content after deletion, delete the file.
-2. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased`.
+2. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md`:
+   `- [done] <sprint title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
+   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — reusable detail belongs in the
+   owning `docs/*.md` (link it), narrative belongs in the commit and PR body. Full rules:
+   `harness-invariants.md` → *CHANGELOG Entry Contract*.
 
 *Task came from tasks.md finding group (h3/h2):*
 - In `tasks.md`: **delete** each completed finding line (the `- [ ]` items that were fixed). If the h3 heading has no remaining open `- [ ]` items after deletion, delete the heading line too. If `## Review Backlog` becomes empty, delete that section header as well. If `tasks.md` is now entirely empty, delete the file.
@@ -285,7 +289,10 @@ initial PR commit alongside the code.
 *Task came from backlog.md group:*
 1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
 2. In `backlog.md`: **delete** each item line listed in `## Covers` of the Sprint Contract. Also delete any h2/h3 heading that has no remaining open `- [ ]` items after the deletion.
-3. Append to `CHANGELOG.md`: `- [done] <sprint title> (<date>)` under `## Unreleased` (create the section if absent).
+3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
+   `- [done] <sprint title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
+   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — see the *CHANGELOG Entry
+   Contract* in `harness-invariants.md`.
 
 *Blocked-analysis sync (runs for every source type):*
 
