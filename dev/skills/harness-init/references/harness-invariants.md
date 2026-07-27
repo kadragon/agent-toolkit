@@ -89,3 +89,40 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 
 For this contract to hold, init MUST create `backlog.md` / `tasks.md` with the
 exact schema above.
+
+## CHANGELOG Entry Contract
+
+`CHANGELOG.md` is an **index, not a record**. Every cycle tail — `task-new`, `task-next`
+(single, batch, or worktree), `reconcile-harness.py` — appends exactly one line under
+`## Unreleased`:
+
+```
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>)
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>) → <path/to/owning-doc>.md
+```
+
+Drop the `(<plugin> v<X.Y.Z>)` clause in repos that ship no versioned plugin.
+
+**Hard limits.** One line. **≤160 characters.** At most **one** `→ <path/to/owning-doc>.md`
+link — the repo-relative path of the doc that actually holds the detail (usually `docs/*.md`;
+in a plugin repo it may be a skill's `references/*.md`). No link when no doc holds it.
+
+**Banned in a changelog line** — every one of these is what made past entries balloon:
+
+- explanatory clauses chained with `—`, `;`, or `,` ("… now does X, so Y stops happening")
+- lists of touched files, functions, or scripts
+- failure-mode narration ("the failure mode that makes it silently open a blank document")
+- more than one sentence, or any sentence at all beyond the title
+
+**Where the detail goes.** Judge the dropped material once:
+
+| Material | Destination |
+|----------|-------------|
+| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (the write-back `task-review` Step 4.5 already performs via `harness-capture`), then link it from the changelog line |
+| Narrative of what was changed and how | **dropped** — `git log` and the PR body already hold it verbatim |
+
+Never create a changelog-detail file. Moving the bloat to a second file that nobody reads is
+not brevity.
+
+**Test.** If the changelog line alone does not identify what changed, the **title** is bad —
+fix the title, do not append an explanation.

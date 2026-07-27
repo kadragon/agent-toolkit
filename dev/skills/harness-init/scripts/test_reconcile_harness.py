@@ -438,7 +438,7 @@ def test_strip_handles_nested_fences():
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
 
-def _run_main_in_tmp(tasks_text: str, backlog_text: str) -> dict:
+def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | None = None) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
     Returns a dict snapshotting file existence/contents and captured streams
@@ -447,11 +447,13 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str) -> dict:
     """
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
-        tpath, bpath = tmp / "tasks.md", tmp / "backlog.md"
+        tpath, bpath, cpath = tmp / "tasks.md", tmp / "backlog.md", tmp / "CHANGELOG.md"
         tpath.write_text(tasks_text, encoding="utf-8")
         bpath.write_text(backlog_text, encoding="utf-8")
+        if changelog_text is not None:
+            cpath.write_text(changelog_text, encoding="utf-8")
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
-        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, tmp / "CHANGELOG.md"
+        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -462,6 +464,7 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str) -> dict:
             "tasks_exists": tpath.exists(),
             "tasks_body": tpath.read_text(encoding="utf-8") if tpath.exists() else "",
             "backlog_body": bpath.read_text(encoding="utf-8"),
+            "changelog_body": cpath.read_text(encoding="utf-8") if cpath.exists() else "",
             "stdout": out.getvalue(),
             "stderr": err.getvalue(),
         }
@@ -482,6 +485,71 @@ def test_main_done_only_sprint_unlinks():
     backlog = "## Now\n- [>] Sprint: solo\n"
     r = _run_main_in_tmp(TASKS_ONLY_SPRINT, backlog)
     check("main-done-solo: tasks.md unlinked", not r["tasks_exists"])
+
+
+def test_main_done_changelog_single_line_under_unreleased():
+    """done sprint → exactly one `- [done]` line inserted under `## Unreleased`.
+
+    CHANGELOG Entry Contract (references/harness-invariants.md): the entry is one line,
+    never a `## {date} — {title}` block with a summary paragraph.
+    """
+    before = "# Changelog\n\n## Unreleased\n\n- [done] earlier thing (2026-01-01)\n"
+    backlog = "## Now\n- [>] Sprint: do the thing\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog, changelog_text=before)
+    body = r["changelog_body"]
+    added = [ln for ln in body.splitlines() if ln not in before.splitlines()]
+    check("changelog: exactly one line added", len(added) == 1, repr(added))
+    check("changelog: entry is a `- [done]` bullet",
+          bool(added) and added[0].startswith("- [done] "), repr(added))
+    check("changelog: no date-heading block", "## 20" not in body, body)
+    check("changelog: prior entry preserved", "earlier thing (2026-01-01)" in body, body)
+    lines = body.splitlines()
+    idx_unreleased = lines.index("## Unreleased")
+    check("changelog: entry sits under Unreleased",
+          bool(added) and 0 < lines.index(added[0]) - idx_unreleased <= 2, body)
+
+
+def test_main_done_changelog_creates_unreleased_when_absent():
+    """CHANGELOG.md without an `## Unreleased` section → section created, one line under it."""
+    before = "# Changelog\n\n## 1.0.0\n\n- [done] shipped (2026-01-01)\n"
+    backlog = "## Now\n- [>] Sprint: do the thing\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog, changelog_text=before)
+    body = r["changelog_body"]
+    check("changelog-new-section: Unreleased created", "## Unreleased" in body, body)
+    check("changelog-new-section: one done entry appended",
+          len([ln for ln in body.splitlines() if ln.startswith("- [done] Sprint:")]) == 1, body)
+    check("changelog-new-section: existing release untouched",
+          "## 1.0.0" in body and "- [done] shipped (2026-01-01)" in body, body)
+
+
+def test_main_done_changelog_skips_fenced_unreleased():
+    """A `## Unreleased` inside a fenced example must not absorb the entry.
+
+    Docs that show the changelog format embed a literal `## Unreleased` in a code fence;
+    inserting there silently loses the entry from the real section below.
+    """
+    before = (
+        "# Changelog\n\nFormat:\n\n```\n## Unreleased\n\n- [done] example (2026-01-01)\n```\n\n"
+        "## Unreleased\n\n- [done] real earlier entry (2026-01-02)\n"
+    )
+    backlog = "## Now\n- [>] Sprint: do the thing\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog, changelog_text=before)
+    lines = r["changelog_body"].splitlines()
+    added = [ln for ln in lines if ln.startswith("- [done] Sprint:")]
+    check("changelog-fence: entry added once", len(added) == 1, repr(added))
+    check("changelog-fence: entry lands after the fenced block",
+          bool(added) and lines.index(added[0]) > lines.index("```", 1), r["changelog_body"])
+    check("changelog-fence: fenced example untouched",
+          "- [done] example (2026-01-01)" in r["changelog_body"], r["changelog_body"])
+
+
+def test_main_done_no_changelog_is_noop():
+    """No CHANGELOG.md → reconcile still completes, nothing created."""
+    backlog = "## Now\n- [>] Sprint: do the thing\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog)
+    check("changelog-absent: nothing written", r["changelog_body"] == "", r["changelog_body"])
+    check("changelog-absent: backlog still reconciled",
+          "[>] Sprint: do the thing" not in r["backlog_body"], r["backlog_body"])
 
 
 def test_main_failed_preserves_review_backlog():
@@ -550,6 +618,10 @@ SUITES = [
     ("strip_sprint_block: handles nested fences", test_strip_handles_nested_fences),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
+    ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
+    ("main: done changelog creates Unreleased", test_main_done_changelog_creates_unreleased_when_absent),
+    ("main: done changelog skips fenced Unreleased", test_main_done_changelog_skips_fenced_unreleased),
+    ("main: done without CHANGELOG is no-op", test_main_done_no_changelog_is_noop),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),

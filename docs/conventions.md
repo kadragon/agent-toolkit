@@ -27,6 +27,23 @@ Commit types (mandatory prefix):
 
 Never commit directly to `main` — branch first (`git checkout -b <type>/<slug>`).
 
+### CHANGELOG Entries
+
+`CHANGELOG.md` is an index, not a record. One line per completed cycle, under `## Unreleased`:
+
+```
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>)
+- [done] <title> (<plugin> v<X.Y.Z>) (<date>) → <path/to/owning-doc>.md
+```
+
+**≤160 characters, at most one `docs/` link, no explanatory clauses** — no `—`/`;`-chained
+descriptions, no file lists, no failure-mode narration. Reusable knowledge goes to the owning
+`docs/*.md` (linked from the entry); the story of what changed already lives in `git log` and the
+PR body. If the line alone doesn't identify the change, fix the title rather than append prose.
+
+Canonical rule and rationale: *CHANGELOG Entry Contract* in the `dev:harness-init` skill's
+`references/harness-invariants.md`.
+
 ## Shell Script Conventions
 
 ### Capture-Before-Use (mandatory)
