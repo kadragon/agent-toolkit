@@ -82,9 +82,23 @@ Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 o
 
 | Count | Action |
 |-------|--------|
-| 0 | No fast-path hits — fall through to full scan below |
+| 0 | No fast-path hits — **read the script's stderr before concluding anything** (see below), then fall through to full scan |
 | 1 | Announce the group and proceed directly to Step 3 |
 | 2–5 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
+
+**Zero candidates is ambiguous — never report "queue clear" on an empty stdout alone.** When
+the script finds nothing it writes a diagnosis to **stderr** naming which kind of empty this
+is, and they demand opposite responses:
+
+- *"N candidate(s) ARE reachable with --full-scan"* — the fast path's rules simply do not cover
+  them (e.g. a `tasks.md` h2 outside `## Review Backlog`). Run the full scan; there IS work.
+- *"heading(s) own prose bullets but no `- [ ]` item"* — format drift. The file holds real work
+  the parser cannot see, because only checkbox lines are selectable and `####`-or-deeper
+  headings are not headings to it. Surface this to the user; do NOT report an empty queue.
+- *"actionable item(s) sit above the first heading"* / *"attributed … but no phase selected
+  them"* — real work, unreachable by every rule. Same handling: surface, do not silently drop.
+- *"all parked by a `*(blocked by: …)*` marker"* or *"no open items"* — these are the genuine
+  empties. Report per Step 2 (surface the blockers, or "nothing open").
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
