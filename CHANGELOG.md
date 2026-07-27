@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] task-review Codex capture (dev v4.0.9) — `preflight.sh` now finds `codex-companion.mjs` at its real layouts (`cache/*/codex/<ver>/scripts/`, `marketplaces/*/plugins/codex/scripts/`) and ranks by the version component, so plugin mode stops silently degrading to the `codex review` CLI; `codex-review.sh` keeps stdout to the final review alone (transcript redirected to a log, diagnostics byte-bounded at 2 KB with the full path named, `.rendered`/raw-JSON fallbacks dropped because both carry the reasoning trace, status-0-with-empty-body reported as "no findings" instead of a failure) (2026-07-27)
+
 - [done] task-next HTML-comment false positives (dev v4.0.3) — `backlog_candidates.py` now blanks out `<!-- ... -->` spans before tokenizing (line count preserved), so a commented-out `## Feature Name` / `- [ ] Simplest case` template no longer surfaces as a candidate group; SKILL.md hand-grep fallback documents the same rule (2026-07-27)
 - [done] hwpx stale-linesegarray guard (prod v3.0.2) — `validate.py validate --baseline` now reports paragraphs whose text changed while the line-break cache was carried over (positional alignment; Hancom reuses the placeholder id `2147483648`), the failure mode that makes Hancom silently open a blank `빈 문서`; Bulk File Edit recipe gained the missing `strip-lineseg` step; rule 19 raised 🟡→🔴; dead script names fixed in editing-gotchas.md (2026-07-27)
 - [done] Fix Windows Codex hook commands and hook test portability; clean stale plugin rename references and global legacy installations (2026-07-21)
