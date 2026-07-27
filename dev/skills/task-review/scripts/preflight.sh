@@ -49,18 +49,36 @@ if command -v agy >/dev/null 2>&1; then
 fi
 
 # --- Codex ---
+# Plugin mode is strongly preferred: `codex-companion.mjs review --json` yields the final
+# review alone, while the bare `codex review` CLI streams its whole session transcript.
+# The companion ships at two layouts — a versioned plugin cache and the marketplace checkout:
+#   ~/.claude/plugins/cache/<marketplace>/codex/<version>/scripts/codex-companion.mjs
+#   ~/.claude/plugins/marketplaces/<marketplace>/plugins/codex/scripts/codex-companion.mjs
+# Rank cached hits by the <version> component alone — sorting whole paths would compare
+# <marketplace> first, letting a lexically-later marketplace supply an older companion (plain
+# `head -1` is worse still: it picks the lexically-first, i.e. oldest, copy). Address that
+# component by offset (`$(NF-2)`), not by matching the literal "codex" component: a marketplace
+# directory may itself be named `codex`. Fall back to the marketplace checkout only when no
+# cached copy exists. Plugin mode also needs node.
 CODEX_AVAILABLE=false
 CODEX_MODE="none"
 CODEX_COMPANION_PATH=""
-# Use glob instead of find for predictable plugin structure
-CODEX_COMPANION=$(ls ~/.claude/plugins/*/codex/*/codex-companion.mjs ~/.claude/plugins/cache/*/codex/*/codex-companion.mjs 2>/dev/null | head -1 || true)
-if [ -n "$CODEX_COMPANION" ] && command -v codex >/dev/null 2>&1; then
+# Use globs instead of find for predictable plugin structure
+CODEX_COMPANION=$(ls ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs 2>/dev/null \
+  | awk -F/ '{print $(NF-2) "\t" $0}' \
+  | sort -V -k1,1 | tail -1 | cut -f2- || true)
+if [ -z "$CODEX_COMPANION" ]; then
+  CODEX_COMPANION=$(ls ~/.claude/plugins/marketplaces/*/plugins/codex/scripts/codex-companion.mjs \
+    ~/.claude/plugins/*/codex/*/codex-companion.mjs 2>/dev/null | head -1 || true)
+fi
+if command -v codex >/dev/null 2>&1; then
   CODEX_AVAILABLE=true
-  CODEX_MODE="plugin"
-  CODEX_COMPANION_PATH="$CODEX_COMPANION"
-elif command -v codex >/dev/null 2>&1; then
-  CODEX_AVAILABLE=true
-  CODEX_MODE="cli"
+  if [ -n "$CODEX_COMPANION" ] && command -v node >/dev/null 2>&1; then
+    CODEX_MODE="plugin"
+    CODEX_COMPANION_PATH="$CODEX_COMPANION"
+  else
+    CODEX_MODE="cli"
+  fi
 fi
 
 # --- Native runtime engine + Claude CLI (cross-runtime Claude review) ---
