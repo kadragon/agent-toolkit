@@ -253,8 +253,11 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
   Do not proceed to qa-verifier.
 
-**QA (workflows.md Step 4 — mandatory)**
-ALWAYS spawn `qa-verifier` as a separate agent. The implementing agent must not verify.
+**QA (workflows.md Step 4)**
+This skill always spawns `qa-verifier` as a separate agent — its own bar, not one workflows.md
+imposes (Step 4 there only requires that verification, *if* delegated, goes to `qa-verifier`).
+The global layer permits a skill to direct delegation; this is that direction. The implementing
+agent must not verify.
 
 If qa-verifier reports blocking issues:
 1. Surface findings to user.
