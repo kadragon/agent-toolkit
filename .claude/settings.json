@@ -9,5 +9,10 @@
       "$defaults",
       "Bash(bash */skills/task-review/scripts/merge-and-cleanup.sh *)"
     ]
+  },
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": false,
+    "playwright@claude-plugins-official": false,
+    "humanize-korean@im-not-ai": false
   }
 }

@@ -9,7 +9,7 @@ Plugin marketplace (dev + prod + team-standards) by kadragon. This repo IS the h
 | `docs/architecture.md` | Before adding new skill/agent/hook or modifying plugin structure |
 | `docs/conventions.md` | Before writing shell scripts, commit messages, or bumping versions |
 | `docs/workflows.md` | When starting any implementation cycle |
-| `docs/delegation.md` | Before delegating to sub-agents |
+| `docs/delegation.md` | When you have decided to delegate — brief format, effort tier, handoff protocol |
 | `docs/eval-criteria.md` | When evaluating skill quality |
 | `docs/runbook.md` | For validate/test commands and troubleshooting |
 | `docs/platform-specs.md` | Before writing any skill/hook/agent — covers both Claude Code and Codex CLI spec differences |
@@ -20,30 +20,27 @@ Invariants enforced mechanically. Violations block merges.
 
 1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/` and `team-standards/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review + PR checklist.
-3. **Delegation discipline** — Objective triggers in `docs/delegation.md` are hard stops. Skipping a mandatory gate is a violation. Triggers are measurable (file count, path pattern) — not subjective.
-4. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
+3. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
 
-## Delegation (Hard Stop)
+## Delegation
 
-Read `docs/delegation.md` for full routing table. All triggers are objective.
+**The bar lives in your platform's global instruction layer, not here** — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex). Default inline. Delegate only when the user asks or a skill directs — **and** only if the work then also clears the global gate (10+ files to read/summarize · 3+ truly independent units · output would flood main context). Both conditions, not either. Coupled, sequential, or judgment-heavy work stays inline. This repo does not impose a lower threshold.
 
-Delegation is description-driven: skill/agent auto-invocation relies on each `SKILL.md`/agent `description:` field plus the objective triggers below — there is no prompt-matching router hook in this repo.
+Once you have decided to delegate, `docs/delegation.md` covers *how* — role routing, the four-field spawn brief, effort tier, handoff protocol. Auto-invocation is description-driven: it relies on each `SKILL.md`/agent `description:` field; there is no prompt-matching router hook in this repo.
 
-| Trigger (objective) | Delegate | Model |
-|---------------------|----------|-------|
-| Plugin area not explored this session, target >3 files | explorer | sonnet |
-| Implementation task from backlog | implementer | sonnet |
-| After any source edit | qa-verifier | sonnet |
-| Skill quality assessment | skill-evaluator | opus |
-| Same failure ×2 | advisor tool | — |
+| Role | Fits | Model |
+|------|------|-------|
+| explorer | Read-only map of an unfamiliar plugin area | sonnet |
+| implementer | A `backlog.md` item with a Sprint Contract | sonnet |
+| qa-verifier | Verifying work a *different* agent implemented | sonnet |
+| skill-evaluator | Skill quality assessment | opus |
 
 ## Token Economy
 
 1. Do not re-read a file already read this session. Check diff/region only.
 2. No tool calls to confirm known facts. Direct answers for simple questions.
 3. Independent tool calls in parallel — never sequential when not dependent.
-4. Delegate analysis that produces >20 lines to sub-agent; return conclusion only.
-5. Do not restate user's message.
+4. Do not restate user's message.
 
 ## Working with Existing Code
 
