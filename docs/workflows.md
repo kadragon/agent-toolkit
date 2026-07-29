@@ -1,6 +1,6 @@
 # Workflows
 
-Six workflows. Pick the primary one per cycle. See `docs/delegation.md` for routing details.
+Six workflows. Pick the primary one per cycle. See `docs/delegation.md` for how to brief a sub-agent once you have decided to delegate.
 
 ## `plan` — Spec Generation
 
@@ -26,19 +26,20 @@ Primary cycle for behavioral changes.
 **Step 0: Branch**
 Ensure you're on a feature branch. `git checkout -b <type>/<slug>` if on `main`.
 
-**Step 1: Scope check (delegation gate)**
-Check objective triggers in `docs/delegation.md`:
-- Target skill/plugin area not explored this session AND has >3 files → spawn `explorer`
-- First edit in a directory this session → spawn `explorer` first
+**Step 1: Scope check**
+Establish what the change touches. Look yourself first (1–2 searches). Spawn `explorer` only if
+the global delegation bar is met — 10+ files to read, or the survey would flood main context.
 
 **Step 2: Sprint Contract**
 Before writing, define "done" in concrete, testable terms. Template in `docs/eval-criteria.md`.
 
 **Step 3: Implement**
-For ≤2 files: implement directly. Larger: delegate to `implementer` role with spec + conventions.
+Implement directly. Delegate to `implementer` (with spec + conventions) only when the global
+delegation bar is met — e.g. a backlog batch of independent items.
 
-**Step 4: QA (mandatory delegation)**
-Always delegate to `qa-verifier`. The agent that implemented must NOT verify its own work.
+**Step 4: QA**
+Verify against the Sprint Contract. Run the tests/lint yourself. If you delegate verification,
+it must go to `qa-verifier` — never to the agent that implemented the change.
 
 **Step 5: Version bump**
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.

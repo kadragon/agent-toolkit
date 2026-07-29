@@ -496,7 +496,7 @@ if [[ "$exit_code" -ne 0 ]]; then
     count=$((count + 1))
     echo "$count" > "$STATE"
     if (( count >= THRESHOLD )); then
-        echo "CIRCUIT BREAKER: $count consecutive failures. Stop retrying. Call advisor or report to user." >&2
+        echo "CIRCUIT BREAKER: $count consecutive failures. Stop retrying. Escalate per docs/delegation.md or report to user." >&2
         echo "Last exit code: $exit_code. Reset by running a successful command." >&2
         # Exit 2 surfaces stderr to the agent (non-blocking on PostToolUse —
         # injects a course-correction message; does NOT prevent the next command)
@@ -532,10 +532,10 @@ exit 0
 **Reset condition:** Any successful Bash exit (exit 0) resets the counter. This means a partial fix that lets a different command succeed will reset the breaker — which is the right behavior.
 
 **Escalation path:** When the breaker fires, the agent should:
-1. Call `advisor` (strong reviewer)
+1. Escalate to a stronger independent reviewer that actually exists in the target repo — e.g. `codex:rescue`, or a review role from `docs/delegation.md`. Do not name a reviewer the repo has not installed.
 2. If still stuck: report to user and stop (do NOT self-continue)
 
-This maps to the existing "same failure x2 → call advisor" rule in AGENTS.md's delegation table, now mechanically enforced instead of relying on the agent's judgment.
+This mechanically enforces the "same failure ×2" escalation row in `docs/delegation.md` instead of relying on the agent's judgment.
 
 ## Consent Gates for External Actions (Layer 1 Extension)
 

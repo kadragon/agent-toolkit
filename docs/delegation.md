@@ -1,6 +1,10 @@
 # Delegation
 
-The orchestrator plans and routes. Sub-agents do the heavy lifting. Broad work inline is a harness defect.
+**This file does not decide *whether* to delegate — it defines *how*, once that decision is made.**
+The threshold lives in `~/.claude/CLAUDE.md`: default inline; delegate only when the user asks, a
+skill directs, or a global gate applies (10+ files to read/summarize · 3+ truly independent units ·
+output would flood main context). Coupled, sequential, or judgment-heavy work stays inline. This
+repo imposes no lower bar.
 
 ## Pattern Selection
 
@@ -15,18 +19,19 @@ Q2. Do subtasks need to share findings mid-flight?
 
 Most work in this repo is sequential: explore → implement → verify. Default to sub-agent mode.
 
-## Routing Table
+## Role Routing
 
-All triggers are objective and measurable — no subjective conditions.
+No row below is a gate. When the threshold above is met, match the job to the role:
 
-### Mandatory Gates (blocking — skipping is a golden principle violation)
-
-| Trigger | Delegate to | Model | Context to pass |
-|---------|-------------|-------|-----------------|
-| Target plugin area not explored this session AND has >3 files | `explorer` | sonnet | Plugin dir path |
+| Job | Delegate to | Model | Context to pass |
+|-----|-------------|-------|-----------------|
+| Read-only map of an unexplored plugin area | `explorer` | sonnet | Plugin dir path |
 | Implementation task from `backlog.md` | `implementer` | sonnet | Backlog item, conventions, target files |
-| After any source edit (always) | `qa-verifier` | sonnet | Modified files, test/lint commands |
+| Verifying an implementation | `qa-verifier` | sonnet | Modified files, test/lint commands |
 | Skill quality assessment requested | `skill-evaluator` | opus | Skill path, eval-criteria.md |
+
+`qa-verifier` never runs on its own output — whoever implemented must not be the one who verifies.
+That constraint holds whenever a verifier runs; it does not by itself mandate spawning one.
 
 ### Background Gates (non-blocking)
 
@@ -39,8 +44,8 @@ All triggers are objective and measurable — no subjective conditions.
 
 | Trigger | Action |
 |---------|--------|
-| Same failure ×2 | Call `advisor` tool — full context forwarded automatically |
-| Advisor unresolved | `codex:rescue` with explicit brief |
+| Same failure ×2 | Encode the fix mechanically (hook/lint/test) per the global harness-ratchet rule |
+| Root cause still unknown after that | `codex:rescue` with an explicit brief |
 
 ## Spawn Prompt Contract (all 4 fields mandatory)
 
