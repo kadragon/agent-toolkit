@@ -14,12 +14,15 @@
 #   8. .agents/skills → ../.claude/skills symlink (sync E invariant)
 #   9. backlog.md schema (checkbox items under ## headings; sync D-1)
 #  10. AGENTS.md ## Maintenance section embeds edit-policy rules
+#  11. .claude/agents/*.md carry the role-template spine (Step 4b resync)
 #
 # A clean run means the maintenance routine will be a no-op on first invocation.
-# Performance: Sections 1–5 and 7–10 use [[ =~ ]] bash builtins, no grep
+# Performance: Sections 1–5 and 7–11 use [[ =~ ]] bash builtins, no grep
 # subprocesses. Section 1b uses grep per file. AGENTS.md is read in a single
 # pass — no repeated file scans. Section 6b uses grep twice: agent file
 # detection (find | grep -q) and SKILL.md content matching (grep -qiE).
+# Section 11 gates on 6b's has_agents flag, then lists the role files with one
+# more find and reads each of them in a single pass.
 
 set -euo pipefail
 
@@ -324,6 +327,80 @@ if [[ -f "AGENTS.md" ]]; then
     else
         fail "AGENTS.md missing ## Maintenance section — sync A edit policy not internalized"
     fi
+fi
+
+# ── 11. Agent role spine (Step 4b template resync) ─────────
+# Nothing re-runs init Step 4b when references/teammate-role-template.md
+# changes, so generated role files drift as that template improves. This is the
+# resync report — it never edits a role file.
+#
+# Scope is deliberately narrow. Per teammate-role-template.md → "Common spine vs
+# repo-specific additions", only two layers are template-owned: frontmatter-field
+# presence and presence of the four spine sections. NOT checked, by design:
+#   - section contents (test commands, path globs, thresholds — repo-owned)
+#   - sections a repo adds (## Checks (always run) etc. — intended specialization)
+#   - opt-in non-spine template sections (## Multi-pass Rule,
+#     ## Team Communication Protocol — absence is not staleness)
+# `tools` is not required either: the template allows omitting it for roles that
+# take the full tool set.
+if $has_agents; then
+    echo ""
+    echo "--- Agent Role Spine (Step 4b template resync) ---"
+
+    while IFS= read -r role_file; do
+        [[ -n "$role_file" ]] || continue
+
+        in_fm=false
+        seen_fm=false
+        fm_name=false; fm_desc=false; fm_model=false
+        s_objective=false; s_spawn=false; s_effort=false; s_exit=false
+
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # Section 1b only normalizes *.sh/*.bash/*.py, so a CRLF-saved role
+            # file is reachable — strip the CR or '---\r' would never open the
+            # frontmatter block and every field check below would misfire.
+            line="${line%$'\r'}"
+            # Frontmatter runs from the leading '---' to the next '---'; fields
+            # are only honoured inside it so a body line cannot satisfy them.
+            if [[ "$line" == "---" ]]; then
+                if ! $seen_fm; then
+                    seen_fm=true; in_fm=true
+                elif $in_fm; then
+                    in_fm=false
+                fi
+                continue
+            fi
+            if $in_fm; then
+                [[ "$line" =~ ^name: ]] && fm_name=true
+                [[ "$line" =~ ^description: ]] && fm_desc=true
+                [[ "$line" =~ ^model: ]] && fm_model=true
+                continue
+            fi
+            case "$line" in
+                "## Objective"*)             s_objective=true ;;
+                "## Spawn Prompt Contract"*) s_spawn=true ;;
+                "## Effort Tier"*)           s_effort=true ;;
+                "## Exit Criteria"*)         s_exit=true ;;
+            esac
+        done < "$role_file"
+
+        role_missing=""
+        $fm_name     || role_missing+=" name:"
+        $fm_desc     || role_missing+=" description:"
+        $fm_model    || role_missing+=" model:"
+        $s_objective || role_missing+=" '## Objective'"
+        $s_spawn     || role_missing+=" '## Spawn Prompt Contract'"
+        $s_effort    || role_missing+=" '## Effort Tier'"
+        $s_exit      || role_missing+=" '## Exit Criteria'"
+
+        if [[ -z "$role_missing" ]]; then
+            pass "$role_file — frontmatter fields + 4 spine sections present"
+        else
+            warn "$role_file missing:$role_missing — resync against references/teammate-role-template.md → Required Body Sections"
+        fi
+    done < <(find ".claude/agents" -maxdepth 1 -name "*.md" 2>/dev/null | sort)
+
+    info "Spine presence only — section contents, repo-added sections, and the opt-in ## Multi-pass Rule / ## Team Communication Protocol sections are out of scope by design."
 fi
 
 # ── Maturity Level Assessment ─────────────────────────────────
