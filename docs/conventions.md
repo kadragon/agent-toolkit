@@ -69,6 +69,9 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 - Hooks (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`): always `exit 0` — never block on unexpected input
 - Validation scripts (`validate-harness.sh`, CI checks): `exit 1` on failure, `0` on success
 - Use `set -u` (unbound var error); avoid `set -e` in hook scripts (one bad regex should not kill the hook)
+- `find` feeding a `while read` loop needs `-type f`. A directory whose name matches the glob
+  (`.claude/agents/bogus.md/`) makes the inner `read` fail; under `set -u` the loop variable is
+  then unbound and the whole script aborts mid-run — before its summary ever prints.
 - Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
 - Tracked `*.json` must be UTF-8 **without** BOM — strict parsers reject the leading `EF BB BF`, which silently breaks manifest loading. Windows PowerShell 5.1 `Out-File`/`Set-Content -Encoding utf8` writes one; edit JSON through the file tools or git bash instead. CI rejects any BOM-carrying JSON.
 
@@ -142,6 +145,16 @@ Two consequences, both mandatory:
    indistinguishable from a passing one in the CI summary.
 
 Reference implementation: `scripts/ci/check_skill_frontmatter.py`.
+
+### Adjudicated Exceptions Need a Marker, Not a Standing Warning
+
+A new check must not ship a warning the repo has *already decided* is correct-by-design. That
+warning never goes away, so it teaches the operator to skim past the whole section — costing the
+real drift the check exists to catch. When a legitimate exception exists, give it a mechanical
+opt-out (a frontmatter key, a marker comment) and document the class that may use it; deferring
+the decision to `tasks.md` leaves the noisy state as the shipped default.
+
+Reference implementation: `spine-exempt: true` in `validate-harness.sh` §11.
 
 ## Skill Doc Rules
 

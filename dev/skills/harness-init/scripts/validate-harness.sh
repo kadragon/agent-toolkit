@@ -225,7 +225,7 @@ $has_enforcement || warn "No enforcement layer detected (hooks, pre-commit, or C
 has_orchestrator=false
 has_agents=false
 if [[ -d ".claude/agents" ]]; then
-    find ".claude/agents" -maxdepth 1 -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
+    find ".claude/agents" -maxdepth 1 -type f -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
 fi
 if [[ -d ".claude/skills" ]]; then
     while IFS= read -r -d '' skill; do
@@ -343,6 +343,13 @@ fi
 #     ## Team Communication Protocol — absence is not staleness)
 # `tools` is not required either: the template allows omitting it for roles that
 # take the full tool set.
+#
+# Escape hatch: a role that is deliberately lean (pure role-play spawned in bulk,
+# where four stub sections cost real per-spawn tokens) declares
+# `spine-exempt: true` in its frontmatter. That waives the four section checks
+# only — the frontmatter fields are still required, since the router reads them.
+# The marker is the point: it turns "this one is intentional" from tribal
+# knowledge into a mechanical, greppable claim.
 if $has_agents; then
     echo ""
     echo "--- Agent Role Spine (Step 4b template resync) ---"
@@ -352,7 +359,7 @@ if $has_agents; then
 
         in_fm=false
         seen_fm=false
-        fm_name=false; fm_desc=false; fm_model=false
+        fm_name=false; fm_desc=false; fm_model=false; fm_exempt=false
         s_objective=false; s_spawn=false; s_effort=false; s_exit=false
 
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -374,6 +381,7 @@ if $has_agents; then
                 [[ "$line" =~ ^name: ]] && fm_name=true
                 [[ "$line" =~ ^description: ]] && fm_desc=true
                 [[ "$line" =~ ^model: ]] && fm_model=true
+                [[ "$line" =~ ^spine-exempt:[[:space:]]*true[[:space:]]*$ ]] && fm_exempt=true
                 continue
             fi
             case "$line" in
@@ -385,20 +393,24 @@ if $has_agents; then
         done < "$role_file"
 
         role_missing=""
-        $fm_name     || role_missing+=" name:"
-        $fm_desc     || role_missing+=" description:"
-        $fm_model    || role_missing+=" model:"
-        $s_objective || role_missing+=" '## Objective'"
-        $s_spawn     || role_missing+=" '## Spawn Prompt Contract'"
-        $s_effort    || role_missing+=" '## Effort Tier'"
-        $s_exit      || role_missing+=" '## Exit Criteria'"
-
-        if [[ -z "$role_missing" ]]; then
-            pass "$role_file — frontmatter fields + 4 spine sections present"
-        else
-            warn "$role_file missing:$role_missing — resync against references/teammate-role-template.md → Required Body Sections"
+        $fm_name  || role_missing+=" name:"
+        $fm_desc  || role_missing+=" description:"
+        $fm_model || role_missing+=" model:"
+        if ! $fm_exempt; then
+            $s_objective || role_missing+=" '## Objective'"
+            $s_spawn     || role_missing+=" '## Spawn Prompt Contract'"
+            $s_effort    || role_missing+=" '## Effort Tier'"
+            $s_exit      || role_missing+=" '## Exit Criteria'"
         fi
-    done < <(find ".claude/agents" -maxdepth 1 -name "*.md" 2>/dev/null | sort)
+
+        if [[ -n "$role_missing" ]]; then
+            warn "$role_file missing:$role_missing — resync against references/teammate-role-template.md → Required Body Sections"
+        elif $fm_exempt; then
+            pass "$role_file — frontmatter fields present; spine sections waived by spine-exempt: true"
+        else
+            pass "$role_file — frontmatter fields + 4 spine sections present"
+        fi
+    done < <(find ".claude/agents" -maxdepth 1 -type f -name "*.md" 2>/dev/null | sort)
 
     info "Spine presence only — section contents, repo-added sections, and the opt-in ## Multi-pass Rule / ## Team Communication Protocol sections are out of scope by design."
 fi
