@@ -534,8 +534,9 @@ exit 0
 **Escalation path:** When the breaker fires, the agent should:
 1. Escalate to a stronger independent reviewer that actually exists in the target repo — e.g. `codex:rescue`, or a review role from `docs/delegation.md`. Do not name a reviewer the repo has not installed.
 2. If still stuck: report to user and stop (do NOT self-continue)
+3. Once the cause is known: encode the fix mechanically so this failure cannot recur
 
-This mechanically enforces the "same failure ×2" escalation row in `docs/delegation.md` instead of relying on the agent's judgment.
+This mechanically enforces the "same failure ×2" escalation row in `docs/delegation.md` instead of relying on the agent's judgment — same order: get outside help first, encode the fix once there is one.
 
 ## Consent Gates for External Actions (Layer 1 Extension)
 

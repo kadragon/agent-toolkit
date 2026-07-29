@@ -24,7 +24,7 @@ Invariants enforced mechanically. Violations block merges.
 
 ## Delegation
 
-**The bar lives in `~/.claude/CLAUDE.md`, not here.** Default inline; delegate only when the user asks, a skill directs, or a global gate applies (10+ files to read/summarize · 3+ truly independent units · output would flood main context). Coupled, sequential, or judgment-heavy work stays inline. This repo does not impose a lower threshold.
+**The bar lives in your platform's global instruction layer, not here** — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex). Default inline. Delegate only when the user asks or a skill directs — **and** only if the work then also clears the global gate (10+ files to read/summarize · 3+ truly independent units · output would flood main context). Both conditions, not either. Coupled, sequential, or judgment-heavy work stays inline. This repo does not impose a lower threshold.
 
 Once you have decided to delegate, `docs/delegation.md` covers *how* — role routing, the four-field spawn brief, effort tier, handoff protocol. Auto-invocation is description-driven: it relies on each `SKILL.md`/agent `description:` field; there is no prompt-matching router hook in this repo.
 

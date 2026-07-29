@@ -27,8 +27,9 @@ Primary cycle for behavioral changes.
 Ensure you're on a feature branch. `git checkout -b <type>/<slug>` if on `main`.
 
 **Step 1: Scope check**
-Establish what the change touches. Look yourself first (1–2 searches). Spawn `explorer` only if
-the global delegation bar is met — 10+ files to read, or the survey would flood main context.
+Establish what the change touches. Look yourself first (1–2 searches). Spawn `explorer` only when
+this cycle was directed to (by the user, or by the skill driving it) **and** the survey also clears
+the global gate — 10+ files to read, or output that would flood main context.
 
 **Step 2: Sprint Contract**
 Before writing, define "done" in concrete, testable terms. Template in `docs/eval-criteria.md`.

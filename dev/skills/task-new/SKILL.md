@@ -42,7 +42,7 @@ an untagged one-file behavioral addition ("로그인 버튼 추가해줘") is no
 `[FEAT]`.
 
 If the file count isn't obvious from the request text, run a quick scoped scan (or spawn
-`explorer` per the `docs/delegation.md` >3-file gate) to estimate it before classifying.
+`explorer` if the scan itself would be large) to estimate it before classifying.
 
 ## Step 2 — Route by size
 

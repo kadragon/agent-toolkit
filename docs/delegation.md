@@ -1,10 +1,11 @@
 # Delegation
 
 **This file does not decide *whether* to delegate — it defines *how*, once that decision is made.**
-The threshold lives in `~/.claude/CLAUDE.md`: default inline; delegate only when the user asks, a
-skill directs, or a global gate applies (10+ files to read/summarize · 3+ truly independent units ·
-output would flood main context). Coupled, sequential, or judgment-heavy work stays inline. This
-repo imposes no lower bar.
+The threshold lives in your platform's global instruction layer — `~/.claude/CLAUDE.md` (Claude
+Code) or `~/.codex/AGENTS.md` (Codex). Default inline. Delegate only when the user asks or a skill
+directs — **and** only if the work then also clears the global gate (10+ files to read/summarize ·
+3+ truly independent units · output would flood main context). Both conditions, not either.
+Coupled, sequential, or judgment-heavy work stays inline. This repo imposes no lower bar.
 
 ## Pattern Selection
 
@@ -33,19 +34,19 @@ No row below is a gate. When the threshold above is met, match the job to the ro
 `qa-verifier` never runs on its own output — whoever implemented must not be the one who verifies.
 That constraint holds whenever a verifier runs; it does not by itself mandate spawning one.
 
-### Background Gates (non-blocking)
+## Background Routing (non-blocking)
 
 | Trigger | Delegate to | Context |
 |---------|-------------|---------|
 | Every PR | `dev:task-review` skill | PR number or current branch |
 | Harness check request | `dev:harness-curate` skill | — |
 
-### Escalation
+## Escalation
 
 | Trigger | Action |
 |---------|--------|
-| Same failure ×2 | Encode the fix mechanically (hook/lint/test) per the global harness-ratchet rule |
-| Root cause still unknown after that | `codex:rescue` with an explicit brief |
+| Same failure ×2 | `codex:rescue` with an explicit brief — what failed, what was already tried |
+| Once the cause is known | Encode the fix mechanically (hook/lint/test) per the global harness-ratchet rule so it cannot recur |
 
 ## Spawn Prompt Contract (all 4 fields mandatory)
 
