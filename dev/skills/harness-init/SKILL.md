@@ -45,7 +45,7 @@ Before acting, determine mode AND maturity level.
 
 **Default toward orchestration infrastructure — but size the agent roster by reachable triggers, not by default.** The **orchestrator** (Step 4c) is worth building whenever unsure: without it, auto-delegation (Step 7b) has no named target and the model does everything inline, and an unused orchestrator skill costs little. **Agent roles** (Step 4b) are different — apply the reachability gate there. An agent whose trigger never fires is not cheap insurance; it is the "made it, never used it" dead weight that trains the operator to ignore the harness. Build every reachable role, skip unreachable ones. Skip both entirely only for genuinely trivial repos (single script, docs-only, one-file library).
 
-**Second sizing input — the operator's own instruction layer.** Read `~/.claude/CLAUDE.md` (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
+**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
 **Mode selection:**
 
@@ -72,6 +72,8 @@ Run `scripts/validate-harness.sh` against the target repo (if it exists). Classi
 | Add new domain with orchestrator | 4b + 4c + 4d → 9 |
 | Architecture change | Affected docs → 4b (impacted roles) → 4c → 9 |
 
+**Every row above still runs the Step 1 language resolution first.** It is a precondition for writing prose, not a New-setup-only step — an Extend run that skips it falls back to the chat language, which is the exact failure Step 1 exists to prevent.
+
 Report mode + current maturity level + target level before proceeding.
 
 ### Step 1: Analyze the Repository
@@ -90,6 +92,19 @@ Scan the repo for:
 ```
 
 Record findings — these shape every artifact created downstream. If existing AGENTS.md or docs/ exist, read them, decide what to keep vs. replace.
+
+**Settle the docs language here, before writing anything.** Every artifact this skill produces — AGENTS.md prose, `docs/*.md` bodies, role and skill files — goes in that language, *not* the language of the conversation you are having. The two are unrelated: conversation language is a UI preference for one session, generated docs are version-controlled repo artifacts governed by the repo's own policy. Defaulting to the chat language is the observed failure — Korean docs written into a repo whose Language Policy, authored in the same session, says docs are English. Resolve in order:
+
+1. **Existing repo Language Policy** (AGENTS.md, README, CONTRIBUTING) — it wins outright.
+2. Else the invoking platform's global instruction file, already read in Step 0 — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) (e.g. "User-facing Korean; code/commits/comments/docs English").
+3. Neither settles it → ask. One question, then proceed.
+
+Domain terms with no real equivalent in the target language (a local platform's proper name, a regulatory term, a framework's own field labels) stay in the source language — they are data, not prose, and translating them destroys the referent. State the resolved language before Step 3 so the user can correct it once instead of after every file.
+
+**Two carve-outs — the docs language governs prose bodies only.**
+
+- **Matcher text follows the operator's prompt language, not the docs language.** Trigger phrases, skill/agent `description:` fields, and router route patterns are matched against what the operator actually types, so a pattern in the wrong language never fires. Follow `references/orchestrator-template.md` → Localization note and `references/trigger-router-template.md` instead: keep the English lines always, keep or translate the other-language alternates to whatever the operator prompts in. An English docs policy does not license stripping Korean trigger alternates from a repo whose operator prompts in Korean.
+- **`harness:verbatim` blocks stay verbatim.** The two mandated AGENTS.md blocks (Step 3) are copied unchanged in English no matter what language resolves here — they are a contract with later trimming passes, not prose.
 
 ### Step 2: Define Golden Principles
 
@@ -121,7 +136,7 @@ Three patterns make the map earn its tokens:
 
 See `examples/agents-md-example.md` for complete reference.
 
-**Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`.
+**Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`. Write this file's own prose in the language resolved in Step 1 — a `## Language Policy` the surrounding file violates teaches every later reader that the policy is decorative. The two `harness:verbatim` blocks below are the exception: copy them in English unchanged (Step 1 carve-out).
 
 **Two embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): `## Maintenance` edit policy, `## Token Economy` rules. Copy the `<!-- harness:verbatim … -->` comment that precedes each one too. The mandate lives here, in a skill that only loads when harness-init runs, so an AGENTS.md carrying these blocks unmarked reads to any later trimming pass (`claude-md-improver`, `/doctor`, a human editor) as generic boilerplate — exactly the shape that filter is built to delete. The marker is what travels with the file and makes the block defend itself; it renders invisibly in Markdown and costs ~8 tokens.
 
@@ -146,7 +161,7 @@ Read `references/path-scoped-rules.md` for layout, the home-selection table (AGE
 
 ### Step 4: Create docs/ Knowledge Base
 
-Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc.
+Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc. Bodies go in the Step 1 language, not the chat language — the templates ship in English as scaffolding, which is not itself the language decision.
 
 | File | Purpose | Template |
 |------|---------|----------|
@@ -189,7 +204,7 @@ A backlog-driven `implementer` is dead weight in a repo with no backlog; a `prod
 
 Result is typically **1–3 roles, not a fixed set.** Zero is itself a smell for any repo with editable source — at minimum create `qa-verifier` so post-edit verification has a target. If you create none, state why.
 
-Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways.
+Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways. Role-file prose goes in the Step 1 language; the `description:` field follows the matcher carve-out there, not the docs language.
 
 **Propagate the pruned roster downstream.** The generated `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `references/delegation-template.md`) hardcode `explorer`/`implementer`/`product-evaluator` in mandatory gates. For every role you skip here, drop or rewrite the gate row that names it — never leave a mandatory gate pointing at an agent you didn't create.
 
@@ -207,6 +222,8 @@ If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) o
 
 Create at:
 `.claude/skills/{domain}-orchestrator/SKILL.md`
+
+Skill-body prose goes in the Step 1 language; trigger phrases and the `description:` field follow the matcher carve-out there, not the docs language.
 
 Read `references/orchestrator-template.md` and choose one of:
 - **Template A (team)** — agents share findings mid-flight via SendMessage
