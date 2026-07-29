@@ -30,11 +30,13 @@ plugin's `agents/` directory.
 ---
 name: {role-slug}
 description: |
-  {Directive. Start with "Use this agent when ..." or "ALWAYS invoke when ...".
-  Include measurable triggers only — the delegation router reads this verbatim
-  to decide when to spawn. Source for directive phrasing: Anthropic
+  {Directive. Start with "Use this agent when ...". State the measurable
+  triggers that make this role the right fit — the delegation router reads this
+  verbatim to decide when to spawn. Source for directive phrasing: Anthropic
   skill-creator docs — directive descriptions improved auto-trigger rate on
-  5 of 6 public skills vs descriptive ("triggers on …") phrasing.}
+  5 of 6 public skills vs descriptive ("triggers on …") phrasing. Reserve
+  "ALWAYS invoke" / "do NOT inline" for roles the delegation table marks
+  "Mandatory, blocking" — see the rule below the anti-pattern table.}
 tools: {comma-separated allowlist or omit for all tools}
 model: {haiku | sonnet | opus}
 ---
@@ -47,13 +49,28 @@ catches them):
 
 | Bad | Good |
 |---|---|
-| `description: Reviews code for issues.` | `description: Use this agent when reviewing diffs, PRs, or pre-commit changes. ALWAYS invoke for code review — do NOT inline-review.` |
-| `description: Triggered on explore commands.` | `description: Use this agent for first-touch exploration of a module — when (a) target module has >5 files OR >500 LOC, OR (b) first edit in that directory this session. Spawn before editing.` |
-| `description: Considers test verification.` | `description: ALWAYS invoke after any source edit to verify tests still pass. Do NOT skip — this is a mandatory gate.` |
+| `description: Reviews code for issues.` | `description: Use this agent when reviewing a diff that touches auth, billing, or migrations, or that spans >N files.` |
+| `description: Triggered on explore commands.` | `description: Use this agent to map a module before editing it — when the target has >N files or >M LOC, per this repo's delegation table.` |
+| `description: Considers test verification.` | `description: Use this agent to verify an implementation against its Sprint Contract after a separate agent implemented it. Never the agent that wrote the code.` |
 
-If a role appears in the AGENTS.md delegation table as "Mandatory, blocking",
-its description MUST contain `ALWAYS` and an explicit "do NOT inline" or
-"do NOT skip" clause — this directive description is the primary trigger. Only
+Note what the "Good" column does *not* do: it states measurable fit, not an
+unconditional mandate. A description that reads `ALWAYS … do NOT inline` makes
+the role fire on every superficially matching turn regardless of whether the
+delegation bar is met, which is the drift the next rule bounds.
+
+`>N` / `>M` are placeholders — substitute the thresholds from this repo's own
+delegation table, and keep them at or above what the platform's global
+instruction layer requires, never below. Do not replace them with a subjective
+condition ("unfamiliar module", "if unsure") or with a self-assessment that
+defers to "the caller's delegation bar": `delegation-template.md` →
+*Trigger Anti-patterns* rejects all three, and a description is read by the
+router before any caller judgment exists to defer to.
+
+If — and only if — a role appears in the AGENTS.md delegation table as
+"Mandatory, blocking", its description MUST contain `ALWAYS` and an explicit
+"do NOT inline" or "do NOT skip" clause — for that role the directive
+description is the primary trigger. A role that is merely *available* for
+delegation gets a fit-description instead; the caller's own bar decides. Only
 if the repo runs the trigger-router *fallback* (Step 7b — installed on a
 measured miss-rate, not by default), also register the role in
 `.claude/trigger-routes.json` (see `references/trigger-router-template.md`) so
@@ -104,6 +121,34 @@ Role stops when ANY of:
 - {explicit handoff to another role}
 ```
 
+### Common spine vs repo-specific additions
+
+Nothing re-runs Step 4b when *this template* changes. The documented paths that revisit an
+existing role file are all repo-driven — Extend mode's `Architecture change` row in `SKILL.md`,
+and the feedback signals plus Periodic Audit in `references/harness-evolution.md` — never
+template-driven. So template improvements never reach existing instances, and instances drift as
+this file improves.
+
+Not all drift is equal — before treating a difference as staleness, classify it:
+
+| Layer | Owner | Drift means |
+|---|---|---|
+| Frontmatter schema (required fields present, `model` from the Model Selection table) | this template | stale instance — the template is the source of truth |
+| The four spine sections above (Objective, Spawn Prompt Contract, Effort Tier, Exit Criteria) | this template | stale instance — the template is the source of truth |
+| Non-spine sections this template ships (`## Multi-pass Rule`, `## Team Communication Protocol`) | this template, but **opt-in per role** | absence is not staleness — they apply only to roles that need them |
+| Sections a repo *adds* (e.g. `## Checks (always run)`, `## Domain-safety pass`) | the repo | intended specialization — never overwrite |
+| Wording inside any shared section (test/lint commands, path globs, thresholds) | the repo | intended — the section is common, its contents are local |
+
+Measured 2026-07-29 across four repos generated from this template (`qa-verifier.md`, 27–36 lines,
+four distinct hashes): every instance carried all four spine sections; every difference was either
+an added repo-specific section or repo-local wording inside a shared one. No instance was missing
+spine structure. Note none carried `## Multi-pass Rule` either — which is why row 3 exists: a
+differ that treated every template section as required would report four false positives here.
+
+Consequence for any future resync tool: reconcile **frontmatter-field presence and spine-section
+presence**. Section contents, repo-added sections, and the opt-in non-spine sections are out of
+its remit.
+
 ## Team Communication Protocol (add when role runs in Agent Teams)
 
 When a role participates in a team, add this section to the body:
@@ -137,9 +182,10 @@ trigger is reachable in the target repo — see the reachability gate in
 ---
 name: implementer
 description: |
-  ALWAYS invoke for an implementation task that has a Sprint Contract and ≥1
-  file to edit — do NOT inline-implement. Does NOT self-evaluate; hands off to
-  qa-verifier afterwards.
+  Use this agent for an implementation task that already has a Sprint Contract
+  and a listed set of files to edit — when that list spans >N files or ≥3
+  independent units. Does NOT self-evaluate; hands off to qa-verifier
+  afterwards.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -175,9 +221,9 @@ role first.
 ---
 name: explorer
 description: |
-  ALWAYS invoke before the first edit in a directory this session, OR when the
-  target module has >5 files / >500 LOC — do NOT skip straight to editing.
-  Read-only: produces a map, not a change.
+  Use this agent to map a module before editing it — when the target has >N
+  files or >M LOC, per this repo's delegation table. Read-only: produces a map,
+  not a change.
 tools: Read, Grep, Glob
 model: sonnet
 ---
@@ -209,8 +255,9 @@ return a partial report with "further exploration needed" and stop.
 ---
 name: qa-verifier
 description: |
-  ALWAYS invoke after every implementer run — do NOT skip verification. NEVER
-  the same agent instance that implemented. Verifies against Sprint Contract
+  Use this agent to verify an implementation a *different* agent produced.
+  NEVER the same agent instance that implemented — that constraint holds
+  whenever verification is delegated at all. Verifies against Sprint Contract
   criteria, not impressions.
 tools: Read, Grep, Glob, Bash
 model: sonnet
@@ -259,9 +306,9 @@ Non-high-stakes features: single pass is sufficient.
 ---
 name: product-evaluator
 description: |
-  ALWAYS invoke at feature completion — do NOT declare done without it.
-  Opus-level judgment for subjective quality. Independent from implementer and
-  qa-verifier.
+  Use this agent at feature completion when the quality question is subjective
+  — does this actually solve the user's problem? Opus-level judgment,
+  independent from implementer and qa-verifier.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

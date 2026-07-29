@@ -253,8 +253,19 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
 - **If `implementer` fails or returns unusable output:** stop and report to user with reason.
   Do not proceed to qa-verifier.
 
-**QA (workflows.md Step 4 — mandatory)**
-ALWAYS spawn `qa-verifier` as a separate agent. The implementing agent must not verify.
+**QA (workflows.md Step 4)**
+This skill always spawns `qa-verifier` as a separate agent. That is this skill's own bar, not one
+workflows.md imposes — Step 4 there only requires that verification, *if* delegated, goes to
+`qa-verifier`.
+
+This one spawn is a deliberate exception to the repo's usual gate, which reads: "Delegate only
+when the user asks or a skill directs — **and** only if the work then also clears the global gate
+(10+ files to read/summarize · 3+ truly independent units · output would flood main context).
+Both conditions, not either." The exception is to the *second* condition only. What the spawn buys
+is **independence** — a verifier that did not write the code — which is a correctness property,
+not a volume one, so a volume gate cannot measure it; a 1-file fix needs an independent check as
+much as a 20-file one. Every other delegation in this skill still requires both conditions. The
+implementing agent must not verify.
 
 If qa-verifier reports blocking issues:
 1. Surface findings to user.

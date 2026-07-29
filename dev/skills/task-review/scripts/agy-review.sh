@@ -100,5 +100,13 @@ if [ "$AGY_EXIT" -ne 0 ]; then
   exit 1
 fi
 
-# Forward any agy stderr (warnings, auth notices, rate-limit messages) even on success
-[ -s "$AGY_ERR" ] && cat "$AGY_ERR" >&2
+# Forward any agy stderr (warnings, auth notices, rate-limit messages) even on success.
+# Must not be the script's last command as a bare `[ ... ] && ...` list: when stderr is
+# empty the test fails, the list returns 1, and — being last — that becomes the script's
+# exit status. The caller reads a non-zero exit as failure and prints its
+# `{"agy_review":"failed"}` sentinel after a perfectly good review. Hence the explicit exit 0.
+if [ -s "$AGY_ERR" ]; then
+  cat "$AGY_ERR" >&2
+fi
+
+exit 0
