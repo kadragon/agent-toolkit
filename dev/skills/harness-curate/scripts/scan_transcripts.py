@@ -106,6 +106,13 @@ def encode_project(path):
 
     Normalizes to an absolute, case-folded path first so Windows drive-letter
     case differences (`C:` vs `c:`) don't fragment state across sessions.
+
+    INVARIANT — do not "fix" the collision. This must REPRODUCE Claude Code's own project-dir
+    naming in order to FIND dirs Claude already created, so its lossiness is inherited, not ours:
+    `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` because Claude collapses them
+    too. De-colliding (e.g. appending a path hash) would make every lookup miss its real
+    directory — trading a rare theoretical clash for guaranteed total failure. The verbatim twin
+    in task-audit-nudge/nudge.py carries the same note; keep them consistent.
     """
     path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)

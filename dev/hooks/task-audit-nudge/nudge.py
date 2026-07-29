@@ -59,6 +59,14 @@ MIN_NEW_SESSIONS = 3   # need this many sessions since lastRunMs before "stale" 
 
 
 def encode_project(path):
+    """Map a project path to its transcript dir name, mirroring scan_transcripts.py's copy.
+
+    INVARIANT — do not "fix" the collision. This must REPRODUCE Claude Code's own project-dir
+    naming in order to FIND dirs Claude already created, so its lossiness is inherited, not ours:
+    `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` because Claude collapses them
+    too. De-colliding (e.g. appending a path hash) would make every lookup miss its real
+    directory — trading a rare theoretical clash for guaranteed total failure.
+    """
     path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)
 
@@ -161,9 +169,17 @@ def resolve_state_dir(cwd, proj_root):
 def config_dir():
     """(dir, is_codex). is_codex tells the caller which session-counting strategy applies
     — Claude's real sessions live in `dir`'s own projects tree, Codex's don't (see
-    _codex_new_session_count)."""
-    if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), False
+    _codex_new_session_count).
+
+    CLAUDE_PLUGIN_ROOT is deliberately NOT consulted: Codex sets it as a compatibility alias in
+    plugin hooks (docs/platform-specs.md), so its presence does not mean Claude Code. Treating it
+    as proof of Claude made this hook read `~/.claude` under Codex AND take the is_codex=False
+    counting path, which always returns 0 and permanently suppresses the nudge. It never
+    contributed a *value* either — only the `~/.claude` default the last line already returns — so
+    the branch is gone rather than demoted. Order: explicit user config, then explicit Codex env,
+    then the installed script's own path."""
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        return os.environ["CLAUDE_CONFIG_DIR"], False
     if os.environ.get("CODEX_HOME"):
         return os.environ["CODEX_HOME"], True
 
@@ -236,8 +252,12 @@ def main():
     sys.stdout.write(msg)
 
 
-try:
-    main()
-except Exception:
-    pass   # any failure -> silent, never block startup
-sys.exit(0)
+if __name__ == "__main__":
+    # Guarded so the module stays importable for verification — without it, `import nudge` runs
+    # main() and immediately sys.exit(0)s the importing process, which silently voids any test.
+    # Behavior when run as a hook (dev/hooks.json invokes `python3 .../nudge.py`) is unchanged.
+    try:
+        main()
+    except Exception:
+        pass   # any failure -> silent, never block startup
+    sys.exit(0)

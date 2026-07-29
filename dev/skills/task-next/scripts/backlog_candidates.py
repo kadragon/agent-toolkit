@@ -33,6 +33,13 @@ reinterpret it):
   `## Feature Name` / `- [ ] Simplest case` block harness-init seeds `backlog.md` with — are
   markup, not work, and must never be reported as candidates.
 
+  Fenced code blocks: ```-fenced and ~~~-fenced spans are blanked the same way, immediately after
+  the comment pass. A `#`/`##`/`###` line in a code sample is markup too, and a fake heading does
+  more than pollute the listing — it truncates the enclosing region (see "Directly owns" below),
+  so a real `- [ ]` sitting after the fence stops counting toward its actual heading. Openers are
+  3+ backticks/tildes indented at most 3 spaces; a closer needs the same character and at least
+  the opener's length; an unclosed fence runs to EOF.
+
   Phase A (tasks.md h1 sprint blocks): an `# ` heading is a candidate if `status: open`
   is the FIRST `status:` line whose line number falls strictly between this h1 and the next
   h1 (or EOF) — NOT literally the next line in the file. Body content commonly sits between
@@ -77,7 +84,10 @@ Self-check (--test):
   interleaving, and the blocked/deferred-marker exclusion case (all-marked heading is not a
   candidate; mixed marked+unmarked heading counts only the unmarked items), and the
   HTML-comment case (a commented-out template heading + item is not a candidate, and line
-  numbers of the real content after it are unshifted). All fixtures are
+  numbers of the real content after it are unshifted), and the fenced-code-block case (a fenced
+  `## Fake` between a heading and its items neither becomes a candidate nor truncates the real
+  heading's region; tilde fences, info strings, longer-closer nesting, unclosed fences, the
+  4-space-indent non-fence, and the comments-before-fences ordering all covered). All fixtures are
   in-memory strings — no real files touched. Exits 0 on PASS, 1 on FAIL.
 """
 
@@ -102,6 +112,10 @@ _BLOCK_MARKER_RE = re.compile(r"\*\(\s*(?:deferred|blocked by)\s*:.*?\)\*", re.I
 # HTML comments hold format templates (`## Feature Name` / `- [ ] Simplest case`) that must
 # never surface as candidates.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Fenced code blocks hold command samples and markdown examples — same problem as comments, but
+# fences are line-anchored (a span regex is the wrong tool). Up to 3 leading spaces per
+# CommonMark; 4+ makes it an indented code block's content, not a fence opener.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 # A plain list bullet that is NOT a checkbox. Never used for candidate selection — it exists
 # only so an empty result can tell "this heading has no work" apart from "this heading's work
 # is written as prose bullets, which the selector cannot see".
@@ -118,6 +132,47 @@ def _strip_html_comments(text: str) -> str:
     return _HTML_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
+def _strip_fenced_blocks(text: str) -> str:
+    """Blank out fenced code blocks, preserving line count so token line numbers stay 1-based.
+
+    A `#`/`##`/`###` line inside a ```-fenced sample is markup, not a heading — and treating it as
+    one corrupts *selection*, not just reporting: `_region_end` boundaries on the next level-1..3
+    heading, so a fake heading truncates the enclosing region and a real `- [ ]` after the fence
+    stops counting toward its actual heading.
+
+    Fence rules follow CommonMark where it matters here: an opener is 3+ backticks or 3+ tildes
+    indented at most 3 spaces (4+ spaces is indented-code content, not a fence); a closer must use
+    the same character, run at least as long as the opener, and carry nothing but whitespace after
+    it. An unclosed fence runs to EOF. The delimiter lines are blanked too — they are never
+    headings, status lines, or checkboxes, so nothing is lost.
+    """
+    out = []
+    fence_char = None
+    fence_len = 0
+    for line in text.splitlines():
+        if fence_char is None:
+            m = _FENCE_RE.match(line)
+            if m:
+                fence_char = m.group(1)[0]
+                fence_len = len(m.group(1))
+                out.append("")
+                continue
+            out.append(line)
+            continue
+        # Inside a fence: only a same-char run at least as long as the opener, with nothing but
+        # whitespace after it, closes. A shorter or differently-charactered run is just content.
+        m = _FENCE_RE.match(line)
+        if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
+            fence_char = None
+            fence_len = 0
+        out.append("")
+    # The trailing "\n" is required, not cosmetic: when an unclosed fence blanks the file's LAST
+    # line, `out` ends in "" and a bare `"\n".join(out)` loses exactly that line on the caller's
+    # `.splitlines()` — silently breaking the line-count contract in the one case with no content
+    # after the fence to make the drift visible. Guard the empty input, whose join is already "".
+    return "\n".join(out) + "\n" if out else ""
+
+
 def tokenize(text: str) -> list[dict]:
     """Classify each line into a typed token: heading / status / checkbox / bullet.
 
@@ -125,11 +180,16 @@ def tokenize(text: str) -> list[dict]:
     candidate detection, and every selector filters on `type`, so the diagnosis-only `bullet`
     token is inert to them. Line numbers are 1-based to match grep -n output.
 
-    `<!-- ... -->` spans are blanked out first: template/example markup inside a comment is
-    not real content, so it must not produce headings or checkbox items.
+    `<!-- ... -->` spans and fenced code blocks are blanked out first: template/example markup,
+    whether parked in a comment or shown in a code sample, is not real content, so it must not
+    produce headings or checkbox items.
+
+    Comments are stripped BEFORE fences, and the order is load-bearing: a doc template parked in a
+    comment often contains a lone ``` opener, which — if fences ran first — would open a phantom
+    unclosed fence and blank the rest of the file.
     """
     tokens: list[dict] = []
-    for i, line in enumerate(_strip_html_comments(text).splitlines(), start=1):
+    for i, line in enumerate(_strip_fenced_blocks(_strip_html_comments(text)).splitlines(), start=1):
         m = _HEADING_RE.match(line)
         if m:
             tokens.append(
@@ -711,6 +771,126 @@ Ordered by priority.
         result == [{"source": "backlog.md", "kind": "h2", "title": "Live group", "line": 1, "items": 1}],
         "single-line comments are stripped in place without dropping the surrounding line",
     )
+
+    # ---- Test 3d: fenced code blocks ----
+    print("\nTest 3d: fenced code blocks — headings/items inside a fence are markup, not work")
+
+    # The finding's named fixture: a fenced `## Fake` sits BETWEEN a heading and its items. The
+    # bug is not cosmetic — a fake heading truncates the enclosing region (_region_end), so the
+    # real item after the fence stops counting toward `Real group` and the group silently drops.
+    fenced_between = """## Real group
+
+Some prose before the sample.
+
+```markdown
+## Fake heading in a sample
+- [ ] fake item
+```
+
+- [ ] real item after the fence
+"""
+    tokens = tokenize(fenced_between)
+    result = backlog_fast_candidates(tokens)
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Real group", "line": 1, "items": 1}],
+        "a fenced `## Fake` between a heading and its items neither becomes a candidate nor "
+        "truncates the real heading's region",
+    )
+    _assert(
+        not any(t["type"] == "heading" and t["title"].startswith("Fake") for t in tokens),
+        "no heading token is emitted for a `##` line inside a fence",
+    )
+    _assert(
+        [t["line"] for t in tokens if t["type"] == "checkbox"] == [10],
+        "line numbers after a stripped fence are unshifted (fence blanked, not deleted)",
+    )
+
+    tilde_and_info = """## Tilde group
+~~~python
+## Fake in a tilde fence
+- [ ] ghost
+~~~
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(tilde_and_info))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Tilde group", "line": 1, "items": 1}],
+        "`~~~` fences carrying an info string are stripped just like backtick fences",
+    )
+
+    # A closing fence must be at least as long as its opener, so the shorter inner fences here
+    # do NOT close the outer one — otherwise the sample's own `## Fake` leaks back out.
+    nested_fence = """## Four group
+````
+```
+## Fake inside a shorter inner fence
+```
+````
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(nested_fence))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Four group", "line": 1, "items": 1}],
+        "a shorter inner fence does not close a longer outer fence",
+    )
+
+    unclosed_fence = """## Open group
+- [ ] real item
+```
+## Fake after an unclosed fence
+- [ ] ghost item
+"""
+    result = backlog_fast_candidates(tokenize(unclosed_fence))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Open group", "line": 1, "items": 1}],
+        "an unclosed fence blanks through EOF, so nothing after it is selectable",
+    )
+
+    # REGRESSION GUARD — a 4-space-indented ``` is an indented code block's content, not a fence
+    # opener (CommonMark). Treating it as one would open an unclosed fence and silently blank the
+    # rest of a real backlog.
+    indented_fence = """## Indent group
+    ```
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(indented_fence))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Indent group", "line": 1, "items": 1}],
+        "a 4-space-indented ``` does not open a fence, so the following item stays selectable",
+    )
+
+    # REGRESSION GUARD — comments are stripped BEFORE fences. A lone ``` parked inside a
+    # commented-out doc template must not open a phantom fence that swallows the rest of the file.
+    fence_inside_comment = """<!--
+```
+-->
+## Real group
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(fence_inside_comment))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Real group", "line": 4, "items": 1}],
+        "an unbalanced ``` inside an HTML comment does not open a phantom fence",
+    )
+
+    # REGRESSION GUARD (qa-verifier) — the line-count contract must hold for EVERY input, not only
+    # ones with content after the fence. The candidate/token assertions above cannot see a drop of
+    # the file's LAST line (nothing follows it to be mis-numbered), so assert the raw count too.
+    for label, fixture in (
+        ("fenced_between", fenced_between),
+        ("tilde_and_info", tilde_and_info),
+        ("nested_fence", nested_fence),
+        ("unclosed_fence", unclosed_fence),
+        ("indented_fence", indented_fence),
+        ("fence_inside_comment", fence_inside_comment),
+        ("empty input", ""),
+        ("nothing but an unclosed fence", "```\n"),
+        ("no trailing newline", "## Group\n- [ ] item"),
+    ):
+        _assert(
+            len(_strip_fenced_blocks(fixture).splitlines()) == len(fixture.splitlines()),
+            f"_strip_fenced_blocks preserves line count exactly ({label})",
+        )
 
     # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
     print("\nTest 4: fast_path — cap 5 total across Phase A + B + C")
