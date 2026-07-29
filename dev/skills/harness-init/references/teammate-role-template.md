@@ -49,14 +49,22 @@ catches them):
 
 | Bad | Good |
 |---|---|
-| `description: Reviews code for issues.` | `description: Use this agent when reviewing a diff, a PR, or pre-commit changes — and the review spans >3 files or touches auth/billing/migrations.` |
-| `description: Triggered on explore commands.` | `description: Use this agent for first-touch exploration of a module — when (a) target module has >5 files OR >500 LOC, OR (b) first edit in that directory this session. Spawn before editing.` |
+| `description: Reviews code for issues.` | `description: Use this agent when reviewing a diff that touches auth, billing, or migrations, or that spans >N files.` |
+| `description: Triggered on explore commands.` | `description: Use this agent to map a module before editing it — when the target has >N files or >M LOC, per this repo's delegation table.` |
 | `description: Considers test verification.` | `description: Use this agent to verify an implementation against its Sprint Contract after a separate agent implemented it. Never the agent that wrote the code.` |
 
 Note what the "Good" column does *not* do: it states measurable fit, not an
 unconditional mandate. A description that reads `ALWAYS … do NOT inline` makes
 the role fire on every superficially matching turn regardless of whether the
 delegation bar is met, which is the drift the next rule bounds.
+
+`>N` / `>M` are placeholders — substitute the thresholds from this repo's own
+delegation table, and keep them at or above what the platform's global
+instruction layer requires, never below. Do not replace them with a subjective
+condition ("unfamiliar module", "if unsure") or with a self-assessment that
+defers to "the caller's delegation bar": `delegation-template.md` →
+*Trigger Anti-patterns* rejects all three, and a description is read by the
+router before any caller judgment exists to defer to.
 
 If — and only if — a role appears in the AGENTS.md delegation table as
 "Mandatory, blocking", its description MUST contain `ALWAYS` and an explicit
@@ -115,23 +123,31 @@ Role stops when ANY of:
 
 ### Common spine vs repo-specific additions
 
-`harness-init` writes each `.claude/agents/{role}.md` once and never revisits it, so instances
-drift from this template as it improves. Not all drift is equal — before treating a difference as
-staleness, classify it:
+Nothing re-runs Step 4b when *this template* changes. The documented paths that revisit an
+existing role file are all repo-driven — Extend mode's `Architecture change` row in `SKILL.md`,
+and the feedback signals plus Periodic Audit in `references/harness-evolution.md` — never
+template-driven. So template improvements never reach existing instances, and instances drift as
+this file improves.
+
+Not all drift is equal — before treating a difference as staleness, classify it:
 
 | Layer | Owner | Drift means |
 |---|---|---|
-| Frontmatter schema + the four sections above (Objective, Spawn Prompt Contract, Effort Tier, Exit Criteria) | this template | stale instance — the template is the source of truth |
+| Frontmatter schema (required fields present, `model` from the Model Selection table) | this template | stale instance — the template is the source of truth |
+| The four spine sections above (Objective, Spawn Prompt Contract, Effort Tier, Exit Criteria) | this template | stale instance — the template is the source of truth |
+| Non-spine sections this template ships (`## Multi-pass Rule`, `## Team Communication Protocol`) | this template, but **opt-in per role** | absence is not staleness — they apply only to roles that need them |
 | Sections a repo *adds* (e.g. `## Checks (always run)`, `## Domain-safety pass`) | the repo | intended specialization — never overwrite |
-| Wording inside a shared section (test/lint commands, path globs) | the repo | intended — the section is common, its contents are local |
+| Wording inside any shared section (test/lint commands, path globs, thresholds) | the repo | intended — the section is common, its contents are local |
 
 Measured 2026-07-29 across four repos generated from this template (`qa-verifier.md`, 27–36 lines,
 four distinct hashes): every instance carried all four spine sections; every difference was either
 an added repo-specific section or repo-local wording inside a shared one. No instance was missing
-spine structure.
+spine structure. Note none carried `## Multi-pass Rule` either — which is why row 3 exists: a
+differ that treated every template section as required would report four false positives here.
 
-Consequence for any future resync tool: reconcile **presence of spine sections only**. Section
-contents and added sections are out of its remit.
+Consequence for any future resync tool: reconcile **frontmatter-field presence and spine-section
+presence**. Section contents, repo-added sections, and the opt-in non-spine sections are out of
+its remit.
 
 ## Team Communication Protocol (add when role runs in Agent Teams)
 
@@ -167,8 +183,9 @@ trigger is reachable in the target repo — see the reachability gate in
 name: implementer
 description: |
   Use this agent for an implementation task that already has a Sprint Contract
-  and a listed set of files to edit, when the caller's delegation bar is met.
-  Does NOT self-evaluate; hands off to qa-verifier afterwards.
+  and a listed set of files to edit — when that list spans >N files or ≥3
+  independent units. Does NOT self-evaluate; hands off to qa-verifier
+  afterwards.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -204,9 +221,9 @@ role first.
 ---
 name: explorer
 description: |
-  Use this agent to map an unfamiliar area before editing it — when the target
-  module has >5 files / >500 LOC, or the survey would otherwise flood the
-  caller's context. Read-only: produces a map, not a change.
+  Use this agent to map a module before editing it — when the target has >N
+  files or >M LOC, per this repo's delegation table. Read-only: produces a map,
+  not a change.
 tools: Read, Grep, Glob
 model: sonnet
 ---

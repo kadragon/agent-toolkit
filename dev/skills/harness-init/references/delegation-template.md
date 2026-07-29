@@ -229,8 +229,8 @@ These delegations are **embedded as named steps in `docs/workflows.md`**, not ju
 |----------|------|----------|-----------|
 | `code` | Step 1: Scope check | Analysis agent (if objective trigger met) | Mandatory |
 | `code` | Step 3: Implementation | Implementation agent (or orchestrator for ≤2 files) | Conditional |
-| `code` | Step 4: Post-implementation | QA agent | Mandatory (always) |
-| `code` | Step 5: Feature complete | Product evaluator | Mandatory (always) |
+| `code` | Step 4: Post-implementation | QA agent (never the implementing agent) | Conditional |
+| `code` | Step 5: Feature complete | Product evaluator | Conditional |
 | `plan` | Domain research | Analysis agent | Optional |
 | `draft` | Context gathering | Analysis agent | Optional |
 | `sweep` | Large scan | Sweep agent (background) | Background |

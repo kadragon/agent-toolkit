@@ -42,12 +42,12 @@ If you installed the gate, a mandatory row that fires halts an inline edit. If y
 
 | Trigger (objective) | Delegate | Mode | Gate |
 |---------------------|----------|------|------|
-| Target module has >5 files or >500 LOC | Explore agent (sonnet) | sub-agent | Mandatory, blocking |
+| Target module has >5 files or >500 LOC | Explore agent (sonnet) | sub-agent | Optional |
 | Change touches ≥3 directories | Architecture analysis (opus) | sub-agent | Mandatory, blocking |
 | First edit in a directory this session | Explore agent (sonnet) | sub-agent | Optional |
 | File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent (sonnet) | sub-agent | Mandatory, blocking |
-| After implementation (always) | QA verification (sonnet) | sub-agent | Mandatory, blocking |
-| Feature complete | Product evaluator (opus) | sub-agent | Mandatory, blocking |
+| After implementation, when verification is delegated at all | QA verification (sonnet) | sub-agent | Optional |
+| Feature complete | Product evaluator (opus) | sub-agent | Optional |
 | Multi-perspective review needed | Review team (sonnet × N) | **agent team** | Optional |
 | Cross-layer refactor (≥3 modules) | Refactor team (opus lead + sonnet) | **agent team** | Escalation |
 | Every commit | Code reviewer (sonnet) | background | Background |
