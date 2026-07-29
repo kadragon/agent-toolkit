@@ -127,6 +127,22 @@ Typical trap: anchoring an ordering assertion on the wrong landmark. `lines.inde
 finds the *opening* fence, so "inserted after the fence" is satisfied by an insertion *inside*
 the fenced block — the exact defect under test. Anchor on the real target instead.
 
+### Validator Discovery (enumerate by path, fail closed)
+
+A CI validator must decide *what it covers* from the path layout, never from the content it is
+about to judge. Content-gated discovery ("check every file that starts with `---`") skips the
+loudest forms of the very defect it exists to catch — a file missing that marker entirely, or
+one where a UTF-8 BOM makes the marker unrecognizable — and reports green.
+
+Two consequences, both mandatory:
+
+1. Enumerate the target set by path (`*/skills/*/SKILL.md`, `*/agents/*.md`, …) and require
+   every member to be valid. Content may add files to the set, never remove them from it.
+2. An empty target set is a **failure**, not a pass. A gate that silently covers zero files is
+   indistinguishable from a passing one in the CI summary.
+
+Reference implementation: `scripts/ci/check_skill_frontmatter.py`.
+
 ## Skill Doc Rules
 
 When writing shell patterns in `SKILL.md` that use variables, always show:

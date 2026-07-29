@@ -30,6 +30,17 @@ codex plugin add prod@kadragon
 |---------|---------|
 | `bash dev/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
+| `python3 scripts/ci/check_harness_drift.py` | Plugin-root portability + capture-before-use over shipped skills |
+| `python3 scripts/ci/check_skill_frontmatter.py` | Skill/agent/command frontmatter parses as YAML, required keys present (needs PyYAML) |
+| `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
+
+`check_skill_frontmatter.py` needs PyYAML. macOS system `python3` is PEP 668
+externally-managed, so install it into a venv rather than globally:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install pyyaml
+.venv/bin/python scripts/ci/check_skill_frontmatter.py
+```
 
 ## Release Workflow
 
