@@ -91,6 +91,14 @@ Scan the repo for:
 
 Record findings — these shape every artifact created downstream. If existing AGENTS.md or docs/ exist, read them, decide what to keep vs. replace.
 
+**Settle the docs language here, before writing anything.** Every artifact this skill produces — AGENTS.md prose, `docs/*.md` bodies, role and skill files — goes in that language, *not* the language of the conversation you are having. The two are unrelated: conversation language is a UI preference for one session, generated docs are version-controlled repo artifacts governed by the repo's own policy. Defaulting to the chat language is the observed failure — Korean docs written into a repo whose Language Policy, authored in the same session, says docs are English. Resolve in order:
+
+1. **Existing repo Language Policy** (AGENTS.md, README, CONTRIBUTING) — it wins outright.
+2. Else `~/.claude/CLAUDE.md`, already read in Step 0 (e.g. "User-facing Korean; code/commits/comments/docs English").
+3. Neither settles it → ask. One question, then proceed.
+
+Domain terms with no real equivalent in the target language (a local platform's proper name, a regulatory term, a framework's own field labels) stay in the source language — they are data, not prose, and translating them destroys the referent. State the resolved language before Step 3 so the user can correct it once instead of after every file.
+
 ### Step 2: Define Golden Principles
 
 Golden principles = 3-7 invariants that, if violated, cause most damage. Must be:
@@ -121,7 +129,7 @@ Three patterns make the map earn its tokens:
 
 See `examples/agents-md-example.md` for complete reference.
 
-**Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`.
+**Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`. Write this file's own prose in the language resolved in Step 1 — a `## Language Policy` the surrounding file violates teaches every later reader that the policy is decorative.
 
 **Two embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): `## Maintenance` edit policy, `## Token Economy` rules. Copy the `<!-- harness:verbatim … -->` comment that precedes each one too. The mandate lives here, in a skill that only loads when harness-init runs, so an AGENTS.md carrying these blocks unmarked reads to any later trimming pass (`claude-md-improver`, `/doctor`, a human editor) as generic boilerplate — exactly the shape that filter is built to delete. The marker is what travels with the file and makes the block defend itself; it renders invisibly in Markdown and costs ~8 tokens.
 
@@ -146,7 +154,7 @@ Read `references/path-scoped-rules.md` for layout, the home-selection table (AGE
 
 ### Step 4: Create docs/ Knowledge Base
 
-Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc.
+Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc. Bodies go in the Step 1 language, not the chat language — the templates ship in English as scaffolding, which is not itself the language decision.
 
 | File | Purpose | Template |
 |------|---------|----------|

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-init resolves docs language before writing any artifact (dev v4.0.15) (2026-07-29)
 - [done] task-next fenced-block stripping + task-audit-nudge Codex config_dir (dev v4.0.14) (2026-07-29)
 - [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
 - [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
