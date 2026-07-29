@@ -59,6 +59,14 @@ MIN_NEW_SESSIONS = 3   # need this many sessions since lastRunMs before "stale" 
 
 
 def encode_project(path):
+    """Map a project path to its transcript dir name, mirroring scan_transcripts.py's copy.
+
+    INVARIANT — do not "fix" the collision. This must REPRODUCE Claude Code's own project-dir
+    naming in order to FIND dirs Claude already created, so its lossiness is inherited, not ours:
+    `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` because Claude collapses them
+    too. De-colliding (e.g. appending a path hash) would make every lookup miss its real
+    directory — trading a rare theoretical clash for guaranteed total failure.
+    """
     path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)
 
@@ -161,15 +169,33 @@ def resolve_state_dir(cwd, proj_root):
 def config_dir():
     """(dir, is_codex). is_codex tells the caller which session-counting strategy applies
     — Claude's real sessions live in `dir`'s own projects tree, Codex's don't (see
-    _codex_new_session_count)."""
-    if os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), False
-    if os.environ.get("CODEX_HOME"):
-        return os.environ["CODEX_HOME"], True
+    _codex_new_session_count).
 
+    Determine the PLATFORM first, then that platform's config dir. Deriving the platform from a
+    config variable is what broke this twice, in opposite directions:
+      - `CLAUDE_PLUGIN_ROOT` is NOT proof of Claude: Codex sets it as a compatibility alias in
+        plugin hooks (docs/platform-specs.md), so trusting it made the hook read `~/.claude` under
+        Codex AND take the is_codex=False counting path, which always returns 0 and permanently
+        suppresses the nudge.
+      - `CODEX_HOME` is NOT proof of Codex either: anyone who relocated their Codex home exports
+        it from a shell profile, so trusting it would send a genuine Claude session's state to
+        `~/.codex` — the same failure mirrored.
+
+    The installed script's own realpath is the decisive signal, because it cannot be inherited
+    from an ambient shell. Only when the hook is NOT running from an installed plugin tree (dev
+    checkout, ad-hoc invocation) do env markers decide, and there `PLUGIN_ROOT` is the Codex
+    marker: docs/platform-specs.md lists it as Codex's canonical plugin root and undocumented for
+    Claude Code. If a future Claude Code release starts setting `PLUGIN_ROOT`, revisit this."""
     script_path = os.path.realpath(__file__)
     if "/.codex/" in script_path:
-        return os.path.expanduser("~/.codex"), True
+        return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), True
+    if "/.claude/" in script_path:
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), False
+
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        return os.environ["CLAUDE_CONFIG_DIR"], False
+    if os.environ.get("PLUGIN_ROOT") or os.environ.get("CODEX_HOME"):
+        return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), True
     return os.path.expanduser("~/.claude"), False
 
 
@@ -236,8 +262,76 @@ def main():
     sys.stdout.write(msg)
 
 
-try:
-    main()
-except Exception:
-    pass   # any failure -> silent, never block startup
-sys.exit(0)
+def _run_tests():
+    """Pin config_dir()'s precedence table. This logic has been wrong in two OPPOSITE directions
+    across two cycles (CLAUDE_PLUGIN_ROOT read as proof of Claude; then an ambient CODEX_HOME read
+    as proof of Codex), and it is invisible in normal use — a misdetection just silences the nudge
+    forever. Fixtures are in-memory env/__file__ swaps; no real files touched."""
+    global __file__
+    passed = failed = 0
+
+    def check(script_path, env, expected, label):
+        nonlocal passed, failed
+        keys = ("CLAUDE_CONFIG_DIR", "CLAUDE_PLUGIN_ROOT", "CODEX_HOME", "PLUGIN_ROOT")
+        saved_env = {k: os.environ.get(k) for k in keys}
+        saved_file = __file__
+        for k in keys:
+            os.environ.pop(k, None)
+        os.environ.update(env)
+        globals()["__file__"] = script_path
+        try:
+            got = config_dir()
+        finally:
+            globals()["__file__"] = saved_file
+            for k, v in saved_env.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
+        if got == expected:
+            passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            print(f"  FAIL: {label} -> {got}, expected {expected}")
+
+    claude_home = os.path.expanduser("~/.claude")
+    codex_home = os.path.expanduser("~/.codex")
+    claude_install = f"{claude_home}/plugins/cache/kadragon/dev/9.9.9/hooks/task-audit-nudge/nudge.py"
+    codex_install = f"{codex_home}/plugins/cache/kadragon/dev/9.9.9/hooks/task-audit-nudge/nudge.py"
+    checkout = "/Users/someone/Dev/agent-toolkit/dev/hooks/task-audit-nudge/nudge.py"
+
+    print("=== nudge.py config_dir() precedence ===")
+    # The original bug: Codex sets CLAUDE_PLUGIN_ROOT as a compat alias, so it never proved Claude.
+    check(codex_install, {"CLAUDE_PLUGIN_ROOT": "/x/plugins/dev"}, (codex_home, True),
+          "Codex install path wins over the CLAUDE_PLUGIN_ROOT compat alias")
+    # The mirror bug: an ambient CODEX_HOME must not hijack a genuine Claude session.
+    check(claude_install, {"CODEX_HOME": codex_home}, (claude_home, False),
+          "Claude install path wins over an ambient CODEX_HOME")
+    check(codex_install, {"CODEX_HOME": "/custom/codex"}, ("/custom/codex", True),
+          "CODEX_HOME supplies the dir once the platform is known to be Codex")
+    check(claude_install, {"CLAUDE_CONFIG_DIR": "/custom/claude"}, ("/custom/claude", False),
+          "CLAUDE_CONFIG_DIR supplies the dir once the platform is known to be Claude")
+    # Not installed (dev checkout): env markers decide. PLUGIN_ROOT is Codex-canonical.
+    check(checkout, {"PLUGIN_ROOT": "/x/plugins/dev"}, (codex_home, True),
+          "PLUGIN_ROOT alone identifies Codex when no install path is available")
+    check(checkout, {"CLAUDE_PLUGIN_ROOT": "/x/plugins/dev"}, (claude_home, False),
+          "CLAUDE_PLUGIN_ROOT alone still resolves to Claude off an install path")
+    check(checkout, {"CLAUDE_CONFIG_DIR": "/custom/claude", "CODEX_HOME": codex_home},
+          ("/custom/claude", False), "explicit CLAUDE_CONFIG_DIR beats an ambient CODEX_HOME")
+    check(checkout, {}, (claude_home, False), "no signal at all defaults to Claude")
+
+    print(f"\n=== Results: {passed} PASS, {failed} FAIL ===")
+    return 0 if failed == 0 else 1
+
+
+if __name__ == "__main__":
+    # Guarded so the module stays importable for verification — without it, `import nudge` runs
+    # main() and immediately sys.exit(0)s the importing process, which silently voids any test.
+    # Behavior when run as a hook (dev/hooks.json invokes `python3 .../nudge.py`) is unchanged.
+    if "--test" in sys.argv[1:]:
+        sys.exit(_run_tests())
+    try:
+        main()
+    except Exception:
+        pass   # any failure -> silent, never block startup
+    sys.exit(0)

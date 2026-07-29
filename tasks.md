@@ -2,17 +2,10 @@
 
 Deferred items surfaced during task-review. Not blocking; triage later.
 
+## lint
+
+- [ ] **[P3] ruff pre-commit gate blocks on pre-existing violations in any touched `*/scripts/*.py`** — the local (repo-untracked) `.git/hooks/pre-commit` runs `ruff check` on staged scripts, and `dev/skills/harness-curate/scripts/scan_transcripts.py` alone carries 13 pre-existing hits (BLE001 x6, S112 x3, SIM115 x2, PIE810, SIM103), plus EXE001 + I001 in `dev/skills/task-next/scripts/backlog_candidates.py`. Verified pre-existing: HEAD and working-tree violation sets are identical. Touching any of these files for an unrelated reason therefore fails the commit — dev v4.0.14 had to use `--no-verify`. Note most blind `except Exception` sites are deliberate ("never raise, never block session start"), so the fix is a repo-level ruff config that encodes the intended ruleset (or per-site `# noqa` with a reason), NOT rewriting the handlers. CI does not run ruff, so this is local-gate-only today.
+
 ## backlog_candidates
 
-- [ ] **[P2] `tokenize()` does not strip fenced code blocks** — `_strip_html_comments` blanks `<!-- … -->` before tokenizing, but a ```` ``` ````-fenced block gets no such treatment, so a `#`/`##`/`###` line inside a code sample is parsed as a real heading. This corrupts candidate *selection* (a fake heading truncates the enclosing region, so a real checkbox after it can stop counting toward its heading), not just the zero-candidate diagnosis. Pre-existing — predates the diagnosis work, found by qa-verifier while probing it. Fix: blank fenced spans line-count-preserving, exactly as `_strip_html_comments` does, and add a fixture where a fenced `## Fake` sits between a heading and its items.
-
-## task-audit-nudge
-
-The self-improve-nudge hook was retired for the manual `harness-capture` skill,
-which is now scriptless (reflects on the live conversation — no transcript parse).
-So the `detect_signals` / `encode_project` / `config_dir` items that were carried
-into its old `scan_session.py` are moot for this skill. `task-audit-nudge` still
-has its own copies; residual items below.
-
-- [ ] **[P3] `encode_project` key collision** — `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` (codex C2). The verbatim `encode_project` lives in `task-audit-nudge` and `harness-curate/scan_transcripts.py`; extremely unlikely in practice. If fixed, fix both together (append a short path hash) to keep them consistent.
-- [ ] **[pre-existing] `task-audit-nudge.config_dir` has the Codex/CLAUDE_PLUGIN_ROOT precedence bug** — under Codex, `CLAUDE_PLUGIN_ROOT` is set as a compat alias, so its `config_dir()` returns `~/.claude` instead of `~/.codex`. Fix: check `CODEX_HOME` (and a `/.codex/` script path) before falling back to the Claude default.
+- [ ] **[P3] `_strip_html_comments` drops the file's last line when a comment reaches true EOF** — `_strip_html_comments("<!--\nx\n-->")` returns 2 lines for a 3-line input. Same root cause as the fenced-block bug fixed in dev v4.0.14 (the `"\n" * count` replacement under-represents the final line when the match ends at EOF with nothing after it), but in the untouched comment stripper. Functionally inert today: the dropped line is always blank, and `_region_end` uses `math.inf` for the EOF boundary rather than a line total, so no token's line number shifts. Found by qa-verifier while re-verifying the fenced-block fix. Fix: mirror the `+ "\n" if out else ""` treatment, and extend Test 3d's line-count loop to cover `_strip_html_comments` on the same fixtures.

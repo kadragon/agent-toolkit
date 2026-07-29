@@ -51,8 +51,10 @@ cap-5 truncation described below. **If the script is unavailable or errors, fall
 hand-grepping per the Phase A/B/C rules below** (kept in this doc for that purpose).
 
 When hand-grepping (fast path and full scan alike), discard any heading or `- [ ]` line that
-sits inside an `<!-- ... -->` block — commented-out format templates are markup, not work. The
-script already strips them.
+sits inside an `<!-- ... -->` block or a ```-fenced (or `~~~`-fenced) code block — commented-out
+format templates and code samples are markup, not work. A fenced heading is the costlier miss: it
+also truncates the enclosing group, so a real `- [ ]` after the fence stops counting toward its
+heading. The script already strips both.
 
 **Phase A — h1 sprint blocks (tasks.md):**
 
@@ -77,6 +79,12 @@ grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
 ```
 
 Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker.
+
+**Unbalanced-fence warning — read stderr on EVERY run, not just empty ones.** A stray odd
+```` ``` ```` blanks everything after it, which can hide part of the queue while other groups
+still surface. The script writes `Warning: unbalanced fence opened at line N in <file>` to stderr
+whenever it sees one. Surface it to the user and treat the affected file as untrustworthy until
+the fence is closed — do NOT present the candidate list as complete.
 
 **Fast-path selection (A+B+C combined, cap = 5):**
 
