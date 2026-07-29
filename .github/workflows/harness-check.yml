@@ -84,6 +84,21 @@ jobs:
       - name: Run scripts/ci/check_harness_drift.py
         run: python3 scripts/ci/check_harness_drift.py
 
+  skill-frontmatter:
+    name: Skill/agent/command frontmatter check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Run scripts/ci/test_check_skill_frontmatter.py
+        run: python3 scripts/ci/test_check_skill_frontmatter.py
+
+      - name: Run scripts/ci/check_skill_frontmatter.py
+        run: python3 scripts/ci/check_skill_frontmatter.py
+
   version-bump:
     name: Plugin version bump check
     runs-on: ubuntu-latest

@@ -2,10 +2,6 @@
 
 Deferred items surfaced during task-review. Not blocking; triage later.
 
-## Plugin validation
-
-- [ ] **[P2] `dev/skills/task-review/SKILL.md` frontmatter fails Claude plugin validation** — `claude plugin validate ./dev` reports a YAML parse error and drops all metadata. Quote or fold the `description:` scalar, then add validator coverage.
-
 ## backlog_candidates
 
 - [ ] **[P2] `tokenize()` does not strip fenced code blocks** — `_strip_html_comments` blanks `<!-- … -->` before tokenizing, but a ```` ``` ````-fenced block gets no such treatment, so a `#`/`##`/`###` line inside a code sample is parsed as a real heading. This corrupts candidate *selection* (a fake heading truncates the enclosing region, so a real checkbox after it can stop counting toward its heading), not just the zero-candidate diagnosis. Pre-existing — predates the diagnosis work, found by qa-verifier while probing it. Fix: blank fenced spans line-count-preserving, exactly as `_strip_html_comments` does, and add a fixture where a fenced `## Fake` sits between a heading and its items.
