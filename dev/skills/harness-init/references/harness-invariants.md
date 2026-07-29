@@ -18,7 +18,7 @@ value changes here, update both in the same commit.
 | `backlog.md` | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings | init Step 4 | maintenance C + D-1 |
 | `tasks.md` | Fields: `# Title`, `status:`, `Scope`, `Acceptance Criteria`, `Evaluator Feedback` | init Step 4 | maintenance C + D-1 |
 | `docs/architecture.md` etc. | Referenced from AGENTS.md docs index | init Step 4 | `validate-harness.sh` |
-| `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`, `tools`, `model`) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria | init Step 4c (if multi-agent) | manual review |
+| `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`, `model`; `tools` optional) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria, unless the role declares `spine-exempt: true` | init Step 4b (if multi-agent) | `validate-harness.sh` §11 (presence only — WARN) |
 
 ## AGENTS.md Size Policy
 

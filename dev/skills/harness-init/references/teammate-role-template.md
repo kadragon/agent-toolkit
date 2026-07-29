@@ -121,13 +121,31 @@ Role stops when ANY of:
 - {explicit handoff to another role}
 ```
 
+### Exemption: deliberately lean roles
+
+One class of role is exempt: a **pure role-play or single-shot worker spawned in bulk**, where the
+whole prompt arrives per call and four stub sections would buy nothing but per-spawn tokens.
+Declare it in the frontmatter:
+
+```markdown
+spine-exempt: true
+```
+
+`validate-harness.sh` §11 then waives the four section checks for that file and reports it as a
+`PASS`. The frontmatter fields stay required — the router reads them regardless.
+
+The marker exists so the intent is **mechanical rather than tribal**: without it, a lean role is
+indistinguishable from a stale one, and a permanent WARN the repo has already ruled correct-by-
+design trains the operator to skim past §11 entirely. Reach for it only when the leanness is the
+point; a role that merely *has not been written yet* is stale, not exempt.
+
 ### Common spine vs repo-specific additions
 
-Nothing re-runs Step 4b when *this template* changes. The documented paths that revisit an
-existing role file are all repo-driven — Extend mode's `Architecture change` row in `SKILL.md`,
-and the feedback signals plus Periodic Audit in `references/harness-evolution.md` — never
-template-driven. So template improvements never reach existing instances, and instances drift as
-this file improves.
+Nothing *regenerates* a role file when this template changes — the paths that revisit one are all
+repo-driven (Extend mode's `Architecture change` row in `SKILL.md`, the feedback signals plus
+Periodic Audit in `references/harness-evolution.md`), never template-driven. What closes that gap
+is `scripts/validate-harness.sh` §11, which reports drift on every validate run. It is a reporting
+check, not a rewriter: resyncing a flagged file stays a human decision.
 
 Not all drift is equal — before treating a difference as staleness, classify it:
 
@@ -145,9 +163,11 @@ an added repo-specific section or repo-local wording inside a shared one. No ins
 spine structure. Note none carried `## Multi-pass Rule` either — which is why row 3 exists: a
 differ that treated every template section as required would report four false positives here.
 
-Consequence for any future resync tool: reconcile **frontmatter-field presence and spine-section
-presence**. Section contents, repo-added sections, and the opt-in non-spine sections are out of
-its remit.
+`validate-harness.sh` §11 implements exactly that boundary: it reconciles **frontmatter-field
+presence** (`name`, `description`, `model`; `tools` is optional per the schema above) **and
+spine-section presence** — the latter waived by `spine-exempt: true` — and emits `WARN`, never
+`FAIL`, never an edit. Section contents, repo-added sections, and the opt-in non-spine sections
+are out of its remit. Any future resync tool inherits the same limits.
 
 ## Team Communication Protocol (add when role runs in Agent Teams)
 

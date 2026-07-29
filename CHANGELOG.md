@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
 - [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
 - [done] CHANGELOG entry contract + named-agent result handoff (dev v4.0.10) (2026-07-27) → docs/conventions.md
 - [done] task-review: capture only Codex's final review (dev v4.0.9) (2026-07-27)
