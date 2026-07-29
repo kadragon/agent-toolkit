@@ -80,6 +80,12 @@ grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
 
 Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker.
 
+**Unbalanced-fence warning — read stderr on EVERY run, not just empty ones.** A stray odd
+```` ``` ```` blanks everything after it, which can hide part of the queue while other groups
+still surface. The script writes `Warning: unbalanced fence opened at line N in <file>` to stderr
+whenever it sees one. Surface it to the user and treat the affected file as untrustworthy until
+the fence is closed — do NOT present the candidate list as complete.
+
 **Fast-path selection (A+B+C combined, cap = 5):**
 
 | Count | Action |

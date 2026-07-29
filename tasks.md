@@ -2,11 +2,9 @@
 
 Deferred items surfaced during task-review. Not blocking; triage later.
 
-## backlog_candidates
-
 ## lint
 
-- [ ] **[P3] ruff pre-commit gate blocks on pre-existing violations in any touched `*/scripts/*.py`** — the local (repo-untracked) `.git/hooks/pre-commit` runs `ruff check` on staged scripts, and `dev/skills/harness-curate/scripts/scan_transcripts.py` alone carries 13 pre-existing hits (BLE001 x5, S112 x3, SIM115 x2, PIE810, SIM103), plus EXE001 + I001 in `dev/skills/task-next/scripts/backlog_candidates.py`. Verified pre-existing: HEAD and working-tree violation sets are identical. Touching any of these files for an unrelated reason therefore fails the commit — dev v4.0.14 had to use `--no-verify`. Note most blind `except Exception` sites are deliberate ("never raise, never block session start"), so the fix is a repo-level ruff config that encodes the intended ruleset (or per-site `# noqa` with a reason), NOT rewriting the handlers. CI does not run ruff, so this is local-gate-only today.
+- [ ] **[P3] ruff pre-commit gate blocks on pre-existing violations in any touched `*/scripts/*.py`** — the local (repo-untracked) `.git/hooks/pre-commit` runs `ruff check` on staged scripts, and `dev/skills/harness-curate/scripts/scan_transcripts.py` alone carries 13 pre-existing hits (BLE001 x6, S112 x3, SIM115 x2, PIE810, SIM103), plus EXE001 + I001 in `dev/skills/task-next/scripts/backlog_candidates.py`. Verified pre-existing: HEAD and working-tree violation sets are identical. Touching any of these files for an unrelated reason therefore fails the commit — dev v4.0.14 had to use `--no-verify`. Note most blind `except Exception` sites are deliberate ("never raise, never block session start"), so the fix is a repo-level ruff config that encodes the intended ruleset (or per-site `# noqa` with a reason), NOT rewriting the handlers. CI does not run ruff, so this is local-gate-only today.
 
 ## backlog_candidates
 

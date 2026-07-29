@@ -132,7 +132,7 @@ def _strip_html_comments(text: str) -> str:
     return _HTML_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
-def _strip_fenced_blocks(text: str) -> str:
+def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
     """Blank out fenced code blocks, preserving line count so token line numbers stay 1-based.
 
     A `#`/`##`/`###` line inside a ```-fenced sample is markup, not a heading — and treating it as
@@ -145,16 +145,29 @@ def _strip_fenced_blocks(text: str) -> str:
     the same character, run at least as long as the opener, and carry nothing but whitespace after
     it. An unclosed fence runs to EOF. The delimiter lines are blanked too — they are never
     headings, status lines, or checkboxes, so nothing is lost.
+
+    Returns `(blanked_text, unclosed_opener_line)`. The second element is the whole point of the
+    tuple: an unclosed fence is CommonMark-correct to blank through EOF, but an odd number of
+    ``` is an ordinary hand-editing typo, and swallowing the rest of a backlog silently is the
+    exact false-negative class `zero_candidate_diagnosis` exists to prevent — yet invisible to it,
+    since the swallowed headings never become tokens. Callers surface it (see `main`).
     """
     out = []
     fence_char = None
     fence_len = 0
+    opened_at = None
     for line in text.splitlines():
         if fence_char is None:
             m = _FENCE_RE.match(line)
-            if m:
+            # CommonMark forbids a backtick in a BACKTICK fence's info string (tilde fences allow
+            # it). Without this guard an ordinary prose line like ```foo`bar reads as an unclosed
+            # opener and blanks the file through EOF — precisely the silent candidate loss this
+            # function exists to prevent. Openers only; the closer branch below already requires
+            # nothing but whitespace after the run.
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
                 fence_char = m.group(1)[0]
                 fence_len = len(m.group(1))
+                opened_at = len(out) + 1   # 1-based line of this opener
                 out.append("")
                 continue
             out.append(line)
@@ -165,12 +178,28 @@ def _strip_fenced_blocks(text: str) -> str:
         if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
             fence_char = None
             fence_len = 0
+            opened_at = None
         out.append("")
     # The trailing "\n" is required, not cosmetic: when an unclosed fence blanks the file's LAST
     # line, `out` ends in "" and a bare `"\n".join(out)` loses exactly that line on the caller's
     # `.splitlines()` — silently breaking the line-count contract in the one case with no content
     # after the fence to make the drift visible. Guard the empty input, whose join is already "".
-    return "\n".join(out) + "\n" if out else ""
+    blanked = "\n".join(out) + "\n" if out else ""
+    return blanked, opened_at
+
+
+def _strip_fenced_blocks(text: str) -> str:
+    """`_scan_fenced_blocks` without the unclosed-opener line — for callers that only want text."""
+    return _scan_fenced_blocks(text)[0]
+
+
+def unclosed_fence_line(text: str) -> int | None:
+    """1-based line of an unbalanced fence opener in `text`, or None.
+
+    Applies the same comments-then-fences order `tokenize` uses, so a ``` parked inside an HTML
+    comment is not reported as an unbalanced fence.
+    """
+    return _scan_fenced_blocks(_strip_html_comments(text))[1]
 
 
 def tokenize(text: str) -> list[dict]:
@@ -572,8 +601,23 @@ def main(argv: list[str]) -> int:
         else:
             i += 1
 
-    tasks_tokens = tokenize(_read_file(tasks_path))
-    backlog_tokens = tokenize(_read_file(backlog_path, required=True))
+    tasks_raw = _read_file(tasks_path)
+    backlog_raw = _read_file(backlog_path, required=True)
+    tasks_tokens = tokenize(tasks_raw)
+    backlog_tokens = tokenize(backlog_raw)
+
+    # Unbalanced-fence warning, emitted even when candidates WERE found. A stray odd ``` blanks
+    # everything after it, which can hide part of the queue while other groups still surface — so
+    # gating this on a zero result would miss the partial case entirely, and `zero_candidate_
+    # diagnosis` cannot see it either (the swallowed headings never become tokens). stderr keeps
+    # `--json` stdout machine-parseable, same split the diagnosis already uses.
+    for label, raw in ((tasks_path or "tasks.md", tasks_raw), (backlog_path or "backlog.md", backlog_raw)):
+        n = unclosed_fence_line(raw)
+        if n is not None:
+            sys.stderr.write(
+                f"Warning: unbalanced fence opened at line {n} in {label} — everything after it "
+                "was treated as code and is not selectable. Close or remove the fence.\n"
+            )
 
     candidates = full_scan(tasks_tokens, backlog_tokens) if full_scan_flag else fast_path(tasks_tokens, backlog_tokens)
 
@@ -891,6 +935,61 @@ Some prose before the sample.
             len(_strip_fenced_blocks(fixture).splitlines()) == len(fixture.splitlines()),
             f"_strip_fenced_blocks preserves line count exactly ({label})",
         )
+
+    # REGRESSION GUARD (codex review) — CommonMark forbids a backtick in a BACKTICK fence's info
+    # string. Accepting one turned an ordinary prose line into an unclosed opener that blanked the
+    # file through EOF, dropping every real item after it.
+    backtick_in_info = """## Real group
+```foo`bar
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(backtick_in_info))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Real group", "line": 1, "items": 1}],
+        "a backtick inside a backtick fence's info string does not open a fence",
+    )
+    tilde_backtick_info = """## Tilde group
+~~~foo`bar
+## Fake
+~~~
+- [ ] real item
+"""
+    result = backlog_fast_candidates(tokenize(tilde_backtick_info))
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Tilde group", "line": 1, "items": 1}],
+        "a TILDE fence's info string may contain backticks — still a real fence",
+    )
+
+    # REGRESSION GUARD (claude review) — an unclosed fence blanking through EOF is CommonMark-
+    # correct, but an odd ``` is a routine typo and the swallowed headings never become tokens, so
+    # zero_candidate_diagnosis is structurally blind to it. It must be reported on its own channel.
+    _assert(
+        unclosed_fence_line(unclosed_fence) == 3,
+        "unclosed_fence_line reports the opener's 1-based line",
+    )
+    _assert(
+        unclosed_fence_line(fenced_between) is None
+        and unclosed_fence_line(nested_fence) is None
+        and unclosed_fence_line("") is None,
+        "unclosed_fence_line returns None when every fence is balanced",
+    )
+    _assert(
+        unclosed_fence_line(fence_inside_comment) is None,
+        "a ``` parked inside an HTML comment is not reported as an unbalanced fence",
+    )
+    # The partial case: a stray fence hides SOME work while other groups still surface, so the
+    # warning cannot be gated on a zero-candidate result.
+    partial_swallow = """## Visible group
+- [ ] surfaced item
+```sh
+## Hidden group
+- [ ] swallowed item
+"""
+    _assert(
+        [c["title"] for c in backlog_fast_candidates(tokenize(partial_swallow))] == ["Visible group"]
+        and unclosed_fence_line(partial_swallow) == 3,
+        "a partial swallow still yields candidates, so the warning must not be zero-gated",
+    )
 
     # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
     print("\nTest 4: fast_path — cap 5 total across Phase A + B + C")
