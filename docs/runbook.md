@@ -82,6 +82,12 @@ git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
 **Cause:** File missing or CLAUDE.md has content other than `@AGENTS.md`
 **Fix:** Create missing file or restore `CLAUDE.md` to single line `@AGENTS.md`
 
+### Commit blocked by ruff errors you didn't introduce
+
+**Symptom:** `git commit` fails with `ruff: checking staged scripts...` followed by violations (`EXE001`, `RUF100`, `BLE001`, `TRY004`, …) on lines your edit never touched.
+**Cause:** the local pre-commit hook (`.git/hooks/pre-commit` — not version-controlled) runs `ruff check` on each **staged file whole**, not on the diff. Staging a long-lived script for a one-line change therefore surfaces every pre-existing violation it carries.
+**Fix:** decide by where the change belongs. If the edit can live elsewhere (e.g. the same guidance in the calling `SKILL.md`), move it and leave the script unstaged. If the script itself must change, clean its violations in the same commit and say so in the message. Never reach for `--no-verify` — that disables the gate for every other staged file too.
+
 ### `.agents/skills` symlink broken
 
 **Symptom:** Skill lookup fails; `validate-harness.sh` reports symlink warning

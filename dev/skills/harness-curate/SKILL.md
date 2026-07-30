@@ -104,12 +104,21 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
   OSTATE="$SKILL_DIR/scripts/overlap_state.py"
   TARGET_REPO="<the --project path, or cwd on `current` scope>"
   REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
-  # Write pairs.json first — one entry per candidate pair, the SAME verbatim lines you
-  # quoted above: [{"global": "<verbatim line>", "repo": "<verbatim line>"}, ...]
-  # The two keys are positional, not literal file names: "global" is the UPPER layer's line
-  # (base instructions, ~/.claude/CLAUDE.md, or ~/.codex/AGENTS.md) and "repo" is the
-  # repo-side line (CLAUDE.md / AGENTS.md / .claude/rules/ / docs/). The key is a hash of
-  # the two line *values*, so pair identity is unaffected by which layers they came from.
+  # Write pairs.json first — one entry per candidate pair. The two keys are positional,
+  # not literal file names: "global" is the UPPER layer's side (base instructions,
+  # ~/.claude/CLAUDE.md, or ~/.codex/AGENTS.md) and "repo" is the repo-side one
+  # (CLAUDE.md / AGENTS.md / .claude/rules/ / docs/).
+  # Each value = the source, then the verbatim line you quoted above:
+  #   [{"global": "~/.claude/CLAUDE.md: <verbatim line>",
+  #     "repo":   "docs/delegation.md: <verbatim line>"}, ...]
+  # For a base-instruction side, the source is the label: "[base instructions — {model id}]".
+  # The key is a hash of the two *values*, so the source prefix is load-bearing: without it,
+  # the same duplicated sentence appearing in two indexed files collapses to one key, and
+  # dismissing one pair silently suppresses the other. Use the path, NOT path:line — line
+  # numbers shift on unrelated edits and would resurface settled pairs as noise. Including
+  # the model id in the base label is what makes a model upgrade invalidate that dismissal.
+  # Pairs dismissed before this rule existed were keyed on the bare lines; they resurface
+  # once, then re-dismiss under the new key.
   python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json   # NEW / DISMISSED per pair + counts
   ```
 

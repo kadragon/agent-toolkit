@@ -115,6 +115,8 @@ TaskUpdate(taskId: "1", owner: "{agent-1}")             # lead assigns; a teamma
 
 `TaskCreate` takes no `id`, `agent`, or `dependencies` field — ownership is `owner` on `TaskUpdate`, dependencies are `addBlocks` / `addBlockedBy`. A completed task unblocks its dependents automatically.
 
+Provenance for the task-tool field names in this file (`taskId`, `status`, `owner`, `metadata`, `addBlocks`, `addBlockedBy`, and the absence of `task_id` / `claimed_by` / `notes` / a `blocked` status): read off the live `TaskCreate` / `TaskUpdate` tool schemas on 2026-07-30, not from the Agent-teams docs page cited above — that page documents team behavior, not the task-tool signature. Re-read the schemas before trusting this list on a much newer CLI.
+
 ## Phase 3: Parallel Execution
 
 Agents run and coordinate via SendMessage. The orchestrator monitors via TaskGet.

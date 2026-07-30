@@ -178,8 +178,8 @@ When a role participates in a team, add this section to the body:
 
 **Receives from:** {agent name(s)} via SendMessage — {what data/signal to expect}
 **Sends to:** {agent name(s)} via SendMessage — {what data/signal to emit}
-**Task updates:** Call `TaskUpdate(task_id, status: "in_progress")` when starting;
-  `TaskUpdate(task_id, status: "completed")` when done.
+**Task updates:** Call `TaskUpdate(taskId, status: "in_progress")` when starting;
+  `TaskUpdate(taskId, status: "completed")` when done.
 **Artifact path:** Write output to `{scratchpad}/{phase:02d}_{this-role}_{artifact}.{ext}` — the orchestrator passes `{scratchpad}` explicitly in the Spawn Prompt Contract; do not derive it yourself.
 
 Block on input from {upstream agent} before proceeding. If no message within
