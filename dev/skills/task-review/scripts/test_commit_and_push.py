@@ -121,18 +121,36 @@ def case_unstaged_deletion(tmp):
 
 
 def case_unknown_path(tmp):
-    """Guard: a path in neither worktree nor index is skipped, not fatal."""
+    """A genuinely unknown path must still abort -- only staged deletions are excused.
+
+    Dropping every unmatched pathspec would turn a typo in an agent-built --files
+    list into a quietly incomplete commit that goes on to review and merge.
+    """
     repo = make_repo(tmp)
     (repo / "keep.md").write_text("keep\nmore\n")
 
-    proc, payload = run_script(repo, "keep.md never-existed.md")
-    if proc.returncode != 0:
-        fail("unknown path in --files", f"exit {proc.returncode}: {proc.stderr.strip()}")
-    if not payload or payload.get("committed") is not True:
-        fail("unknown path in --files", f"expected committed=true, got {proc.stdout!r}")
-    if name_status(repo) != ["M\tkeep.md"]:
-        fail("unknown path in --files", f"commit contents {name_status(repo)}")
-    print("OK: unmatched pathspec is skipped without aborting the batch")
+    proc, _ = run_script(repo, "keep.md never-existed.md")
+    if proc.returncode == 0:
+        fail("unknown path in --files", "expected a non-zero exit, got 0 (path silently dropped)")
+    if "did not match any files" not in proc.stderr:
+        fail("unknown path in --files", f"expected git's pathspec fatal, got {proc.stderr.strip()!r}")
+    print("OK: a genuinely unknown pathspec still aborts (only staged deletions are excused)")
+
+
+def case_unknown_path_with_staged_deletion(tmp):
+    """The two cases must be told apart even when they appear in the same list."""
+    repo = make_repo(tmp)
+    git(repo, "rm", "-q", "tasks.md")
+
+    proc, _ = run_script(repo, "tasks.md never-existed.md")
+    if proc.returncode == 0:
+        fail("unknown path alongside staged deletion", "expected a non-zero exit, got 0")
+    if "did not match any files" not in proc.stderr:
+        fail(
+            "unknown path alongside staged deletion",
+            f"expected git's pathspec fatal, got {proc.stderr.strip()!r}",
+        )
+    print("OK: an unknown path still aborts even when a staged deletion is excused alongside it")
 
 
 def main():
@@ -147,6 +165,7 @@ def main():
         case_deletion_only(tmp)
         case_unstaged_deletion(tmp)
         case_unknown_path(tmp)
+        case_unknown_path_with_staged_deletion(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

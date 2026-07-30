@@ -100,6 +100,22 @@ jobs:
       - name: Install ruff
         run: python3 -m pip install --quiet 'ruff==0.16.0'
 
+      # `.python-version` and ruff.toml's `target-version` are two spellings of the
+      # same floor, and NOTHING in the toolchain reconciles them: ruff never reads
+      # `.python-version`, and setup-python only picks the interpreter that runs pip.
+      # Left unchecked they drift silently — bumping one while the other stays put
+      # goes unnoticed. Assert they agree so the doc's claim is actually enforced.
+      - name: Assert .python-version matches ruff target-version
+        run: |
+          floor="py$(tr -d '.[:space:]' < .python-version)"
+          target=$(grep -E '^target-version' ruff.toml | sed -E 's/.*"(.*)".*/\1/')
+          if [ "$floor" != "$target" ]; then
+            echo "ERROR: .python-version ($floor) != ruff.toml target-version ($target)."
+            echo "Both record the repo's Python floor — bump them together."
+            exit 1
+          fi
+          echo "OK: Python floor $floor agrees with ruff target-version."
+
       # Repo-wide, not just the hook's */scripts/*.py scope. The repo sits at 0
       # violations everywhere, and repo-wide is what mechanically enforces
       # ruff.toml's target-version: lowering it below py312 makes ruff's

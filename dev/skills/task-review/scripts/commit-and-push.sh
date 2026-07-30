@@ -68,11 +68,19 @@ if [ -n "$FILES" ]; then
   # a path in neither worktree nor index, which by definition has nothing left to
   # add, so dropping it from the pathspec list is both safe and sufficient — the
   # already-staged deletion rides into the commit untouched.
+  #
+  # Only that one case is suppressed. A path that matches nothing AND has no staged
+  # deletion is a genuinely unknown path — a typo, or a stale entry in an
+  # agent-supplied --files list — and it stays in the pathspec so git's own fatal
+  # still fires. Dropping those too would turn a loud abort into a quietly
+  # incomplete commit that then goes to review and merge.
   STAGE=()
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
   for f in $FILES; do
     if [ -e "$f" ] || [ -L "$f" ] || git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      STAGE+=("$f")
+    elif [ -z "$(git diff --cached --name-only --diff-filter=D -- "$f")" ]; then
       STAGE+=("$f")
     fi
   done
