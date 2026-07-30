@@ -93,22 +93,29 @@ Embed the full scratchpad path explicitly in every spawn prompt below — sub-ag
 
 ## Phase 2: Team Assembly
 
+**There is no team-creation call.** The team forms when the lead spawns its first teammate; the shared task list and each agent's mailbox already exist for the session. `TeamCreate` / `TeamDelete` were removed in Claude Code v2.1.178 — the `Agent` tool still accepts `team_name` but ignores it, and cleanup happens automatically at session exit ([Agent teams](https://code.claude.com/docs/en/agent-teams)). Teammates only spawn at all when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`; see `references/agent-teams-onboarding.md`.
+
+Spawn each teammate with a **`name`** (its only address for `SendMessage`) and the role's `subagent_type` — the role file's `tools` allowlist and `model` are honored, and its body is appended to the teammate's system prompt:
+
 ```
-TeamCreate(
-  team_name: "{domain}-team",
-  members: ["{agent-1}", "{agent-2}", "{agent-3}"]
+Agent(
+  name: "{agent-1}",
+  subagent_type: "{role-1}",   # .claude/agents/{role-1}.md
+  prompt: "<all four Spawn Prompt Contract fields + the explicit {scratchpad} path>"
 )
 ```
 
-Assign tasks with dependencies:
+Seed the shared task list — one call per task, then wire ownership and dependencies:
 
 ```
-TaskCreate([
-  {id: "task-1", agent: "{agent-1}", description: "...", dependencies: []},
-  {id: "task-2", agent: "{agent-2}", description: "...", dependencies: ["task-1"]},
-  {id: "task-3", agent: "{agent-3}", description: "...", dependencies: ["task-1"]}
-])
+TaskCreate(subject: "...", description: "...")          # repeat per task; note each returned id
+TaskUpdate(taskId: "2", addBlockedBy: ["1"])            # dependency gate
+TaskUpdate(taskId: "1", owner: "{agent-1}")             # lead assigns; a teammate self-claims the same way
 ```
+
+`TaskCreate` takes no `id`, `agent`, or `dependencies` field — ownership is `owner` on `TaskUpdate`, dependencies are `addBlocks` / `addBlockedBy`. A completed task unblocks its dependents automatically.
+
+Provenance for the task-tool field names in this file (`taskId`, `status`, `owner`, `metadata`, `addBlocks`, `addBlockedBy`, and the absence of `task_id` / `claimed_by` / `notes` / a `blocked` status): read off the live `TaskCreate` / `TaskUpdate` tool schemas on 2026-07-30, not from the Agent-teams docs page cited above — that page documents team behavior, not the task-tool signature. Re-read the schemas before trusting this list on a much newer CLI.
 
 ## Phase 3: Parallel Execution
 
@@ -130,11 +137,11 @@ Error policy:
 
 ## Phase 5: Cleanup
 
-```
-TeamDelete(team_name: "{domain}-team")
-```
-
-No cleanup needed — the scratchpad is session-scoped and self-cleaning.
+No cleanup call — there is no team-teardown tool. The team's config directory is
+removed when the session exits, and the scratchpad is session-scoped and
+self-cleaning. To release one teammate early, ask it to shut down by name.
+The shared task list outlives the session by design (it is what a resumed
+session reads back), so mark tasks `completed` rather than leaving them open.
 ```
 
 ---
@@ -202,9 +209,10 @@ Between phases, save artifacts to the scratchpad, then switch mode:
 [spawn sub-agents, collect to {scratchpad}]
 
 ## Phase 3: Team Synthesis (team)
-TeamCreate(...)
+[spawn named teammates with Agent(name:, subagent_type:) — no TeamCreate call exists]
 [read {scratchpad} artifacts, coordinate via SendMessage]
-TeamDelete(...)
+[no teardown call — the team is cleaned up when the session exits; to end one teammate
+ early, ask it to shut down by name and it approves or rejects]
 
 ## Phase 4: Independent Verification (sub-agent)
 [spawn verifier sub-agent reading {scratchpad} artifacts]
@@ -233,25 +241,26 @@ Rules:
 
 ## Task Claim Protocol
 
-For team mode with multiple agents that could race to claim tasks, use an explicit claim step to prevent duplicate work.
+Claim races are already handled natively — the platform uses file locking so two teammates can't claim the same task, and a pending task with unresolved dependencies can't be claimed at all. The sequence below is therefore ordering discipline and a visibility safety net, not the lock itself.
 
 **Agent-side claim sequence:**
 
 ```
-1. TaskGet(task_id) → check status
-2. If status != "pending": skip — claimed by another agent
-3. TaskUpdate(task_id, status: "in_progress", claimed_by: "{this-agent}")
+1. TaskGet(taskId) → read latest state (it may have changed since TaskList)
+2. If status != "pending" or owner is already set: skip — another agent has it
+3. TaskUpdate(taskId, owner: "{this-agent}", status: "in_progress")
 4. Do the work
-5. TaskUpdate(task_id, status: "completed")
+5. TaskUpdate(taskId, status: "completed")
 6. Write artifact to {scratchpad}
-7. SendMessage to orchestrator: "task-{id} done, artifact: {scratchpad}/..."
+7. SendMessage(to: "{orchestrator-name}") — "task-{id} done, artifact: {scratchpad}/..."
 ```
 
-**If agent stops unexpectedly:**
+**If the agent cannot finish:** there is no `blocked` status (`pending` / `in_progress` / `completed` / `deleted` only) and no `notes` field. Leave the task `in_progress`, record what is known, and say so out of band:
 
 ```
-TaskUpdate(task_id, status: "blocked", notes: "{last known state}")
-SendMessage to orchestrator: "task-{id} blocked — {reason}"
+TaskUpdate(taskId, metadata: {blockedReason: "{last known state}"})
+TaskCreate(subject: "Unblock task-{id}", description: "{what must be resolved first}")
+SendMessage(to: "{orchestrator-name}") — "task-{id} blocked — {reason}"
 ```
 
 This prevents the second most common multi-agent failure: two agents writing to the same artifact path simultaneously. The orchestrator should not assign the same task to multiple agents, but the claim check is a safety net.

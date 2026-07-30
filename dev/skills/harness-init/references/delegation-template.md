@@ -15,7 +15,7 @@ Q2. Do subtasks need to share findings mid-flight (not just report at end)?
     No  → Q4.
 Q3. Is there an objective written pass/fail criterion?
     Yes → Generator-Verifier (Team mode with verifier gate).
-    No  → Agent Team (TeamCreate + SendMessage + TaskCreate).
+    No  → Agent Team (named Agent spawns + SendMessage + shared task list).
           See references/orchestrator-template.md — Template A.
 Q4. Are subtasks truly independent (results returned at end only)?
     Yes → Orchestrator-Subagent. See orchestrator-template.md — Template B.

@@ -35,7 +35,9 @@ subagent, then synthesizes. Subagents do NOT talk to each other.
 ## 3. Agent Teams
 
 Multiple persistent workers share a task list and message each other directly.
-Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (Claude Code v2.1.32+).
+Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`; without it the platform
+spawns no teammates at all. No team-creation call — the team forms on the
+first named `Agent` spawn (see `references/agent-teams-onboarding.md`).
 
 - **Use when:** Work is genuinely parallel AND teammates need to share
   findings mid-flight (cross-layer refactor, adversarial debugging, parallel

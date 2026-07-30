@@ -34,7 +34,7 @@ Delegation is a golden principle — skipping a mandatory gate is a violation. R
 If you installed the gate, a mandatory row that fires halts an inline edit. If you installed the router, update both the table here and `.claude/trigger-routes.json` in the same commit.
 
 **Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
-- Sub-agents share findings mid-flight → Agent Team (`TeamCreate` + `SendMessage`)
+- Sub-agents share findings mid-flight → Agent Team (`Agent` with `name:` + `SendMessage`)
 - Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
 - Phase-dependent → Hybrid (see `references/orchestrator-template.md`)
 
