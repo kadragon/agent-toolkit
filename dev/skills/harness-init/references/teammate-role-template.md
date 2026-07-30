@@ -187,7 +187,8 @@ Block on input from {upstream agent} before proceeding. If no message within
 ```
 
 **When to include:** Step 4b creates this section for every role that participates
-in a `TeamCreate`-based orchestration. Omit for purely sub-agent roles that
+in a team-mode orchestration (spawned by the lead as a named teammate, not via any
+team-creation call — see `orchestrator-template.md` → Phase 2). Omit for purely sub-agent roles that
 only return values to the orchestrator.
 
 ## Role Templates (create the reachable ones on `harness-init`)

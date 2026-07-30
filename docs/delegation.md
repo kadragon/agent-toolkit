@@ -14,7 +14,7 @@ Q1. Does the task decompose into >1 genuinely parallel subtask?
     No  → single session. No delegation. Stop.
     Yes → Q2.
 Q2. Do subtasks need to share findings mid-flight?
-    Yes → Agent Team (TeamCreate + SendMessage)
+    Yes → Agent Team (Agent with name: + SendMessage)
     No  → Sub-agent (Agent tool, run_in_background ok)
 ```
 

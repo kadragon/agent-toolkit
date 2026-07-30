@@ -233,7 +233,7 @@ Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these f
 
 Read `references/teammate-role-template.md` for the full schema and per-role templates.
 
-**Team communication protocol:** For every role that will participate in `TeamCreate`-based orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
+**Team communication protocol:** For every role that will be spawned as a named teammate in team-mode orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
 
 Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
 
@@ -416,7 +416,7 @@ Read `references/agent-teams-onboarding.md` for tooling prerequisites and enviro
 
 Add adversarial debugging playbook as on-demand workflow: `references/competing-hypotheses-playbook.md`. Maps to `debate` workflow in `docs/workflows.md`.
 
-**Skip entirely if:** Step 4c chose Template B (sub-agent only). Agent Teams carries 3–5× token cost — don't enable it without an orchestrator that uses `TeamCreate`.
+**Skip entirely if:** Step 4c chose Template B (sub-agent only). Agent Teams carries 3–5× token cost — don't enable it without an orchestrator that actually spawns named teammates and coordinates them mid-flight.
 
 Token cost note: Team mode is not free. The orchestrator template enforces the decision gate (Q2 in Pattern Selection) so teams only activate when mid-flight coordination genuinely pays off.
 

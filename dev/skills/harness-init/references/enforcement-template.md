@@ -287,6 +287,8 @@ done < "$FILE"
 
 If Agent Teams is enabled (see `references/agent-teams-onboarding.md`), three team-lifecycle hooks give the harness mechanical control points that do not exist for single-session work. Non-zero exit with code `2` sends feedback back to the agent and blocks the event.
 
+Do not key any of these hooks on the payload's `team_name` field — it is deprecated and now just carries the session-derived name (`session-` + the first eight session-id characters), since a session has exactly one team.
+
 ```json
 {
   "hooks": {
