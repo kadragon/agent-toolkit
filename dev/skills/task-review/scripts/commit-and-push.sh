@@ -54,9 +54,41 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
 if [ -n "$FILES" ]; then
+  # `git add` treats a pathspec matching neither the worktree nor the index as
+  # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in
+  # the same call stay unstaged too. task-next's pre-merge cleanup deletes
+  # tasks.md whenever it empties, and changed-files.sh correctly reports the
+  # deleted path, so once that deletion is staged the path matches nothing and
+  # Step 1 dies with `fatal: pathspec 'tasks.md' did not match any files`.
+  #
+  # `git add -A -- $FILES` is NOT the fix (measured, git 2.50.1): -A changes
+  # which *changes* are picked up, not whether an unmatched pathspec is fatal —
+  # it fails identically. Nor is a plain worktree deletion the problem: plain
+  # `git add -- <deleted-but-tracked>` already stages it. The only broken case is
+  # a path in neither worktree nor index, which by definition has nothing left to
+  # add, so dropping it from the pathspec list is both safe and sufficient — the
+  # already-staged deletion rides into the commit untouched.
+  #
+  # Only that one case is suppressed. A path that matches nothing AND has no staged
+  # deletion is a genuinely unknown path — a typo, or a stale entry in an
+  # agent-supplied --files list — and it stays in the pathspec so git's own fatal
+  # still fires. Dropping those too would turn a loud abort into a quietly
+  # incomplete commit that then goes to review and merge.
+  STAGE=()
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
-  git add -- $FILES
+  for f in $FILES; do
+    if [ -e "$f" ] || [ -L "$f" ] || git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      STAGE+=("$f")
+    elif [ -z "$(git diff --cached --name-only --diff-filter=D -- "$f")" ]; then
+      STAGE+=("$f")
+    fi
+  done
+  # Guard the expansion: bash 3.2 (macOS system bash) errors on "${arr[@]}" for
+  # an empty array under `set -u`.
+  if [ "${#STAGE[@]}" -gt 0 ]; then
+    git add -- "${STAGE[@]}"
+  fi
   # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
   # STDOUT, which would pollute the pure-JSON contract exactly like the new-branch
   # push tracking line did (see Push below). Command substitution already keeps
