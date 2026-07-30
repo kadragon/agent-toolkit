@@ -7,7 +7,7 @@ Plugin marketplace (dev + prod + team-standards) by kadragon. This repo IS the h
 | File | When to read |
 |------|--------------|
 | `docs/architecture.md` | Before adding new skill/agent/hook or modifying plugin structure |
-| `docs/conventions.md` | Before writing shell scripts, commit messages, or bumping versions |
+| `docs/conventions.md` | Before writing shell or Python scripts, commit messages, or bumping versions |
 | `docs/workflows.md` | When starting any implementation cycle |
 | `docs/delegation.md` | When you have decided to delegate — brief format, effort tier, handoff protocol |
 | `docs/eval-criteria.md` | When evaluating skill quality |

@@ -98,7 +98,6 @@ import math
 import re
 import sys
 
-
 # ---------------------------------------------------------------------------
 # Pure-function core (testable without real filesystem)
 # ---------------------------------------------------------------------------
@@ -128,7 +127,25 @@ def _is_blocked(text: str) -> bool:
 
 
 def _strip_html_comments(text: str) -> str:
-    """Blank out `<!-- ... -->` spans, preserving line count so token line numbers stay 1-based."""
+    """Blank out `<!-- ... -->` spans, preserving line count so token line numbers stay 1-based.
+
+    The trailing-newline guard is the same class of fix as `_scan_fenced_blocks`'s `+ "\\n" if out`
+    below, for the same reason: an N-line match holds only N-1 newlines, so when the match ends at
+    true EOF with nothing after it, the `"\\n" * count` replacement is one separator short and a
+    bare `.sub` drops the file's last line. The guard goes on the INPUT because neither
+    output-side variant works — spelling both out, since each fails on a different input and
+    picking between them by inspection is how this bug got written in the first place:
+
+      - append unconditionally after `.sub`: fixes the EOF case, but inflates every input that
+        already ends in a newline ("a\\n" -> 2 lines, "```\\n" -> 2).
+      - append only when the result lacks a trailing newline: never fires, because the
+        substituted text already ends in one — so the EOF case stays broken (3 lines, want 4).
+
+    Normalizing the input is correct for both classes at once. Guard the empty string, whose
+    line count is already 0.
+    """
+    if text and not text.endswith("\n"):
+        text += "\n"
     return _HTML_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
 
 
@@ -930,10 +947,20 @@ Some prose before the sample.
         ("empty input", ""),
         ("nothing but an unclosed fence", "```\n"),
         ("no trailing newline", "## Group\n- [ ] item"),
+        # The fixtures above all end in "\n", so none of them can reach the EOF case in the
+        # COMMENT stripper — a comment whose `-->` is the file's last characters. These two do.
+        ("comment closing at true EOF", "## Group\n<!--\nx\n-->"),
+        ("nothing but a comment at EOF", "<!--\nx\n-->"),
     ):
         _assert(
             len(_strip_fenced_blocks(fixture).splitlines()) == len(fixture.splitlines()),
             f"_strip_fenced_blocks preserves line count exactly ({label})",
+        )
+        # Same contract, same loop, other stripper: `tokenize` chains comments-then-fences, so a
+        # line dropped here shifts every token line number just as surely.
+        _assert(
+            len(_strip_html_comments(fixture).splitlines()) == len(fixture.splitlines()),
+            f"_strip_html_comments preserves line count exactly ({label})",
         )
 
     # REGRESSION GUARD (codex review) — CommonMark forbids a backtick in a BACKTICK fence's info

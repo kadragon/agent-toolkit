@@ -6,11 +6,11 @@ and the Codex-side session discovery / parsing added alongside it.
 Run: python test_scan_transcripts.py
 """
 
+import importlib.util
 import json
 import os
 import sys
 import tempfile
-import importlib.util
 from pathlib import Path
 
 SCRIPT = Path(__file__).parent / "scan_transcripts.py"

@@ -90,6 +90,25 @@ readers that consume all input (`tail`, `wc`, `jq`) or read from a file rather t
 - Hook script bodies derive adjacent assets from `BASH_SOURCE[0]` (shell) or `__file__` (Python), so they remain runnable outside the hook launcher.
 - Shared skills resolve bundled files from the absolute location of the `SKILL.md` loaded for that turn. Skill-executed shells must not assume plugin hook root variables are present.
 
+## Python Lint Rules
+
+- `ruff.toml` at the repo root pins the ruleset the local `.git/hooks/pre-commit` gate enforces on staged `*/scripts/*.py`. Without a config, ruff activates its full rule set and the gate reports ~149 pre-existing violations, which forces `--no-verify`. Keep the repo at 0 violations so the gate stays usable.
+- `target-version` is load-bearing, not cosmetic: ruff's parser is version-aware, so it also gates `E9` invalid-syntax. Setting it below the repo's real floor makes every commit fail.
+- **Never infer the Python floor by grepping for version-gated constructs.** Tokenizer-level changes do not look like keywords and will be missed — `prod/skills/hwpx/scripts/table.py` needs 3.12 only because of PEP 701 f-strings (backslash and reused outer quote inside the braces), which a grep for `match`/`tomllib`/`except*` does not see. Derive it mechanically instead:
+
+```sh
+# ladder the ruff target-version until E9 clears — lowest clean value is the floor
+for v in py39 py310 py311 py312 py313; do
+  printf "%-6s " "$v"
+  git ls-files -z | grep -zE '\.py$' | xargs -0 ruff check --no-cache --target-version "$v" 2>/dev/null | tail -1
+done
+
+# confirm against a real interpreter before asserting a floor
+uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(open('path/to/file.py').read())"
+```
+
+`ast.parse(..., feature_version=(3, N))` is **not** a valid check here — it does not re-enforce PEP 701's tokenizer restrictions and silently accepts 3.12-only f-strings.
+
 ## Plugin Version Bump Rules
 
 `dev/.claude-plugin/plugin.json`, `prod/.claude-plugin/plugin.json`, and `team-standards/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
