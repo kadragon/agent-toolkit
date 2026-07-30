@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] PR #176 review backlog — commit-and-push.sh delete-only pathspec fix + ruff CI gate (dev v4.0.20) (2026-07-30) → docs/conventions.md
 - [done] repo ruff config + _strip_html_comments EOF line-count fix (dev v4.0.19, prod v3.0.3) (2026-07-30)
 - [done] harness-init resolves docs language before writing any artifact (dev v4.0.15) (2026-07-29)
 - [done] task-next fenced-block stripping + task-audit-nudge Codex config_dir (dev v4.0.14) (2026-07-29)

@@ -84,6 +84,44 @@ jobs:
       - name: Run scripts/ci/check_harness_drift.py
         run: python3 scripts/ci/check_harness_drift.py
 
+  ruff:
+    name: Ruff lint (pinned ruleset)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # Pinned: an unpinned ruff release could widen the ruleset ruff.toml scopes
+      # and break CI on untouched code. Keep in sync with the local
+      # .git/hooks/pre-commit gate, which is untracked and per-machine.
+      - name: Install ruff
+        run: python3 -m pip install --quiet 'ruff==0.16.0'
+
+      # Repo-wide, not just the hook's */scripts/*.py scope. The repo sits at 0
+      # violations everywhere, and repo-wide is what mechanically enforces
+      # ruff.toml's target-version: lowering it below py312 makes ruff's
+      # version-aware parser report 6 E9 invalid-syntax errors on the PEP 701
+      # f-strings in prod/skills/hwpx/scripts/table.py. Until this job existed
+      # that floor was asserted in a comment alone.
+      - name: Run ruff check
+        run: ruff check --no-cache .
+
+  commit-and-push-test:
+    name: commit-and-push.sh regression test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Run dev/skills/task-review/scripts/test_commit_and_push.py
+        run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
+
   skill-frontmatter:
     name: Skill/agent/command frontmatter check
     runs-on: ubuntu-latest

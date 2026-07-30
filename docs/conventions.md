@@ -94,6 +94,8 @@ readers that consume all input (`tail`, `wc`, `jq`) or read from a file rather t
 
 - `ruff.toml` at the repo root pins the ruleset the local `.git/hooks/pre-commit` gate enforces on staged `*/scripts/*.py`. Without a config, ruff activates its full rule set and the gate reports ~149 pre-existing violations, which forces `--no-verify`. Keep the repo at 0 violations so the gate stays usable.
 - `target-version` is load-bearing, not cosmetic: ruff's parser is version-aware, so it also gates `E9` invalid-syntax. Setting it below the repo's real floor makes every commit fail.
+- The pre-commit hook is untracked and per-machine, so CI carries the real gate: the `ruff` job in `.github/workflows/harness-check.yml` runs `ruff check --no-cache .` **repo-wide** with ruff pinned to `0.16.0`. Repo-wide is deliberate — it is what fails a `target-version` downgrade, which the hook's staged-files-only scope can miss. Bump the pin and the hook together.
+- The Python floor lives in `.python-version` (`3.12`), which the `ruff` job consumes via `python-version-file` so the floor and the linter cannot drift apart.
 - **Never infer the Python floor by grepping for version-gated constructs.** Tokenizer-level changes do not look like keywords and will be missed — `prod/skills/hwpx/scripts/table.py` needs 3.12 only because of PEP 701 f-strings (backslash and reused outer quote inside the braces), which a grep for `match`/`tomllib`/`except*` does not see. Derive it mechanically instead:
 
 ```sh
