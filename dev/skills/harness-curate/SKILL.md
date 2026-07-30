@@ -2,10 +2,11 @@
 name: harness-curate
 description: >-
   Mine session transcripts across projects to propose or prune harness assets
-  (skills/agents/hooks), and audit global vs repo instruction files for duplicate
-  or conflicting rules. Routes to the owning creator — never generates itself.
-  Repo structure validation → harness-init.
-version: 1.4.2
+  (skills/agents/hooks), and audit instruction layers — the model's own base
+  instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
+  indexed docs/ — for duplicate or conflicting rules. Routes to the owning
+  creator — never generates itself. Repo structure validation → harness-init.
+version: 1.5.0
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -22,7 +23,7 @@ Replaces the old `/dev:task-audit` command, which mined only `history.jsonl` pro
 - **all** — every project. Use for "what should I build across all my work" and to detect cross-project recurrence (drives the scope decision in Step 4).
 - **--project `<abs path>`** — one named project.
 
-**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "check my global vs repo instructions" asks for Signal 8 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
+**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 8 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
 
 ## Step 1 — Scan (bounded, deterministic)
 
@@ -88,7 +89,14 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
   done
   ```
 - **Unparseable** — flag any `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description` (it silently never loads — a triggering miss with a structural cause).
-- **Instruction-layer overlap** — read these layers in full, then pair rules that govern the same behavior. **Read set (bounded):** global `~/.claude/CLAUDE.md`; `~/.codex/AGENTS.md` if present (Codex's global layer); the repo's `CLAUDE.md` / `AGENTS.md` at the repo root and any `AGENTS.md` in directories between cwd and that root — **stop at `git rev-parse --show-toplevel`, never walk into `$HOME` or `/`**; `<repo root>/.claude/rules/*.md` (Claude-only path-scoped rules — resolve from that same repo root, not from cwd, or a run started in a subdirectory silently drops them). A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta) or a **conflict** (incompatible instructions for the same situation) — see `references/signal-taxonomy.md` §8 for the non-findings list (starting with cross-tool reach, the main false positive) and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line`; unquotable pairs are dropped, not reported. Then filter the surviving pairs through the dismissal state so resolved-or-kept pairs don't re-fire every run:
+- **Instruction-layer overlap** — read these layers in full, then pair rules that govern the same behavior. **Read set (bounded), highest layer first:**
+  - **The platform's base instructions** — the model's own system prompt for this session. No file to open: it is already in front of you, and it is the *only* layer you cannot cite by `file:line` (see the evidence rule below).
+  - Global `~/.claude/CLAUDE.md`; `~/.codex/AGENTS.md` if present (Codex's global layer).
+  - The repo's `CLAUDE.md` / `AGENTS.md` at the repo root and any `AGENTS.md` in directories between cwd and that root — **stop at `git rev-parse --show-toplevel`, never walk into `$HOME` or `/`**.
+  - `<repo root>/.claude/rules/*.md` (Claude-only path-scoped rules — resolve from that same repo root, not from cwd, or a run started in a subdirectory silently drops them).
+  - **The `docs/*.md` files the repo's AGENTS.md Docs Index actually points to**, resolved from the same repo root. `docs/` is where `harness-init` deliberately routes procedure and delegation detail, so a rule that duplicates or contradicts an upper layer lands there just as often as in AGENTS.md — and never got read before. Bound the read to indexed files (an unindexed `docs/` file is a separate `harness-init` finding, not an overlap one); if that set is large, delegate the reading to `Explore` / an `Agent` and pair from the returned quotes, same as Step 1.
+
+  A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta), a **conflict** (incompatible instructions for the same situation), or **base-redundant** (a repo-side rule whose entire content is behavior the base instructions already impose every turn) — see `references/signal-taxonomy.md` §8 for the three subtypes, the non-findings list (starting with cross-tool reach, the main false positive) and the ownership-based routing. Every finding must carry both sides quoted verbatim with `file:line` — the base-instruction side excepted, where the verbatim quote carries a `[base instructions — {model id}, this session]` label instead. Unquotable pairs are dropped, not reported. Then filter the surviving pairs through the dismissal state so resolved-or-kept pairs don't re-fire every run:
 
   ```bash
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -98,6 +106,10 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
   REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
   # Write pairs.json first — one entry per candidate pair, the SAME verbatim lines you
   # quoted above: [{"global": "<verbatim line>", "repo": "<verbatim line>"}, ...]
+  # The two keys are positional, not literal file names: "global" is the UPPER layer's line
+  # (base instructions, ~/.claude/CLAUDE.md, or ~/.codex/AGENTS.md) and "repo" is the
+  # repo-side line (CLAUDE.md / AGENTS.md / .claude/rules/ / docs/). The key is a hash of
+  # the two line *values*, so pair identity is unaffected by which layers they came from.
   python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json   # NEW / DISMISSED per pair + counts
   ```
 
@@ -120,7 +132,7 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
 | **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
-| **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, or contradicted between, global `~/.claude/CLAUDE.md` and repo `CLAUDE.md`/`AGENTS.md` | duplicate → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified Claude-only repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file** |
+| **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md` | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. Before any **delete**, run the adversarial check (Step 7).
 
@@ -266,7 +278,7 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
 - New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook, or loosen an over-firing hook/permission gate (harness-friction) → `hookify` or `update-config`. For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.
-- Instruction-layer overlap → show the quoted pair (`file:line` both sides) and the ownership call. A repo-side edit (deleting a duplicate from `CLAUDE.md`/`AGENTS.md`, or labeling a deliberate override) is applied only on confirmation; a global-side edit is never applied — surface the line and let the user change `~/.claude/CLAUDE.md` themselves. Once the user has resolved a pair **or decided to keep it as-is**, record the dismissal so it stops re-firing:
+- Instruction-layer overlap → show the quoted pair (`file:line` both sides, or the `[base instructions — {model id}, this session]` label on the base side) and the ownership call. A repo-side edit (deleting a duplicate from `CLAUDE.md`/`AGENTS.md`/`.claude/rules/`/`docs/`, trimming a base-redundant line, or labeling a deliberate override) is applied only on confirmation; a global-side edit is never applied — surface the line and let the user change `~/.claude/CLAUDE.md` themselves. Base instructions are not editable at all — the only actionable side of a base-redundant pair is the repo one. Once the user has resolved a pair **or decided to keep it as-is**, record the dismissal so it stops re-firing:
 
   ```bash
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"

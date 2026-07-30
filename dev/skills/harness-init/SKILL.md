@@ -47,13 +47,15 @@ Before acting, determine mode AND maturity level.
 
 **Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
+Delegation is only the axis where narrowing is a safe automatic fix. Every other axis goes through Step 0b.
+
 **Mode selection:**
 
 | Condition | Mode | Action |
 |-----------|------|--------|
 | No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Steps 1–10 |
 | Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
-| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop |
+| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop. Structure only — for an instruction-conflict/duplication audit of the existing files, route to `dev:harness-curate` (Signal 8) |
 
 **Maturity assessment (for New setup and Extend mode):**
 
@@ -72,9 +74,30 @@ Run `scripts/validate-harness.sh` against the target repo (if it exists). Classi
 | Add new domain with orchestrator | 4b + 4c + 4d → 9 |
 | Architecture change | Affected docs → 4b (impacted roles) → 4c → 9 |
 
-**Every row above still runs the Step 1 language resolution first.** It is a precondition for writing prose, not a New-setup-only step — an Extend run that skips it falls back to the chat language, which is the exact failure Step 1 exists to prevent.
+**Every row above still runs Step 0b and the Step 1 language resolution first.** Both are preconditions for writing anything, not New-setup-only steps — an Extend run that skips Step 1 falls back to the chat language (the exact failure Step 1 exists to prevent), and one that skips Step 0b can add a single role or gate that contradicts the operator's global layer.
 
 Report mode + current maturity level + target level before proceeding.
+
+### Step 0b: Reconcile With Higher-Precedence Instruction Layers
+
+The global instruction file read in Step 0 is not just a sizing input — it is a **higher-precedence layer this skill must not contradict**. Before writing any artifact, pair each rule you intend to generate against that layer (and against the platform's base instructions, already in front of you this session) and classify the pair:
+
+| Pair shape | Action |
+|---|---|
+| Repo rule **specializes** the upper layer (narrower scope, stricter threshold, repo value filling a placeholder) | Write it. Refinement, not conflict. |
+| Repo rule uses an **opt-out the upper layer itself grants** (e.g. a global "Exception: repo AGENTS.md/CLAUDE.md opts in") | Write it, and label it inline (`Overrides global: …`) so the next agent doesn't re-derive the exemption. |
+| Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep it (the repo copy is that rule's only reach on Codex/Cursor/Copilot). Verified single-tool repo → replace with a pointer to the owning layer instead of a second copy. |
+| Repo rule **contradicts** the upper layer — incompatible instructions for the same situation | **Stop and ask the user.** Do not write either version, and do not silently pick one. |
+
+**The ask, when a real conflict exists.** Surface it before generating the affected file, not after: quote both sides verbatim (`file:line` for the global file; for base instructions, quote the covering text and label it `[base instructions — {model id}, this session]`, since no `file:line` exists), state which side you recommend and why, then ask which is authoritative. Batch every conflict found into one prompt — one round-trip, not one per rule.
+
+**Asking does not mean halting the run.** Generate every artifact the conflict does not touch first, then ask, then write the affected ones. That ordering is itself what a global hard-stop rule typically requires — this operator's, verbatim, is *"Material ambiguity affecting scope, irreversible effects, external communication, or expected output → finish everything independent of the answer first, then Grill: one question at a time (or one batched question prompt), each with recommended answer + rationale; answer in code → read, don't ask."* Read the invoking layer's own wording rather than assuming this one; `Skill(dev:task-grill)` is available when the conflicts need real interviewing.
+
+Precedence between layers is **not spec** — never assert a winner you cannot quote a source for. That is precisely why this is a question for the user, not a call to make silently.
+
+**Two bounds, so the gate doesn't become noise:**
+- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts. Reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §8 rather than re-deriving one.
+- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to `dev:harness-curate`'s Signal 8 — Audit mode points there instead of re-implementing that sweep.
 
 ### Step 1: Analyze the Repository
 
@@ -414,6 +437,7 @@ Script checks:
 Clean validate run at Level 2+ means enforcement is active and drift is mechanically prevented.
 
 Manual checklist for items script cannot verify:
+- [ ] No generated rule contradicts the operator's global layer or the platform's base instructions — every conflict Step 0b found was surfaced to the user and resolved by them (never resolved silently)
 - [ ] Golden principles enforceable (each has lint rule, test, or hook)
 - [ ] Delegation table specifies model per role (haiku/sonnet/opus)
 - [ ] Eval criteria concrete and gradeable (not vague)
