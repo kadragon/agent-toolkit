@@ -5,11 +5,11 @@ Unit tests for reconcile-harness.py — multi-anchor support (## Covers).
 Run: python test_reconcile_harness.py
 """
 
+import contextlib
+import importlib.util
 import io
 import sys
-import contextlib
 import tempfile
-import importlib.util
 from pathlib import Path
 
 # ---------------------------------------------------------------------------

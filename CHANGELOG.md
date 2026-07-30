@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] repo ruff config + _strip_html_comments EOF line-count fix (dev v4.0.19, prod v3.0.3) (2026-07-30)
 - [done] harness-init resolves docs language before writing any artifact (dev v4.0.15) (2026-07-29)
 - [done] task-next fenced-block stripping + task-audit-nudge Codex config_dir (dev v4.0.14) (2026-07-29)
 - [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md

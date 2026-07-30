@@ -479,8 +479,8 @@ def cmd_record(repo, args, today):
 # ---------- self-check ----------
 
 def run_tests():
-    import tempfile
     import shutil
+    import tempfile
 
     failures = []
 

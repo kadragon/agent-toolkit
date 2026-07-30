@@ -1,0 +1,28 @@
+# Pins the ruleset the pre-commit gate enforces on `*/scripts/*.py`.
+#
+# Without this file ruff activates its full rule set (~415 rules in 0.16), which flagged 149
+# pre-existing violations across the repo's scripts — enough that touching any script for an
+# unrelated reason failed the commit hook. Most of those hits are deliberate (blind
+# `except Exception` in hooks that must never block session start), so the gate is scoped to
+# genuine-error rules plus import ordering rather than style opinions.
+#
+# E4/E7/E9 + F: pyflakes and the pycodestyle error subset — undefined names, unused imports,
+# syntax errors. I: import ordering, kept because it is fully auto-fixable (`ruff check --fix`).
+#
+# `target-version` is NOT just a `UP` knob — ruff's parser is version-aware, so it also gates
+# `E9` invalid-syntax detection. `prod/skills/hwpx/scripts/table.py:1546,1548` use PEP 701
+# f-strings (backslash and reused outer quote inside the braces), which is 3.12+ syntax, so any
+# value below `py312` makes the gate report 6 invalid-syntax errors and fail every commit.
+# Measured: py38/py39/py310/py311 → 6 errors, py312/py313 → clean. `py312` is therefore the
+# repo's real floor, not a preference.
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[lint.isort]
+# `prod/skills/hwpx/scripts/` imports its sibling helper as a bare `_common`, which isort would
+# otherwise file under third-party and sort in among `defusedxml` — collapsing the deliberate
+# blank line those modules keep between vendor imports and their own. Declaring it first-party
+# preserves that grouping at no cost: the repo-wide violation count is 10 either way.
+known-first-party = ["_common"]

@@ -37,7 +37,6 @@ import os
 import sys
 import tempfile
 
-
 # ---------------------------------------------------------------------------
 # Pure-function core (testable without real filesystem)
 # ---------------------------------------------------------------------------

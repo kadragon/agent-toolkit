@@ -12,24 +12,24 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import xml.etree.ElementTree as ET
-from xml.etree.ElementTree import Element
 import os
 import re
 import shutil
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from xml.etree.ElementTree import Element
 
 from _common import (
+    MIN_USER_ID,
+    NS,
+    SECTION_RE,
     collect_ids,
     configure_io,
     die,
     get_ids_from_hwpx,
-    MIN_USER_ID,
-    NS,
-    SECTION_RE,
     xml_escape,
 )
 
@@ -95,7 +95,7 @@ def _pack_hwpx(input_dir: Path, output_path: Path) -> None:
 
 
 def _validate_hwpx(hwpx_path: Path) -> list[str]:
-    from zipfile import BadZipFile, ZIP_STORED, ZipFile
+    from zipfile import ZIP_STORED, BadZipFile, ZipFile
     errors: list[str] = []
     required = ["mimetype", "Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml"]
     try:

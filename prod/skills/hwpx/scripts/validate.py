@@ -13,14 +13,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
-import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as DET
 from defusedxml.common import DefusedXmlException
 

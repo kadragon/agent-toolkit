@@ -22,7 +22,6 @@ from zipfile import BadZipFile, ZipFile
 
 from _common import LINESEG_RE, SECTION_RE, check_para_ids, configure_io, die
 
-
 # ── extract ───────────────────────────────────────────────────────────────────
 
 def _local(tag: object) -> str:

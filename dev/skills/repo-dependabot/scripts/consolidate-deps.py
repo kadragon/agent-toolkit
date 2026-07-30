@@ -15,7 +15,6 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-
 BRANCH_NAME = 'chore/deps-combined-update'
 
 
