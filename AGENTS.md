@@ -18,7 +18,7 @@ Plugin marketplace (dev + prod) by kadragon. This repo IS the harness — skills
 
 Invariants enforced mechanically. Violations block merges.
 
-1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
+1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: major is reserved for removing or renaming something invoked **by name** (skill, agent, command); a hook has no invocable name, so hook removal is a patch. Full table: `docs/conventions.md` → Plugin Version Bump Rules.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review + PR checklist.
 3. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
 

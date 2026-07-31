@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harness ratchet checks for shipped plugin skills (dev/, prod/).
 
-Two independent checks, run over every `{plugin}/skills/*/SKILL.md`:
+Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
 (a) Plugin-root portability — shared skill instructions and references must not
     depend on hook-only plugin root variables to locate bundled files.
@@ -10,7 +10,16 @@ Two independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     inside a fenced ```bash/```sh code block must have a `VAR=` capture
     earlier in the *same* block. Platform env vars (HOME, PATH) are allowlisted.
 
-Scope note: plugin-root portability violations are unconditional errors.
+(c) Section references - every `§N` / `§ "Title"` pointer that names a bundled
+    `*.md` on the same line, plus every bare `Signal N`, must resolve to a real
+    anchor in the target. PR #181 renumbered the signal taxonomy 8 -> 7 and
+    shipped 5 orphaned references that only human review caught; this check is
+    the mechanical replacement. Scope is deliberately cross-asset: a `§N` with no
+    file named on its line (the owning file may be paragraphs back) is skipped
+    rather than guessed at.
+
+Scope note: plugin-root portability and section-reference violations are
+unconditional errors.
 Capture-before-use violations are HARD-FAIL only for HARD_FAIL_SKILLS (skills
 fixed in an earlier sprint). Other skills report WARN so pre-existing debt
 remains visible without blocking CI. Extend HARD_FAIL_SKILLS as each skill is
@@ -56,6 +65,21 @@ CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
+
+# Section references. `§3e`, `§ "Title"`, `§'Title'` — a bare `§Some Words` with
+# neither number nor quotes is deliberately unmatched: those point at the global
+# instruction layer, not at a bundled file.
+SECTION_REF_RE = re.compile(r"§\s*(?:\"([^\"\n]+)\"|'([^'\n]+)'|(\d+[a-z]?)\b)")
+# Known extensions only: a permissive `\.\w+` also matches prose like "e.g".
+FILE_MENTION_RE = re.compile(r"([A-Za-z0-9._-]+\.(?:md|sh|py|json|ya?ml|toml|txt))")
+SIGNAL_REF_RE = re.compile(r"\bSignals?\s+(\d+)(?:\s+and\s+(\d+))?\b")
+HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
+BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
+NUMERIC_ANCHOR_RE = re.compile(r"^(\d+[a-z]?)[.)]")
+
+# `Signal N` is a bare reference — it names no file. The taxonomy that owns those
+# numbers is located by basename, so a move within the skills tree still resolves.
+SIGNAL_TAXONOMY_BASENAME = "signal-taxonomy.md"
 
 
 def find_skill_files() -> list[Path]:
@@ -152,6 +176,119 @@ def check_plugin_root_portability(text: str) -> list[str]:
     ]
 
 
+def normalize_anchor(text: str) -> str:
+    """Casefold an anchor/reference title so quoting and code ticks don't split a match."""
+    cleaned = text.replace("`", "").replace('"', "").replace("'", "")
+    return " ".join(cleaned.split()).strip(" .:;,-").casefold()
+
+
+def collect_anchors(text: str) -> tuple[set[str], set[str]]:
+    """Return (numeric anchors, titled anchors) a `§` reference may point at.
+
+    Both ATX headings and `**bold**` spans count: this repo anchors some sections on a
+    bold callout rather than a heading (e.g. `prod/skills/hwpx/SKILL.md` line 243).
+    """
+    numeric: set[str] = set()
+    titles: set[str] = set()
+    for raw in [m.group(1) for m in HEADING_RE.finditer(text)] + BOLD_RE.findall(text):
+        stripped = raw.replace("`", "").strip()
+        num = NUMERIC_ANCHOR_RE.match(stripped)
+        if num:
+            numeric.add(num.group(1))
+        titles.add(normalize_anchor(raw))
+    return numeric, titles
+
+
+def skill_dir_of(path: Path) -> Path:
+    """Return the `{plugin}/skills/{name}` directory owning a SKILL.md or references/*.md."""
+    for parent in path.parents:
+        if parent.parent.name == "skills":
+            return parent
+    return path.parent
+
+
+def build_basename_index(paths: list[Path]) -> dict[str, list[Path]]:
+    index: dict[str, list[Path]] = {}
+    for path in paths:
+        index.setdefault(path.name, []).append(path)
+    return index
+
+
+def resolve_md_target(
+    name: str, source: Path, basename_index: dict[str, list[Path]]
+) -> Path | None:
+    """Resolve a referenced `*.md` basename to a bundled asset, or None if it isn't one.
+
+    None means "not ours to check" — skills routinely name target-repo files such as
+    `backlog.md`, `tasks.md`, or `docs/workflows.md`, which do not exist in this repo.
+    """
+    skill_dir = skill_dir_of(source)
+    for candidate in (source.parent / name, skill_dir / name, skill_dir / "references" / name):
+        if candidate.is_file():
+            return candidate
+    # Cross-skill reference (e.g. harness-init pointing at harness-curate's taxonomy):
+    # a unique basename across all bundled assets is an unambiguous target.
+    matches = basename_index.get(name, [])
+    return matches[0] if len(matches) == 1 else None
+
+
+def check_section_refs(
+    text: str,
+    source: Path,
+    basename_index: dict[str, list[Path]],
+    anchor_cache: dict[Path, tuple[set[str], set[str]]],
+) -> list[str]:
+    """Return messages for `§`/`Signal N` references that resolve to no anchor."""
+
+    def anchors(path: Path) -> tuple[set[str], set[str]]:
+        if path not in anchor_cache:
+            anchor_cache[path] = collect_anchors(path.read_text(encoding="utf-8"))
+        return anchor_cache[path]
+
+    taxonomy_matches = basename_index.get(SIGNAL_TAXONOMY_BASENAME, [])
+    taxonomy = taxonomy_matches[0] if len(taxonomy_matches) == 1 else None
+
+    problems = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for ref in SECTION_REF_RE.finditer(line):
+            title = ref.group(1) or ref.group(2)
+            number = ref.group(3)
+
+            mentions = [m for m in FILE_MENTION_RE.finditer(line) if m.start() < ref.start()]
+            if not mentions:
+                # No file named on this line. Prose continues across lines, so the owning
+                # file may be paragraphs back — unresolvable without guessing. Cross-asset
+                # references are the scope here; bare `§N` is left to human review.
+                continue
+            named = mentions[-1].group(1)
+            if not named.endswith(".md"):
+                # e.g. `validate-harness.sh` §11 — a script has no heading structure.
+                continue
+            target = resolve_md_target(named, source, basename_index)
+            if target is None:
+                continue
+
+            where = str(target.relative_to(REPO_ROOT))
+            numeric_anchors, titled_anchors = anchors(target)
+            if number is not None:
+                if number not in numeric_anchors:
+                    problems.append(f"line {lineno}: §{number} has no section {number}. in {where}")
+            elif normalize_anchor(title) not in titled_anchors:
+                problems.append(f'line {lineno}: § "{title}" has no matching section in {where}')
+
+        if taxonomy is None:
+            continue
+        numeric_anchors, _ = anchors(taxonomy)
+        for ref in SIGNAL_REF_RE.finditer(line):
+            for number in (ref.group(1), ref.group(2)):
+                if number is not None and number not in numeric_anchors:
+                    problems.append(
+                        f"line {lineno}: Signal {number} has no section {number}. in "
+                        f"{taxonomy.relative_to(REPO_ROOT)}"
+                    )
+    return problems
+
+
 def check_windows_hook_commands() -> list[str]:
     """Require an explicit PowerShell-safe override for every dev command hook."""
     try:
@@ -183,6 +320,10 @@ def main() -> int:
         print("SKIP: no skill files found")
         return 0
 
+    reference_files = find_reference_files()
+    basename_index = build_basename_index(skill_files + [p for _, p in reference_files])
+    anchor_cache: dict[Path, tuple[set[str], set[str]]] = {}
+
     hard_fail = False
     windows_hook_problems = check_windows_hook_commands()
     for msg in windows_hook_problems:
@@ -203,11 +344,12 @@ def main() -> int:
 
         portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
+        section_refs = check_section_refs(text, path, basename_index, anchor_cache)
 
-        if not portability and not capture:
+        if not portability and not capture and not section_refs:
             print(
                 f"OK   {rel} ({name}): plugin-root portability "
-                "+ capture-before-use clean"
+                "+ capture-before-use + section refs clean"
             )
             continue
 
@@ -215,8 +357,10 @@ def main() -> int:
             print(f"ERROR {rel} ({name}) [plugin-root-portability]: {msg}")
         for msg in capture:
             print(f"{severity} {rel} ({name}) [capture-before-use]: {msg}")
+        for msg in section_refs:
+            print(f"ERROR {rel} ({name}) [section-ref]: {msg}")
 
-        if portability:
+        if portability or section_refs:
             hard_fail = True
         if severity == "ERROR" and capture:
             hard_fail = True
@@ -225,16 +369,17 @@ def main() -> int:
     # miss), so surfacing them is new visibility. Promoting straight to hard-fail
     # would retroactively block CI on pre-existing debt in untouched reference
     # docs (e.g. hwpx's $SKILL_DIR pattern) — track those via backlog, not here.
-    for skill_name, path in find_reference_files():
+    for skill_name, path in reference_files:
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(REPO_ROOT)
         portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
+        section_refs = check_section_refs(text, path, basename_index, anchor_cache)
 
-        if not portability and not capture:
+        if not portability and not capture and not section_refs:
             print(
                 f"OK   {rel} ({skill_name}): plugin-root portability "
-                "+ capture-before-use clean"
+                "+ capture-before-use + section refs clean"
             )
             continue
 
@@ -242,8 +387,10 @@ def main() -> int:
             print(f"ERROR {rel} ({skill_name}) [plugin-root-portability]: {msg}")
         for msg in capture:
             print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
+        for msg in section_refs:
+            print(f"ERROR {rel} ({skill_name}) [section-ref]: {msg}")
 
-        if portability:
+        if portability or section_refs:
             hard_fail = True
 
     print("----")

@@ -118,9 +118,17 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 
 | Change type | Bump |
 |-------------|------|
-| Skill or agent added | minor: `x.Y.z → x.(Y+1).0` |
-| Skill or agent modified | patch: `x.y.Z → x.y.(Z+1)` |
-| Skill or agent removed or renamed | major: `X.y.z → (X+1).0.0` |
+| Skill, agent, or command added | minor: `x.Y.z → x.(Y+1).0` |
+| Hook added (new bundle or new registration) | minor: `x.Y.z → x.(Y+1).0` |
+| Any shipped asset modified | patch: `x.y.Z → x.y.(Z+1)` |
+| Hook removed or renamed | patch: `x.y.Z → x.y.(Z+1)` |
+| Skill, agent, or command removed or renamed | major: `X.y.z → (X+1).0.0` |
+
+**Why hook removal is a patch, not a major.** Major is reserved for removing or renaming
+something invoked **by name** — a skill, agent, or command a user or another asset calls. That
+call breaks. A hook has no invocable name: removing it changes ambient behavior, not an
+interface, so nothing a consumer wrote stops resolving. PR #181 retired the `failure-log` and
+`delegation-log` bundles under this rule and shipped `4.0.21 → 4.0.22`.
 
 Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 

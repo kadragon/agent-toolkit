@@ -76,10 +76,13 @@ jobs:
           PY
 
   harness-drift:
-    name: Plugin-root portability + capture-before-use check
+    name: Plugin-root portability + capture-before-use + section-ref check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Run scripts/ci/test_check_harness_drift.py
+        run: python3 scripts/ci/test_check_harness_drift.py
 
       - name: Run scripts/ci/check_harness_drift.py
         run: python3 scripts/ci/check_harness_drift.py
