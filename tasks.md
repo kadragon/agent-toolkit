@@ -2,7 +2,7 @@
 
 ## Review Backlog
 
-### PR #181 — retire failure-log/delegation-log hooks; consolidate SessionStart into one dispatcher (2026-07-31)
+### PR #182 — gate dangling cross-asset section refs; state hook version-bump rule (2026-07-31)
 
-- [ ] [doc] Version-bump table scopes "remove/rename → major" to skills/agents only — hook removal/rename is uncovered, and the two reviewers split on major vs patch for this PR. Decide and state the rule (source: review, codex) — `AGENTS.md` Golden Principle 1, `docs/conventions.md:117-123`
-- [ ] [harness] Add a CI gate for dangling cross-asset section references (`§N`, `Signal N`) — this PR renumbered signal-taxonomy 8→7 and shipped 4 dangling refs in `harness-init/SKILL.md` plus 1 in `harness-curate/SKILL.md`; nothing mechanical caught it (source: retrospect) — `scripts/ci/check_harness_drift.py`
+- [ ] [doc] Shipped skills still carry the coarse bump rule `(patch for modify, minor for new skill, major for remove/rename)`, which no longer states the by-name carve-out PR #182 wrote into `AGENTS.md` and `docs/conventions.md`. Deferred out of #182 because editing either file forces the `dev/` version bump that PR deliberately had no need for — fold into the next `dev/` change (source: review) — `dev/skills/task-next/SKILL.md:286`, `dev/skills/task-new/SKILL.md:121`
+- [ ] [doc] `AGENTS.md` says "Agent roles in `.claude/agents/*.md` — used both as subagent and Agent Teams teammate" and the Delegation table names `explorer` / `implementer` / `qa-verifier` / `skill-evaluator`, but `.claude/agents/` does not exist in this repo, so none of those roles resolve as a `subagent_type`. Either ship the role files or restate the table as guidance about *which* brief to write rather than which agent type to spawn (source: retrospect) — `AGENTS.md` Delegation section
