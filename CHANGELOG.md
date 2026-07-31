@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] failure-log/delegation-log hooks retired, SessionStart consolidated into one dispatcher (dev v4.0.22) (2026-07-31)
 - [done] bump-version.sh --skill no-op on CRLF checkouts (2026-07-31) → docs/conventions.md
 - [done] team-standards plugin removed from the marketplace (dev v4.0.21) (2026-07-31)
 - [done] PR #176 review backlog — commit-and-push.sh delete-only pathspec fix + ruff CI gate (dev v4.0.20) (2026-07-30) → docs/conventions.md

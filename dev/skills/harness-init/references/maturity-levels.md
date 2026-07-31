@@ -32,7 +32,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] Delegation routing table triggers are objective and measurable (no subjective conditions)
 - [ ] `docs/workflows.md` embeds delegation gates as named steps (not footnotes)
 - [ ] Lint/test infrastructure exists and passes
-- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or `dev:harness-maintenance` SessionStart hook)
+- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or the `dev` plugin's SessionStart hook)
 - [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `references/path-scoped-rules.md` *(manual check — not enforced by `validate-harness.sh`)*
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
