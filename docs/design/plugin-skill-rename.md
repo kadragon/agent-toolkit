@@ -116,7 +116,7 @@ resume. The rename commit must include this workflow edit so CI is green in the 
 
 - `grep -rI 'dev-tools\|productivity\|<renamed skill names>\|orchestrate\|loop-engineer'` over
   tracked files returns **0**, excluding: this spec, `CHANGELOG.md` history, the migration-continuity
-  names `.harness-curator-state.json` and `task-audit-nudge/`, and the known false positive
+  names `.harness-curator-state.json` and `session-start/`, and the known false positive
   `conventions-template.md` ("views orchestrate"). No other stale name survives.
 - `grep -rI 'dev-tools:\|productivity:'` returns 0 (no stale invocation prefix).
 - `dev/skills/orchestrate` and `dev/skills/loop-engineer` no longer exist.

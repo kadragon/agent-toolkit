@@ -112,7 +112,7 @@ def encode_project(path):
     `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` because Claude collapses them
     too. De-colliding (e.g. appending a path hash) would make every lookup miss its real
     directory — trading a rare theoretical clash for guaranteed total failure. The verbatim twin
-    in task-audit-nudge/nudge.py carries the same note; keep them consistent.
+    in session-start/task-audit-nudge.py carries the same note; keep them consistent.
     """
     path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)

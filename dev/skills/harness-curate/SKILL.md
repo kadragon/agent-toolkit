@@ -6,12 +6,12 @@ description: >-
   instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
   indexed docs/ — for duplicate or conflicting rules. Routes to the owning
   creator — never generates itself. Repo structure validation → harness-init.
-version: 1.5.1
+version: 1.5.2
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" and "what's failing" live in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into eight signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" lives in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into seven signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
 Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
 
@@ -23,7 +23,7 @@ Replaces the old `/dev:task-audit` command, which mined only `history.jsonl` pro
 - **all** — every project. Use for "what should I build across all my work" and to detect cross-project recurrence (drives the scope decision in Step 4).
 - **--project `<abs path>`** — one named project.
 
-**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 8 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
+**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 7 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
 
 ## Step 1 — Scan (bounded, deterministic)
 
@@ -46,18 +46,6 @@ The scanner also folds in **Codex CLI sessions** (`~/.codex/sessions/`) for the 
 `SKILLS-ACTIVE` / `AGENTS-USED` / `CORRECTION-SIGNALS` / `HARNESS-FRICTION` are always cumulative (full lifetime history) — a demote candidate must be "~0 across all history," not "~0 since last run." Only `PROMPTS` defaults to **new-since-last-run** (using this project's own `.harness-curator-state.json` `lastRunMs`, written in Step 6) — otherwise re-running the scan re-shows the same latest-250-prompt window every time and the model re-clusters work it already reported. The header prints `new_since_last_run=` / `already_analyzed_suppressed=` so this is never silent; pass `--full` to re-review the entire history (first-ever run on a project, or a deliberate comprehensive re-audit, already behaves like `--full` since there's no prior `lastRunMs`).
 
 If the scan volume is large (`all` scope, or thousands of prompts), do NOT read it all inline — delegate the per-project reading to `Explore` or an `Agent` and analyze the returned summaries. See `references/transcript-format.md` for the record shapes and grep patterns.
-
-Also fold in the **per-repo failed-command log** (written by the `failure-log` PostToolUse hook to `<root>/.claude/logs/failed-commands.jsonl` — genuinely-failed Bash commands, noise already filtered). Cluster it with the bundled summarizer:
-
-```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/../../hooks/failure-log" ]] || { echo "Bundled hook helper unavailable: $SKILL_DIR/../../hooks/failure-log" >&2; exit 1; }
-FLOG="$SKILL_DIR/../../hooks/failure-log/summarize.py"
-python3 "$FLOG"                              # current repo (cwd → git root)
-python3 "$FLOG" /abs/path/to/repo           # one named repo
-```
-
-Its `FAILED-COMMANDS` block ranks failure signatures by count. A signature failing ≥3× is a harness gap — route it in Step 3 (recurring typo → alias/doc; missing tool/dep → setup doc or guard; same wrong flag → CLAUDE.md note or a PreToolUse block).
 
 ## Step 2 — Inventory existing assets
 
@@ -126,9 +114,9 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
 
   Report only `NEW` rows, and carry the printed `suppressed=` count into the report. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
 
-Feed all three into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 8. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+Feed all three into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
-## Step 3 — Classify into eight signals
+## Step 3 — Classify into seven signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
 
@@ -140,7 +128,6 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing) | loosen/narrow → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
-| **Recurring failure** | `FAILED-COMMANDS` signature failing ≥3× | typo → alias/doc; missing dep/tool → setup doc or guard; wrong flag repeatedly → CLAUDE.md/AGENTS.md note or PreToolUse block via `hookify` / `update-config` |
 | **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md` | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. Before any **delete**, run the adversarial check (Step 7).
@@ -309,5 +296,5 @@ When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that
 - **`references/signal-taxonomy.md`** — detection rules, thresholds, and per-signal delegate brief.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes (`attributionSkill`, tool_use, corrections), grep patterns, project-path encoding.
 - **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
-- **`scripts/overlap_state.py`** — Signal 8 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
+- **`scripts/overlap_state.py`** — Signal 7 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
 - **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.
