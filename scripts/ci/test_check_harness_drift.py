@@ -127,31 +127,41 @@ def main() -> int:
             run_refs("`dev:beta` -> `references/signal-taxonomy.md` §9", alpha, index) != [],
         )
 
-        print("\nAnchor forms")
+        print("\nAnchor forms (referenced cross-asset, from the skill's own SKILL.md)")
+        chained = run_refs("`references/notes.md` §2·§4.", alpha, index)
         check(
             "chained §2·§3 both resolve",
-            run_refs("Detail — `notes.md` §2·§3.", notes, index) == [],
+            run_refs("Detail — `references/notes.md` §2·§3.", alpha, index) == [],
         )
         check(
             "chained §2·§4 reports only the missing one",
-            [p for p in run_refs("`notes.md` §2·§4.", notes, index) if "§4" in p]
-            and not [p for p in run_refs("`notes.md` §2·§4.", notes, index) if "§2" in p],
+            [p for p in chained if "§4" in p] and not [p for p in chained if "§2" in p],
+            f"got {chained}",
         )
-        check("letter-suffixed §3e resolves", run_refs("`notes.md` §3e", notes, index) == [])
+        check(
+            "letter-suffixed §3e resolves",
+            run_refs("`references/notes.md` §3e", alpha, index) == [],
+        )
         check(
             "quoted title matching a heading resolves",
-            run_refs('`notes.md` § "header.xml Editing Guide"', notes, index) == [],
+            run_refs('`references/notes.md` § "header.xml Editing Guide"', alpha, index) == [],
         )
         check(
             "quoted title matching a **bold** callout resolves",
             run_refs(
-                '`notes.md` §"Validate timing when overwriting original"', notes, index
+                '`references/notes.md` §"Validate timing when overwriting original"',
+                alpha,
+                index,
             )
             == [],
         )
         check(
             "unknown quoted title is reported",
-            run_refs('`notes.md` § "No Such Section"', notes, index) != [],
+            run_refs('`references/notes.md` § "No Such Section"', alpha, index) != [],
+        )
+        check(
+            "a uniquely-named file referencing itself is still graded",
+            run_refs("`notes.md` § \"No Such Section\"", notes, index) != [],
         )
 
         print("\nSkip paths (must not fire)")
@@ -181,6 +191,36 @@ def main() -> int:
         check(
             "Signal N is skipped when no signal-taxonomy.md is bundled",
             run_refs("Route it to Signal 8 instead.", alpha, bare_index) == [],
+        )
+        check(
+            "Signal N in a file that never reaches for the taxonomy is not graded",
+            run_refs("The rubric scores Signal 9 highest.", notes, index) == [],
+        )
+        check(
+            "...but is graded once the same file names the taxonomy",
+            run_refs(
+                "See `references/signal-taxonomy.md` §7.\nThe rubric scores Signal 9 highest.",
+                notes,
+                index,
+            )
+            != [],
+        )
+
+        print("\nFail closed on a bundled references/ target that no longer exists")
+        gone = run_refs("See `references/deleted-doc.md` §2 for detail.", alpha, index)
+        check("missing references/ target is reported", gone != [], f"got {gone}")
+        check(
+            "the message names the unresolvable file",
+            gone and "deleted-doc.md" in gone[0],
+            f"got {gone}",
+        )
+
+        print("\nAmbiguous basename does not resolve to the referrer")
+        # `SKILL.md` collides across skills; probing source.parent first would grade the
+        # reference against the referring file's own anchors.
+        check(
+            "cross-skill `SKILL.md` §N is skipped, not mis-resolved",
+            run_refs("`dev:beta` -> `SKILL.md` §1 covers it", alpha, index) == [],
         )
 
     print("\n----")

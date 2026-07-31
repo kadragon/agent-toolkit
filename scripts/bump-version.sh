@@ -2,10 +2,11 @@
 # Bump plugin and/or skill versions atomically.
 # Usage: bump-version.sh <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 #
-# Semver rules (from AGENTS.md):
-#   add skill/agent → minor
-#   modify          → patch
-#   remove/rename   → major
+# Semver rules — full table: docs/conventions.md → Plugin Version Bump Rules.
+#   add skill/agent/command/hook → minor
+#   modify any shipped asset     → patch
+#   remove/rename a hook         → patch (a hook has no invocable name)
+#   remove/rename skill/agent/command → major (breaks a by-name call)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

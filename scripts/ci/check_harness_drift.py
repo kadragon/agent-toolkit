@@ -16,7 +16,9 @@ Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     shipped 5 orphaned references that only human review caught; this check is
     the mechanical replacement. Scope is deliberately cross-asset: a `§N` with no
     file named on its line (the owning file may be paragraphs back) is skipped
-    rather than guessed at.
+    rather than guessed at. A `references/`-qualified name that resolves to
+    nothing fails closed — that path can only mean a bundled sibling doc, so an
+    unresolvable one was deleted or renamed.
 
 Scope note: plugin-root portability and section-reference violations are
 unconditional errors.
@@ -222,10 +224,13 @@ def resolve_md_target(
     None means "not ours to check" — skills routinely name target-repo files such as
     `backlog.md`, `tasks.md`, or `docs/workflows.md`, which do not exist in this repo.
     """
+    # `SKILL.md` is not a unique basename, so a cross-skill reference to one would resolve
+    # to the referrer itself on the first probe and be graded against the wrong anchors.
+    ambiguous = len(basename_index.get(name, [])) > 1
     skill_dir = skill_dir_of(source)
     for candidate in (source.parent / name, skill_dir / name, skill_dir / "references" / name):
         if candidate.is_file():
-            return candidate
+            return None if (ambiguous and candidate == source) else candidate
     # Cross-skill reference (e.g. harness-init pointing at harness-curate's taxonomy):
     # a unique basename across all bundled assets is an unambiguous target.
     matches = basename_index.get(name, [])
@@ -247,6 +252,13 @@ def check_section_refs(
 
     taxonomy_matches = basename_index.get(SIGNAL_TAXONOMY_BASENAME, [])
     taxonomy = taxonomy_matches[0] if len(taxonomy_matches) == 1 else None
+    # `Signal N` is only the taxonomy's numbering inside the skills that use it. Unrelated
+    # prose elsewhere (a "Signal 3" in a hwpx or persona-debate doc) must not be graded
+    # against harness-curate's headings, so require the file to reach for the taxonomy.
+    if taxonomy is not None and not (
+        SIGNAL_TAXONOMY_BASENAME in text or skill_dir_of(source) == skill_dir_of(taxonomy)
+    ):
+        taxonomy = None
 
     problems = []
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -266,6 +278,15 @@ def check_section_refs(
                 continue
             target = resolve_md_target(named, source, basename_index)
             if target is None:
+                # A `references/` path names a bundled sibling doc, so failing to resolve one
+                # means it was deleted or renamed — the very drift this check exists for.
+                # Fail closed there; every other unresolved name is a target-repo file
+                # (`backlog.md`, `docs/workflows.md`) the plugin does not ship.
+                if line[: mentions[-1].start()].endswith("references/"):
+                    problems.append(
+                        f"line {lineno}: references/{named} is not a bundled file "
+                        "(deleted, renamed, or a typo)"
+                    )
                 continue
 
             where = str(target.relative_to(REPO_ROOT))
