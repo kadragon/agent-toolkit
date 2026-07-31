@@ -113,7 +113,7 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 
 ## Plugin Version Bump Rules
 
-`dev/.claude-plugin/plugin.json`, `prod/.claude-plugin/plugin.json`, and `team-standards/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
+`dev/.claude-plugin/plugin.json` and `prod/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
 
 | Change type | Bump |
 |-------------|------|

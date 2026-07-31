@@ -5,17 +5,16 @@ description: >-
   interviewing the user one question at a time, each with a recommended answer +
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
-version: 1.0.1
+version: 1.0.2
 ---
 
 # Grill
 
 > Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
 
-Formalizes this repo's existing "Grill" hard-stop convention (`~/.claude/CLAUDE.md`,
-`team-standards/standards/AGENT-STANDARDS.md`) into a reusable skill: **material ambiguity
-affecting scope, irreversible effects, external communication, or expected output → grill,
-don't guess.** Unlike mattpocock's `grilling`+`domain-modeling` pair, this skill does not
+Formalizes this repo's existing "Grill" hard-stop convention (`~/.claude/CLAUDE.md`) into a
+reusable skill: **material ambiguity affecting scope, irreversible effects, external
+communication, or expected output → grill, don't guess.** Unlike mattpocock's `grilling`+`domain-modeling` pair, this skill does not
 produce a separate `CONTEXT.md` or ADR artifact — this repo has no such convention. Its output
 feeds directly into whichever document is being built next: a Sprint Contract
 (`docs/eval-criteria.md` template) or a `task-spec` document.

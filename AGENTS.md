@@ -1,6 +1,6 @@
 # agent-toolkit
 
-Plugin marketplace (dev + prod + team-standards) by kadragon. This repo IS the harness — skills, agents, hooks shipped to other repos.
+Plugin marketplace (dev + prod) by kadragon. This repo IS the harness — skills, agents, hooks shipped to other repos.
 
 ## Docs Index (read on demand)
 
@@ -18,7 +18,7 @@ Plugin marketplace (dev + prod + team-standards) by kadragon. This repo IS the h
 
 Invariants enforced mechanically. Violations block merges.
 
-1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/` and `team-standards/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
+1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. Enforced by CI (`harness-check.yml`) for both platforms. Semver: add skill/agent → minor; modify → patch; remove/rename → major.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review + PR checklist.
 3. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
 

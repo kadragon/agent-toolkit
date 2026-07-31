@@ -6,7 +6,7 @@ description: >-
   instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
   indexed docs/ — for duplicate or conflicting rules. Routes to the owning
   creator — never generates itself. Repo structure validation → harness-init.
-version: 1.5.0
+version: 1.5.1
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
