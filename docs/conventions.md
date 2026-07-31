@@ -72,6 +72,7 @@ Every shell pattern in skill docs that references `$var` MUST show the `var=$(cm
 - `find` feeding a `while read` loop needs `-type f`. A directory whose name matches the glob
   (`.claude/agents/bogus.md/`) makes the inner `read` fail; under `set -u` the loop variable is
   then unbound and the whole script aborts mid-run — before its summary ever prints.
+- Markdown and JSON are **not** LF-pinned, so a Windows checkout hands them to scripts as CRLF. A `$`-anchored substitution (`s/^version: 1.0.1$/…/`) then silently matches nothing, because the line really ends `1.0.1\r`. Match with a `(?=\r?$)` lookahead — which also preserves the `\r` — and verify the rewrite landed instead of trusting the exit code (`scripts/bump-version.sh`, regression test `scripts/ci/test_bump_version.py`).
 - Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
 - Tracked `*.json` must be UTF-8 **without** BOM — strict parsers reject the leading `EF BB BF`, which silently breaks manifest loading. Windows PowerShell 5.1 `Out-File`/`Set-Content -Encoding utf8` writes one; edit JSON through the file tools or git bash instead. CI rejects any BOM-carrying JSON.
 

@@ -58,8 +58,17 @@ bump_plugin() {
   local new_version
   new_version=$(bump_semver "$claude_ver" "$bump_type")
 
-  perl -pi -e "s/\"version\": \"${claude_ver}\"/\"version\": \"${new_version}\"/" "$claude_json"
-  perl -pi -e "s/\"version\": \"${codex_ver}\"/\"version\": \"${new_version}\"/" "$codex_json"
+  perl -pi -e "s/\"version\": *\"\Q${claude_ver}\E\"/\"version\": \"${new_version}\"/" "$claude_json"
+  perl -pi -e "s/\"version\": *\"\Q${codex_ver}\E\"/\"version\": \"${new_version}\"/" "$codex_json"
+
+  # The parse above tolerates spacing the replace once did not — verify rather than trust.
+  local json
+  for json in "$claude_json" "$codex_json"; do
+    grep -q "\"version\": \"${new_version}\"" "$json" || {
+      echo "Failed to rewrite version in $json" >&2
+      exit 1
+    }
+  done
 
   echo "  ${plugin}: ${claude_ver} → ${new_version}"
 }
@@ -78,7 +87,14 @@ bump_skill() {
   local new_version
   new_version=$(bump_semver "$current_version" "$bump_type")
 
-  perl -pi -e "s/^version: ${current_version}\$/version: ${new_version}/" "$skill_md"
+  # \Q..\E quotes the dots; the (?=\r?$) lookahead matches CRLF checkouts (Windows
+  # core.autocrlf) without consuming the \r, so the file's line endings survive.
+  perl -pi -e "s/^version:[ \t]*\Q${current_version}\E(?=\r?\$)/version: ${new_version}/" "$skill_md"
+
+  grep -q "^version: ${new_version}" "$skill_md" || {
+    echo "Failed to rewrite version in $skill_md (still ${current_version})" >&2
+    exit 1
+  }
   echo "    skill ${skill_name}: ${current_version} → ${new_version}"
 }
 
