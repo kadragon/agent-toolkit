@@ -186,7 +186,7 @@ def config_dir():
     checkout, ad-hoc invocation) do env markers decide, and there `PLUGIN_ROOT` is the Codex
     marker: docs/platform-specs.md lists it as Codex's canonical plugin root and undocumented for
     Claude Code. If a future Claude Code release starts setting `PLUGIN_ROOT`, revisit this."""
-    script_path = os.path.realpath(__file__)
+    script_path = os.path.realpath(__file__).replace("\\", "/")
     if "/.codex/" in script_path:
         return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), True
     if "/.claude/" in script_path:
@@ -296,9 +296,9 @@ def _run_tests():
 
     claude_home = os.path.expanduser("~/.claude")
     codex_home = os.path.expanduser("~/.codex")
-    claude_install = f"{claude_home}/plugins/cache/kadragon/dev/9.9.9/hooks/task-audit-nudge/nudge.py"
-    codex_install = f"{codex_home}/plugins/cache/kadragon/dev/9.9.9/hooks/task-audit-nudge/nudge.py"
-    checkout = "/Users/someone/Dev/agent-toolkit/dev/hooks/task-audit-nudge/nudge.py"
+    claude_install = f"{claude_home}/plugins/cache/kadragon/dev/9.9.9/hooks/session-start/task-audit-nudge.py"
+    codex_install = f"{codex_home}/plugins/cache/kadragon/dev/9.9.9/hooks/session-start/task-audit-nudge.py"
+    checkout = "/Users/someone/Dev/agent-toolkit/dev/hooks/session-start/task-audit-nudge.py"
 
     print("=== nudge.py config_dir() precedence ===")
     # The original bug: Codex sets CLAUDE_PLUGIN_ROOT as a compat alias, so it never proved Claude.
@@ -327,7 +327,7 @@ def _run_tests():
 if __name__ == "__main__":
     # Guarded so the module stays importable for verification — without it, `import nudge` runs
     # main() and immediately sys.exit(0)s the importing process, which silently voids any test.
-    # Behavior when run as a hook (dev/hooks.json invokes `python3 .../nudge.py`) is unchanged.
+    # Behavior when run as a hook (dev/hooks.json invokes `run.sh`) is unchanged.
     if "--test" in sys.argv[1:]:
         sys.exit(_run_tests())
     try:

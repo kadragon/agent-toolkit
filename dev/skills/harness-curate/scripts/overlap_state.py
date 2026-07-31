@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Cross-run suppression for Signal 8 (instruction-layer overlap).
+Cross-run suppression for Signal 7 (instruction-layer overlap).
 
-Signals 1-7 are transcript-derived, so `lastRunMs` incrementality keeps them from
-re-reporting analyzed work. Signal 8 is *static*: a duplicate/conflicting rule pair
+Signals 1-6 are transcript-derived, so `lastRunMs` incrementality keeps them from
+re-reporting analyzed work. Signal 7 is *static*: a duplicate/conflicting rule pair
 sits in the files until someone edits them, so without per-finding suppression every
 run re-reports the same pairs and re-sets `lastCandidateMs` — turning the staleness
 nudge into permanent noise.

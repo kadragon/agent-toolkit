@@ -1,0 +1,19 @@
+{
+  "description": "SessionStart dispatcher for harness maintenance and harness-curate staleness nudges. Maintenance is daily-debounced; each component fails independently and never blocks startup.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/session-start/run.sh\"",
+            "commandWindows": "bash \"$env:PLUGIN_ROOT/hooks/session-start/run.sh\"",
+            "timeout": 15,
+            "statusMessage": "Running session-start maintenance..."
+          }
+        ]
+      }
+    ]
+  }
+}

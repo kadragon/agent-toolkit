@@ -32,7 +32,8 @@ Two plugins:
 > `dev@kadragon` and `prod@kadragon`. Remove the old plugin
 > (`claude plugin uninstall toolkit@kadragon`) and install both below.
 > Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
-> the hook now ships as `dev:harness-maintenance`.
+> maintenance now runs inside the `dev` plugin's single SessionStart dispatcher
+> (`hooks/session-start/run.sh`).
 
 ### npx skills
 

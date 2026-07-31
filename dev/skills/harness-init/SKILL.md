@@ -55,7 +55,7 @@ Delegation is only the axis where narrowing is a safe automatic fix. Every other
 |-----------|------|--------|
 | No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Step 0b, then Steps 1–10 |
 | Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
-| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop. Structure only — for an instruction-conflict/duplication audit of the existing files, route to `dev:harness-curate` (Signal 8) |
+| User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop. Structure only — for an instruction-conflict/duplication audit of the existing files, route to `dev:harness-curate` (Signal 7) |
 
 **Maturity assessment (for New setup and Extend mode):**
 
@@ -86,7 +86,7 @@ The global instruction file read in Step 0 is not just a sizing input — it is 
 |---|---|
 | Repo rule **specializes** the upper layer (narrower scope, stricter threshold, repo value filling a placeholder) | Write it. Refinement, not conflict. |
 | Repo rule uses an **opt-out the upper layer itself grants** (e.g. a global "Exception: repo AGENTS.md/CLAUDE.md opts in") | Write it, and label it inline (`Overrides global: …`) so the next agent doesn't re-derive the exemption. |
-| Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep it (the repo copy is that rule's only reach on Codex/Cursor/Copilot). Verified single-tool repo → trim the redundant *items*, keeping the repo-specific ones, exactly as Step 3 prescribes for `## Token Economy` — never swap a whole mandated block for a pointer. "Verified" means positive evidence that Claude is the only intended reader, not the mere absence of another tool's config (same bar as `dev:harness-curate` → `references/signal-taxonomy.md` §8). |
+| Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep it (the repo copy is that rule's only reach on Codex/Cursor/Copilot). Verified single-tool repo → trim the redundant *items*, keeping the repo-specific ones, exactly as Step 3 prescribes for `## Token Economy` — never swap a whole mandated block for a pointer. "Verified" means positive evidence that Claude is the only intended reader, not the mere absence of another tool's config (same bar as `dev:harness-curate` → `references/signal-taxonomy.md` §7). |
 | Repo rule **contradicts** the upper layer — incompatible instructions for the same situation | **Stop and ask the user.** Do not write either version, and do not silently pick one. |
 
 **The ask, when a real conflict exists.** Surface it before generating the affected file, not after: quote both sides verbatim (`file:line` for the global file; for base instructions, quote the covering text and label it `[base instructions — {model id}, this session]`, since no `file:line` exists), state which side you recommend and why, then ask which is authoritative. Batch every conflict found into one prompt — one round-trip, not one per rule.
@@ -98,8 +98,8 @@ The global instruction file read in Step 0 is not just a sizing input — it is 
 Precedence between layers is **not spec** — never assert a winner you cannot quote a source for. That is precisely why this is a question for the user, not a call to make silently.
 
 **Two bounds, so the gate doesn't become noise:**
-- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts. Reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §8 rather than re-deriving one.
-- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to `dev:harness-curate`'s Signal 8 — Audit mode points there instead of re-implementing that sweep.
+- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts. Reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §7 rather than re-deriving one.
+- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to `dev:harness-curate`'s Signal 7 — Audit mode points there instead of re-implementing that sweep.
 
 ### Step 1: Analyze the Repository
 
@@ -489,7 +489,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
 
-The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The SessionStart hook (`dev:harness-maintenance`) runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
+The last three scripts are repair tools, not routine ops. At Level 3, they should rarely be needed. The `dev` plugin's SessionStart hook runs sync-claude-md (CLAUDE.md pointer check), symlink-guard (.agents/skills symlink check), and check-context-size (AGENTS.md size check) daily as a lightweight safety net; at Level 3 it should always be silent.
 
 ## Additional Resources
 
