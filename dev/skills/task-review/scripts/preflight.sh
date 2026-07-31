@@ -35,17 +35,14 @@ fi
 
 # --- Antigravity (agy) CLI ---
 AGY_AVAILABLE=false
+# Windows/Git Bash was once excluded here: agy.exe wrote through the Windows console API
+# (text_drip renderer) instead of stdout, so `agy ... | tee` in agy-review.sh captured nothing.
+# Fixed upstream — verified on agy 1.1.8 / MINGW64, where both `agy -p ... > file` and the
+# review script's own `agy -p ... | tee` shape return the full response with PIPESTATUS 0 0.
+# No platform gate: agy-review.sh already fails closed on empty or truncated output, which
+# covers a regression better than a preflight probe (a probe costs an API round trip per run).
 if command -v agy >/dev/null 2>&1; then
   AGY_AVAILABLE=true
-  # On Windows/Git Bash, agy.exe writes output via Windows console API (text_drip renderer)
-  # rather than stdout. agy-review.sh always invokes agy in a pipeline (agy ... | tee),
-  # so agy's stdout is always a pipe — never a TTY — and the output is silently lost
-  # regardless of whether the outer terminal is interactive. Disable unconditionally on
-  # Windows rather than using a TTY heuristic that would incorrectly report
-  # agy_available=true when preflight is run in an interactive shell.
-  case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) AGY_AVAILABLE=false ;;
-  esac
 fi
 
 # --- Codex ---
