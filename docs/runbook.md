@@ -32,6 +32,7 @@ codex plugin add prod@kadragon
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 | `python3 scripts/ci/check_harness_drift.py` | Plugin-root portability + capture-before-use over shipped skills |
 | `python3 scripts/ci/check_skill_frontmatter.py` | Skill/agent/command frontmatter parses as YAML, required keys present (needs PyYAML) |
+| `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
 | `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
 
 `check_skill_frontmatter.py` needs PyYAML. macOS system `python3` is PEP 668

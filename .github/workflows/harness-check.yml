@@ -138,6 +138,21 @@ jobs:
       - name: Run dev/skills/task-review/scripts/test_commit_and_push.py
         run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
 
+  bump-version-test:
+    name: bump-version.sh regression test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # Builds its own CRLF fixture, so this catches the Windows-only no-op even
+      # though the runner checks out LF.
+      - name: Run scripts/ci/test_bump_version.py
+        run: python3 scripts/ci/test_bump_version.py
+
   skill-frontmatter:
     name: Skill/agent/command frontmatter check
     runs-on: ubuntu-latest
