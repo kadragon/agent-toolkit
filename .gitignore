@@ -5,8 +5,9 @@ __pycache__/
 .DS_Store
 .claude/worktrees/
 .worktrees/
-# harness role files ARE tracked (validate-harness.sh §11 checks them);
-# only the local copy of the plugin-shipped prod:persona-actor stays ignored
+# .claude/agents/*.md are tracked — validate-harness.sh §11 checks them.
+# persona-actor.md stays untracked: it is a spine-exempt variant of
+# prod/agents/persona-actor.md (see backlog.md).
 .claude/agents/persona-actor.md
 .security-scan/
 /cache/
