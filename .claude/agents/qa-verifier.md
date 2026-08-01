@@ -25,7 +25,7 @@ Default **simple**. If failures > passes, stop at 3 failures and return early.
 
 ## Checks (always run)
 
-1. `plugin.json` version bumped for the modified plugin (vs `main` diff)
+1. `plugin.json` version bumped for the modified plugin (vs `main` diff) — **only when the diff touches a shipped asset under `dev/` or `prod/`**. A change confined to docs, `AGENTS.md`, `backlog.md`/`tasks.md`, or `.claude/agents/` requires no bump; record the check as N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
 3. Lint/test command from Sprint Contract exits 0
 4. No new `$var` references without visible `var=$(cmd)` capture

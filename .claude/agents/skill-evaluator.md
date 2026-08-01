@@ -25,7 +25,7 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 
 ## Checks
 
-1. Trigger accuracy: test router with sample phrases from the description
+1. Trigger accuracy (model-judged; no router in this repo): draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills — per `docs/eval-criteria.md` → *Trigger Accuracy* → **How to test**
 2. Correctness: read skill content against stated acceptance criteria
 3. Shell doc compliance: grep for `$var` without preceding capture in same block
 4. Context economy: check for inline reference dumps vs doc pointers
@@ -33,4 +33,4 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 ## Exit Criteria
 
 - All four criteria scored with evidence
-- Verdict written to `{scratchpad}/02_skill-evaluator_{skill-name}.md` (scratchpad path from the system prompt)
+- Scored table + verdict + top 3 risks + concrete fixes returned as this agent's tool result — `docs/delegation.md` → Data Transfer Protocols → *Return value*. Write no files: `tools:` grants no `Write`, and Boundaries above prohibit edits.
