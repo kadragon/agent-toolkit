@@ -19,7 +19,7 @@ All four fields required. Missing any → return control to lead.
 - **Objective:** which backlog item, which acceptance criteria
 - **Output format:** code diff + one-line summary per changed file + plugin.json bump if needed
 - **Tools to use:** Read/Edit/Write on listed paths; Grep/Glob for locating existing patterns
-- **Boundaries:** files outside the listed plugin area; do not touch tests the qa-verifier will run
+- **Boundaries:** do not touch files outside the listed plugin area; do not touch tests the qa-verifier will run
 
 ## Effort Tier
 
@@ -28,5 +28,5 @@ Default **simple**. Escalate to **comparison** if the task spans ≥3 skill dire
 ## Exit Criteria
 
 - All acceptance criteria verifiable by the stated test/lint command
-- `plugin.json` bumped for the modified plugin (patch/minor/major per `docs/conventions.md`)
+- `plugin.json` bumped (patch/minor/major per `docs/conventions.md`) — required **iff the diff touches any file under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count; repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees and need no bump
 - Blocked → return control to lead with a concrete question
