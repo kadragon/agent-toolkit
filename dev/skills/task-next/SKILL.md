@@ -305,6 +305,10 @@ initial PR commit alongside the code.
 
 *Task came from tasks.md finding group (h3/h2):*
 - In `tasks.md`: **delete** each completed finding line (the `- [ ]` items that were fixed). If the h3 heading has no remaining open `- [ ]` items after deletion, delete the heading line too. If `## Review Backlog` becomes empty, delete that section header as well. If `tasks.md` is now entirely empty, delete the file.
+2. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
+   `- [done] <finding-group title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
+   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — see the *CHANGELOG Entry
+   Contract* in `docs/conventions.md`.
 
 *Task came from backlog.md group:*
 1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
