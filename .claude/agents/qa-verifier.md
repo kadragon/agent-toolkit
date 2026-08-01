@@ -25,7 +25,7 @@ Default **simple**. If failures > passes, stop at 3 failures and return early.
 
 ## Checks (always run)
 
-1. `plugin.json` version bumped — required **iff the diff touches any file under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: `docs/conventions.md` states "if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`", and `harness-check.yml` enforces it with `git diff origin/main...HEAD -- dev/`. Reference docs and `SKILL.md` files *inside* those trees count. Repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees → record N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
+1. `plugin.json` version bumped — inspect the complete working-tree change set, including committed, staged, unstaged, and untracked files; do not rely only on `git diff origin/main...HEAD`. Required **iff any changed path is under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count. Repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees → record N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
 3. Lint/test command from Sprint Contract exits 0
 4. No new `$var` references without visible `var=$(cmd)` capture
