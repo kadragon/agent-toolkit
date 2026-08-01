@@ -28,5 +28,5 @@ Default **simple**. Escalate to **comparison** if the task spans ≥3 skill dire
 ## Exit Criteria
 
 - All acceptance criteria verifiable by the stated test/lint command
-- `plugin.json` bumped for the modified plugin (patch/minor/major per `docs/conventions.md`) — **only when the diff touches a shipped asset under `dev/` or `prod/`**; a change confined to docs, `AGENTS.md`, `backlog.md`/`tasks.md`, or `.claude/agents/` requires no bump
+- `plugin.json` bumped (patch/minor/major per `docs/conventions.md`) — required **iff the diff touches any file under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count; repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees and need no bump
 - Blocked → return control to lead with a concrete question

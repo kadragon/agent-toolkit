@@ -25,7 +25,7 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 
 ## Checks
 
-1. Trigger accuracy (model-judged; no router in this repo): draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills — per `docs/eval-criteria.md` → *Trigger Accuracy* → **How to test**
+1. Trigger accuracy: draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills — per `docs/eval-criteria.md` → *Trigger Accuracy* → **How to test**
 2. Correctness: read skill content against stated acceptance criteria
 3. Shell doc compliance: grep for `$var` without preceding capture in same block
 4. Context economy: check for inline reference dumps vs doc pointers
