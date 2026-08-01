@@ -283,8 +283,9 @@ If qa-verifier reports blocking issues:
 
 **Version bump (workflows.md Step 5)**
 Per `docs/conventions.md` — determine which plugin directory contains the changed files and
-bump its manifests (patch for modify, minor for new skill, major for remove/rename). Do this
-AFTER all changes, BEFORE handoff.
+bump its manifests (patch for modify; minor for a new skill, agent, command, or hook; major only
+for removing or renaming something invoked **by name** — a skill, agent, or command. A hook has
+no invocable name, so hook removal is a patch). Do this AFTER all changes, BEFORE handoff.
 
 **Do NOT commit.** Leave all changes uncommitted. `task-review` Step 1 commits everything
 so there is one clean commit per review/merge cycle.

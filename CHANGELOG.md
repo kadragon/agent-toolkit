@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] PR #182 review backlog — by-name bump rule in shipped skills + agent role files tracked (dev v4.0.23) (2026-08-01)
 - [done] failure-log/delegation-log hooks retired, SessionStart consolidated into one dispatcher (dev v4.0.22) (2026-07-31)
 - [done] bump-version.sh --skill no-op on CRLF checkouts (2026-07-31) → docs/conventions.md
 - [done] team-standards plugin removed from the marketplace (dev v4.0.21) (2026-07-31)
