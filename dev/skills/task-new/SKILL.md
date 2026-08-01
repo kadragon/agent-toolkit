@@ -117,9 +117,11 @@ report — do NOT hand off with unresolved blockers.
 
 **Version bump (Step 5)**
 Per `docs/conventions.md` — determine which plugin directory the changed files belong to and bump
-its manifests (keep `.claude-plugin` and `.codex-plugin` in sync; patch for modify, minor for new
-skill, major for remove/rename). Do this AFTER all changes, BEFORE handoff. (If the target repo is
-not this plugin marketplace, skip when no `plugin.json` applies.)
+its manifests (keep `.claude-plugin` and `.codex-plugin` in sync; patch for modify; minor for a new
+skill, agent, command, or hook; major only for removing or renaming something invoked **by name**
+— a skill, agent, or command. A hook has no invocable name, so hook removal is a patch). Do this
+AFTER all changes, BEFORE handoff. (If the target repo is not this plugin marketplace, skip when
+no `plugin.json` applies.)
 
 **Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
 
