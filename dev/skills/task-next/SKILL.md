@@ -90,8 +90,10 @@ rc=$?
 [[ $rc -eq 0 ]] || { echo "backlog_candidates.py exited $rc — see its stderr above" >&2; exit 1; }
 ```
 
-Same rules, uncapped, plus one ordering difference: the backlog.md sources use type priority (all
-qualifying h3 headings before any h2 heading) instead of the fast path's document order. Every
+Uncapped, and two differences from the fast path: it also reads `tasks.md` h2 headings **outside**
+`## Review Backlog` — a source the fast path never covers, so a fast-path zero is not proof the
+queue is empty — and the backlog.md sources use type priority (all qualifying h3 headings before
+any h2 heading) instead of the fast path's document order. Every
 h2/h3 with an open `- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
 `[>]`/`[x]`/a `*(deferred: ...)*` marker, not by choosing a section name.
 

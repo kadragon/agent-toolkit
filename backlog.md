@@ -26,7 +26,7 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 
 ### CHANGELOG Entry Contract lint (edge #10)
 
-- [ ] [CONSTRAINT] Enforce the ≤160-char single-line rule with a lint in `harness-check.yml`. Real payoff is deleting the 6 prose restatements above, not the block itself.
+- [ ] [CONSTRAINT] Enforce the ≤160-char single-line rule with a lint in `harness-check.yml`. Real payoff is deleting the 7 prose restatements above, not the block itself. Evidence it is needed: PR #188 shipped a 185-char entry that only qa-verifier caught, in the very cycle that re-stated the rule.
 
 ### qa-verifier evidence check (edge #6)
 
