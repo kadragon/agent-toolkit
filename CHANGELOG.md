@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-next prose reduction (dev v4.0.28) (2026-08-02) → docs/design/harness-altitude-audit.md
 - [done] task-next bundled-script guard checks the script, not the directory (dev v4.0.27) (2026-08-02) → docs/design/harness-altitude-audit.md
 - [done] prod plugin agent registration (prod v3.0.4) (2026-08-01)
 - [done] batch-task-next-changelog (1 unit) (dev v4.0.25) (2026-08-01)

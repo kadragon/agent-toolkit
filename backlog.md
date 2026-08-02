@@ -12,21 +12,9 @@ is preserved elsewhere or explicitly retired with a reason, and report the measu
 
 - [ ] [HARNESS] Script branch derivation, CHANGELOG `## Unreleased` insertion and backlog-line deletion in `task-next`/`task-new`, and have both invoke the existing `scripts/bump-version.sh` instead of restating the bump rules in prose.
 
-### Drop the `task-next` Step 1 hand-grep fallback
-
-- [ ] [HARNESS] Delete the Phase A/B/C hand-grep rules and the zero-candidate stderr taxonomy from `task-next/SKILL.md` Step 1 (~95 lines re-stating `backlog_candidates.py` in prose). The guard now stops the run instead of degrading, so the fallback covers no reachable state — only the prose remains.
-
-### Collapse the pre-merge cleanup variants
-
-- [ ] [HARNESS] Merge the three near-identical cleanup procedures (the three `*Task came from …*` variants under *Pre-merge cleanup* in `task-next/SKILL.md`) into one parameterized block plus a 3-row source table (tasks.md h1 / tasks.md finding group / backlog.md group).
-
 ### Single-source the CHANGELOG Entry Contract
 
 - [ ] [DOCS] The `≤160 chars` rule is restated in 7 locations across 5 files (`docs/conventions.md`, `harness-invariants.md`, `task-new/SKILL.md`, `task-next/SKILL.md` ×3, `batch.md`). Keep one canonical statement in `harness-invariants.md`; link from the rest. Pairs with the lint below.
-
-### Cut the QA delegation rationale
-
-- [ ] [DOCS] The *QA (workflows.md Step 4)* exception paragraph in `task-next/SKILL.md` argues *why* the qa-verifier spawn is an exception to the delegation gate. Reduce to one sentence; move the argument to `docs/delegation.md`, read once rather than every run.
 
 ## Harness — `task-*` edge enforcement (rescoped)
 
@@ -38,7 +26,7 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 
 ### CHANGELOG Entry Contract lint (edge #10)
 
-- [ ] [CONSTRAINT] Enforce the ≤160-char single-line rule with a lint in `harness-check.yml`. Real payoff is deleting the 6 prose restatements above, not the block itself.
+- [ ] [CONSTRAINT] Enforce the ≤160-char single-line rule with a lint in `harness-check.yml`. Real payoff is deleting the 7 prose restatements above, not the block itself. Evidence it is needed: PR #188 shipped a 185-char entry that only qa-verifier caught, in the very cycle that re-stated the rule.
 
 ### qa-verifier evidence check (edge #6)
 
