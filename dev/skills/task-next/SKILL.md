@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.4
+version: 1.4.5
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -93,8 +93,8 @@ rc=$?
 Uncapped, and two differences from the fast path: it also reads `tasks.md` h2 headings **outside**
 `## Review Backlog` — a source the fast path never covers, so a fast-path zero is not proof the
 queue is empty — and the backlog.md sources use type priority (all qualifying h3 headings before
-any h2 heading) instead of the fast path's document order. Every
-h2/h3 with an open `- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
+any h2 heading) instead of the fast path's document order. Every h2/h3 with an open
+`- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
 `[>]`/`[x]`/a `*(deferred: ...)*` marker, not by choosing a section name.
 
 ## Step 2 — Select
@@ -260,9 +260,9 @@ remains in it.
 **2. Insert one line as the first entry under `## Unreleased` in `CHANGELOG.md`** (create the
 section if absent): `- [done] <sprint or finding-group title> (<plugin> v<X.Y.Z>) (<date>)`,
 optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the
-`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory
-clauses** — reusable detail belongs in the owning `docs/*.md` (link it), narrative belongs in
-the commit and PR body. Full rules: `harness-invariants.md` → *CHANGELOG Entry Contract*.
+`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. Every other rule — the
+**≤160-char** cap included — lives in `harness-invariants.md` → *CHANGELOG Entry Contract*.
+Read it; do not reconstruct it from memory.
 
 *Blocked-analysis sync (runs for every source type):*
 

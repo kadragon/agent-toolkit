@@ -37,13 +37,10 @@ entry under `## Unreleased` (newest first):
 - [done] <title> (<plugin> v<X.Y.Z>) (<date>) → <path/to/owning-doc>.md
 ```
 
-**≤160 characters, at most one `docs/` link, no explanatory clauses** — no `—`/`;`-chained
-descriptions, no file lists, no failure-mode narration. Reusable knowledge goes to the owning
-`docs/*.md` (linked from the entry); the story of what changed already lives in `git log` and the
-PR body. If the line alone doesn't identify the change, fix the title rather than append prose.
-
 Canonical rule and rationale: *CHANGELOG Entry Contract* in the `dev:harness-init` skill's
-`references/harness-invariants.md`.
+`references/harness-invariants.md` — read it before writing an entry. Its decidable subset
+(≤160 chars, at most one `→` link, link must resolve) is enforced by
+`scripts/ci/check_changelog_entries.py` in `harness-check.yml`; the rest is on review.
 
 ## Shell Script Conventions
 
