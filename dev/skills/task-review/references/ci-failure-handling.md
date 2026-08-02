@@ -18,7 +18,8 @@ REASON=$(echo "$RESULT" | jq -r '.reason // empty')
 Allow up to 15 minutes (900000ms). Branch on both `PASSED` and `REASON`:
 
 - `PASSED` is `true` → proceed to merge.
-- `PASSED` is `false` and `REASON` is empty → a real CI failure (an actual check failed). Go to "Handle CI Failure" below; this counts toward the 3-strikes limit.
+- `PASSED` is `false` and `REASON` is empty → a real CI failure (an actual check failed). Go to "Handle CI Failure" below. The script has already counted this strike and reports the running total in `.failures`; you do not track it yourself.
+- `PASSED` is `false` and `REASON == "rework-cap"` → the 3rd consecutive real failure. **Hard stop** — do not fetch logs, do not attempt another fix. Report the PR number and `.failures` to the user and ask for guidance. The counter lives in `.git/task-review-ci-strikes-<pr>`; delete that file if the user decides to keep going anyway.
 - `PASSED` is `false` and `REASON == "timeout"` → CI has not finished after 15 minutes. This is NOT a failure — do not fetch logs, do not count toward 3-strikes. Stop and ask the user: "CI hasn't completed after 15 min on PR #<PR_NUMBER>. (a) keep waiting — re-run ci-wait.sh, (b) check the CI dashboard yourself and report back, (c) abandon this PR." Wait for the user's choice — do not silently re-loop `ci-wait.sh` automatically.
 - `PASSED` is `false` and `REASON` is present but not `"timeout"` (a hub API/`ci-status` lookup hiccup) → retry `ci-wait.sh` once; if it recurs, escalate exactly like the timeout case above.
 
@@ -51,7 +52,10 @@ Determine the commit message yourself based on the fix just applied (you have fu
 
 ### 5. Re-check CI
 
-Return to the CI wait step. If CI fails **3 consecutive times** (no passing run in between — counter resets on any pass), stop the workflow and ask the user for guidance. Timeouts and repeated CI-status errors do NOT increment this counter — they route to the user-escalation branch in "Wait for CI" instead.
+Return to the CI wait step. `ci-wait.sh` counts consecutive real failures itself and switches to
+`reason: "rework-cap"` on the 3rd — that is the stop signal, and it is an exit condition you read,
+not a tally you keep. A passing run clears the counter; timeouts and CI-status errors never
+increment it (they route to the user-escalation branch in "Wait for CI" instead).
 
 ## Merge and Clean Up
 

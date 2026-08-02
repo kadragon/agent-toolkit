@@ -6,12 +6,43 @@
 # Output: JSON to stdout — {passed: bool}
 #
 # The orchestrator enforces a 15-minute background timeout externally.
+#
+# Rework cap: consecutive REAL CI failures are counted in a per-PR strike file under
+# the repo's git dir. At MAX_STRIKES the script reports reason "rework-cap" so the
+# orchestrator hard-stops on an exit code instead of remembering how many times it has
+# already been round this loop. A pass clears the file; timeouts and ci-status errors
+# never increment it — they are not rework.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
+MAX_STRIKES="${CI_WAIT_MAX_STRIKES:-3}"
+
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || true)
+STRIKE_FILE=""
+if [ -n "$GIT_DIR" ]; then
+  STRIKE_FILE="$GIT_DIR/task-review-ci-strikes-$PR_NUMBER"
+fi
+
+read_strikes() {
+  # Missing, unreadable, or non-numeric all mean "no strikes recorded yet".
+  local n=0
+  if [ -n "$STRIKE_FILE" ] && [ -r "$STRIKE_FILE" ]; then
+    n=$(cat "$STRIKE_FILE" 2>/dev/null || echo 0)
+  fi
+  case "$n" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$n" ;;
+  esac
+}
+
+clear_strikes() {
+  [ -n "$STRIKE_FILE" ] && rm -f "$STRIKE_FILE"
+  return 0
+}
+
 TIMEOUT_SECS=870
 POLL_INTERVAL=20
 # Some repos have no CI at all. Give checks this long to appear before
@@ -27,11 +58,20 @@ while true; do
 
   case "$STATUS" in
     success)
+      clear_strikes
       jq -n '{passed: true}'
       exit 0
       ;;
     failure)
-      jq -n '{passed: false}'
+      STRIKES=$(read_strikes)
+      STRIKES=$(( STRIKES + 1 ))
+      [ -n "$STRIKE_FILE" ] && printf '%s\n' "$STRIKES" > "$STRIKE_FILE"
+      if [ "$STRIKES" -ge "$MAX_STRIKES" ]; then
+        jq -n --argjson n "$STRIKES" --argjson max "$MAX_STRIKES" \
+          '{passed: false, reason: "rework-cap", failures: $n, max_failures: $max}'
+      else
+        jq -n --argjson n "$STRIKES" '{passed: false, failures: $n}'
+      fi
       exit 0
       ;;
     none)

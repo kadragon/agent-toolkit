@@ -260,8 +260,9 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" \
 
 Follow **`references/ci-failure-handling.md`**. Summary:
 1. `scripts/ci-wait.sh <PR_NUMBER>` — wait up to 15 min, check `passed` and `reason`.
-2. On failure with no `reason` (real CI failure): `scripts/ci-failure-logs.sh` → classify fix. Trivial → apply directly. Logic change → re-run Steps 2–3. Hard stop after 3 failures.
-   On failure with `reason:"timeout"` (CI still running after 15 min): NOT a failure — do not fetch logs, does not count toward 3×. Stop and ask the user (keep waiting / check dashboard / abandon PR). See ci-failure-handling.md for detail.
+2. On failure with no `reason` (real CI failure): `scripts/ci-failure-logs.sh` → classify fix. Trivial → apply directly. Logic change → re-run Steps 2–3.
+   On failure with `reason:"rework-cap"`: the script's own 3-strike counter tripped — hard stop, report `.failures` and ask the user. Do not count strikes yourself.
+   On failure with `reason:"timeout"` (CI still running after 15 min): NOT a failure — do not fetch logs, does not increment the counter. Stop and ask the user (keep waiting / check dashboard / abandon PR). See ci-failure-handling.md for detail.
 3. Merge (all 4 args required; `MERGE_STRATEGY` is a JSON object, not a bare word):
    ```bash
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -282,8 +283,8 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
-| CI fails 3× | Stop, ask user |
-| CI timeout (`reason:"timeout"`) | Stop, ask user — does not count toward 3× |
+| CI fails 3× (`reason:"rework-cap"`) | Stop, ask user — the script counts, not you |
+| CI timeout (`reason:"timeout"`) | Stop, ask user — does not increment the counter |
 | Merge fails | Report `merge_ok`, do not force-delete |
 
 ## Scripts Reference
@@ -294,7 +295,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | `scripts/commit-and-push.sh` | Stage, commit, push, create PR; idempotent with `--pr` |
 | `scripts/agy-review.sh` | Antigravity review launcher |
 | `scripts/codex-review.sh` | Codex review launcher |
-| `scripts/ci-wait.sh <pr>` | Wait for CI, outputs `{passed: bool}` |
+| `scripts/ci-wait.sh <pr>` | Wait for CI, outputs `{passed: bool}`; counts consecutive real failures and reports `reason:"rework-cap"` at 3 |
 | `scripts/ci-failure-logs.sh` | Fetch failed CI logs as JSON |
 | `scripts/merge-and-cleanup.sh` | Merge PR, clean local/remote branches |
 | `scripts/hub.sh` | Hub adapter (GitHub / Forgejo) — called by other scripts |

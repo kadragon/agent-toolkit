@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] ci-wait.sh counts consecutive CI failures and hard-stops at 3 (dev v4.0.31) (2026-08-02)
 - [done] PR #188 review — task-next wording gaps closed (dev v4.0.30) (2026-08-02) → docs/delegation.md
 - [done] CHANGELOG Entry Contract lint + single-sourcing (dev v4.0.29) (2026-08-02) → docs/conventions.md
 - [done] task-next prose reduction (dev v4.0.28) (2026-08-02) → docs/design/harness-altitude-audit.md
