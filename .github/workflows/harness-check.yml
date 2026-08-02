@@ -153,6 +153,9 @@ jobs:
       - name: Run dev/skills/task-review/scripts/test_commit_and_push.py
         run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
 
+      - name: Run dev/skills/task-review/scripts/test_ci_wait.py
+        run: python3 dev/skills/task-review/scripts/test_ci_wait.py
+
   bump-version-test:
     name: bump-version.sh regression test
     runs-on: ubuntu-latest

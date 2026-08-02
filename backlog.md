@@ -24,10 +24,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 
 - [ ] [CONSTRAINT] `PreToolUse(Bash)` on `git commit`, gated on an evidence file tied to the current diff. The acceptance condition is **"an evidence file exists and matches the current diff"** — not "verification was independent", which this cannot check. Word the hook message accordingly. While the hook is open, also assert `tasks.md` has a `status: active` block (edge #9, ~3 lines, not worth a standalone item).
 
-### Numeric cap on CI rework (edge #8, C3)
-
-- [ ] [HARNESS] Count `ci-wait.sh` non-zero exits and hard-stop at 3. Scored 2.5/3 — decidable from exit codes, and CI minutes are a resource a re-run does not reclaim. Low priority; the prose-reduction section outranks it. Do **not** extend this to C2 ("same fix attempted 3×") — that predicate needs model judgment and was cut.
-
 ### Cut — do not re-file without new evidence
 
 Re-filing requires evidence of the specific kind each item failed on, not a restated intuition:
