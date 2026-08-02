@@ -260,9 +260,9 @@ remains in it.
 **2. Insert one line as the first entry under `## Unreleased` in `CHANGELOG.md`** (create the
 section if absent): `- [done] <sprint or finding-group title> (<plugin> v<X.Y.Z>) (<date>)`,
 optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the
-`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. Every other rule — the
-**≤160-char** cap included — lives in `harness-invariants.md` → *CHANGELOG Entry Contract*.
-Read it; do not reconstruct it from memory.
+`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. Every other rule — the character
+cap included — lives in `harness-invariants.md` → *CHANGELOG Entry Contract*. Read it; do not
+reconstruct the limits from memory.
 
 *Blocked-analysis sync (runs for every source type):*
 

@@ -38,9 +38,14 @@ entry under `## Unreleased` (newest first):
 ```
 
 Canonical rule and rationale: *CHANGELOG Entry Contract* in the `dev:harness-init` skill's
-`references/harness-invariants.md` — read it before writing an entry. Its decidable subset
-(≤160 chars, at most one `→` link, link must resolve) is enforced by
-`scripts/ci/check_changelog_entries.py` in `harness-check.yml`; the rest is on review.
+`references/harness-invariants.md` — read it before writing an entry; the limits are stated
+there and nowhere else, so they cannot drift.
+
+Its decidable subset — the character cap, one line per entry, at most one `→` link, and that
+link resolving under `## Unreleased` — is enforced by `scripts/ci/check_changelog_entries.py`,
+run by the `changelog-entries` job in `harness-check.yml` (exit 1 blocks the PR). The cap's
+value lives in that script's `MAX_LEN`, which is the enforcement point; everything the contract
+bans but a script cannot decide (explanatory clauses, file lists, narration) is on review.
 
 ## Shell Script Conventions
 

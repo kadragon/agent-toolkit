@@ -33,10 +33,13 @@ def check(name, condition, detail=""):
     _results.append(condition)
 
 
+UNRELEASED = "# Changelog\n\n## Unreleased\n\n"
+
+
 def errors_for(root: Path, body: str) -> list[str]:
-    """Write `body` as a changelog under `root` and return its violations."""
+    """Write `body` under an `## Unreleased` heading and return its violations."""
     path = root / "CHANGELOG.md"
-    path.write_text(body, encoding="utf-8")
+    path.write_text(UNRELEASED + body, encoding="utf-8")
     return mod.check_file(path)
 
 
@@ -88,6 +91,52 @@ def main() -> int:
 
             check("no link at all is fine", errors_for(root, entry("t")) == [])
 
+            anchored = entry("t", "docs/real.md#section")
+            check("an anchor on a real path is accepted",
+                  errors_for(root, anchored) == [], f"got {errors_for(root, anchored)}")
+
+            absolute = entry("t", "/docs/real.md")
+            errs = errors_for(root, absolute)
+            check("an absolute link is rejected even though the path exists",
+                  any("absolute" in e for e in errs), f"got {errs}")
+
+            escaping = entry("t", "../outside.md")
+            errs = errors_for(root, escaping)
+            check("a `..` escape is rejected",
+                  any("escapes" in e for e in errs), f"got {errs}")
+
+            print("\n-- one line means one line --")
+            multiline = entry("t") + "\n  continued explanatory clause here\n"
+            errs = errors_for(root, multiline)
+            check("an indented continuation under an entry is rejected",
+                  any("continuation line" in e for e in errs), f"got {errs}")
+
+            two_entries = entry("first") + "\n" + entry("second") + "\n"
+            check("a following entry is not mistaken for a continuation",
+                  errors_for(root, two_entries) == [],
+                  f"got {errors_for(root, two_entries)}")
+
+            print("\n-- released sections keep length caps, drop link resolution --")
+            released = (
+                "# Changelog\n\n## Unreleased\n\n"
+                + entry("current", "docs/real.md")
+                + "\n\n## v1.0.0\n\n"
+                + entry("historical", "docs/retired.md")
+                + "\n"
+            )
+            (root / "CHANGELOG.md").write_text(released, encoding="utf-8")
+            check("a dead link in a released section does not fail",
+                  mod.check_file(root / "CHANGELOG.md") == [],
+                  f"got {mod.check_file(root / 'CHANGELOG.md')}")
+
+            released_long = released.replace(
+                entry("historical", "docs/retired.md"),
+                entry("h" * 200, "docs/retired.md"),
+            )
+            (root / "CHANGELOG.md").write_text(released_long, encoding="utf-8")
+            check("but an over-length entry in a released section still fails",
+                  any("max 160" in e for e in mod.check_file(root / "CHANGELOG.md")))
+
             print("\n-- skip paths --")
             prose = "# Changelog\n\n## Unreleased\n\n" + "z" * 300 + "\n"
             check("non-entry lines are not length-checked",
@@ -97,8 +146,17 @@ def main() -> int:
                   errors_for(root, "- [ ] " + "z" * 300) == [])
 
             missing = root / "nope" / "CHANGELOG.md"
-            check("a missing file is skipped, not failed",
+            check("an explicitly-passed missing file is skipped, not failed",
                   mod.main([str(missing)]) == 0)
+
+            empty_root = root / "empty"
+            empty_root.mkdir()
+            mod.REPO_ROOT = empty_root
+            try:
+                check("a missing DEFAULT changelog fails instead of silently no-opping",
+                      mod.main([]) == 1)
+            finally:
+                mod.REPO_ROOT = root
 
             print("\n-- end-to-end --")
             errors_for(root, over)

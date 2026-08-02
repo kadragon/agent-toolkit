@@ -134,9 +134,9 @@ Leave these uncommitted so they land in the initial PR commit:
 3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
    `- [done] <title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
    `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no
-   versioned plugin. Every other rule — the **≤160-char** cap included — lives in the
+   versioned plugin. Every other rule — the character cap included — lives in the
    *CHANGELOG Entry Contract* in `harness-invariants.md` (bundled with `dev:harness-init`).
-   Read it; do not reconstruct it from memory.
+   Read it; do not reconstruct the limits from memory.
 
 ## Step 4 — Hand off
 
