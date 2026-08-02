@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.3
+version: 1.0.4
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -130,7 +130,8 @@ Leave these uncommitted so they land in the initial PR commit:
 1. In `tasks.md`: delete the Sprint Contract block written above. If `tasks.md` has no remaining
    content, delete the file.
 2. If a `## Covers` ticket was set (multi-session path): delete that item's `- [ ]` line from
-   `backlog.md`. Also delete any now-empty h2/h3 heading left behind.
+   `backlog.md`. Also delete the h2/h3 heading that owned it if this deletion emptied it — but
+   only that one; headings elsewhere with all-`[x]`/`[>]` items are deliberate history.
 3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
    `- [done] <title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
    `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no

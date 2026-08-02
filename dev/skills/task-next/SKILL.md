@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.5
+version: 1.4.6
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -101,7 +101,7 @@ any h2 heading) instead of the fast path's document order. Every h2/h3 with an o
 
 | Groups found | Action |
 |-------------|--------|
-| 0 | Report "backlog and tasks are clear — nothing open." If the user has specific new work in mind, point them to `task-new` (describe the work and it runs the code cycle). Stop. |
+| 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, candidates reachable with `--full-scan` — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
@@ -220,8 +220,8 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
 **QA (workflows.md Step 4)**
 This skill always spawns `qa-verifier` as a separate agent, and the implementing agent must not
 verify — a deliberate exception to the volume half of the repo's delegation gate, argued once in
-`docs/delegation.md` → *Role Routing*. Every other delegation in this skill still needs both
-conditions.
+`docs/delegation.md` → *Role Routing*. The exception covers every QA spawn this skill owns,
+batch mode's per-unit verifiers included; every non-QA delegation still needs both conditions.
 
 If qa-verifier reports blocking issues:
 1. Surface findings to user.
@@ -253,9 +253,13 @@ Two steps, in order. Step 1 varies by where the task came from; Step 2 is identi
 | tasks.md finding group (h3/h2) | each `- [ ]` finding line that was fixed |
 | backlog.md group | the Sprint Contract h1 block (`status: active`) from `tasks.md`, **and** every `backlog.md` line listed verbatim in its `## Covers` |
 
-Then cascade the deletion upward in both files: drop any heading left with no open `- [ ]`
-items, drop `## Review Backlog` if it becomes empty, and delete `tasks.md` outright if nothing
-remains in it.
+Then cascade the deletion upward, **scoped to what this sprint actually emptied**: drop the
+heading that owned a deleted line once it has no open `- [ ]` items left, then step up to its
+parent and drop that only if the deletion left it with no content at all — no open items and no
+surviving child headings. Drop `## Review Backlog` on the same test, and delete `tasks.md`
+outright if nothing remains. Never delete a heading holding content the sprint did not touch: a
+sibling group whose items are all `[x]` or `[>]` is deliberate history, and it keeps its
+ancestors alive.
 
 **2. Insert one line as the first entry under `## Unreleased` in `CHANGELOG.md`** (create the
 section if absent): `- [done] <sprint or finding-group title> (<plugin> v<X.Y.Z>) (<date>)`,
