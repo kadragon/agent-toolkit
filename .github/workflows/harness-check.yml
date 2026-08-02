@@ -87,6 +87,18 @@ jobs:
       - name: Run scripts/ci/check_harness_drift.py
         run: python3 scripts/ci/check_harness_drift.py
 
+  changelog-entries:
+    name: CHANGELOG Entry Contract check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run scripts/ci/test_check_changelog_entries.py
+        run: python3 scripts/ci/test_check_changelog_entries.py
+
+      - name: Run scripts/ci/check_changelog_entries.py
+        run: python3 scripts/ci/check_changelog_entries.py
+
   ruff:
     name: Ruff lint (pinned ruleset)
     runs-on: ubuntu-latest

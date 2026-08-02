@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.2
+version: 1.0.3
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -133,9 +133,10 @@ Leave these uncommitted so they land in the initial PR commit:
    `backlog.md`. Also delete any now-empty h2/h3 heading left behind.
 3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
    `- [done] <title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
-   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — reusable detail belongs in the
-   owning `docs/*.md` (link it), narrative belongs in the commit and PR body. Full rules: the
+   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no
+   versioned plugin. Every other rule — the character cap included — lives in the
    *CHANGELOG Entry Contract* in `harness-invariants.md` (bundled with `dev:harness-init`).
+   Read it; do not reconstruct the limits from memory.
 
 ## Step 4 — Hand off
 

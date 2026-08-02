@@ -12,10 +12,6 @@ is preserved elsewhere or explicitly retired with a reason, and report the measu
 
 - [ ] [HARNESS] Script branch derivation, CHANGELOG `## Unreleased` insertion and backlog-line deletion in `task-next`/`task-new`, and have both invoke the existing `scripts/bump-version.sh` instead of restating the bump rules in prose.
 
-### Single-source the CHANGELOG Entry Contract
-
-- [ ] [DOCS] The `≤160 chars` rule is restated in 7 locations across 5 files (`docs/conventions.md`, `harness-invariants.md`, `task-new/SKILL.md`, `task-next/SKILL.md` ×3, `batch.md`). Keep one canonical statement in `harness-invariants.md`; link from the rest. Pairs with the lint below.
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
@@ -23,10 +19,6 @@ Each edge is scored on three questions — **Silent** (invisible to the orchestr
 decision point), **Costly** (damage survives the session: lands on `main`/remote, corrupts tracked
 state, or burns a resource a re-run does not reclaim), **Decidable** (a file or exit code settles
 it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is ceremony.
-
-### CHANGELOG Entry Contract lint (edge #10)
-
-- [ ] [CONSTRAINT] Enforce the ≤160-char single-line rule with a lint in `harness-check.yml`. Real payoff is deleting the 7 prose restatements above, not the block itself. Evidence it is needed: PR #188 shipped a 185-char entry that only qa-verifier caught, in the very cycle that re-stated the rule.
 
 ### qa-verifier evidence check (edge #6)
 
