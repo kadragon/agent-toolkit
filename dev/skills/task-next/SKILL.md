@@ -52,6 +52,8 @@ The guard tests the **script**, not `scripts/`: a present directory holding a mi
 or non-running script is the failure this catches. Exit status is checked separately because a
 `python3` crash or an unreadable `backlog.md` also produces no candidates — **an empty candidate
 list at exit 0 is meaningful and must not be swallowed** (see the zero-candidate diagnosis below).
+A missing `backlog.md` is a non-zero exit by design: it is a Prerequisite above, so the run stops
+and the user goes to `dev:harness-init`. Only `tasks.md` is optional.
 
 Prints one line per candidate — `[N] <source>: <heading> (<M> items)` (h1 sprint blocks omit
 the item count) — already applying the Phase A → B → C order, per-phase caps, and the combined
@@ -59,11 +61,11 @@ cap-5 truncation described below. The guard above **stops the run** when the scr
 exits non-zero — it does not degrade to hand-grepping. The Phase A/B/C rules below document what
 the script implements; they are queued for removal (`backlog.md`).
 
-When hand-grepping (fast path and full scan alike), discard any heading or `- [ ]` line that
-sits inside an `<!-- ... -->` block or a ```-fenced (or `~~~`-fenced) code block — commented-out
-format templates and code samples are markup, not work. A fenced heading is the costlier miss: it
+Across both paths the script discards any heading or `- [ ]` line that sits inside an
+`<!-- ... -->` block or a ```-fenced (or `~~~`-fenced) code block — commented-out format
+templates and code samples are markup, not work. A fenced heading is the costlier miss: it
 also truncates the enclosing group, so a real `- [ ]` after the fence stops counting toward its
-heading. The script already strips both.
+heading.
 
 **Phase A — h1 sprint blocks (tasks.md):**
 
@@ -138,7 +140,7 @@ grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
 grep -En "^#{1,3} |^- \[ \]" backlog.md 2>/dev/null
 ```
 
-From the output, group each `- [ ]` line under its nearest preceding heading. A group is **candidate** if it directly contains ≥1 open `- [ ]` line ("directly" means no narrower sub-heading sits between the item and this heading).
+The script groups each `- [ ]` line under its nearest preceding heading. A group is **candidate** if it directly contains ≥1 open `- [ ]` line ("directly" means no narrower sub-heading sits between the item and this heading).
 
 **tasks.md candidates (in order):**
 1. h1 (`# `) blocks with `status: open` — the `tasks.md` grep above captures `status:` lines; match each h1 heading to the `status:` line that immediately follows it. The h1 title is the sprint scope; do not expand item list here.

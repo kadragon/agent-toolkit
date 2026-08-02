@@ -18,15 +18,15 @@ is preserved elsewhere or explicitly retired with a reason, and report the measu
 
 ### Collapse the pre-merge cleanup variants
 
-- [ ] [HARNESS] Merge the three near-identical cleanup procedures (`task-next/SKILL.md:293–344`) into one parameterized block plus a 3-row source table (tasks.md h1 / tasks.md finding group / backlog.md group).
+- [ ] [HARNESS] Merge the three near-identical cleanup procedures (the three `*Task came from …*` variants under *Pre-merge cleanup* in `task-next/SKILL.md`) into one parameterized block plus a 3-row source table (tasks.md h1 / tasks.md finding group / backlog.md group).
 
 ### Single-source the CHANGELOG Entry Contract
 
-- [ ] [DOCS] The `≤160 chars` rule is restated in 6 locations across 5 files (`docs/conventions.md:40`, `harness-invariants.md:109`, `task-new/SKILL.md:136`, `task-next/SKILL.md:302,310,318`, `batch.md:127`). Keep one canonical statement in `harness-invariants.md`; link from the rest. Pairs with the lint below.
+- [ ] [DOCS] The `≤160 chars` rule is restated in 7 locations across 5 files (`docs/conventions.md`, `harness-invariants.md`, `task-new/SKILL.md`, `task-next/SKILL.md` ×3, `batch.md`). Keep one canonical statement in `harness-invariants.md`; link from the rest. Pairs with the lint below.
 
 ### Cut the QA delegation rationale
 
-- [ ] [DOCS] `task-next/SKILL.md:268–276` argues *why* the qa-verifier spawn is an exception to the delegation gate. Reduce to one sentence; move the argument to `docs/delegation.md`, read once rather than every run.
+- [ ] [DOCS] The *QA (workflows.md Step 4)* exception paragraph in `task-next/SKILL.md` argues *why* the qa-verifier spawn is an exception to the delegation gate. Reduce to one sentence; move the argument to `docs/delegation.md`, read once rather than every run.
 
 ## Harness — `task-*` edge enforcement (rescoped)
 

@@ -100,14 +100,16 @@ Inside `task-next/SKILL.md` specifically:
 
 | Region | Lines | Assessment |
 |--------|-------|------------|
-| Step 1 candidate gathering (`:38–142`) | 105 | ~95 of these restate, in prose, the logic of the bundled `backlog_candidates.py` as a hand-grep fallback — plus a 6-branch stderr diagnosis taxonomy. Textbook over-specification. |
-| Pre-merge cleanup (`:293–344`) | 52 | three near-identical variants of one procedure, differing only in which file the task came from |
-| QA delegation rationale (`:268–276`) | 9 | argues with the reader about *why* an exception to the delegation gate exists; instructs nothing |
-| Edge cases (`:397–453`) | 57 | a 3-step shell diagnosis tree for "work already in flight" |
+| Step 1 candidate gathering (`:38–156`) | 119 | ~95 of these restate, in prose, the logic of the bundled `backlog_candidates.py` — plus a 6-branch stderr diagnosis taxonomy. Textbook over-specification. |
+| Pre-merge cleanup (`:307–358`) | 52 | three near-identical variants of one procedure, differing only in which file the task came from |
+| QA delegation rationale (`:283–290`) | 8 | argues with the reader about *why* an exception to the delegation gate exists; instructs nothing |
+| Edge cases (`:411–466`) | 56 | a 3-step shell diagnosis tree for "work already in flight" |
 
-And the CHANGELOG Entry Contract's `≤160 chars` rule is restated in **6 locations across 5 files**
-(`docs/conventions.md:40`, `harness-invariants.md:109`, `task-new/SKILL.md:136`,
-`task-next/SKILL.md:302,310,318`, `batch.md:127`) — the backlog's own item says "four files" and
+Line numbers are as of this branch's HEAD; the enumerated regions are the durable anchors.
+
+And the CHANGELOG Entry Contract's `≤160 chars` rule is restated in **7 locations across 5 files**
+(`docs/conventions.md`, `harness-invariants.md`, `task-new/SKILL.md`,
+`task-next/SKILL.md` ×3, `batch.md`) — the backlog's own item says "four files" and
 undercounts.
 
 ## Verdict on the premise
@@ -184,7 +186,7 @@ Higher expected value than anything remaining on the enforcement side, because i
    dependency; state it in one line where 95 stood.
 2. **Collapse the three pre-merge cleanup variants** into one parameterized block plus a 3-row
    source table.
-3. **Cut the QA delegation rationale** (`:268–276`) to a single sentence; move the argument to
+3. **Cut the QA delegation rationale** (the *QA (workflows.md Step 4)* exception paragraph) to a single sentence; move the argument to
    `docs/delegation.md` where it is read once, not every run.
 4. **Single-source the CHANGELOG contract** — one canonical statement in
    `harness-invariants.md`, links everywhere else. Rides item #5's lint.
