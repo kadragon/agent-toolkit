@@ -223,6 +223,42 @@ def main() -> int:
             run_refs("`dev:beta` -> `SKILL.md` §1 covers it", alpha, index) == [],
         )
 
+    print("\nBundled-script references resolve against the owning skill")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        skill = write(root, "dev/skills/alpha/SKILL.md", "placeholder")
+        write(root, "dev/skills/alpha/scripts/present.py", "print()")
+        write(root, "dev/skills/beta/scripts/elsewhere.py", "print()")
+
+        def run_scripts(text):
+            return mod.check_bundled_script_refs(text, skill)
+
+        check(
+            "a bundled script that exists passes",
+            run_scripts('python3 "$SKILL_DIR/scripts/present.py" --flag') == [],
+        )
+        missing = run_scripts('python3 "$SKILL_DIR/scripts/absent.py"')
+        check("a missing bundled script is reported", missing != [], f"got {missing}")
+        check(
+            "the message names the unresolvable script",
+            missing and "absent.py" in missing[0],
+            f"got {missing}",
+        )
+        # The whole point of the guard: a directory-only check passes here, a file check
+        # does not. `scripts/` exists in this skill, `elsewhere.py` is another skill's.
+        check(
+            "another skill's script does not satisfy the reference",
+            run_scripts('python3 "$SKILL_DIR/scripts/elsewhere.py"') != [],
+        )
+        check(
+            "the `$SKILL_DIR/scripts/...` prose placeholder is not graded",
+            run_scripts("scripts live under `$SKILL_DIR/scripts/...`") == [],
+        )
+        check(
+            "${SKILL_DIR} brace form is matched too",
+            run_scripts('python3 "${SKILL_DIR}/scripts/absent.py"') != [],
+        )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

@@ -20,8 +20,13 @@ Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     nothing fails closed — that path can only mean a bundled sibling doc, so an
     unresolvable one was deleted or renamed.
 
-Scope note: plugin-root portability and section-reference violations are
-unconditional errors.
+(d) Bundled-script references — every `$SKILL_DIR/scripts/<name>` named in a
+    skill's markdown must resolve to a file that skill actually bundles. The
+    runtime guard in the skill can only report this after invocation; this
+    catches the packaging error at merge time instead.
+
+Scope note: plugin-root portability, section-reference and bundled-script
+violations are unconditional errors.
 Capture-before-use violations are HARD-FAIL only for HARD_FAIL_SKILLS (skills
 fixed in an earlier sprint). Other skills report WARN so pre-existing debt
 remains visible without blocking CI. Extend HARD_FAIL_SKILLS as each skill is
@@ -82,6 +87,12 @@ NUMERIC_ANCHOR_RE = re.compile(r"^(\d+[a-z]?)[.)]")
 # `Signal N` is a bare reference — it names no file. The taxonomy that owns those
 # numbers is located by basename, so a move within the skills tree still resolves.
 SIGNAL_TAXONOMY_BASENAME = "signal-taxonomy.md"
+
+# Bundled script invocations: `$SKILL_DIR/scripts/foo.py`, `"${SKILL_DIR}"/scripts/foo.sh`.
+# The trailing name is matched loosely and filtered below — `$SKILL_DIR/scripts/...` is a
+# prose placeholder, not a file.
+BUNDLED_SCRIPT_RE = re.compile(r"\$\{?SKILL_DIR\}?\"?/scripts/([A-Za-z0-9._-]+)")
+SCRIPT_PLACEHOLDER_NAMES = {"...", "..", "."}
 
 
 def find_skill_files() -> list[Path]:
@@ -176,6 +187,30 @@ def check_plugin_root_portability(text: str) -> list[str]:
         for token in FORBIDDEN_SKILL_ROOT_VARS
         if re.search(rf"(?<![A-Z0-9_]){re.escape(token)}(?![A-Z0-9_])", code_text)
     ]
+
+
+def check_bundled_script_refs(text: str, path: Path) -> list[str]:
+    """Every `$SKILL_DIR/scripts/<name>` must resolve to a file the skill actually bundles.
+
+    A skill's runtime guard can only report a missing bundled script *after* the user has
+    invoked the skill. This catches the same packaging error at merge time, where it is
+    still free to fix. Resolution is scoped to the owning skill — a script bundled by some
+    *other* skill does not satisfy the reference.
+    """
+    scripts_dir = skill_dir_of(path) / "scripts"
+    problems = []
+    for name in sorted(set(BUNDLED_SCRIPT_RE.findall(text))):
+        if name in SCRIPT_PLACEHOLDER_NAMES:
+            continue
+        if not (scripts_dir / name).is_file():
+            try:
+                where = scripts_dir.relative_to(REPO_ROOT)
+            except ValueError:  # a path outside the repo (unit tests use a tempdir)
+                where = scripts_dir
+            problems.append(
+                f"references $SKILL_DIR/scripts/{name}, but {where}/{name} does not exist"
+            )
+    return problems
 
 
 def normalize_anchor(text: str) -> str:
@@ -366,11 +401,12 @@ def main() -> int:
         portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
+        script_refs = check_bundled_script_refs(text, path)
 
-        if not portability and not capture and not section_refs:
+        if not portability and not capture and not section_refs and not script_refs:
             print(
                 f"OK   {rel} ({name}): plugin-root portability "
-                "+ capture-before-use + section refs clean"
+                "+ capture-before-use + section refs + bundled scripts clean"
             )
             continue
 
@@ -380,8 +416,10 @@ def main() -> int:
             print(f"{severity} {rel} ({name}) [capture-before-use]: {msg}")
         for msg in section_refs:
             print(f"ERROR {rel} ({name}) [section-ref]: {msg}")
+        for msg in script_refs:
+            print(f"ERROR {rel} ({name}) [bundled-script-ref]: {msg}")
 
-        if portability or section_refs:
+        if portability or section_refs or script_refs:
             hard_fail = True
         if severity == "ERROR" and capture:
             hard_fail = True
@@ -396,11 +434,12 @@ def main() -> int:
         portability = check_plugin_root_portability(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
+        script_refs = check_bundled_script_refs(text, path)
 
-        if not portability and not capture and not section_refs:
+        if not portability and not capture and not section_refs and not script_refs:
             print(
                 f"OK   {rel} ({skill_name}): plugin-root portability "
-                "+ capture-before-use + section refs clean"
+                "+ capture-before-use + section refs + bundled scripts clean"
             )
             continue
 
@@ -410,8 +449,10 @@ def main() -> int:
             print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
         for msg in section_refs:
             print(f"ERROR {rel} ({skill_name}) [section-ref]: {msg}")
+        for msg in script_refs:
+            print(f"ERROR {rel} ({skill_name}) [bundled-script-ref]: {msg}")
 
-        if portability or section_refs:
+        if portability or section_refs or script_refs:
             hard_fail = True
 
     print("----")
