@@ -12,13 +12,9 @@ is preserved elsewhere or explicitly retired with a reason, and report the measu
 
 - [ ] [HARNESS] Script branch derivation, CHANGELOG `## Unreleased` insertion and backlog-line deletion in `task-next`/`task-new`, and have both invoke the existing `scripts/bump-version.sh` instead of restating the bump rules in prose.
 
-### Tighten the `backlog_candidates.py` guard
-
-- [ ] [FIX] `task-next/SKILL.md:44,115` test `[[ -d "$SKILL_DIR/scripts" ]]` — the directory, not the script. A missing/unreadable `backlog_candidates.py` or a failing `python3` passes the guard. Test the file and the exit status; add a test per failure mode. **Blocks the fallback deletion below** — until this lands, the fallback covers real uncovered states.
-
 ### Drop the `task-next` Step 1 hand-grep fallback
 
-- [ ] [HARNESS] Delete `task-next/SKILL.md:59–142` (~95 lines re-stating `backlog_candidates.py` in prose). Replace with one line stating the skill stops if the bundled script is unavailable. *(blocked by: tighten-guard)*
+- [ ] [HARNESS] Delete the Phase A/B/C hand-grep rules and the zero-candidate stderr taxonomy from `task-next/SKILL.md` Step 1 (~95 lines re-stating `backlog_candidates.py` in prose). The guard now stops the run instead of degrading, so the fallback covers no reachable state — only the prose remains.
 
 ### Collapse the pre-merge cleanup variants
 
