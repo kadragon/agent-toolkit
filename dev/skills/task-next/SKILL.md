@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.3
+version: 1.4.4
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -55,69 +55,29 @@ list at exit 0 is meaningful and must not be swallowed** (see the zero-candidate
 A missing `backlog.md` is a non-zero exit by design: it is a Prerequisite above, so the run stops
 and the user goes to `dev:harness-init`. Only `tasks.md` is optional.
 
-Prints one line per candidate — `[N] <source>: <heading> (<M> items)` (h1 sprint blocks omit
-the item count) — already applying the Phase A → B → C order, per-phase caps, and the combined
-cap-5 truncation described below. The guard above **stops the run** when the script is missing or
-exits non-zero — it does not degrade to hand-grepping. The Phase A/B/C rules below document what
-the script implements; they are queued for removal (`backlog.md`).
+Prints one line per candidate — `[N] <source>: <heading> (<M> items)`; h1 sprint blocks omit the
+item count. The script owns the selection algorithm end to end: source order (tasks.md `status:
+open` h1 sprint blocks → `## Review Backlog` h3 groups → backlog.md h2/h3 groups), the per-source
+and combined cap-5 truncation, skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by:
+…)*` and blocks marked `status: active`/`done`, and discarding headings and items buried in
+`<!-- ... -->` comments or fenced code blocks. Read the script if you need the exact rule.
 
-Across both paths the script discards any heading or `- [ ]` line that sits inside an
-`<!-- ... -->` block or a ```-fenced (or `~~~`-fenced) code block — commented-out format
-templates and code samples are markup, not work. A fenced heading is the costlier miss: it
-also truncates the enclosing group, so a real `- [ ]` after the fence stops counting toward its
-heading.
+**Read stderr on every run, not just empty ones.** Two orchestrator decisions depend on it:
 
-**Phase A — h1 sprint blocks (tasks.md):**
+- `Warning: unbalanced fence opened at line N in <file>` — a stray odd fence blanks everything
+  after it, so part of the queue can be hidden while other groups still surface. Relay the
+  warning and treat that file as untrustworthy: do NOT present the candidate list as complete.
+- On zero candidates the script writes a diagnosis naming *which kind* of empty this is. If it
+  says candidates are reachable with `--full-scan`, run the full scan — there IS work. Otherwise
+  relay the diagnosis verbatim; **never report "queue clear" on an empty stdout alone.**
 
-```bash
-grep -En "^# |^status:" tasks.md 2>/dev/null
-```
-
-For each `# ` heading, check if the immediately following `status:` line reads `open`. Collect all matching h1 titles in document order.
-
-**Phase B — top Review Backlog h3 groups (tasks.md):** *(skip if Phase A already has 5 candidates)*
-
-```bash
-grep -n "^## Review Backlog\|^### \|^- \[ \]" tasks.md 2>/dev/null | head -80
-```
-
-Locate the `## Review Backlog` line in the output; collect up to **3** h3 sub-headings (in document order) that directly own ≥1 open `- [ ]`.
-
-**Phase C — top backlog.md groups:** *(skip if Phases A+B already have 5 candidates)*
-
-```bash
-grep -n "^## \|^### \|^- \[ \]" backlog.md 2>/dev/null | head -40
-```
-
-Collect up to **2** h2 or h3 groups (in document order) that directly own ≥1 open `- [ ]`, skipping groups where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker.
-
-**Unbalanced-fence warning — read stderr on EVERY run, not just empty ones.** A stray odd
-```` ``` ```` blanks everything after it, which can hide part of the queue while other groups
-still surface. The script writes `Warning: unbalanced fence opened at line N in <file>` to stderr
-whenever it sees one. Surface it to the user and treat the affected file as untrustworthy until
-the fence is closed — do NOT present the candidate list as complete.
-
-**Fast-path selection (A+B+C combined, cap = 5):**
+**Fast-path selection (cap = 5):**
 
 | Count | Action |
 |-------|--------|
-| 0 | No fast-path hits — **read the script's stderr before concluding anything** (see below), then fall through to full scan |
+| 0 | Follow the stderr diagnosis above, then fall through to the full scan |
 | 1 | Announce the group and proceed directly to Step 3 |
 | 2–5 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
-
-**Zero candidates is ambiguous — never report "queue clear" on an empty stdout alone.** When
-the script finds nothing it writes a diagnosis to **stderr** naming which kind of empty this
-is, and they demand opposite responses:
-
-- *"N candidate(s) ARE reachable with --full-scan"* — the fast path's rules simply do not cover
-  them (e.g. a `tasks.md` h2 outside `## Review Backlog`). Run the full scan; there IS work.
-- *"heading(s) own prose bullets but no `- [ ]` item"* — format drift. The file holds real work
-  the parser cannot see, because only checkbox lines are selectable and `####`-or-deeper
-  headings are not headings to it. Surface this to the user; do NOT report an empty queue.
-- *"actionable item(s) sit above the first heading"* / *"attributed … but no phase selected
-  them"* — real work, unreachable by every rule. Same handling: surface, do not silently drop.
-- *"all parked by a `*(blocked by: …)*` marker"* or *"no open items"* — these are the genuine
-  empties. Report per Step 2 (surface the blockers, or "nothing open").
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
@@ -130,30 +90,10 @@ rc=$?
 [[ $rc -eq 0 ]] || { echo "backlog_candidates.py exited $rc — see its stderr above" >&2; exit 1; }
 ```
 
-This applies rules 1–5 below in order, uncapped — note rules 4+5 use type priority (all
-qualifying h3 headings first, then all qualifying h2 headings), which is a different ordering
-from Phase C's type-agnostic document-order scan above. As in the fast path, the guard stops the
-run rather than degrading; the greps below document the rules and are queued for removal:
-
-```bash
-grep -En "^#{1,3} |^- \[ \]|^status:" tasks.md 2>/dev/null
-grep -En "^#{1,3} |^- \[ \]" backlog.md 2>/dev/null
-```
-
-The script groups each `- [ ]` line under its nearest preceding heading. A group is **candidate** if it directly contains ≥1 open `- [ ]` line ("directly" means no narrower sub-heading sits between the item and this heading).
-
-**tasks.md candidates (in order):**
-1. h1 (`# `) blocks with `status: open` — the `tasks.md` grep above captures `status:` lines; match each h1 heading to the `status:` line that immediately follows it. The h1 title is the sprint scope; do not expand item list here.
-2. h3 (`### `) sub-headings under `## Review Backlog` that directly own ≥1 open `- [ ]`.
-3. h2 (`## `) headings outside Review Backlog that directly own ≥1 open `- [ ]`.
-
-Skip h1 blocks with `status: active` (already in flight) or `status: done`.
-
-**backlog.md candidates (after tasks.md):**
-4. h3 (`### `) sub-headings under any h2 container that directly own ≥1 open `- [ ]`.
-5. h2 (`## `) headings that directly own ≥1 open `- [ ]` (domain groups, `## Now`, `## Next`).
-
-Skip headings where every item is `[x]`, `[>]`, or carries a `*(deferred: ...)*`/`*(blocked by: ...)*` marker. Note: all h2/h3 headings with open checkboxes are candidates — including `## Ideas` or `## Someday` sections left unscheduled. Authors must use `[>]` or `[x]` to park items intentionally; the old `## Now`/`## Next` allowlist is removed.
+Same rules, uncapped, plus one ordering difference: the backlog.md sources use type priority (all
+qualifying h3 headings before any h2 heading) instead of the fast path's document order. Every
+h2/h3 with an open `- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
+`[>]`/`[x]`/a `*(deferred: ...)*` marker, not by choosing a section name.
 
 ## Step 2 — Select
 
@@ -276,18 +216,10 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Do not proceed to qa-verifier.
 
 **QA (workflows.md Step 4)**
-This skill always spawns `qa-verifier` as a separate agent. That is this skill's own bar, not one
-workflows.md imposes — Step 4 there only requires that verification, *if* delegated, goes to
-`qa-verifier`.
-
-This one spawn is a deliberate exception to the repo's usual gate, which reads: "Delegate only
-when the user asks or a skill directs — **and** only if the work then also clears the global gate
-(10+ files to read/summarize · 3+ truly independent units · output would flood main context).
-Both conditions, not either." The exception is to the *second* condition only. What the spawn buys
-is **independence** — a verifier that did not write the code — which is a correctness property,
-not a volume one, so a volume gate cannot measure it; a 1-file fix needs an independent check as
-much as a 20-file one. Every other delegation in this skill still requires both conditions. The
-implementing agent must not verify.
+This skill always spawns `qa-verifier` as a separate agent, and the implementing agent must not
+verify — a deliberate exception to the volume half of the repo's delegation gate, argued once in
+`docs/delegation.md` → *Role Routing*. Every other delegation in this skill still needs both
+conditions.
 
 If qa-verifier reports blocking issues:
 1. Surface findings to user.
@@ -309,28 +241,26 @@ so there is one clean commit per review/merge cycle.
 Mark the sprint done and sync tracking files — leave as uncommitted so they land in the
 initial PR commit alongside the code.
 
-*Task came from tasks.md h1 block:*
-1. Delete the entire h1 block from `tasks.md` (the `# heading`, `status:` line, and all body content). If `tasks.md` has no remaining content after deletion, delete the file.
-2. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md`:
-   `- [done] <sprint title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
-   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — reusable detail belongs in the
-   owning `docs/*.md` (link it), narrative belongs in the commit and PR body. Full rules:
-   `harness-invariants.md` → *CHANGELOG Entry Contract*.
+Two steps, in order. Step 1 varies by where the task came from; Step 2 is identical for all three.
 
-*Task came from tasks.md finding group (h3/h2):*
-1. In `tasks.md`: **delete** each completed finding line (the `- [ ]` items that were fixed). If the h3 heading has no remaining open `- [ ]` items after deletion, delete the heading line too. If `## Review Backlog` becomes empty, delete that section header as well. If `tasks.md` is now entirely empty, delete the file.
-2. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
-   `- [done] <finding-group title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
-   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — see the *CHANGELOG Entry
-   Contract* in `docs/conventions.md`.
+**1. Delete the completed work from its tracking file(s):**
 
-*Task came from backlog.md group:*
-1. In `tasks.md`: delete the Sprint Contract block (the entire h1 block with `status: active`). If `tasks.md` has no remaining content, delete the file.
-2. In `backlog.md`: **delete** each item line listed in `## Covers` of the Sprint Contract. Also delete any h2/h3 heading that has no remaining open `- [ ]` items after the deletion.
-3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
-   `- [done] <sprint title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
-   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory clauses** — see the *CHANGELOG Entry
-   Contract* in `harness-invariants.md`.
+| Task came from | Delete |
+|----------------|--------|
+| tasks.md h1 block | the entire h1 block — `# heading`, `status:` line, and all body content |
+| tasks.md finding group (h3/h2) | each `- [ ]` finding line that was fixed |
+| backlog.md group | the Sprint Contract h1 block (`status: active`) from `tasks.md`, **and** every `backlog.md` line listed verbatim in its `## Covers` |
+
+Then cascade the deletion upward in both files: drop any heading left with no open `- [ ]`
+items, drop `## Review Backlog` if it becomes empty, and delete `tasks.md` outright if nothing
+remains in it.
+
+**2. Insert one line as the first entry under `## Unreleased` in `CHANGELOG.md`** (create the
+section if absent): `- [done] <sprint or finding-group title> (<plugin> v<X.Y.Z>) (<date>)`,
+optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the
+`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **≤160 chars, no explanatory
+clauses** — reusable detail belongs in the owning `docs/*.md` (link it), narrative belongs in
+the commit and PR body. Full rules: `harness-invariants.md` → *CHANGELOG Entry Contract*.
 
 *Blocked-analysis sync (runs for every source type):*
 
