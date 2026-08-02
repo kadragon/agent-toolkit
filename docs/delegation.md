@@ -35,10 +35,12 @@ No row below is a gate. When the threshold above is met, match the job to the ro
 That constraint holds whenever a verifier runs; it does not by itself mandate spawning one.
 
 **Why `task-next` always spawns one anyway.** That skill overrides the volume half of the gate
-(10+ files · 3+ units · context flood) for this one spawn, and only for it. What the spawn buys
-is **independence** — a verifier that did not write the code — which is a correctness property,
-not a volume one, so a volume gate cannot measure it: a 1-file fix needs an independent check as
-much as a 20-file one. Every other delegation in that skill still requires both conditions.
+(10+ files · 3+ units · context flood) for its QA spawns — **every** one it owns, including the
+per-unit verifier each successful unit gets in `--all` batch mode, and nothing else. What the
+spawn buys is **independence** — a verifier that did not write the code — which is a correctness
+property, not a volume one, so a volume gate cannot measure it: a 1-file fix needs an independent
+check as much as a 20-file one. Every non-QA delegation in that skill still requires both
+conditions.
 
 ## Background Routing (non-blocking)
 

@@ -122,8 +122,8 @@ any worktree.
 4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
    single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
 5. **Pre-merge cleanup — once.**
-   - **tasks.md findings**: delete each completed `- [ ]` line. Remove the h3/h2 heading if no open items remain. Remove `## Review Backlog` if it becomes empty. If `tasks.md` is now entirely empty, delete the file.
-   - **backlog.md**: delete each completed item line. Remove h2/h3 headings that have no remaining open `- [ ]` items.
+   - **tasks.md findings**: delete each completed `- [ ]` line. Remove an h3/h2 heading only if this batch emptied it — headings elsewhere whose items are all `[x]`/`[>]` are deliberate history, not leftovers. Remove `## Review Backlog` if it becomes empty. If `tasks.md` is now entirely empty, delete the file.
+   - **backlog.md**: delete each completed item line. Remove an h2/h3 heading only if this batch emptied it — headings elsewhere whose items are all `[x]`/`[>]` are deliberate history, not leftovers.
    - **CHANGELOG.md**: insert **one** line as the first entry under `## Unreleased`: `- [done] <batch-slug> (<N> units) (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **No per-unit breakdown** — the units are enumerated in the PR body. Every other rule, the character cap included, lives in the *CHANGELOG Entry Contract* in `harness-invariants.md`; read it rather than reconstructing the limits.
    - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
