@@ -1,6 +1,9 @@
 # Design: `task-*` Pipeline Graph + Edge Enforcement Audit
 
-**Status:** analysis (no code change in this doc)
+**Status:** analysis (no code change in this doc). **Enforcement direction superseded by
+`docs/design/harness-altitude-audit.md`** — the graph and the edge table below stand, but the
+"5 of 12 edges" ratio is not a completion metric; items 2 and 3 of the resulting backlog were cut
+there and should not be re-filed without new evidence.
 **Branch:** `plan/task-graph-audit`
 **Type:** `[PLAN]` — produces backlog items, not behavior.
 
