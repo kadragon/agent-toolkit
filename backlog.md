@@ -1,17 +1,5 @@
 # Backlog
 
-## Harness — `task-*` prose reduction
-
-Source: `docs/design/harness-altitude-audit.md`. Highest-value work in this file: it pays every run
-by shrinking the procedure a `task-next` invocation loads before reading any repo file. One h3 per
-item so each is independently selectable. Every item here carries the same acceptance bar — before
-editing, enumerate the current behaviors as a checklist; every deleted line must map to a row that
-is preserved elsewhere or explicitly retired with a reason, and report the measured `wc -w` delta.
-
-### Script the deterministic `task-*` nodes
-
-- [ ] [HARNESS] Script branch derivation, CHANGELOG `## Unreleased` insertion and backlog-line deletion in `task-next`/`task-new`, and have both invoke the existing `scripts/bump-version.sh` instead of restating the bump rules in prose.
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

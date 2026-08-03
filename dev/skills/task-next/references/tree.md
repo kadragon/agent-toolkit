@@ -8,8 +8,13 @@ while a task is in flight.
 **Modified Branch step (replaces `git checkout -b` under `--tree`):**
 
 ```bash
-SLUG=<slug>            # short slug derived from item title
-BRANCH=<type>/<slug>   # derived as normal from item [type] tag + slug
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/scripts/task_nodes.py"
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
+  | python3 "$NODES" branch --title "<selected heading title>")
+[[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
+SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
@@ -49,7 +54,7 @@ git branch -D "$BRANCH"
 ```
 Report the failure; main checkout remains on `main`.
 
-**Version bump (workflows.md Step 5):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then edit the manifests in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
+**Version bump (workflows.md Step 5):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
 
 **Collapse after QA passes:**
 

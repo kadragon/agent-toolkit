@@ -21,9 +21,13 @@ Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     unresolvable one was deleted or renamed.
 
 (d) Bundled-script references — every `$SKILL_DIR/scripts/<name>` named in a
-    skill's markdown must resolve to a file that skill actually bundles. The
-    runtime guard in the skill can only report this after invocation; this
-    catches the packaging error at merge time instead.
+    skill's markdown must resolve to a file that skill actually bundles, and
+    every `$SKILL_DIR/../<sibling>/scripts/<name>` must resolve to a file that
+    named sibling skill bundles. The runtime guard in the skill can only report
+    this after invocation; this catches the packaging error at merge time
+    instead. The sibling form exists because two skills in one plugin may share
+    a single copy of a script (`task-new` invokes `task-next`'s `task_nodes.py`)
+    rather than duplicating it and letting the copies drift.
 
 Scope note: plugin-root portability, section-reference and bundled-script
 violations are unconditional errors.
@@ -92,6 +96,12 @@ SIGNAL_TAXONOMY_BASENAME = "signal-taxonomy.md"
 # The trailing name is matched loosely and filtered below — `$SKILL_DIR/scripts/...` is a
 # prose placeholder, not a file.
 BUNDLED_SCRIPT_RE = re.compile(r"\$\{?SKILL_DIR\}?\"?/scripts/([A-Za-z0-9._-]+)")
+# Sibling-skill invocations: `$SKILL_DIR/../task-next/scripts/task_nodes.py`. Two skills in one
+# plugin may share a single copy of a script rather than duplicating it; the reference is just as
+# breakable as an own-skill one, so it gets the same merge-time check against the named sibling.
+SIBLING_SCRIPT_RE = re.compile(
+    r"\$\{?SKILL_DIR\}?\"?/\.\./([A-Za-z0-9._-]+)/scripts/([A-Za-z0-9._-]+)"
+)
 SCRIPT_PLACEHOLDER_NAMES = {"...", "..", "."}
 
 
@@ -197,19 +207,32 @@ def check_bundled_script_refs(text: str, path: Path) -> list[str]:
     still free to fix. Resolution is scoped to the owning skill — a script bundled by some
     *other* skill does not satisfy the reference.
     """
-    scripts_dir = skill_dir_of(path) / "scripts"
+    skill_dir = skill_dir_of(path)
     problems = []
+
+    def report(ref: str, target: Path) -> None:
+        try:
+            where = target.relative_to(REPO_ROOT)
+        except ValueError:  # a path outside the repo (unit tests use a tempdir)
+            where = target
+        problems.append(f"references {ref}, but {where} does not exist")
+
     for name in sorted(set(BUNDLED_SCRIPT_RE.findall(text))):
         if name in SCRIPT_PLACEHOLDER_NAMES:
             continue
-        if not (scripts_dir / name).is_file():
-            try:
-                where = scripts_dir.relative_to(REPO_ROOT)
-            except ValueError:  # a path outside the repo (unit tests use a tempdir)
-                where = scripts_dir
-            problems.append(
-                f"references $SKILL_DIR/scripts/{name}, but {where}/{name} does not exist"
-            )
+        target = skill_dir / "scripts" / name
+        if not target.is_file():
+            report(f"$SKILL_DIR/scripts/{name}", target)
+
+    # A sibling reference resolves against `{plugin}/skills/<sibling>/scripts/<name>` — the
+    # deliberate shared-copy case (`task-new` -> `task-next`), not a stray relative path.
+    for sibling, name in sorted(set(SIBLING_SCRIPT_RE.findall(text))):
+        if name in SCRIPT_PLACEHOLDER_NAMES or sibling in SCRIPT_PLACEHOLDER_NAMES:
+            continue
+        target = skill_dir.parent / sibling / "scripts" / name
+        if not target.is_file():
+            report(f"$SKILL_DIR/../{sibling}/scripts/{name}", target)
+
     return problems
 
 
