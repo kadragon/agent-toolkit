@@ -239,8 +239,14 @@ The judgment is *which* plugin and *which* bump level; the rewrite itself is scr
 AFTER all changes, BEFORE handoff.
 
 ```bash
-[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch>
+[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch> \
+  [--skill <name> <major|minor|patch>]
 ```
+
+Pass `--skill` when the changed files include that skill's own `SKILL.md`, so its `version:`
+frontmatter does not go stale. The script takes **one** `--skill` per run and bumps the plugin on
+every run, so a change touching two skills needs the second skill's `version:` edited by hand —
+re-running would bump the plugin twice for one change.
 
 `bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
 header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them
@@ -275,10 +281,13 @@ python3 "$NODES" changelog --file CHANGELOG.md --title "<sprint or finding-group
   --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
 ```
 
-`prune-*` refuses (exit 1) and changes nothing on a line that does not match verbatim — re-read and
-re-run rather than loosening the input. A heading is dropped only where this sprint emptied it, so
-`[x]`/`[>]` history, prose and surviving children all keep their ancestors alive; `tasks.md` goes
-once empty, `backlog.md` never does. What the script cannot decide — the character cap, and the ban
+`prune-*` refuses (exit 1) and changes nothing when a line matches no line verbatim, or matches
+more than one — an ambiguous target is the dangerous case, since two sections can hold identically
+worded items and only one is done. Re-read and re-run rather than loosening the input. A heading is
+dropped only where this sprint left its whole section blank, so `[x]`/`[>]` history, prose and
+surviving child headings all keep their ancestors alive. **This is deliberately stricter than the
+rule it replaced** ("no open `- [ ]` items left"), which would strand surviving `[x]` lines under a
+deleted heading. `tasks.md` goes once empty, `backlog.md` never does. What the script cannot decide — the character cap, and the ban
 on explanatory clauses, file lists and narration — lives in `harness-invariants.md` → *CHANGELOG
 Entry Contract*. Read it before choosing the title; do not reconstruct the limits from memory.
 

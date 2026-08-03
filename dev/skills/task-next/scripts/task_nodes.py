@@ -50,13 +50,19 @@ from __future__ import annotations
 import datetime
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from backlog_candidates import _headings, tokenize  # noqa: E402
+from backlog_candidates import (  # noqa: E402
+    _headings,
+    _strip_fenced_blocks,
+    _strip_html_comments,
+    tokenize,
+)
 
 # `[FEAT]`, `[HARNESS]`, … as written at the head of a checkbox item's text.
 _TAG_RE = re.compile(r"\[([A-Z][A-Z_-]*)\]")
@@ -236,19 +242,30 @@ def insert_changelog_entry(text: str, entry: str) -> tuple[str, bool]:
 # prune (shared by prune-backlog and prune-tasks)
 # ---------------------------------------------------------------------------
 
-def _heading_lines(text: str) -> list[int]:
-    """0-based indices of real level-1..3 headings, per `backlog_candidates` semantics.
+def _heading_levels(text: str) -> dict[int, int]:
+    """`{0-based line index: heading level}` for real level-1..3 headings.
 
-    Fenced and commented `##` lines are markup there and must not become deletion boundaries
-    here either — a fake heading would otherwise split a section and make a still-populated
-    region look empty.
+    Fenced and commented `##` lines are markup per `backlog_candidates` semantics and must not
+    become deletion boundaries here either — a fake heading would otherwise split a section and
+    make a still-populated region look empty.
     """
-    return [h["line"] - 1 for h in _headings(tokenize(text))]
+    return {h["line"] - 1: h["level"] for h in _headings(tokenize(text))}
 
 
-def _region_blank(lines: list[str], start: int, heads: list[int]) -> bool:
-    """True if every line strictly after `start` up to the next heading (or EOF) is blank."""
-    end = next((h for h in heads if h > start), len(lines))
+def _region_blank(lines: list[str], start: int, levels: dict[int, int]) -> bool:
+    """True if `start`'s whole section is blank — its own items AND everything nested under it.
+
+    The section ends at the next heading of level <= `start`'s, NOT the next heading of any
+    level. Ending at any heading would stop the scan at `start`'s own surviving child, report
+    the parent as empty, and delete it — orphaning that child. Because a surviving child's
+    heading line is itself non-blank, this span test protects the parent automatically; a child
+    the same run dropped is already blanked and correctly does not.
+    """
+    level = levels.get(start, 1)
+    end = next(
+        (h for h in sorted(levels) if h > start and levels[h] <= level),
+        len(lines),
+    )
     return all(not lines[i].strip() for i in range(start + 1, min(end, len(lines))))
 
 
@@ -295,11 +312,18 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     """
     lines, eols = _split(text)
     default_eol = _dominant_eol(eols)
+    # Match against the same masked view heading detection uses: a `- [ ]` inside a fenced sample
+    # or an HTML comment is markup, not work. harness-init seeds `backlog.md` with a commented-out
+    # `- [ ] Simplest case` template, so without this an item worded like the template is either
+    # deleted from the comment or — since the ambiguity guard above — blocks its own deletion.
+    masked = _strip_fenced_blocks(_strip_html_comments(text)).splitlines()
+    if len(masked) != len(lines):  # line-count contract broken upstream; fail safe, do not guess
+        return text, ["internal: masked line count does not match the source file"]
     wanted = [t.rstrip() for t in targets if t.strip()]
     problems = []
     drop: set[int] = set()
     for target in wanted:
-        hits = [i for i, ln in enumerate(lines) if ln.rstrip() == target]
+        hits = [i for i, ln in enumerate(masked) if ln.rstrip() == target]
         if not hits:
             problems.append(f"no line matches verbatim: {target!r}")
         elif len(hits) > 1:
@@ -315,21 +339,20 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
 
     # Headings whose region this run may have emptied — computed on the ORIGINAL text so a
     # heading that was already empty before the run is left alone (deliberate history).
-    heads = _heading_lines(text)
+    levels = _heading_levels(text)
+    heads = sorted(levels)
     owned: set[int] = set()
     for i in sorted(drop):
         prior = [h for h in heads if h < i]
         if prior:
             owned.add(prior[-1])
 
-    # Cascade: deleting an h3 can empty its h2 parent, but only if the parent holds nothing else.
+    # Cascade: deleting an h3 can empty its h2 parent, but only if the parent holds nothing else —
+    # including no surviving child heading, which `_region_blank`'s level-aware span enforces.
     while True:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
-        newly = {
-            h
-            for h in owned
-            if h not in drop and _region_blank(surviving, h, [x for x in heads if x not in drop])
-        }
+        alive = {h: lv for h, lv in levels.items() if h not in drop}
+        newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
         if not newly:
             break
         drop.update(newly)
@@ -391,7 +414,12 @@ def _require(value: str | None, name: str) -> str:
 def cmd_branch(argv: list[str]) -> int:
     title = _require(_opt(argv, "--title"), "--title")
     max_slug = int(_opt(argv, "--max-slug") or DEFAULT_MAX_SLUG)
-    name, warning = branch_name(title, _read_stdin_lines(), _opt(argv, "--tag"), max_slug)
+    # Resolve --tag BEFORE touching stdin: with a tag there is nothing to derive, and an inherited
+    # open pipe (task-new's documented invocation passes no stdin redirect) would block the read
+    # forever. `isatty()` alone does not cover that case.
+    tag = _opt(argv, "--tag")
+    items = [] if tag else _read_stdin_lines()
+    name, warning = branch_name(title, items, tag, max_slug)
     if not name:
         sys.stderr.write(f"Error: {warning}\n")
         return 1
@@ -528,6 +556,25 @@ def run_tests() -> int:
 
     _assert(branch_name("Anything", [], tag="REFACTOR")[0].startswith("refactor/"),
             "--tag overrides stdin derivation")
+
+    # REGRESSION GUARD (claude review, PR #192) — with --tag there is nothing to derive from
+    # stdin, and an inherited open pipe (task-new passes no redirect) blocks the read forever.
+    with tempfile.TemporaryDirectory() as _td:
+        _r, _w = os.pipe()
+        _proc = subprocess.Popen(
+            [sys.executable, __file__, "branch", "--title", "some title", "--tag", "FIX"],
+            stdin=_r, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=_td,
+        )
+        os.close(_r)
+        try:
+            _out, _ = _proc.communicate(timeout=10)
+            _assert(_out.decode().strip() == "fix/some-title",
+                    "--tag short-circuits the stdin read — no hang on an inherited open pipe")
+        except subprocess.TimeoutExpired:
+            _proc.kill()
+            _assert(False, "--tag short-circuits the stdin read — no hang on an inherited open pipe")
+        finally:
+            os.close(_w)
     _assert(slugify("[HARNESS] Leading tag is dropped") == "leading-tag-is-dropped",
             "a leading [TYPE] tag is not repeated in the slug")
     _assert(slugify("a" * 80) == "a" * DEFAULT_MAX_SLUG,
@@ -627,6 +674,29 @@ Preamble prose that outlives its items.
     unchanged, problems = prune_lines(backlog, ["- [ ] nope"])
     _assert(unchanged == backlog, "a refused run deletes nothing at all")
 
+    # REGRESSION GUARD (agy review, PR #192) — every fixture above gives the parent h2 a preamble,
+    # which hid this: with no preamble, `_region_blank` used to stop at the parent's own surviving
+    # child h3, call the parent empty, and delete it — orphaning that child. The section must end
+    # at the next heading of level <= its own, not the next heading of any level.
+    siblings = """## Group
+
+### Sub A
+
+- [ ] [FIX] item A
+
+### Sub B
+
+- [ ] [FIX] item B
+"""
+    out, _ = prune_lines(siblings, ["- [ ] [FIX] item A"])
+    _assert("## Group" in out, "a parent with a surviving child h3 is NOT deleted, even with no preamble")
+    _assert("### Sub A" not in out, "the emptied child h3 is still deleted")
+    _assert("### Sub B" in out and "- [ ] [FIX] item B" in out, "the surviving child is not orphaned")
+
+    out, _ = prune_lines(siblings, ["- [ ] [FIX] item A", "- [ ] [FIX] item B"])
+    _assert("## Group" not in out and out == "",
+            "emptying every child still cascades the parent away — the fix does not block a full cascade")
+
     history = """## Shipped
 
 - [x] done long ago
@@ -639,6 +709,38 @@ Preamble prose that outlives its items.
     _assert("## Shipped" in out and "- [x] done long ago" in out,
             "a heading holding only [x] history is NOT deleted — this run did not empty it")
     _assert("## Live" not in out, "the heading this run did empty IS deleted")
+
+    # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
+    # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init
+    # seeds into backlog.md collided with a real item worded the same way. With the ambiguity
+    # guard above that collision blocks a legitimate deletion outright.
+    commented_template = """# Backlog
+
+<!--
+## Feature Name
+- [ ] Simplest case
+-->
+
+## Real group
+
+- [ ] Simplest case
+"""
+    out, problems = prune_lines(commented_template, ["- [ ] Simplest case"])
+    _assert(problems == [], "a commented-out template line is not a competing match")
+    _assert("## Real group" not in out and "<!--" in out,
+            "the real item is deleted (emptying its heading) while the comment is left intact")
+
+    fenced_item = """## Real group
+
+```markdown
+- [ ] Simplest case
+```
+
+- [ ] Simplest case
+"""
+    out, problems = prune_lines(fenced_item, ["- [ ] Simplest case"])
+    _assert(problems == [] and "```markdown" in out,
+            "a fenced sample line is not a competing match either, and survives the deletion")
 
     fenced = """## Real group
 

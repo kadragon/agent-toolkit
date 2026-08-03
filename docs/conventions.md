@@ -162,6 +162,13 @@ Typical trap: anchoring an ordering assertion on the wrong landmark. `lines.inde
 finds the *opening* fence, so "inserted after the fence" is satisfied by an insertion *inside*
 the fenced block — the exact defect under test. Anchor on the real target instead.
 
+**Mutation-testing a fixture set proves each assertion bites; it does not prove the set is
+complete.** Vary the structural precondition, not just the payload. In PR #192 every fixture for
+`task_nodes.py`'s heading cascade gave the parent heading a preamble paragraph; each assertion
+went red under mutation, and the suite still missed a parent with *no* preamble being deleted out
+from under its surviving child. The shared, unstated precondition was the blind spot — so when a
+fixture family holds some structural fact constant, add the case where it does not hold.
+
 ### Validator Discovery (enumerate by path, fail closed)
 
 A CI validator must decide *what it covers* from the path layout, never from the content it is

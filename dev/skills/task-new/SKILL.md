@@ -127,8 +127,14 @@ The judgment is *which* plugin and *which* bump level; the rewrite is scripted. 
 changes, BEFORE handoff.
 
 ```bash
-[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch>
+[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch> \
+  [--skill <name> <major|minor|patch>]
 ```
+
+Pass `--skill` when the changed files include that skill's own `SKILL.md`, so its `version:`
+frontmatter does not go stale. The script takes **one** `--skill` per run and bumps the plugin on
+every run, so a change touching two skills needs the second skill's `version:` edited by hand —
+re-running would bump the plugin twice for one change.
 
 `bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
 header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them

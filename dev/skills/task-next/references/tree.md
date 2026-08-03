@@ -9,8 +9,11 @@ while a task is in flight.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/scripts/task_nodes.py"
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
-  | python3 "$SKILL_DIR/scripts/task_nodes.py" branch --title "<selected heading title>")
+  | python3 "$NODES" branch --title "<selected heading title>")
+[[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)

@@ -127,6 +127,7 @@ any worktree.
    ```bash
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
    NODES="$SKILL_DIR/scripts/task_nodes.py"
+   [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
    printf '%s\n' "<every completed tasks.md finding line>" | python3 "$NODES" prune-tasks --file tasks.md
    printf '%s\n' "<every completed backlog.md item line>"  | python3 "$NODES" prune-backlog --file backlog.md
    python3 "$NODES" changelog --file CHANGELOG.md --title "<batch-slug>" --units <N> \
