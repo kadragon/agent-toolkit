@@ -259,6 +259,27 @@ def main() -> int:
             run_scripts('python3 "${SKILL_DIR}/scripts/absent.py"') != [],
         )
 
+        # Sibling form: two skills in one plugin sharing one copy of a script. The reference is
+        # as breakable as an own-skill one, so it must be graded, not silently skipped.
+        check(
+            "a sibling skill's bundled script resolves",
+            run_scripts('python3 "$SKILL_DIR/../beta/scripts/elsewhere.py"') == [],
+        )
+        sib_missing = run_scripts('python3 "$SKILL_DIR/../beta/scripts/absent.py"')
+        check(
+            "a missing sibling script is reported, not skipped",
+            sib_missing != [] and "../beta/scripts/absent.py" in sib_missing[0],
+            f"got {sib_missing}",
+        )
+        check(
+            "a reference to a sibling skill that does not exist at all is reported",
+            run_scripts('python3 "$SKILL_DIR/../gamma/scripts/present.py"') != [],
+        )
+        check(
+            "the sibling path is not also graded as an own-skill reference",
+            run_scripts('python3 "$SKILL_DIR/../beta/scripts/elsewhere.py"') == [],
+        )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

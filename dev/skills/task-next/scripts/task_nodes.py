@@ -1,0 +1,758 @@
+#!/usr/bin/env python3
+"""task_nodes.py — the deterministic nodes of the `task-next` / `task-new` code cycle.
+
+Branch derivation, CHANGELOG `## Unreleased` insertion and backlog/tasks line deletion are
+transforms with one correct output for a given input. Leaving them as prose means every run
+re-reads and re-interprets the rule; putting them here means the rule is executed, not recalled.
+`task-new` invokes this same file as a bundled sibling
+(`$SKILL_DIR/../task-next/scripts/task_nodes.py`) — both skills ship in the `dev` plugin and are
+always co-installed, so there is exactly one copy of each rule.
+
+Usage:
+  python3 task_nodes.py branch --title TITLE [--tag TAG] [--max-slug N] < items
+  python3 task_nodes.py changelog --file PATH --title TITLE [--plugin P --version V]
+                                  [--units N] [--link PATH] [--date YYYY-MM-DD]
+  python3 task_nodes.py prune-backlog --file PATH < items
+  python3 task_nodes.py prune-tasks --file PATH (--block TITLE | < items)
+  python3 task_nodes.py --test
+
+  branch          Print `<type>/<slug>`. Item lines on stdin supply the `[TYPE]` tag: all items
+                  sharing one tag give that prefix (lowercased); mixed or absent tags fall back
+                  to `fix` and say so on stderr. `--tag` skips stdin derivation entirely.
+                  Does NOT run git — the caller does `git checkout -b "$(...)"`.
+
+  changelog       Compose one entry and insert it as the FIRST line under `## Unreleased`,
+                  creating that section (and the file) when absent. Prints the inserted line.
+                  An identical line already under `## Unreleased` is left alone (re-run safe).
+
+  prune-backlog   Delete the verbatim `- [ ]` lines given on stdin, then delete any heading
+                  this run left with an entirely blank region. Refuses (exit 1) on a line that
+                  matches nothing, rather than deleting an approximation of it.
+
+  prune-tasks     Same deletion pass for finding lines, plus `--block TITLE` to delete a whole
+                  h1 sprint block. Deletes the file when nothing but blank lines is left.
+
+Deliberate non-goal — the CHANGELOG character cap is NOT enforced here. Its single enforcement
+point is `MAX_LEN` in the repo's `scripts/ci/check_changelog_entries.py`; a second hardcoded copy
+inside a shipped script is exactly the drift that single-sourcing removed. This script composes
+and places the line; the cap, and every judgment the *CHANGELOG Entry Contract* states (no
+explanatory clauses, no file lists), stay where they already live.
+
+Heading detection is imported from the sibling `backlog_candidates.py` so the two scripts agree
+on what a heading is — fenced code blocks and HTML comments are markup in both, and a `## Fake`
+inside a sample must not become a deletion boundary here either.
+
+Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures are in-memory or in a tempdir.
+"""
+
+from __future__ import annotations
+
+import datetime
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from backlog_candidates import _headings, tokenize  # noqa: E402
+
+# `[FEAT]`, `[HARNESS]`, … as written at the head of a checkbox item's text.
+_TAG_RE = re.compile(r"\[([A-Z][A-Z_-]*)\]")
+_CHECKBOX_LINE_RE = re.compile(r"^\s*-\s*\[[ xX>]\]\s*(.*)$")
+DEFAULT_MAX_SLUG = 48
+FALLBACK_TAG = "fix"
+
+
+# ---------------------------------------------------------------------------
+# branch
+# ---------------------------------------------------------------------------
+
+def slugify(title: str, max_len: int = DEFAULT_MAX_SLUG) -> str:
+    """Lowercase kebab slug, truncated at a word boundary.
+
+    A leading `[TYPE]` tag is dropped: it is already encoded in the branch prefix, so
+    `harness/harness-script-…` would say it twice.
+    """
+    text = _TAG_RE.sub(" ", title)
+    text = text.replace("`", " ").replace("*", " ")
+    text = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
+    text = re.sub(r"-{2,}", "-", text)
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len]
+    # Prefer a word boundary, but never return an empty slug for a single very long token.
+    return cut.rsplit("-", 1)[0] if "-" in cut else cut
+
+
+def derive_tag(item_lines: list[str]) -> tuple[str, str | None]:
+    """Return `(prefix, warning)` for the branch type prefix.
+
+    All items sharing one `[TYPE]` tag give that tag lowercased. Mixed tags, or no tag at all,
+    fall back to `fix` with a warning — matching the SKILL.md rule this replaces.
+    """
+    tags = []
+    for raw in item_lines:
+        m = _CHECKBOX_LINE_RE.match(raw)
+        body = m.group(1) if m else raw
+        found = _TAG_RE.match(body.strip())
+        if found:
+            tags.append(found.group(1).lower())
+    if not tags:
+        return FALLBACK_TAG, f"No [TYPE] tag on any item — defaulting branch prefix to `{FALLBACK_TAG}/`"
+    unique = sorted(set(tags))
+    if len(unique) > 1:
+        return (
+            FALLBACK_TAG,
+            f"Items carry mixed [TYPE] tags ({', '.join(unique)}) — defaulting branch prefix to `{FALLBACK_TAG}/`",
+        )
+    if len(tags) != len(item_lines):
+        return (
+            unique[0],
+            f"{len(item_lines) - len(tags)} of {len(item_lines)} items carry no [TYPE] tag — "
+            f"using the shared tag `{unique[0]}/` from the rest",
+        )
+    return unique[0], None
+
+
+def branch_name(title: str, item_lines: list[str], tag: str | None = None, max_slug: int = DEFAULT_MAX_SLUG) -> tuple[str, str | None]:
+    warning = None
+    if tag is None:
+        tag, warning = derive_tag(item_lines)
+    slug = slugify(title, max_slug)
+    if not slug:
+        return "", "Title produced an empty slug — pass a title with at least one alphanumeric character"
+    return f"{tag.lower()}/{slug}", warning
+
+
+# ---------------------------------------------------------------------------
+# changelog
+# ---------------------------------------------------------------------------
+
+UNRELEASED_HEADING = "## Unreleased"
+
+
+# ---------------------------------------------------------------------------
+# Line-ending-preserving split/join
+# ---------------------------------------------------------------------------
+#
+# `text.splitlines()` + `"\n".join(...)` rewrites every line ending in the file, so a CRLF
+# checkout comes back LF-only — including regions this run never touched. Markdown is not
+# LF-pinned in this repo (`docs/conventions.md` → the CRLF note; `bump-version.sh` carries the
+# same guard), so each line's own terminator is carried alongside it and re-emitted verbatim.
+# Only a line that had no terminator at all — the last line of a file with no trailing newline —
+# gets the file's dominant ending.
+
+def _split(text: str) -> tuple[list[str], list[str]]:
+    """`(bodies, terminators)`, index-aligned. `terminators[i]` is "" only at a newline-less EOF."""
+    bodies, eols = [], []
+    for raw in text.splitlines(keepends=True):
+        body = raw.rstrip("\r\n")
+        bodies.append(body)
+        eols.append(raw[len(body):])
+    return bodies, eols
+
+
+def _dominant_eol(eols: list[str]) -> str:
+    return "\r\n" if eols.count("\r\n") > eols.count("\n") else "\n"
+
+
+def _join(bodies: list[str], eols: list[str], default: str) -> str:
+    return "".join(body + (eol or default) for body, eol in zip(bodies, eols))
+
+
+def compose_entry(
+    title: str,
+    *,
+    plugin: str | None = None,
+    version: str | None = None,
+    units: int | None = None,
+    link: str | None = None,
+    date: str | None = None,
+) -> str:
+    """`- [done] <title> [(<N> units)] [(<plugin> v<X.Y.Z>)] (<date>) [→ <link>]`."""
+    parts = [f"- [done] {title.strip()}"]
+    if units is not None:
+        parts.append(f"({units} units)")
+    if plugin and version:
+        parts.append(f"({plugin} v{version.lstrip('v')})")
+    parts.append(f"({date or datetime.date.today().isoformat()})")
+    line = " ".join(parts)
+    if link:
+        line += f" → {link}"
+    return line
+
+
+def insert_changelog_entry(text: str, entry: str) -> tuple[str, bool]:
+    """Insert `entry` as the first line under `## Unreleased`. Returns `(new_text, inserted)`.
+
+    Creates the section (after a leading `# ` title if there is one) and the whole file when
+    absent. An identical entry already present under `## Unreleased` is left alone so a re-run
+    after a partial cycle does not double-log.
+    """
+    lines, eols = _split(text)
+    eol = _dominant_eol(eols)
+    idx = next((i for i, ln in enumerate(lines) if ln.strip() == UNRELEASED_HEADING), None)
+
+    def splice(at: int, block: list[str]) -> None:
+        lines[at:at] = block
+        eols[at:at] = [eol] * len(block)
+
+    if idx is None:
+        if not lines:
+            return f"# Changelog{eol}{eol}{UNRELEASED_HEADING}{eol}{eol}{entry}{eol}", True
+        # After a leading `# ` title (and the blank line under it), else at the very top.
+        at = 0
+        if lines[0].startswith("# "):
+            at = 1
+            while at < len(lines) and not lines[at].strip():
+                at += 1
+        block = [UNRELEASED_HEADING, "", entry, ""]
+        if at > 0 and lines[at - 1].strip():
+            block = ["", *block]
+        splice(at, block)
+        return _join(lines, eols, eol), True
+
+    # Section end: the next heading of any level, or EOF.
+    end = next(
+        (i for i in range(idx + 1, len(lines)) if lines[i].startswith("#")),
+        len(lines),
+    )
+    if any(lines[i].strip() == entry.strip() for i in range(idx + 1, end)):
+        return text, False
+
+    at = idx + 1
+    while at < end and not lines[at].strip():
+        at += 1
+    if at == idx + 1:
+        splice(at, [""])
+        at += 1
+    splice(at, [entry])
+    return _join(lines, eols, eol), True
+
+
+# ---------------------------------------------------------------------------
+# prune (shared by prune-backlog and prune-tasks)
+# ---------------------------------------------------------------------------
+
+def _heading_lines(text: str) -> list[int]:
+    """0-based indices of real level-1..3 headings, per `backlog_candidates` semantics.
+
+    Fenced and commented `##` lines are markup there and must not become deletion boundaries
+    here either — a fake heading would otherwise split a section and make a still-populated
+    region look empty.
+    """
+    return [h["line"] - 1 for h in _headings(tokenize(text))]
+
+
+def _region_blank(lines: list[str], start: int, heads: list[int]) -> bool:
+    """True if every line strictly after `start` up to the next heading (or EOF) is blank."""
+    end = next((h for h in heads if h > start), len(lines))
+    return all(not lines[i].strip() for i in range(start + 1, min(end, len(lines))))
+
+
+def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
+    """Source indices to keep, collapsing only the blank runs a deletion created.
+
+    `origin[i]` is the source index of `lines[i]`; a jump in that sequence means something was
+    removed between them. Only those seams are collapsed, so the diff stays scoped to the edit.
+    Returning indices rather than text lets the caller carry each line's own terminator through.
+    """
+    out: list[int] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip():
+            out.append(origin[i])
+            i += 1
+            continue
+        j = i
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        # A seam exists if lines were dropped just before, inside, or just after this blank run.
+        contiguous = all(origin[k + 1] == origin[k] + 1 for k in range(i, j - 1))
+        seam = (
+            (i > 0 and origin[i] != origin[i - 1] + 1)
+            or not contiguous
+            or (j < len(lines) and origin[j] != origin[j - 1] + 1)
+        )
+        keep = 1 if (seam and j - i > 1) else j - i
+        # A seam at the very end of the file leaves no separator worth keeping.
+        if seam and j >= len(lines):
+            keep = 0
+        out.extend(origin[i:i + keep])
+        i = j
+    return out
+
+
+def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
+    """Delete each verbatim line in `targets`, then any heading this run left with a blank region.
+
+    Returns `(new_text, problems)`. `problems` is non-empty when a target matched nothing — or
+    matched more than once, which is the more dangerous case: two sections can hold identically
+    worded items, only one of which is done, and deleting both silently discards live work. Both
+    are fatal to the whole run; the caller must not delete an approximate or an ambiguous match.
+    """
+    lines, eols = _split(text)
+    default_eol = _dominant_eol(eols)
+    wanted = [t.rstrip() for t in targets if t.strip()]
+    problems = []
+    drop: set[int] = set()
+    for target in wanted:
+        hits = [i for i, ln in enumerate(lines) if ln.rstrip() == target]
+        if not hits:
+            problems.append(f"no line matches verbatim: {target!r}")
+        elif len(hits) > 1:
+            where = ", ".join(str(i + 1) for i in hits)
+            problems.append(
+                f"{len(hits)} lines match verbatim (lines {where}) — ambiguous, refusing to guess "
+                f"which one is done; disambiguate the wording first: {target!r}"
+            )
+        else:
+            drop.add(hits[0])
+    if problems:
+        return text, problems
+
+    # Headings whose region this run may have emptied — computed on the ORIGINAL text so a
+    # heading that was already empty before the run is left alone (deliberate history).
+    heads = _heading_lines(text)
+    owned: set[int] = set()
+    for i in sorted(drop):
+        prior = [h for h in heads if h < i]
+        if prior:
+            owned.add(prior[-1])
+
+    # Cascade: deleting an h3 can empty its h2 parent, but only if the parent holds nothing else.
+    while True:
+        surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
+        newly = {
+            h
+            for h in owned
+            if h not in drop and _region_blank(surviving, h, [x for x in heads if x not in drop])
+        }
+        if not newly:
+            break
+        drop.update(newly)
+        for h in newly:
+            prior = [x for x in heads if x < h and x not in drop]
+            if prior:
+                owned.add(prior[-1])
+
+    kept = [i for i in range(len(lines)) if i not in drop]
+    final = _collapse_gap_blanks([lines[i] for i in kept], kept)
+    out = _join([lines[i] for i in final], [eols[i] for i in final], default_eol)
+    return (out if out.strip() else ""), []
+
+
+def prune_h1_block(text: str, title: str) -> tuple[str, list[str]]:
+    """Delete the whole `# <title>` block — heading, `status:` line, and body — up to the next h1."""
+    lines, eols = _split(text)
+    default_eol = _dominant_eol(eols)
+    tok = tokenize(text)
+    h1s = [t for t in tok if t["type"] == "heading" and t["level"] == 1]
+    start = next((t["line"] - 1 for t in h1s if t["title"].strip() == title.strip()), None)
+    if start is None:
+        titles = ", ".join(repr(t["title"]) for t in h1s) or "none"
+        return text, [f"no h1 block titled {title!r} (h1 blocks present: {titles})"]
+    end = next((t["line"] - 1 for t in h1s if t["line"] - 1 > start), len(lines))
+    kept = [i for i in range(len(lines)) if not (start <= i < end)]
+    final = _collapse_gap_blanks([lines[i] for i in kept], kept)
+    out = _join([lines[i] for i in final], [eols[i] for i in final], default_eol)
+    return (out if out.strip() else ""), []
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _read_stdin_lines() -> list[str]:
+    if sys.stdin is None or sys.stdin.isatty():
+        return []
+    return [ln for ln in sys.stdin.read().splitlines() if ln.strip()]
+
+
+def _opt(argv: list[str], name: str) -> str | None:
+    if name in argv:
+        i = argv.index(name)
+        if i + 1 >= len(argv):
+            sys.stderr.write(f"Error: {name} requires a value\n")
+            sys.exit(1)
+        return argv[i + 1]
+    return None
+
+
+def _require(value: str | None, name: str) -> str:
+    if value is None:
+        sys.stderr.write(f"Error: {name} is required\n")
+        sys.exit(1)
+    return value
+
+
+def cmd_branch(argv: list[str]) -> int:
+    title = _require(_opt(argv, "--title"), "--title")
+    max_slug = int(_opt(argv, "--max-slug") or DEFAULT_MAX_SLUG)
+    name, warning = branch_name(title, _read_stdin_lines(), _opt(argv, "--tag"), max_slug)
+    if not name:
+        sys.stderr.write(f"Error: {warning}\n")
+        return 1
+    if warning:
+        sys.stderr.write(f"Warning: {warning}\n")
+    print(name)
+    return 0
+
+
+def cmd_changelog(argv: list[str]) -> int:
+    path = Path(_opt(argv, "--file") or "CHANGELOG.md")
+    units = _opt(argv, "--units")
+    entry = compose_entry(
+        _require(_opt(argv, "--title"), "--title"),
+        plugin=_opt(argv, "--plugin"),
+        version=_opt(argv, "--version"),
+        units=int(units) if units is not None else None,
+        link=_opt(argv, "--link"),
+        date=_opt(argv, "--date"),
+    )
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    new_text, inserted = insert_changelog_entry(text, entry)
+    if inserted:
+        path.write_text(new_text, encoding="utf-8")
+    else:
+        sys.stderr.write("Note: an identical entry is already under ## Unreleased — left as is\n")
+    print(entry)
+    return 0
+
+
+def _write_or_delete(path: Path, text: str, delete_if_empty: bool) -> str:
+    if not text.strip() and delete_if_empty:
+        os.remove(path)
+        return f"{path}: deleted (no content left)"
+    path.write_text(text, encoding="utf-8")
+    return f"{path}: updated"
+
+
+def cmd_prune(argv: list[str], *, delete_if_empty: bool) -> int:
+    path = Path(_require(_opt(argv, "--file"), "--file"))
+    if not path.is_file():
+        sys.stderr.write(f"Error: not a file: {path}\n")
+        return 1
+    text = path.read_text(encoding="utf-8")
+    block = _opt(argv, "--block")
+    if block is not None:
+        new_text, problems = prune_h1_block(text, block)
+    else:
+        targets = _read_stdin_lines()
+        if not targets:
+            sys.stderr.write("Error: no lines on stdin to delete (and no --block given)\n")
+            return 1
+        new_text, problems = prune_lines(text, targets)
+    if problems:
+        for p in problems:
+            sys.stderr.write(f"Error: {p}\n")
+        sys.stderr.write("Nothing was deleted — fix the input and re-run.\n")
+        return 1
+    print(_write_or_delete(path, new_text, delete_if_empty))
+    return 0
+
+
+USAGE = (
+    "Usage: task_nodes.py {branch|changelog|prune-backlog|prune-tasks|--test} [options]\n"
+    "       see the module docstring for each subcommand's flags\n"
+)
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        sys.stderr.write(USAGE)
+        return 1
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "--test":
+        return run_tests()
+    if cmd == "branch":
+        return cmd_branch(rest)
+    if cmd == "changelog":
+        return cmd_changelog(rest)
+    if cmd == "prune-backlog":
+        return cmd_prune(rest, delete_if_empty=False)
+    if cmd == "prune-tasks":
+        return cmd_prune(rest, delete_if_empty=True)
+    sys.stderr.write(f"Unknown subcommand: {cmd}\n{USAGE}")
+    return 1
+
+
+# ---------------------------------------------------------------------------
+# Self-check (--test)
+# ---------------------------------------------------------------------------
+
+PASS_COUNT = 0
+FAIL_COUNT = 0
+
+
+def _assert(condition: bool, label: str) -> None:
+    global PASS_COUNT, FAIL_COUNT
+    if condition:
+        PASS_COUNT += 1
+        print(f"  PASS: {label}")
+    else:
+        FAIL_COUNT += 1
+        print(f"  FAIL: {label}")
+
+
+def run_tests() -> int:
+    global PASS_COUNT, FAIL_COUNT
+    PASS_COUNT = 0
+    FAIL_COUNT = 0
+    print("=== task_nodes.py --test ===\n")
+
+    # ---- branch ----
+    print("Test 1: branch — tag derivation and slugification")
+    shared = [
+        "- [ ] [HARNESS] script the nodes",
+        "- [ ] [HARNESS] and the other nodes",
+    ]
+    name, warn = branch_name("Script the deterministic `task-*` nodes", shared)
+    _assert(name == "harness/script-the-deterministic-task-nodes", f"shared tag gives its prefix (got {name!r})")
+    _assert(warn is None, "a clean shared tag emits no warning")
+
+    mixed = ["- [ ] [FIX] a", "- [ ] [FEAT] b"]
+    name, warn = branch_name("Two different things", mixed)
+    _assert(name.startswith("fix/"), "mixed tags fall back to fix/")
+    _assert(warn is not None and "mixed" in warn, "mixed tags warn on stderr")
+
+    name, warn = branch_name("Untagged finding from a review", ["- [ ] no tag here"])
+    _assert(name == "fix/untagged-finding-from-a-review", "untagged items fall back to fix/")
+    _assert(warn is not None and "No [TYPE] tag" in warn, "untagged items warn on stderr")
+
+    name, warn = branch_name("Partly tagged", ["- [ ] [FIX] a", "- [ ] b"])
+    _assert(name.startswith("fix/") and warn is not None and "carry no [TYPE] tag" in warn,
+            "a partially tagged group uses the shared tag and says how many lacked one")
+
+    _assert(branch_name("Anything", [], tag="REFACTOR")[0].startswith("refactor/"),
+            "--tag overrides stdin derivation")
+    _assert(slugify("[HARNESS] Leading tag is dropped") == "leading-tag-is-dropped",
+            "a leading [TYPE] tag is not repeated in the slug")
+    _assert(slugify("a" * 80) == "a" * DEFAULT_MAX_SLUG,
+            "a single over-long token is hard-truncated rather than emptied")
+    _assert(len(slugify("one two three four five six seven eight nine ten")) <= DEFAULT_MAX_SLUG,
+            "a long title is truncated at a word boundary within the cap")
+    _assert(branch_name("!!!", [])[0] == "", "a title with no alphanumerics is an error, not an empty slug")
+
+    # ---- changelog ----
+    print("\nTest 2: changelog — composition and insertion")
+    _assert(
+        compose_entry("a thing", plugin="dev", version="4.0.32", date="2026-08-03")
+        == "- [done] a thing (dev v4.0.32) (2026-08-03)",
+        "the standard shape composes exactly as the Entry Contract states",
+    )
+    _assert(
+        compose_entry("b", date="2026-08-03") == "- [done] b (2026-08-03)",
+        "the plugin/version clause is dropped in a repo with no versioned plugin",
+    )
+    _assert(
+        compose_entry("c", plugin="dev", version="v1.2.3", units=3, link="docs/x.md", date="2026-08-03")
+        == "- [done] c (3 units) (dev v1.2.3) (2026-08-03) → docs/x.md",
+        "units and link clauses land in the batch-mode order, and a leading v is not doubled",
+    )
+
+    existing = "# Changelog\n\n## Unreleased\n\n- [done] older (2026-08-01)\n"
+    out, inserted = insert_changelog_entry(existing, "- [done] newer (2026-08-03)")
+    _assert(inserted, "a new entry is inserted")
+    _assert(
+        out.splitlines()[4:6] == ["- [done] newer (2026-08-03)", "- [done] older (2026-08-01)"],
+        "the new entry lands FIRST under ## Unreleased, above the previous newest",
+    )
+    out2, inserted2 = insert_changelog_entry(out, "- [done] newer (2026-08-03)")
+    _assert(not inserted2 and out2 == out, "an identical entry already present is left alone (re-run safe)")
+
+    no_section = "# Changelog\n\n## 4.0.0\n\n- [done] shipped (2026-01-01)\n"
+    out, _ = insert_changelog_entry(no_section, "- [done] fresh (2026-08-03)")
+    lines = out.splitlines()
+    _assert(
+        lines.index("## Unreleased") < lines.index("## 4.0.0"),
+        "an absent ## Unreleased is created above the existing version sections",
+    )
+    _assert(
+        lines[lines.index("## Unreleased") + 2] == "- [done] fresh (2026-08-03)",
+        "the entry lands under the section it just created",
+    )
+    out, _ = insert_changelog_entry("", "- [done] first ever (2026-08-03)")
+    _assert(
+        out == "# Changelog\n\n## Unreleased\n\n- [done] first ever (2026-08-03)\n",
+        "an absent file is created with a title, the section, and the entry",
+    )
+    empty_section = "# Changelog\n\n## Unreleased\n\n## 4.0.0\n"
+    out, _ = insert_changelog_entry(empty_section, "- [done] x (2026-08-03)")
+    _assert(
+        out.splitlines()[:5] == ["# Changelog", "", "## Unreleased", "", "- [done] x (2026-08-03)"],
+        "an existing but empty ## Unreleased takes the entry without eating the next heading",
+    )
+
+    # ---- prune ----
+    print("\nTest 3: prune — verbatim deletion, emptied headings, untouched history")
+    backlog = """# Backlog
+
+## Group one
+
+Preamble prose that outlives its items.
+
+### Sub A
+
+- [ ] [FIX] the only item under Sub A
+
+### Sub B
+
+- [ ] [FIX] one
+- [ ] [FIX] two
+
+## Group two
+
+- [ ] [FEAT] lonely item
+"""
+    out, problems = prune_lines(backlog, ["- [ ] [FIX] the only item under Sub A"])
+    _assert(problems == [], "a verbatim match produces no problems")
+    _assert("### Sub A" not in out, "the heading this run emptied is deleted")
+    _assert("## Group one" in out and "Preamble prose" in out,
+            "the parent h2 survives because its preamble is still content")
+    _assert("### Sub B" in out and "- [ ] [FIX] one" in out, "sibling groups are untouched")
+
+    out, problems = prune_lines(backlog, ["- [ ] [FEAT] lonely item"])
+    _assert("## Group two" not in out, "an h2 whose only content was the deleted item is deleted too")
+
+    out, problems = prune_lines(backlog, ["- [ ] [FIX] one"])
+    _assert(problems == [] and "### Sub B" in out and "- [ ] [FIX] two" in out,
+            "a heading with a remaining item is kept")
+
+    _, problems = prune_lines(backlog, ["- [ ] [FIX] the only item under sub a"])
+    _assert(len(problems) == 1 and "no line matches verbatim" in problems[0],
+            "a near-miss target is refused, not approximated")
+    unchanged, problems = prune_lines(backlog, ["- [ ] nope"])
+    _assert(unchanged == backlog, "a refused run deletes nothing at all")
+
+    history = """## Shipped
+
+- [x] done long ago
+
+## Live
+
+- [ ] [FIX] current
+"""
+    out, _ = prune_lines(history, ["- [ ] [FIX] current"])
+    _assert("## Shipped" in out and "- [x] done long ago" in out,
+            "a heading holding only [x] history is NOT deleted — this run did not empty it")
+    _assert("## Live" not in out, "the heading this run did empty IS deleted")
+
+    fenced = """## Real group
+
+```markdown
+## Fake heading in a sample
+```
+
+- [ ] [FIX] real item after a fence
+"""
+    out, _ = prune_lines(fenced, ["- [ ] [FIX] real item after a fence"])
+    _assert("## Real group" in out and "## Fake heading in a sample" in out,
+            "a fenced `##` is not a deletion boundary, so the real heading is not falsely emptied")
+
+    seam = "## A\n\n- [ ] x\n- [ ] y\n\n## B\n\n- [ ] z\n"
+    out, _ = prune_lines(seam, ["- [ ] x"])
+    _assert(out == "## A\n\n- [ ] y\n\n## B\n\n- [ ] z\n",
+            "deleting one of several items leaves the surrounding blank lines exactly as they were")
+
+    # REGRESSION GUARD (qa-verifier) — two sections can hold identically worded items with only
+    # one of them done. Deleting both silently discards live work, so an ambiguous match is fatal.
+    # The zero-match case was already refused; the multi-match case is strictly more dangerous.
+    duplicate = """## Group A
+
+- [ ] [FIX] update the docs
+
+## Group B
+
+- [ ] [FIX] update the docs
+"""
+    unchanged, problems = prune_lines(duplicate, ["- [ ] [FIX] update the docs"])
+    _assert(len(problems) == 1 and "2 lines match verbatim" in problems[0],
+            "a target matching two lines is refused as ambiguous, not applied to both")
+    _assert(bool(problems) and "lines 3, 7" in problems[0],
+            "the ambiguity message names the 1-based line numbers so the caller can disambiguate")
+    _assert(unchanged == duplicate, "an ambiguous run deletes nothing at all")
+
+    # REGRESSION GUARD (qa-verifier) — markdown is not LF-pinned here (docs/conventions.md), so a
+    # Windows checkout arrives CRLF. Rewriting every terminator would touch regions this run never
+    # edited, breaking the byte-identical guarantee for untouched sections.
+    crlf = "## A\r\n\r\n- [ ] x\r\n- [ ] y\r\n\r\n## B\r\n\r\n- [ ] z\r\n"
+    out, _ = prune_lines(crlf, ["- [ ] x"])
+    _assert(out == "## A\r\n\r\n- [ ] y\r\n\r\n## B\r\n\r\n- [ ] z\r\n",
+            "CRLF survives prune_lines — every surviving line keeps its own terminator")
+    _assert("\n" not in out.replace("\r\n", ""), "no bare LF is introduced into a CRLF file")
+
+    crlf_block = "# One\r\n\r\nstatus: active\r\n\r\n# Two\r\n\r\nstatus: open\r\n"
+    out, _ = prune_h1_block(crlf_block, "One")
+    _assert(out == "# Two\r\n\r\nstatus: open\r\n", "CRLF survives prune_h1_block")
+
+    crlf_log = "# Changelog\r\n\r\n## Unreleased\r\n\r\n- [done] older (2026-08-01)\r\n"
+    out, _ = insert_changelog_entry(crlf_log, "- [done] newer (2026-08-03)")
+    _assert(
+        out == "# Changelog\r\n\r\n## Unreleased\r\n\r\n- [done] newer (2026-08-03)\r\n"
+               "- [done] older (2026-08-01)\r\n",
+        "CRLF survives insert_changelog_entry, and the inserted line uses the file's own ending",
+    )
+    mixed = "# Changelog\n\n## Unreleased\n"
+    out, _ = insert_changelog_entry(mixed, "- [done] x (2026-08-03)")
+    _assert("\r" not in out, "an LF file stays LF — the dominant ending decides, not a hardcoded one")
+
+    no_final_newline = "## A\n\n- [ ] x\n- [ ] y"
+    out, _ = prune_lines(no_final_newline, ["- [ ] x"])
+    _assert(out == "## A\n\n- [ ] y\n",
+            "a file with no trailing newline gains one from the dominant ending, losing no content")
+
+    # ---- prune-tasks h1 block ----
+    print("\nTest 4: prune-tasks — h1 sprint blocks")
+    tasks = """# Sprint one
+
+status: active
+
+## Scope
+
+body content
+
+# Sprint two
+
+status: open
+"""
+    out, problems = prune_h1_block(tasks, "Sprint one")
+    _assert(problems == [] and out.startswith("# Sprint two"),
+            "the whole h1 block — heading, status, body — is deleted up to the next h1")
+    _assert("## Scope" not in out and "body content" not in out, "the block's body goes with it")
+
+    out, problems = prune_h1_block(tasks, "Sprint three")
+    _assert(len(problems) == 1 and "no h1 block titled" in problems[0] and "'Sprint one'" in problems[0],
+            "a missing title is refused and the available titles are named")
+
+    only, _ = prune_h1_block("# Only\n\nstatus: active\n", "Only")
+    _assert(only == "", "deleting the last block leaves an empty string, which the CLI turns into a file delete")
+
+    # ---- CLI file handling ----
+    print("\nTest 5: CLI — file write and delete-if-empty")
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "tasks.md"
+        p.write_text("# Only\n\nstatus: active\n", encoding="utf-8")
+        msg = _write_or_delete(p, "", delete_if_empty=True)
+        _assert(not p.exists() and "deleted" in msg, "prune-tasks deletes a file left with no content")
+
+        b = Path(td) / "backlog.md"
+        b.write_text("# Backlog\n", encoding="utf-8")
+        _write_or_delete(b, "", delete_if_empty=False)
+        _assert(b.exists() and b.read_text(encoding="utf-8") == "",
+                "prune-backlog never deletes backlog.md — it is a prerequisite file")
+
+        c = Path(td) / "CHANGELOG.md"
+        rc = main(["changelog", "--file", str(c), "--title", "t", "--plugin", "dev",
+                   "--version", "1.0.0", "--date", "2026-08-03"])
+        _assert(rc == 0 and c.read_text(encoding="utf-8").endswith("- [done] t (dev v1.0.0) (2026-08-03)\n"),
+                "the changelog subcommand creates the file end-to-end")
+
+    print(f"\n=== Results: {PASS_COUNT} PASS, {FAIL_COUNT} FAIL ===")
+    return 0 if FAIL_COUNT == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

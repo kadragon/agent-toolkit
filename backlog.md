@@ -8,10 +8,6 @@ item so each is independently selectable. Every item here carries the same accep
 editing, enumerate the current behaviors as a checklist; every deleted line must map to a row that
 is preserved elsewhere or explicitly retired with a reason, and report the measured `wc -w` delta.
 
-### Script the deterministic `task-*` nodes
-
-- [ ] [HARNESS] Script branch derivation, CHANGELOG `## Unreleased` insertion and backlog-line deletion in `task-next`/`task-new`, and have both invoke the existing `scripts/bump-version.sh` instead of restating the bump rules in prose.
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

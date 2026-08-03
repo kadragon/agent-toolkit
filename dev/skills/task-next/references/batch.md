@@ -119,12 +119,24 @@ any worktree.
 3. **Collect cleanup targets — once.** For each merged unit, record what to delete:
    - **backlog units** → all open `- [ ]` lines directly under the unit's heading group in `backlog.md` (read the heading section; every `- [ ]` item under it is a deletion target)
    - **finding groups** → the completed `- [ ]` lines in the relevant h3/h2 block in `tasks.md`
-4. **Version bump — once.** Per `docs/conventions.md`, bump each touched plugin's manifests a
-   single time for the whole batch (both `.claude-plugin` and `.codex-plugin`).
-5. **Pre-merge cleanup — once.**
-   - **tasks.md findings**: delete each completed `- [ ]` line. Remove an h3/h2 heading only if this batch emptied it — headings elsewhere whose items are all `[x]`/`[>]` are deliberate history, not leftovers. Remove `## Review Backlog` if it becomes empty. If `tasks.md` is now entirely empty, delete the file.
-   - **backlog.md**: delete each completed item line. Remove an h2/h3 heading only if this batch emptied it — headings elsewhere whose items are all `[x]`/`[>]` are deliberate history, not leftovers.
-   - **CHANGELOG.md**: insert **one** line as the first entry under `## Unreleased`: `- [done] <batch-slug> (<N> units) (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. **No per-unit breakdown** — the units are enumerated in the PR body. Every other rule, the character cap included, lives in the *CHANGELOG Entry Contract* in `harness-invariants.md`; read it rather than reconstructing the limits.
+4. **Version bump — once.** `bash scripts/bump-version.sh <plugin> <major|minor|patch>` per touched
+   plugin, a single time for the whole batch (it keeps both manifests in sync). Bump level per that
+   script's header / `docs/conventions.md`; hand-edit only where the script is absent.
+5. **Pre-merge cleanup — once.** Same subcommands as single-pick (SKILL.md → *Pre-merge cleanup*),
+   run once over the whole batch's collected targets:
+   ```bash
+   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+   NODES="$SKILL_DIR/scripts/task_nodes.py"
+   printf '%s\n' "<every completed tasks.md finding line>" | python3 "$NODES" prune-tasks --file tasks.md
+   printf '%s\n' "<every completed backlog.md item line>"  | python3 "$NODES" prune-backlog --file backlog.md
+   python3 "$NODES" changelog --file CHANGELOG.md --title "<batch-slug>" --units <N> \
+     --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
+   ```
+   A heading is dropped only where this batch emptied it, `## Review Backlog` and `tasks.md` go the
+   same way once empty, and `--units <N>` produces the batch entry's `(<N> units)` clause. **No
+   per-unit breakdown** in the entry — the units are enumerated in the PR body. What the script
+   cannot decide — the character cap, and the ban on explanatory clauses — lives in the *CHANGELOG
+   Entry Contract* in `harness-invariants.md`; read it rather than reconstructing the limits.
    - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
    Leave all edits uncommitted — `task-review` Step 1 commits them.

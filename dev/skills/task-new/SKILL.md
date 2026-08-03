@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.4
+version: 1.0.5
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -74,9 +74,16 @@ cycle; the overrides below are what differ for a **request-sourced** task. Stand
 where not overridden.
 
 **Branch (Step 0)**
-`git checkout -b <type>/<slug>` — derive from the `[type]` inferred in Step 1 + a short slug. If the
-tag was left untagged, emit a warning ("Request has no clear [type] — defaulting branch prefix to
-`fix/`") and use `fix/`.
+Pass the `[type]` inferred in Step 1; omit `--tag` if it was left untagged and the script falls back
+to `fix/` with a stderr warning.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/../task-next/scripts/task_nodes.py"   # one shared copy; same dev plugin
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+BRANCH=$(python3 "$NODES" branch --title "<short title for the request>" --tag <TYPE>)
+git checkout -b "$BRANCH"
+```
 
 **Scope check (Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before writing
@@ -116,28 +123,42 @@ ALWAYS spawn `qa-verifier` as a separate agent. If it reports blocking issues: s
 report — do NOT hand off with unresolved blockers.
 
 **Version bump (Step 5)**
-Per `docs/conventions.md` — determine which plugin directory the changed files belong to and bump
-its manifests (keep `.claude-plugin` and `.codex-plugin` in sync; patch for modify; minor for a new
-skill, agent, command, or hook; major only for removing or renaming something invoked **by name**
-— a skill, agent, or command. A hook has no invocable name, so hook removal is a patch). Do this
-AFTER all changes, BEFORE handoff. (If the target repo is not this plugin marketplace, skip when
-no `plugin.json` applies.)
+The judgment is *which* plugin and *which* bump level; the rewrite is scripted. Do this AFTER all
+changes, BEFORE handoff.
+
+```bash
+[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch>
+```
+
+`bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
+header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them
+rather than recalling the rules. No `scripts/bump-version.sh` → edit the manifests by hand per
+`docs/conventions.md`; no `plugin.json` at all → skip this step.
 
 **Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
 
 **Pre-merge cleanup (before handoff)**
-Leave these uncommitted so they land in the initial PR commit:
-1. In `tasks.md`: delete the Sprint Contract block written above. If `tasks.md` has no remaining
-   content, delete the file.
-2. If a `## Covers` ticket was set (multi-session path): delete that item's `- [ ]` line from
-   `backlog.md`. Also delete the h2/h3 heading that owned it if this deletion emptied it — but
-   only that one; headings elsewhere with all-`[x]`/`[>]` items are deliberate history.
-3. Insert **one** line as the first entry under `## Unreleased` in `CHANGELOG.md` (create the section if absent):
-   `- [done] <title> (<plugin> v<X.Y.Z>) (<date>)`, optionally followed by a single
-   `→ <path/to/owning-doc>.md` link. Drop the `(<plugin> v<X.Y.Z>)` clause in a repo with no
-   versioned plugin. Every other rule — the character cap included — lives in the
-   *CHANGELOG Entry Contract* in `harness-invariants.md` (bundled with `dev:harness-init`).
-   Read it; do not reconstruct the limits from memory.
+Leave everything uncommitted so it lands in the initial PR commit.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/../task-next/scripts/task_nodes.py"   # one shared copy; same dev plugin
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+
+# the Sprint Contract block written above; deletes tasks.md if nothing remains
+python3 "$NODES" prune-tasks --file tasks.md --block "<Sprint Contract title>"
+# multi-session path only — the ## Covers ticket line, verbatim
+printf '%s\n' "<the ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
+# one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
+python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
+  --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
+```
+
+`prune-*` refuses (exit 1) and changes nothing on a line that does not match verbatim. A heading is
+dropped only where this run emptied it — headings elsewhere with all-`[x]`/`[>]` items are
+deliberate history and stay. What the script cannot decide — the character cap, and the ban on
+explanatory clauses, file lists and narration — lives in the *CHANGELOG Entry Contract* in
+`harness-invariants.md` (bundled with `dev:harness-init`). Read it before choosing the title.
 
 ## Step 4 — Hand off
 

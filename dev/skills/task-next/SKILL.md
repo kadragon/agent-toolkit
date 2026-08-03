@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.6
+version: 1.4.7
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -151,11 +151,16 @@ Execute `docs/workflows.md` → `code` cycle (workflows.md Steps 0–5; workflow
 Overrides below; standard steps apply where not overridden.
 
 **Branch (workflows.md Step 0)**
-`git checkout -b <type>/<slug>` — derive from the item's `[type]` tag + short slug.
-For a heading group: use the common `[type]` if all items share one (e.g. all `[FIX]` →
-`fix/<slug>`); otherwise default to `fix/`. If the item has no `[type]` tag (common
-for tasks.md findings), emit a warning ("Item has no [type] tag — defaulting branch prefix
-to `fix/`") and use `fix/` prefix.
+The script applies the shared-`[type]`-else-`fix/` rule; surface its stderr warning when it falls back.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/scripts/task_nodes.py"
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
+  | python3 "$NODES" branch --title "<selected heading title>")
+git checkout -b "$BRANCH"
+```
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
@@ -230,10 +235,18 @@ If qa-verifier reports blocking issues:
 4. If still blocking after one retry: stop and report — do NOT hand off with unresolved blockers.
 
 **Version bump (workflows.md Step 5)**
-Per `docs/conventions.md` — determine which plugin directory contains the changed files and
-bump its manifests (patch for modify; minor for a new skill, agent, command, or hook; major only
-for removing or renaming something invoked **by name** — a skill, agent, or command. A hook has
-no invocable name, so hook removal is a patch). Do this AFTER all changes, BEFORE handoff.
+The judgment is *which* plugin and *which* bump level; the rewrite itself is scripted. Do this
+AFTER all changes, BEFORE handoff.
+
+```bash
+[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh <plugin> <major|minor|patch>
+```
+
+`bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
+header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them
+rather than recalling the rules. If the repo has no `scripts/bump-version.sh` (it ships with this
+marketplace, not with the skill), edit the manifests by hand per `docs/conventions.md`; if the repo
+has no `plugin.json` at all, skip this step.
 
 **Do NOT commit.** Leave all changes uncommitted. `task-review` Step 1 commits everything
 so there is one clean commit per review/merge cycle.
@@ -243,30 +256,31 @@ so there is one clean commit per review/merge cycle.
 Mark the sprint done and sync tracking files — leave as uncommitted so they land in the
 initial PR commit alongside the code.
 
-Two steps, in order. Step 1 varies by where the task came from; Step 2 is identical for all three.
+Your judgment is *which* lines are done; deletion, heading cascade and entry placement are
+scripted. Run the lines that apply to this task's source:
 
-**1. Delete the completed work from its tracking file(s):**
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+NODES="$SKILL_DIR/scripts/task_nodes.py"
+[[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 
-| Task came from | Delete |
-|----------------|--------|
-| tasks.md h1 block | the entire h1 block — `# heading`, `status:` line, and all body content |
-| tasks.md finding group (h3/h2) | each `- [ ]` finding line that was fixed |
-| backlog.md group | the Sprint Contract h1 block (`status: active`) from `tasks.md`, **and** every `backlog.md` line listed verbatim in its `## Covers` |
+# tasks.md h1 block — a sprint, or the Sprint Contract written for a backlog.md group
+python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
+# tasks.md finding lines (h3/h2 group), verbatim, one per line
+printf '%s\n' "<each fixed - [ ] line>" | python3 "$NODES" prune-tasks --file tasks.md
+# backlog.md lines listed verbatim in the Sprint Contract's ## Covers
+printf '%s\n' "<each ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
+# one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
+python3 "$NODES" changelog --file CHANGELOG.md --title "<sprint or finding-group title>" \
+  --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
+```
 
-Then cascade the deletion upward, **scoped to what this sprint actually emptied**: drop the
-heading that owned a deleted line once it has no open `- [ ]` items left, then step up to its
-parent and drop that only if the deletion left it with no content at all — no open items and no
-surviving child headings. Drop `## Review Backlog` on the same test, and delete `tasks.md`
-outright if nothing remains. Never delete a heading holding content the sprint did not touch: a
-sibling group whose items are all `[x]` or `[>]` is deliberate history, and it keeps its
-ancestors alive.
-
-**2. Insert one line as the first entry under `## Unreleased` in `CHANGELOG.md`** (create the
-section if absent): `- [done] <sprint or finding-group title> (<plugin> v<X.Y.Z>) (<date>)`,
-optionally followed by a single `→ <path/to/owning-doc>.md` link. Drop the
-`(<plugin> v<X.Y.Z>)` clause in a repo with no versioned plugin. Every other rule — the character
-cap included — lives in `harness-invariants.md` → *CHANGELOG Entry Contract*. Read it; do not
-reconstruct the limits from memory.
+`prune-*` refuses (exit 1) and changes nothing on a line that does not match verbatim — re-read and
+re-run rather than loosening the input. A heading is dropped only where this sprint emptied it, so
+`[x]`/`[>]` history, prose and surviving children all keep their ancestors alive; `tasks.md` goes
+once empty, `backlog.md` never does. What the script cannot decide — the character cap, and the ban
+on explanatory clauses, file lists and narration — lives in `harness-invariants.md` → *CHANGELOG
+Entry Contract*. Read it before choosing the title; do not reconstruct the limits from memory.
 
 *Blocked-analysis sync (runs for every source type):*
 
