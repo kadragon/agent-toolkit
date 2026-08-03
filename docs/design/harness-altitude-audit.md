@@ -226,16 +226,40 @@ Reviewed by Codex (session `019fc290-cc42-7e50-bf62-3f2751dd1d05`) against this 
 Rejected, with reason:
 
 - *"#7's cut rests on an unverified assumption."* The premise was correct — the original scoring
-  did assume it — but the conclusion survives verification. `task-review/SKILL.md:90,162,281`
-  already distinguish reviewed-empty from skipped and surface both. Cut stands, now on evidence.
+  did assume it — but the conclusion survives verification. `task-review/SKILL.md` already
+  distinguishes reviewed-empty from skipped and surfaces both — its *Collect Reviews* 600s-breach
+  rule, the three "Reviewers Skipped: …" labels, and the reviewer prompt's *"Send the array even
+  when it is empty ([])"* instruction. Cut stands, now on evidence.
 - *"`bounded within one session` assumes away token and time cost."* Accepted in general and folded
   into the new *costly* definition, but it does not rescue C2 specifically: C2's blocker is
   Decidable, and a widened cost test cannot fix an undecidable predicate.
 
+## Superseded (2026-08-03)
+
+**Row #1 — "qa-verifier gate on commit", scored 2.5/3 "Keep, descope" — is withdrawn and cut.**
+Re-scored to ~0.5/3 when the item reached implementation. The decisive finding is that the hook
+cannot fire where the row assumed it would: `task-review/SKILL.md` Steps 1 and 5 commit through
+`bash "$SKILL_DIR/scripts/commit-and-push.sh"`, and the real `git commit -m "$MESSAGE"` runs inside
+that script, so `guard.py`'s `_is_git_commit()` sees only the `bash <script>` command string and
+returns without checking. *Silent* and *Costly* also survive only on `task-next`'s lite
+path — the full cycle gates every commit behind three reviewers, the P0/P1 verifier, and CI before
+merge, which bounds the residual failure and so fails this doc's own "2/3 ships only if the residual
+failure is unbounded" clause. Full reasoning and the re-file bar: `backlog.md` → *Cut — do not
+re-file without new evidence*.
+
+That finding also invalidates the second bullet below as written. It was re-filed as a 3/3 `[FIX]`
+and shipped in dev v4.0.33 (`guard.py`'s `--precommit-check` mode, called from
+`commit-and-push.sh`). The residual gap — merges into a protected branch, which are not `git
+commit` and so still pass unguarded — survives as `backlog.md` → *commit-guard: merge invocations
+are unguarded*.
+
 ## What this does not claim
 
-- Not an argument against mechanical enforcement. Golden Principle 1 holds — the commit-guard hook
-  and the CI jobs are exactly right, and all five already-enforced edges stay.
+- Not an argument against mechanical enforcement. Golden Principle 1 holds — the CI jobs are
+  exactly right, and all five already-enforced edges stay. The commit-guard hook is the right
+  shape, but see *Superseded* above: neither of its two guards reached the `task-review` commit
+  path until dev v4.0.33 wired `--precommit-check` into `commit-and-push.sh`, so its coverage was
+  overstated here.
 - Not an argument that `qa-verifier` should go. Independence is a correctness property, not process
   ceremony, and the cited Verifier ablation measures a self-check stage, not an independent agent.
 - Not a claim that any of this is measured *in this repo*. The evidence is external; the

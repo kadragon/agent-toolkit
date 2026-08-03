@@ -12,9 +12,24 @@
 #   --base <branch>    Base branch for the PR (default: main)
 #
 # Output: JSON to stdout
-#   {commit_hash, committed, pushed, pr_number, pr_url}
+#   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped}
 #   committed=false means the tree was clean and HEAD was pushed/PR'd as-is
 #   (re-run against an already-committed branch).
+#   guard_skipped=true means commit-guard could not be run (missing guard.py or
+#   no python3) and the commit went through UNCHECKED — see the guard section below.
+#
+# Exit codes:
+#   0  success
+#   1  usage error, nothing to commit, commit/push failure, OR a commit-guard
+#      rejection (protected branch / bad [TYPE] message). The JSON error on stderr
+#      carries the guard's reason; fix the branch or the message, do not retry as-is.
+#
+# Guard outcomes are three, not two: it ALLOWS (commit proceeds), it REJECTS
+# (exit 1, no commit), or it could not run at all. Only the last is fail-open, and
+# only for a guard that is absent — a guard.py that exists but crashes exits
+# non-zero and is treated as a rejection, so the stderr JSON carries a traceback
+# instead of a guard reason. That is deliberate: a broken guard must not become a
+# silent allow.
 
 set -euo pipefail
 
@@ -53,7 +68,46 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
+GUARD_SKIPPED=false
 if [ -n "$FILES" ]; then
+  # --- commit-guard ---
+  # Runs BEFORE `git add`: the guard reads only the branch and the message, so it
+  # has no dependency on staged state, and rejecting first leaves the index exactly
+  # as the caller left it.
+  #
+  # The PreToolUse(Bash) hook cannot see this commit: the agent's Bash command is
+  # `bash <this script> ...`, so guard.py's _is_git_commit() finds no git+commit
+  # token pair and passes. Both shipped guards (protected branch, [TYPE] message)
+  # were therefore inert on this — the repo's primary — commit path. Call the same
+  # policy directly instead, via guard.py's --precommit-check CLI mode.
+  #
+  # Fail-open on a missing guard (partial install, moved path) or no interpreter,
+  # but NEVER silently: a guard that vanished is the same invisible gap this call
+  # exists to close, so it warns on stderr and surfaces guard_skipped=true in JSON.
+  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
+  # Resolve the interpreter rather than hardcoding python3. Windows installs
+  # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
+  # `commandWindows: python ...` for exactly that reason, and
+  # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
+  # here would leave every task-review commit unguarded on those installs while
+  # reporting a clean run.
+  PY=$(command -v python3 || command -v python || true)
+  if [ ! -f "$GUARD" ]; then
+    echo "WARNING: commit-guard not found at $GUARD — committing UNCHECKED" >&2
+    GUARD_SKIPPED=true
+  elif [ -z "$PY" ]; then
+    echo "WARNING: no python3/python interpreter — commit-guard skipped, committing UNCHECKED" >&2
+    GUARD_SKIPPED=true
+  else
+    # Exit 2 = guard rejection; exit 1 = we called it wrong. Both must stop the
+    # commit, but only the former is the caller's message/branch to fix.
+    GUARD_RC=0
+    GUARD_OUT=$("$PY" "$GUARD" --precommit-check --message "$MESSAGE" --cwd "$PWD" 2>&1) || GUARD_RC=$?
+    if [ "$GUARD_RC" -ne 0 ]; then
+      jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT" '{error: $e}' >&2
+      exit 1
+    fi
+  fi
   # `git add` treats a pathspec matching neither the worktree nor the index as
   # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in
   # the same call stay unstaged too. task-next's pre-merge cleanup deletes
@@ -111,7 +165,9 @@ COMMIT_HASH=$(git rev-parse HEAD)
 
 if [ "$NO_PUSH" = "true" ]; then
   jq -n --arg hash "$COMMIT_HASH" --argjson committed "$COMMITTED" \
-    '{commit_hash: $hash, committed: $committed, pushed: false, pr_number: null, pr_url: null}'
+    --argjson guard_skipped "$GUARD_SKIPPED" \
+    '{commit_hash: $hash, committed: $committed, pushed: false, pr_number: null,
+      pr_url: null, guard_skipped: $guard_skipped}'
   exit 0
 fi
 
@@ -154,10 +210,12 @@ jq -n \
   --argjson committed "$COMMITTED" \
   --arg pr_number "$PR_NUMBER" \
   --arg pr_url "$PR_URL" \
+  --argjson guard_skipped "$GUARD_SKIPPED" \
   '{
     commit_hash: $hash,
     committed: $committed,
     pushed: true,
     pr_number: ($pr_number | if . == "" then null else . end),
-    pr_url: ($pr_url | if . == "" then null else . end)
+    pr_url: ($pr_url | if . == "" then null else . end),
+    guard_skipped: $guard_skipped
   }'

@@ -235,6 +235,14 @@ Do not use these root variables to locate files from shared skill instructions. 
 
 Every command hook also needs a PowerShell-safe `commandWindows` using Codex's canonical `$env:PLUGIN_ROOT`.
 
+The same Windows constraint reaches **any shipped script that shells out to an interpreter**, not just hook registrations. Windows installs routinely provide Python as `python` with no `python3` shim — which is why `hooks.json`'s commit-guard entry spells its `commandWindows` as `python ...`. A script that hardcodes `python3` does not error there; it takes whatever fallback branch it has, so a guard silently stops guarding while the run still reports success. Resolve the interpreter instead:
+
+```sh
+PY=$(command -v python3 || command -v python || true)
+```
+
+Shipped precedents: `hooks/session-start/run.sh` and `skills/task-review/scripts/commit-and-push.sh`.
+
 ## Executable Line Endings
 
 All shell and Python scripts shipped in plugins must use LF line endings. Bash hooks installed on Windows still run through bash, and CRLF causes parse errors such as `set: pipefail\r: invalid option name`.
