@@ -1302,10 +1302,20 @@ def _test():
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
+    # _cli_precommit takes no override hooks, so it shells out to real git. Point
+    # it at an empty non-repo directory: _current_branch then returns "" and the
+    # branch guard is inert, leaving these cases to test argv dispatch alone. Using
+    # the live cwd instead would make them pass or fail with the checkout's branch
+    # — green locally on a feature branch, red in CI on main.
+    cli_cwd = tempfile.mkdtemp()
+
     def run_cli(argv):
         old_stderr, sys.stderr = sys.stderr, io.StringIO()
         try:
-            return _cli_precommit(argv)
+            # PREPENDED, not appended: appending would hand a trailing valueless
+            # `--message` the `--cwd` flag as its value, silently converting the
+            # malformed-invocation case into a valid one.
+            return _cli_precommit(["--cwd", cli_cwd] + argv)
         finally:
             sys.stderr = old_stderr
 
@@ -1313,6 +1323,16 @@ def _test():
           run_cli(["--precommit-check"]) == 1)
     check("precommit CLI: --message with no value exits 1",
           run_cli(["--precommit-check", "--message"]) == 1)
+    # Bypass regression: the message value lands in argv, so a __main__ that
+    # membership-tests "--test" BEFORE "--precommit-check" would run the test
+    # suite and exit 0 for a commit message of exactly `--test` — read as ALLOW
+    # by the wrapper. _cli_precommit must judge such a message on its text alone.
+    check("precommit CLI: a message of '--test' is judged, not dispatched",
+          run_cli(["--precommit-check", "--message", "--test"]) == 2)
+    check("precommit CLI: a message of '--precommit-check' is judged too",
+          run_cli(["--precommit-check", "--message", "--precommit-check"]) == 2)
+    check("precommit CLI: a flag-shaped message with a valid type still passes",
+          run_cli(["--precommit-check", "--message", "[FIX] --test harness wiring"]) == 0)
 
     print()
     if fails:
@@ -1322,13 +1342,18 @@ def _test():
 
 
 if __name__ == "__main__":
-    if "--test" in sys.argv:
-        _test()
-    elif "--precommit-check" in sys.argv:
+    # Order matters: --precommit-check is tested FIRST. Its --message value is
+    # arbitrary caller text that lands in argv, so a membership test for "--test"
+    # would match a commit message of exactly `--test` — running the test suite
+    # and exiting 0, which the wrapper reads as ALLOW. That is a guard bypass.
+    # Checking the mode flag first makes the message text unable to select a mode.
+    if "--precommit-check" in sys.argv:
         # Direct CLI mode: no hook payload on stdin, no never-raise wrapper —
         # a caller invoking this explicitly wants the verdict, and a crash here
         # must not be swallowed into a silent allow.
         sys.exit(_cli_precommit(sys.argv[1:]))
+    elif "--test" in sys.argv:
+        _test()
     else:
         _code = 0
         try:

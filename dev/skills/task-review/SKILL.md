@@ -287,7 +287,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
-| Commit rejected by commit-guard | `commit-and-push.sh` exits 1, `{"error": "commit blocked by commit-guard: ..."}`, no commit created. Fix the branch or the `[TYPE]` message — never retry the same call. The guard runs after `git add`, so the files are already staged; re-run the script normally, do not re-stage by hand |
+| Commit rejected by commit-guard | `commit-and-push.sh` exits 1, `{"error": "commit blocked by commit-guard: ..."}`, no commit created. Fix the branch or the `[TYPE]` message — never retry the same call. The guard runs before `git add`, so the index is untouched; just re-run the script |
 | Guard error is a traceback, not a guard reason | `guard.py` exists but crashed. Also exit 1, also no commit — a broken guard is treated as a rejection, never as a pass. Fix `guard.py`; do not work around it |
 | `guard_skipped: true` in the commit JSON | The guard could not run at all (missing `guard.py` or no `python3`); the commit is UNCHECKED. Report it — do not treat the commit as guarded |
 | CI fails 3× (`reason:"rework-cap"`) | Stop, ask user — the script counts, not you |

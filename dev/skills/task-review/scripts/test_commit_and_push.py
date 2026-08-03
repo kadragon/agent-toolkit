@@ -249,6 +249,71 @@ def case_guard_missing(tmp):
     print("OK: a missing guard fails open with guard_skipped=true and a stderr warning")
 
 
+def case_guard_reject_leaves_index_clean(tmp):
+    """A rejection must not mutate the index -- the guard runs before `git add`.
+
+    It reads only the branch and the message, so staging first would leave the
+    caller's index changed by a call that did nothing else.
+    """
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("keep\nmore\n")
+    before = git(repo, "diff", "--cached", "--name-only").stdout
+
+    proc, _ = run_script(repo, "keep.md", message="wip")
+    if proc.returncode == 0:
+        fail("reject leaves index clean", "expected a non-zero exit, got 0")
+    after = git(repo, "diff", "--cached", "--name-only").stdout
+    if after != before:
+        fail("reject leaves index clean", f"index changed: {before!r} -> {after!r}")
+    print("OK: a rejected commit leaves the index exactly as it was")
+
+
+def case_guard_python_fallback(tmp):
+    """Windows installs often ship only `python`, not `python3`.
+
+    dev/hooks.json's own commit-guard entry uses `commandWindows: python ...`,
+    so hardcoding python3 here would silently disable BOTH guards on those
+    installs while still reporting a clean commit. Simulate it with a PATH that
+    exposes `python` but no `python3`.
+    """
+    real_python = shutil.which("python3") or shutil.which("python")
+    # `bash` must be in the shim too: PATH is replaced wholesale, so the
+    # interpreter that runs the script has to be reachable through it.
+    needed = ["bash", "git", "jq", "sed", "tr", "dirname", "awk"]
+    found = {t: shutil.which(t) for t in needed}
+    missing = [t for t, p in found.items() if not p]
+    if not real_python or missing:
+        print(f"SKIP: python fallback case (missing on PATH: {missing or 'python'})")
+        return
+    resolved = {t: str(p) for t, p in found.items() if p}
+
+    shim = Path(tmp) / "shimbin"
+    shim.mkdir(exist_ok=True)
+    for tool, path in resolved.items():
+        target = shim / tool
+        if not target.exists():
+            target.symlink_to(path)
+    py_shim = shim / "python"
+    if not py_shim.exists():
+        py_shim.symlink_to(real_python)
+    if (shim / "python3").exists():
+        fail("python fallback", "shim dir must not expose python3")
+
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("keep\nmore\n")
+
+    proc = subprocess.run(
+        [resolved["bash"], str(SCRIPT), "--message", "wip", "--files", "keep.md", "--no-push"],
+        cwd=repo, check=False, capture_output=True, text=True,
+        env={"PATH": str(shim), "HOME": str(repo)},
+    )
+    if proc.returncode == 0:
+        fail("python fallback", "guard did not fire with only `python` on PATH (exit 0)")
+    if "commit blocked by commit-guard" not in proc.stderr:
+        fail("python fallback", f"expected a guard rejection, got {proc.stderr.strip()!r}")
+    print("OK: the guard still runs when only `python` (no python3) is on PATH")
+
+
 def case_guard_skipped_false_normally(tmp):
     """guard_skipped must be false on the normal path, or the flag means nothing."""
     repo = make_repo(tmp)
@@ -277,6 +342,8 @@ def main():
         case_guard_protected_branch(tmp)
         case_guard_allow_main_marker(tmp)
         case_guard_missing(tmp)
+        case_guard_reject_leaves_index_clean(tmp)
+        case_guard_python_fallback(tmp)
         case_guard_skipped_false_normally(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

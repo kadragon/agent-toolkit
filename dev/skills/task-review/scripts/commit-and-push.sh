@@ -70,6 +70,44 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 COMMITTED=false
 GUARD_SKIPPED=false
 if [ -n "$FILES" ]; then
+  # --- commit-guard ---
+  # Runs BEFORE `git add`: the guard reads only the branch and the message, so it
+  # has no dependency on staged state, and rejecting first leaves the index exactly
+  # as the caller left it.
+  #
+  # The PreToolUse(Bash) hook cannot see this commit: the agent's Bash command is
+  # `bash <this script> ...`, so guard.py's _is_git_commit() finds no git+commit
+  # token pair and passes. Both shipped guards (protected branch, [TYPE] message)
+  # were therefore inert on this — the repo's primary — commit path. Call the same
+  # policy directly instead, via guard.py's --precommit-check CLI mode.
+  #
+  # Fail-open on a missing guard (partial install, moved path) or no interpreter,
+  # but NEVER silently: a guard that vanished is the same invisible gap this call
+  # exists to close, so it warns on stderr and surfaces guard_skipped=true in JSON.
+  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
+  # Resolve the interpreter rather than hardcoding python3. Windows installs
+  # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
+  # `commandWindows: python ...` for exactly that reason, and
+  # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
+  # here would leave every task-review commit unguarded on those installs while
+  # reporting a clean run.
+  PY=$(command -v python3 || command -v python || true)
+  if [ ! -f "$GUARD" ]; then
+    echo "WARNING: commit-guard not found at $GUARD — committing UNCHECKED" >&2
+    GUARD_SKIPPED=true
+  elif [ -z "$PY" ]; then
+    echo "WARNING: no python3/python interpreter — commit-guard skipped, committing UNCHECKED" >&2
+    GUARD_SKIPPED=true
+  else
+    # Exit 2 = guard rejection; exit 1 = we called it wrong. Both must stop the
+    # commit, but only the former is the caller's message/branch to fix.
+    GUARD_RC=0
+    GUARD_OUT=$("$PY" "$GUARD" --precommit-check --message "$MESSAGE" --cwd "$PWD" 2>&1) || GUARD_RC=$?
+    if [ "$GUARD_RC" -ne 0 ]; then
+      jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT" '{error: $e}' >&2
+      exit 1
+    fi
+  fi
   # `git add` treats a pathspec matching neither the worktree nor the index as
   # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in
   # the same call stay unstaged too. task-next's pre-merge cleanup deletes
@@ -104,33 +142,6 @@ if [ -n "$FILES" ]; then
   # an empty array under `set -u`.
   if [ "${#STAGE[@]}" -gt 0 ]; then
     git add -- "${STAGE[@]}"
-  fi
-  # --- commit-guard ---
-  # The PreToolUse(Bash) hook cannot see this commit: the agent's Bash command is
-  # `bash <this script> ...`, so guard.py's _is_git_commit() finds no git+commit
-  # token pair and passes. Both shipped guards (protected branch, [TYPE] message)
-  # were therefore inert on this — the repo's primary — commit path. Call the same
-  # policy directly instead, via guard.py's --precommit-check CLI mode.
-  #
-  # Fail-open on a missing guard (partial install, moved path), but NEVER silently:
-  # a guard that vanished is the same invisible gap this call exists to close, so it
-  # warns on stderr and surfaces guard_skipped=true in the output JSON.
-  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
-  if [ ! -f "$GUARD" ]; then
-    echo "WARNING: commit-guard not found at $GUARD — committing UNCHECKED" >&2
-    GUARD_SKIPPED=true
-  elif ! command -v python3 >/dev/null 2>&1; then
-    echo "WARNING: python3 not available — commit-guard skipped, committing UNCHECKED" >&2
-    GUARD_SKIPPED=true
-  else
-    # Exit 2 = guard rejection; exit 1 = we called it wrong. Both must stop the
-    # commit, but only the former is the caller's message/branch to fix.
-    GUARD_RC=0
-    GUARD_OUT=$(python3 "$GUARD" --precommit-check --message "$MESSAGE" --cwd "$PWD" 2>&1) || GUARD_RC=$?
-    if [ "$GUARD_RC" -ne 0 ]; then
-      jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT" '{error: $e}' >&2
-      exit 1
-    fi
   fi
   # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
   # STDOUT, which would pollute the pure-JSON contract exactly like the new-branch
