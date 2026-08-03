@@ -250,8 +250,13 @@ re-file without new evidence*.
 That finding also invalidates the second bullet below as written. It was re-filed as a 3/3 `[FIX]`
 and shipped in dev v4.0.33 (`guard.py`'s `--precommit-check` mode, called from
 `commit-and-push.sh`). The residual gap — merges into a protected branch, which are not `git
-commit` and so still pass unguarded — survives as `backlog.md` → *commit-guard: merge invocations
-are unguarded*.
+commit` and so still pass unguarded — was filed, then **scored ≈1/3 and cut**: neither known site
+is an unintended landing (`merge-and-cleanup.sh`'s `--ff-only` runs only after the remote merge
+succeeded and merely fast-forwards local `main` onto an already-pushed commit; `task-next`'s lite
+path merges by explicit user opt-in at Step 2.5), and the only opt-out `guard.py` implements is the
+repo-wide allow-main marker that both guards read — so exempting the lite path would also disable
+the branch guard on `git commit`. Full grounds and the re-file bar: `backlog.md` → *Cut — do not
+re-file without new evidence*.
 
 ## What this does not claim
 

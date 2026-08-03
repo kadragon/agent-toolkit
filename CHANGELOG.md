@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] commit-guard merge coverage cut at 1/3 (2026-08-03) → docs/design/harness-altitude-audit.md
 - [done] commit-guard reaches the task-review commit path via guard.py --precommit-check (dev v4.0.33) (2026-08-03)
 - [done] deterministic task-* nodes scripted (branch, CHANGELOG, prune, bump) (dev v4.0.32) (2026-08-03) → docs/design/harness-altitude-audit.md
 - [done] ci-wait.sh counts consecutive CI failures and hard-stops at 3 (dev v4.0.31) (2026-08-02)
