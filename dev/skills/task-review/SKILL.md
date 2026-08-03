@@ -85,6 +85,8 @@ RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" \
 
 Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_url'`). Hub mode only: if `pr_number` null but `pr_url` non-null, extract from URL: `basename "$PR_URL"`. Halt if both null. `--no-hub` (`--no-push`): null PR fields are expected — do not halt.
 
+**commit-guard runs inside the script** (`hooks/commit-guard/guard.py --precommit-check`), because the PreToolUse hook cannot see a `git commit` that happens inside `bash <script>`. A rejection exits 1 with `{"error": "commit blocked by commit-guard: ..."}` on stderr and creates no commit. Two causes, both requiring a fix rather than a retry: the branch is `main`/`master` (check out a feature branch), or the message fails `^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|PLAN)\] ` (fix the message). Also check `guard_skipped` in the output JSON — `true` means the guard could not run and the commit went through unchecked; surface that to the user rather than treating the commit as verified.
+
 ### Step 2: Collect Reviews
 
 **All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. On a 600s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>600s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 600s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
@@ -254,6 +256,8 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" \
   --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
+commit-guard applies here exactly as in Step 1 — a rejection exits 1 with no commit created, and `guard_skipped: true` means the commit was unchecked. Reusing Step 1's `COMMIT_MESSAGE` keeps the `[TYPE]` prefix valid; if you rewrite the message, keep the prefix.
+
 `--no-hub`: report summary and end here.
 
 ### Step 6: CI + Merge
@@ -283,6 +287,9 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
+| Commit rejected by commit-guard | `commit-and-push.sh` exits 1, `{"error": "commit blocked by commit-guard: ..."}`, no commit created. Fix the branch or the `[TYPE]` message — never retry the same call. The guard runs after `git add`, so the files are already staged; re-run the script normally, do not re-stage by hand |
+| Guard error is a traceback, not a guard reason | `guard.py` exists but crashed. Also exit 1, also no commit — a broken guard is treated as a rejection, never as a pass. Fix `guard.py`; do not work around it |
+| `guard_skipped: true` in the commit JSON | The guard could not run at all (missing `guard.py` or no `python3`); the commit is UNCHECKED. Report it — do not treat the commit as guarded |
 | CI fails 3× (`reason:"rework-cap"`) | Stop, ask user — the script counts, not you |
 | CI timeout (`reason:"timeout"`) | Stop, ask user — does not increment the counter |
 | Merge fails | Report `merge_ok`, do not force-delete |
@@ -292,7 +299,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Script | Usage |
 |--------|-------|
 | `scripts/preflight.sh` | Pre-flight checks, outputs JSON |
-| `scripts/commit-and-push.sh` | Stage, commit, push, create PR; idempotent with `--pr` |
+| `scripts/commit-and-push.sh` | Stage, commit, push, create PR; idempotent with `--pr`. Calls `hooks/commit-guard/guard.py --precommit-check` before committing (the PreToolUse hook cannot see a commit made inside a script); reports `guard_skipped` when it could not |
 | `scripts/agy-review.sh` | Antigravity review launcher |
 | `scripts/codex-review.sh` | Codex review launcher |
 | `scripts/ci-wait.sh <pr>` | Wait for CI, outputs `{passed: bool}`; counts consecutive real failures and reports `reason:"rework-cap"` at 3 |

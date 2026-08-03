@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Regression tests for commit-and-push.sh pathspec handling.
+"""Regression tests for commit-and-push.sh -- pathspec handling and commit-guard.
 
-Focus: a path the cycle DELETED must not blow up the stage step. task-next's
+Pathspec: a path the cycle DELETED must not blow up the stage step. task-next's
 pre-merge cleanup deletes tasks.md whenever it empties, changed-files.sh reports
 the deleted path, and `git add` treats a pathspec matching neither the worktree
 nor the index as fatal -- aborting the whole batch, not just that one path.
+
+commit-guard: the script runs `git commit` internally, so the PreToolUse(Bash)
+hook never saw it (the Bash tool only saw `bash <script>`) and BOTH shipped
+guards were inert on the repo's primary commit path. The script now calls
+guard.py's --precommit-check mode directly; these cases pin that it fires, that
+the allow-main marker still opts out, and that a missing guard fails open loudly.
 
 Run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
 Exits 0 on success, 1 on the first failure.
@@ -43,13 +49,18 @@ def make_repo(tmp):
     (repo / "keep.md").write_text("keep\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "[TEST] init")
+    # `git init` lands on main or master depending on init.defaultBranch, and
+    # commit-and-push.sh now runs commit-guard's branch guard -- which blocks
+    # exactly those two. Move to a feature branch so the fixture reflects real
+    # usage; the protected-branch behavior gets its own cases below.
+    git(repo, "checkout", "-q", "-b", "feature/test")
     return repo
 
 
-def run_script(repo, files):
+def run_script(repo, files, message="[TEST] cycle"):
     """Invoke commit-and-push.sh in --no-push mode; return (proc, parsed_json)."""
     proc = subprocess.run(
-        ["bash", str(SCRIPT), "--message", "[TEST] cycle", "--files", files, "--no-push"],
+        ["bash", str(SCRIPT), "--message", message, "--files", files, "--no-push"],
         cwd=repo,
         check=False,
         capture_output=True,
@@ -153,6 +164,102 @@ def case_unknown_path_with_staged_deletion(tmp):
     print("OK: an unknown path still aborts even when a staged deletion is excused alongside it")
 
 
+def head(repo):
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def case_guard_bad_type(tmp):
+    """A message failing the [TYPE] contract must be refused before any commit.
+
+    The regression this covers: commit-and-push.sh runs `git commit` inside the
+    script, so the PreToolUse hook never saw it and the type guard was inert on
+    the repo's primary commit path.
+    """
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("keep\nmore\n")
+    before = head(repo)
+
+    proc, _ = run_script(repo, "keep.md", message="wip")
+    if proc.returncode == 0:
+        fail("bad [TYPE] message", "expected a non-zero exit, got 0 (guard did not fire)")
+    if "commit blocked by commit-guard" not in proc.stderr:
+        fail("bad [TYPE] message", f"expected the guard's reason, got {proc.stderr.strip()!r}")
+    if head(repo) != before:
+        fail("bad [TYPE] message", "a commit was created despite the guard rejection")
+    print("OK: a bad [TYPE] message is refused inside the script, with no commit created")
+
+
+def case_guard_protected_branch(tmp):
+    """A commit on main without the allow-main marker must be refused."""
+    repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-B", "main")
+    (repo / "keep.md").write_text("keep\nmore\n")
+    before = head(repo)
+
+    proc, _ = run_script(repo, "keep.md")
+    if proc.returncode == 0:
+        fail("protected branch", "expected a non-zero exit, got 0 (branch guard did not fire)")
+    if "is protected" not in proc.stderr:
+        fail("protected branch", f"expected the branch-guard reason, got {proc.stderr.strip()!r}")
+    if head(repo) != before:
+        fail("protected branch", "a commit was created on main despite the guard rejection")
+    print("OK: a commit on main is refused inside the script, with no commit created")
+
+
+def case_guard_allow_main_marker(tmp):
+    """The documented opt-in marker still unblocks main -- the guard is not a wall."""
+    repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-B", "main")
+    (repo / "AGENTS.md").write_text("# repo\n\n<!-- commit-guard: allow-main -->\n")
+    (repo / "keep.md").write_text("keep\nmore\n")
+
+    proc, payload = run_script(repo, "keep.md AGENTS.md")
+    if proc.returncode != 0:
+        fail("allow-main marker", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    if not payload or payload.get("committed") is not True:
+        fail("allow-main marker", f"expected committed=true, got {proc.stdout!r}")
+    print("OK: the allow-main marker still permits a commit on main")
+
+
+def case_guard_missing(tmp):
+    """A missing guard.py fails OPEN but never silently: guard_skipped=true + a warning.
+
+    Staged into a bare directory tree so the script's
+    `$SCRIPT_DIR/../../../hooks/commit-guard/guard.py` resolves to nothing.
+    """
+    stand_in = Path(tmp) / "standin" / "skills" / "task-review" / "scripts"
+    stand_in.mkdir(parents=True)
+    shutil.copy(SCRIPT, stand_in / SCRIPT.name)
+
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("keep\nmore\n")
+
+    proc = subprocess.run(
+        ["bash", str(stand_in / SCRIPT.name),
+         "--message", "wip", "--files", "keep.md", "--no-push"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("missing guard", f"expected fail-open, got exit {proc.returncode}: {proc.stderr.strip()}")
+    payload = json.loads(proc.stdout)
+    if payload.get("guard_skipped") is not True:
+        fail("missing guard", f"expected guard_skipped=true, got {proc.stdout!r}")
+    if "committing UNCHECKED" not in proc.stderr:
+        fail("missing guard", f"expected a stderr warning, got {proc.stderr.strip()!r}")
+    print("OK: a missing guard fails open with guard_skipped=true and a stderr warning")
+
+
+def case_guard_skipped_false_normally(tmp):
+    """guard_skipped must be false on the normal path, or the flag means nothing."""
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("keep\nmore\n")
+
+    _, payload = run_script(repo, "keep.md")
+    if not payload or payload.get("guard_skipped") is not False:
+        fail("guard_skipped on the normal path", f"expected false, got {payload!r}")
+    print("OK: guard_skipped is false when the guard actually ran")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -166,10 +273,15 @@ def main():
         case_unstaged_deletion(tmp)
         case_unknown_path(tmp)
         case_unknown_path_with_staged_deletion(tmp)
+        case_guard_bad_type(tmp)
+        case_guard_protected_branch(tmp)
+        case_guard_allow_main_marker(tmp)
+        case_guard_missing(tmp)
+        case_guard_skipped_false_normally(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    print("OK: all commit-and-push.sh pathspec cases pass.")
+    print("OK: all commit-and-push.sh pathspec and commit-guard cases pass.")
 
 
 if __name__ == "__main__":

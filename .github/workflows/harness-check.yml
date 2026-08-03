@@ -150,6 +150,9 @@ jobs:
         with:
           python-version-file: .python-version
 
+      - name: Run dev/hooks/commit-guard/guard.py --test
+        run: python3 dev/hooks/commit-guard/guard.py --test
+
       - name: Run dev/skills/task-review/scripts/test_commit_and_push.py
         run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
 

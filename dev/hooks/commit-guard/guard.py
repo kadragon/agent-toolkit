@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
-"""commit-guard — PreToolUse(Bash) gate for `git commit` invocations.
+"""commit-guard — branch and message guards for `git commit`.
 
-Intercepts git commit commands before execution and applies two guards:
+Two entry points, one policy:
+
+  * `main()` — the PreToolUse(Bash) hook. Reads a hook payload on stdin and
+    statically analyses the Bash command string.
+  * `precommit_check()` — a direct CLI check, `--precommit-check --message
+    <text> [--cwd <path>]`, for callers that run `git commit` inside a script
+    where the hook cannot see it. `scripts/commit-and-push.sh` in the
+    `task-review` skill is the bundled caller; without this the hook never fired
+    on that path at all, because the Bash tool only ever saw `bash <script>`.
+
+Both apply the same two guards below and share `_current_branch`,
+`_marker_present`, and `TYPE_PATTERN`, so policy lives in exactly one place.
+
+The hook path applies two guards:
   1. Branch guard: blocks commits to main/master unless the repo's AGENTS.md
      or CLAUDE.md contains the literal marker <!-- commit-guard: allow-main -->.
      A branch created earlier in the same chain — `git checkout -b/-B/--orphan
@@ -27,9 +40,22 @@ Intercepts git commit commands before execution and applies two guards:
      undecidable (fail-open). Single-quoted substitution is literal — git
      receives it verbatim — so it stays type-checked.
 
-Design contract: never-raise, always exit 0 (allow) unless a guard fires (exit 2).
-A guard failure prints the reason to stderr and exits 2. All other exits are 0
-(fail-open: parse errors, missing git, non-commit commands all pass through).
+Design contract (HOOK PATH ONLY): never-raise, always exit 0 (allow) unless a
+guard fires (exit 2). A guard failure prints the reason to stderr and exits 2.
+All other exits are 0 (fail-open: parse errors, missing git, non-commit commands
+all pass through). The `--precommit-check` entry point is deliberately exempt
+from never-raise — see the `__main__` block: a caller that asked for a verdict
+must not receive a silent allow when this file itself is broken. Its wrapper
+treats any non-zero as "do not commit", so a crash blocks rather than passes.
+
+`precommit_check()` keeps the exit-code contract (0 allow / 2 block) but is
+deliberately STRICTER than the hook on the type guard: its message arrives as a
+real argv value that the shell has already expanded, so there is no statically
+undecidable text and none of the `_has_expandable_subst` / raw-token machinery
+applies. Do not "restore" that fail-open branch here — a literal `$(...)` in an
+argv message is exactly the message git will receive. The branch guard is
+likewise simpler: the caller commits at the moment it invokes this, so live
+`rev-parse` is authoritative and no in-chain attribution is needed.
 """
 
 import json
@@ -871,6 +897,67 @@ def main(branch_override=None, marker_override=None, reflog_override=None):
             # msg is None here only when -F read failed → fail-open (allow)
 
 
+def precommit_check(message, cwd=None, branch_override=None, marker_override=None):
+    """Direct (non-hook) guard check for a caller about to run `git commit`.
+
+    Applies the same branch and type guards as the hook, against the LIVE repo
+    state — the caller commits immediately after this returns, so there is no
+    command chain to attribute and `rev-parse` is authoritative.
+
+    Returns None on allow; raises SystemExit(2) via `_block` on a violation.
+    `branch_override` / `marker_override` are for test injection, matching
+    `main()`'s interface.
+    """
+    cwd = cwd or os.getcwd()
+
+    branch = _current_branch(cwd, _override=branch_override)
+    if branch in ("main", "master"):
+        if not _marker_present(cwd, _override=marker_override):
+            _block(
+                f"commit-guard: blocked — branch '{branch}' is protected. "
+                "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
+            )
+
+    # No expandable-substitution escape here — see the module docstring. The
+    # message is a real argv value, so what we match is exactly what git gets.
+    if not TYPE_PATTERN.match(message or ""):
+        _block(
+            f"commit-guard: blocked — message does not match required format "
+            r"^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|PLAN)\] . "
+            f"Got: {message!r}"
+        )
+
+
+def _cli_precommit(argv):
+    """Parse `--precommit-check --message <text> [--cwd <path>]` and run the check.
+
+    Returns an exit code. A malformed invocation is a caller bug, not a commit
+    to judge — it exits 1 (distinct from the guard's own 2) so a wrapper can
+    tell "you called me wrong" from "your commit is rejected".
+    """
+    message = None
+    cwd = None
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--message" and i + 1 < len(argv):
+            message = argv[i + 1]
+            i += 2
+            continue
+        if argv[i] == "--cwd" and i + 1 < len(argv):
+            cwd = argv[i + 1]
+            i += 2
+            continue
+        i += 1
+    if message is None:
+        print("commit-guard: --precommit-check requires --message <text>", file=sys.stderr)
+        return 1
+    try:
+        precommit_check(message, cwd=cwd)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 0
+    return 0
+
+
 def _test():
     """Embedded test suite. Run: python3 guard.py --test"""
     import io
@@ -1169,6 +1256,64 @@ def _test():
 
     check("-F nonexistent: fail-open", run("git commit -F /nonexistent/msg.txt", branch="feature/x") == 0)
 
+    # --- precommit_check(): the direct CLI entry point used by commit-and-push.sh ---
+    # Without this path the hook never fired on the task-review commit path at all,
+    # because the Bash tool only saw `bash <script>` (see module docstring).
+    def run_pre(message, branch="feature/x", marker=False, cwd="/tmp"):
+        """Simulate a --precommit-check invocation. Returns exit code (0/2)."""
+        old_stderr, sys.stderr = sys.stderr, io.StringIO()
+        try:
+            precommit_check(message, cwd=cwd, branch_override=branch, marker_override=marker)
+            return 0
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 0
+        finally:
+            sys.stderr = old_stderr
+
+    check("precommit: valid type on feature branch passes", run_pre("[FEAT] x") == 0)
+    check("precommit: every valid type accepted",
+          all(run_pre(f"[{t}] x") == 0 for t in
+              ("FEAT", "REFACTOR", "FIX", "TEST", "CONSTRAINT", "DOCS", "HARNESS", "PLAN")))
+    check("precommit: bad message blocked", run_pre("wip") == 2)
+    check("precommit: conventional-commit style blocked", run_pre("feat: add x") == 2)
+    check("precommit: missing trailing space blocked", run_pre("[FEAT]x") == 2)
+    check("precommit: unknown type blocked", run_pre("[CHORE] x") == 2)
+    check("precommit: empty message blocked", run_pre("") == 2)
+    check("precommit: None message blocked", run_pre(None) == 2)
+    check("precommit: multi-line message checks first line only",
+          run_pre("[FIX] subject\n\nbody text") == 0)
+
+    check("precommit: main blocked without marker", run_pre("[FEAT] x", branch="main") == 2)
+    check("precommit: master blocked without marker", run_pre("[FEAT] x", branch="master") == 2)
+    check("precommit: main allowed with marker",
+          run_pre("[FEAT] x", branch="main", marker=True) == 0)
+    check("precommit: marker does not excuse a bad message",
+          run_pre("wip", branch="main", marker=True) == 2)
+    check("precommit: branch guard fires before type guard on main",
+          run_pre("wip", branch="main", marker=False) == 2)
+
+    # Unlike the hook path, an argv message is already shell-expanded — a literal
+    # '$(...)' is exactly what git receives, so it stays type-checked (no fail-open).
+    check("precommit: literal $(...) is NOT excused (stricter than hook)",
+          run_pre("$(cat msg.txt)") == 2)
+    check("precommit: backtick text is NOT excused", run_pre("`cat msg.txt`") == 2)
+    check("precommit: valid type with $(...) in the body passes",
+          run_pre("[FEAT] handle $(x) safely") == 0)
+
+    # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
+    # wrapper must be able to tell apart from a rejected commit (exit 2).
+    def run_cli(argv):
+        old_stderr, sys.stderr = sys.stderr, io.StringIO()
+        try:
+            return _cli_precommit(argv)
+        finally:
+            sys.stderr = old_stderr
+
+    check("precommit CLI: missing --message exits 1 (not 2)",
+          run_cli(["--precommit-check"]) == 1)
+    check("precommit CLI: --message with no value exits 1",
+          run_cli(["--precommit-check", "--message"]) == 1)
+
     print()
     if fails:
         print(f"{len(fails)} FAILED: {fails}")
@@ -1179,6 +1324,11 @@ def _test():
 if __name__ == "__main__":
     if "--test" in sys.argv:
         _test()
+    elif "--precommit-check" in sys.argv:
+        # Direct CLI mode: no hook payload on stdin, no never-raise wrapper —
+        # a caller invoking this explicitly wants the verdict, and a crash here
+        # must not be swallowed into a silent allow.
+        sys.exit(_cli_precommit(sys.argv[1:]))
     else:
         _code = 0
         try:

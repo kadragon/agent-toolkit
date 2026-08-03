@@ -8,9 +8,9 @@ decision point), **Costly** (damage survives the session: lands on `main`/remote
 state, or burns a resource a re-run does not reclaim), **Decidable** (a file or exit code settles
 it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is ceremony.
 
-### commit-guard wrapper-script blind spot
+### commit-guard: merge invocations are unguarded
 
-- [ ] [FIX] `commit-guard` never fires on the `task-review` commit path. `task-review/SKILL.md` Steps 1 and 5 invoke `bash "$SKILL_DIR/scripts/commit-and-push.sh" ...`; the real commit runs inside that script (`commit-and-push.sh:101`, `git commit -m "$MESSAGE"`). The PreToolUse hook only sees the `bash <script>` command string, so `guard.py`'s `_is_git_commit()` finds no `git`+`commit` token pair and returns without checking. **Both** shipped guards — the main/master branch guard and the `[TYPE]` message guard — have therefore never applied to the repo's primary commit path. Fix by teaching `guard.py` to recognize the bundled commit wrapper, or by moving the guards inside `commit-and-push.sh`. Scored 3/3 on the `harness-altitude-audit.md` rubric: Silent (the bypass is invisible — the hook exits 0 exactly as it does for a legitimate non-commit), Costly (a commit landing on `main` survives the session), Decidable (a file path and an exit code settle it).
+- [ ] [CONSTRAINT] The branch guard inspects `git commit` only, so a **merge** into a protected branch passes untouched. Two known sites: `task-next`'s lite path (`git checkout main && git merge --no-ff <branch> && git push origin main` — the Bash tool sees these, but no `git commit` token appears), and `merge-and-cleanup.sh:89`'s `git merge --ff-only FETCH_HEAD`. Same class as the wrapper blind spot fixed in dev v4.0.33, different verb. Before building anything, settle whether this is worth guarding at all: the lite path merges to `main` **by design** and the user opts into it explicitly at `task-next` Step 2.5, so a guard here may be blocking a decision rather than a mistake — unlike the commit case, where landing on `main` was never intended. Score it on the `harness-altitude-audit.md` rubric first.
 
 ### Cut — do not re-file without new evidence
 
