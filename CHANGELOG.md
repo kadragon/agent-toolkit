@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-curate audits the auto-memory store (dev v4.1.0) (2026-08-05) → dev/skills/harness-curate/references/signal-taxonomy.md
 - [done] commit-guard merge coverage cut at 1/3 (2026-08-03) → docs/design/harness-altitude-audit.md
 - [done] commit-guard reaches the task-review commit path via guard.py --precommit-check (dev v4.0.33) (2026-08-03)
 - [done] deterministic task-* nodes scripted (branch, CHANGELOG, prune, bump) (dev v4.0.32) (2026-08-03) → docs/design/harness-altitude-audit.md
