@@ -65,6 +65,7 @@ from backlog_candidates import (  # noqa: E402
     _headings,
     _strip_fenced_blocks,
     _strip_html_comments,
+    tasks_persistent_sections,
     tokenize,
 )
 
@@ -371,14 +372,8 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     return (out if out.strip() else ""), []
 
 
-# A trailing ` — <repo>` is allowed: security-overview writes `## Security Fixes — <repo-name>`.
-_PERSISTENT_SECTION_RE = re.compile(
-    r"^##\s+(Review Backlog|Security Fixes)\b.*$", re.MULTILINE
-)
-
-
 def persistent_sections(text: str) -> list[str]:
-    """Findings-section headings that must not be in `tasks.md`.
+    """Titles of findings sections that must not be in `tasks.md`.
 
     `tasks.md` is the Sprint Contract and is deleted whole at sprint close, so anything meant to
     outlive the sprint belongs in `backlog.md`. An h1 block runs to the next h1 or EOF, which means
@@ -386,10 +381,11 @@ def persistent_sections(text: str) -> list[str]:
     nothing is unlinked outright. Rather than guess a safe boundary inside a file that should not
     need one, `prune-tasks` refuses on this shape and names the migration.
 
-    Matched by exact heading title, not by "an h2 owning open items": this drives a hard refusal,
-    and a Sprint Contract's own `## Acceptance criteria` owns open items legitimately.
+    Thin wrapper over `backlog_candidates.tasks_persistent_sections` on purpose: that function is
+    the single definition, so the pruner's refusal and the candidate scanner's warning cannot
+    disagree about the same file. Do not re-derive the rule here.
     """
-    return _PERSISTENT_SECTION_RE.findall(text)
+    return [s["title"] for s in tasks_persistent_sections(tokenize(text))]
 
 
 def prune_h1_block(text: str, title: str) -> tuple[str, list[str]]:
@@ -902,11 +898,26 @@ status: open
             "prune-tasks refuses a tasks.md holding a persistent section, leaving it untouched",
         )
         _assert(
-            persistent_sections(mixed_text) == ["Review Backlog"]
+            persistent_sections(mixed_text) == ["Review Backlog", "PR #101 — earlier PR (2026-07-01)"]
             and persistent_sections("# S\n\nstatus: active\n\n## Scope\n\n- [ ] x\n") == []
             and persistent_sections("## Security Fixes — my-webapp\n\n- [ ] rotate\n")
-            == ["Security Fixes"],
-            "the guard matches findings-section titles (suffix and all), not a contract's ## Scope",
+            == ["Security Fixes — my-webapp"],
+            "the guard matches findings sections (suffix and all), not a contract's ## Scope",
+        )
+        # REGRESSION GUARD: the pruner and the candidate scanner share ONE predicate. Before
+        # this, a grab-bag h2 was warned about by one and deleted by the other.
+        grab = "# S\n\nstatus: active\n\n## Scope\n\n- [ ] a\n\n## Follow-ups\n\n- [ ] leftover\n"
+        gr = Path(td) / "grab.md"
+        gr.write_text(grab, encoding="utf-8")
+        rc = main(["prune-tasks", "--file", str(gr), "--block", "S"])
+        _assert(
+            rc == 1 and gr.exists() and gr.read_text(encoding="utf-8") == grab,
+            "prune-tasks refuses an ad-hoc grab-bag section too, not only the two known titles",
+        )
+        _assert(
+            persistent_sections("# S\n\nstatus: active\n\n```markdown\n## Review Backlog\n```\n")
+            == [],
+            "a findings heading inside a fence does not trigger a false refusal",
         )
         # prune-backlog must NOT refuse — backlog.md is where these sections belong.
         bl = Path(td) / "bl.md"

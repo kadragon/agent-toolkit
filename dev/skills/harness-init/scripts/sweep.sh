@@ -118,6 +118,11 @@ if [[ -f "backlog.md" ]]; then
         echo "- [ ] $f" >> backlog.md
     done
     echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to backlog.md${NC}"
+else
+    # Never drop findings silently. backlog.md is optional after a minimal init, so its
+    # absence is expected -- but then the findings above exist only in this terminal.
+    echo -e "${YELLOW}No backlog.md — ${#FINDINGS[@]} finding(s) NOT persisted.${NC}" >&2
+    echo -e "${YELLOW}Create backlog.md (harness-init references/backlog-template.md) to capture them.${NC}" >&2
 fi
 
 exit 1

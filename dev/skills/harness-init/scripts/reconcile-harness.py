@@ -225,16 +225,42 @@ def remove_orphan_markers(backlog: str) -> str:
 
 
 def remove_empty_headings(backlog: str) -> str:
-    """Drop headings immediately followed by another heading or end-of-file."""
+    """Drop a heading only when the whole section it owns has no content.
+
+    Level-aware: a heading owns everything up to the next heading of the SAME OR BROADER
+    level, so a parent whose next line is a child heading is not empty when that child
+    owns items.  The documented findings shape depends on this -- '## Review Backlog'
+    followed immediately by '### PR #N' and its items, and the same for
+    '## Security Fixes'.  The previous 'heading followed by a heading' test deleted both
+    parents plus '# Backlog' itself, orphaning every finding.
+
+    Children are judged the same way in the same pass: an empty child is dropped, and a
+    parent whose children are all empty finds no content either (the scan skips heading
+    lines) and is dropped with them.
+    """
     lines = backlog.splitlines()
-    result = []
-    for i, line in enumerate(lines):
-        if re.match(r'^#+\s', line):
-            following = [ln for ln in lines[i + 1:] if ln.strip()]
-            if not following or re.match(r'^#+\s', following[0]):
+    levels: list[int | None] = []
+    for line in lines:
+        m = re.match(r'^(#+)\s', line)
+        levels.append(len(m.group(1)) if m else None)
+
+    drop = set()
+    for i, level in enumerate(levels):
+        if level is None:
+            continue
+        has_content = False
+        for j in range(i + 1, len(lines)):
+            child_level = levels[j]
+            if child_level is not None:
+                if child_level <= level:
+                    break
                 continue
-        result.append(line)
-    return '\n'.join(result)
+            if lines[j].strip():
+                has_content = True
+                break
+        if not has_content:
+            drop.add(i)
+    return '\n'.join(line for i, line in enumerate(lines) if i not in drop)
 
 
 MAX_CHANGELOG_LINE = 160

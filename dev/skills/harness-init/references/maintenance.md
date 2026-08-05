@@ -115,7 +115,7 @@ Verify **schema** (not content) of harness-related docs. Full schemas in `refere
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
-Either file entirely missing → repo not fully bootstrapped — point user at harness-init Step 4a, don't guess content.
+`backlog.md` missing → repo not fully bootstrapped — point user at harness-init Step 4a, don't guess content. `tasks.md` missing is the **idle state**, not drift: init never creates it and it is deleted at sprint close.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 

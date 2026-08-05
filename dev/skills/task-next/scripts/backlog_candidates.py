@@ -123,8 +123,9 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
 
 # h2 titles shipped tooling used to append to tasks.md, before findings moved to backlog.md.
-# Presence of one in tasks.md is a migration signal, never a candidate source.
-PERSISTENT_SECTION_TITLES = frozenset({"Review Backlog", "Security Fixes"})
+# Presence of one in tasks.md is a migration signal, never a candidate source. Matched as a
+# PREFIX: security-overview writes `## Security Fixes — <repo-name>`.
+PERSISTENT_SECTION_TITLES = ("Review Backlog", "Security Fixes")
 
 # The Sprint Contract's own sections (lowercased). These own open `- [ ]` items legitimately —
 # `## Acceptance criteria` is checkboxes by definition — so they are the exception to "an h2 with
@@ -325,13 +326,32 @@ def phase_a_candidates(tasks_tokens: list[dict]) -> list[dict]:
 
 # ---- Migration check: persistent sections that no longer belong in tasks.md -------------
 
+def _is_persistent_title(title: str) -> bool:
+    """Prefix match, so `Security Fixes — my-webapp` counts as `Security Fixes`."""
+    stripped = title.strip()
+    return any(
+        stripped == known or stripped.startswith(known + " ")
+        for known in PERSISTENT_SECTION_TITLES
+    )
+
+
 def tasks_persistent_sections(tasks_tokens: list[dict]) -> list[dict]:
-    """h2/h3 headings in tasks.md that directly own open items.
+    """Headings in tasks.md that hold content meant to outlive the sprint.
+
+    THE single definition of "persistent section". `task_nodes.py` imports this to decide whether
+    `prune-tasks` may touch the file, and the CLI below uses it to warn — one predicate, so the
+    warning and the refusal can never disagree about the same file. Two guards drifting apart is
+    worse than either alone: the warning says "move these or they will be lost" while the pruner,
+    not recognising the shape, deletes the h1 block to EOF and unlinks the file.
 
     `tasks.md` is the Sprint Contract and nothing else — it is deleted whole at sprint close, so
     anything meant to outlive the sprint must live in `backlog.md`. Older repos wrote
     `## Review Backlog` findings here. Those are NOT candidates any more, but dropping them
-    silently would hide real queued work, so they are reported as a migration warning instead.
+    silently would hide real queued work, so they are reported instead.
+
+    Takes tokens, not raw text, so fenced code blocks and HTML comments are already masked: a
+    `## Review Backlog` inside a ```markdown example is documentation, and blocking cleanup on it
+    would be a false refusal with no override.
 
     A Sprint Contract's own `## Scope` / `## Acceptance criteria` own open checkboxes too, so a
     bare "h2 with open items" test would fire on every healthy sprint. Two narrower tests instead,
@@ -339,19 +359,25 @@ def tasks_persistent_sections(tasks_tokens: list[dict]) -> list[dict]:
 
       1. its title is one tooling is known to have written (`PERSISTENT_SECTION_TITLES`), or an
          h3 nested under such a heading — this catches findings appended AFTER the sprint h1, the
-         placement that used to destroy them;
-      2. it owns open items and is not one of the Sprint Contract's own sections
-         (`SPRINT_SECTION_TITLES`) — this catches an ad-hoc grab-bag heading anywhere in the file,
-         whichever side of the sprint h1 it sits on.
+         placement that used to destroy them, and fires whether or not the items are still open;
+      2. it owns open items and neither it nor its parent h2 is one of the Sprint Contract's own
+         sections (`SPRINT_SECTION_TITLES`) — this catches an ad-hoc grab-bag heading anywhere in
+         the file, whichever side of the sprint h1 it sits on.
     """
     headings = _headings(tasks_tokens)
+    coarse = [h for h in headings if h["level"] in (1, 2)]
     known_end = None  # end line of the persistent section currently open, for its h3 children
+    parent_is_sprint_section = False
     result = []
     for h in headings:
         if h["level"] in (1, 2) and known_end is not None and h["line"] >= known_end:
             known_end = None
-        if h["level"] == 2 and h["title"] in PERSISTENT_SECTION_TITLES:
-            known_end = _region_end(h, [x for x in headings if x["level"] in (1, 2)])
+        if h["level"] in (1, 2):
+            parent_is_sprint_section = (
+                h["level"] == 2 and h["title"].strip().lower() in SPRINT_SECTION_TITLES
+            )
+        if h["level"] == 2 and _is_persistent_title(h["title"]):
+            known_end = _region_end(h, coarse)
             result.append({"title": h["title"], "line": h["line"], "level": 2})
             continue
         if h["level"] == 3 and known_end is not None and h["line"] < known_end:
@@ -360,6 +386,7 @@ def tasks_persistent_sections(tasks_tokens: list[dict]) -> list[dict]:
         if (
             h["level"] in (2, 3)
             and h["title"].strip().lower() not in SPRINT_SECTION_TITLES
+            and not (h["level"] == 3 and parent_is_sprint_section)
             and _direct_open_items(tasks_tokens, h, headings)
         ):
             result.append({"title": h["title"], "line": h["line"], "level": h["level"]})
@@ -1109,6 +1136,40 @@ status: open
         )
         == [],
         "a healthy Sprint Contract's own ## Scope checkboxes raise no migration warning",
+    )
+    _assert(
+        tasks_persistent_sections(
+            tokenize("# S\n\nstatus: active\n\n## Scope\n\n### Area A\n\n- [ ] x\n")
+        )
+        == [],
+        "an h3 nested under a Sprint Contract section is contract content, not a findings group",
+    )
+    # REGRESSION GUARD: the two callers must agree. A grab-bag h2 is the case that used to warn
+    # "these will be lost" while prune-tasks deleted the file anyway.
+    _assert(
+        [s["title"] for s in tasks_persistent_sections(
+            tokenize("# S\n\nstatus: active\n\n## Scope\n\n- [ ] a\n\n## Follow-ups\n\n- [ ] leftover\n")
+        )] == ["Follow-ups"],
+        "an ad-hoc grab-bag h2 with open items is reported, not just the two known titles",
+    )
+    _assert(
+        [s["title"] for s in tasks_persistent_sections(
+            tokenize("## Security Fixes — my-webapp\n\n### Dependabot\n\n- [x] done\n")
+        )] == ["Security Fixes — my-webapp", "Dependabot"],
+        "the ` — <repo>` suffix still matches, and fires even when every item is closed",
+    )
+    # REGRESSION GUARD: fences and comments are markup. Blocking cleanup on a documentation
+    # example would be a false refusal with no override flag.
+    _assert(
+        tasks_persistent_sections(
+            tokenize("# S\n\nstatus: active\n\n```markdown\n## Review Backlog\n```\n")
+        )
+        == []
+        and tasks_persistent_sections(
+            tokenize("# S\n\nstatus: active\n\n<!--\n## Security Fixes\n-->\n")
+        )
+        == [],
+        "a findings heading inside a fence or an HTML comment is markup, not a persistent section",
     )
 
     # ---- Test 5: Phase-B-vs-full-scan ordering divergence ----

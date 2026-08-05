@@ -1,5 +1,17 @@
 # Backlog
 
+## Review Backlog
+
+### PR #195 — unmix tasks.md (2026-08-05)
+
+Out-of-scope findings from the PR #195 review. All three trace to the bundled `harness-init`
+minimalization commits (6933b43, 48b9f0f), not to the unmix change — a fresh **minimal** init is
+the shape that breaks; an existing repo is unaffected.
+
+- [ ] [constraint] minimal init creates no `implementer`/`qa-verifier` roles, but `task-new` and `task-next` still spawn them for nontrivial work — the first task on a fresh repo reaches nonexistent agents (source: codex, P1) — `dev/skills/task-next/SKILL.md:207-239`, `dev/skills/task-new/SKILL.md:108-123`
+- [ ] [constraint] `docs/conventions.md` is conditional at init but an unconditional prerequisite in `task-new`/`task-next` — a repo whose linter owns every rule cannot start a task (source: codex, P1) — `dev/skills/harness-init/SKILL.md:196`, `dev/skills/task-next/SKILL.md:26`
+- [ ] [harness] `sweep.sh` key-doc loop reports intentionally-absent docs as findings, so post-minimal-init sweeps now pollute `backlog.md` — reuse `validate-harness.sh`'s conditional rules (source: codex, P2) — `dev/skills/harness-init/scripts/sweep.sh:91-97`
+
 ## Harness — `tasks.md` sprint-block boundary
 
 Option 7 (unmix `tasks.md`) shipped; options 1–4 are superseded by it. Remaining leftovers from the
