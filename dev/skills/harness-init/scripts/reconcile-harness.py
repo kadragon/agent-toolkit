@@ -190,17 +190,19 @@ def strip_sprint_block(content: str) -> str | None:
     inside a ``` or ~~~ code block is content, not a heading, so example shell
     comments under '## Review Backlog' no longer get misread as the sprint heading.
 
-    Ordering invariant: non-sprint content (e.g. '## Review Backlog') MUST appear
-    BEFORE the Sprint Contract '# ' heading.  The sprint block spans from the
-    status-owning '# ' heading to the next top-level '# ' heading or EOF, and
-    legitimately contains '##' sub-sections (Scope, Acceptance criteria, Covers,
-    Out of scope) -- so the boundary cannot be an '##' heading.  Any content placed
-    AFTER the sprint heading is therefore treated as part of the sprint block and
-    removed with it.  The task-next / harness-init templates always emit Review
-    Backlog above the sprint, which satisfies this.
+    Under the current contract tasks.md holds the Sprint Contract and nothing else
+    -- every persistent item, '## Review Backlog' included, lives in backlog.md
+    (references/backlog-template.md).  So the usual outcome here is None and the
+    caller unlinks the file, which is correct rather than lossy.
 
-    This preserves unrelated open '## Review Backlog' items that previously were
-    destroyed by an unconditional TASKS.unlink() on sprint completion.
+    The preserve-the-remainder path stays for a repo mid-migration.  It carries an
+    ordering caveat: the sprint block spans from the status-owning '# ' heading to
+    the next top-level '# ' heading or EOF, and legitimately contains '##'
+    sub-sections (Scope, Acceptance criteria, Covers, Out of scope) -- so the
+    boundary cannot be an '##' heading.  Leftover non-sprint content therefore
+    survives only when it sits BEFORE the sprint heading; content after it is
+    removed with the block.  Move such sections to backlog.md rather than relying on
+    their position; task_nodes.py 'prune-tasks' refuses outright on this shape.
     """
     lines = content.splitlines(keepends=True)
     mask = _fence_mask(lines)

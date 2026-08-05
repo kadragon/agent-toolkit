@@ -101,9 +101,9 @@ gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 
 ### Severity Mapping
 
-CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to tasks.md severity labels as follows:
+CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to backlog.md severity labels as follows:
 
-| `rule.severity` | tasks.md severity | Notes |
+| `rule.severity` | backlog.md severity | Notes |
 |-----------------|-----------------|-------|
 | `error` | CRITICAL | Code injection, auth bypass, or similar high-impact issues |
 | `error` | HIGH | All other `error`-level rules not matching CRITICAL criteria |

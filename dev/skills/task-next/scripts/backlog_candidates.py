@@ -57,31 +57,33 @@ reinterpret it):
   just the next heading of the same or broader level. A checkbox sitting after a nested h3
   child does NOT count toward that h3's h2 parent.
 
-  Phase B (tasks.md, fast path only): up to 3 h3 sub-headings under `## Review Backlog`
-  (document order) that directly own >=1 open item. Skipped entirely if Phase A already
-  produced 5 candidates.
+  tasks.md contributes h1 sprint blocks and NOTHING else. It is the Sprint Contract, deleted
+  whole at sprint close, so no queue lives there — `## Review Backlog` findings now go to
+  backlog.md (`harness-init/references/backlog-template.md`). An older tasks.md that still holds
+  such a section is reported by `tasks_persistent_sections()` as a migration warning on stderr,
+  never selected as a candidate.
 
-  Phase C (backlog.md, FAST PATH ONLY): top-to-bottom, TYPE-AGNOSTIC scan collecting up to 2
+  Phase B (backlog.md, FAST PATH ONLY): top-to-bottom, TYPE-AGNOSTIC scan collecting up to 2
   qualifying h2-or-h3 headings in raw document order (h2/h3 interleaved as they appear).
-  Skipped entirely if Phase A + Phase B already produced 5 candidates. The fast-path total
-  across Phase A + B + C is capped at 5.
+  Skipped entirely if Phase A already produced 5 candidates. The fast-path total across
+  Phase A + B is capped at 5.
 
-  Full scan is a DIFFERENT algorithm from Phase C, not a superset call to the same helper:
-  rule 1 = all qualifying tasks.md h1 blocks (Phase A, uncapped); rule 2 = all qualifying
-  tasks.md h3 headings under Review Backlog (uncapped); rule 3 = all qualifying tasks.md h2
-  headings outside Review Backlog; rule 4 = ALL qualifying backlog.md h3 headings, in document
-  order among h3s only; rule 5 = ALL qualifying backlog.md h2 headings, in document order among
-  h2s only. Rules 4 and 5 apply TYPE PRIORITY (all h3 first, then all h2) — this is NOT the
-  same ordering as Phase C's raw document order across types, and the two must stay separate
-  functions (`fast_path()` / `full_scan()`) rather than one shared helper, or the divergence
-  silently disappears.
+  Full scan is a DIFFERENT algorithm from Phase B, not a superset call to the same helper:
+  rule 1 = all qualifying tasks.md h1 blocks (Phase A, uncapped); rule 2 = ALL qualifying
+  backlog.md h3 headings, in document order among h3s only; rule 3 = ALL qualifying backlog.md
+  h2 headings, in document order among h2s only. Rules 2 and 3 apply TYPE PRIORITY (all h3
+  first, then all h2) — this is NOT the same ordering as Phase B's raw document order across
+  types, and the two must stay separate functions (`fast_path()` / `full_scan()`) rather than
+  one shared helper, or the divergence silently disappears.
 
 Self-check (--test):
   Exercises the status-line-gap case (Phase A), the direct-items heading-boundary case
   (nested h3 item must not count toward its h2 parent), the all-parked-skip case (every item
-  `[x]`/`[>]` under a heading is not a candidate), Phase-B/C limit truncation (cap 5 total
-  across A+B+C), the Phase-C-vs-full-scan ordering divergence on backlog.md h2/h3
-  interleaving, and the blocked/deferred-marker exclusion case (all-marked heading is not a
+  `[x]`/`[>]` under a heading is not a candidate), Phase-B limit truncation (cap 5 total
+  across A+B), the Phase-B-vs-full-scan ordering divergence on backlog.md h2/h3
+  interleaving, the tasks.md findings-section guard (never a candidate in either algorithm;
+  reported by `tasks_persistent_sections`, and a healthy `## Scope` does not trip it),
+  and the blocked/deferred-marker exclusion case (all-marked heading is not a
   candidate; mixed marked+unmarked heading counts only the unmarked items), and the
   HTML-comment case (a commented-out template heading + item is not a candidate, and line
   numbers of the real content after it are unshifted), and the fenced-code-block case (a fenced
@@ -119,6 +121,24 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 # only so an empty result can tell "this heading has no work" apart from "this heading's work
 # is written as prose bullets, which the selector cannot see".
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
+
+# h2 titles shipped tooling used to append to tasks.md, before findings moved to backlog.md.
+# Presence of one in tasks.md is a migration signal, never a candidate source.
+PERSISTENT_SECTION_TITLES = frozenset({"Review Backlog", "Security Fixes"})
+
+# The Sprint Contract's own sections (lowercased). These own open `- [ ]` items legitimately —
+# `## Acceptance criteria` is checkboxes by definition — so they are the exception to "an h2 with
+# open items in tasks.md is misplaced queue content".
+SPRINT_SECTION_TITLES = frozenset(
+    {
+        "scope",
+        "acceptance criteria",
+        "out of scope",
+        "evaluator feedback",
+        "covers",
+        "lint/test command",
+    }
+)
 
 
 def _is_blocked(text: str) -> bool:
@@ -303,55 +323,46 @@ def phase_a_candidates(tasks_tokens: list[dict]) -> list[dict]:
     return result
 
 
-# ---- Phase B / full-scan rule 2: tasks.md Review Backlog h3s --------------------------
+# ---- Migration check: persistent sections that no longer belong in tasks.md -------------
 
-def review_backlog_h3_candidates(tasks_tokens: list[dict], limit: int | None = None) -> list[dict]:
+def tasks_persistent_sections(tasks_tokens: list[dict]) -> list[dict]:
+    """h2/h3 headings in tasks.md that directly own open items.
+
+    `tasks.md` is the Sprint Contract and nothing else — it is deleted whole at sprint close, so
+    anything meant to outlive the sprint must live in `backlog.md`. Older repos wrote
+    `## Review Backlog` findings here. Those are NOT candidates any more, but dropping them
+    silently would hide real queued work, so they are reported as a migration warning instead.
+
+    A Sprint Contract's own `## Scope` / `## Acceptance criteria` own open checkboxes too, so a
+    bare "h2 with open items" test would fire on every healthy sprint. Two narrower tests instead,
+    either of which qualifies a heading:
+
+      1. its title is one tooling is known to have written (`PERSISTENT_SECTION_TITLES`), or an
+         h3 nested under such a heading — this catches findings appended AFTER the sprint h1, the
+         placement that used to destroy them;
+      2. it owns open items and is not one of the Sprint Contract's own sections
+         (`SPRINT_SECTION_TITLES`) — this catches an ad-hoc grab-bag heading anywhere in the file,
+         whichever side of the sprint h1 it sits on.
+    """
     headings = _headings(tasks_tokens)
-    rb = next((h for h in headings if h["level"] == 2 and h["title"] == "Review Backlog"), None)
-    if rb is None:
-        return []
-    rb_end = math.inf
-    for h in headings:
-        if h["line"] > rb["line"] and h["level"] in (1, 2):
-            rb_end = h["line"]
-            break
+    known_end = None  # end line of the persistent section currently open, for its h3 children
     result = []
     for h in headings:
-        if h["level"] == 3 and rb["line"] < h["line"] < rb_end:
-            open_items = _direct_open_items(tasks_tokens, h, headings)
-            if open_items:
-                result.append(
-                    {
-                        "source": "tasks.md",
-                        "kind": "h3",
-                        "title": h["title"],
-                        "line": h["line"],
-                        "items": len(open_items),
-                    }
-                )
-                if limit is not None and len(result) >= limit:
-                    break
-    return result
-
-
-# ---- Full-scan rule 3: tasks.md h2 outside Review Backlog ------------------------------
-
-def h2_outside_review_backlog_candidates(tasks_tokens: list[dict]) -> list[dict]:
-    headings = _headings(tasks_tokens)
-    result = []
-    for h in headings:
-        if h["level"] == 2 and h["title"] != "Review Backlog":
-            open_items = _direct_open_items(tasks_tokens, h, headings)
-            if open_items:
-                result.append(
-                    {
-                        "source": "tasks.md",
-                        "kind": "h2",
-                        "title": h["title"],
-                        "line": h["line"],
-                        "items": len(open_items),
-                    }
-                )
+        if h["level"] in (1, 2) and known_end is not None and h["line"] >= known_end:
+            known_end = None
+        if h["level"] == 2 and h["title"] in PERSISTENT_SECTION_TITLES:
+            known_end = _region_end(h, [x for x in headings if x["level"] in (1, 2)])
+            result.append({"title": h["title"], "line": h["line"], "level": 2})
+            continue
+        if h["level"] == 3 and known_end is not None and h["line"] < known_end:
+            result.append({"title": h["title"], "line": h["line"], "level": 3})
+            continue
+        if (
+            h["level"] in (2, 3)
+            and h["title"].strip().lower() not in SPRINT_SECTION_TITLES
+            and _direct_open_items(tasks_tokens, h, headings)
+        ):
+            result.append({"title": h["title"], "line": h["line"], "level": h["level"]})
     return result
 
 
@@ -409,24 +420,19 @@ def backlog_h2_candidates(backlog_tokens: list[dict]) -> list[dict]:
 # ---- Orchestrators ----------------------------------------------------------------------
 
 def fast_path(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[dict]:
-    """Phase A (uncapped) + Phase B (<=3, skipped if A already >=5) +
-    Phase C (<=2, skipped if A+B already >=5), truncated to 5 total."""
+    """Phase A (uncapped) + Phase B (<=2, skipped if A already >=5), truncated to 5 total."""
     result: list[dict] = []
     result.extend(phase_a_candidates(tasks_tokens))
-    if len(result) < 5:
-        result.extend(review_backlog_h3_candidates(tasks_tokens, limit=3))
     if len(result) < 5:
         result.extend(backlog_fast_candidates(backlog_tokens, limit=2))
     return result[:5]
 
 
 def full_scan(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[dict]:
-    """Rules 1-5 in order, uncapped. Rules 4+5 are type-priority (all h3, then all h2) —
-    a genuinely different ordering from Phase C's type-agnostic document order."""
+    """Rules 1-3 in order, uncapped. Rules 2+3 are type-priority (all h3, then all h2) —
+    a genuinely different ordering from Phase B's type-agnostic document order."""
     result: list[dict] = []
     result.extend(phase_a_candidates(tasks_tokens))
-    result.extend(review_backlog_h3_candidates(tasks_tokens))
-    result.extend(h2_outside_review_backlog_candidates(tasks_tokens))
     result.extend(backlog_h3_candidates(backlog_tokens))
     result.extend(backlog_h2_candidates(backlog_tokens))
     return result
@@ -511,8 +517,8 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
         # The reachability gap differs per file — naming tasks.md's causes while diagnosing
         # backlog.md would be a false statement about the file in front of the reader.
         cause = (
-            "a `###` outside `## Review Backlog`, or an h1 block whose `status:` is not `open`, "
-            "is reachable by no rule"
+            "tasks.md contributes h1 `status: open` sprint blocks only — items under any `##`/"
+            "`###` there are reachable by no rule and belong in backlog.md"
             if label == "tasks.md"
             else "the backlog.md rules cover h2/h3 groups only, so items under a top-level "
             "`# ` heading are reachable by no rule"
@@ -535,27 +541,16 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
     return msgs
 
 
-def zero_candidate_diagnosis(
-    tasks_tokens: list[dict], backlog_tokens: list[dict], *, full_scan_used: bool = False
-) -> list[str]:
+def zero_candidate_diagnosis(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[str]:
     """Human-readable reasons an otherwise-valid run produced zero candidates.
 
-    When the fast path came up empty, the single most useful answer is whether `--full-scan`
-    would find anything — so run it and report the verified result rather than guessing. The
-    fast path deliberately covers fewer rules (no tasks.md h2-outside-Review-Backlog), so
-    "fast path found nothing" and "there is nothing" are different facts.
+    No `--full-scan` reachability probe here: since tasks.md stopped contributing h2/h3 groups,
+    both algorithms qualify a heading by the same test and differ only in cap and ordering, so a
+    fast path that found nothing proves the full scan finds nothing. Re-adding a tasks.md-only
+    full-scan rule would make "fast path found nothing" and "there is nothing" different facts
+    again — restore the probe with it.
     """
     lines = []
-    if not full_scan_used:
-        reachable = full_scan(tasks_tokens, backlog_tokens)
-        if reachable:
-            names = ", ".join(f"{c['title']!r}" for c in reachable[:3])
-            more = f", +{len(reachable) - 3} more" if len(reachable) > 3 else ""
-            lines.append(
-                f"{len(reachable)} candidate(s) ARE reachable with --full-scan — {names}{more}. "
-                "The fast path reads only tasks.md h1 `status: open` blocks, h3s under "
-                "`## Review Backlog`, and backlog.md h2/h3 groups."
-            )
     for label, tokens in (("tasks.md", tasks_tokens), ("backlog.md", backlog_tokens)):
         lines.extend(_diagnose_source(label, tokens))
     if not lines:
@@ -636,6 +631,21 @@ def main(argv: list[str]) -> int:
                 "was treated as code and is not selectable. Close or remove the fence.\n"
             )
 
+    # Migration warning, emitted even when candidates WERE found. tasks.md no longer contributes
+    # anything but h1 sprint blocks, so a leftover findings section is real queued work that this
+    # run cannot see — reporting it beats dropping it silently. `prune-tasks` refuses on the same
+    # shape, so the two scripts agree on what needs moving.
+    stale = tasks_persistent_sections(tasks_tokens)
+    if stale:
+        shown = ", ".join(f"{s['title']!r} (line {s['line']})" for s in stale[:3])
+        more = f", +{len(stale) - 3} more" if len(stale) > 3 else ""
+        sys.stderr.write(
+            f"Warning: {tasks_path or 'tasks.md'} holds {len(stale)} persistent section(s) that "
+            f"belong in backlog.md — {shown}{more}. tasks.md is the Sprint Contract only and is "
+            "deleted at sprint close; move these to backlog.md verbatim or they will be lost and "
+            "are not selectable here.\n"
+        )
+
     candidates = full_scan(tasks_tokens, backlog_tokens) if full_scan_flag else fast_path(tasks_tokens, backlog_tokens)
 
     if json_flag:
@@ -647,9 +657,7 @@ def main(argv: list[str]) -> int:
     # Zero candidates is ambiguous — say which kind of empty this is, on stderr so `--json`
     # stdout stays machine-parseable. Exit code stays 0: an empty queue is not an error.
     if not candidates:
-        for line in zero_candidate_diagnosis(
-            tasks_tokens, backlog_tokens, full_scan_used=full_scan_flag
-        ):
+        for line in zero_candidate_diagnosis(tasks_tokens, backlog_tokens):
             sys.stderr.write(line + "\n")
     return 0
 
@@ -1018,8 +1026,8 @@ Some prose before the sample.
         "a partial swallow still yields candidates, so the warning must not be zero-gated",
     )
 
-    # ---- Test 4: Phase-B/C limit truncation (cap 5 total across A+B+C) ----
-    print("\nTest 4: fast_path — cap 5 total across Phase A + B + C")
+    # ---- Test 4: Phase-B limit truncation (cap 5 total across A+B) ----
+    print("\nTest 4: fast_path — cap 5 total across Phase A + B")
     tasks_many = """# Sprint 1
 status: open
 
@@ -1031,14 +1039,6 @@ status: open
 
 # Sprint 4
 status: open
-
-## Review Backlog
-### RB item 1
-- [ ] a
-### RB item 2
-- [ ] b
-### RB item 3
-- [ ] c
 """
     backlog_many = """## B group 1
 - [ ] x
@@ -1048,13 +1048,13 @@ status: open
     tasks_tokens = tokenize(tasks_many)
     backlog_tokens = tokenize(backlog_many)
     result = fast_path(tasks_tokens, backlog_tokens)
-    _assert(len(result) == 5, "fast_path truncates combined A+B+C to 5 candidates")
+    _assert(len(result) == 5, "fast_path truncates combined A+B to 5 candidates")
     _assert(
-        [c["title"] for c in result] == ["Sprint 1", "Sprint 2", "Sprint 3", "Sprint 4", "RB item 1"],
-        "truncation keeps A(4) then only the first of B, C entirely skipped",
+        [c["title"] for c in result] == ["Sprint 1", "Sprint 2", "Sprint 3", "Sprint 4", "B group 1"],
+        "truncation keeps A(4) then only the first of B",
     )
 
-    # Phase A alone already at 5 -> B and C fully skipped
+    # Phase A alone already at 5 -> B fully skipped
     tasks_five = """# S1
 status: open
 
@@ -1069,20 +1069,50 @@ status: open
 
 # S5
 status: open
-
-## Review Backlog
-### RB item
-- [ ] a
 """
     result = fast_path(tokenize(tasks_five), tokenize(backlog_many))
     _assert(len(result) == 5, "Phase A alone at 5 still caps combined total at 5")
     _assert(
         all(c["source"] == "tasks.md" and c["kind"] == "h1" for c in result),
-        "Phase A already at 5 skips Phase B and Phase C entirely",
+        "Phase A already at 5 skips Phase B entirely",
     )
 
-    # ---- Test 5: Phase-C-vs-full-scan ordering divergence ----
-    print("\nTest 5: Phase C (type-agnostic doc order) vs full_scan (type-priority h3-then-h2)")
+    # REGRESSION GUARD: tasks.md findings sections are never candidates, whatever their shape.
+    tasks_mixed = """# Sprint one
+
+status: open
+
+## Review Backlog
+
+### PR #101 — earlier PR
+
+- [ ] [debt] leftover finding
+
+## Grab bag
+
+- [ ] [doc] another
+"""
+    mixed_tokens = tokenize(tasks_mixed)
+    _assert(
+        [c["title"] for c in fast_path(mixed_tokens, tokenize(""))] == ["Sprint one"]
+        and [c["title"] for c in full_scan(mixed_tokens, tokenize(""))] == ["Sprint one"],
+        "tasks.md h2/h3 findings are not candidates in either algorithm",
+    )
+    stale = tasks_persistent_sections(mixed_tokens)
+    _assert(
+        [s["title"] for s in stale] == ["Review Backlog", "PR #101 — earlier PR", "Grab bag"],
+        "tasks_persistent_sections reports the findings sections instead of dropping them",
+    )
+    _assert(
+        tasks_persistent_sections(
+            tokenize("# Sprint one\n\nstatus: active\n\n## Scope\n\n- [ ] in scope\n")
+        )
+        == [],
+        "a healthy Sprint Contract's own ## Scope checkboxes raise no migration warning",
+    )
+
+    # ---- Test 5: Phase-B-vs-full-scan ordering divergence ----
+    print("\nTest 5: Phase B (type-agnostic doc order) vs full_scan (type-priority h3-then-h2)")
     backlog_interleaved = """## H2-A
 - [ ] item a
 ### H3-B
@@ -1091,37 +1121,27 @@ status: open
 - [ ] item c
 """
     tokens = tokenize(backlog_interleaved)
-    phase_c_result = backlog_fast_candidates(tokens, limit=2)
+    phase_b_result = backlog_fast_candidates(tokens, limit=2)
     _assert(
-        [c["title"] for c in phase_c_result] == ["H2-A", "H3-B"],
-        "Phase C picks first 2 in raw document order, type-agnostic",
+        [c["title"] for c in phase_b_result] == ["H2-A", "H3-B"],
+        "Phase B picks first 2 in raw document order, type-agnostic",
     )
 
     full_scan_backlog_only = backlog_h3_candidates(tokens) + backlog_h2_candidates(tokens)
     _assert(
         [c["title"] for c in full_scan_backlog_only] == ["H3-B", "H2-A", "H2-C"],
-        "full-scan rules 4+5 apply type priority: all h3 first, then all h2 — diverges from Phase C order",
+        "full-scan rules 2+3 apply type priority: all h3 first, then all h2 — diverges from Phase B order",
     )
 
     # ---- Test 6: full_scan end-to-end composition ----
-    print("\nTest 6: full_scan — rules 1-5 concatenated, uncapped")
+    print("\nTest 6: full_scan — rules 1-3 concatenated, uncapped")
     tasks_fs = """# Sprint open
 status: open
-
-## Review Backlog
-### RB a
-- [ ] x
-### RB b
-- [ ] y
-
-## Grab bag
-- [ ] z
 """
     result = full_scan(tokenize(tasks_fs), tokenize(backlog_interleaved))
     _assert(
-        [c["title"] for c in result]
-        == ["Sprint open", "RB a", "RB b", "Grab bag", "H3-B", "H2-A", "H2-C"],
-        "full_scan concatenates rule1..rule5 in order, uncapped, backlog rules type-prioritized",
+        [c["title"] for c in result] == ["Sprint open", "H3-B", "H2-A", "H2-C"],
+        "full_scan concatenates rule1..rule3 in order, uncapped, backlog rules type-prioritized",
     )
 
     # ---- Test 7: format_candidates — h1 omits item count ----
@@ -1225,25 +1245,21 @@ status: open
         "items above the first heading are reported as unattributed, not as absent",
     )
 
-    # 8g: fast path empty but --full-scan would hit. REGRESSION GUARD — a tasks.md h2 outside
-    # `## Review Backlog` is a full-scan-only rule, so its items ARE attributed to a heading.
-    # Reporting them as "not attributed to a heading" is a false statement about the file.
-    full_scan_only = """# Out-of-Scope Findings
+    # 8g: REGRESSION GUARD — a tasks.md h2 is unreachable by any rule now, but its items ARE
+    # attributed to a heading. Reporting them as "not attributed to a heading" is a false
+    # statement about the file.
+    unreachable_h2 = """# Out-of-Scope Findings
 
 ## Plugin validation
 
 - [ ] fix the frontmatter parse error
 """
-    tasks_tok = tokenize(full_scan_only)
+    tasks_tok = tokenize(unreachable_h2)
     _assert(
-        fast_path(tasks_tok, tokenize("")) == [] and len(full_scan(tasks_tok, tokenize(""))) == 1,
-        "fixture really is fast-path-empty but full-scan-reachable",
+        fast_path(tasks_tok, tokenize("")) == [] and full_scan(tasks_tok, tokenize("")) == [],
+        "a tasks.md h2 group is reachable by neither algorithm",
     )
     out = zero_candidate_diagnosis(tasks_tok, tokenize(""))
-    _assert(
-        any("reachable with --full-scan" in line and "'Plugin validation'" in line for line in out),
-        "the fast path names the candidates --full-scan would find, verified by running it",
-    )
     _assert(
         not any("above the first heading" in line for line in out),
         "REGRESSION: an attributed-but-unselected item must not be called unattributed",
@@ -1275,13 +1291,13 @@ status: open
     )
     tasks_h3 = """## Some group
 
-### Nested outside Review Backlog
+### Nested group
 
 - [ ] real actionable item
 """
     out = zero_candidate_diagnosis(tokenize(tasks_h3), tokenize(""))
     _assert(
-        any("Review Backlog" in line for line in out),
+        any("belong in backlog.md" in line for line in out),
         "the tasks.md explanation is still given when tasks.md is the file being diagnosed",
     )
 
@@ -1318,9 +1334,9 @@ status: open
     _assert(
         not any(
             "reachable with --full-scan" in line
-            for line in zero_candidate_diagnosis(tasks_tok, tokenize(""), full_scan_used=True)
+            for line in zero_candidate_diagnosis(tasks_tok, tokenize(""))
         ),
-        "the --full-scan suggestion is suppressed when full scan is what already ran",
+        "no --full-scan suggestion: both algorithms qualify headings by the same test now",
     )
 
     # 8d: genuinely clear queue — everything closed

@@ -76,7 +76,7 @@ When the feature is done, grade it against the done-when criteria and `docs/eval
 
 ## `draft` — Documentation
 
-Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, add to `backlog.md` or `tasks.md`.
+Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, add to `backlog.md`.
 
 ## `constrain` — Architectural Enforcement
 
@@ -90,7 +90,7 @@ Write or update `docs/`. Ground every claim in current code. Never modify produc
 Fight entropy. Run between features or on a schedule.
 
 - Run automated sweep script (`tools/sweep.sh` or equivalent)
-- List findings in `tasks.md` tagged as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
+- List findings in `backlog.md` tagged as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
 - Fix trivials inline
 - Leave complex items for later
 - Include harness simplification: "Is this component still compensating for a real model limitation?"
@@ -113,7 +113,7 @@ While in a primary workflow, these side-effects are allowed without switching:
 
 | Primary workflow | Permitted side-effect |
 |------------------|-----------------------|
-| `code` | Add `[doc]` or `[constraint]` item to `tasks.md` when discovering issues |
+| `code` | Add `[doc]` or `[constraint]` item to `backlog.md` when discovering issues |
 | `code` | Update relevant docs after implementation |
 | `draft` | Add `backlog.md` item when doc reveals missing behavior |
 | `sweep` | Fix trivial `[doc]` items inline |

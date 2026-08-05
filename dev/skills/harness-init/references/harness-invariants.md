@@ -87,8 +87,16 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 | `failed` | Revert `[>]` → `[ ]` in backlog with evaluator note; delete tasks.md | Sprint returned to queue |
 | (no tasks.md) | Strip orphan `[>]` markers from backlog | Backlog idle state |
 
-For this contract to hold, init MUST create `backlog.md` / `tasks.md` with the
-exact schema above.
+For this contract to hold, init MUST create `backlog.md` with the exact schema above, and the
+first sprint MUST write `tasks.md` to it (init never creates `tasks.md` — the idle state is its
+absence).
+
+**File-role invariant.** `tasks.md` is the Sprint Contract and nothing else; `backlog.md` is the
+only persistent queue. Deleting `tasks.md` on sprint close is safe *because* nothing that must
+outlive the sprint is in it. Review findings, security findings, sweep findings and follow-ups all
+append to `backlog.md`. Enforced at both ends: `task_nodes.py prune-tasks` refuses on a `tasks.md`
+holding a `## Review Backlog` / `## Security Fixes` section, and `backlog_candidates.py` warns on
+the same shape instead of offering it as work.
 
 ## CHANGELOG Entry Contract
 

@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.1.2
+version: 2.1.3
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -72,14 +72,14 @@ the PR and CI validates them), provided you keep them **light and in-scope**:
 - Small doc or gotcha directly tied to this change → inline edit to
   `docs/*.md` / `AGENTS.md` / `CLAUDE.md`; it merges with the PR.
 - Anything heavy — a new skill, a skill overhaul, a multi-file doc rewrite —
-  does **not** belong in this PR. Record it to `tasks.md` as a follow-up, the
+  does **not** belong in this PR. Record it to `backlog.md` as a follow-up, the
   same channel out-of-scope review findings use. Inlining it would balloon the
   PR and, for a skill, force a mid-cycle version re-bump.
 
 **Under `--auto` (the non-interactive path `task-review` uses):** do not
 pause for the per-write veto or hygiene approval described below — the open PR's
 review and CI are the safety net. Write the light memory/doc delta directly, and
-for any *destructive* memory prune (deleting an entry) defer it to `tasks.md`
+for any *destructive* memory prune (deleting an entry) defer it to `backlog.md`
 rather than blocking, so the review cycle's `--auto` guarantee holds.
 
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,

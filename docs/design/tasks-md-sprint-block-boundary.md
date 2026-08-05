@@ -1,8 +1,14 @@
 # `tasks.md` sprint-block boundary — deferred decision
 
-**Status:** analysis done, no code written. The `harness-init` minimalization work is committed on
-branch `feat/init-minimal-no-agents` (it did not touch `reconcile-harness.py`), so options 4 and 5
-below are no longer blocked on it — they still share that file and belong in one change.
+**Status: option 7 implemented** on branch `feat/unmix-tasks-md` (2026-08-05). `tasks.md` is now the
+Sprint Contract only; every persistent queue — review findings, security findings, sweep findings —
+lives in `backlog.md`. Options 1, 2 and 4 are superseded: the boundary they were hardening no longer
+separates deletable from must-survive content. Option 3's regression test shipped as the migration
+guard test in `task_nodes.py`. **Option 5 (the dead `[>]` anchor path in `reconcile-harness.py` C-1)
+is still open** — only its stale `backlog-template.md:15` claim was corrected here. Option 6 (making
+the Sprint Contract write conditional on `## Covers`) is untouched and still stands on its own.
+
+Everything below is the original analysis, kept as the record of why.
 
 **Reported as:** "`prune-tasks` treats a `#`-level Sprint Contract as running to EOF and deletes
 all of `tasks.md`."
@@ -142,13 +148,59 @@ conditional also shrinks the exposure surface of the boundary defect above by co
    `[>]`. Same file as option 4; do them together.
 6. **Make the Sprint Contract write conditional** on `## Covers` being needed (see the section
    above). Touches `task-next/SKILL.md` and `task-new/SKILL.md` only — independent of 1–5.
+7. **Unmix `tasks.md` — route persistent findings to `backlog.md`.** Structural alternative to 1–4;
+   see the section below.
 
 Suggested shape: **2 + 3 first** (stop the data loss, prove it), **1 alongside** (cheap, removes the
 trigger), then **4 + 5 together** as one `reconcile-harness.py` change. **6** is independent and can
-go whenever; doing it early shrinks how often the boundary is exercised at all.
+go whenever; doing it early shrinks how often the boundary is exercised at all. If **7** is taken,
+1–4 shrink to a regression test — re-plan before spending on them.
 
-## Open question for the decider
+## Option 7 — unmix `tasks.md` (the file-role split)
 
-Is the mixed-content `tasks.md` itself worth keeping? Splitting review findings into their own file
-(e.g. `review-backlog.md`) removes the boundary problem by construction, but changes the contract
-across `task-review`, `security-overview`, and `harness-init` at once. Not scoped here.
+The distinction that earns its keep is not *backlog vs tasks*. It is **persistent queue vs
+one-cycle ephemeral state**. The two files no longer sit on that axis:
+
+- `tasks.md` holds the Sprint Contract (dies at sprint close) **and** `## Review Backlog` findings
+  (survive indefinitely — `task-review/references/consolidation-guide.md:118-153`).
+- `task-next` already pulls work items from **three** sources (`task-next/SKILL.md:182-193`): a
+  `tasks.md` h1 block, a `tasks.md` finding group, and a `backlog.md` group. `tasks.md` is already
+  a queue.
+
+Every defect above is downstream of that mixing: `delete_if_empty` / `os.remove` is only a safe
+primitive on a file that contains nothing persistent, and today it does not. Options 1–4 all
+re-establish a boundary *inside* a file that should not need one.
+
+**Proposal.**
+
+| File | Role | Lifetime |
+|---|---|---|
+| `backlog.md` | the only queue — human-entered items **and** review/security findings | persistent |
+| `tasks.md` | current Sprint Contract only | created at sprint start, file removed at close |
+
+Consequences:
+
+- `os.remove` on sprint close becomes correct by construction. The h1-to-EOF boundary question
+  disappears; so does the write-position invariant (option 1) and most of `prune_h1_block`'s
+  divergence from `strip_sprint_block` (options 2, 4). Keep option 3's regression test regardless.
+- Findings arrive already shaped for the queue — they are `- [ ]` lines with harness tags today, and
+  `backlog.md`'s schema is `- [ ]` items under `##` headings. The per-PR `###` grouping maps onto
+  `backlog.md`'s existing heading nesting.
+- The `## Covers` verbatim-match contract is unaffected: it points at `backlog.md` either way, and
+  under this split it points at *one* file instead of two.
+
+Cost — the write path changes in three places at once:
+
+- `task-review/references/consolidation-guide.md` (§ "Recording Backlog Items in tasks.md")
+- `dev/commands/security-overview.md` + `dev/references/security-overview/tasks-template.md`
+- `harness-init`: `references/tasks-template.md`, `references/backlog-template.md`,
+  `scripts/validate-harness.sh` schema checks, and `scripts/reconcile-harness.py`
+  (`strip_sprint_block`'s ordering-invariant docstring becomes obsolete)
+
+plus `task-next/SKILL.md`'s three-source selection collapses to two.
+
+Rejected variant: **unify into `tasks.md`** (drop `backlog.md`). Fewer files, but it keeps
+"deletable region" and "must-survive region" in one file — the exact structure that produced this
+bug — and forfeits the safe-delete primitive permanently.
+
+Not decided here. Decide 7 before spending on 1/2/4.

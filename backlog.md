@@ -1,5 +1,13 @@
 # Backlog
 
+## Harness — `tasks.md` sprint-block boundary
+
+Option 7 (unmix `tasks.md`) shipped; options 1–4 are superseded by it. Remaining leftovers from the
+analysis in `docs/design/tasks-md-sprint-block-boundary.md`.
+
+- [ ] [FIX] `reconcile-harness.py` C-1 anchors on `[>]` lines nothing writes any more — re-anchor on `## Covers` or drop the marker machinery (option 5)
+- [ ] [REFACTOR] make the Sprint Contract write conditional on `## Covers` being needed (option 6)
+
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

@@ -96,7 +96,7 @@ Fire-and-forget tasks that improve quality but don't block progress.
 | Trigger | Delegate to | Context to pass |
 |---------|-------------|-----------------|
 | Every commit | Code reviewer (background) | Commit hash, changed files |
-| Periodic | Sweep agent (background) | tasks.md path |
+| Periodic | Sweep agent (background) | backlog.md path |
 ```
 
 ### Escalation

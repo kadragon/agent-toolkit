@@ -195,7 +195,7 @@ A new check must not ship a warning the repo has *already decided* is correct-by
 warning never goes away, so it teaches the operator to skim past the whole section — costing the
 real drift the check exists to catch. When a legitimate exception exists, give it a mechanical
 opt-out (a frontmatter key, a marker comment) and document the class that may use it; deferring
-the decision to `tasks.md` leaves the noisy state as the shipped default.
+the decision to `backlog.md` leaves the noisy state as the shipped default.
 
 Reference implementation: `spine-exempt: true` in `validate-harness.sh` §11.
 

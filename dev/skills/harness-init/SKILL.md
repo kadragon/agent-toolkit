@@ -211,7 +211,7 @@ For each doc you skip, say so in the Step 10 summary with its one-line trigger, 
 If the repo does adopt the backlog/sprint flow — now or later — create at repo root:
 
 - **`backlog.md`** — queue of work not yet in flight. Copy the minimal template from `references/backlog-template.md`. Empty sections are fine.
-- **`tasks.md`** — never at init. It exists only during an active sprint. Record the template path (`references/tasks-template.md`) in `docs/workflows.md` so the first sprint starter knows the schema.
+- **`tasks.md`** — never at init. It exists only during an active sprint, holds the Sprint Contract and nothing else, and is deleted whole at close; every persistent item (queue, review findings, security findings) belongs in `backlog.md`. Record the template path (`references/tasks-template.md`) in `docs/workflows.md` so the first sprint starter knows the schema.
 
 Both files follow the **Reconciliation Contract** in `references/harness-invariants.md`.
 

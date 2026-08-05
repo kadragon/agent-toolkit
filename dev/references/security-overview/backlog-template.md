@@ -1,17 +1,23 @@
-# tasks.md Template and Rules
+# backlog.md Template and Rules
 
-Rules and template for generating per-repo `tasks.md` files with security fix tasks.
+Rules and template for appending a security-fix section to each affected repo's `backlog.md`.
+
+Findings outlive the cycle that produced them, so they belong in `backlog.md` — the repo's only
+persistent queue. Never write them to `tasks.md`: that file is the current Sprint Contract and is
+deleted whole at sprint close, and `task_nodes.py prune-tasks` refuses to run against a `tasks.md`
+holding a `## Security Fixes` section.
 
 ## Target Path
 
-Each affected repo gets its own tasks.md:
+The section is appended to each affected repo's own backlog:
 
 ```
-${WORKSPACE_DIR}/${REPO_NAME}/tasks.md
+${WORKSPACE_DIR}/${REPO_NAME}/backlog.md
 ```
 
 Where `WORKSPACE_DIR` is the **parent** of the current working directory.
-Do NOT create a single consolidated file.
+Do NOT create a single consolidated file. If a repo has no `backlog.md`, create one with a
+`# Backlog` heading, then append the section below it.
 
 ## Template
 
@@ -65,13 +71,14 @@ Do NOT create a single consolidated file.
 
 ### Idempotency
 
-If `tasks.md` already exists and contains a `## Security Fixes` section:
+If `backlog.md` already contains a `## Security Fixes` section:
 
-Before replacing: run `git log -1 --format=%ai tasks.md`. If the file was modified by a human after last scan, prompt: "tasks.md has manual edits — overwrite? [y/N]". Proceed only on "y".
+Before replacing: run `git log -1 --format=%ai backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
 
 On confirmation (or if no human edit detected):
 - **Replace** that section with fresh scan results.
-- **Preserve** all other content in the file.
+- **Preserve** all other content in the file — other `##` groups and `## Review Backlog` findings
+  live in the same file and must survive untouched.
 
 This prevents duplicate entries from repeated runs.
 
@@ -96,13 +103,13 @@ This prevents duplicate entries from repeated runs.
 
 ## Summary Format
 
-After generating all tasks.md files, present:
+After updating all backlog.md files, present:
 
 ```
 | Repo | Path | Items |
 |------|------|-------|
-| my-webapp | ~/dev/my-webapp/tasks.md | 5 |
-| api-server | ~/dev/api-server/tasks.md | 2 |
+| my-webapp | ~/dev/my-webapp/backlog.md | 5 |
+| api-server | ~/dev/api-server/backlog.md | 2 |
 
 Total: 7 fix items across 2 repos.
 

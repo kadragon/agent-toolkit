@@ -110,7 +110,7 @@ enabled):
    teammate via the native shared task list (`TaskCreate`, persisted under
    the Claude config dir, default `~/.claude/tasks/{team-name}/`). No
    teammate edits outside its glob.
-   `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
+   `backlog.md` stays the durable backlog — read-only during team
    work. See `dev:harness-init` → `references/workflows-template.md` → "Step 1.5: File Ownership
    Declaration".
 
@@ -135,7 +135,7 @@ enabled):
 6. **Teammates do not inherit lead conversation.** Every spawn prompt must
    be self-contained (Spawn Prompt Contract — all 4 fields).
 
-7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
+7. **Task store separation.** `backlog.md` = durable backlog
    (read-only mid-session input). Live coordination, status, and file globs
    live in the native shared task list (Task tools, persisted under the
    Claude config dir, default `~/.claude/tasks/{team-name}/`; see the Path
