@@ -33,6 +33,22 @@ the dirty files — do NOT proceed. Ask the user to commit, stash, or discard fi
 checked once, here. Later steps deliberately dirty `tasks.md`/`backlog.md` as part of the cycle;
 that is expected and rides into the feature branch.)
 
+**Roster check — before any agent spawn in any step below.** A role exists only if
+`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present. `dev:harness-init` creates
+**no** roles (its Step 4b), so an empty roster is the designed state of a freshly initialized repo,
+not a defect — never stop on it, and never create the role mid-task. Route around it per the
+fallback attached to each spawn point, say in one line which fallback you took, and note that
+`dev:harness-curate` is what adds a role once the transcripts show the delegation recurring.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
+(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
+lists the role as an available agent type, treat it as present regardless of the probe.
+
 ## Step 1 — Classify & size-gate
 
 Free text carries no `[type]` tag yet, so infer one from what the request describes before
@@ -45,7 +61,8 @@ an untagged one-file behavioral addition ("로그인 버튼 추가해줘") is no
 `[FEAT]`.
 
 If the file count isn't obvious from the request text, run a quick scoped scan (or spawn
-`explorer` if the scan itself would be large) to estimate it before classifying.
+`explorer` if the scan itself would be large — the built-in `Explore` subagent when `explorer` is
+absent from the roster) to estimate it before classifying.
 
 ## Step 2 — Route by size
 
@@ -90,7 +107,8 @@ git checkout -b "$BRANCH"
 
 **Scope check (Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before writing
-the Sprint Contract.
+the Sprint Contract. **`explorer` absent from the roster:** spawn the built-in `Explore` subagent
+with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at for a repo with no roles.
 
 **Plan mode gate (before Step 2)**
 - **Non-trivial** (tag is `[FEAT]`/`[REFACTOR]`, OR ≥3 files, OR new public API/schema): use
@@ -107,18 +125,6 @@ Write a `tasks.md` Sprint Contract per `docs/eval-criteria.md`:
 - If this cycle is running a `task-tickets`-generated backlog ticket (the multi-session path), add a
   `## Covers` line with that ticket's `- [ ]` item copied **verbatim** from `backlog.md` — this is
   the deletion target for cleanup.
-
-**Roster check — before any spawn below.** A role exists only if `.claude/agents/{role}.md` or
-`~/.claude/agents/{role}.md` is present. `dev:harness-init` creates **no** roles (its Step 4b), so
-an empty roster is the designed state of a freshly initialized repo, not a defect — never stop on
-it, and never create the role mid-task. Route around it per the fallbacks below, say in one line
-which fallback you took, and note that `dev:harness-curate` is what adds a role once the transcripts
-show the delegation recurring.
-
-```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
-```
 
 **Implement (Step 3)**
 - 1–2 files AND not `[FEAT]`/`[REFACTOR]`: inline edit.
@@ -141,8 +147,10 @@ ALWAYS spawn `qa-verifier` as a separate agent. If it reports blocking issues: s
 report — do NOT hand off with unresolved blockers.
 
 **`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
-verifier instead, briefed with the Sprint Contract's acceptance criteria verbatim, the in-scope
-paths and the lint/test command, told to verify against those criteria and change nothing. The
+verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
+four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
+with the Sprint Contract's acceptance criteria verbatim, the in-scope paths and the lint/test
+command, and telling it to verify against those criteria and change nothing. The
 independence is what must not be dropped, not the role name: the agent that implemented — the main
 thread included, when the implementer fallback above was taken — never verifies its own output.
 Fixes on the retry path go to `implementer`, or inline when that role is also absent.
@@ -165,7 +173,9 @@ re-running would bump the plugin twice for one change.
 header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy where that doc exists.
 Read one of them rather than recalling the rules — the script header suffices on its own when the
 repo has no `docs/conventions.md`. No `scripts/bump-version.sh` → edit the manifests by hand per the
-same rules; no `plugin.json` at all → skip this step.
+same rules; no `plugin.json` at all → skip this step. With **neither** the script nor
+`docs/conventions.md` present, the repo has stated no release policy — ask the user for the bump
+level instead of inventing one.
 
 **Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
 

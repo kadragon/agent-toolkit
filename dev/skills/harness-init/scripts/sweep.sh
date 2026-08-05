@@ -88,7 +88,10 @@ if [[ -f "AGENTS.md" ]]; then
     done
 fi
 
-# Check key docs exist — same two tiers as validate-harness.sh section 1.
+# Check key docs exist — the same two tiers validate-harness.sh applies in its
+# section 1, with docs/delegation.md folded into the conditional list. That doc
+# sits outside section 1 there, where a role-aware check can WARN once the repo
+# has roles but no routing doc; sweep has no roster context, so it stays INFO.
 # Always required: docs/runbook.md, the one doc whose content (build/test/deploy
 # commands, env setup, failure modes) is never inferable from source. Everything
 # else is conditional: harness-init generates it only when the repo has the thing

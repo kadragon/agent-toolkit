@@ -172,9 +172,27 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 git checkout -b "$BRANCH"
 ```
 
+**Roster check — before any agent spawn in this step or the ones below.** A role exists only if
+`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present. `dev:harness-init` creates
+**no** roles (its Step 4b), so an empty roster is the designed state of a freshly initialized repo,
+not a defect — never stop on it, and never create the role mid-task. Route around it per the
+fallbacks attached to each spawn point below, say in one line which fallback you took, and note that
+`dev:harness-curate` is what adds a role once the transcripts show the delegation recurring.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
+(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
+lists the role as an available agent type, treat it as present regardless of the probe.
+
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
-writing the Sprint Contract.
+writing the Sprint Contract. **`explorer` absent from the roster:** spawn the built-in `Explore`
+subagent with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at for a repo
+with no roles.
 
 **Plan mode gate (before workflows.md Step 2)**
 Check tag first, then file count:
@@ -206,18 +224,6 @@ Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Ou
 
 For a multi-item group: Acceptance criteria has **one concrete checkbox per item** — do not
 merge them into a single vague criterion. Scope lists all in-scope files/areas.
-
-**Roster check — before any spawn below.** A role exists only if `.claude/agents/{role}.md` or
-`~/.claude/agents/{role}.md` is present. `dev:harness-init` creates **no** roles (its Step 4b), so
-an empty roster is the designed state of a freshly initialized repo, not a defect — never stop on
-it, and never create the role mid-task. Route around it per the fallbacks below, say in one line
-which fallback you took, and note that `dev:harness-curate` is what adds a role once the transcripts
-show the delegation recurring.
-
-```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
-```
 
 **Implement (workflows.md Step 3)**
 - 1–2 files AND not `[FEAT]`/`[REFACTOR]` (including small bundles that still touch ≤2
@@ -256,9 +262,11 @@ verify — a deliberate exception to the volume half of the repo's delegation ga
 batch mode's per-unit verifiers included; every non-QA delegation still needs both conditions.
 
 **`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
-verifier instead, briefed with the Sprint Contract's acceptance criteria verbatim, the in-scope
-paths, and the lint/test command, and told to verify against those criteria rather than impressions
-and to change nothing. What must never be dropped is the independence, not the role name: the agent
+verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
+four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
+with the Sprint Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test
+command, and telling it to verify against those criteria rather than impressions and to change
+nothing. What must never be dropped is the independence, not the role name: the agent
 that implemented — the main thread included, when the implementer fallback above was taken — does
 not verify its own output. This fallback applies to every QA spawn this skill owns, batch mode's
 per-unit verifiers included.
@@ -288,8 +296,10 @@ re-running would bump the plugin twice for one change.
 header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy where that doc exists.
 Read one of them rather than recalling the rules — the script header suffices on its own when the
 repo has no `docs/conventions.md`. If the repo has no `scripts/bump-version.sh` (it ships with this
-marketplace, not with the skill), edit the manifests by hand per `docs/conventions.md`; if the repo
-has no `plugin.json` at all, skip this step.
+marketplace, not with the skill), edit the manifests by hand per the same rules; if the repo
+has no `plugin.json` at all, skip this step. With **neither** the script nor `docs/conventions.md`
+present, the repo has stated no release policy — ask the user for the bump level instead of
+inventing one.
 
 **Do NOT commit.** Leave all changes uncommitted. `task-review` Step 1 commits everything
 so there is one clean commit per review/merge cycle.
