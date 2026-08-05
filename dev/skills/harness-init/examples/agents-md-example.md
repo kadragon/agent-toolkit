@@ -36,22 +36,24 @@ If you installed the gate, a mandatory row that fires halts an inline edit. If y
 **Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
 - Sub-agents share findings mid-flight → Agent Team (`Agent` with `name:` + `SendMessage`)
 - Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
-- Phase-dependent → Hybrid (see `references/orchestrator-template.md`)
+- Phase-dependent → Hybrid (see `dev:harness-curate` → `references/orchestrator-template.md`)
 
-**This table is the maximalist case — most repos ship 2–4 rows, not ten.** A `Mandatory, blocking` row with no hook behind it is prose, and a blocking row that contradicts `~/.claude/CLAUDE.md` (or the platform's base instructions) loses to that layer — keep such rows a subset of what it permits and demote the rest to `Optional`.
+**This table is the maximalist case — a mature repo after months of use, not what `harness-init` produces.** A freshly initialized repo has **no rows here at all**: init creates no agent roles and no orchestrator, so there is nothing to route to, and every row below arrived later via `dev:harness-curate` on transcript evidence. Most repos settle at 2–4 rows, not ten; some stay at zero. A `Mandatory, blocking` row with no hook behind it is prose, and a blocking row that contradicts `~/.claude/CLAUDE.md` (or the platform's base instructions) loses to that layer — keep such rows a subset of what it permits and demote the rest to `Optional`.
+
+No row pins a model. Spawns inherit the session model; the caller overrides per spawn when a specific task warrants it (`docs/delegation.md` → Model Selection).
 
 | Trigger (objective) | Delegate | Mode | Gate |
 |---------------------|----------|------|------|
-| Target module has >5 files or >500 LOC | Explore agent (sonnet) | sub-agent | Optional |
-| Change touches ≥3 directories | Architecture analysis (opus) | sub-agent | Mandatory, blocking |
-| First edit in a directory this session | Explore agent (sonnet) | sub-agent | Optional |
-| File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent (sonnet) | sub-agent | Mandatory, blocking |
-| After implementation, when verification is delegated at all | QA verification (sonnet) | sub-agent | Optional |
-| Feature complete | Product evaluator (opus) | sub-agent | Optional |
-| Multi-perspective review needed | Review team (sonnet × N) | **agent team** | Optional |
-| Cross-layer refactor (≥3 modules) | Refactor team (opus lead + sonnet) | **agent team** | Escalation |
-| Every commit | Code reviewer (sonnet) | background | Background |
-| Same failure x2 | Deep investigation (opus) | sub-agent | Escalation, blocking |
+| Target module has >5 files or >500 LOC | Explore agent | sub-agent | Optional |
+| Change touches ≥3 directories | Architecture analysis | sub-agent | Mandatory, blocking |
+| First edit in a directory this session | Explore agent | sub-agent | Optional |
+| File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent | sub-agent | Mandatory, blocking |
+| After implementation, when verification is delegated at all | QA verification | sub-agent | Optional |
+| Feature complete | Product evaluator | sub-agent | Optional |
+| Multi-perspective review needed | Review team (× N) | **agent team** | Optional |
+| Cross-layer refactor (≥3 modules) | Refactor team | **agent team** | Escalation |
+| Every commit | Code reviewer | background | Background |
+| Same failure x2 | Deep investigation | sub-agent | Escalation, blocking |
 
 **Intermediate artifacts:** session scratchpad dir, `{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
 

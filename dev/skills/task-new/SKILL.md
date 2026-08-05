@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.5
+version: 1.0.6
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -170,7 +170,7 @@ explanatory clauses, file lists and narration — lives in the *CHANGELOG Entry 
 
 Invoke `Skill(dev:task-review)` with `args: --auto`. It commits (including the cleanup
 above), creates the PR, collects reviews, applies in-scope findings, records out-of-scope items to
-`tasks.md`, waits for CI, and merges.
+`backlog.md`, waits for CI, and merges.
 
 If `task-review` reports CI failure and the PR must be abandoned: close the PR and delete the
 feature branch — `main` retains its pre-cleanup state, no rollback needed.

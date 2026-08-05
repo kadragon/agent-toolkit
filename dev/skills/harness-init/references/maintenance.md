@@ -8,7 +8,7 @@ Maintain repo agent instruction files under **minimal-noise policy**.
 - `AGENTS.md` — canonical, minimal operational log (target ≤100 lines, hard warn >200)
 - `CLAUDE.md` — must contain exactly one line: `@AGENTS.md`
 - `.agents/skills` → `../.claude/skills` symlink
-- `backlog.md` / `tasks.md` — follow reconciliation contract
+- `backlog.md` / `tasks.md` — follow reconciliation contract (backlog.md = the only persistent queue; tasks.md = Sprint Contract only)
 
 All thresholds, paths, contracts live in `references/harness-invariants.md`. Update there when values change.
 
@@ -111,11 +111,11 @@ maintained here — that is transcript-driven and lives in `harness-curate`.
 Verify **schema** (not content) of harness-related docs. Full schemas in `references/backlog-template.md` and `references/tasks-template.md`; minimal assertions below match those templates:
 
 - `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings
-- `tasks.md` must have: top-level `# Title`, `status:` line, sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback`
+- `tasks.md` must have: top-level `# Title`, `status:` line, sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
-Either file entirely missing → repo not fully bootstrapped — point user at harness-init Step 4b, don't guess content.
+`backlog.md` missing → repo not fully bootstrapped — point user at harness-init Step 4a, don't guess content. `tasks.md` missing is the **idle state**, not drift: init never creates it and it is deleted at sprint close.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 

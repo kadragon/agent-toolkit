@@ -18,6 +18,8 @@ Skip for trivial features.
 
 The primary cycle for behavioral changes. Delegation checkpoints are **named steps** in this workflow — they are not optional "consult if needed" references.
 
+**Delegation in a freshly initialized repo.** `harness-init` creates no agent roles and no orchestrator, so on a new repo every step below runs **inline in the main thread**: it does its own scope check, its own implementation, its own verification pass. That is the intended starting state, not a gap. Keep the steps — the discipline is the point — and drop the words "delegate to X" from any step whose X does not exist here yet. Roles arrive later via `dev:harness-curate` on transcript evidence; when one does, restore the delegation wording for that step only.
+
 **Step 0: Branch**
 Before any edit, ensure you're on a feature branch — never on `main`/`master`. If currently on the default branch, run `git checkout -b <type>/<slug>` (e.g. `feat/user-auth`, `fix/login-redirect`). Exceptions must be declared explicitly in this repo's `AGENTS.md` / `CLAUDE.md`.
 
@@ -54,11 +56,11 @@ Adapt testing approach to the project:
 **Step 3: Implement**
 For changes spanning ≤2 files, the orchestrator may implement directly. For larger changes, delegate to Implementation agent with spec + conventions + reference files.
 
-**Step 4: Post-implementation QA (mandatory delegation)**
-Always delegate to QA/verification agent. The agent that implemented must NOT verify its own work. No exceptions. The evaluator grades against the sprint contract criteria, not vague impressions.
+**Step 4: Post-implementation QA (mandatory — delegated only if a QA role exists)**
+Verify against the Sprint Contract criteria, not vague impressions. If a QA/verification role exists, delegate to it — and the agent that implemented must NOT be the one to verify. If no such role exists yet, run the verification inline against the same written criteria; what is non-negotiable is that the check happens against the contract, not that a second agent runs it.
 
-**Step 5: Feature-complete evaluation (mandatory delegation)**
-When the feature is done, delegate to Product evaluator with done-when criteria and `docs/eval-criteria.md`. Generator-Evaluator separation is non-negotiable.
+**Step 5: Feature-complete evaluation (mandatory — same rule)**
+When the feature is done, grade it against the done-when criteria and `docs/eval-criteria.md`. Delegate to an evaluator role if one exists. Generator-Evaluator separation is the goal wherever a separate evaluator is available; where it is not, the written criteria are what keep the self-grade honest.
 
 **`backlog.md` format:**
 
@@ -74,7 +76,7 @@ When the feature is done, delegate to Product evaluator with done-when criteria 
 
 ## `draft` — Documentation
 
-Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, add to `backlog.md` or `tasks.md`.
+Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, add to `backlog.md`.
 
 ## `constrain` — Architectural Enforcement
 
@@ -88,7 +90,7 @@ Write or update `docs/`. Ground every claim in current code. Never modify produc
 Fight entropy. Run between features or on a schedule.
 
 - Run automated sweep script (`tools/sweep.sh` or equivalent)
-- List findings in `tasks.md` tagged as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
+- List findings in `backlog.md` tagged as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
 - Fix trivials inline
 - Leave complex items for later
 - Include harness simplification: "Is this component still compensating for a real model limitation?"
@@ -99,7 +101,7 @@ State the question → research/prototype → report options and tradeoffs → *
 
 ## `debate` — Competing Hypotheses (optional, on-demand)
 
-Adversarial multi-agent root-cause investigation. Use ONLY when a first-pass single-agent diagnosis failed on a high-stakes bug. Requires Agent Teams. Full procedure in `references/competing-hypotheses-playbook.md`.
+Adversarial multi-agent root-cause investigation. Use ONLY when a first-pass single-agent diagnosis failed on a high-stakes bug. Requires Agent Teams. Full procedure in `dev:harness-curate` → `references/competing-hypotheses-playbook.md`.
 
 Not a default workflow. Most projects invoke it <1×/month.
 
@@ -111,7 +113,7 @@ While in a primary workflow, these side-effects are allowed without switching:
 
 | Primary workflow | Permitted side-effect |
 |------------------|-----------------------|
-| `code` | Add `[doc]` or `[constraint]` item to `tasks.md` when discovering issues |
+| `code` | Add `[doc]` or `[constraint]` item to `backlog.md` when discovering issues |
 | `code` | Update relevant docs after implementation |
 | `draft` | Add `backlog.md` item when doc reveals missing behavior |
 | `sweep` | Fix trivial `[doc]` items inline |

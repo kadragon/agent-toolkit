@@ -69,7 +69,7 @@ Findings propagate immediately via the store.
 - **Limitation:** Without explicit coordination, agents duplicate work or take
   contradictory directions. Needs strong file ownership discipline — see
   `docs/workflows.md` → File Ownership Declaration.
-- **Partial adoption:** `backlog.md` / `tasks.md` / `handoff-{feature}.md` are
+- **Partial adoption:** `backlog.md` / `handoff-{feature}.md` are
   a lightweight shared-state substrate this harness already ships.
 
 ---

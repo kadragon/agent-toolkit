@@ -3,7 +3,9 @@
 # Usage: bash validate-harness.sh [project-root]
 #
 # Checks (keep aligned with references/harness-invariants.md):
-#   1. Required files exist (AGENTS.md, CLAUDE.md, docs/*, backlog.md)
+#   0. Delegation-surface detection (has_agents / has_orchestrator)
+#   1. Required files exist (AGENTS.md, CLAUDE.md, docs/runbook.md); the other
+#      docs and backlog.md are conditional — absence reported as INFO
 #   1b. Executable text file line endings (*.sh/*.bash/*.py)
 #   2. AGENTS.md size policy (target ≤100, warn ≤120, fail >120)
 #   3. All files referenced in AGENTS.md docs index exist
@@ -19,10 +21,11 @@
 # A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Sections 1–5 and 7–11 use [[ =~ ]] bash builtins, no grep
 # subprocesses. Section 1b uses grep per file. AGENTS.md is read in a single
-# pass — no repeated file scans. Section 6b uses grep twice: agent file
-# detection (find | grep -q) and SKILL.md content matching (grep -qiE).
-# Section 11 gates on 6b's has_agents flag, then lists the role files with one
-# more find and reads each of them in a single pass.
+# pass — no repeated file scans. Section 0 uses grep twice: agent file
+# detection (find | grep -q) and SKILL.md content matching (grep -qiE), and
+# its flags are reused by sections 1, 5, 6b, and 11. Section 11 gates on
+# has_agents, then lists the role files with one more find and reads each of
+# them in a single pass.
 
 set -euo pipefail
 
@@ -47,19 +50,60 @@ echo "=== Harness Validation ==="
 echo "  Project: $(pwd)"
 echo ""
 
+# ── 0. Delegation-surface detection ────────────────────────
+# Computed before any check that depends on it (sections 1, 5, 6b, 11).
+# `has_agents` / `has_orchestrator` answer "does this repo have anything to
+# delegate to?" — init creates neither, so their absence is the designed
+# default, not a defect. Several checks below downgrade WARN to INFO on it.
+# Uses `find` instead of bash-builtin `compgen` so this runs under `sh`/`zsh`
+# invocation as well as `bash`.
+has_agents=false
+has_orchestrator=false
+if [[ -d ".claude/agents" ]]; then
+    find ".claude/agents" -maxdepth 1 -type f -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
+fi
+if [[ -d ".claude/skills" ]]; then
+    while IFS= read -r -d '' skill; do
+        if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
+            has_orchestrator=true
+            break
+        fi
+    done < <(find ".claude/skills" -maxdepth 2 -name "SKILL.md" -print0 2>/dev/null)
+fi
+
 # ── 1. Required files ──────────────────────────────────────
+# Two tiers. Always-required: the map, its pointer, and the one doc whose
+# content is genuinely non-inferable (build/test/deploy commands). Everything
+# else is conditional — init generates it only when the repo has the thing it
+# documents, so absence is reported as INFO. A permanent WARN for a file the
+# repo correctly does not have is how operators learn to skim this report.
 echo "--- Required Files ---"
 
 for f in AGENTS.md CLAUDE.md; do
     [[ -f "$f" ]] && pass "$f exists" || fail "$f missing"
 done
 
-for f in docs/architecture.md docs/conventions.md docs/workflows.md docs/delegation.md docs/eval-criteria.md docs/runbook.md; do
-    [[ -f "$f" ]] && pass "$f exists" || warn "$f missing"
+[[ -f "docs/runbook.md" ]] && pass "docs/runbook.md exists" \
+    || warn "docs/runbook.md missing — build/test commands undocumented"
+
+echo ""
+echo "--- Conditional Docs (absent = not applicable to this repo) ---"
+
+conditional_docs=(
+    "docs/architecture.md:generated when the repo has real module boundaries"
+    "docs/conventions.md:generated when rules exist that the linter does not own"
+    "docs/workflows.md:generated when the repo runs a defined work cycle"
+    "docs/eval-criteria.md:generated when the repo runs the Sprint Contract flow"
+)
+for entry in "${conditional_docs[@]}"; do
+    f="${entry%%:*}"
+    why="${entry#*:}"
+    [[ -f "$f" ]] && pass "$f exists" || info "$f absent — $why"
 done
 
-# Harness state files (sync C/D-1 expect these)
-[[ -f "backlog.md" ]] && pass "backlog.md exists" || warn "backlog.md missing (sync C expects it)"
+# Harness state files (sync C/D-1 operate on these when the sprint flow is used)
+[[ -f "backlog.md" ]] && pass "backlog.md exists" \
+    || info "backlog.md absent — created when the repo adopts the backlog/sprint flow (sync C/D-1 no-op until then)"
 
 # ── 1b. Executable text line endings ───────────────────────
 echo ""
@@ -198,8 +242,10 @@ fi
 
 if [[ -f "docs/delegation.md" ]]; then
     pass "docs/delegation.md exists with detailed routing"
+elif $has_agents || $has_orchestrator; then
+    warn "docs/delegation.md missing — this repo has agents/orchestrators but no routing doc"
 else
-    warn "docs/delegation.md missing — delegation details not documented"
+    info "docs/delegation.md absent — no agent roles or orchestrator to route to yet (created with the first role; see dev:harness-curate)"
 fi
 
 # ── 6. Enforcement check ───────────────────────────────────
@@ -212,30 +258,12 @@ has_enforcement=false
 [[ -f ".husky/pre-commit" ]] && { pass ".husky/pre-commit exists"; has_enforcement=true; }
 [[ -d ".github/workflows" ]] && { pass ".github/workflows/ exists"; has_enforcement=true; }
 
-$has_enforcement || warn "No enforcement layer detected (hooks, pre-commit, or CI)"
+$has_enforcement || info "No enforcement layer (hooks, pre-commit, or CI) — expected at Level 1. Add CI to reach Level 2; add hooks for Level 3."
 
 # ── 6b. Auto-Delegation Router (Step 7b) ──────────────────
-# Warn only when there is something worth routing to:
-#   - any .claude/agents/{role}.md, OR
-#   - any .claude/skills/*/SKILL.md whose description directs delegation
-#     (mentions an orchestrator or carries an ALWAYS-invoke directive).
-# A trivial single-skill repo (e.g. a doc formatter) should NOT warn.
-# Uses `find` instead of bash-builtin `compgen` so this block runs under
-# `sh`/`zsh` invocation as well as `bash`.
-has_orchestrator=false
-has_agents=false
-if [[ -d ".claude/agents" ]]; then
-    find ".claude/agents" -maxdepth 1 -type f -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
-fi
-if [[ -d ".claude/skills" ]]; then
-    while IFS= read -r -d '' skill; do
-        if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
-            has_orchestrator=true
-            break
-        fi
-    done < <(find ".claude/skills" -maxdepth 2 -name "SKILL.md" -print0 2>/dev/null)
-fi
-
+# Reports only when there is something worth routing to — the `has_agents` /
+# `has_orchestrator` flags computed in section 0. A repo with neither (every
+# fresh init) has nothing to route, so this block stays silent.
 if $has_orchestrator || $has_agents; then
     has_router=false
     if [[ -f ".claude/settings.json" ]]; then
@@ -244,7 +272,7 @@ if $has_orchestrator || $has_agents; then
     if $has_router && [[ -f ".claude/trigger-routes.json" ]]; then
         pass "Auto-delegation router installed (Step 7b fallback)"
     else
-        info "No UserPromptSubmit trigger router — expected default. Step 7b relies on directive skill/agent descriptions; add the router only if a delegation measurably misfires (references/trigger-router-template.md)."
+        info "No UserPromptSubmit trigger router — expected default. Step 7b relies on directive skill/agent descriptions; add the router only if a delegation measurably misfires (dev:harness-curate references/trigger-router-template.md)."
     fi
 fi
 
@@ -310,7 +338,7 @@ if [[ -f "backlog.md" ]]; then
     $backlog_bad_box && fail "backlog.md contains non-standard checkboxes (only [ ], [>], [x] allowed)" \
                      || true
 else
-    warn "backlog.md missing — create via references/backlog-template.md"
+    info "backlog.md absent — schema check not applicable (create via references/backlog-template.md when the repo adopts the sprint flow)"
 fi
 
 # ── 10. AGENTS.md Maintenance section (edit policy) ────────
@@ -330,7 +358,7 @@ if [[ -f "AGENTS.md" ]]; then
 fi
 
 # ── 11. Agent role spine (Step 4b template resync) ─────────
-# Nothing re-runs init Step 4b when references/teammate-role-template.md
+# Nothing re-runs the role-template spine when dev:harness-curate's teammate-role-template.md
 # changes, so generated role files drift as that template improves. This is the
 # resync report — it never edits a role file.
 #
@@ -342,7 +370,9 @@ fi
 #   - opt-in non-spine template sections (## Multi-pass Rule,
 #     ## Team Communication Protocol — absence is not staleness)
 # `tools` is not required either: the template allows omitting it for roles that
-# take the full tool set.
+# take the full tool set. Neither is `model`: the template now says to omit it so
+# the role inherits the session model and the caller overrides per spawn — a
+# pinned tier is the exception, not the schema.
 #
 # Escape hatch: a role that is deliberately lean (pure role-play spawned in bulk,
 # where four stub sections cost real per-spawn tokens) declares
@@ -359,7 +389,7 @@ if $has_agents; then
 
         in_fm=false
         seen_fm=false
-        fm_name=false; fm_desc=false; fm_model=false; fm_exempt=false
+        fm_name=false; fm_desc=false; fm_exempt=false
         s_objective=false; s_spawn=false; s_effort=false; s_exit=false
 
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -380,7 +410,6 @@ if $has_agents; then
             if $in_fm; then
                 [[ "$line" =~ ^name: ]] && fm_name=true
                 [[ "$line" =~ ^description: ]] && fm_desc=true
-                [[ "$line" =~ ^model: ]] && fm_model=true
                 [[ "$line" =~ ^spine-exempt:[[:space:]]*true[[:space:]]*$ ]] && fm_exempt=true
                 continue
             fi
@@ -395,7 +424,6 @@ if $has_agents; then
         role_missing=""
         $fm_name  || role_missing+=" name:"
         $fm_desc  || role_missing+=" description:"
-        $fm_model || role_missing+=" model:"
         if ! $fm_exempt; then
             $s_objective || role_missing+=" '## Objective'"
             $s_spawn     || role_missing+=" '## Spawn Prompt Contract'"
@@ -404,7 +432,7 @@ if $has_agents; then
         fi
 
         if [[ -n "$role_missing" ]]; then
-            warn "$role_file missing:$role_missing — resync against references/teammate-role-template.md → Required Body Sections"
+            warn "$role_file missing:$role_missing — resync against dev:harness-curate references/teammate-role-template.md → Required Body Sections"
         elif $fm_exempt; then
             pass "$role_file — frontmatter fields present; spine sections waived by spine-exempt: true"
         else
@@ -419,11 +447,13 @@ fi
 echo ""
 echo "--- Maturity Level ---"
 
-# Level 1: docs exist + CLAUDE.md pointer + backlog schema
+# Level 1: the map + its pointer + the one non-inferable doc.
+# Deliberately NOT gated on architecture.md/backlog.md: both are conditional
+# artifacts a minimal init skips, and gating on them reported a correct minimal
+# harness as "Level 0 — Not initialized".
 level1=true
 [[ -f "AGENTS.md" && -f "CLAUDE.md" ]] || level1=false
-[[ -f "docs/architecture.md" && -f "docs/runbook.md" ]] || level1=false
-[[ -f "backlog.md" ]] || level1=false
+[[ -f "docs/runbook.md" ]] || level1=false
 if [[ -f "CLAUDE.md" ]]; then
     claude_trimmed2=$(tr -d '[:space:]' < CLAUDE.md)
     [[ "$claude_trimmed2" == "@AGENTS.md" ]] || level1=false
@@ -432,11 +462,13 @@ fi
 # Level 2: Level 1 + CI + reference integrity + delegation has objective triggers
 level2=false
 if $level1; then
+    # CI is the whole Level 2 delta. Reference integrity is already enforced by
+    # section 3 (a broken docs-index link FAILs, which downgrades every level).
+    # docs/delegation.md is NOT required here — it is created with the repo's
+    # first agent role, which may never happen.
     has_ci=false
     [[ -d ".github/workflows" || -f ".gitlab-ci.yml" || -f ".circleci/config.yml" ]] && has_ci=true
-    has_refs=true
-    [[ -f "docs/delegation.md" ]] || has_refs=false
-    $has_ci && $has_refs && level2=true
+    $has_ci && level2=true
 fi
 
 # Level 3: Level 2 + PostToolUse hooks + pre-commit or git hooks + drift detection
@@ -464,7 +496,7 @@ elif $level2; then
     echo -e "  ${YELLOW}→${NC} To reach Level 3: add PostToolUse hooks + pre-commit hooks"
 elif $level1; then
     echo -e "  ${YELLOW}LEVEL 1 — Basic${NC}  (docs present, no CI enforcement)"
-    echo -e "  ${YELLOW}→${NC} To reach Level 2: add CI workflow + docs/delegation.md with objective triggers"
+    echo -e "  ${YELLOW}→${NC} To reach Level 2: add a CI workflow that runs this validation"
 else
     echo -e "  ${RED}LEVEL 0 — Not initialized${NC}"
     echo -e "  ${RED}→${NC} Run harness-init to reach Level 1"

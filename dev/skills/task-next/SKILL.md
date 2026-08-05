@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.7
+version: 1.4.8
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -32,8 +32,12 @@ list the dirty files — do NOT proceed. Ask the user to commit, stash, or disca
 dirty tree turns out to be an in-flight feature branch (not stray dirty files), route to the
 "Work already in flight" edge case below instead of hard-stopping.
 
-`tasks.md` is optional: present in an active sprint or as a review-backlog accumulator; absent
-in the idle state. If absent, only `backlog.md` candidates are offered.
+`tasks.md` is optional: it holds the Sprint Contract and nothing else, so it is present only
+during a sprint and absent in the idle state. Every persistent item — queued work, review
+findings, security findings — lives in `backlog.md`, which is why `backlog.md` is a prerequisite
+and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
+`## Review Backlog` / `## Security Fixes` section, move it to `backlog.md` verbatim before
+proceeding: those items are not selectable, and `prune-tasks` refuses to run until they move.
 
 ## Step 1 — Gather candidate groups
 
@@ -57,19 +61,22 @@ and the user goes to `dev:harness-init`. Only `tasks.md` is optional.
 
 Prints one line per candidate — `[N] <source>: <heading> (<M> items)`; h1 sprint blocks omit the
 item count. The script owns the selection algorithm end to end: source order (tasks.md `status:
-open` h1 sprint blocks → `## Review Backlog` h3 groups → backlog.md h2/h3 groups), the per-source
-and combined cap-5 truncation, skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by:
-…)*` and blocks marked `status: active`/`done`, and discarding headings and items buried in
-`<!-- ... -->` comments or fenced code blocks. Read the script if you need the exact rule.
+open` h1 sprint blocks → backlog.md h2/h3 groups), the per-source and combined cap-5 truncation,
+skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by: …)*` and blocks marked
+`status: active`/`done`, and discarding headings and items buried in `<!-- ... -->` comments or
+fenced code blocks. Read the script if you need the exact rule.
 
-**Read stderr on every run, not just empty ones.** Two orchestrator decisions depend on it:
+**Read stderr on every run, not just empty ones.** Three orchestrator decisions depend on it:
 
 - `Warning: unbalanced fence opened at line N in <file>` — a stray odd fence blanks everything
   after it, so part of the queue can be hidden while other groups still surface. Relay the
   warning and treat that file as untrustworthy: do NOT present the candidate list as complete.
-- On zero candidates the script writes a diagnosis naming *which kind* of empty this is. If it
-  says candidates are reachable with `--full-scan`, run the full scan — there IS work. Otherwise
-  relay the diagnosis verbatim; **never report "queue clear" on an empty stdout alone.**
+- `Warning: <file> holds N persistent section(s) that belong in backlog.md` — a `tasks.md` still
+  carrying `## Review Backlog` / `## Security Fixes`. Those items are real queued work that no
+  rule can select, and `prune-tasks` will refuse at pre-merge cleanup. Move the section to
+  `backlog.md` verbatim (the item syntax is identical) before continuing, and say so.
+- On zero candidates the script writes a diagnosis naming *which kind* of empty this is. Relay it
+  verbatim; **never report "queue clear" on an empty stdout alone.**
 
 **Fast-path selection (cap = 5):**
 
@@ -90,10 +97,10 @@ rc=$?
 [[ $rc -eq 0 ]] || { echo "backlog_candidates.py exited $rc — see its stderr above" >&2; exit 1; }
 ```
 
-Uncapped, and two differences from the fast path: it also reads `tasks.md` h2 headings **outside**
-`## Review Backlog` — a source the fast path never covers, so a fast-path zero is not proof the
-queue is empty — and the backlog.md sources use type priority (all qualifying h3 headings before
-any h2 heading) instead of the fast path's document order. Every h2/h3 with an open
+Uncapped, and one difference from the fast path: the backlog.md sources use type priority (all
+qualifying h3 headings before any h2 heading) instead of the fast path's document order. Both
+algorithms qualify a heading by the same test, so a fast-path zero **is** proof the queue is
+empty — the full scan is for ordering and completeness, not reachability. Every h2/h3 with an open
 `- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
 `[>]`/`[x]`/a `*(deferred: ...)*` marker, not by choosing a section name.
 
@@ -101,7 +108,7 @@ any h2 heading) instead of the fast path's document order. Every h2/h3 with an o
 
 | Groups found | Action |
 |-------------|--------|
-| 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, candidates reachable with `--full-scan` — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
+| 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, a `tasks.md` findings section pending migration — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
@@ -183,11 +190,8 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
   The existing h1 block IS the Sprint Contract — do not write a new one. Read the h1 block's
   body (especially `## Acceptance criteria` if present) for implementation scope.
 
-*tasks.md finding group (h3 under Review Backlog, or h2 grab-bag):* leave `[ ]` checkboxes
-  as-is — findings resolve when the fix is committed and verified. No `[>]` flip; no
-  `## Covers` section needed.
-
-*backlog.md group (h2 or h3):* Write a `tasks.md` Sprint Contract with:
+*backlog.md group (h2 or h3) — including a `### PR #N` findings group under `## Review Backlog`:*
+  Write a `tasks.md` Sprint Contract with:
   - `# heading` = the selected heading title (verbatim from backlog.md)
   - `status: active`
   - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
@@ -272,8 +276,6 @@ NODES="$SKILL_DIR/scripts/task_nodes.py"
 
 # tasks.md h1 block — a sprint, or the Sprint Contract written for a backlog.md group
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
-# tasks.md finding lines (h3/h2 group), verbatim, one per line
-printf '%s\n' "<each fixed - [ ] line>" | python3 "$NODES" prune-tasks --file tasks.md
 # backlog.md lines listed verbatim in the Sprint Contract's ## Covers
 printf '%s\n' "<each ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
 # one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
@@ -287,7 +289,9 @@ worded items and only one is done. Re-read and re-run rather than loosening the 
 dropped only where this sprint left its whole section blank, so `[x]`/`[>]` history, prose and
 surviving child headings all keep their ancestors alive. **This is deliberately stricter than the
 rule it replaced** ("no open `- [ ]` items left"), which would strand surviving `[x]` lines under a
-deleted heading. `tasks.md` goes once empty, `backlog.md` never does. What the script cannot decide — the character cap, and the ban
+deleted heading. `tasks.md` goes once empty — safe because it holds the Sprint Contract and
+nothing else, which `prune-tasks` verifies before touching it — and `backlog.md` never does.
+What the script cannot decide — the character cap, and the ban
 on explanatory clauses, file lists and narration — lives in `harness-invariants.md` → *CHANGELOG
 Entry Contract*. Read it before choosing the title; do not reconstruct the limits from memory.
 
@@ -321,7 +325,7 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 Invoke `Skill(dev:task-review)` with `args: --auto`.
 
 `task-review --auto` commits (including the cleanup changes above), creates PR, collects
-reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, waits CI, and merges.
+reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
 
 **If task-review reports CI failure and the PR must be abandoned:** close the PR and delete
 the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
@@ -421,5 +425,5 @@ If all candidates are deferred with unresolved blockers, report that and stop.
 is unresolved, note it as a warning but continue with the non-deferred items in that group.
 If all items in the group are deferred, skip the group (see Step 2 deferred-items rule).
 
-**tasks.md finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
-Record broader related items back to `tasks.md` via the out-of-scope path in task-review.
+**Review finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
+Record broader related items back to `backlog.md` via the out-of-scope path in task-review.

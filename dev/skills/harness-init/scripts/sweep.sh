@@ -108,14 +108,21 @@ fi
 echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
 for f in "${FINDINGS[@]}"; do echo "  $f"; done
 
-# Append to tasks.md if it exists
-if [[ -f "tasks.md" ]]; then
-    echo "" >> tasks.md
-    echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> tasks.md
+# Append to backlog.md if it exists. NOT tasks.md: sweep findings outlive the sprint that
+# happens to be in flight, and tasks.md is deleted whole at sprint close.
+if [[ -f "backlog.md" ]]; then
+    echo "" >> backlog.md
+    echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> backlog.md
+    echo "" >> backlog.md
     for f in "${FINDINGS[@]}"; do
-        echo "- [ ] $f" >> tasks.md
+        echo "- [ ] $f" >> backlog.md
     done
-    echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to tasks.md${NC}"
+    echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to backlog.md${NC}"
+else
+    # Never drop findings silently. backlog.md is optional after a minimal init, so its
+    # absence is expected -- but then the findings above exist only in this terminal.
+    echo -e "${YELLOW}No backlog.md — ${#FINDINGS[@]} finding(s) NOT persisted.${NC}" >&2
+    echo -e "${YELLOW}Create backlog.md (harness-init references/backlog-template.md) to capture them.${NC}" >&2
 fi
 
 exit 1

@@ -8,7 +8,7 @@ description: >-
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
   Routes to the owning creator — never generates itself. Repo structure
   validation → harness-init.
-version: 1.6.0
+version: 1.6.1
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -162,6 +162,10 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | two inputs: recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow), **and** Step 2's memory-store lens (a `project`/`reference` memory holding a repo-scoped fact) | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact. Memory-sourced: also route the memory file's deletion to `harness-capture` (Step 7) |
 | **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md` | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
+
+**Agent roles are created here, not at init.** `dev:harness-init` deliberately ships an empty `.claude/agents/` roster and no orchestrator skill (its Steps 4b/4c) — before a repo has working history there is no evidence about which delegations recur, so any roster is a guess. That makes this skill the only path by which a repo acquires its first role: a **triggering miss** where work was repeatedly done inline that a missing agent should have owned, or a **new-asset candidate** whose recurring shape is a delegation. Route those to `plugin-dev:agent-creator` (new) or `plugin-dev:agent-development` (fix), and remember the corollary — an empty roster in a young repo is the designed state, never a finding.
+
+Two follow-ups when a role is actually created: the repo's `docs/delegation.md` routing table gains its row **only then** (init leaves it header-only), and an orchestrator becomes worth proposing once ≥1 role exists *and* the same multi-step domain workflow recurs in the transcripts — that one routes to `skill-creator`. Do not pin a model on a role you create; spawns inherit the session model and the caller overrides per spawn.
 
 Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. A memory-sourced Signal 6 candidate also needs 1: a memory is by construction a fact someone already judged durable, so the frequency bar was cleared when it was written — the quoting requirement still holds. Before any **delete**, run the adversarial check (Step 7).
 
@@ -329,6 +333,16 @@ When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that
 
 - **`references/signal-taxonomy.md`** — detection rules, thresholds, and per-signal delegate brief.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes (`attributionSkill`, tool_use, corrections), grep patterns, project-path encoding.
+
+**Delegation-asset templates.** These moved here from `harness-init` when init stopped creating agents: they describe how to build a delegation surface, and this skill is the only path that decides one is warranted. Read the relevant one when a signal routes to `plugin-dev:agent-creator` or `skill-creator` — they are the brief material for that handoff, not something this skill executes itself.
+
+- **`references/teammate-role-template.md`** — role-file schema (frontmatter, four spine sections), description anti-patterns, per-role starting templates, the `spine-exempt` escape hatch.
+- **`references/delegation-template.md`** — pattern selection, Spawn Prompt Contract, effort tiers, routing-table structure and objective-trigger design, data-transfer protocols, model-inheritance rule.
+- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), scratchpad convention, `docs/harness-log.md` pointer block, directive-description rule, skill frontmatter reference.
+- **`references/coordination-patterns.md`** — multi-agent coordination shapes to pick between before writing an orchestrator.
+- **`references/agent-teams-onboarding.md`** — Agent Teams prerequisites and environment check; needed only for a team-mode orchestrator (3–5× token cost).
+- **`references/competing-hypotheses-playbook.md`** — adversarial root-cause investigation; maps to the `debate` workflow.
+- **`references/trigger-router-template.md`** — UserPromptSubmit hook mapping prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)`. **Fallback only**, installed on a measured miss-rate ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)).
 - **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
 - **`scripts/overlap_state.py`** — Signal 7 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
 - **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.
