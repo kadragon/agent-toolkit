@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.6
+version: 1.0.7
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -21,14 +21,33 @@ Boundary vs `task-next`: if the request is already a `backlog.md`/`tasks.md` ite
 
 ## Prerequisites
 
-The repo must have `backlog.md`, `docs/workflows.md`, `docs/eval-criteria.md`, and
-`docs/conventions.md` (harness-init artifacts). If any is missing, stop and point the user to
-`dev:harness-init`.
+**Required:** `backlog.md`, `docs/workflows.md`, `docs/eval-criteria.md` — the queue and the two
+docs this skill executes. If any is missing, stop and point the user to `dev:harness-init`.
+
+**Conditional:** `docs/conventions.md` is generated at init only when rules exist that the linter
+does not already own, so a repo whose linter owns every rule correctly has none. Read and follow it
+when present; when absent, proceed and take the linter as the authority. Never stop on its absence.
 
 **Working tree gate:** Run `git status --porcelain`. If the output is non-empty, stop and list
 the dirty files — do NOT proceed. Ask the user to commit, stash, or discard first. (This gate is
 checked once, here. Later steps deliberately dirty `tasks.md`/`backlog.md` as part of the cycle;
 that is expected and rides into the feature branch.)
+
+**Roster check — before any agent spawn in any step below.** A role exists only if
+`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present. `dev:harness-init` creates
+**no** roles (its Step 4b), so an empty roster is the designed state of a freshly initialized repo,
+not a defect — never stop on it, and never create the role mid-task. Route around it per the
+fallback attached to each spawn point, say in one line which fallback you took, and note that
+`dev:harness-curate` is what adds a role once the transcripts show the delegation recurring.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
+(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
+lists the role as an available agent type, treat it as present regardless of the probe.
 
 ## Step 1 — Classify & size-gate
 
@@ -42,7 +61,8 @@ an untagged one-file behavioral addition ("로그인 버튼 추가해줘") is no
 `[FEAT]`.
 
 If the file count isn't obvious from the request text, run a quick scoped scan (or spawn
-`explorer` if the scan itself would be large) to estimate it before classifying.
+`explorer` if the scan itself would be large — the built-in `Explore` subagent when `explorer` is
+absent from the roster) to estimate it before classifying.
 
 ## Step 2 — Route by size
 
@@ -87,7 +107,8 @@ git checkout -b "$BRANCH"
 
 **Scope check (Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before writing
-the Sprint Contract.
+the Sprint Contract. **`explorer` absent from the roster:** spawn the built-in `Explore` subagent
+with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at for a repo with no roles.
 
 **Plan mode gate (before Step 2)**
 - **Non-trivial** (tag is `[FEAT]`/`[REFACTOR]`, OR ≥3 files, OR new public API/schema): use
@@ -110,6 +131,9 @@ Write a `tasks.md` Sprint Contract per `docs/eval-criteria.md`:
 - Otherwise: spawn `implementer` (brief per `docs/delegation.md` four-field format: Objective /
   Output format / Tools to use / Boundaries — include the Sprint Contract, absolute paths of all
   in-scope files, and the lint/test command). `implementer` must NOT verify its own output.
+- **`implementer` absent from the roster:** implement inline on the main thread. Sprint Contract,
+  in-scope paths and lint/test command still apply — only the spawn brief is dropped. Whoever
+  implemented does not verify, so QA below still goes to a separate agent.
 - **Stuck-fix stop condition:** if the same fix is attempted 3+ times on one file without the
   lint/test command passing, stop and report instead of retrying.
 - **Destructive-command guard:** never run `git push --force`/`--force-with-lease`,
@@ -121,6 +145,15 @@ Write a `tasks.md` Sprint Contract per `docs/eval-criteria.md`:
 ALWAYS spawn `qa-verifier` as a separate agent. If it reports blocking issues: surface them, spawn
 `implementer` to fix, re-run `qa-verifier` **once**. If still blocking after one retry: stop and
 report — do NOT hand off with unresolved blockers.
+
+**`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
+verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
+four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
+with the Sprint Contract's acceptance criteria verbatim, the in-scope paths and the lint/test
+command, and telling it to verify against those criteria and change nothing. The
+independence is what must not be dropped, not the role name: the agent that implemented — the main
+thread included, when the implementer fallback above was taken — never verifies its own output.
+Fixes on the retry path go to `implementer`, or inline when that role is also absent.
 
 **Version bump (Step 5)**
 The judgment is *which* plugin and *which* bump level; the rewrite is scripted. Do this AFTER all
@@ -137,9 +170,12 @@ every run, so a change touching two skills needs the second skill's `version:` e
 re-running would bump the plugin twice for one change.
 
 `bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
-header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them
-rather than recalling the rules. No `scripts/bump-version.sh` → edit the manifests by hand per
-`docs/conventions.md`; no `plugin.json` at all → skip this step.
+header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy where that doc exists.
+Read one of them rather than recalling the rules — the script header suffices on its own when the
+repo has no `docs/conventions.md`. No `scripts/bump-version.sh` → edit the manifests by hand per the
+same rules; no `plugin.json` at all → skip this step. With **neither** the script nor
+`docs/conventions.md` present, the repo has stated no release policy — ask the user for the bump
+level instead of inventing one.
 
 **Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
 

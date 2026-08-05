@@ -88,12 +88,31 @@ if [[ -f "AGENTS.md" ]]; then
     done
 fi
 
-# Check key docs exist
-for key_doc in docs/architecture.md docs/conventions.md docs/workflows.md docs/delegation.md docs/eval-criteria.md; do
-    if [[ ! -f "$key_doc" ]]; then
-        FINDINGS+=("[harness] Missing key doc: $key_doc")
-        harness_issues=$((harness_issues + 1))
-    fi
+# Check key docs exist — the same two tiers validate-harness.sh applies in its
+# section 1, with docs/delegation.md folded into the conditional list. That doc
+# sits outside section 1 there, where a role-aware check can WARN once the repo
+# has roles but no routing doc; sweep has no roster context, so it stays INFO.
+# Always required: docs/runbook.md, the one doc whose content (build/test/deploy
+# commands, env setup, failure modes) is never inferable from source. Everything
+# else is conditional: harness-init generates it only when the repo has the thing
+# it documents, so a missing file is a decision, not a defect. Reporting those as
+# findings would file backlog items against a correct minimal init.
+if [[ ! -f "docs/runbook.md" ]]; then
+    FINDINGS+=("[harness] Missing key doc: docs/runbook.md")
+    harness_issues=$((harness_issues + 1))
+fi
+
+conditional_docs=(
+    "docs/architecture.md:generated when the repo has real module boundaries"
+    "docs/conventions.md:generated when rules exist that the linter does not own"
+    "docs/workflows.md:generated when the repo runs a defined work cycle"
+    "docs/eval-criteria.md:generated when the repo runs the Sprint Contract flow"
+    "docs/delegation.md:created with the repo's first agent role (see dev:harness-curate)"
+)
+for entry in "${conditional_docs[@]}"; do
+    doc="${entry%%:*}"
+    why="${entry#*:}"
+    [[ -f "$doc" ]] || echo -e "  INFO  $doc absent — $why"
 done
 
 [[ $harness_issues -eq 0 ]] && echo -e "  ${GREEN}All references valid${NC}"
