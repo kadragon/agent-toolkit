@@ -2,13 +2,6 @@
 
 ## Review Backlog
 
-### PR #196 — empty-roster survival (2026-08-05)
-
-Out-of-scope finding from the PR #196 review. The roster/conventions fixes landed; this is the
-adjacent `harness-init` gap the verifier surfaced while refuting agy's P1.
-
-- [ ] [harness] nothing in `harness-init` Step 3 says "index only the docs you actually create", and `references/examples/agents-md-example.md` shows all six rows including `docs/delegation.md`, which init never creates — a literal init emits dangling Docs Index rows that `sweep.sh`/`validate-harness.sh` then correctly report as drift (source: verifier, P2) — `dev/skills/harness-init/SKILL.md:146`, `dev/skills/harness-init/references/examples/agents-md-example.md:5-15`
-
 ## Harness — `tasks.md` sprint-block boundary
 
 Option 7 (unmix `tasks.md`) shipped; options 1–4 are superseded by it. Remaining leftovers from the

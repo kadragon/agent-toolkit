@@ -4,6 +4,8 @@ A Next.js 14 SaaS task management app with PostgreSQL, Prisma ORM, and Tailwind 
 
 ## Docs Index (read on demand)
 
+**Six rows is the mature-repo case, not what `harness-init` produces.** Index only the docs that exist: a fresh init always writes `docs/runbook.md`, adds the conditional docs whose "Create when" fired (`harness-init` Step 4 table), and never writes `docs/delegation.md` — that one arrives with the repo's first agent role, via `dev:harness-curate`. Most inits emit one to three rows here; a row for an uncreated doc is drift `sweep.sh`/`validate-harness.sh` will report.
+
 | File | When to read |
 |------|--------------|
 | `docs/architecture.md` | Before modifying source structure or adding new modules |
