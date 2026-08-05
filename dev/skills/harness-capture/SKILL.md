@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.1.1
+version: 2.1.2
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -146,3 +146,10 @@ diff → approval** flow — never bulk-delete silently.
    one line per surviving memory file and none for deleted ones.
 
 If the store is already clean, say so in one line — a no-op is fine here too.
+
+**Boundary with `harness-curate`.** Deciding that a repo-scoped fact should move *out* of
+memory into the owning repo's `docs/` is `harness-curate`'s call, not this skill's — it needs
+cross-session evidence and the repo's own doc layout, which the warm path does not have. When
+curate routes such a promotion here, it has already written `docs/<topic>.md`; this skill
+executes the deletion and index repair under step 3's confirm-then-apply flow. Everything
+above — stale, wrong, redundant, index drift, bloat — stays this skill's, from either path.

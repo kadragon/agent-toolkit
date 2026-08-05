@@ -4,9 +4,11 @@ description: >-
   Mine session transcripts across projects to propose or prune harness assets
   (skills/agents/hooks), and audit instruction layers — the model's own base
   instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
-  indexed docs/ — for duplicate or conflicting rules. Routes to the owning
-  creator — never generates itself. Repo structure validation → harness-init.
-version: 1.5.2
+  indexed docs/ — for duplicate or conflicting rules. Also audits the auto-memory
+  store and promotes repo-scoped facts stuck there into the owning repo's docs/.
+  Routes to the owning creator — never generates itself. Repo structure
+  validation → harness-init.
+version: 1.6.0
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -57,7 +59,7 @@ Before proposing anything, know what already exists, or candidates will duplicat
 
 The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
 
-Three supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, exist yet never parse, or be contradicted by a rule one layer up):
+Four supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, exist yet never parse, or be contradicted by a rule one layer up — and a repo fact can sit in auto-memory where no other tool can read it):
 - **Stale code** — resolve each asset's repo before checking history. For every inventoried `SKILL.md` / agent `.md` / command `.md`, run the loop below: new/untracked files (empty `git log` output) skip the age check; assets with a commit date 60+ days ago are flagged; if repo detection fails, mark the asset `non-git` and skip the age check rather than running `git log` from the current project.
 
   ```bash
@@ -113,8 +115,41 @@ Three supplementary file-lenses complement the transcript firing data (a skill c
   `--project` is required, not optional: the script defaults to `os.getcwd()`, so a `--project /other/repo` run launched from anywhere else would read the *current* repo's dismissals. `REPO_ROOT` is the same root the read set above is bounded by — reuse it for both.
 
   Report only `NEW` rows, and carry the printed `suppressed=` count into the report. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
+- **Memory-store promotion** — the auto-memory store (`<config>/projects/<encoded>/memory/*.md` + its `MEMORY.md` index) is a fifth instruction layer, and the only one that is **Claude-only and per-project**. A repo-specific fact written there is invisible to Codex and every other tool that reads `AGENTS.md`/`docs/` — exactly the loss the global routing rule ("repo facts → owning repo's `docs/`, indexed by `AGENTS.md`") exists to prevent. `harness-capture` tidies this store from inside one session; nobody audits it across sessions, which is this lens. Resolve the directory with the scanner's own resolver rather than re-deriving the path encoding — that is what guarantees it is the same directory Step 1 read and Step 6 will stamp:
 
-Feed all three into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  export SKILL_DIR
+  MEMDIR=$(python3 - <<'PY'
+  import os, sys
+  sys.path.insert(0, os.path.join(os.environ["SKILL_DIR"], "scripts"))
+  from scan_transcripts import resolve_project_dir
+  cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+  print(os.path.join(resolve_project_dir(os.getcwd(), os.path.join(cfg, "projects")), "memory"))
+  PY
+  )
+  [ -d "$MEMDIR" ] || echo "no auto-memory store for this project — lens is a no-op"
+  ```
+
+  Read `MEMORY.md` and every memory file in that directory. A memory is a **promotion candidate** only when its frontmatter `metadata.type` is `project` or `reference` **and** its content is scoped to this one repo. `user` and `feedback` memories are cross-repo by definition — promoting them into a single repo's `docs/` would silently drop them everywhere else, so they stay. Full detection rules, non-findings, and the `already-promoted` subtype: `references/signal-taxonomy.md` §6.
+
+  **Evidence requirement (hard, same as the overlap lens):** every candidate quotes the memory body verbatim with `file:line` and names a concrete target `docs/<topic>.md`. Cannot quote it → drop it entirely, not even `Watch:`. Before proposing, confirm the fact is not already in `AGENTS.md` / `CLAUDE.md` / an existing `docs/*.md`.
+
+  Filter candidates through the same `overlap_state.py` suppression so a declined promotion does not re-fire every run. The script is unchanged and its two keys are **positional** (see the Step 2 overlap snippet): for this lens `"global"` is the memory side, `"repo"` is the proposed docs target.
+
+  ```bash
+  OSTATE="$SKILL_DIR/scripts/overlap_state.py"
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
+  # pairs.json for this lens — one entry per promotion candidate:
+  #   [{"global": "memory/<file>.md: <verbatim body line>",
+  #     "repo":   "docs/<topic>.md (proposed)"}, ...]
+  python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json
+  ```
+
+  Same `--project "$REPO_ROOT"` requirement, same `NEW`-rows-only reporting, same `suppressed=` count carried into the report. `current` / `--project` scope only — `all` cannot resolve the owning repo path to promote *into*.
+
+Feed all four into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7; memory promotion → Signal 6. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
 ## Step 3 — Classify into seven signals
 
@@ -127,10 +162,10 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Underperforming asset** | skill in `CORRECTION-SIGNALS` / agent in `AGENT-CORRECTION-SIGNALS` (loaded/invoked, then user corrected) | skill → `skill-creator` modify; agent → `plugin-dev:agent-development` modify |
 | **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing) | loosen/narrow → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
-| **Domain knowledge candidate** | recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow) — model judgment same as Signal 1 | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact |
+| **Domain knowledge candidate** | two inputs: recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow), **and** Step 2's memory-store lens (a `project`/`reference` memory holding a repo-scoped fact) | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact. Memory-sourced: also route the memory file's deletion to `harness-capture` (Step 7) |
 | **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md` | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
 
-Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. Before any **delete**, run the adversarial check (Step 7).
+Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. A memory-sourced Signal 6 candidate also needs 1: a memory is by construction a fact someone already judged durable, so the frequency bar was cleared when it was written — the quoting requirement still holds. Before any **delete**, run the adversarial check (Step 7).
 
 ## Step 4 — Decide asset scope (per candidate)
 
@@ -194,7 +229,7 @@ Output one ranked table, candidates only:
 
 Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
 
-Instruction-layer overlap rows are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from `overlap_state.py --check` under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
+Instruction-layer overlap rows and memory-promotion rows are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from each `overlap_state.py --check` run under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
 
 Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
@@ -287,6 +322,7 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
   # and the pair re-fires next run.
   python3 "$OSTATE" --dismiss --project "$REPO_ROOT" < pairs.json
   ```
+- Memory → `docs/` promotion (memory-sourced Signal 6) → show the memory quoted with `file:line` and the proposed `docs/<topic>.md`. On confirmation, write the fact to `docs/<topic>.md` and add the one-line pointer to the AGENTS.md Docs Index — the fact itself never goes into AGENTS.md/CLAUDE.md. Then **invoke `Skill(dev:harness-capture)` (Memory hygiene) to delete the promoted memory file and repair the `MEMORY.md` index**: capture owns destructive memory prunes, and this skill does not reimplement an owner's job any more than it reimplements `skill-creator`. An `already-promoted` candidate skips the docs write and goes straight to that deletion route. Record the decision — promoted *or* consciously kept — with `--dismiss` using the same pairs.json shape as the Step 2 check, or it re-fires next run.
 - Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
 
 When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that plugin's `.claude-plugin/plugin.json` version (project CLAUDE.md rule).
