@@ -8,6 +8,7 @@ Option 7 (unmix `tasks.md`) shipped; options 1–4 are superseded by it. Remaini
 analysis in `docs/design/tasks-md-sprint-block-boundary.md`.
 
 - [ ] [FIX] `reconcile-harness.py` C-1 anchors on `[>]` lines nothing writes any more — re-anchor on `## Covers` or drop the marker machinery (option 5)
+- [ ] [FIX] `task_nodes.py prune-backlog` keeps a heading whose only surviving content is its own intro prose, so a fully-drained group leaves an orphaned heading + dangling description the operator deletes by hand (observed in PR #197). Drop the heading when nothing but its intro prose remains, or state the manual step in `task-next`'s cleanup block
 - [ ] [REFACTOR] make the Sprint Contract write conditional on `## Covers` being needed (option 6)
 
 ## Harness — `task-*` edge enforcement (rescoped)
