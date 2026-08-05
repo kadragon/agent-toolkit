@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-new/task-next survive an empty agent roster and a linter-owned convention set (dev v4.2.2) (2026-08-05)
 - [done] unmix tasks.md — backlog.md is the only persistent queue (dev v4.2.1) (2026-08-05) → docs/design/tasks-md-sprint-block-boundary.md
 - [done] harness-init goes minimal — nothing speculative created (dev v4.2.0) (2026-08-05) → dev/skills/harness-init/references/design-rationale.md
 - [done] harness-curate audits the auto-memory store (dev v4.1.0) (2026-08-05) → dev/skills/harness-curate/references/signal-taxonomy.md
