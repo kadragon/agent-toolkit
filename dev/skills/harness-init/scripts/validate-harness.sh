@@ -342,7 +342,9 @@ fi
 #   - opt-in non-spine template sections (## Multi-pass Rule,
 #     ## Team Communication Protocol — absence is not staleness)
 # `tools` is not required either: the template allows omitting it for roles that
-# take the full tool set.
+# take the full tool set. Neither is `model`: the template now says to omit it so
+# the role inherits the session model and the caller overrides per spawn — a
+# pinned tier is the exception, not the schema.
 #
 # Escape hatch: a role that is deliberately lean (pure role-play spawned in bulk,
 # where four stub sections cost real per-spawn tokens) declares
@@ -359,7 +361,7 @@ if $has_agents; then
 
         in_fm=false
         seen_fm=false
-        fm_name=false; fm_desc=false; fm_model=false; fm_exempt=false
+        fm_name=false; fm_desc=false; fm_exempt=false
         s_objective=false; s_spawn=false; s_effort=false; s_exit=false
 
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -380,7 +382,6 @@ if $has_agents; then
             if $in_fm; then
                 [[ "$line" =~ ^name: ]] && fm_name=true
                 [[ "$line" =~ ^description: ]] && fm_desc=true
-                [[ "$line" =~ ^model: ]] && fm_model=true
                 [[ "$line" =~ ^spine-exempt:[[:space:]]*true[[:space:]]*$ ]] && fm_exempt=true
                 continue
             fi
@@ -395,7 +396,6 @@ if $has_agents; then
         role_missing=""
         $fm_name  || role_missing+=" name:"
         $fm_desc  || role_missing+=" description:"
-        $fm_model || role_missing+=" model:"
         if ! $fm_exempt; then
             $s_objective || role_missing+=" '## Objective'"
             $s_spawn     || role_missing+=" '## Spawn Prompt Contract'"

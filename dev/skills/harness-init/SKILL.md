@@ -43,9 +43,13 @@ Before acting, determine mode AND maturity level.
 
 > **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
 
-**Default toward orchestration infrastructure — but size the agent roster by reachable triggers, not by default.** The **orchestrator** (Step 4c) is worth building whenever unsure: without it, auto-delegation (Step 7b) has no named target and the model does everything inline, and an unused orchestrator skill costs little. **Agent roles** (Step 4b) are different — apply the reachability gate there. An agent whose trigger never fires is not cheap insurance; it is the "made it, never used it" dead weight that trains the operator to ignore the harness. Build every reachable role, skip unreachable ones. Skip both entirely only for genuinely trivial repos (single script, docs-only, one-file library).
+**Init ships no orchestration infrastructure — no agent roles (Step 4b), no orchestrator skill (Step 4c).** This is the default and it is not a gap to apologize for. At init the repo has no working history, so any roster is a guess about which delegations will recur; a guessed agent shows up in the session's agent list, sets an expectation in AGENTS.md that nothing fulfills, and produces the "made it, never used it" smell that trains the operator to distrust the whole harness. An orchestrator with no roles to spawn is the same problem one layer up. The built-in `Explore` / `general-purpose` subagents already cover ad-hoc fan-out, so a fresh repo loses nothing by starting empty.
 
-**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
+Roles arrive **on evidence, not on setup**: `dev:harness-curate` mines the transcripts for work repeatedly done inline that a missing agent should have owned (its *triggering-miss* signal), and routes to `plugin-dev:agent-creator`. Adding one afterwards is Extend mode, not a re-init. Zero roles is a legitimate steady state — many repos never need one.
+
+**Create a role or orchestrator during init only if the user explicitly asks for it in this session.** Then it is their call, not the skill's guess: build exactly what they named, apply the reachability check in Step 4b to that candidate, and skip the rest.
+
+**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing any delegation wording. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, the generated docs must not read stricter than it. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
 Delegation is only the axis where narrowing is a safe automatic fix. Every other axis goes through Step 0b.
 
@@ -53,7 +57,7 @@ Delegation is only the axis where narrowing is a safe automatic fix. Every other
 
 | Condition | Mode | Action |
 |-----------|------|--------|
-| No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Step 0b, then Steps 1–10 |
+| No `AGENTS.md`, no `docs/` | **New setup** | Run Step 0b, then Steps 1–10 |
 | Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
 | User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop. Structure only — for an instruction-conflict/duplication audit of the existing files, route to `dev:harness-curate` (Signal 7) |
 
@@ -199,7 +203,7 @@ Create these files. Each read **on demand**, not loaded every session. Each temp
 
 **Non-negotiable for `docs/delegation.md`:** triggers in routing table must be objective and measurable — never subjective conditions ("unfamiliar module") agent can rationalize away.
 
-**Complete Step 4a first. If this is a multi-agent project: also complete Step 4b after Step 4a.**
+**Complete Step 4a first.** Steps 4b–4d (roles, orchestrator, scratchpad) produce nothing on a default init — read them for the one case that does apply: the user asked for a specific role or orchestrator this session.
 
 ### Step 4a: Create Sprint / Backlog Files
 
@@ -212,38 +216,40 @@ Create at repo root:
 
 Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
 
-### Step 4b: Define Reusable Roles
+### Step 4b: Reusable Roles — none by default
 
-**Create a role only when its delegation trigger can actually fire in this repo's normal work.** A role file earns its place by giving the main loop a pre-scoped target so it delegates instead of working inline. A role whose trigger never fires is the opposite: it shows up in the session's agent list, sets an unmet expectation in AGENTS.md, and produces the "made it, never used it" smell that trains the operator to distrust the harness.
+**Create no `.claude/agents/*.md` at init.** The repo starts with an empty roster and the main thread does the work inline, using the built-in `Explore` / `general-purpose` subagents when it wants ad-hoc fan-out. Rationale in Step 0: before the repo has a working history there is no evidence about which delegations recur, and a guessed role is dead weight that discredits the harness.
 
-Apply the **reachability gate** to each candidate — keep it only if reachable here:
+Say so explicitly in the Step 10 summary — "no agent roles created; `dev:harness-curate` adds them when the transcripts show a delegation actually recurring" — so the empty roster reads as a decision rather than an omission.
+
+**The one exception: the user asked for a specific role in this session.** Then create that role and only that role, after a reachability check — does its trigger fire in this repo's normal work?
 
 | Role | Trigger | Reachable when |
 |------|---------|----------------|
-| `qa-verifier` | after any source edit | almost always — any repo with editable source |
+| `qa-verifier` | after any source edit | any repo with editable source |
 | `explorer` | unexplored area >3 files | repo has real modules/dirs, not one flat file |
 | `implementer` | backlog item w/ Sprint Contract | repo actually runs a `backlog.md` sprint flow |
 | `product-evaluator` | subjective quality judgment | repo ships a user-facing artifact that gets judged |
 
-A backlog-driven `implementer` is dead weight in a repo with no backlog; a `product-evaluator` is dead weight where nothing has a subjective quality bar. Swap in a domain-specific role when it matches recurring work better than the generic one (this marketplace uses `skill-evaluator` in place of `product-evaluator`).
+If the requested role fails its own reachability check, say so and let the user decide — do not silently create it, and do not silently skip it. Swap in a domain-specific role when it matches the request better than the generic one (this marketplace uses `skill-evaluator` in place of `product-evaluator`).
 
-Result is typically **1–3 roles, not a fixed set.** Zero is itself a smell for any repo with editable source — at minimum create `qa-verifier` so post-edit verification has a target. If you create none, state why.
+Role-file prose goes in the Step 1 language; the `description:` field follows the matcher carve-out there, not the docs language. Omit `model:` — the role inherits the session model and the caller overrides per spawn (`references/delegation-template.md` → "Model Selection — inherited by default").
 
-Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways. Role-file prose goes in the Step 1 language; the `description:` field follows the matcher carve-out there, not the docs language.
+**Keep the generated docs consistent with the empty roster.** `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `references/delegation-template.md`) must not name an agent this repo does not have: generate the delegation section headers and trigger-design rules, leave the routing-table rows out, and write the workflow's QA/eval steps as inline checks against the written criteria. Both templates carry the wording for this. Never leave a mandatory gate pointing at an agent that does not exist.
 
-**Propagate the pruned roster downstream.** The generated `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `references/delegation-template.md`) hardcode `explorer`/`implementer`/`product-evaluator` in mandatory gates. For every role you skip here, drop or rewrite the gate row that names it — never leave a mandatory gate pointing at an agent you didn't create.
+Read `references/teammate-role-template.md` for the full schema and per-role templates — they are starting points for the later evidence-driven creation, not an init checklist.
 
-Read `references/teammate-role-template.md` for the full schema and per-role templates.
+**Team communication protocol:** If a role is created and will be spawned as a named teammate in team-mode orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
 
-**Team communication protocol:** For every role that will be spawned as a named teammate in team-mode orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
+Regardless of roster, write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
 
-Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
+### Step 4c: Orchestrator Skill — not at init
 
-### Step 4c: Create Orchestrator Skill
+**Create no orchestrator skill during init** (default-off per Step 0). An orchestrator exists to route work to agents; with the Step 4b roster empty there is nothing to route to, so what gets generated is a skill that describes coordination the repo cannot perform. Its cost is not zero either — it loads on matching prompts and tells the model to spawn agents that do not exist.
 
-**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo) (default-on per Step 0). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that auto-delegation (Step 7b — directive description first, router fallback) points at.
+The same evidence path applies: once `dev:harness-curate` has produced one or more roles and the transcripts show the *same multi-step domain workflow* recurring, an orchestrator is worth building — and by then its phases can be written from what actually happened instead of guessed. That is Extend mode (`Add new domain with orchestrator` in the Step 0 matrix), and it routes to `skill-creator`.
 
-If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) or C (hybrid). For single-agent domains, use Template B with one sub-agent — it is still worth creating because the orchestrator gives auto-delegation a target and the model an explicit "spawn the agent, do not inline" instruction.
+**Build one during init only if the user explicitly asks.** In that case follow the rest of this step as written.
 
 Create at:
 `.claude/skills/{domain}-orchestrator/SKILL.md`
@@ -267,9 +273,7 @@ After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## H
 
 **Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". This is Step 7b's primary mechanism — get it right before considering the router fallback.
 
-**Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `model` / `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). See `references/orchestrator-template.md` → "Skill frontmatter reference".
-
-**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same trivial-repo bar that lets Step 4b skip roles entirely (the orchestrator itself stays default-on per Step 0).
+**Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). Leave `model` unset unless the skill is defined by its tier — see `references/delegation-template.md` → "Model Selection — inherited by default". Full list: `references/orchestrator-template.md` → "Skill frontmatter reference".
 
 ### Step 4d: Scratchpad Pattern
 
@@ -343,7 +347,9 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
 
 **Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Auto-invocation is description-driven, and field reports put it well below 100% even with good descriptions ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). The failure mode: init produces a beautiful delegation harness, then the agent does the work inline anyway.
 
-**Primary mechanism — directive descriptions (do this always).** The highest-leverage, lowest-cost lever is the `description:` field of every orchestrator skill and high-leverage agent role. Directive phrasing ("ALWAYS invoke when X — do NOT inline-execute") measurably out-triggers descriptive phrasing ("Triggers on X"). This is where auto-delegation is won or lost — get the descriptions right first (template: `references/orchestrator-template.md` → "Description writing rule"). This repo's own harness relies on description-driven invocation with **no router hook** — dogfooded, and sufficient for the large majority of repos.
+**Applies only once orchestrators or roles exist.** A freshly initialized repo has neither (Steps 4b/4c), so there is nothing to auto-delegate *to* and this whole step is a no-op — do not install a router to compensate for an empty roster. Run it when `dev:harness-curate` adds the first role or orchestrator, and apply it to that asset.
+
+**Primary mechanism — directive descriptions (do this always, for each asset that exists).** The highest-leverage, lowest-cost lever is the `description:` field of every orchestrator skill and high-leverage agent role. Directive phrasing ("ALWAYS invoke when X — do NOT inline-execute") measurably out-triggers descriptive phrasing ("Triggers on X"). This is where auto-delegation is won or lost — get the descriptions right first (template: `references/orchestrator-template.md` → "Description writing rule"). This repo's own harness relies on description-driven invocation with **no router hook** — dogfooded, and sufficient for the large majority of repos.
 
 **Fallback — trigger router (only when you've measured a real miss-rate).** If, after directive descriptions are in place, a specific high-value delegation still misfires often enough to hurt, add a mechanical backstop. Do not install it preemptively — it costs a hook on every prompt plus a routes file to keep in sync, and a stale router is worse than none.
 
@@ -352,11 +358,11 @@ Match enforcement depth to maturity level target: Level 1 → no hooks required;
    - `.claude/trigger-routes.json` (one route per delegation you watched misfire)
    - Add `UserPromptSubmit` hook to `.claude/settings.json`
 
-2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. This is a hard block justified wherever an inline edit is genuinely dangerous — independent of the router, install it on evidence of risk, not of miss-rate. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
+2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. This is a hard block justified wherever an inline edit is genuinely dangerous — independent of the router, install it on evidence of risk, not of miss-rate. **Prerequisite: a role the gate can be satisfied by.** Installing it with an empty roster makes those paths simply un-editable, which is a broken repo, not a safe one. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
-**Default:** ship directive descriptions for every orchestrator/agent (default-on per Step 0). Add the router or gate only on evidence — a route you watched misfire, or a critical path that must never be touched inline. This mirrors this repo's own conclusion: description-driven first, router only if the miss-rate proves it necessary.
+**Default:** ship directive descriptions for every orchestrator/agent that exists — at init, typically none. Add the router or gate only on evidence — a route you watched misfire, or a critical path that must never be touched inline. This mirrors this repo's own conclusion: description-driven first, router only if the miss-rate proves it necessary.
 
 **Validation (if you install the router):** test each route after creation:
 
@@ -441,7 +447,8 @@ Clean validate run at Level 2+ means enforcement is active and drift is mechanic
 Manual checklist for items script cannot verify:
 - [ ] No generated rule contradicts the operator's global layer or the platform's base instructions — every conflict Step 0b found was surfaced to the user and resolved by them (never resolved silently)
 - [ ] Golden principles enforceable (each has lint rule, test, or hook)
-- [ ] Delegation table specifies model per role (haiku/sonnet/opus)
+- [ ] No generated doc names an agent role or orchestrator that does not exist in this repo
+- [ ] No role file or delegation table pins a model — spawns inherit, callers override (`references/delegation-template.md`)
 - [ ] Eval criteria concrete and gradeable (not vague)
 - [ ] `docs/` files don't duplicate each other
 - [ ] Sweep trigger policy recorded in `docs/runbook.md`

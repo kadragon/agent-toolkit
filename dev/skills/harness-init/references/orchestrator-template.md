@@ -51,7 +51,7 @@ Only `description` is required (defaults aside). Per the Agent Skills standard p
 |-------|-----|
 | `description` (+ `when_to_use`) | What + when. **Combined budget ~1,536 chars — front-load the key use case**; everything past the cap is truncated and never seen. |
 | `name` | Display name; defaults to the directory name. |
-| `model` | Per-skill model override (e.g. force `opus` for a judgment-heavy orchestrator, `haiku` for a mechanical one). |
+| `model` | Per-skill model override. **Leave unset by default** — the skill inherits the session model and the caller overrides per spawn; pin only when the skill is defined by its tier (`delegation-template.md` → Model Selection). |
 | `effort` | Per-skill reasoning effort (`low`…`max`). |
 | `disable-model-invocation: true` | Manual-only (`/name`); also keeps it out of subagent preload. Use for destructive or expensive skills that must not auto-fire. |
 | `user-invocable: false` | Hide from the `/` menu — background knowledge the model consults but the user never calls directly. |

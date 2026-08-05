@@ -50,23 +50,29 @@ Source: Anthropic "How we built our multi-agent research system" (2026). Failure
 
 Agents systematically mis-judge effort. Tag each spawn with a tier so the subagent calibrates tool-call budget:
 
-| Tier | Use for | Tool calls | Parallel subagents | Model default |
-|------|---------|------------|--------------------|---------------|
-| **Simple** | Known-answer lookup, single file edit, mechanical check | 3-10 | 1 | haiku/sonnet |
-| **Comparison** | Weighing 2-4 options, multi-file code review, cross-module check | 10-15 per agent | 2-4 | sonnet |
-| **Complex** | Root cause unknown, architectural decision, cross-layer refactor | 15+ per agent | up to 5 | sonnet + opus lead |
+| Tier | Use for | Tool calls | Parallel subagents |
+|------|---------|------------|--------------------|
+| **Simple** | Known-answer lookup, single file edit, mechanical check | 3-10 | 1 |
+| **Comparison** | Weighing 2-4 options, multi-file code review, cross-module check | 10-15 per agent | 2-4 |
+| **Complex** | Root cause unknown, architectural decision, cross-layer refactor | 15+ per agent | up to 5 |
 
 Complex tier requires the lead to **explicitly justify** team size in the spawn prompt. Default hard cap: 5 parallel agents.
 
 ## Routing Table Structure
 
+**At init the routing table is empty, and that is the correct state.** A gate may only name an agent that exists; `harness-init` creates no agent roles and no orchestrator (SKILL.md Step 4b/4c), so there is nothing to route to yet. Generate the section headers and the anti-pattern rules below — they are the contract a future row must satisfy — but leave the rows out until a role exists. A blocking gate pointing at a non-existent agent is worse than no gate: the first agent to hit it either fabricates a spawn target or learns the table is decorative.
+
+Rows get added later, one at a time, when `dev:harness-curate` finds transcript evidence that a delegation is actually recurring and creates the matching role. Adding a row is Extend mode, not a re-init.
+
 Organize into three tiers:
 
 ### Mandatory Gates (blocking)
 
-Tasks that must complete before the workflow can proceed. These are **hard stops**, not suggestions — skipping a mandatory gate is a golden principle violation.
+Tasks that must complete before the workflow can proceed. These are **hard stops**, not suggestions — skipping a mandatory gate is a golden principle violation. That severity is exactly why a row belongs here only once its target role exists and has proven recurring.
 
 **Critical: All triggers must be objective and measurable.** Never use subjective conditions like "unfamiliar module" or "complex change" — agents systematically overestimate their own understanding and will rationalize skipping delegation every time. See `references/golden-principles-guide.md` → "Delegation Discipline" for why.
+
+Example rows — the shape a row must take once its target role exists. Do **not** copy them into a freshly initialized repo:
 
 ```markdown
 | Trigger (objective) | Delegate to | Context to pass |
@@ -172,35 +178,22 @@ Map these to the tools available in your environment:
 
 For projects without specialized sub-agents, the `general-purpose` Agent subagent with a well-crafted prompt is sufficient. The key is separation of concerns — the agent that generates should not be the agent that evaluates.
 
-## Model Selection per Role
+## Model Selection — inherited by default
 
-Not all sub-agent tasks need the most powerful (and expensive) model. Match the model to the cognitive complexity of the task:
+**Do not pin a model in a role file or a routing table.** Leave `model:` out of `.claude/agents/*.md` frontmatter and out of the routing table entirely. A spawn with no model override inherits the session's model, which is the right answer in the large majority of cases — and it stays right after a model upgrade, whereas a pinned tier silently keeps spawning last year's model long after the pin stopped making sense.
 
-| Role | Recommended Model | Reasoning |
-|------|------------------|-----------|
-| **Structural grading** (file exists? line count?) | `haiku` | Mechanical checks, no judgment needed |
-| **Code review** (bugs, style) | `sonnet` | Solid reasoning at lower cost, good for pattern matching |
-| **Implementation** (write code) | `sonnet` | Standard coding tasks, follows patterns well |
-| **Codebase exploration** | `sonnet` | Searching and reading, summarizing findings |
-| **Architecture analysis** | `opus` | Complex multi-file reasoning, design tradeoffs |
-| **Product evaluation** | `opus` | Subjective judgment, skeptical assessment, calibration needed |
-| **Deep debugging** (2nd attempt) | `opus` | Root cause analysis after simpler approaches failed |
-| **Sweep / garbage collection** | `haiku` or `sonnet` | Mostly grep + pattern matching, light judgment |
+The choice belongs to the **caller at spawn time** — the orchestrator, or the main thread acting as one — because only the caller knows what this particular task is. Override per call, never per role:
 
-**Rules of thumb:**
-- If the task is **checking known criteria**, use `haiku` — it's fast and cheap.
-- If the task is **following instructions to produce output**, use `sonnet` — good balance of quality and cost.
-- If the task requires **judgment, creativity, or multi-step reasoning**, use `opus` — worth the cost for high-stakes decisions.
-- When in doubt, start with `sonnet` and escalate to `opus` only if quality is insufficient.
-
-In Claude Code, specify the model when spawning a sub-agent:
 ```
 Agent({
   description: "...",
   prompt: "...",
-  model: "sonnet"  // or "haiku", "opus"
+  // model: omitted → inherits the session model. Add an override only when
+  // this specific task clearly warrants a different tier.
 })
 ```
+
+Pin a model in a role file only when the role is *defined by* its tier (a deliberately cheap mechanical grader, a deliberately expensive adversarial judge) and you can say in one line why inheritance is wrong for it. Record that line next to the pin — it is what a later `dev:harness-curate` load-bearing pass re-examines after a model upgrade.
 
 ## Objective Trigger Design
 
@@ -222,7 +215,9 @@ When writing triggers for the routing table, follow these rules:
 
 ## Workflow → Delegation Mapping
 
-These delegations are **embedded as named steps in `docs/workflows.md`**, not just cross-referenced. The workflow itself enforces delegation — an agent following the `code` workflow cannot skip these steps because they are the workflow.
+Once roles exist, their delegations are **embedded as named steps in `docs/workflows.md`**, not just cross-referenced. The workflow itself then enforces delegation — an agent following the `code` workflow cannot skip these steps because they are the workflow.
+
+Before any role exists, the same steps stay in the workflow but run **inline**: the main thread does the scope check, the implementation, and the verification itself. Do not write a step that names an agent the repo does not have.
 
 ```markdown
 | Workflow | Step | Delegate | Gate type |
@@ -244,7 +239,9 @@ These delegations are **embedded as named steps in `docs/workflows.md`**, not ju
 
 ## Reusable Roles
 
-Define each recurring role once as `.claude/agents/{role}.md`. The routing table cites roles by name; Claude Code reuses the same file for both subagent and teammate spawns. See `references/teammate-role-template.md` for the schema and role templates; create only the roles whose triggers are reachable in the target repo (reachability gate in `SKILL.md` Step 4b).
+**None at init.** `harness-init` ships no `.claude/agents/*.md` — a roster guessed before the repo has any working history is the classic "made it, never used it" asset. Until a role exists, the main thread does the work inline and the `Explore` / `general-purpose` built-ins cover ad-hoc fan-out (see "Choosing Delegation Targets" above).
+
+A role gets created when there is evidence for it: `dev:harness-curate` mines the transcripts, finds work repeatedly done inline that a missing agent should have owned (its *triggering-miss* signal), and routes to `plugin-dev:agent-creator`. Then — and only then — define the role once as `.claude/agents/{role}.md` and add the routing-table row that cites it. Claude Code reuses the same file for both subagent and teammate spawns. Schema and per-role templates: `references/teammate-role-template.md`.
 
 ## Handoff Within a Session
 

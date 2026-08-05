@@ -38,7 +38,6 @@ description: |
   "ALWAYS invoke" / "do NOT inline" for roles the delegation table marks
   "Mandatory, blocking" — see the rule below the anti-pattern table.}
 tools: {comma-separated allowlist or omit for all tools}
-model: {haiku | sonnet | opus}
 ---
 
 {Role system prompt — goes here as markdown body.}
@@ -81,8 +80,12 @@ the hook emits an explicit `Spawn Agent(subagent_type={role}) ...` on match.
 - `tools` allowlist is enforced for both subagent and teammate use. Team
   coordination tools (`SendMessage`, task mgmt) are always available to
   teammates regardless.
-- `model` selection must match the table in
-  `references/delegation-template.md` → "Model Selection per Role".
+- **Omit `model`.** The role inherits the session's model, and the caller
+  (orchestrator or main thread) overrides per spawn when a specific task
+  warrants a different tier. Pin it in the role file only when the role is
+  defined by its tier, and say why in one line — see
+  `references/delegation-template.md` → "Model Selection — inherited by
+  default".
 - `skills` and `mcpServers` frontmatter fields do NOT apply when the role
   runs as a teammate — teammates load from project/user settings only.
 - The body is **appended** to the teammate system prompt, not replacing it.
@@ -151,7 +154,7 @@ Not all drift is equal — before treating a difference as staleness, classify i
 
 | Layer | Owner | Drift means |
 |---|---|---|
-| Frontmatter schema (required fields present, `model` from the Model Selection table) | this template | stale instance — the template is the source of truth |
+| Frontmatter schema (required fields present) | this template | stale instance — the template is the source of truth |
 | The four spine sections above (Objective, Spawn Prompt Contract, Effort Tier, Exit Criteria) | this template | stale instance — the template is the source of truth |
 | Non-spine sections this template ships (`## Multi-pass Rule`, `## Team Communication Protocol`) | this template, but **opt-in per role** | absence is not staleness — they apply only to roles that need them |
 | Sections a repo *adds* (e.g. `## Checks (always run)`, `## Domain-safety pass`) | the repo | intended specialization — never overwrite |
@@ -164,7 +167,7 @@ spine structure. Note none carried `## Multi-pass Rule` either — which is why 
 differ that treated every template section as required would report four false positives here.
 
 `validate-harness.sh` §11 implements exactly that boundary: it reconciles **frontmatter-field
-presence** (`name`, `description`, `model`; `tools` is optional per the schema above) **and
+presence** (`name`, `description`; `tools` and `model` are optional per the schema above) **and
 spine-section presence** — the latter waived by `spine-exempt: true` — and emits `WARN`, never
 `FAIL`, never an edit. Section contents, repo-added sections, and the opt-in non-spine sections
 are out of its remit. Any future resync tool inherits the same limits.
@@ -186,16 +189,20 @@ Block on input from {upstream agent} before proceeding. If no message within
 {N} tool calls, write partial output to `{scratchpad}` and notify orchestrator.
 ```
 
-**When to include:** Step 4b creates this section for every role that participates
+**When to include:** add this section to every role that participates
 in a team-mode orchestration (spawned by the lead as a named teammate, not via any
 team-creation call — see `orchestrator-template.md` → Phase 2). Omit for purely sub-agent roles that
 only return values to the orchestrator.
 
-## Role Templates (create the reachable ones on `harness-init`)
+## Role Templates (starting points — not created at init)
 
-These are templates, not a mandatory set. Create a role only if its delegation
-trigger is reachable in the target repo — see the reachability gate in
-`SKILL.md` Step 4b. Most repos keep 1–3.
+These are templates, not a mandatory set, and `harness-init` creates **none** of
+them: Step 4b ships an empty roster deliberately, because which roles a repo
+actually needs is not knowable before it has any working history. Reach for one
+of these when `dev:harness-curate` surfaces transcript evidence that a
+delegation keeps being done inline, and adapt it to the observed pattern rather
+than adopting it wholesale. Most repos end up with 1–3 after months of use, and
+zero is a legitimate steady state for a repo the main thread handles alone.
 
 ### `implementer.md`
 
@@ -208,7 +215,6 @@ description: |
   independent units. Does NOT self-evaluate; hands off to qa-verifier
   afterwards.
 tools: Read, Edit, Write, Grep, Glob, Bash
-model: sonnet
 ---
 
 You implement code against a spec. You follow `docs/conventions.md` and do
@@ -246,7 +252,6 @@ description: |
   files or >M LOC, per this repo's delegation table. Read-only: produces a map,
   not a change.
 tools: Read, Grep, Glob
-model: sonnet
 ---
 
 ## Objective
@@ -281,7 +286,6 @@ description: |
   whenever verification is delegated at all. Verifies against Sprint Contract
   criteria, not impressions.
 tools: Read, Grep, Glob, Bash
-model: sonnet
 ---
 
 ## Objective
@@ -331,7 +335,6 @@ description: |
   — does this actually solve the user's problem? Opus-level judgment,
   independent from implementer and qa-verifier.
 tools: Read, Grep, Glob, Bash
-model: opus
 ---
 
 ## Objective

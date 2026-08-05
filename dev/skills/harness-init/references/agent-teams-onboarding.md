@@ -199,9 +199,9 @@ You: "Review PR #142 with three independent lenses."
 
 Claude (lead):
   Creating team with 3 teammates:
-    - sec-reviewer (security-reviewer role, opus)
-    - perf-reviewer (qa-verifier role with perf focus, sonnet)
-    - test-coverage-reviewer (qa-verifier role with coverage focus, sonnet)
+    - sec-reviewer (security-reviewer role)
+    - perf-reviewer (qa-verifier role with perf focus)
+    - test-coverage-reviewer (qa-verifier role with coverage focus)
 
   Shared task list seeded with 3 tasks (one per lens).
   Each teammate has its own Spawn Prompt Contract referencing PR #142 diff.

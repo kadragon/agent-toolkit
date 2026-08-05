@@ -115,7 +115,7 @@ Verify **schema** (not content) of harness-related docs. Full schemas in `refere
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
-Either file entirely missing → repo not fully bootstrapped — point user at harness-init Step 4b, don't guess content.
+Either file entirely missing → repo not fully bootstrapped — point user at harness-init Step 4a, don't guess content.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 
