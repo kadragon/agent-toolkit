@@ -115,21 +115,20 @@ Four supplementary file-lenses complement the transcript firing data (a skill ca
   `--project` is required, not optional: the script defaults to `os.getcwd()`, so a `--project /other/repo` run launched from anywhere else would read the *current* repo's dismissals. `REPO_ROOT` is the same root the read set above is bounded by — reuse it for both.
 
   Report only `NEW` rows, and carry the printed `suppressed=` count into the report. Runs on `current` / `--project` scope only — `all` scope has no resolvable repo path per project (same limitation as the Codex fold-in), so run `--project` per repo for cross-repo coverage.
-- **Memory-store promotion** — the auto-memory store (`<config>/projects/<encoded>/memory/*.md` + its `MEMORY.md` index) is a fifth instruction layer, and the only one that is **Claude-only and per-project**. A repo-specific fact written there is invisible to Codex and every other tool that reads `AGENTS.md`/`docs/` — exactly the loss the global routing rule ("repo facts → owning repo's `docs/`, indexed by `AGENTS.md`") exists to prevent. `harness-capture` tidies this store from inside one session; nobody audits it across sessions, which is this lens. Resolve the directory with the scanner's own resolver rather than re-deriving the path encoding — that is what guarantees it is the same directory Step 1 read and Step 6 will stamp:
+- **Memory-store promotion** — the auto-memory store (`<config>/projects/<encoded>/memory/*.md` + its `MEMORY.md` index) is a fifth instruction layer, and the only one that is **Claude-only and per-project**. A repo-specific fact written there is invisible to Codex and every other tool that reads `AGENTS.md`/`docs/` — exactly the loss the global routing rule ("repo facts → owning repo's `docs/`, indexed by `AGENTS.md`") exists to prevent. `harness-capture` tidies this store from inside one session; nobody audits it across sessions, which is this lens. Resolve the directory with the scanner's own path helpers rather than re-deriving the encoding by hand — but check the **exact** encoded path before the resolver's fuzzy pick, for the reason spelled out under the snippet:
 
   ```bash
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-  export SKILL_DIR
-  MEMDIR=$(python3 - <<'PY'
-  import os, sys
-  sys.path.insert(0, os.path.join(os.environ["SKILL_DIR"], "scripts"))
-  from scan_transcripts import resolve_project_dir
-  cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-  print(os.path.join(resolve_project_dir(os.getcwd(), os.path.join(cfg, "projects")), "memory"))
-  PY
-  )
-  [ -d "$MEMDIR" ] || echo "no auto-memory store for this project — lens is a no-op"
+  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+  TARGET_REPO="<the --project path, or cwd on `current` scope>"
+  MEMDIRS=$(TARGET_REPO="$TARGET_REPO" SKILL_DIR="$SKILL_DIR" python3 -c 'import os, sys; sys.path.insert(0, os.path.join(os.environ["SKILL_DIR"], "scripts")); from scan_transcripts import encode_project, resolve_project_dir; cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"); root = os.path.join(cfg, "projects"); repo = os.environ["TARGET_REPO"]; cands = [os.path.join(root, encode_project(repo)), resolve_project_dir(repo, root)]; [print(os.path.join(d, "memory")) for d in dict.fromkeys(cands)]')
+  echo "$MEMDIRS" | while read -r d; do [ -d "$d" ] && echo "store: $d"; done
+  # nothing printed → no auto-memory store for this project; the lens is a no-op
   ```
+
+  **`TARGET_REPO`, never `os.getcwd()`.** The resolver defaults to the current directory, so a `--project /other/repo` run launched from anywhere else would read *this* repo's memory store while proposing promotions into the other repo's `docs/` and writing dismissals under the other repo's key — the same hazard the overlap lens documents one bullet above, in the same direction. Pass the audited repo in explicitly. The one-liner is `python3 -c`, not a heredoc, on purpose: this snippet is nested in a list item, and an indented `PY` terminator would never close a `<<'PY'` heredoc.
+
+  **Why two candidate paths, exact one first.** `resolve_project_dir` picks the encoded sibling holding the most `*.jsonl` — the right rule for transcripts, the wrong one for memory. The two directories have different producers: transcripts are written per session, the memory store by the memory writer under the project's own encoded path, and nothing ties "most transcripts" to "holds `memory/`". Under the case/underscore drift `_loose_key` exists to absorb, the jsonl-heavy winner can even be a **different repo**, so the fuzzy pick is a fallback, never the primary — check `encode_project(TARGET_REPO)` first and treat a match there as authoritative. Auditing only the resolver's pick returns a clean "no candidates" over a store that exists, which is indistinguishable from a real no-op. If both paths exist and disagree, report it rather than merging them: one of them belongs to another project.
 
   Read `MEMORY.md` and every memory file in that directory. A memory is a **promotion candidate** only when its frontmatter `metadata.type` is `project` or `reference` **and** its content is scoped to this one repo. `user` and `feedback` memories are cross-repo by definition — promoting them into a single repo's `docs/` would silently drop them everywhere else, so they stay. Full detection rules, non-findings, and the `already-promoted` subtype: `references/signal-taxonomy.md` §6.
 
@@ -139,8 +138,7 @@ Four supplementary file-lenses complement the transcript firing data (a skill ca
 
   ```bash
   OSTATE="$SKILL_DIR/scripts/overlap_state.py"
-  TARGET_REPO="<the --project path, or cwd on `current` scope>"
-  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
+  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)   # TARGET_REPO from the MEMDIR snippet above — the same repo, or the two sides disagree
   # pairs.json for this lens — one entry per promotion candidate:
   #   [{"global": "memory/<file>.md: <verbatim body line>",
   #     "repo":   "docs/<topic>.md (proposed)"}, ...]
