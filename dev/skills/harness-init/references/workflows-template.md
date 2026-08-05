@@ -101,7 +101,7 @@ State the question → research/prototype → report options and tradeoffs → *
 
 ## `debate` — Competing Hypotheses (optional, on-demand)
 
-Adversarial multi-agent root-cause investigation. Use ONLY when a first-pass single-agent diagnosis failed on a high-stakes bug. Requires Agent Teams. Full procedure in `references/competing-hypotheses-playbook.md`.
+Adversarial multi-agent root-cause investigation. Use ONLY when a first-pass single-agent diagnosis failed on a high-stakes bug. Requires Agent Teams. Full procedure in `dev:harness-curate` → `references/competing-hypotheses-playbook.md`.
 
 Not a default workflow. Most projects invoke it <1×/month.
 

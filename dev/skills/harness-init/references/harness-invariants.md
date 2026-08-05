@@ -55,8 +55,8 @@ Every subagent/teammate spawn MUST carry all four fields:
 **Objective**, **Output format**, **Tools to use**, **Boundaries**.
 
 Enforced by:
-- `references/delegation-template.md` → "Spawn Prompt Contract" (documents it)
-- `references/teammate-role-template.md` (each role's body restates it)
+- `dev:harness-curate` → `references/delegation-template.md` → "Spawn Prompt Contract" (documents it)
+- `dev:harness-curate` → `references/teammate-role-template.md` (each role's body restates it)
 - `references/enforcement-template.md` → `task-created-contract.sh` (blocks at `TaskCreated`)
 
 When this contract changes, update all three places plus any existing `.claude/hooks/task-created-contract.sh` in target repos.

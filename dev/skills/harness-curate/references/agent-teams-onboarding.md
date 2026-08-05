@@ -94,7 +94,7 @@ time.
 ### 4. Wire the team hooks
 
 Add to `.claude/settings.json` hooks block (see
-`references/enforcement-template.md` → "Agent Teams Quality Gates"):
+`dev:harness-init` → `references/enforcement-template.md` → "Agent Teams Quality Gates"):
 
 - `TaskCreated` — enforce Spawn Prompt Contract (reject tasks missing any
   of the 4 fields)
@@ -111,7 +111,7 @@ enabled):
    the Claude config dir, default `~/.claude/tasks/{team-name}/`). No
    teammate edits outside its glob.
    `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
-   work. See `references/workflows-template.md` → "Step 1.5: File Ownership
+   work. See `dev:harness-init` → `references/workflows-template.md` → "Step 1.5: File Ownership
    Declaration".
 
 2. **Start with 3–5 teammates.** There is no hard platform limit, but token

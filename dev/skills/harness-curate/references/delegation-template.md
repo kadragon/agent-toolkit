@@ -60,7 +60,7 @@ Complex tier requires the lead to **explicitly justify** team size in the spawn 
 
 ## Routing Table Structure
 
-**At init the routing table is empty, and that is the correct state.** A gate may only name an agent that exists; `harness-init` creates no agent roles and no orchestrator (SKILL.md Step 4b/4c), so there is nothing to route to yet. Generate the section headers and the anti-pattern rules below — they are the contract a future row must satisfy — but leave the rows out until a role exists. A blocking gate pointing at a non-existent agent is worse than no gate: the first agent to hit it either fabricates a spawn target or learns the table is decorative.
+**At init the routing table is empty, and that is the correct state.** A gate may only name an agent that exists; `harness-init` creates no agent roles and no orchestrator (harness-init SKILL.md Step 4b/4c), so there is nothing to route to yet. Generate the section headers and the anti-pattern rules below — they are the contract a future row must satisfy — but leave the rows out until a role exists. A blocking gate pointing at a non-existent agent is worse than no gate: the first agent to hit it either fabricates a spawn target or learns the table is decorative.
 
 Rows get added later, one at a time, when `dev:harness-curate` finds transcript evidence that a delegation is actually recurring and creates the matching role. Adding a row is Extend mode, not a re-init.
 
@@ -70,7 +70,7 @@ Organize into three tiers:
 
 Tasks that must complete before the workflow can proceed. These are **hard stops**, not suggestions — skipping a mandatory gate is a golden principle violation. That severity is exactly why a row belongs here only once its target role exists and has proven recurring.
 
-**Critical: All triggers must be objective and measurable.** Never use subjective conditions like "unfamiliar module" or "complex change" — agents systematically overestimate their own understanding and will rationalize skipping delegation every time. See `references/golden-principles-guide.md` → "Delegation Discipline" for why.
+**Critical: All triggers must be objective and measurable.** Never use subjective conditions like "unfamiliar module" or "complex change" — agents systematically overestimate their own understanding and will rationalize skipping delegation every time. See `dev:harness-init` → `references/golden-principles-guide.md` → "Delegation Discipline" for why.
 
 Example rows — the shape a row must take once its target role exists. Do **not** copy them into a freshly initialized repo:
 
@@ -245,4 +245,4 @@ A role gets created when there is evidence for it: `dev:harness-curate` mines th
 
 ## Handoff Within a Session
 
-For work approaching context limits, or before spawning a fresh subagent/switching teammates, write a handoff file (in the scratchpad) with the schema in `references/handoff-template.md`. A handoff IS a deferred Spawn Prompt Contract — its "Next Agent Contract" section mirrors the 4 fields above. This does NOT survive a new CLI session — there is currently no supported mechanism for genuine multi-day/cross-session handoff; say so plainly rather than implying otherwise.
+For work approaching context limits, or before spawning a fresh subagent/switching teammates, write a handoff file (in the scratchpad) with the schema in `dev:harness-init` → `references/handoff-template.md`. A handoff IS a deferred Spawn Prompt Contract — its "Next Agent Contract" section mirrors the 4 fields above. This does NOT survive a new CLI session — there is currently no supported mechanism for genuine multi-day/cross-session handoff; say so plainly rather than implying otherwise.

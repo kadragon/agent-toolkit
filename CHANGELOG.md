@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-init goes minimal — nothing speculative created (dev v4.2.0) (2026-08-05) → dev/skills/harness-init/references/design-rationale.md
 - [done] harness-curate audits the auto-memory store (dev v4.1.0) (2026-08-05) → dev/skills/harness-curate/references/signal-taxonomy.md
 - [done] commit-guard merge coverage cut at 1/3 (2026-08-03) → docs/design/harness-altitude-audit.md
 - [done] commit-guard reaches the task-review commit path via guard.py --precommit-check (dev v4.0.33) (2026-08-03)
@@ -23,8 +24,8 @@
 - [done] repo ruff config + _strip_html_comments EOF line-count fix (dev v4.0.19, prod v3.0.3) (2026-07-30)
 - [done] harness-init resolves docs language before writing any artifact (dev v4.0.15) (2026-07-29)
 - [done] task-next fenced-block stripping + task-audit-nudge Codex config_dir (dev v4.0.14) (2026-07-29)
-- [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
-- [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29) → dev/skills/harness-init/references/teammate-role-template.md
+- [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-curate/references/teammate-role-template.md
+- [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29) → dev/skills/harness-curate/references/teammate-role-template.md
 - [done] CHANGELOG entry contract + named-agent result handoff (dev v4.0.10) (2026-07-27) → docs/conventions.md
 - [done] task-review: capture only Codex's final review (dev v4.0.9) (2026-07-27)
 - [done] task-next: ignore HTML-commented markup in backlog candidate scan (dev v4.0.7) (2026-07-27)

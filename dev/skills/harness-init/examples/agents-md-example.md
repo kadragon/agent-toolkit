@@ -36,7 +36,7 @@ If you installed the gate, a mandatory row that fires halts an inline edit. If y
 **Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
 - Sub-agents share findings mid-flight → Agent Team (`Agent` with `name:` + `SendMessage`)
 - Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
-- Phase-dependent → Hybrid (see `references/orchestrator-template.md`)
+- Phase-dependent → Hybrid (see `dev:harness-curate` → `references/orchestrator-template.md`)
 
 **This table is the maximalist case — a mature repo after months of use, not what `harness-init` produces.** A freshly initialized repo has **no rows here at all**: init creates no agent roles and no orchestrator, so there is nothing to route to, and every row below arrived later via `dev:harness-curate` on transcript evidence. Most repos settle at 2–4 rows, not ten; some stay at zero. A `Mandatory, blocking` row with no hook behind it is prose, and a blocking row that contradicts `~/.claude/CLAUDE.md` (or the platform's base instructions) loses to that layer — keep such rows a subset of what it permits and demote the rest to `Optional`.
 

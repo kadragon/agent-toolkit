@@ -70,7 +70,7 @@ If — and only if — a role appears in the AGENTS.md delegation table as
 "do NOT inline" or "do NOT skip" clause — for that role the directive
 description is the primary trigger. A role that is merely *available* for
 delegation gets a fit-description instead; the caller's own bar decides. Only
-if the repo runs the trigger-router *fallback* (Step 7b — installed on a
+if the repo runs the trigger-router *fallback* (harness-init Step 7b — installed on a
 measured miss-rate, not by default), also register the role in
 `.claude/trigger-routes.json` (see `references/trigger-router-template.md`) so
 the hook emits an explicit `Spawn Agent(subagent_type={role}) ...` on match.
@@ -145,8 +145,8 @@ point; a role that merely *has not been written yet* is stale, not exempt.
 ### Common spine vs repo-specific additions
 
 Nothing *regenerates* a role file when this template changes — the paths that revisit one are all
-repo-driven (Extend mode's `Architecture change` row in `SKILL.md`, the feedback signals plus
-Periodic Audit in `references/harness-evolution.md`), never template-driven. What closes that gap
+repo-driven (Extend mode's `Architecture change` row in `harness-init` SKILL.md, the feedback signals plus
+Periodic Audit in `dev:harness-init` → `references/harness-evolution.md`), never template-driven. What closes that gap
 is `scripts/validate-harness.sh` §11, which reports drift on every validate run. It is a reporting
 check, not a rewriter: resyncing a flagged file stays a human decision.
 
@@ -197,7 +197,7 @@ only return values to the orchestrator.
 ## Role Templates (starting points — not created at init)
 
 These are templates, not a mandatory set, and `harness-init` creates **none** of
-them: Step 4b ships an empty roster deliberately, because which roles a repo
+them: harness-init Step 4b ships an empty roster deliberately, because which roles a repo
 actually needs is not knowable before it has any working history. Reach for one
 of these when `dev:harness-curate` surfaces transcript evidence that a
 delegation keeps being done inline, and adapt it to the observed pattern rather
