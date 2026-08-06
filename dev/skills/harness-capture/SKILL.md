@@ -57,6 +57,13 @@ specific named asset — route those to `harness-curate` / `skill-creator`.
    | Approach correction / preference | → auto-memory (see **Writing to auto-memory**), or an instruction-file delta: `CLAUDE.md` (Claude Code) / `AGENTS.md` (Codex) |
    | Workflow misunderstanding | → `skill-creator` improvement to the relevant skill |
 
+   Whatever the route, the write proposal names in one line **the concrete
+   failure this write-back prevents** ("without this: X happens again") — the
+   warm-path form of the loop contract's prediction field (`dev:harness-init` →
+   `references/harness-evolution.md` §3). For auto-memory the line also lands in
+   the memory body (see **Writing to auto-memory** step 4); for `docs/` or
+   instruction-file deltas it stays in the proposal/commit context.
+
 3. If nothing clears the gate, say so in one line and stop — **do not manufacture
    a lesson**. A no-op is the correct outcome for most sessions.
 
@@ -112,12 +119,10 @@ and before writing:
 4. **Show the write before applying.** State which file you'll create or edit and
    quote the fact (a short diff/block), so the user can veto before it lands —
    then write, and add/refresh the one-line `MEMORY.md` pointer in the same pass.
-   Include one line in the memory body naming **the concrete failure this memory
-   prevents** ("without this: X happens again") — the warm-path form of the loop
-   contract's prediction field (`dev:harness-init` →
-   `references/harness-evolution.md` §3): it is what lets a later hygiene pass
-   judge whether the memory earned its keep instead of guessing. Body line only —
-   no frontmatter or schema change.
+   Include the failure-this-prevents line (How-to-run step 2) in the memory
+   body itself: it is what lets a later hygiene pass judge whether the memory
+   earned its keep instead of guessing. Body line only — no frontmatter or
+   schema change.
 5. **Opportunistic hygiene.** While you're in the store, if you notice a stale or
    contradicted neighbour, flag it and run **Memory hygiene** on it rather than
    leaving rot next to the fresh entry.
