@@ -294,9 +294,9 @@ Add to `docs/harness-log.md` (and register the file as a Docs Index row in AGENT
 **Trigger:** For {domain} work, use the `{domain}-orchestrator` skill.
 
 **Change History:**
-| Date | Change | Scope | Reason |
-|------|--------|-------|--------|
-| {YYYY-MM-DD} | Initial setup | all | - |
+| Date | Change | Scope | Reason | Predicted impact | Verified |
+|------|--------|-------|--------|------------------|----------|
+| {YYYY-MM-DD} | Initial setup | all | - | - | - |
 ```
 
 Keep `docs/harness-log.md` as a thin pointer — trigger rule + change history only. Agent list, skill list, directory structure → do NOT put here.

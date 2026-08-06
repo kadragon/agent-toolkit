@@ -143,7 +143,7 @@ Cumulative lifetime history, like `CORRECTION-SIGNALS`. **Deliberately over-coll
 - qa-reject cluster naming the same criterion → fix the producing skill/agent (`skill-creator` / `plugin-dev:agent-development`) with the quoted verdicts.
 - Hook matcher misfiring (wrong denials) → `update-config` to narrow; repeated correct denials of the same path → fix the routing skill/doc, per above.
 
-**Brief to pass:** goal (the failure pattern in one line) · evidence (≥2 quoted verifier verdicts with session/kind) · constraint (the verifier itself is read-only — never edit `validate-harness.sh`, the qa-verifier definition's acceptance bar, or CI workflows to make the signal go away) · exit criterion (the objective check that must pass after the fix, per the validation gate).
+**Brief to pass:** goal (the failure pattern in one line) · evidence (≥2 quoted verifier verdicts with session/kind) · constraint (the verifier itself is read-only — never edit `validate-harness.sh`, the qa-verifier definition's acceptance bar, or CI workflows to make the signal go away) · exit criterion (the objective check that must pass after the fix, per the validation gate in `dev:harness-init` → `references/harness-evolution.md` §2).
 
 ## Thresholds (no silent drops)
 
