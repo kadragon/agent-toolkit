@@ -31,6 +31,7 @@ Records with `.isMeta` or `.isSidechain` true are non-conversational (injected c
 - **Correction** — a short `user` text (< 80 chars) matching a negative pattern (`no`, `wrong`, `actually`, `revert`, `아니`, `다시`, `틀렸`, `잘못` …) immediately after a skill-active assistant turn. Heuristic, not exact — confirm by reading.
 - **Harness friction** — a `user` text matching a recurring-behavior complaint (`you keep`, `every time`, `자꾸`, `매번`, `disable …` …) anywhere in the session. Targets a hook/rule, not the answer, so it carries no `attributionSkill` — collected standalone. Deliberately over-collects (a task complaint shares the phrasing); read before treating as over-protection.
 - **Tool error** — encodings vary; `.toolUseResult.is_error` / `.error`, or an `is_error` `tool_result` block. Best-effort; the correction signal is more reliable for "this asset underperformed".
+- **Async agent verdict** — an async `Agent` spawn's own `tool_result` is launch metadata only ("Async agent launched successfully…"); the verdict arrives later as a `user` record whose `message.content` is a plain **string** carrying `<teammate-message>` / `<task-notification>` / `<agent-message>` markup (verified: 24/24 qa-verifier tool_results in this repo were spawn metadata). `task-notification` may hold only a `summary` — the full verdict lives in the `<output-file>` path it names, which the transcript alone does not contain. Exit-0 gate scripts (`ci-wait.sh`) report failure as `{"passed": false}` JSON with no `is_error` flag.
 
 ## Useful grep patterns
 

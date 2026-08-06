@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-Step 1's scan (`scan_transcripts.py`) emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Signal 7 has no scan block at all — it is read directly off the instruction files in Step 2, and so is Signal 6's second input, the auto-memory store. `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
+Step 1's scan (`scan_transcripts.py`) emits seven blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `VERIFIER-FAILURES`, `PROMPTS`. Signal 7 has no scan block at all — it is read directly off the instruction files in Step 2, and so is Signal 6's second input, the auto-memory store. `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -122,6 +122,29 @@ The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) 
 
 **Scope limit:** `current` / `--project` only — the lens needs a resolvable repo path, which `all` scope doesn't have (same limitation as the Codex fold-in). For cross-repo coverage, run `--project` per repo.
 
+## 8. Verifier-grounded failure
+
+> Concept: Self-Harness weakness mining (Lilian Weng, "Harness Engineering for Self-Improvement", https://lilianweng.github.io/posts/2026-07-04-harness/) — cluster failures grounded in **machine verdicts**, not user pushback. Signals 3/5 fire only when the user notices and complains; Signal 8 fires when a verifier already said no, so the harness improves without the user carrying the detection load.
+
+**Detect:** Lines in `VERIFIER-FAILURES`, three kinds — **Claude transcripts only**: Codex tool failures live in `function_call_output` records the scanner does not parse, so there is no `CODEX-VERIFIER-FAILURES` block and *absence* of Signal 8 on a Codex-heavy project is not evidence of health.
+- `ci-fail` — a Bash tool_use matching a CI/test command pattern (`ci-wait`, `pytest`, `validate-harness`, `--test`, `test_*.py`, …) whose tool_result errored **or returned a `{"passed": false}` JSON verdict** (gate scripts like `ci-wait.sh` report failure at exit 0; timeouts are excluded — CI still running is not a failure). Detail is the failing command plus the matched token (the pattern substring-matches compound commands, so the token shows *why* the line was collected).
+- `qa-reject` — a `qa-verifier` verdict matching rejection phrasing (BLOCKING / FAIL / REJECT / 반려 / 불합격 …), from either delivery path: the Agent tool_result (synchronous spawns), or the plain-string user record an **async** spawn's verdict arrives in (`teammate-message` / `task-notification` markup — the common case; the tool_result there is launch metadata only). Task-notification records sometimes carry only a summary, with the full verdict in an on-disk output file — the summary is what gets mined, so treat a `qa-reject` line as a pointer, not the whole verdict.
+- `hook-deny` — any errored tool_result matching hook-block phrasing (`PreToolUse`, `hook error`, `commit-guard`, `PermissionDenial` …). Outranks `ci-fail` when both match: a hook-blocked CI command is a denial, not a CI failure.
+
+Cumulative lifetime history, like `CORRECTION-SIGNALS`. **Deliberately over-collects** — a CI failure caused by the task under work (a genuinely broken change) matches the same pattern as one caused by a harness defect. Read each sample and establish the **terminal verifier-level cause** and the **causal status of harness behavior** before treating it as a finding: the signal is a failure the harness *let happen repeatedly* (a missing gate, a skill instruction that produces the same CI breakage, a hook matcher misfiring), not any red exit code.
+
+**Not a finding:**
+- A one-off task bug the verifier caught exactly as designed — that is the harness *working*.
+- A hook-deny where the block was correct (e.g. commit-guard stopping a `main` commit). Repeated *correct* denials of the same attempted action are instead evidence the workflow doc/skill routes the model into the blocked path — route that as an underperforming-asset fix (Signal 3), quoting the denials.
+- CI failures already hard-stopped and reworked to green within the same session with no recurrence across sessions.
+
+**Route (same creators as Signals 3/5, evidence differs):**
+- Recurring CI/test failure pattern traceable to a skill's instructions → `skill-creator` modify, brief quotes the failing commands/output cluster.
+- qa-reject cluster naming the same criterion → fix the producing skill/agent (`skill-creator` / `plugin-dev:agent-development`) with the quoted verdicts.
+- Hook matcher misfiring (wrong denials) → `update-config` to narrow; repeated correct denials of the same path → fix the routing skill/doc, per above.
+
+**Brief to pass:** goal (the failure pattern in one line) · evidence (≥2 quoted verifier verdicts with session/kind) · constraint (the verifier itself is read-only — never edit `validate-harness.sh`, the qa-verifier definition's acceptance bar, or CI workflows to make the signal go away) · exit criterion (the objective check that must pass after the fix, per the validation gate).
+
 ## Thresholds (no silent drops)
 
 | Signal | Min occurrences |
@@ -133,6 +156,7 @@ The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) 
 | Domain knowledge candidate (from `PROMPTS`) | 2 (lower than Signal 1 — atomic facts never form large clusters) |
 | Domain knowledge candidate (from the memory store) | 1 — static defect; the frequency bar was cleared when the memory was written, but the verbatim quote is still mandatory |
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
+| Verifier-grounded failure | 2 same-cause (or 1 with systematic cause) — after the causal-status read; raw `VERIFIER-FAILURES` lines are not findings |
 | Instruction-layer overlap | 1 — static defect, but **only** with both sides quoted (`file:line`, or the labeled verbatim base-instruction quote); unquotable → dropped |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.

@@ -15,6 +15,18 @@ These power the triggering-miss / underperforming-asset / demote signals for BOT
 skills and agents — an installed agent with ~0 invocations is a demote candidate just
 like an unused skill.
 
+Transcripts also carry machine verdicts the user never typed:
+  - failing CI/test Bash commands (tool_result error on a ci-wait/pytest/validate run)
+  - qa-verifier rejections (Agent tool_result matching rejection phrasing)
+  - hook denials (PreToolUse/permission blocks echoed as tool_result errors)
+These feed the VERIFIER-FAILURES block — Signal 8 (verifier-grounded failure,
+signal-taxonomy.md §8): the harness improving on machine evidence instead of waiting
+for the user to complain. Best-effort extraction (transcript-format.md: error
+encodings vary) that over-collects by design; the model reads samples and judges
+causal status before routing. Codex-side Signal 8 mining is a DOCUMENTED GAP —
+Codex tool failures live in function_call_output records that are not yet parsed;
+Claude transcripts only for now (deferred, see docs/design/harness-self-improvement-loop.md).
+
 Scope (mirrors the old command):
   (empty)            current cwd project
   all                every project
@@ -59,6 +71,7 @@ import sys
 PROMPT_CAP = 250        # prompts shown per project (most recent kept)
 CORRECTION_CAP = 40     # correction samples per project
 FRICTION_CAP = 30       # harness-friction samples per project
+VERIFIER_CAP = 30       # verifier-failure samples per project
 PROJECT_CAP = 25        # projects shown in `all` scope (busiest kept)
 
 NOISE = {"hi", "ok", "okay", "yes", "no", "go", "go on", "continue", "next",
@@ -99,6 +112,43 @@ FRICTION_RE = re.compile(
     re.IGNORECASE,
 )
 FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
+
+# ---- Signal 8: verifier-grounded failures (machine verdicts, not user pushback) ----
+# A Bash tool_use whose command matches CI_COMMAND_RE and whose tool_result errored is
+# a ci-fail; a qa-verifier Agent tool_result matching QA_REJECT_RE is a qa-reject; any
+# errored tool_result matching HOOK_DENY_RE is a hook-deny. All three deliberately
+# over-collect (a task-caused CI failure matches too) — the model reads samples and
+# judges terminal verifier-level cause before routing (signal-taxonomy.md §8).
+CI_COMMAND_RE = re.compile(
+    r"ci-wait|validate-harness|pytest|unittest|--test\b|npm (run )?test|make test|"
+    r"cargo test|go test|ruff\b|\btest_\w+\.py\b",
+    re.IGNORECASE,
+)
+# ci-wait.sh (and similar gate scripts) report failure as {"passed": false, ...} but
+# exit 0 — so the tool_result carries no is_error flag. A JSON failure verdict counts
+# as a ci-fail unless it is a timeout (CI still running is not a failure).
+CI_FAIL_RESULT_RE = re.compile(r'"passed"\s*:\s*false')
+CI_TIMEOUT_RE = re.compile(r'"reason"\s*:\s*"timeout"')
+QA_REJECT_RE = re.compile(
+    r"\b(blocking|blocked|fail(ed|s)?|reject(ed)?|not?[ -]pass(ed)?|P0|P1)\b"
+    r"|불합격|반려|실패|블로킹",
+    re.IGNORECASE,
+)
+HOOK_DENY_RE = re.compile(
+    r"hook (error|blocked|denied)|PreToolUse|PermissionDenial|commit-guard|blocked —",
+    re.IGNORECASE,
+)
+VERIFIER_DETAIL_MAXLEN = 160
+
+# Async agent verdicts never land in the spawning Agent tool_use's tool_result — that
+# result is launch metadata only. The verdict arrives later as a user record whose
+# message.content is a plain STRING carrying <teammate-message>/<task-notification>/
+# <agent-message> markup (verified against real transcripts: 24/24 qa-verifier
+# tool_results were spawn metadata). So qa-reject is ALSO mined from those strings,
+# attributed by qa-verify phrasing. The task-notification shape sometimes holds only a
+# summary (full verdict in an on-disk output file) — the summary is what gets mined.
+ASYNC_RESULT_RE = re.compile(r"<(teammate-message|task-notification|agent-message)\b")
+QA_ATTRIB_RE = re.compile(r"qa[-_ ]?verif", re.IGNORECASE)
 
 
 def encode_project(path):
@@ -427,6 +477,17 @@ def text_of(message):
     return ""
 
 
+def _tool_result_text(block):
+    """Plain text of a tool_result block's content (a str, or a [{type: text}] list)."""
+    c = block.get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join((b.get("text") or "") for b in c
+                        if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
 def scan_dir(tdir, label):
     """Scan one transcript dir. Return a summary dict, or None if it has no .jsonl.
 
@@ -446,6 +507,7 @@ def scan_dir(tdir, label):
     corrections = []                                # (skill_active, text)
     agent_corrections = []                          # (agent_active, text)
     frictions = []                                  # (text) — harness over-protection complaints
+    verifier_failures = []                          # (kind, detail) — Signal 8 machine verdicts
     skill_sessions = collections.defaultdict(set)   # skill -> {session files}
     agent_sessions = collections.defaultdict(set)   # subagent_type -> {session files}
     sessions = 0
@@ -454,6 +516,7 @@ def scan_dir(tdir, label):
         last_skill = None                # skill active on the most recent assistant turn
         last_agents = set()              # subagent_types invoked since the last user turn
         frictions_seen = set()           # deduplicate friction phrases within a session
+        pending_tools = {}               # tool_use id -> (kind, meta) awaiting its tool_result
         try:
             fh = open(fp, encoding="utf-8")
         except OSError:
@@ -481,16 +544,79 @@ def scan_dir(tdir, label):
                     content = msg.get("content") if isinstance(msg, dict) else None
                     if isinstance(content, list):
                         for b in content:
-                            if (isinstance(b, dict) and b.get("type") == "tool_use"
-                                    and b.get("name") in ("Agent", "Task")):
+                            if not (isinstance(b, dict) and b.get("type") == "tool_use"):
+                                continue
+                            name = b.get("name")
+                            if name in ("Agent", "Task"):
                                 st = (b.get("input") or {}).get("subagent_type")
                                 if st:
                                     agent_sessions[st].add(fp)
                                     last_agents.add(st)
+                                    # qa-verifier verdicts come back as a main-chain
+                                    # tool_result — remember the id to classify it.
+                                    if st == "qa-verifier" and b.get("id"):
+                                        pending_tools[b["id"]] = ("qa-reject", st)
+                            elif name == "Bash":
+                                cmd = (b.get("input") or {}).get("command") or ""
+                                m = CI_COMMAND_RE.search(cmd)
+                                if b.get("id") and m:
+                                    # append the matched token: the pattern substring-
+                                    # matches compound commands, so the first 160 chars
+                                    # alone often don't show WHY the line was collected.
+                                    pending_tools[b["id"]] = (
+                                        "ci-fail",
+                                        cmd.replace("\n", " ")[:VERIFIER_DETAIL_MAXLEN]
+                                        + f"  [matched: {m.group(0)}]")
                     continue
 
                 if typ == "user":
-                    txt = text_of(r.get("message")).replace("\n", " ").strip()
+                    msg = r.get("message")
+                    content = msg.get("content") if isinstance(msg, dict) else None
+                    # transcript variants store failure status at record level
+                    # (toolUseResult.is_error / .error) instead of on the block —
+                    # fall back to it so those events aren't silently dropped.
+                    tur = r.get("toolUseResult")
+                    rec_err = isinstance(tur, dict) and bool(
+                        tur.get("is_error") or tur.get("error"))
+                    # async agent verdicts arrive as plain-string user records
+                    # (teammate-message / task-notification), not tool_results —
+                    # mine qa-reject from them here (see ASYNC_RESULT_RE note).
+                    if (isinstance(content, str) and ASYNC_RESULT_RE.search(content)
+                            and QA_ATTRIB_RE.search(content)):
+                        flat = content.replace("\n", " ")
+                        if QA_REJECT_RE.search(flat):
+                            sm = re.search(r'summary="([^"]*)"', flat)
+                            detail = (sm.group(1) if sm else flat)
+                            verifier_failures.append(
+                                ("qa-reject", detail[:VERIFIER_DETAIL_MAXLEN]))
+                    if isinstance(content, list):
+                        # tool_result blocks echoed as the user role — never prompt
+                        # text (text_of returns ""), but they carry the machine
+                        # verdicts VERIFIER-FAILURES mines (Signal 8).
+                        for b in content:
+                            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                                continue
+                            rtxt = _tool_result_text(b).replace("\n", " ").strip()
+                            is_err = bool(b.get("is_error")) or rec_err
+                            kind_meta = pending_tools.pop(b.get("tool_use_id"), None)
+                            # hook-deny outranks the pending kind: a hook-blocked CI
+                            # command is a denial, not a CI failure.
+                            if is_err and HOOK_DENY_RE.search(rtxt):
+                                verifier_failures.append(
+                                    ("hook-deny", rtxt[:VERIFIER_DETAIL_MAXLEN]))
+                            elif kind_meta is not None:
+                                kind, meta = kind_meta
+                                # a gate script's {"passed": false} JSON verdict is a
+                                # failure even at exit 0 — unless it's a timeout.
+                                if kind == "ci-fail" and (
+                                        is_err
+                                        or (CI_FAIL_RESULT_RE.search(rtxt)
+                                            and not CI_TIMEOUT_RE.search(rtxt))):
+                                    verifier_failures.append(("ci-fail", meta))
+                                elif kind == "qa-reject" and QA_REJECT_RE.search(rtxt):
+                                    verifier_failures.append(
+                                        ("qa-reject", rtxt[:VERIFIER_DETAIL_MAXLEN]))
+                    txt = text_of(msg).replace("\n", " ").strip()
                     if not txt:
                         continue
                     if len(txt) < CORRECTION_MAXLEN and CORRECTION_RE.search(txt):
@@ -522,6 +648,7 @@ def scan_dir(tdir, label):
         "corrections": corrections,
         "agent_corrections": agent_corrections,
         "frictions": frictions,
+        "verifier_failures": verifier_failures,
     }
 
 
@@ -595,6 +722,17 @@ def emit(summary):
               + (f"  [dropped {fdropped}]" if fdropped else ""))
         for txt in show:
             print(f"  {txt}")
+
+    vf = summary.get("verifier_failures") or []
+    if vf:
+        show = vf[:VERIFIER_CAP]
+        vdropped = len(vf) - len(show)
+        print("\nVERIFIER-FAILURES (machine verdicts — ci-fail / qa-reject / hook-deny;"
+              " ≥2 same-cause cluster = Signal 8 candidate. Over-collects: a task-caused"
+              " CI failure matches too — read and judge causal status before routing):"
+              + (f"  [dropped {vdropped}]" if vdropped else ""))
+        for kind, txt in show:
+            print(f"  [{kind}] {txt}")
 
     print("\nPROMPTS (cluster these by intent):" + (" [new since last run]" if last_run_ms else ""))
     if last_run_ms and not shown:
@@ -721,12 +859,13 @@ def main():
                 if s is None:
                     s = {"label": label, "sessions": 0, "prompts": [], "skill_sessions": {},
                          "agent_sessions": {}, "corrections": [], "agent_corrections": [],
-                         "frictions": [], "last_run_ms": 0}
+                         "frictions": [], "verifier_failures": [], "last_run_ms": 0}
                 s["codex"] = codex_summary
         return s
 
     def has_data(s):
-        if s["prompts"] or s["frictions"] or s["corrections"]:
+        if (s["prompts"] or s["frictions"] or s["corrections"]
+                or s.get("verifier_failures")):
             return True
         codex = s.get("codex")
         return bool(codex and (codex["prompts"] or codex["frictions"]
