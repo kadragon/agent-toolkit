@@ -67,7 +67,9 @@ pairs each edit with a prediction a later run can check:
   new columns — there is no edit to falsify at setup time.
 - The re-audit consumer of this column is `dev:harness-curate` Step 2.5, which
   loads `pending`/`unverified` rows, stamps predictions that held, and surfaces
-  `failed` ones as prune/rework candidates. Changes without
+  `failed` ones as prune/rework candidates until resolved. It runs on
+  `current`/`--project` scope only — `all` scope has no resolvable repo path,
+  so pending rows are not re-audited there. Changes without
   a history entry are invisible to future sessions — this record IS the
   harness memory, and an unrecorded edit can never be falsified.
 
