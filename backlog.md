@@ -31,8 +31,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-- [ ] [HARNESS] Add a "failure this prevents" line to `harness-capture` write-back proposals (memory body, warm-path prediction field) — minimal prose delta, no auto-memory schema change
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

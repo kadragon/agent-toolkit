@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.1.3
+version: 2.1.4
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -112,6 +112,12 @@ and before writing:
 4. **Show the write before applying.** State which file you'll create or edit and
    quote the fact (a short diff/block), so the user can veto before it lands —
    then write, and add/refresh the one-line `MEMORY.md` pointer in the same pass.
+   Include one line in the memory body naming **the concrete failure this memory
+   prevents** ("without this: X happens again") — the warm-path form of the loop
+   contract's prediction field (`dev:harness-init` →
+   `references/harness-evolution.md` §3): it is what lets a later hygiene pass
+   judge whether the memory earned its keep instead of guessing. Body line only —
+   no frontmatter or schema change.
 5. **Opportunistic hygiene.** While you're in the store, if you notice a stale or
    contradicted neighbour, flag it and run **Memory hygiene** on it rather than
    leaving rot next to the fresh entry.
