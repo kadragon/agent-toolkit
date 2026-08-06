@@ -8,7 +8,7 @@ description: >-
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
   Routes to the owning creator — never generates itself. Repo structure
   validation → harness-init.
-version: 1.6.4
+version: 1.6.5
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -25,7 +25,7 @@ Replaces the old `/dev:task-audit` command, which mined only `history.jsonl` pro
 - **all** — every project. Use for "what should I build across all my work" and to detect cross-project recurrence (drives the scope decision in Step 4).
 - **--project `<abs path>`** — one named project.
 
-**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 7 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
+**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 7 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 2.5, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
 
 ## Step 1 — Scan (bounded, deterministic)
 
@@ -149,6 +149,18 @@ Four supplementary file-lenses complement the transcript firing data (a skill ca
 
 Feed all four into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7; memory promotion → Signal 6. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
+## Step 2.5 — Prediction re-audit (current / --project scope only)
+
+Past harness edits carry falsifiable predictions (`dev:harness-init` → `references/harness-evolution.md` §3 — the loop contract's change record; the file ships with harness-init, not this skill). This step is what falsifies them, using the scan output Step 1 just produced.
+
+1. Resolve the target repo root — `REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)` with `TARGET_REPO` = the `--project` path, or cwd on `current` scope (the same two-line resolution Step 2's overlap lens and Step 7 use; the log lives at the repo root, so a run started in a subdirectory must not read `<cwd>/docs/`) — and read `<REPO_ROOT>/docs/harness-log.md`. **Absent file = no pending rows — skip this step silently, it is not an error** (a repo with zero loop-originated edits is the normal case). `all` scope skips too: no resolvable repo path (same limitation as Signal 7 and the Codex fold-in).
+2. Load change-history rows whose `Verified` is `pending`, `unverified` (first — they landed without a check), or a bare `failed` with no resolution note — a failure the operator has not yet acted on must keep re-surfacing, not vanish after one declined report.
+3. Judge each `Predicted impact` **only against evidence datable after the row's `Date`** — new-since-last-run `PROMPTS`, `VERIFIER-FAILURES` samples from sessions after the edit, or a direct read/command run now. Step 1's cumulative blocks (`SKILLS-ACTIVE`, `CORRECTION-SIGNALS`, … — lifetime aggregates by design) cannot be dated and so can neither hold nor fail a row on their own; when the prediction's window has not elapsed or no post-edit evidence is in view, leave the row untouched.
+4. **Held** → stamp the row in place: replace `pending`/`unverified` with the date + one-line evidence (this is loop bookkeeping, the log is its state file — no separate confirmation needed for the stamp itself).
+5. **Failed** (the predicted change observably did not happen, or the mistake recurred — post-edit evidence only, per 3) → write `failed` and surface the edit as a **prune/rework candidate** row in the Step 6 report. Any resulting delete goes through the Step 7 adversarial check like every other demote. When the operator resolves it, append the outcome to the cell (`failed — reworked YYYY-MM-DD` / `failed — accepted YYYY-MM-DD`) so step 2 stops reloading it; a bare `failed` means still open.
+
+**Skip on an instruction-overlap-only run** — this step consumes Step 1's scan, which that path never runs (see "When to use which scope").
+
 ## Step 3 — Classify into eight signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
@@ -232,7 +244,9 @@ Output one ranked table, candidates only:
 
 Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
 
-Instruction-layer overlap rows and memory-promotion rows are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from each `overlap_state.py --check` run under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
+Step 2.5's outcome rides in the same report: failed-prediction edits appear as prune/rework candidate rows (route → Step 7, adversarial check before delete), and a one-line `Re-audit:` footer states how many predictions were stamped / left pending / failed — so the log's state is visible even when nothing failed.
+
+Instruction-layer overlap rows, memory-promotion rows, and failed-prediction rows (Step 2.5) are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from each `overlap_state.py --check` run under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
 
 Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
@@ -310,7 +324,7 @@ This snippet only stamps the CURRENT project's Codex state (matching `os.getcwd(
 
 Ask whether to act on the **top** candidate now. Do not auto-create. On yes, invoke the matching skill with a brief (goal · constraint · exit criterion).
 
-**Validation gate — the exit criterion is an objective check, not plausibility.** Every routed brief names its acceptance check up front, from the loop contract's per-route table: `dev:harness-init` → `references/harness-evolution.md` §2 — read the table there, do not restate it. The check passing is what makes the edit land; **failing it means revert, not retry-until-green**. When no verifier exists for an edit, it may still land on user confirmation, but its change record is written `unverified` and it is first in line at the next re-audit (manual at each curate run until the D4 re-audit step lands — see the contract §3's note). Record every landed edit per the contract's §3 schema — `Predicted impact` + `Verified` columns in **the edited repo's** `docs/harness-log.md` (the `--project` path, or cwd on `current` scope, same resolution as `TARGET_REPO` above; no resolvable repo path → surface the record for the user instead of writing).
+**Validation gate — the exit criterion is an objective check, not plausibility.** Every routed brief names its acceptance check up front, from the loop contract's per-route table: `dev:harness-init` → `references/harness-evolution.md` §2 — read the table there, do not restate it. The check passing is what makes the edit land; **failing it means revert, not retry-until-green**. When no verifier exists for an edit, it may still land on user confirmation, but its change record is written `unverified` and it is first in line at the next re-audit (Step 2.5). Record every landed edit per the contract's §3 schema — `Predicted impact` + `Verified` columns in **the edited repo's** `docs/harness-log.md` (the `--project` path, or cwd on `current` scope, same resolution as `TARGET_REPO` above; no resolvable repo path → surface the record for the user instead of writing).
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
 - New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook, or loosen an over-firing hook/permission gate (harness-friction) → `hookify` or `update-config`. For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.

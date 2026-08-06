@@ -27,8 +27,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D2.
 
 Source: `docs/design/harness-self-improvement-loop.md` D4.
 
-- [ ] [HARNESS] Add a curate re-audit step (current/--project scope) that reads the target repo's `docs/harness-log.md`, checks `Verified: pending` rows against this run's scan output, stamps held predictions with date+evidence, and surfaces failed ones as prune/rework candidates in the Step 6 report (adversarial check before delete); an absent `docs/harness-log.md` = no pending rows, not an error (PR #199 contest note)
-
 ## Self-improvement loop — capture prediction line (D6)
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.

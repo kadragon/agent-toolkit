@@ -65,11 +65,11 @@ pairs each edit with a prediction a later run can check:
   instead of `pending` (see §2) and gets checked the same way. An
   `Initial setup` row (from the orchestrator template) may carry `-` in both
   new columns — there is no edit to falsify at setup time.
-- The re-audit consumer of this column is `dev:harness-curate`, which loads
-  `pending`/`unverified` rows, stamps predictions that held, and surfaces
-  `failed` ones as prune/rework candidates *(shipping as D4 of
-  `docs/design/harness-self-improvement-loop.md` — until that step lands, the
-  column is maintained by hand at each `harness-curate` run)*. Changes without
+- The re-audit consumer of this column is `dev:harness-curate` Step 2.5, which
+  loads `pending`/`unverified` rows, stamps predictions that held, and surfaces
+  `failed` ones as prune/rework candidates until resolved. It runs on
+  `current`/`--project` scope only — `all` scope has no resolvable repo path,
+  so pending rows are not re-audited there. Changes without
   a history entry are invisible to future sessions — this record IS the
   harness memory, and an unrecorded edit can never be falsified.
 
