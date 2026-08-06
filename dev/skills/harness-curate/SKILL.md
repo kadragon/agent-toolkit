@@ -8,7 +8,7 @@ description: >-
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
   Routes to the owning creator — never generates itself. Repo structure
   validation → harness-init.
-version: 1.6.3
+version: 1.6.4
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -308,7 +308,9 @@ This snippet only stamps the CURRENT project's Codex state (matching `os.getcwd(
 
 ## Step 7 — Route to the creator (on confirmation)
 
-Ask whether to act on the **top** candidate now. Do not auto-create. On yes, invoke the matching skill with a brief (goal · constraint · exit criterion):
+Ask whether to act on the **top** candidate now. Do not auto-create. On yes, invoke the matching skill with a brief (goal · constraint · exit criterion).
+
+**Validation gate — the exit criterion is an objective check, not plausibility.** Every routed brief names its acceptance check up front, per the loop contract's per-route table (`dev:harness-init` → `references/harness-evolution.md` §2 — skill→`skill-creator` eval, skill description→optimizer train/test, hook→trigger simulation, agent→failing-case re-run, docs/memory→record-only; read the table there, do not restate it). The check passing is what makes the edit land; **failing it means revert, not retry-until-green**. When no verifier exists for an edit, it may still land on user confirmation, but its change record is written `unverified` and it is first in line at the next re-audit. Record every landed edit per the contract's §3 schema (`docs/harness-log.md`, `Predicted impact` + `Verified` columns).
 - New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
 - New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
 - New deterministic hook, or loosen an over-firing hook/permission gate (harness-friction) → `hookify` or `update-config`. For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.
