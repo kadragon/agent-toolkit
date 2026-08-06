@@ -8,12 +8,12 @@ description: >-
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
   Routes to the owning creator — never generates itself. Repo structure
   validation → harness-init.
-version: 1.6.1
+version: 1.6.2
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" lives in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into seven signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" lives in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into eight signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
 
 Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
 
@@ -41,7 +41,7 @@ python3 "$SCAN" --project "/abs/path"        # one named project — quote paths
 python3 "$SCAN" --full                       # force full historical PROMPTS window (see below)
 ```
 
-Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `AGENTS-USED` (subagent_type → sessions-invoked), `CORRECTION-SIGNALS` and `AGENT-CORRECTION-SIGNALS` (skill/agent active then user pushed back), `HARNESS-FRICTION` (user complaining about a recurring imposed behavior — a hook/rule over-firing), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
+Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `AGENTS-USED` (subagent_type → sessions-invoked), `CORRECTION-SIGNALS` and `AGENT-CORRECTION-SIGNALS` (skill/agent active then user pushed back), `HARNESS-FRICTION` (user complaining about a recurring imposed behavior — a hook/rule over-firing), `VERIFIER-FAILURES` (machine verdicts — CI/test failures, qa-verifier rejections, hook denials; Signal 8), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
 
 The scanner also folds in **Codex CLI sessions** (`~/.codex/sessions/`) for the same project, appended as a `CODEX-SOURCED` block with `CODEX-`-prefixed sections (`CODEX-SKILLS-ACTIVE`, `CODEX-AGENTS-USED`, `CODEX-CORRECTION-SIGNALS`, `CODEX-AGENT-CORRECTION-SIGNALS`, `CODEX-HARNESS-FRICTION`, `CODEX-PROMPTS`) — kept separate rather than merged because the two platforms' signals aren't directly comparable (see `references/transcript-format.md` for why). Cluster `PROMPTS` and `CODEX-PROMPTS` together by intent; treat `SKILLS-ACTIVE`/`AGENTS-USED` and their `CODEX-` counterparts as separate demote-candidate evidence per platform. **Codex matching only happens for `current`/`--project` scope** — `all` scope can't reverse Claude's encoded project-directory names back into a real path to match Codex's `session_meta.cwd` against, so it skips Codex entirely (this is documented, not a bug — for cross-project Codex coverage, run `--project` per path).
 
@@ -149,7 +149,7 @@ Four supplementary file-lenses complement the transcript firing data (a skill ca
 
 Feed all four into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7; memory promotion → Signal 6. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
 
-## Step 3 — Classify into seven signals
+## Step 3 — Classify into eight signals
 
 Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
 
@@ -161,13 +161,14 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 | **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing) | loosen/narrow → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
 | **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
 | **Domain knowledge candidate** | two inputs: recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow), **and** Step 2's memory-store lens (a `project`/`reference` memory holding a repo-scoped fact) | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact. Memory-sourced: also route the memory file's deletion to `harness-capture` (Step 7) |
+| **Verifier-grounded failure** | `VERIFIER-FAILURES` — ci-fail / qa-reject / hook-deny machine verdicts; ≥2 same-cause after the causal-status read (`references/signal-taxonomy.md` §8; over-collects — read before routing) | same creators as Signals 3/5, evidence = quoted verifier verdicts; verifiers themselves are read-only |
 | **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md` | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
 
 **Agent roles are created here, not at init.** `dev:harness-init` deliberately ships an empty `.claude/agents/` roster and no orchestrator skill (its Steps 4b/4c) — before a repo has working history there is no evidence about which delegations recur, so any roster is a guess. That makes this skill the only path by which a repo acquires its first role: a **triggering miss** where work was repeatedly done inline that a missing agent should have owned, or a **new-asset candidate** whose recurring shape is a delegation. Route those to `plugin-dev:agent-creator` (new) or `plugin-dev:agent-development` (fix), and remember the corollary — an empty roster in a young repo is the designed state, never a finding.
 
 Two follow-ups when a role is actually created: the repo's `docs/delegation.md` routing table gains its row **only then** (init leaves it header-only), and an orchestrator becomes worth proposing once ≥1 role exists *and* the same multi-step domain workflow recurs in the transcripts — that one routes to `skill-creator`. Do not pin a model on a role you create; spawns inherit the session model and the caller overrides per spawn.
 
-Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, and harness-friction need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. A memory-sourced Signal 6 candidate also needs 1: a memory is by construction a fact someone already judged durable, so the frequency bar was cleared when it was written — the quoting requirement still holds. Before any **delete**, run the adversarial check (Step 7).
+Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, harness-friction, and verifier-grounded failure need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. A memory-sourced Signal 6 candidate also needs 1: a memory is by construction a fact someone already judged durable, so the frequency bar was cleared when it was written — the quoting requirement still holds. Before any **delete**, run the adversarial check (Step 7).
 
 ## Step 4 — Decide asset scope (per candidate)
 

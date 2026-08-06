@@ -249,6 +249,92 @@ def test_scan_codex_files_skips_malformed_lines_without_raising():
             )
 
 
+def _assistant_tool_use(blocks):
+    return {"type": "assistant", "timestamp": "2026-01-01T00:00:00.000Z",
+            "message": {"content": blocks}}
+
+
+def _user_tool_result(tool_use_id, content, is_error=False):
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    if is_error:
+        block["is_error"] = True
+    return {"type": "user", "timestamp": "2026-01-01T00:00:01.000Z",
+            "message": {"content": [block]}}
+
+
+def test_scan_dir_collects_verifier_failures():
+    """VERIFIER-FAILURES (Signal 8): a failing CI command, a qa-verifier rejection,
+    and a hook denial are each collected with the right kind label."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t1",
+                                  "input": {"command": "bash scripts/ci-wait.sh 123"}}]),
+            _user_tool_result("t1", "run 3 concluded: failure", is_error=True),
+            _assistant_tool_use([{"type": "tool_use", "name": "Agent", "id": "t2",
+                                  "input": {"subagent_type": "qa-verifier",
+                                            "prompt": "verify sprint contract"}}]),
+            _user_tool_result("t2", [{"type": "text",
+                                      "text": "VERDICT: BLOCKING — criterion 2 not met"}]),
+            _user_tool_result("t9", "PreToolUse:Bash hook error: commit-guard: blocked —"
+                                    " branch 'main' is protected", is_error=True),
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        kinds = [k for k, _ in summary["verifier_failures"]]
+        check(
+            "scan_dir collects ci-fail, qa-reject, hook-deny",
+            kinds == ["ci-fail", "qa-reject", "hook-deny"],
+            f"got {summary['verifier_failures']!r}",
+        )
+        check(
+            "ci-fail detail carries the failing command",
+            "ci-wait.sh" in dict(zip(kinds, [d for _, d in summary["verifier_failures"]]))
+            .get("ci-fail", ""),
+            f"got {summary['verifier_failures']!r}",
+        )
+
+
+def test_scan_dir_ignores_non_verifier_noise():
+    """Negative cases: a non-CI Bash failure, a passing CI command, and a qa-verifier
+    result with no rejection phrasing must NOT enter VERIFIER-FAILURES."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t1",
+                                  "input": {"command": "git status --porcelain"}}]),
+            _user_tool_result("t1", "fatal: not a git repository", is_error=True),
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t2",
+                                  "input": {"command": "python3 scripts/x.py --test"}}]),
+            _user_tool_result("t2", "Results: 12/12 passed"),
+            _assistant_tool_use([{"type": "tool_use", "name": "Agent", "id": "t3",
+                                  "input": {"subagent_type": "qa-verifier",
+                                            "prompt": "verify"}}]),
+            _user_tool_result("t3", [{"type": "text",
+                                      "text": "All acceptance criteria met. Approve."}]),
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        check(
+            "scan_dir keeps noise out of verifier_failures",
+            summary["verifier_failures"] == [],
+            f"got {summary['verifier_failures']!r}",
+        )
+
+
+def test_scan_dir_hook_deny_outranks_pending_ci_kind():
+    """A hook-blocked CI command is a denial, not a CI failure — hook-deny wins."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t1",
+                                  "input": {"command": "bash scripts/ci-wait.sh 9"}}]),
+            _user_tool_result("t1", "PreToolUse:Bash hook error: blocked", is_error=True),
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        kinds = [k for k, _ in summary["verifier_failures"]]
+        check(
+            "hook-deny outranks the pending ci-fail classification",
+            kinds == ["hook-deny"],
+            f"got {summary['verifier_failures']!r}",
+        )
+
+
 SUITES = [
     (
         "resolve_project_dir: exact match beats higher-file-count fuzzy match",
@@ -297,6 +383,18 @@ SUITES = [
     (
         "scan_codex_files: never raises on a malformed line",
         test_scan_codex_files_skips_malformed_lines_without_raising,
+    ),
+    (
+        "scan_dir: collects verifier failures (Signal 8)",
+        test_scan_dir_collects_verifier_failures,
+    ),
+    (
+        "scan_dir: keeps non-verifier noise out of VERIFIER-FAILURES",
+        test_scan_dir_ignores_non_verifier_noise,
+    ),
+    (
+        "scan_dir: hook-deny outranks pending ci-fail",
+        test_scan_dir_hook_deny_outranks_pending_ci_kind,
     ),
 ]
 

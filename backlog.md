@@ -15,8 +15,6 @@ analysis in `docs/design/tasks-md-sprint-block-boundary.md`.
 
 Source: `docs/design/harness-self-improvement-loop.md` D1.
 
-- [ ] [HARNESS] Extend `harness-curate/scripts/scan_transcripts.py` with a capped `VERIFIER-FAILURES` block (CI/test Bash failures, qa-verifier rejection tool_results, hook denials; dropped counts printed) and document Signal 8 detection + routing brief in `references/signal-taxonomy.md` (threshold ≥2, or 1 with systematic cause); fixture-backed tests in `test_scan_transcripts.py`
-
 ## Self-improvement loop — loop contract + prediction schema (D5+D3)
 
 Source: `docs/design/harness-self-improvement-loop.md` D3, D5.
