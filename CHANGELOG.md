@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] validation gate wired into harness-curate Step 7 routing (dev v4.3.2) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] harness-evolution.md rewritten as the self-improvement loop contract (dev v4.3.1) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] Signal 8 verifier-grounded failure mining in harness-curate (dev v4.3.0) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] harness-init indexes only the docs it creates (dev v4.2.3) (2026-08-05)

@@ -23,8 +23,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D3, D5.
 
 Source: `docs/design/harness-self-improvement-loop.md` D2.
 
-- [ ] [HARNESS] Make the per-route objective acceptance check the exit criterion of `harness-curate` Step 7 briefs (skill→skill-creator eval, description→optimizer train/test, hook→trigger simulation, agent→failing-case re-run, docs/memory→record-only); no verifier available → land on confirmation but record `unverified`; failing check → revert
-
 ## Self-improvement loop — prediction re-audit step (D4)
 
 Source: `docs/design/harness-self-improvement-loop.md` D4.
