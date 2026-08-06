@@ -426,7 +426,7 @@ After a harness is in use, it should evolve based on feedback. Trigger evolution
 - Agent bypasses orchestrator (description trigger missing)
 - Repeated agent failure pattern (definition defect)
 
-Signal detection and fix routing live in `dev:harness-curate` → `references/signal-taxonomy.md` (the single detection authority). `references/harness-evolution.md` is the **loop contract** the resulting edit must follow — editable-surface manifest, validation gate (acceptance = objective check), and the change record with a falsifiable `Predicted impact` + `Verified` pair. Record every change in the orchestrator's pointer block in `docs/harness-log.md` (see Step 4c) — never CLAUDE.md.
+Signal detection and fix routing live in `dev:harness-curate` → `references/signal-taxonomy.md` (the single detection authority). `references/harness-evolution.md` is the **loop contract** the resulting edit must follow — editable-surface manifest, validation gate (acceptance = objective check), and the change record with a falsifiable `Predicted impact` + `Verified` pair. Record every change in `docs/harness-log.md` (created on first edit if absent — no orchestrator required; an orchestrator's pointer block from Step 4c lands in the same file when one exists) — never CLAUDE.md.
 
 ## Ongoing Maintenance
 

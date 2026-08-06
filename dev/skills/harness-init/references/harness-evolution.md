@@ -30,7 +30,8 @@ revert, not retry-until-green.
 | Edit route | Acceptance check |
 |------------|------------------|
 | Skill create / modify | `skill-creator` eval pass (it owns evals — do not build a parallel harness) |
-| Skill/agent triggering description | `skill-creator` description-optimizer train/test pass |
+| Skill triggering description | `skill-creator` description-optimizer train/test pass |
+| Agent triggering description | `plugin-dev:agent-development` modify + re-run of the missed trigger case (the skill optimizer does not own agent definitions) |
 | Hook / settings change | Trigger simulation: pipe a fixture event through the hook (`echo '{...}' \| bash hook.sh`) and assert the expected verdict |
 | Agent create / modify | Re-run of the failing case (or a dry-run of the changed flow) succeeds |
 | Docs / memory write | Record-only — no runtime behavior to test; the prediction field (below) is still required |
@@ -43,7 +44,11 @@ Disclose the limit; never present an unverified edit as a verified one.
 
 Record every harness change in the change-history table in
 `docs/harness-log.md` (never CLAUDE.md — it stays a pure `@AGENTS.md`
-pointer). The schema pairs each edit with a prediction a later run can check:
+pointer). **The record does not depend on an orchestrator existing**: if the
+repo has no `docs/harness-log.md` yet, the first loop-originated edit creates
+it — the table below plus one Docs Index row in AGENTS.md — regardless of
+whether an orchestrator pointer block was ever registered there. The schema
+pairs each edit with a prediction a later run can check:
 
 ```markdown
 **Change History:**
@@ -57,17 +62,21 @@ pointer). The schema pairs each edit with a prediction a later run can check:
   behavior changes, over what window. "Improves quality" is not a prediction.
 - **Verified** — `pending` until checked; then a date + one-line evidence, or
   `failed`. An edit that landed without a verifier is written `unverified`
-  instead of `pending` (see §2) and gets checked the same way.
-- `dev:harness-curate`'s re-audit reads `pending`/`unverified` rows on each
-  run, stamps predictions that held, and surfaces `failed` ones as
-  prune/rework candidates. Changes without a history entry are invisible to
-  future sessions — this record IS the harness memory, and an unrecorded edit
-  can never be falsified.
+  instead of `pending` (see §2) and gets checked the same way. An
+  `Initial setup` row (from the orchestrator template) may carry `-` in both
+  new columns — there is no edit to falsify at setup time.
+- The re-audit consumer of this column is `dev:harness-curate`, which loads
+  `pending`/`unverified` rows, stamps predictions that held, and surfaces
+  `failed` ones as prune/rework candidates *(shipping as D4 of
+  `docs/design/harness-self-improvement-loop.md` — until that step lands, the
+  column is maintained by hand at each `harness-curate` run)*. Changes without
+  a history entry are invisible to future sessions — this record IS the
+  harness memory, and an unrecorded edit can never be falsified.
 
 ## 4. Protocol (per confirmed signal)
 
 1. **Identify** — the confirmed signal, from `signal-taxonomy.md` (quote its
-   evidence; verifier-grounded evidence per §8 when available).
+   evidence; verifier-grounded evidence per signal-taxonomy §8 when available).
 2. **Diagnose** — read the failing definition to find the gap.
 3. **Propose** — minimal change, within the §1 manifest, through the owning
    creator; the brief names the §2 acceptance check and the §3 prediction.
