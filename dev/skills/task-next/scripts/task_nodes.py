@@ -29,8 +29,11 @@ Usage:
                   this run left with an entirely blank region. Refuses (exit 1) on a line that
                   matches nothing, rather than deleting an approximation of it.
 
-  prune-tasks     Same deletion pass for finding lines, plus `--block TITLE` to delete a whole
-                  h1 sprint block. Deletes the file when nothing but blank lines is left.
+  prune-tasks     Same deletion pass, plus `--block TITLE` to delete a whole h1 sprint block.
+                  Deletes the file when nothing but blank lines is left — safe only because
+                  tasks.md is the Sprint Contract and nothing else, so it refuses (exit 1) on a
+                  tasks.md still holding a `## Review Backlog` / `## Security Fixes` section and
+                  names the migration to backlog.md.
 
 Deliberate non-goal — the CHANGELOG character cap is NOT enforced here. Its single enforcement
 point is `MAX_LEN` in the repo's `scripts/ci/check_changelog_entries.py`; a second hardcoded copy
@@ -48,6 +51,7 @@ Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures are in-memory or i
 from __future__ import annotations
 
 import datetime
+import io
 import os
 import re
 import subprocess
@@ -61,6 +65,7 @@ from backlog_candidates import (  # noqa: E402
     _headings,
     _strip_fenced_blocks,
     _strip_html_comments,
+    tasks_persistent_sections,
     tokenize,
 )
 
@@ -367,8 +372,28 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     return (out if out.strip() else ""), []
 
 
+def persistent_sections(text: str) -> list[str]:
+    """Titles of findings sections that must not be in `tasks.md`.
+
+    `tasks.md` is the Sprint Contract and is deleted whole at sprint close, so anything meant to
+    outlive the sprint belongs in `backlog.md`. An h1 block runs to the next h1 or EOF, which means
+    a findings section placed after the sprint heading is deleted with it — and a file left with
+    nothing is unlinked outright. Rather than guess a safe boundary inside a file that should not
+    need one, `prune-tasks` refuses on this shape and names the migration.
+
+    Thin wrapper over `backlog_candidates.tasks_persistent_sections` on purpose: that function is
+    the single definition, so the pruner's refusal and the candidate scanner's warning cannot
+    disagree about the same file. Do not re-derive the rule here.
+    """
+    return [s["title"] for s in tasks_persistent_sections(tokenize(text))]
+
+
 def prune_h1_block(text: str, title: str) -> tuple[str, list[str]]:
-    """Delete the whole `# <title>` block — heading, `status:` line, and body — up to the next h1."""
+    """Delete the whole `# <title>` block — heading, `status:` line, and body — up to the next h1.
+
+    Correct only because `tasks.md` holds the Sprint Contract and nothing else; `cmd_prune` blocks
+    the mixed-content case up front via `persistent_sections`.
+    """
     lines, eols = _split(text)
     default_eol = _dominant_eol(eols)
     tok = tokenize(text)
@@ -464,6 +489,17 @@ def cmd_prune(argv: list[str], *, delete_if_empty: bool) -> int:
         sys.stderr.write(f"Error: not a file: {path}\n")
         return 1
     text = path.read_text(encoding="utf-8")
+    if delete_if_empty:
+        stale = persistent_sections(text)
+        if stale:
+            names = ", ".join(f"`## {s}`" for s in stale)
+            sys.stderr.write(
+                f"Error: {path} holds persistent section(s) {names}, which belong in backlog.md.\n"
+                "tasks.md is the Sprint Contract only and is deleted at sprint close, so pruning "
+                "here would destroy them.\n"
+                "Move those sections to backlog.md verbatim, then re-run. Nothing was deleted.\n"
+            )
+            return 1
     block = _opt(argv, "--block")
     if block is not None:
         new_text, problems = prune_h1_block(text, block)
@@ -845,6 +881,56 @@ status: open
         _write_or_delete(b, "", delete_if_empty=False)
         _assert(b.exists() and b.read_text(encoding="utf-8") == "",
                 "prune-backlog never deletes backlog.md — it is a prerequisite file")
+
+        # REGRESSION GUARD: the mixed-content shape that used to delete all of tasks.md.
+        # `## Review Backlog` sits AFTER the sprint h1, so the h1-to-EOF boundary swallows it and
+        # `delete_if_empty` unlinks the file. prune-tasks must refuse and change nothing.
+        mixed = Path(td) / "tasks.md"
+        mixed_text = (
+            "# Fix the thing\n\nstatus: active\n\n## Covers\n\n- [ ] [FIX] a\n\n"
+            "## Review Backlog\n\n### PR #101 — earlier PR (2026-07-01)\n\n"
+            "- [ ] [debt] leftover finding\n"
+        )
+        mixed.write_text(mixed_text, encoding="utf-8")
+        rc = main(["prune-tasks", "--file", str(mixed), "--block", "Fix the thing"])
+        _assert(
+            rc == 1 and mixed.exists() and mixed.read_text(encoding="utf-8") == mixed_text,
+            "prune-tasks refuses a tasks.md holding a persistent section, leaving it untouched",
+        )
+        _assert(
+            persistent_sections(mixed_text) == ["Review Backlog", "PR #101 — earlier PR (2026-07-01)"]
+            and persistent_sections("# S\n\nstatus: active\n\n## Scope\n\n- [ ] x\n") == []
+            and persistent_sections("## Security Fixes — my-webapp\n\n- [ ] rotate\n")
+            == ["Security Fixes — my-webapp"],
+            "the guard matches findings sections (suffix and all), not a contract's ## Scope",
+        )
+        # REGRESSION GUARD: the pruner and the candidate scanner share ONE predicate. Before
+        # this, a grab-bag h2 was warned about by one and deleted by the other.
+        grab = "# S\n\nstatus: active\n\n## Scope\n\n- [ ] a\n\n## Follow-ups\n\n- [ ] leftover\n"
+        gr = Path(td) / "grab.md"
+        gr.write_text(grab, encoding="utf-8")
+        rc = main(["prune-tasks", "--file", str(gr), "--block", "S"])
+        _assert(
+            rc == 1 and gr.exists() and gr.read_text(encoding="utf-8") == grab,
+            "prune-tasks refuses an ad-hoc grab-bag section too, not only the two known titles",
+        )
+        _assert(
+            persistent_sections("# S\n\nstatus: active\n\n```markdown\n## Review Backlog\n```\n")
+            == [],
+            "a findings heading inside a fence does not trigger a false refusal",
+        )
+        # prune-backlog must NOT refuse — backlog.md is where these sections belong.
+        bl = Path(td) / "bl.md"
+        bl.write_text("## Review Backlog\n\n- [ ] [debt] one\n- [ ] [debt] two\n", encoding="utf-8")
+        real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] [debt] one\n")
+        try:
+            rc = main(["prune-backlog", "--file", str(bl)])
+        finally:
+            sys.stdin = real_stdin
+        _assert(
+            rc == 0 and "- [ ] [debt] two" in bl.read_text(encoding="utf-8"),
+            "prune-backlog still prunes a `## Review Backlog` section in backlog.md",
+        )
 
         c = Path(td) / "CHANGELOG.md"
         rc = main(["changelog", "--file", str(c), "--title", "t", "--plugin", "dev",

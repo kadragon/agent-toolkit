@@ -88,12 +88,31 @@ if [[ -f "AGENTS.md" ]]; then
     done
 fi
 
-# Check key docs exist
-for key_doc in docs/architecture.md docs/conventions.md docs/workflows.md docs/delegation.md docs/eval-criteria.md; do
-    if [[ ! -f "$key_doc" ]]; then
-        FINDINGS+=("[harness] Missing key doc: $key_doc")
-        harness_issues=$((harness_issues + 1))
-    fi
+# Check key docs exist — the same two tiers validate-harness.sh applies in its
+# section 1, with docs/delegation.md folded into the conditional list. That doc
+# sits outside section 1 there, where a role-aware check can WARN once the repo
+# has roles but no routing doc; sweep has no roster context, so it stays INFO.
+# Always required: docs/runbook.md, the one doc whose content (build/test/deploy
+# commands, env setup, failure modes) is never inferable from source. Everything
+# else is conditional: harness-init generates it only when the repo has the thing
+# it documents, so a missing file is a decision, not a defect. Reporting those as
+# findings would file backlog items against a correct minimal init.
+if [[ ! -f "docs/runbook.md" ]]; then
+    FINDINGS+=("[harness] Missing key doc: docs/runbook.md")
+    harness_issues=$((harness_issues + 1))
+fi
+
+conditional_docs=(
+    "docs/architecture.md:generated when the repo has real module boundaries"
+    "docs/conventions.md:generated when rules exist that the linter does not own"
+    "docs/workflows.md:generated when the repo runs a defined work cycle"
+    "docs/eval-criteria.md:generated when the repo runs the Sprint Contract flow"
+    "docs/delegation.md:created with the repo's first agent role (see dev:harness-curate)"
+)
+for entry in "${conditional_docs[@]}"; do
+    doc="${entry%%:*}"
+    why="${entry#*:}"
+    [[ -f "$doc" ]] || echo -e "  INFO  $doc absent — $why"
 done
 
 [[ $harness_issues -eq 0 ]] && echo -e "  ${GREEN}All references valid${NC}"
@@ -108,14 +127,21 @@ fi
 echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
 for f in "${FINDINGS[@]}"; do echo "  $f"; done
 
-# Append to tasks.md if it exists
-if [[ -f "tasks.md" ]]; then
-    echo "" >> tasks.md
-    echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> tasks.md
+# Append to backlog.md if it exists. NOT tasks.md: sweep findings outlive the sprint that
+# happens to be in flight, and tasks.md is deleted whole at sprint close.
+if [[ -f "backlog.md" ]]; then
+    echo "" >> backlog.md
+    echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> backlog.md
+    echo "" >> backlog.md
     for f in "${FINDINGS[@]}"; do
-        echo "- [ ] $f" >> tasks.md
+        echo "- [ ] $f" >> backlog.md
     done
-    echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to tasks.md${NC}"
+    echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to backlog.md${NC}"
+else
+    # Never drop findings silently. backlog.md is optional after a minimal init, so its
+    # absence is expected -- but then the findings above exist only in this terminal.
+    echo -e "${YELLOW}No backlog.md — ${#FINDINGS[@]} finding(s) NOT persisted.${NC}" >&2
+    echo -e "${YELLOW}Create backlog.md (harness-init references/backlog-template.md) to capture them.${NC}" >&2
 fi
 
 exit 1

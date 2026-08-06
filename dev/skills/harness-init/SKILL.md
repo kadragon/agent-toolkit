@@ -11,15 +11,11 @@ Set up complete harness for repo so Claude Code (and other AI agents) do reliabl
 
 ## Core Philosophy
 
-Three sources inform harness design:
+**If the agent struggles, that's a harness defect** — fix the environment, not the prompt. And find the simplest solution that works: every component encodes an assumption about what the model can't do alone, so start minimal and add scaffolding only on concrete failures. A harness built for the weakest model slows a stronger one down.
 
-1. **Anthropic** — Generator-Evaluator separation, every harness component encodes model-limitation assumption for periodic re-examination (the "context reset over compaction" guidance from the same source is one such assumption — re-check it per model, see `references/workflows-template.md` → Context Anxiety)
-2. **OpenAI** — AGENTS.md is map not encyclopedia (~100 lines), repo is system of record, golden principles enforced mechanically, automated garbage collection
-3. **Practical experience** — Progressive disclosure (INDEX -> detail), agent-readable lint errors, sub-agent context manifests
+That second rule is why this skill creates **nothing speculative**: no agent roles, no orchestrator, no sweep, no lint rewrite, and only the docs the repo has content for. Each has an evidence trigger instead, watched by `dev:harness-curate`.
 
-Key insight: **if agent struggles, that's harness defect**, not agent defect. Fix environment, not prompt.
-
-**Simplification principle:** Find simplest solution, increase complexity only when needed. Every harness component encodes assumption about what model can't do alone — start minimal, add scaffolding only on concrete failures. Harness built for weakest model slows stronger model.
+Sources, evidence, and the failure modes behind each rule: `references/design-rationale.md`. Read it before deviating from a step.
 
 > Trigger conditions are in the frontmatter description above.
 
@@ -41,11 +37,15 @@ Work through steps in order. Each produces concrete artifacts.
 
 Before acting, determine mode AND maturity level.
 
-> **Relation to the platform's own `/init`.** Claude Code ships a built-in `/init` (and newer interactive variants) that bootstraps a basic CLAUDE.md plus optional skills/hooks. This skill **complements, not duplicates** it: harness-init produces the full multi-layer harness (AGENTS.md map, docs knowledge base, path-scoped rules, enforcement chain, orchestrator + agents, maturity progression) that platform `/init` does not. If the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it — don't overwrite blindly.
+> **Relation to the platform's own `/init`.** It complements this skill rather than duplicating it — if the repo already ran `/init`, treat its CLAUDE.md as Step 1 input and migrate/extend it, don't overwrite blindly. Detail: `references/design-rationale.md`.
 
-**Default toward orchestration infrastructure — but size the agent roster by reachable triggers, not by default.** The **orchestrator** (Step 4c) is worth building whenever unsure: without it, auto-delegation (Step 7b) has no named target and the model does everything inline, and an unused orchestrator skill costs little. **Agent roles** (Step 4b) are different — apply the reachability gate there. An agent whose trigger never fires is not cheap insurance; it is the "made it, never used it" dead weight that trains the operator to ignore the harness. Build every reachable role, skip unreachable ones. Skip both entirely only for genuinely trivial repos (single script, docs-only, one-file library).
+**Init ships no orchestration infrastructure — no agent roles (Step 4b), no orchestrator skill (Step 4c).** This is the default, not a gap to apologize for: at init there is no working history, so any roster is a guess, and the built-in `Explore` / `general-purpose` subagents already cover ad-hoc fan-out.
 
-**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing gates. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, then build the roster and orchestrator but keep the delegation gates `Optional` and make blocking gates a strict subset of what that layer permits. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
+Roles arrive **on evidence, not on setup**: `dev:harness-curate` mines the transcripts for work repeatedly done inline that a missing agent should have owned (its *triggering-miss* signal), and routes to `plugin-dev:agent-creator`. Adding one afterwards is Extend mode, not a re-init. Zero roles is a legitimate steady state — many repos never need one.
+
+**Create a role or orchestrator during init only if the user explicitly asks for it in this session.** Then it is their call, not the skill's guess: build exactly what they named, apply the reachability check in Step 4b to that candidate, and skip the rest.
+
+**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing any delegation wording. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, the generated docs must not read stricter than it. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
 Delegation is only the axis where narrowing is a safe automatic fix. Every other axis goes through Step 0b.
 
@@ -53,7 +53,7 @@ Delegation is only the axis where narrowing is a safe automatic fix. Every other
 
 | Condition | Mode | Action |
 |-----------|------|--------|
-| No `AGENTS.md`, no `docs/`, no `.claude/agents/` | **New setup** | Run Step 0b, then Steps 1–10 |
+| No `AGENTS.md`, no `docs/` | **New setup** | Run Step 0b, then Steps 1–10 |
 | Existing harness, user adds agent/skill/area | **Extend** | Run only affected steps (see matrix below) |
 | User asks "harness 점검", "validate", "audit" | **Audit** | Run `scripts/validate-harness.sh`, report maturity level, stop. Structure only — for an instruction-conflict/duplication audit of the existing files, route to `dev:harness-curate` (Signal 7) |
 
@@ -61,9 +61,10 @@ Delegation is only the axis where narrowing is a safe automatic fix. Every other
 
 Run `scripts/validate-harness.sh` against the target repo (if it exists). Classify as Level 1 / 2 / 3 per `references/maturity-levels.md`. Report the current level and which level to target.
 
-- **Default target:** Level 2 (CI-verified). Propose Level 3 only for multi-agent or high-risk repos.
-- **Solo dev / greenfield:** Level 1 suffices; offer Level 2 upgrade path.
-- **Existing repo, partial harness:** Start from current level, advance one level per session.
+- **Default target: Level 1.** Do not treat it as a waypoint to pass through in the same session. Levels 2–3 add CI gates and hooks, and every one of those guards a rule that has not yet been broken in this repo — enforcement built on a guess is the same defect as a roster built on a guess. Report the Level 2/3 upgrade path; let the repo earn it.
+- **Level 2 in the same session:** only when CI already exists and adding the validate step costs one file. Never stand up CI *for* the harness at init.
+- **Level 3:** propose only on demonstrated risk — a destructive surface (`permissions.deny` at Layer 0 is cheap and model-independent, so it is the one exception worth taking early) or a violation that already happened.
+- **Existing repo, partial harness:** start from current level, advance at most one level per session.
 
 **Extend mode — step selection matrix:**
 
@@ -71,7 +72,7 @@ Run `scripts/validate-harness.sh` against the target repo (if it exists). Classi
 |-------------|-------------|
 | Add agent role | 4b (new role file) → 4c (update orchestrator) → 9 (validate) |
 | Add/modify skill | 4c (skill update) → 9 |
-| Add new domain with orchestrator | 4b + 4c + 4d → 9 |
+| Add new domain with orchestrator | 4b + 4c → 9 |
 | Architecture change | Affected docs → 4b (impacted roles) → 4c → 9 |
 
 **Every row above still runs Step 0b and the Step 1 language resolution first.** Both are preconditions for writing anything, not New-setup-only steps — an Extend run that skips Step 1 falls back to the chat language (the exact failure Step 1 exists to prevent), and one that skips Step 0b can add a single role or gate that contradicts the operator's global layer.
@@ -89,17 +90,13 @@ The global instruction file read in Step 0 is not just a sizing input — it is 
 | Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep it (the repo copy is that rule's only reach on Codex/Cursor/Copilot). Verified single-tool repo → trim the redundant *items*, keeping the repo-specific ones, exactly as Step 3 prescribes for `## Token Economy` — never swap a whole mandated block for a pointer. "Verified" means positive evidence that Claude is the only intended reader, not the mere absence of another tool's config (same bar as `dev:harness-curate` → `references/signal-taxonomy.md` §7). |
 | Repo rule **contradicts** the upper layer — incompatible instructions for the same situation | **Stop and ask the user.** Do not write either version, and do not silently pick one. |
 
-**The ask, when a real conflict exists.** Surface it before generating the affected file, not after: quote both sides verbatim (`file:line` for the global file; for base instructions, quote the covering text and label it `[base instructions — {model id}, this session]`, since no `file:line` exists), state which side you recommend and why, then ask which is authoritative. Batch every conflict found into one prompt — one round-trip, not one per rule.
+**On a real conflict:** quote both sides verbatim, recommend a side with reasons, ask which is authoritative — batched into one prompt, before generating the affected file. Never assert a precedence winner you cannot quote a source for.
 
-**Asking does not mean halting the run.** Generate every artifact the conflict does not touch first, then ask, then write the affected ones. That ordering is itself what a global hard-stop rule typically requires — this operator's, verbatim, is *"Material ambiguity affecting scope, irreversible effects, external communication, or expected output → finish everything independent of the answer first, then Grill: one question at a time (or one batched question prompt), each with recommended answer + rationale; answer in code → read, don't ask."* Read the invoking layer's own wording rather than assuming this one; `Skill(dev:task-grill)` is available when the conflicts need real interviewing.
+**Asking never halts the run.** Generate every artifact the conflict does not touch first, then ask, then write the affected ones. With **no user to ask** (running as a subagent/teammate): skip the conflicting rule rather than guessing, state the assumption, and surface both quoted sides in the return value — that satisfies the Step 9 checklist item.
 
-**Running without a user to ask — never block.** This skill is reachable from a subagent or teammate (an `implementer` role, or an orchestrator built in Step 4c), and there the ask has no recipient. The same operator layer covers that case in the bullet immediately after the one quoted above: *"Running AS a subagent/teammate: no user access — never block. State the assumption, finish the work, surface the open question in the return value."* So with no user access: generate the non-conflicting artifacts, skip the conflicting rule rather than guessing at it, state the assumption you made, and surface the conflict — both sides quoted — in the return value for the caller to resolve. The Step 9 checklist item is satisfied by surfacing it upward, not by having an answer.
+**Two bounds, so the gate doesn't become noise:** it fires on *contradiction*, not resemblance (reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §7), and it covers only rules **this run is about to write** — auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` is `dev:harness-curate`'s Signal 7.
 
-Precedence between layers is **not spec** — never assert a winner you cannot quote a source for. That is precisely why this is a question for the user, not a call to make silently.
-
-**Two bounds, so the gate doesn't become noise:**
-- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts. Reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §7 rather than re-deriving one.
-- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to `dev:harness-curate`'s Signal 7 — Audit mode points there instead of re-implementing that sweep.
+Quoting format, the operator hard-stop wording this mirrors, and the full bounds: `references/design-rationale.md` → Instruction-layer reconciliation.
 
 ### Step 1: Analyze the Repository
 
@@ -118,18 +115,18 @@ Scan the repo for:
 
 Record findings — these shape every artifact created downstream. If existing AGENTS.md or docs/ exist, read them, decide what to keep vs. replace.
 
-**Settle the docs language here, before writing anything.** Every artifact this skill produces — AGENTS.md prose, `docs/*.md` bodies, role and skill files — goes in that language, *not* the language of the conversation you are having. The two are unrelated: conversation language is a UI preference for one session, generated docs are version-controlled repo artifacts governed by the repo's own policy. Defaulting to the chat language is the observed failure — Korean docs written into a repo whose Language Policy, authored in the same session, says docs are English. Resolve in order:
+**Settle the docs language here, before writing anything.** Every artifact this skill produces — AGENTS.md prose, `docs/*.md` bodies, role and skill files — goes in that language, *not* the language of the conversation you are having. The two are unrelated; defaulting to the chat language is the observed failure (`references/design-rationale.md` → Docs language). Resolve in order:
 
 1. **Existing repo Language Policy** (AGENTS.md, README, CONTRIBUTING) — it wins outright.
 2. Else the invoking platform's global instruction file, already read in Step 0 — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) (e.g. "User-facing Korean; code/commits/comments/docs English").
 3. Neither settles it → ask. One question, then proceed.
 
-Domain terms with no real equivalent in the target language (a local platform's proper name, a regulatory term, a framework's own field labels) stay in the source language — they are data, not prose, and translating them destroys the referent. State the resolved language before Step 3 so the user can correct it once instead of after every file.
+Domain terms with no real equivalent in the target language (a proper name, a regulatory term, a framework's own field labels) stay in the source language. State the resolved language before Step 3 so the user can correct it once instead of after every file.
 
 **Two carve-outs — the docs language governs prose bodies only.**
 
-- **Matcher text follows the operator's prompt language, not the docs language.** Trigger phrases, skill/agent `description:` fields, and router route patterns are matched against what the operator actually types, so a pattern in the wrong language never fires. Follow `references/orchestrator-template.md` → Localization note and `references/trigger-router-template.md` instead: keep the English lines always, keep or translate the other-language alternates to whatever the operator prompts in. An English docs policy does not license stripping Korean trigger alternates from a repo whose operator prompts in Korean.
-- **`harness:verbatim` blocks stay verbatim.** The two mandated AGENTS.md blocks (Step 3) are copied unchanged in English no matter what language resolves here — they are a contract with later trimming passes, not prose.
+- **Matcher text follows the operator's prompt language.** Trigger phrases, skill/agent `description:` fields, and router route patterns are matched against what the operator actually types: keep the English lines always, and keep or translate the other-language alternates to whatever the operator prompts in.
+- **`harness:verbatim` blocks stay verbatim.** The two mandated AGENTS.md blocks (Step 3) are copied unchanged in English no matter what language resolves here.
 
 ### Step 2: Define Golden Principles
 
@@ -150,9 +147,11 @@ Ask user: "What rules, if broken, cause most pain in this codebase?" Answer seed
 
 AGENTS.md is **map, not encyclopedia** (target ≤100 lines; hard warn at >200 — keeps harness within agent context window). Must fit in agent's context window without crowding actual work.
 
-**Non-inferability filter — the primary anti-bloat gate.** The target is redundant *description*: prose that restates what the agent would independently discover by reading the code — architecture summaries, style rules the linter already owns, a paraphrase of the README. This is not a style preference: an ETH Zurich study ([arxiv 2602.11988](https://arxiv.org/abs/2602.11988)) found LLM-generated context files *reduced* task success in 5 of 8 settings (+2.45–3.92 steps/task, +20–23% inference cost) precisely because they restated facts the agent already reads from code; human-curated, non-inferable files instead gained ~4pp. So before writing a *descriptive* line, ask "would the agent already know this from the repo?" — if yes, delete it. This does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.md` when …") or a concrete non-obvious command/example — those name real files but earn their tokens by cutting discovery cost, which is the whole point of the map. It is the empirical backing for "map, not encyclopedia," and applies to the AGENTS.md body even though the Step 0 default still builds out the orchestration scaffolding (that lives in on-demand `docs/`, not the always-loaded map).
+**Non-inferability filter — the primary anti-bloat gate.** Before writing a *descriptive* line, ask "would the agent already know this from the repo?" — if yes, delete it. The target is prose restating what the agent discovers by reading the code: architecture summaries, style rules the linter owns, a paraphrase of the README. Measured effect, not taste — LLM-generated context files *reduced* task success in 5 of 8 settings in an ETH Zurich study, while human-curated non-inferable ones gained (`references/design-rationale.md` → Non-inferability filter).
 
-**Two limits on the filter — both are places it has actually misfired.** First, a block carrying `<!-- harness:verbatim … -->` is out of scope: it was mandated deliberately, so "the agent already knows this" is not an argument against it. Second, the filter licenses cutting what the agent would rediscover *from the repo* — it does not license cutting a line because some higher-precedence instruction file (the base harness, `~/.claude/CLAUDE.md`, a parent AGENTS.md) supposedly already says it. That is a different claim and a far easier one to get wrong, because those files are not in front of you while you edit. If you cut on those grounds, quote the covering text in the proposal; if you cannot quote it, you have not verified it, so keep the line. And a quote only settles it on a **single-tool** repo: AGENTS.md is read by Codex/Cursor/Copilot too, each carrying its own base instructions, so "Claude's base harness already says this" leaves the line load-bearing for every other reader.
+It does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.md` when …") or a concrete non-obvious command/example — those earn their tokens by cutting discovery cost.
+
+**Two limits, both places it has actually misfired:** a `<!-- harness:verbatim … -->` block is out of scope, and "a higher-precedence file already says this" is a different claim than "the repo already shows this" — quote the covering text or keep the line, and note that a quote only settles it on a single-tool repo. Full reasoning in the rationale doc.
 
 Three patterns make the map earn its tokens:
 - **Code example > prose.** One real snippet of the convention beats three sentences describing it — show the pattern, don't narrate it.
@@ -163,9 +162,11 @@ See `examples/agents-md-example.md` for complete reference.
 
 **Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Full structure in `examples/agents-md-example.md`. Write this file's own prose in the language resolved in Step 1 — a `## Language Policy` the surrounding file violates teaches every later reader that the policy is decorative. The two `harness:verbatim` blocks below are the exception: copy them in English unchanged (Step 1 carve-out).
 
-**Two embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): `## Maintenance` edit policy, `## Token Economy` rules. Copy the `<!-- harness:verbatim … -->` comment that precedes each one too. The mandate lives here, in a skill that only loads when harness-init runs, so an AGENTS.md carrying these blocks unmarked reads to any later trimming pass (`claude-md-improver`, `/doctor`, a human editor) as generic boilerplate — exactly the shape that filter is built to delete. The marker is what travels with the file and makes the block defend itself; it renders invisibly in Markdown and costs ~8 tokens.
+**Index only the docs this run actually creates.** The `## Docs Index` is a table of contents for files on disk, not a wishlist: a row pointing at a doc that does not exist sends the next agent to a dead path, and `sweep.sh`/`validate-harness.sh` correctly report it as drift. Write one row per file Step 4 produced — `docs/runbook.md` always, each conditional doc only if its "Create when" fired, and **never `docs/delegation.md`**, which init does not create (Step 4 table). The six-row index in `examples/agents-md-example.md` is the mature-repo case; a default init typically emits one to three rows. When a later session adds a doc, it adds the row in the same commit. The same applies to `docs/*.md` mentions in the *body* — `sweep.sh`/`validate-harness.sh` scan every reference in AGENTS.md, not just index rows, so prose copied from the example must drop the paths whose files this run did not create.
 
-**Token Economy overlaps Claude's base instructions — keep it anyway on a multi-tool repo.** Current Claude models are already told to batch independent tool calls, not to re-read a file they just edited, and not to restate the user; so on a **Claude-Code-only** repo, trim those items and keep only the repo-specific ones (what to delegate, what "conclusion only" means here). On a multi-tool repo the block stays whole per the cross-tool limit above. Either way, drop any item whose entire content is "the model already behaves this way on every tool you target" — that is the same load-bearing test Step 5's sweep applies to the rest of the harness.
+**Two embedded blocks mandatory in AGENTS.md** — copy verbatim from `examples/agents-md-example.md` (do not paraphrase): the `## Maintenance` edit policy and the `## Token Economy` rules. Copy the `<!-- harness:verbatim … -->` comment preceding each one too — it is what makes the block defend itself against later trimming passes (~8 tokens, invisible in Markdown).
+
+**Token Economy overlaps Claude's base instructions — keep it anyway on a multi-tool repo.** On a **Claude-Code-only** repo, trim the items the base instructions already impose and keep only the repo-specific ones. On a multi-tool repo the block stays whole. Reasoning: `references/design-rationale.md` → Token Economy overlap.
 
 **What NOT to put in AGENTS.md:** workflow details, delegation details, evaluation criteria, architecture deep dives, API references. These belong in `docs/`.
 
@@ -186,143 +187,100 @@ Read `references/path-scoped-rules.md` for layout, the home-selection table (AGE
 
 ### Step 4: Create docs/ Knowledge Base
 
-Create these files. Each read **on demand**, not loaded every session. Each template file is self-describing — read before writing doc. Bodies go in the Step 1 language, not the chat language — the templates ship in English as scaffolding, which is not itself the language decision.
+Each doc is read **on demand**, not loaded every session. Each template file is self-describing — read it before writing the doc. Bodies go in the Step 1 language, not the chat language — the templates ship in English as scaffolding, which is not itself the language decision.
 
-| File | Purpose | Template |
-|------|---------|----------|
-| `docs/architecture.md` | Project structure, layer rules, module boundaries, dependency directions | `references/architecture-template.md` |
-| `docs/conventions.md` | Naming, code style, framework rules agents frequently get wrong (don't duplicate linter) | `references/conventions-template.md` |
-| `docs/workflows.md` | Six standard workflows (plan/code/draft/constrain/sweep/explore) with delegation gates embedded | `references/workflows-template.md` |
-| `docs/delegation.md` | Pattern-selection flowchart, Spawn Prompt Contract, Effort Tier, routing table, per-role model | `references/delegation-template.md` (+ `coordination-patterns.md`) |
-| `docs/eval-criteria.md` | Generator-Evaluator separation, Sprint Contract, calibration methodology | `references/eval-criteria-template.md` |
-| `docs/runbook.md` | Build/test/deploy commands, failure modes, env setup | `references/runbook-template.md` |
+**One doc is unconditional. The rest have to earn it.** Apply Step 3's non-inferability filter here too — it is the same failure mode at a different path, and generating a doc whose content the agent would read from the code anyway is what the ETH result measured as *harmful*, not merely wasteful. Ask per file: does this repo have the thing the doc documents, and is that thing non-inferable from the code?
 
-**Non-negotiable for `docs/delegation.md`:** triggers in routing table must be objective and measurable — never subjective conditions ("unfamiliar module") agent can rationalize away.
+| File | Create when | Template |
+|------|-------------|----------|
+| `docs/runbook.md` | **always** — build/test/deploy commands, env setup, and failure modes are never inferable from source | `references/runbook-template.md` |
+| `docs/architecture.md` | the repo has real module boundaries, layer rules, or dependency directions that the directory tree does not already show | `references/architecture-template.md` |
+| `docs/conventions.md` | rules exist that agents get wrong **and the linter does not already own** — if the linter enforces it, the linter is the doc | `references/conventions-template.md` |
+| `docs/workflows.md` | the repo runs a defined work cycle worth writing down. Write only the workflows actually used — not all six | `references/workflows-template.md` |
+| `docs/eval-criteria.md` | the repo runs the Sprint Contract flow (paired with `backlog.md` below) | `references/eval-criteria-template.md` |
+| `docs/delegation.md` | **not at init** — it documents routing to agents, and init creates none. Created with the repo's first role (`dev:harness-curate`) | `dev:harness-curate` → `references/delegation-template.md` |
 
-**Complete Step 4a first. If this is a multi-agent project: also complete Step 4b after Step 4a.**
+For each doc you skip, say so in the Step 10 summary with its one-line trigger, so the next session knows the gap is a decision with a condition attached rather than an omission. `scripts/validate-harness.sh` reports these as `INFO`, not `WARN`, for the same reason.
 
-### Step 4a: Create Sprint / Backlog Files
+**When `docs/delegation.md` is eventually written:** triggers in its routing table must be objective and measurable — never subjective conditions ("unfamiliar module") an agent can rationalize away.
 
-Required so `scripts/reconcile-harness.py` has valid files to operate on. Without these, reconciliation has nothing to process and warns about missing schema.
+**Steps 4b–4c (roles, orchestrator) produce nothing on a default init** — read them for the one case that does apply: the user asked for a specific role or orchestrator this session.
 
-Create at repo root:
+### Step 4a: Sprint / Backlog Files — only if the repo runs sprints
 
-- **`backlog.md`** — queue of work not yet in flight. Copy minimal template from `references/backlog-template.md`. Empty sections fine.
-- **`tasks.md`** — DO NOT create at init time. Exists only during active sprint. Include template path (`references/tasks-template.md`) as reference in `docs/workflows.md` so first sprint starter knows schema.
+**Do not create `backlog.md` merely so `scripts/reconcile-harness.py` has a file to operate on.** That inverts the dependency: the script exists to serve the sprint flow, so a repo that does not run sprints needs neither. `reconcile-harness.py` is a no-op without them, not a failure, and `validate-harness.sh` reports the absence as `INFO`.
 
-Both files follow **Reconciliation Contract** documented in `references/harness-invariants.md`.
+If the repo does adopt the backlog/sprint flow — now or later — create at repo root:
 
-### Step 4b: Define Reusable Roles
+- **`backlog.md`** — queue of work not yet in flight. Copy the minimal template from `references/backlog-template.md`. Empty sections are fine.
+- **`tasks.md`** — never at init. It exists only during an active sprint, holds the Sprint Contract and nothing else, and is deleted whole at close; every persistent item (queue, review findings, security findings) belongs in `backlog.md`. Record the template path (`references/tasks-template.md`) in `docs/workflows.md` so the first sprint starter knows the schema.
 
-**Create a role only when its delegation trigger can actually fire in this repo's normal work.** A role file earns its place by giving the main loop a pre-scoped target so it delegates instead of working inline. A role whose trigger never fires is the opposite: it shows up in the session's agent list, sets an unmet expectation in AGENTS.md, and produces the "made it, never used it" smell that trains the operator to distrust the harness.
+Both files follow the **Reconciliation Contract** in `references/harness-invariants.md`.
 
-Apply the **reachability gate** to each candidate — keep it only if reachable here:
+### Step 4b: Reusable Roles — none by default
+
+**Create no `.claude/agents/*.md` at init.** The repo starts with an empty roster and the main thread does the work inline, using the built-in `Explore` / `general-purpose` subagents when it wants ad-hoc fan-out. Rationale in Step 0: before the repo has a working history there is no evidence about which delegations recur, and a guessed role is dead weight that discredits the harness.
+
+Say so explicitly in the Step 10 summary — "no agent roles created; `dev:harness-curate` adds them when the transcripts show a delegation actually recurring" — so the empty roster reads as a decision rather than an omission.
+
+**The one exception: the user asked for a specific role in this session.** Then create that role and only that role, after a reachability check — does its trigger fire in this repo's normal work?
 
 | Role | Trigger | Reachable when |
 |------|---------|----------------|
-| `qa-verifier` | after any source edit | almost always — any repo with editable source |
+| `qa-verifier` | after any source edit | any repo with editable source |
 | `explorer` | unexplored area >3 files | repo has real modules/dirs, not one flat file |
 | `implementer` | backlog item w/ Sprint Contract | repo actually runs a `backlog.md` sprint flow |
 | `product-evaluator` | subjective quality judgment | repo ships a user-facing artifact that gets judged |
 
-A backlog-driven `implementer` is dead weight in a repo with no backlog; a `product-evaluator` is dead weight where nothing has a subjective quality bar. Swap in a domain-specific role when it matches recurring work better than the generic one (this marketplace uses `skill-evaluator` in place of `product-evaluator`).
+If the requested role fails its own reachability check, say so and let the user decide — do not silently create it, and do not silently skip it. Swap in a domain-specific role when it matches the request better than the generic one (this marketplace uses `skill-evaluator` in place of `product-evaluator`).
 
-Result is typically **1–3 roles, not a fixed set.** Zero is itself a smell for any repo with editable source — at minimum create `qa-verifier` so post-edit verification has a target. If you create none, state why.
+Role-file prose goes in the Step 1 language; the `description:` field follows the matcher carve-out there, not the docs language. Omit `model:` — the role inherits the session model and the caller overrides per spawn (`dev:harness-curate` → `references/delegation-template.md` → "Model Selection — inherited by default").
 
-Create `.claude/agents/{role}.md` for each kept role. Claude Code reuses these for both subagent spawns and Agent Teams teammates — define once, use both ways. Role-file prose goes in the Step 1 language; the `description:` field follows the matcher carve-out there, not the docs language.
+**Keep the generated docs consistent with the empty roster.** `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `dev:harness-curate` → `references/delegation-template.md`) must not name an agent this repo does not have: generate the delegation section headers and trigger-design rules, leave the routing-table rows out, and write the workflow's QA/eval steps as inline checks against the written criteria. Both templates carry the wording for this. Never leave a mandatory gate pointing at an agent that does not exist.
 
-**Propagate the pruned roster downstream.** The generated `docs/workflows.md` and `docs/delegation.md` (from `references/workflows-template.md` and `references/delegation-template.md`) hardcode `explorer`/`implementer`/`product-evaluator` in mandatory gates. For every role you skip here, drop or rewrite the gate row that names it — never leave a mandatory gate pointing at an agent you didn't create.
+Read `dev:harness-curate` → `references/teammate-role-template.md` for the full schema and per-role templates — they are starting points for the later evidence-driven creation, not an init checklist.
 
-Read `references/teammate-role-template.md` for the full schema and per-role templates.
+**Team communication protocol:** If a role is created and will be spawned as a named teammate in team-mode orchestration, add the `## Team Communication Protocol` section (template in `dev:harness-curate` → `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
 
-**Team communication protocol:** For every role that will be spawned as a named teammate in team-mode orchestration, add the `## Team Communication Protocol` section (template in `references/teammate-role-template.md`). This section specifies which agents to receive from/send to, task update calls, and scratchpad artifact path. Without it, inter-agent coordination degrades to guessing.
+Regardless of roster, write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
 
-Also write `references/handoff-template.md`-style `handoff-{feature}.md` schema reference into `docs/workflows.md` for within-session continuity (context anxiety, subagent handoff — not cross-session resume). Handoff files are deferred Spawn Prompt Contracts.
+### Step 4c: Orchestrator Skill — not at init
 
-### Step 4c: Create Orchestrator Skill
+**Create no orchestrator skill during init** (default-off per Step 0). An orchestrator exists to route work to agents; with the Step 4b roster empty there is nothing to route to, so what gets generated is a skill that describes coordination the repo cannot perform. Its cost is not zero either — it loads on matching prompts and tells the model to spawn agents that do not exist.
 
-**Default: create at least one orchestrator skill** for the repo's primary work domain (e.g., `code-orchestrator` for an app repo, `release-orchestrator` for a library, `review-orchestrator` for a docs repo) (default-on per Step 0). The threshold is not "≥2 agents collaborating" — it is "the user will repeatedly invoke this kind of work." An orchestrator is the **named target** that auto-delegation (Step 7b — directive description first, router fallback) points at.
+The same evidence path applies: once `dev:harness-curate` has produced one or more roles and the transcripts show the *same multi-step domain workflow* recurring, an orchestrator is worth building — and by then its phases can be written from what actually happened instead of guessed. That is Extend mode (`Add new domain with orchestrator` in the Step 0 matrix), and it routes to `skill-creator`.
 
-If a domain genuinely needs ≥2 coordinating agents, prefer Template A (team) or C (hybrid). For single-agent domains, use Template B with one sub-agent — it is still worth creating because the orchestrator gives auto-delegation a target and the model an explicit "spawn the agent, do not inline" instruction.
+**Build one during init only if the user explicitly asks.** In that case follow the rest of this step as written.
 
-Create at:
-`.claude/skills/{domain}-orchestrator/SKILL.md`
+When it is built — here on explicit request, or later via Extend mode — the whole procedure lives in one place: `dev:harness-curate` → `references/orchestrator-template.md` → **Build checklist**. It covers the file path, mode selection (team / sub-agent / hybrid), the four mandatory contents, the directive `description:`, frontmatter fields, registration in AGENTS.md + `docs/harness-log.md`, and the scratchpad convention to copy into `docs/runbook.md`. Do not re-derive any of it here.
 
-Skill-body prose goes in the Step 1 language; trigger phrases and the `description:` field follow the matcher carve-out there, not the docs language.
+Two constraints this skill owns: skill-body prose follows the Step 1 docs language while trigger phrases and `description:` follow the matcher carve-out, and CLAUDE.md stays a pure `@AGENTS.md` pointer (Step 8) — the registration goes in AGENTS.md or `docs/`, never there.
 
-Read `references/orchestrator-template.md` and choose one of:
-- **Template A (team)** — agents share findings mid-flight via SendMessage
-- **Template B (sub-agent)** — agents return results independently
-- **Template C (hybrid)** — phase-dependent: different modes per phase
+### Step 5: Sweep Automation — deferred, not installed
 
-The orchestrator must include:
-1. Explicit data transfer strategy (see `references/delegation-template.md` → Data Transfer Protocols) — determine the scratchpad path from the system prompt and embed it in every spawn prompt
-2. Error policy (1 retry, graceful degradation, report omissions)
-3. Scratchpad naming: `{phase:02d}_{agent}_{artifact}.{ext}`
-4. Task claim protocol if ≥2 agents share a task pool (see `references/orchestrator-template.md` → Task Claim Protocol)
+**Do not copy `scripts/sweep.sh` at init.** Sweep audits harness *drift* — docs that fell behind code, golden principles quietly violated, components that stopped being load-bearing. A harness created minutes ago has no drift, so what init would install is a check whose findings are guaranteed empty plus a cadence decision made before anyone knows the cadence.
 
-No cross-session resume — that mechanism was removed; scratchpad artifacts do not survive a new CLI session.
+Mention it in the Step 10 summary as available-on-demand, and install it on the first real signal: a doc found stale, a principle found violated, or a model upgrade that makes the load-bearing assessment worth running.
 
-After creation, register in AGENTS.md (or `docs/`), never CLAUDE.md: add a `## Harness: {Domain}` pointer block with trigger rule and change history table to `docs/harness-log.md`, and add one row under AGENTS.md's `## Docs Index` pointing to it. CLAUDE.md must stay a pure `@AGENTS.md` pointer (Step 8, enforced by `scripts/validate-harness.sh`) — do not append anything to it.
+**When it is installed** (later session, or now if the user asks): copy `scripts/sweep.sh` into the project's `tools/`, adapt the `# ADAPT:` sections, and read `references/sweep-template.md` for ecosystem-specific guidance. It performs five checks — lint scan, doc drift, golden principle violations, harness freshness, finding report — plus the periodic **load-bearing assessment** (`references/sweep-template.md` → "Load-Bearing Assessment").
 
-**Directive description mandatory.** The skill's `description:` field is the primary auto-invocation mechanism — Claude reads it on every prompt. Anthropic's skill-creator docs report directive descriptions ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills vs descriptive phrasing ("Triggers on X"). Use the template in `references/orchestrator-template.md` → "Description writing rule". This is Step 7b's primary mechanism — get it right before considering the router fallback.
+A trigger policy is required at that point, because sweep is deliberately not in the session-start loop. Pick one and record it in `docs/runbook.md` and in `references/harness-invariants.md` → "Sweep Trigger Policy":
 
-**Frontmatter fields (2026).** `description` (+ `when_to_use`) is truncated at ~1,536 chars combined — front-load the key use case. Other useful fields when generating the SKILL.md: `model` / `effort` (per-skill override), `disable-model-invocation: true` (manual `/name` only), `allowed-tools` (gate tools while active), `paths` (glob-gate auto-activation), `context: fork` + `agent` (run in a forked subagent). See `references/orchestrator-template.md` → "Skill frontmatter reference".
-
-**Skip only if:** the repo is genuinely trivial (single-script tool, docs-only repo) — the same trivial-repo bar that lets Step 4b skip roles entirely (the orchestrator itself stays default-on per Step 0).
-
-### Step 4d: Scratchpad Pattern
-
-If Step 4c created an orchestrator, add a Scratchpad section to `docs/runbook.md`:
-
-```markdown
-## Scratchpad Convention
-
-Intermediate artifacts live in the session scratchpad directory (path given in the system prompt).
-Naming: `{phase:02d}_{agent}_{artifact}.{ext}`
-
-Ephemeral — gone at session end, no cross-session resume.
-
-Separate mechanism: delegation-gate evidence files live in `.claude/tmp/` (gitignored, session_id-stamped — see `references/enforcement-template.md`).
-```
-
-This makes the convention discoverable to future sessions and new contributors.
-
-### Step 5: Set Up Sweep Automation
-
-Copy `scripts/sweep.sh` into target project's `tools/` directory, adapt `# ADAPT:` sections. Read `references/sweep-template.md` for ecosystem-specific adaptation guidance.
-
-Sweep script performs five checks: lint scan, doc drift, golden principle violations, harness freshness, finding report. Includes periodic **load-bearing assessment** — stress-testing whether each harness component still compensates for real model limitation. See `references/sweep-template.md` → "Load-Bearing Assessment".
-
-**Trigger policy required** — sweep deliberately NOT part of session-start sync loop (too heavy for every session). Pick one, document in `docs/runbook.md`:
-
-- **Manual** (default) — developer runs `bash tools/sweep.sh` between features
-- **SessionStart hook** — `.claude/settings.json` hook with staleness guard (e.g., skip if `tools/.sweep-stamp` <7 days old)
+- **Manual** (default) — run `bash tools/sweep.sh` between features
+- **SessionStart hook** — `.claude/settings.json` hook with a staleness guard (skip if `tools/.sweep-stamp` <7 days old)
 - **Cron / CI** — weekly GitHub Actions job or `CronCreate` schedule
 
-Whichever chosen, record in `references/harness-invariants.md` → "Sweep Trigger Policy" so future sessions know cadence.
+### Step 6: Lint Message Readability — on evidence only
 
-### Step 6: Improve Lint for Agent Readability
+**Do not rewrite the project's lint messages at init.** This step edits the user's own lint configuration on the theory that an agent will one day misread an error. That is a speculative change to their code, and the anti-generation ladder rules it out until the failure is observed.
 
-If project has linters, improve error messages for agent consumption:
-
-**Before (human-oriented):**
-```
-ERROR: Line 42 — violation of rule X
-```
-
-**After (agent-readable):**
-```
-ERROR: Line 42 — violation of rule X
-  FIX: {what to change and how}
-  REF: {which doc or config file explains this rule}
-```
-
-Each error message becomes micro-instruction telling agent exactly how to fix issue.
+Do it when an agent actually stalls on a lint error — then the rewrite targets the message that really failed. Append a `FIX:` line (what to change and how) and a `REF:` line (the doc or config explaining the rule) to the existing message, turning it into a micro-instruction.
 
 ### Step 7: Build the Enforcement Chain
 
-Build multi-layer enforcement chain so golden principles are mechanically guaranteed. Read `references/enforcement-template.md` for detailed templates per layer.
+**At a Level 1 target this step ships Layer 0 only.** Every other layer guards a rule that has not yet been broken here; Layer 0 is the exception because it is model-independent, costs a few lines of `.claude/settings.json`, and the thing it prevents (a destructive command, a write outside the repo) is not something you want to learn about from evidence. Add Layers 1–3 as the repo advances a level, or immediately for a demonstrated risk.
+
+Read `references/enforcement-template.md` for detailed templates per layer.
 
 **Five layers (defense in depth):**
 0. **Settings-level deny** (`.claude/settings.json` / managed settings) — `permissions.deny` and `sandbox.enabled` block actions *regardless of what the model decides*. This is the only model-independent layer; hooks can be argued with via clever prompts, prose cannot enforce at all. Put hard blocks here (e.g. deny `Bash(rm -rf*)`, deny writes outside the repo). See `references/enforcement-template.md` → "Layer 0".
@@ -337,26 +295,28 @@ Build multi-layer enforcement chain so golden principles are mechanically guaran
 - **Circuit Breaker** — stops failure cascades before token spiral; fires after N consecutive Bash failures (default: 3). See `references/enforcement-template.md` → "Circuit Breaker".
 - **Consent Gates** — halts before irreversible external actions (push, PR, deploy) until user confirms. See `references/enforcement-template.md` → "Consent Gates".
 
-Match enforcement depth to maturity level target: Level 1 → no hooks required; Level 2 → Layer 1 + 3; Level 3 → all layers + circuit breaker, with Layer 0 deny rules for any high-risk repo (auth/billing/migrations/infra) at any level. Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
+Match enforcement depth to maturity level target: Level 1 (the init default) → Layer 0 only, no hooks; Level 2 → add Layers 1 + 3; Level 3 → all layers + circuit breaker. Layer 0 deny rules apply at every level and are mandatory for a high-risk repo (auth/billing/migrations/infra). Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
 
 ### Step 7b: Make Delegation Non-Optional
 
-**Why this step exists.** The AGENTS.md delegation table and orchestrator skill descriptions only fire if Claude voluntarily reads them and chooses to delegate. Auto-invocation is description-driven, and field reports put it well below 100% even with good descriptions ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). The failure mode: init produces a beautiful delegation harness, then the agent does the work inline anyway.
+**Why this step exists.** A delegation table fires only if the model reads it and chooses to delegate; auto-invocation is description-driven and lands well below 100% even with good descriptions (evidence: `references/design-rationale.md` → Auto-delegation). The failure mode is a beautiful delegation harness the agent then works around inline.
 
-**Primary mechanism — directive descriptions (do this always).** The highest-leverage, lowest-cost lever is the `description:` field of every orchestrator skill and high-leverage agent role. Directive phrasing ("ALWAYS invoke when X — do NOT inline-execute") measurably out-triggers descriptive phrasing ("Triggers on X"). This is where auto-delegation is won or lost — get the descriptions right first (template: `references/orchestrator-template.md` → "Description writing rule"). This repo's own harness relies on description-driven invocation with **no router hook** — dogfooded, and sufficient for the large majority of repos.
+**Applies only once orchestrators or roles exist.** A freshly initialized repo has neither (Steps 4b/4c), so there is nothing to auto-delegate *to* and this whole step is a no-op — do not install a router to compensate for an empty roster. Run it when `dev:harness-curate` adds the first role or orchestrator, and apply it to that asset.
 
-**Fallback — trigger router (only when you've measured a real miss-rate).** If, after directive descriptions are in place, a specific high-value delegation still misfires often enough to hurt, add a mechanical backstop. Do not install it preemptively — it costs a hook on every prompt plus a routes file to keep in sync, and a stale router is worse than none.
+**Primary mechanism — directive descriptions (always, for each asset that exists).** Write the `description:` field of every orchestrator skill and high-leverage role directively ("ALWAYS invoke when X — do NOT inline-execute"); it measurably out-triggers descriptive phrasing. This is where auto-delegation is won or lost — template: `dev:harness-curate` → `references/orchestrator-template.md` → "Description writing rule".
 
-1. **UserPromptSubmit trigger router** — pattern-matches each prompt, emits an explicit `Use Skill(X)` / `Spawn Agent(subagent_type=X)` instruction when a registered phrase matches. Read `references/trigger-router-template.md` and install for the routes that actually miss:
+**Fallback — trigger router (only on a measured miss-rate).** If a specific high-value delegation still misfires after the descriptions are right, add a mechanical backstop. Never preemptively — a stale router is worse than none.
+
+1. **UserPromptSubmit trigger router** — pattern-matches each prompt, emits an explicit `Use Skill(X)` / `Spawn Agent(subagent_type=X)` instruction when a registered phrase matches. Read `dev:harness-curate` → `references/trigger-router-template.md` and install for the routes that actually miss:
    - `.claude/hooks/trigger-router.sh`
    - `.claude/trigger-routes.json` (one route per delegation you watched misfire)
    - Add `UserPromptSubmit` hook to `.claude/settings.json`
 
-2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. This is a hard block justified wherever an inline edit is genuinely dangerous — independent of the router, install it on evidence of risk, not of miss-rate. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
+2. **PreToolUse delegation gate** (critical-path repos only) — blocks `Edit|Write` on critical paths (auth/billing/migrations) unless a delegation evidence file exists in `.claude/tmp/`. This is a hard block justified wherever an inline edit is genuinely dangerous — independent of the router, install it on evidence of risk, not of miss-rate. **Prerequisite: a role the gate can be satisfied by.** Installing it with an empty roster makes those paths simply un-editable, which is a broken repo, not a safe one. Read `references/enforcement-template.md` → "Delegation Gate (Layer 1 Extension)" and install:
    - `.claude/hooks/delegation-gate.sh`
    - Add `PreToolUse` matcher to `.claude/settings.json`
 
-**Default:** ship directive descriptions for every orchestrator/agent (default-on per Step 0). Add the router or gate only on evidence — a route you watched misfire, or a critical path that must never be touched inline. This mirrors this repo's own conclusion: description-driven first, router only if the miss-rate proves it necessary.
+**Default:** directive descriptions for every orchestrator/agent that exists — at init, typically none. Router or gate only on evidence: a route you watched misfire, or a critical path that must never be touched inline. This repo's own harness ships no router.
 
 **Validation (if you install the router):** test each route after creation:
 
@@ -414,9 +374,9 @@ Accepted forms (POSIX symlink or Windows text-file fallback) documented in `refe
 
 If Step 4c created a team-mode orchestrator, complete Agent Teams setup:
 
-Read `references/agent-teams-onboarding.md` for tooling prerequisites and environment check.
+Read `dev:harness-curate` → `references/agent-teams-onboarding.md` for tooling prerequisites and environment check.
 
-Add adversarial debugging playbook as on-demand workflow: `references/competing-hypotheses-playbook.md`. Maps to `debate` workflow in `docs/workflows.md`.
+Add adversarial debugging playbook as on-demand workflow: `dev:harness-curate` → `references/competing-hypotheses-playbook.md`. Maps to `debate` workflow in `docs/workflows.md`.
 
 **Skip entirely if:** Step 4c chose Template B (sub-agent only). Agent Teams carries 3–5× token cost — don't enable it without an orchestrator that actually spawns named teammates and coordinates them mid-flight.
 
@@ -428,7 +388,7 @@ Run `scripts/validate-harness.sh` against target project to verify all artifacts
 
 Script checks:
 
-- Required files exist (`AGENTS.md`, `CLAUDE.md`, `docs/*`, `backlog.md`)
+- Required files exist (`AGENTS.md`, `CLAUDE.md`, `docs/runbook.md`); conditional docs and `backlog.md` are reported as `INFO` when absent, not `WARN`
 - AGENTS.md size within policy band (see `references/harness-invariants.md`)
 - `CLAUDE.md` is exactly `@AGENTS.md`
 - `.agents/skills` points to `../.claude/skills`
@@ -441,21 +401,23 @@ Clean validate run at Level 2+ means enforcement is active and drift is mechanic
 Manual checklist for items script cannot verify:
 - [ ] No generated rule contradicts the operator's global layer or the platform's base instructions — every conflict Step 0b found was surfaced to the user and resolved by them (never resolved silently)
 - [ ] Golden principles enforceable (each has lint rule, test, or hook)
-- [ ] Delegation table specifies model per role (haiku/sonnet/opus)
-- [ ] Eval criteria concrete and gradeable (not vague)
+- [ ] No generated doc names an agent role or orchestrator that does not exist in this repo
+- [ ] No role file or delegation table pins a model — spawns inherit, callers override (`dev:harness-curate` → `references/delegation-template.md`)
+- [ ] Every skipped doc was named in the Step 10 summary with the condition that would create it
+- [ ] Eval criteria concrete and gradeable (not vague) — if `docs/eval-criteria.md` was generated
 - [ ] `docs/` files don't duplicate each other
-- [ ] Sweep trigger policy recorded in `docs/runbook.md`
 
 ### Step 10: Explain to the User
 
-After setup, show the user all four of the following — this is the exit criterion for Step 10:
+Show the user all five of the following — this is the exit criterion for Step 10:
 
 1. **Full AGENTS.md content** — paste or display the entire file so the user can confirm it looks right.
 2. **List of all created files with one-line purpose each** — every file produced during init, so nothing is invisible.
-3. **How to trigger sweep** — exact command or trigger method chosen in Step 5 (e.g., `bash tools/sweep.sh`).
-4. **How to update AGENTS.md when tasks change** — point to the `## Maintenance` rules embedded in AGENTS.md; emphasize: only add when all 4 conditions are met.
+3. **What was deliberately not created, and what would create it.** One line each, covering everything this run skipped: agent roles and orchestrator (→ `dev:harness-curate` when transcripts show a delegation recurring), each skipped doc with its trigger from the Step 4 table, `backlog.md` if the repo does not run sprints, `tools/sweep.sh` (→ on the first drift signal), lint-message rewrites (→ when an agent actually stalls on one), and Layers 1–3 of enforcement (→ on the maturity upgrade or a demonstrated risk). Without this list the user reads a minimal harness as an incomplete one.
+4. **The maturity level reached and the next level's cost** — Level 1 is the expected outcome; state plainly what Level 2 would add and that it is not needed yet.
+5. **How to update AGENTS.md when tasks change** — point to the `## Maintenance` rules embedded in AGENTS.md; emphasize: only add when all 4 conditions are met.
 
-After setup, Level 3 enforcement mechanically prevents drift (hooks + CI). Unexpected violations after a clean init → treat as enforcement gap, not operator error — trace to the missing hook or CI check and fix the template.
+Drift prevention scales with level: at Level 1 it is convention, and only Level 3 makes it mechanical. Do not describe a fresh init as drift-proof. A violation after a clean init is a signal for the *next* level, not operator error — trace it to the missing hook or CI check.
 
 ## Harness Evolution
 
@@ -468,7 +430,7 @@ Read `references/harness-evolution.md` for feedback → fix target mapping and c
 
 ## Ongoing Maintenance
 
-With Level 3 enforcement active, no manual sync routine is needed — hooks and CI prevent drift mechanically. See `references/maintenance.md` for the full maintenance routine.
+At Level 1 the routine below is manual and worth running periodically. Only at Level 3 do hooks and CI prevent drift mechanically, retiring the manual pass. See `references/maintenance.md` for the full routine.
 
 **Regular actions:**
 
@@ -484,7 +446,7 @@ With Level 3 enforcement active, no manual sync routine is needed — hooks and 
 |--------|---------|
 | `scripts/validate-harness.sh` | Full structural validation + maturity level report |
 | `scripts/reconcile-harness.py` | Sync completed tasks.md items into backlog.md |
-| `scripts/sweep.sh` | Five-check harness audit: lint scan, doc drift, golden principle violations, freshness, finding report (copy and adapt per project in Step 5) |
+| `scripts/sweep.sh` | Five-check harness audit: lint scan, doc drift, golden principle violations, freshness, finding report (not installed at init — copy and adapt on the first drift signal, Step 5) |
 | `scripts/sync-claude-md.sh` | Repair CLAUDE.md → @AGENTS.md (if manually broken) |
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |
 | `scripts/check-context-size.sh` | Warn if AGENTS.md > 200 lines |
@@ -493,9 +455,12 @@ The last three scripts are repair tools, not routine ops. At Level 3, they shoul
 
 ## Additional Resources
 
-All `references/*.md` files cited inline at point of use — consult there. Files optional / surfaced on request:
-- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), scratchpad convention, `docs/harness-log.md` pointer block, directive-description rule. **Read at Step 4c.**
-- **`references/trigger-router-template.md`** — UserPromptSubmit hook that maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. **Fallback only** — Step 7b's primary mechanism is directive skill descriptions; reach for the router when a specific delegation still misfires often enough to hurt ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). **Read at Step 7b.**
+All `references/*.md` files are cited inline at point of use — consult them there. Optional / surfaced on request:
+
+- **`references/design-rationale.md`** — evidence and failure modes behind the rules: why init creates nothing speculative, the non-inferability study, instruction-layer precedence, docs-language carve-outs, auto-delegation trigger rates. **Read before deviating from a step.**
+
+**Delegation-asset templates live in `dev:harness-curate/references/`, not here** — `teammate-role-template.md`, `delegation-template.md`, `orchestrator-template.md`, `coordination-patterns.md`, `agent-teams-onboarding.md`, `competing-hypotheses-playbook.md`, `trigger-router-template.md`. They moved when init stopped creating agents (Steps 4b/4c): every one of them is read *after* a delegation has proven itself, which is `harness-curate`'s decision, not init's. Read them from there in the one init case that needs them — the user asked for a specific role or orchestrator this session.
+
 - **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
 - **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**

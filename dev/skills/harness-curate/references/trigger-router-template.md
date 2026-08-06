@@ -127,7 +127,7 @@ exit 0
 
 ### 3. `.claude/trigger-routes.json` (project-specific)
 
-Populate during Step 7b with one route per orchestrator skill and per high-leverage agent role. **Routes must be specific** — overly broad patterns hijack normal conversation.
+Populate during harness-init Step 7b with one route per orchestrator skill and per high-leverage agent role. **Routes must be specific** — overly broad patterns hijack normal conversation.
 
 ```json
 [
@@ -197,7 +197,7 @@ When the hook fires too often or never:
 - **Never fires when it should** → run the prompt verbatim through the test command above; usually the pattern is too narrow or in wrong language.
 - **Two routes conflict** → reorder routes (top wins) or split the second route's pattern.
 
-Record changes in `references/harness-invariants.md` → "Trigger Router Routes" so future sessions don't reintroduce removed routes.
+Record changes in `dev:harness-init` → `references/harness-invariants.md` → "Trigger Router Routes" so future sessions don't reintroduce removed routes.
 
 ---
 

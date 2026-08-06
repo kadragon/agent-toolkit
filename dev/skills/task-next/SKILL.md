@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.7
+version: 1.4.9
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -23,17 +23,24 @@ work already on the queue. Prerequisites and the working-tree gate apply to all 
 
 ## Prerequisites
 
-The repo must have `backlog.md`, `docs/workflows.md`, `docs/eval-criteria.md`, and
-`docs/conventions.md` (harness-init artifacts). If any is missing, stop and point the user
-to `dev:harness-init`.
+**Required:** `backlog.md`, `docs/workflows.md`, `docs/eval-criteria.md` — the queue and the two
+docs this skill executes. If any is missing, stop and point the user to `dev:harness-init`.
+
+**Conditional:** `docs/conventions.md` is generated at init only when rules exist that the linter
+does not already own, so a repo whose linter owns every rule correctly has none. Read and follow it
+when present; when absent, proceed and take the linter as the authority. Never stop on its absence.
 
 **Working tree gate:** Run `git status --porcelain`. If the output is non-empty, stop and
 list the dirty files — do NOT proceed. Ask the user to commit, stash, or discard first. If the
 dirty tree turns out to be an in-flight feature branch (not stray dirty files), route to the
 "Work already in flight" edge case below instead of hard-stopping.
 
-`tasks.md` is optional: present in an active sprint or as a review-backlog accumulator; absent
-in the idle state. If absent, only `backlog.md` candidates are offered.
+`tasks.md` is optional: it holds the Sprint Contract and nothing else, so it is present only
+during a sprint and absent in the idle state. Every persistent item — queued work, review
+findings, security findings — lives in `backlog.md`, which is why `backlog.md` is a prerequisite
+and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
+`## Review Backlog` / `## Security Fixes` section, move it to `backlog.md` verbatim before
+proceeding: those items are not selectable, and `prune-tasks` refuses to run until they move.
 
 ## Step 1 — Gather candidate groups
 
@@ -57,19 +64,22 @@ and the user goes to `dev:harness-init`. Only `tasks.md` is optional.
 
 Prints one line per candidate — `[N] <source>: <heading> (<M> items)`; h1 sprint blocks omit the
 item count. The script owns the selection algorithm end to end: source order (tasks.md `status:
-open` h1 sprint blocks → `## Review Backlog` h3 groups → backlog.md h2/h3 groups), the per-source
-and combined cap-5 truncation, skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by:
-…)*` and blocks marked `status: active`/`done`, and discarding headings and items buried in
-`<!-- ... -->` comments or fenced code blocks. Read the script if you need the exact rule.
+open` h1 sprint blocks → backlog.md h2/h3 groups), the per-source and combined cap-5 truncation,
+skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by: …)*` and blocks marked
+`status: active`/`done`, and discarding headings and items buried in `<!-- ... -->` comments or
+fenced code blocks. Read the script if you need the exact rule.
 
-**Read stderr on every run, not just empty ones.** Two orchestrator decisions depend on it:
+**Read stderr on every run, not just empty ones.** Three orchestrator decisions depend on it:
 
 - `Warning: unbalanced fence opened at line N in <file>` — a stray odd fence blanks everything
   after it, so part of the queue can be hidden while other groups still surface. Relay the
   warning and treat that file as untrustworthy: do NOT present the candidate list as complete.
-- On zero candidates the script writes a diagnosis naming *which kind* of empty this is. If it
-  says candidates are reachable with `--full-scan`, run the full scan — there IS work. Otherwise
-  relay the diagnosis verbatim; **never report "queue clear" on an empty stdout alone.**
+- `Warning: <file> holds N persistent section(s) that belong in backlog.md` — a `tasks.md` still
+  carrying `## Review Backlog` / `## Security Fixes`. Those items are real queued work that no
+  rule can select, and `prune-tasks` will refuse at pre-merge cleanup. Move the section to
+  `backlog.md` verbatim (the item syntax is identical) before continuing, and say so.
+- On zero candidates the script writes a diagnosis naming *which kind* of empty this is. Relay it
+  verbatim; **never report "queue clear" on an empty stdout alone.**
 
 **Fast-path selection (cap = 5):**
 
@@ -90,10 +100,10 @@ rc=$?
 [[ $rc -eq 0 ]] || { echo "backlog_candidates.py exited $rc — see its stderr above" >&2; exit 1; }
 ```
 
-Uncapped, and two differences from the fast path: it also reads `tasks.md` h2 headings **outside**
-`## Review Backlog` — a source the fast path never covers, so a fast-path zero is not proof the
-queue is empty — and the backlog.md sources use type priority (all qualifying h3 headings before
-any h2 heading) instead of the fast path's document order. Every h2/h3 with an open
+Uncapped, and one difference from the fast path: the backlog.md sources use type priority (all
+qualifying h3 headings before any h2 heading) instead of the fast path's document order. Both
+algorithms qualify a heading by the same test, so a fast-path zero **is** proof the queue is
+empty — the full scan is for ordering and completeness, not reachability. Every h2/h3 with an open
 `- [ ]` qualifies — including `## Ideas` or `## Someday`; park an item with
 `[>]`/`[x]`/a `*(deferred: ...)*` marker, not by choosing a section name.
 
@@ -101,7 +111,7 @@ any h2 heading) instead of the fast path's document order. Every h2/h3 with an o
 
 | Groups found | Action |
 |-------------|--------|
-| 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, candidates reachable with `--full-scan` — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
+| 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, a `tasks.md` findings section pending migration — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
 | ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
 
@@ -162,9 +172,27 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 git checkout -b "$BRANCH"
 ```
 
+**Roster check — before any agent spawn in this step or the ones below.** A role exists only if
+`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present. `dev:harness-init` creates
+**no** roles (its Step 4b), so an empty roster is the designed state of a freshly initialized repo,
+not a defect — never stop on it, and never create the role mid-task. Route around it per the
+fallbacks attached to each spawn point below, say in one line which fallback you took, and note that
+`dev:harness-curate` is what adds a role once the transcripts show the delegation recurring.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
+(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
+lists the role as an available agent type, treat it as present regardless of the probe.
+
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
-writing the Sprint Contract.
+writing the Sprint Contract. **`explorer` absent from the roster:** spawn the built-in `Explore`
+subagent with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at for a repo
+with no roles.
 
 **Plan mode gate (before workflows.md Step 2)**
 Check tag first, then file count:
@@ -183,11 +211,8 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
   The existing h1 block IS the Sprint Contract — do not write a new one. Read the h1 block's
   body (especially `## Acceptance criteria` if present) for implementation scope.
 
-*tasks.md finding group (h3 under Review Backlog, or h2 grab-bag):* leave `[ ]` checkboxes
-  as-is — findings resolve when the fix is committed and verified. No `[>]` flip; no
-  `## Covers` section needed.
-
-*backlog.md group (h2 or h3):* Write a `tasks.md` Sprint Contract with:
+*backlog.md group (h2 or h3) — including a `### PR #N` findings group under `## Review Backlog`:*
+  Write a `tasks.md` Sprint Contract with:
   - `# heading` = the selected heading title (verbatim from backlog.md)
   - `status: active`
   - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
@@ -208,6 +233,14 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Objective / Output format / Tools to use / Boundaries). List each item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
+- **`implementer` absent from the roster:** implement inline on the main thread. The Sprint
+  Contract, the in-scope path list and the lint/test command all still apply — only the spawn
+  brief is dropped. QA then follows the same rule it always does: whoever implemented does not
+  verify, so the main thread hands off to the verifier per the QA step below. This fallback
+  covers every implementer spawn this skill owns, including `--tree` mode and batch mode's
+  per-unit fan-out (`references/tree.md`, `references/batch.md`) — there the main thread works
+  the units itself, sequentially, one worktree at a time, since the parallelism came from the
+  fan-out that is no longer available.
 - **Stuck-fix stop condition:** if the same fix is attempted 3+ times on the same file without
   the lint/test command passing (inline edits or implementer briefs alike), stop and report to
   the user instead of continuing to retry. This is a prompted constraint, not a mechanically
@@ -228,10 +261,21 @@ verify — a deliberate exception to the volume half of the repo's delegation ga
 `docs/delegation.md` → *Role Routing*. The exception covers every QA spawn this skill owns,
 batch mode's per-unit verifiers included; every non-QA delegation still needs both conditions.
 
-If qa-verifier reports blocking issues:
+**`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
+verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
+four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
+with the Sprint Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test
+command, and telling it to verify against those criteria rather than impressions and to change
+nothing. What must never be dropped is the independence, not the role name: the agent
+that implemented — the main thread included, when the implementer fallback above was taken — does
+not verify its own output. This fallback applies to every QA spawn this skill owns, batch mode's
+per-unit verifiers included.
+
+If the verifier reports blocking issues:
 1. Surface findings to user.
-2. Spawn `implementer` with those findings as its brief to fix them.
-3. Re-run `qa-verifier` once.
+2. Spawn `implementer` with those findings as its brief to fix them (or fix inline, when
+   `implementer` is absent).
+3. Re-run the verifier once.
 4. If still blocking after one retry: stop and report — do NOT hand off with unresolved blockers.
 
 **Version bump (workflows.md Step 5)**
@@ -249,10 +293,13 @@ every run, so a change touching two skills needs the second skill's `version:` e
 re-running would bump the plugin twice for one change.
 
 `bump-version.sh` keeps both platform manifests in sync and states the semver table in its own
-header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy. Read one of them
-rather than recalling the rules. If the repo has no `scripts/bump-version.sh` (it ships with this
-marketplace, not with the skill), edit the manifests by hand per `docs/conventions.md`; if the repo
-has no `plugin.json` at all, skip this step.
+header; `docs/conventions.md` → *Plugin Version Bump Rules* is the prose copy where that doc exists.
+Read one of them rather than recalling the rules — the script header suffices on its own when the
+repo has no `docs/conventions.md`. If the repo has no `scripts/bump-version.sh` (it ships with this
+marketplace, not with the skill), edit the manifests by hand per the same rules; if the repo
+has no `plugin.json` at all, skip this step. With **neither** the script nor `docs/conventions.md`
+present, the repo has stated no release policy — ask the user for the bump level instead of
+inventing one.
 
 **Do NOT commit.** Leave all changes uncommitted. `task-review` Step 1 commits everything
 so there is one clean commit per review/merge cycle.
@@ -272,8 +319,6 @@ NODES="$SKILL_DIR/scripts/task_nodes.py"
 
 # tasks.md h1 block — a sprint, or the Sprint Contract written for a backlog.md group
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
-# tasks.md finding lines (h3/h2 group), verbatim, one per line
-printf '%s\n' "<each fixed - [ ] line>" | python3 "$NODES" prune-tasks --file tasks.md
 # backlog.md lines listed verbatim in the Sprint Contract's ## Covers
 printf '%s\n' "<each ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
 # one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
@@ -287,7 +332,9 @@ worded items and only one is done. Re-read and re-run rather than loosening the 
 dropped only where this sprint left its whole section blank, so `[x]`/`[>]` history, prose and
 surviving child headings all keep their ancestors alive. **This is deliberately stricter than the
 rule it replaced** ("no open `- [ ]` items left"), which would strand surviving `[x]` lines under a
-deleted heading. `tasks.md` goes once empty, `backlog.md` never does. What the script cannot decide — the character cap, and the ban
+deleted heading. `tasks.md` goes once empty — safe because it holds the Sprint Contract and
+nothing else, which `prune-tasks` verifies before touching it — and `backlog.md` never does.
+What the script cannot decide — the character cap, and the ban
 on explanatory clauses, file lists and narration — lives in `harness-invariants.md` → *CHANGELOG
 Entry Contract*. Read it before choosing the title; do not reconstruct the limits from memory.
 
@@ -321,7 +368,7 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 Invoke `Skill(dev:task-review)` with `args: --auto`.
 
 `task-review --auto` commits (including the cleanup changes above), creates PR, collects
-reviews, applies in-scope findings, records out-of-scope items to `tasks.md`, waits CI, and merges.
+reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
 
 **If task-review reports CI failure and the PR must be abandoned:** close the PR and delete
 the feature branch without merging — `main` retains the pre-cleanup state and no rollback is needed.
@@ -421,5 +468,5 @@ If all candidates are deferred with unresolved blockers, report that and stop.
 is unresolved, note it as a warning but continue with the non-deferred items in that group.
 If all items in the group are deferred, skip the group (see Step 2 deferred-items rule).
 
-**tasks.md finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
-Record broader related items back to `tasks.md` via the out-of-scope path in task-review.
+**Review finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
+Record broader related items back to `backlog.md` via the out-of-scope path in task-review.

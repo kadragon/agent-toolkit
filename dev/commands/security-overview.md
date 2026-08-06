@@ -1,11 +1,11 @@
 ---
-description: "Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos and write per-repo tasks.md with prioritized fix tasks"
+description: "Scan all GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos and append prioritized fix tasks to each repo's backlog.md"
 allowed-tools: ["Bash", "Read", "Write"]
 ---
 
 # Security Overview
 
-Scan all GitHub security alerts across authenticated user's repos, ensure affected repos cloned locally, produce per-repo `tasks.md` with prioritized fix tasks.
+Scan all GitHub security alerts across authenticated user's repos, ensure affected repos cloned locally, append a prioritized `## Security Fixes` section to each repo's `backlog.md`.
 
 Respond in user's language; technical artifacts (commits, branches, file paths) in English.
 
@@ -80,27 +80,27 @@ For each affected repo:
 
 Report status: already-local vs newly-cloned repos. If clone fails for one repo, log the error, continue with remaining repos. Report all failures in final summary. Do NOT abort the entire run.
 
-## Phase 3: Generate tasks.md
+## Phase 3: Update backlog.md
 
-Write **separate** `tasks.md` into **each affected repo's root**. Do NOT create single consolidated file.
+Write a `## Security Fixes` section into **each affected repo's own `backlog.md`**. Do NOT create a single consolidated file, and do NOT write to `tasks.md` — that file is the current Sprint Contract and is deleted at sprint close, so findings placed there are lost.
 
 ### 3-1. Read code context
 
 Before writing fix tasks, read relevant files per repo:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files. Before writing items, check for already-open Dependabot PRs: run `gh search prs --author app/dependabot --state open --repo <owner>/<repo> --limit 100 --json number,title,url` once per affected repo (not per-alert), then match each alert's package name exactly (not by substring) against the package token in PR titles. Pattern details → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`** § Cross-referencing Open PRs.
-- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in tasks.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
+- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
-### 3-2. Write tasks.md
+### 3-2. Write the backlog.md section
 
-Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/tasks-template.md`**.
+Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/backlog-template.md`**.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
-- If an alert's package matches an open Dependabot PR, write the PR-pointer item instead of the manual upgrade item — format → tasks-template.md.
+- If an alert's package matches an open Dependabot PR, write the PR-pointer item instead of the manual upgrade item — format → backlog-template.md.
 
 ### 3-3. Present result
 

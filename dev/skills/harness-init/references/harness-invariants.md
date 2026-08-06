@@ -18,7 +18,7 @@ value changes here, update both in the same commit.
 | `backlog.md` | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings | init Step 4 | maintenance C + D-1 |
 | `tasks.md` | Fields: `# Title`, `status:`, `Scope`, `Acceptance Criteria`, `Evaluator Feedback` | init Step 4 | maintenance C + D-1 |
 | `docs/architecture.md` etc. | Referenced from AGENTS.md docs index | init Step 4 | `validate-harness.sh` |
-| `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`, `model`; `tools` optional) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria, unless the role declares `spine-exempt: true` | init Step 4b (if multi-agent) | `validate-harness.sh` §11 (presence only — WARN) |
+| `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`; `tools` and `model` optional) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria, unless the role declares `spine-exempt: true` | **not init** — created later by `dev:harness-curate` on transcript evidence (init Step 4b creates no roles) | `validate-harness.sh` §11 (presence only — WARN; skipped entirely when no role files exist) |
 
 ## AGENTS.md Size Policy
 
@@ -55,8 +55,8 @@ Every subagent/teammate spawn MUST carry all four fields:
 **Objective**, **Output format**, **Tools to use**, **Boundaries**.
 
 Enforced by:
-- `references/delegation-template.md` → "Spawn Prompt Contract" (documents it)
-- `references/teammate-role-template.md` (each role's body restates it)
+- `dev:harness-curate` → `references/delegation-template.md` → "Spawn Prompt Contract" (documents it)
+- `dev:harness-curate` → `references/teammate-role-template.md` (each role's body restates it)
 - `references/enforcement-template.md` → `task-created-contract.sh` (blocks at `TaskCreated`)
 
 When this contract changes, update all three places plus any existing `.claude/hooks/task-created-contract.sh` in target repos.
@@ -87,8 +87,16 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 | `failed` | Revert `[>]` → `[ ]` in backlog with evaluator note; delete tasks.md | Sprint returned to queue |
 | (no tasks.md) | Strip orphan `[>]` markers from backlog | Backlog idle state |
 
-For this contract to hold, init MUST create `backlog.md` / `tasks.md` with the
-exact schema above.
+For this contract to hold, init MUST create `backlog.md` with the exact schema above, and the
+first sprint MUST write `tasks.md` to it (init never creates `tasks.md` — the idle state is its
+absence).
+
+**File-role invariant.** `tasks.md` is the Sprint Contract and nothing else; `backlog.md` is the
+only persistent queue. Deleting `tasks.md` on sprint close is safe *because* nothing that must
+outlive the sprint is in it. Review findings, security findings, sweep findings and follow-ups all
+append to `backlog.md`. Enforced at both ends: `task_nodes.py prune-tasks` refuses on a `tasks.md`
+holding a `## Review Backlog` / `## Security Fixes` section, and `backlog_candidates.py` warns on
+the same shape instead of offering it as work.
 
 ## CHANGELOG Entry Contract
 

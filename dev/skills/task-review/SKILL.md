@@ -201,7 +201,7 @@ If all sources fail → inline review + note in consolidation.
 
 ### Step 3: Consolidate + Confirm
 
-Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 band), confidence filtering (< 50 drops to low-confidence list), scope classification, and tasks.md recording.
+Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 band), confidence filtering (< 50 drops to low-confidence list), scope classification, and backlog.md recording.
 
 **Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding. Both prompts are subject to the **result-handoff rule** from Step 2 — each must end with an explicit instruction to return its verdicts via `SendMessage(to: "main")`, including when the verdict list is empty.
 
@@ -212,8 +212,8 @@ If `--auto` NOT set: STOP, present consolidated table, wait for confirmation.
 If `--auto` set: treat all in-scope (non-refuted) as approved.
 
 Before proceeding:
-1. Write out-of-scope items to `tasks.md` (format in consolidation-guide.md).
-2. If no in-scope items: skip Step 4, but still run Step 4.5 (retrospect). Run Step 5 if `tasks.md` was modified or Step 4.5 edited any repo file. Step 6 always runs (unless `--no-hub`).
+1. Write out-of-scope items to `backlog.md` (format in consolidation-guide.md). Never `tasks.md` — it is the Sprint Contract and is deleted at sprint close.
+2. If no in-scope items: skip Step 4, but still run Step 4.5 (retrospect). Run Step 5 if `backlog.md` was modified or Step 4.5 edited any repo file. Step 6 always runs (unless `--no-hub`).
 
 ### Step 4: Apply Improvements
 
@@ -231,9 +231,9 @@ If a signal exists, invoke `Skill(dev:harness-capture)` and route its write-back
 |--------|-----------|
 | Preference / approach correction | **auto-memory** — outside the repo, so write now with no merge impact |
 | Small doc or gotcha tied to this change | inline edit to `docs/*.md` / `AGENTS.md` / `CLAUDE.md` → rides into the Step 5 commit, validated by Step 6 CI |
-| New skill, skill overhaul, or multi-file doc rewrite | record to `tasks.md` as a follow-up (same channel as an out-of-scope finding) — do **not** inline: it would balloon the PR, and a skill edit would force a mid-cycle version re-bump |
+| New skill, skill overhaul, or multi-file doc rewrite | record to `backlog.md` as a follow-up (same channel as an out-of-scope finding) — do **not** inline: it would balloon the PR, and a skill edit would force a mid-cycle version re-bump |
 
-`--auto`: `harness-capture` runs **non-interactively** (its cycle-tail `--auto` path) — it writes the light memory/doc delta directly, with this PR's review + CI as the veto, and defers any destructive memory prune to `tasks.md` instead of pausing. Interactive: it shows the proposed delta and waits for confirm. Heavy items always defer to `tasks.md`, never inline.
+`--auto`: `harness-capture` runs **non-interactively** (its cycle-tail `--auto` path) — it writes the light memory/doc delta directly, with this PR's review + CI as the veto, and defers any destructive memory prune to `backlog.md` instead of pausing. Interactive: it shows the proposed delta and waits for confirm. Heavy items always defer to `backlog.md`, never inline.
 
 Any repo file edited here rides into Step 5 — add it to `FILES_TO_STAGE` below.
 

@@ -285,7 +285,7 @@ done < "$FILE"
 
 ## Agent Teams Quality Gates (Layer 1 extension)
 
-If Agent Teams is enabled (see `references/agent-teams-onboarding.md`), three team-lifecycle hooks give the harness mechanical control points that do not exist for single-session work. Non-zero exit with code `2` sends feedback back to the agent and blocks the event.
+If Agent Teams is enabled (see `dev:harness-curate` → `references/agent-teams-onboarding.md`), three team-lifecycle hooks give the harness mechanical control points that do not exist for single-session work. Non-zero exit with code `2` sends feedback back to the agent and blocks the event.
 
 Do not key any of these hooks on the payload's `team_name` field — it is deprecated and now just carries the session-derived name (`session-` + the first eight session-id characters), since a session has exactly one team.
 
@@ -307,7 +307,7 @@ Do not key any of these hooks on the payload's `team_name` field — it is depre
 
 ### `task-created-contract.sh` — enforce Spawn Prompt Contract
 
-Reject any task whose prompt is missing any of the 4 contract fields (Objective, Output format, Tools to use, Boundaries). This turns `references/delegation-template.md` → "Spawn Prompt Contract" into a mechanical check.
+Reject any task whose prompt is missing any of the 4 contract fields (Objective, Output format, Tools to use, Boundaries). This turns `dev:harness-curate` → `references/delegation-template.md` → "Spawn Prompt Contract" into a mechanical check.
 
 ```bash
 #!/usr/bin/env bash
@@ -322,7 +322,7 @@ done
 
 if (( ${#missing[@]} > 0 )); then
     echo "Spawn Prompt Contract violated. Missing fields: ${missing[*]}" >&2
-    echo "See references/delegation-template.md → Spawn Prompt Contract. Re-spawn with all 4 fields." >&2
+    echo "See harness-curate references/delegation-template.md → Spawn Prompt Contract. Re-spawn with all 4 fields." >&2
     exit 2
 fi
 exit 0
@@ -465,12 +465,12 @@ Wire in `.claude/settings.json`:
 **Tuning:**
 
 - **Critical path list** comes directly from AGENTS.md → Delegation table. Use shell glob syntax (`*/auth/*`, `auth/*`), NOT gitignore `**`. `case` does not recurse — include both root and nested variants explicitly per area.
-- **Evidence file naming** must encode the session_id so prior-session evidence does not permanently unblock the gate. Required form: `{NN}_{agent}_{area}_{session_id}_{artifact}.md`. Update `references/orchestrator-template.md` consumers if the convention drifts.
+- **Evidence file naming** must encode the session_id so prior-session evidence does not permanently unblock the gate. Required form: `{NN}_{agent}_{area}_{session_id}_{artifact}.md`. Update `dev:harness-curate` → `references/orchestrator-template.md` consumers if the convention drifts.
 - **Manual override** is allowed by touching a session-tagged sentinel file in `.claude/tmp/` — gitignored, so audit via shell history / session logs, not git history. Don't make it impossible; agents will copy-paste workarounds. Make it visible.
 
 **Skip this hook if:** the delegation table has no path-based critical patterns, or the orchestrator pattern isn't used (single-agent repo).
 
-**Layer composition.** This gate is the *blocking* enforcement; directive skill/agent descriptions are the primary *discovery* mechanism, with the UserPromptSubmit trigger router (`references/trigger-router-template.md`) as an optional discovery *fallback*. The gate stands on its own — install it wherever an inline edit to a critical path is genuinely dangerous, regardless of whether the router is present. Where the router fallback is also installed, the two compose: the router nudges the agent to spawn the delegate; the gate prevents skipping the delegation entirely if discovery missed.
+**Layer composition.** This gate is the *blocking* enforcement; directive skill/agent descriptions are the primary *discovery* mechanism, with the UserPromptSubmit trigger router (`dev:harness-curate` → `references/trigger-router-template.md`) as an optional discovery *fallback*. The gate stands on its own — install it wherever an inline edit to a critical path is genuinely dangerous, regardless of whether the router is present. Where the router fallback is also installed, the two compose: the router nudges the agent to spawn the delegate; the gate prevents skipping the delegation entirely if discovery missed.
 
 ## Circuit Breaker (Layer 1 Extension)
 

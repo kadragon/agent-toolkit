@@ -66,6 +66,10 @@ result=$(some_command)
 
 Every shell pattern in skill docs that references `$var` MUST show the `var=$(cmd)` capture step first. Failure mode: agents read the pattern, skip capture, reference unset variable.
 
+### No heredoc inside an indented snippet
+
+A fenced block nested in a Markdown list item carries the list's indentation, and an indented terminator never closes `<<'EOF'` — the heredoc swallows the rest of the input, and Python bodies pick up a leading indent that is a top-level `IndentationError`. `<<-` does not save it: that strips tabs only, and stripping the body's indent is what breaks the Python. Inside a list item use `python3 -c '...'` (or move the fence to column 0). Top-level snippets may use heredocs freely — the terminator sits at column 0 there.
+
 ### Hook Script Exit Policy
 
 - Hooks (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`): always `exit 0` — never block on unexpected input
@@ -191,7 +195,7 @@ A new check must not ship a warning the repo has *already decided* is correct-by
 warning never goes away, so it teaches the operator to skim past the whole section — costing the
 real drift the check exists to catch. When a legitimate exception exists, give it a mechanical
 opt-out (a frontmatter key, a marker comment) and document the class that may use it; deferring
-the decision to `tasks.md` leaves the noisy state as the shipped default.
+the decision to `backlog.md` leaves the noisy state as the shipped default.
 
 Reference implementation: `spine-exempt: true` in `validate-harness.sh` §11.
 

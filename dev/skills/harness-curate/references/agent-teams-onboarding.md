@@ -94,7 +94,7 @@ time.
 ### 4. Wire the team hooks
 
 Add to `.claude/settings.json` hooks block (see
-`references/enforcement-template.md` → "Agent Teams Quality Gates"):
+`dev:harness-init` → `references/enforcement-template.md` → "Agent Teams Quality Gates"):
 
 - `TaskCreated` — enforce Spawn Prompt Contract (reject tasks missing any
   of the 4 fields)
@@ -110,8 +110,8 @@ enabled):
    teammate via the native shared task list (`TaskCreate`, persisted under
    the Claude config dir, default `~/.claude/tasks/{team-name}/`). No
    teammate edits outside its glob.
-   `tasks.md`/`backlog.md` stay the durable backlog — read-only during team
-   work. See `references/workflows-template.md` → "Step 1.5: File Ownership
+   `backlog.md` stays the durable backlog — read-only during team
+   work. See `dev:harness-init` → `references/workflows-template.md` → "Step 1.5: File Ownership
    Declaration".
 
 2. **Start with 3–5 teammates.** There is no hard platform limit, but token
@@ -135,7 +135,7 @@ enabled):
 6. **Teammates do not inherit lead conversation.** Every spawn prompt must
    be self-contained (Spawn Prompt Contract — all 4 fields).
 
-7. **Task store separation.** `tasks.md`/`backlog.md` = durable backlog
+7. **Task store separation.** `backlog.md` = durable backlog
    (read-only mid-session input). Live coordination, status, and file globs
    live in the native shared task list (Task tools, persisted under the
    Claude config dir, default `~/.claude/tasks/{team-name}/`; see the Path
@@ -199,9 +199,9 @@ You: "Review PR #142 with three independent lenses."
 
 Claude (lead):
   Creating team with 3 teammates:
-    - sec-reviewer (security-reviewer role, opus)
-    - perf-reviewer (qa-verifier role with perf focus, sonnet)
-    - test-coverage-reviewer (qa-verifier role with coverage focus, sonnet)
+    - sec-reviewer (security-reviewer role)
+    - perf-reviewer (qa-verifier role with perf focus)
+    - test-coverage-reviewer (qa-verifier role with coverage focus)
 
   Shared task list seeded with 3 tasks (one per lens).
   Each teammate has its own Spawn Prompt Contract referencing PR #142 diff.

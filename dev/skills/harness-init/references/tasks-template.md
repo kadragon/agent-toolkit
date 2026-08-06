@@ -7,6 +7,25 @@ time the file is absent (that's the idle state).
 The maintenance routine section C reads `status:` every session to decide whether to archive,
 revert, or leave the sprint intact.
 
+## Invariant: nothing persistent lives here
+
+`tasks.md` holds the Sprint Contract and **nothing else**. The file is removed whole at sprint
+close, so any content that must outlive the sprint would be destroyed by that removal.
+
+| Content | File |
+|---|---|
+| Sprint Contract for the sprint in flight | `tasks.md` — deleted at close |
+| Queued work, review findings, security findings, follow-ups | `backlog.md` — persistent |
+
+Do **not** add `## Review Backlog`, `## Security Fixes`, or any other findings section to
+`tasks.md`. Those go to `backlog.md` (see `references/backlog-template.md`). This is enforced:
+`task_nodes.py prune-tasks` refuses to run against a `tasks.md` carrying a persistent findings
+section, and tells you to move it.
+
+*Migrating an older repo:* move the whole `## Review Backlog` / `## Security Fixes` section into
+`backlog.md` verbatim — the item syntax is identical, and `backlog.md` already groups items under
+`##`/`###` headings.
+
 ## Required Schema
 
 The file MUST contain:

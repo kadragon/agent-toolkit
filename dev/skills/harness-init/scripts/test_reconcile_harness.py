@@ -303,6 +303,39 @@ status: done
 """
 
 
+def test_remove_empty_headings_keeps_nested_findings():
+    """REGRESSION: a parent heading whose child owns items must survive.
+
+    The documented findings shape in backlog.md is '## Review Backlog' / '### PR #N' /
+    items.  The old 'heading followed by a heading' test deleted both the parent and
+    '# Backlog' itself, orphaning every finding on the ordinary idle maintenance path.
+    """
+    nested = (
+        "# Backlog\n\n"
+        "## Review Backlog\n\n"
+        "### PR #101 — earlier PR (2026-07-01)\n\n"
+        "- [ ] [debt] leftover finding\n\n"
+        "## Security Fixes — my-webapp\n\n"
+        "### Dependabot Alerts\n\n"
+        "- [ ] Upgrade jsonwebtoken\n"
+    )
+    result = mod.remove_empty_headings(nested)
+    for keep in ("# Backlog", "## Review Backlog", "### PR #101", "## Security Fixes — my-webapp",
+                 "### Dependabot Alerts", "leftover finding", "Upgrade jsonwebtoken"):
+        check(f"empty-headings: {keep!r} preserved", keep in result, repr(result))
+
+
+def test_remove_empty_headings_still_drops_empty_ones():
+    """The genuinely-empty cases must still go, including a parent whose children are all empty."""
+    result = mod.remove_empty_headings(
+        "# Backlog\n\n## Has work\n\n- [ ] real item\n\n## Empty parent\n\n### Empty child\n"
+    )
+    check("empty-headings: empty child dropped", "### Empty child" not in result, repr(result))
+    check("empty-headings: parent of only-empty children dropped", "## Empty parent" not in result)
+    check("empty-headings: section with work kept", "## Has work" in result and "real item" in result)
+    check("empty-headings: root kept", "# Backlog" in result)
+
+
 def test_strip_preserves_review_backlog():
     """strip_sprint_block removes the Sprint Contract but keeps ## Review Backlog."""
     result = mod.strip_sprint_block(TASKS_WITH_BACKLOG)
@@ -646,6 +679,8 @@ SUITES = [
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
+    ("empty-headings: nested findings preserved", test_remove_empty_headings_keeps_nested_findings),
+    ("empty-headings: genuinely empty still dropped", test_remove_empty_headings_still_drops_empty_ones),
 ]
 
 if __name__ == "__main__":

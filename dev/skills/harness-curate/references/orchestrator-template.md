@@ -4,6 +4,19 @@ An orchestrator is a **skill** (`.claude/skills/{domain}-orchestrator/SKILL.md`)
 
 Copy and adapt one of the three templates below based on coordination needs.
 
+## Build checklist
+
+An orchestrator is warranted once ≥1 agent role exists **and** the transcripts show the same multi-step domain workflow recurring — not at `harness-init` time (its Step 4c creates none). When that point arrives:
+
+1. **Create** `.claude/skills/{domain}-orchestrator/SKILL.md`. Body prose follows the repo's docs language; trigger phrases and `description:` follow the operator's prompt language (harness-init Step 1 carve-out).
+2. **Pick a mode** — Template A (team), B (sub-agent), or C (hybrid) below.
+3. **Include all four:** an explicit data-transfer strategy (`references/delegation-template.md` → Data Transfer Protocols) with the scratchpad path read from the system prompt and embedded in every spawn prompt; an error policy (1 retry, graceful degradation, report omissions); scratchpad naming `{phase:02d}_{agent}_{artifact}.{ext}`; and the Task Claim Protocol below if ≥2 agents share a task pool.
+4. **Write a directive `description:`** — this is the primary auto-invocation mechanism; see "Description writing rule" below.
+5. **Register it** in AGENTS.md (or `docs/`), never CLAUDE.md: a `## Harness: {Domain}` pointer block with the trigger rule and a change-history table in `docs/harness-log.md`, plus one row under AGENTS.md's `## Docs Index`. CLAUDE.md stays a pure `@AGENTS.md` pointer, enforced by `validate-harness.sh`.
+6. **Document the scratchpad convention** in `docs/runbook.md` so future sessions and new contributors find it — the block under "Scratchpad Convention" below is the text to copy.
+
+**No cross-session resume.** That mechanism was removed; scratchpad artifacts do not survive a new CLI session. Do not write an orchestrator that assumes otherwise.
+
 ## Choosing an Execution Mode
 
 ```
@@ -41,7 +54,7 @@ description: |
   Skip only if user explicitly says "inline" / "직접" / "without orchestrator".
 ```
 
-Only if you are running the trigger-router *fallback* (Step 7b — installed on a measured miss-rate, not by default), also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match. Absent that, the directive description above is the whole mechanism.
+Only if you are running the trigger-router *fallback* (harness-init Step 7b — installed on a measured miss-rate, not by default), also register the orchestrator in `.claude/trigger-routes.json` so the UserPromptSubmit hook emits an explicit `Use Skill(...)` instruction on match. Absent that, the directive description above is the whole mechanism.
 
 ## Skill frontmatter reference (2026)
 
@@ -51,7 +64,7 @@ Only `description` is required (defaults aside). Per the Agent Skills standard p
 |-------|-----|
 | `description` (+ `when_to_use`) | What + when. **Combined budget ~1,536 chars — front-load the key use case**; everything past the cap is truncated and never seen. |
 | `name` | Display name; defaults to the directory name. |
-| `model` | Per-skill model override (e.g. force `opus` for a judgment-heavy orchestrator, `haiku` for a mechanical one). |
+| `model` | Per-skill model override. **Leave unset by default** — the skill inherits the session model and the caller overrides per spawn; pin only when the skill is defined by its tier (`delegation-template.md` → Model Selection). |
 | `effort` | Per-skill reasoning effort (`low`…`max`). |
 | `disable-model-invocation: true` | Manual-only (`/name`); also keeps it out of subagent preload. Use for destructive or expensive skills that must not auto-fire. |
 | `user-invocable: false` | Hide from the `/` menu — background knowledge the model consults but the user never calls directly. |
@@ -235,7 +248,7 @@ Rules:
 - The orchestrator determines the path once and embeds it explicitly in every spawn prompt; sub-agents/teammates must not derive it themselves
 - Final deliverables go to user-specified path; intermediates stay in the scratchpad
 - Ephemeral by design — gone when the session ends, no cross-session resume
-- **This is a different mechanism from the delegation gate's evidence files.** If `references/enforcement-template.md`'s PreToolUse gate is installed, its evidence files live in the repo-local `.claude/tmp/` (not the scratchpad) and still require `{area}_{session_id}` stamping — see that file for the naming convention. Do not conflate the two.
+- **This is a different mechanism from the delegation gate's evidence files.** If `dev:harness-init` → `references/enforcement-template.md`'s PreToolUse gate is installed, its evidence files live in the repo-local `.claude/tmp/` (not the scratchpad) and still require `{area}_{session_id}` stamping — see that file for the naming convention. Do not conflate the two.
 
 ---
 

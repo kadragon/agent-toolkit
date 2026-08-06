@@ -117,8 +117,8 @@ any worktree.
    If every unit conflicts/drops, abandon: `git checkout main && git branch -D <type>/batch-<slug>`,
    then jump to A7 cleanup and report (do not leave the checkout stranded on a dead branch).
 3. **Collect cleanup targets — once.** For each merged unit, record what to delete:
-   - **backlog units** → all open `- [ ]` lines directly under the unit's heading group in `backlog.md` (read the heading section; every `- [ ]` item under it is a deletion target)
-   - **finding groups** → the completed `- [ ]` lines in the relevant h3/h2 block in `tasks.md`
+   - **backlog units** → all open `- [ ]` lines directly under the unit's heading group in `backlog.md` (read the heading section; every `- [ ]` item under it is a deletion target). Findings groups (`### PR #N` under `## Review Backlog`) are backlog units like any other — same file, same rule.
+   - **sprint blocks** → the unit's `# <title>` block in `tasks.md`, deleted with `--block`
 4. **Version bump — once.** `bash scripts/bump-version.sh <plugin> <major|minor|patch>` per touched
    plugin, a single time for the whole batch (it keeps both manifests in sync). Bump level per that
    script's header / `docs/conventions.md`; hand-edit only where the script is absent.
@@ -128,13 +128,13 @@ any worktree.
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
    NODES="$SKILL_DIR/scripts/task_nodes.py"
    [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
-   printf '%s\n' "<every completed tasks.md finding line>" | python3 "$NODES" prune-tasks --file tasks.md
+   python3 "$NODES" prune-tasks --file tasks.md --block "<sprint h1 title>"   # only if a sprint block exists
    printf '%s\n' "<every completed backlog.md item line>"  | python3 "$NODES" prune-backlog --file backlog.md
    python3 "$NODES" changelog --file CHANGELOG.md --title "<batch-slug>" --units <N> \
      --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
    ```
-   A heading is dropped only where this batch emptied it, `## Review Backlog` and `tasks.md` go the
-   same way once empty, and `--units <N>` produces the batch entry's `(<N> units)` clause. **No
+   A heading is dropped only where this batch emptied it, `## Review Backlog` in `backlog.md` goes
+   the same way once empty, and `--units <N>` produces the batch entry's `(<N> units)` clause. **No
    per-unit breakdown** in the entry — the units are enumerated in the PR body. What the script
    cannot decide — the character cap, and the ban on explanatory clauses — lives in the *CHANGELOG
    Entry Contract* in `harness-invariants.md`; read it rather than reconstructing the limits.
@@ -144,7 +144,7 @@ any worktree.
 6. **Hand off — once.** `Skill(dev:task-review)` with `args: --auto`. Running from the
    main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
    work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
-   to `tasks.md`, waits CI, and merges.
+   to `backlog.md`, waits CI, and merges.
 
 **If the integration PR fails CI and must be abandoned:** close the PR; the unit branches still
 exist, so you can re-run convergence after fixing, or fall back to single-pick per unit.

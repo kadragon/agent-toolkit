@@ -1,6 +1,6 @@
 # Signal Taxonomy — detection rules and delegate briefs
 
-Step 1's scan (`scan_transcripts.py`) emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Signal 7 has no scan block at all — it is read directly off the instruction files in Step 2. `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
+Step 1's scan (`scan_transcripts.py`) emits six blocks per project: `SKILLS-ACTIVE`, `AGENTS-USED`, `CORRECTION-SIGNALS`, `AGENT-CORRECTION-SIGNALS`, `HARNESS-FRICTION`, `PROMPTS`. Signal 7 has no scan block at all — it is read directly off the instruction files in Step 2, and so is Signal 6's second input, the auto-memory store. `PROMPTS` is raw input for model clustering (Signals 1 and 6), not a classified signal on its own. Each signal maps to a single routing decision (one tool delegation, or a user-decision surface). The skill's value is correct routing — never reimplement a generator.
 
 Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` drive triggering-miss and demote; `CORRECTION-SIGNALS`/`AGENT-CORRECTION-SIGNALS` drive underperform. Wherever a rule below names a skill, the agent equivalent applies via the agent block and routes to `plugin-dev:agent-creator` (create) or `plugin-dev:agent-development` (modify/description) instead of `skill-creator`.
 
@@ -65,7 +65,31 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **Confirm before routing:** Verify the fact is not already in AGENTS.md, CLAUDE.md, or an existing `docs/` file. If it is present but the model keeps missing it, the problem is attention/placement — surface the existing location rather than duplicating.
 
-**No scanner change needed:** Signal 6 is detected by model judgment over the same `PROMPTS` block that drives Signal 1. The scanner produces no separate output block for it.
+**No scanner change needed:** Signal 6's `PROMPTS` input is detected by model judgment over the same block that drives Signal 1. The scanner produces no separate output block for it.
+
+### Second input: the auto-memory store
+
+The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) holds facts someone already judged durable enough to persist. It is also **Claude-only and per-project**: Codex and every other tool reads `AGENTS.md` and `docs/`, never this directory. So a repo-scoped fact sitting in memory is a Signal 6 candidate that skipped the frequency question — it earned persistence when it was written; what it did not get is the right *home*.
+
+**Detect:** Step 2's memory-store lens, not `PROMPTS`. A memory qualifies when **both** hold:
+- frontmatter `metadata.type` is `project` or `reference`, **and**
+- the content is scoped to one repo (a path, tool, endpoint, constraint, or convention that only makes sense inside it).
+
+**Not a finding:**
+- **`type: user` or `type: feedback`.** These are cross-repo by construction — who the user is, and how they want work done. Promoting one into a single repo's `docs/` drops it for every other repo, which is the same reach mistake §7 warns about in the other direction. They stay in memory.
+- **A `project`/`reference` memory that is not repo-scoped** — a cross-repo tool quirk or an account-level fact has no owning `docs/` to move into.
+- **Session-scoped residue.** If the "fact" only mattered to the work that produced it, the finding is a memory-hygiene one (`harness-capture`), not a promotion.
+- **The `MEMORY.md` index itself.** It is the store's navigation layer, never promoted.
+
+**Already-promoted subtype:** the fact is already in `AGENTS.md`, `CLAUDE.md`, or an existing `docs/*.md`. This is still actionable — memory and docs now hold the same rule and will drift, which is §7's duplicate cost — but the action is deletion only: no docs write, straight to the `harness-capture` route. Verify by quoting the existing location, exactly as Signal 6's "Confirm before routing" already requires.
+
+**Evidence requirement (hard):** quote the memory body verbatim with `file:line` and name a concrete target `docs/<topic>.md`. Unquotable → dropped, not `Watch:`. Same Agent-integrity reasoning as §7.
+
+**Route — the ownership split matters.** `harness-curate` decides the promotion, writes `docs/<topic>.md`, and adds the AGENTS.md Docs Index pointer. It **never deletes a memory file**: destructive memory prunes belong to `harness-capture`'s Memory hygiene (which also repairs the `MEMORY.md` index and defers risky prunes), so the deletion is routed there on confirmation. Curate is thin glue here as everywhere — it does not reimplement an owner.
+
+**Cross-run suppression (required):** static, like §7 — a declined promotion would otherwise re-fire every run and keep `lastCandidateMs` permanently fresh. Reuse `scripts/overlap_state.py` unchanged, with its positional keys mapped `"global"` = the memory side, `"repo"` = the proposed docs target, and record both outcomes (promoted, or consciously kept) with `--dismiss`.
+
+**Scope limit:** `current` / `--project` only — `all` scope cannot resolve the repo to promote *into* (same limitation as §7 and the Codex fold-in).
 
 ## 7. Instruction-layer overlap (base ↔ global ↔ repo/docs)
 
@@ -106,7 +130,8 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 | Triggering miss (skill or agent) | 2 |
 | Underperforming asset (skill or agent) | 2 (or 1 with systematic cause) |
 | Harness friction (over-protection) | 2 (or 1 with systematic cause) |
-| Domain knowledge candidate | 2 (lower than Signal 1 — atomic facts never form large clusters) |
+| Domain knowledge candidate (from `PROMPTS`) | 2 (lower than Signal 1 — atomic facts never form large clusters) |
+| Domain knowledge candidate (from the memory store) | 1 — static defect; the frequency bar was cleared when the memory was written, but the verbatim quote is still mandatory |
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
 | Instruction-layer overlap | 1 — static defect, but **only** with both sides quoted (`file:line`, or the labeled verbatim base-instruction quote); unquotable → dropped |
 

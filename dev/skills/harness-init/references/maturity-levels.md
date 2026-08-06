@@ -11,10 +11,20 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 **Goal:** Any AI agent can understand the repo without asking questions.
 
 **Required artifacts:**
-- [ ] `AGENTS.md` — index ≤100 lines with Docs Index, Golden Principles, Delegation table
+- [ ] `AGENTS.md` — index ≤100 lines with Docs Index, Golden Principles, Delegation section
 - [ ] `CLAUDE.md` → `@AGENTS.md` pointer
-- [ ] `docs/` — at minimum: `architecture.md`, `conventions.md`, `runbook.md`
-- [ ] `backlog.md` with correct schema
+- [ ] `docs/runbook.md` — build/test/deploy commands and known failure modes
+
+**Conditional artifacts** — generated only when the repo has the thing they document, and their absence is not a Level 1 miss:
+
+| Artifact | Generate when |
+|---|---|
+| `docs/architecture.md` | the repo has real module boundaries to state |
+| `docs/conventions.md` | rules exist that the linter does not already own |
+| `docs/workflows.md` | the repo runs a defined work cycle worth writing down |
+| `docs/eval-criteria.md` | the repo runs the Sprint Contract flow |
+| `backlog.md` | the repo adopts the backlog/sprint flow |
+| `docs/delegation.md` | the repo has its first agent role or orchestrator |
 
 **Passes Level 1 when:** `scripts/validate-harness.sh` exits 0 for all Level 1 checks.
 
@@ -29,9 +39,8 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 **Required additions beyond Level 1:**
 - [ ] CI workflow runs `scripts/validate-harness.sh` on every PR
 - [ ] All doc cross-references resolve (no broken `docs/` links)
-- [ ] Delegation routing table triggers are objective and measurable (no subjective conditions)
-- [ ] `docs/workflows.md` embeds delegation gates as named steps (not footnotes)
 - [ ] Lint/test infrastructure exists and passes
+- [ ] *(only if the repo has agent roles)* delegation routing triggers are objective and measurable, and `docs/workflows.md` embeds the gates as named steps
 - [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or the `dev` plugin's SessionStart hook)
 - [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `references/path-scoped-rules.md` *(manual check — not enforced by `validate-harness.sh`)*
 
@@ -75,7 +84,7 @@ Level 3: PASS / FAIL (N missing items)
 Next step: [specific action to advance one level]
 ```
 
-For new repos, target Level 1 in one session. Level 2 in the same session if CI is already set up. Level 3 as a follow-up when the team is ready.
+**Target Level 1 for a new repo, and stop there.** Level 1 is the default init outcome, not a waypoint to rush past: an enforcement layer built before any violation has occurred is guarding against a guess. Advance when the repo produces the evidence — a rule that actually got broken, a doc that actually went stale — which usually means a later session, not this one. Level 2 in the same session is reasonable only when CI already exists and running the validator in it costs one file.
 
 ---
 

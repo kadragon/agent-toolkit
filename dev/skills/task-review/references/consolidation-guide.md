@@ -113,11 +113,16 @@ After the findings table, add:
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
-## Recording Backlog Items in tasks.md
+## Recording Backlog Items in backlog.md
 
-After user confirmation, route to `tasks.md`: all out-of-scope findings only.
+After user confirmation, route to `backlog.md`: all out-of-scope findings only.
 
-1. Read the existing `tasks.md` in the project root. If it does not exist, create one.
+**Never `tasks.md`.** That file is the current Sprint Contract and is deleted whole at sprint
+close — findings written there are destroyed by the next cleanup pass, and `prune-tasks` refuses
+to run against a `tasks.md` carrying them. `backlog.md` is the only persistent queue.
+
+1. Read the existing `backlog.md` in the project root. It is a harness prerequisite, so it should
+   exist; if it genuinely does not, create it with a `# Backlog` heading.
 2. Append items under a `## Review Backlog` section. Classify each item using harness tags based on its nature.
 
 ### Format When a PR Exists
