@@ -426,7 +426,7 @@ After a harness is in use, it should evolve based on feedback. Trigger evolution
 - Agent bypasses orchestrator (description trigger missing)
 - Repeated agent failure pattern (definition defect)
 
-Read `references/harness-evolution.md` for feedback → fix target mapping and change history protocol. Record every change in the orchestrator's pointer block in `docs/harness-log.md` (see Step 4c) — never CLAUDE.md.
+Signal detection and fix routing live in `dev:harness-curate` → `references/signal-taxonomy.md` (the single detection authority). `references/harness-evolution.md` is the **loop contract** the resulting edit must follow — editable-surface manifest, validation gate (acceptance = objective check), and the change record with a falsifiable `Predicted impact` + `Verified` pair. Record every change in the orchestrator's pointer block in `docs/harness-log.md` (see Step 4c) — never CLAUDE.md.
 
 ## Ongoing Maintenance
 
@@ -438,7 +438,7 @@ At Level 1 the routine below is manual and worth running periodically. Only at L
 |------|--------|
 | Periodically or on "harness 점검" | `bash scripts/validate-harness.sh` — check maturity level |
 | Sprint tasks complete | `python scripts/reconcile-harness.py` — sync tasks.md → backlog.md |
-| Feedback from harness usage | Read `references/harness-evolution.md` |
+| Feedback from harness usage | Detect via `dev:harness-curate`; apply per `references/harness-evolution.md` (loop contract) |
 
 **Scripts (utilities, run from repo root):**
 
@@ -461,7 +461,7 @@ All `references/*.md` files are cited inline at point of use — consult them th
 
 **Delegation-asset templates live in `dev:harness-curate/references/`, not here** — `teammate-role-template.md`, `delegation-template.md`, `orchestrator-template.md`, `coordination-patterns.md`, `agent-teams-onboarding.md`, `competing-hypotheses-playbook.md`, `trigger-router-template.md`. They moved when init stopped creating agents (Steps 4b/4c): every one of them is read *after* a delegation has proven itself, which is `harness-curate`'s decision, not init's. Read them from there in the one init case that needs them — the user asked for a specific role or orchestrator this session.
 
-- **`references/harness-evolution.md`** — Feedback-driven evolution: signal → fix target mapping, change history protocol. **Read when harness needs evolution.**
+- **`references/harness-evolution.md`** — The loop contract for harness edits: editable-surface manifest, validation gate, predicted-impact change record. Detection lives in `dev:harness-curate` → `references/signal-taxonomy.md`. **Read when applying a confirmed harness-evolution signal.**
 - **`references/path-scoped-rules.md`** — `.claude/rules/*.md` with `paths:` frontmatter: mechanical just-in-time rules that load only when matching files are touched, home-selection table, fat-AGENTS.md migration. **Read at Step 3a.**
 - **`references/maturity-levels.md`** — 3-level progression (Basic/Verified/Enforced), checklist per level, upgrade path. **Read at Step 0 for existing repos.**
 - **`references/power-user-settings.md`** — Optional env vars (AUTOCOMPACT threshold, extended thinking) and output-style customization. Informational; surface to user after Step 10 if asked.

@@ -8,7 +8,7 @@ description: >-
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
   Routes to the owning creator — never generates itself. Repo structure
   validation → harness-init.
-version: 1.6.2
+version: 1.6.3
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks

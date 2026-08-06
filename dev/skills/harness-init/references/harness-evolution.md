@@ -1,65 +1,87 @@
-# Harness Evolution
+# Harness Evolution — the loop contract
 
-A harness is a living system, not a one-time setup. This document describes how to evolve the harness based on usage feedback.
+> Concept: Lilian Weng, "Harness Engineering for Self-Improvement"
+> (https://lilianweng.github.io/posts/2026-07-04-harness/). This file is the
+> **contract** every harness-editing loop follows — what may be edited, what
+> acceptance requires, and how changes are recorded so a later run can falsify
+> them. **Detection is not defined here**: which signals mean the harness needs
+> evolving lives in `dev:harness-curate` → `references/signal-taxonomy.md`
+> (Signals 1–8), the single detection authority. This file governs what happens
+> *after* a signal is confirmed.
 
-## When to Evolve
+A harness is a living system, not a one-time setup. But a loop that edits its
+own harness optimizes whatever signal it is given — so the contract bounds
+three things: the editable surface, the acceptance bar, and the record.
 
-Trigger a harness evolution pass in any of these conditions:
+## 1. Editable-surface manifest
 
-| Signal | Interpretation | Action |
-|--------|---------------|--------|
-| Same feedback appears 2×+ | Structural gap in skill/agent | Update skill or agent definition |
-| Agent bypasses orchestrator manually | Orchestrator trigger description missing | Expand orchestrator description |
-| Same agent failure pattern 2×+ | Agent definition defect | Fix principles / exit criteria in agent file |
-| User manually redoes a step | Agent output not matching expectation | Update skill output format spec |
+| Tier | Surfaces | Rule |
+|------|----------|------|
+| **May edit** (on a confirmed signal, through the owning creator) | repo skills (`SKILL.md` + bundled scripts), repo agents (`.claude/agents/*.md`), repo hooks/settings (`.claude/settings.json` via `update-config`/`hookify`), `docs/*.md`, auto-memory | Route through the owning generator — never hand-edit what a creator owns (`skill-creator`, `plugin-dev:agent-creator`, `hookify`, `update-config`) |
+| **Confirmation-gated** | repo `CLAUDE.md` / `AGENTS.md` (always-loaded maps) | Show the exact line before/after; apply only on explicit confirmation |
+| **Read-only** | global `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` (surface the line, user edits); the platform's base instructions (not editable at all); **the verifiers** — `validate-harness.sh`, the qa-verifier agent's acceptance bar, CI workflows, hook guards under test | A loop-originated edit must never touch the mechanism that evaluates it — reward hacking is the failure mode this tier exists to block. Loosening an over-firing guard is legitimate only when the *signal itself* is harness-friction (signal-taxonomy §5), routed and confirmed like any other change — never as a side effect of making another change's check pass |
 
-**Don't wait for explicit "update the harness" request.** When the above signals appear, propose the evolution and apply with user confirmation.
+## 2. Validation gate — acceptance is an objective check, not plausibility
 
-## Feedback → Fix Target Mapping
+Every proposed harness edit names its acceptance check **in the brief, before
+the edit is made**. The check passing is the exit criterion; failing it means
+revert, not retry-until-green.
 
-| Feedback type | Fix target | Example |
-|---------------|-----------|---------|
-| Output quality too low | Agent's skill (`skills/{name}/SKILL.md`) | "분석이 너무 얕아" → 스킬에 깊이 기준 추가 |
-| Wrong role doing the work | Agent definition (`agents/{name}.md`) | "보안 검토도 필요해" → 새 에이전트 추가 |
-| Phase order wrong | Orchestrator skill | "검증을 먼저 해야 해" → Phase 순서 변경 |
-| Two agents doing the same thing | Orchestrator + agent merge | "이 둘은 합쳐도 될 듯" → 에이전트 병합 |
-| Skill doesn't trigger | Skill description | "이 표현으로는 안 돼" → description 확장 |
-| Too many tokens wasted | Scratchpad/`.claude/tmp/` bloat, agent scope | Tighten Boundaries in spawn prompt |
+| Edit route | Acceptance check |
+|------------|------------------|
+| Skill create / modify | `skill-creator` eval pass (it owns evals — do not build a parallel harness) |
+| Skill/agent triggering description | `skill-creator` description-optimizer train/test pass |
+| Hook / settings change | Trigger simulation: pipe a fixture event through the hook (`echo '{...}' \| bash hook.sh`) and assert the expected verdict |
+| Agent create / modify | Re-run of the failing case (or a dry-run of the changed flow) succeeds |
+| Docs / memory write | Record-only — no runtime behavior to test; the prediction field (below) is still required |
 
-## Change History
+**No verifier available** → the edit may still land on user confirmation, but
+its record is marked `unverified` and it is first in line at the next re-audit.
+Disclose the limit; never present an unverified edit as a verified one.
 
-Record every harness change in the pointer block's change history table in `docs/harness-log.md` (never CLAUDE.md — it stays a pure `@AGENTS.md` pointer):
+## 3. Change record — every edit carries a falsifiable prediction
+
+Record every harness change in the change-history table in
+`docs/harness-log.md` (never CLAUDE.md — it stays a pure `@AGENTS.md`
+pointer). The schema pairs each edit with a prediction a later run can check:
 
 ```markdown
 **Change History:**
-| Date | Change | Scope | Reason |
-|------|--------|-------|--------|
-| 2026-05-01 | Initial setup | all | - |
-| 2026-05-03 | Add security-reviewer agent | agents/security-reviewer.md | Output missed auth issues |
-| 2026-05-07 | Expand orchestrator description | skills/domain-orchestrator | "재실행" keyword not triggering |
+| Date | Change | Scope | Reason | Predicted impact | Verified |
+|------|--------|-------|--------|------------------|----------|
+| 2026-05-03 | Add security-reviewer agent | agents/security-reviewer.md | Output missed auth issues | next security-touching PR review flags auth issues | pending |
+| 2026-05-07 | Expand orchestrator description | skills/domain-orchestrator | "재실행" keyword not triggering | trigger-miss for "재실행" drops to 0 over next 5 sessions | 2026-06-01 — 0 misses in 6 sessions |
 ```
 
-Changes without a history entry are invisible to future sessions — this record IS the harness memory.
+- **Predicted impact** — falsifiable and observation-scoped: what measurable
+  behavior changes, over what window. "Improves quality" is not a prediction.
+- **Verified** — `pending` until checked; then a date + one-line evidence, or
+  `failed`. An edit that landed without a verifier is written `unverified`
+  instead of `pending` (see §2) and gets checked the same way.
+- `dev:harness-curate`'s re-audit reads `pending`/`unverified` rows on each
+  run, stamps predictions that held, and surfaces `failed` ones as
+  prune/rework candidates. Changes without a history entry are invisible to
+  future sessions — this record IS the harness memory, and an unrecorded edit
+  can never be falsified.
 
-## Evolution Protocol
+## 4. Protocol (per confirmed signal)
 
-1. **Identify**: which signal triggered the evolution (see table above)
-2. **Diagnose**: read the failing agent/skill definition to find the gap
-3. **Fix**: apply the minimal change (don't rewrite everything)
-4. **Verify**: re-run the failing case or dry-run the changed flow
-5. **Record**: add entry to the `docs/harness-log.md` change history
+1. **Identify** — the confirmed signal, from `signal-taxonomy.md` (quote its
+   evidence; verifier-grounded evidence per §8 when available).
+2. **Diagnose** — read the failing definition to find the gap.
+3. **Propose** — minimal change, within the §1 manifest, through the owning
+   creator; the brief names the §2 acceptance check and the §3 prediction.
+4. **Validate** — run the named check. Pass → land; fail → revert.
+5. **Record** — append the §3 row, prediction included.
 
-Changes to golden principles or enforcement layers are high risk — always confirm with user before applying.
+Changes to golden principles or enforcement layers are high risk — always
+confirm with the user before applying, regardless of tier.
 
-## Periodic Audit (optional)
+## Periodic audit
 
-On explicit "harness audit" request, run this checklist:
-
-- [ ] Each agent's description still matches what it actually does
-- [ ] Orchestrator description covers all known user phrasings
-- [ ] Scratchpad naming convention followed consistently
-- [ ] `docs/harness-log.md` change history is up to date
-- [ ] No stale agent files for roles that are no longer used
-- [ ] Team size still appropriate for current workload
-
-Delete stale agents. Shrink over-specified skills. A lean harness beats a comprehensive one.
+Portfolio health (unused assets, stale descriptions, instruction-layer
+overlap, memory promotion) is `dev:harness-curate`'s job — run it rather than
+re-deriving a checklist here. Its report plus this file's `Verified` column
+together answer the two audit questions that matter: *is anything dead weight*
+and *did past edits actually work*. Delete stale agents; shrink over-specified
+skills. A lean harness beats a comprehensive one.

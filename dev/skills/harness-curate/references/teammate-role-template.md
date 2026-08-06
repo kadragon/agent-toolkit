@@ -145,8 +145,8 @@ point; a role that merely *has not been written yet* is stale, not exempt.
 ### Common spine vs repo-specific additions
 
 Nothing *regenerates* a role file when this template changes — the paths that revisit one are all
-repo-driven (Extend mode's `Architecture change` row in `harness-init` SKILL.md, the feedback signals plus
-Periodic Audit in `dev:harness-init` → `references/harness-evolution.md`), never template-driven. What closes that gap
+repo-driven (Extend mode's `Architecture change` row in `harness-init` SKILL.md, the feedback signals in
+`dev:harness-curate` → `references/signal-taxonomy.md` applied per the `dev:harness-init` → `references/harness-evolution.md` loop contract), never template-driven. What closes that gap
 is `scripts/validate-harness.sh` §11, which reports drift on every validate run. It is a reporting
 check, not a rewriter: resyncing a flagged file stays a human decision.
 
