@@ -121,9 +121,14 @@ FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
 # judges terminal verifier-level cause before routing (signal-taxonomy.md §8).
 CI_COMMAND_RE = re.compile(
     r"ci-wait|validate-harness|pytest|unittest|--test\b|npm (run )?test|make test|"
-    r"cargo test|go test|ruff\b",
+    r"cargo test|go test|ruff\b|\btest_\w+\.py\b",
     re.IGNORECASE,
 )
+# ci-wait.sh (and similar gate scripts) report failure as {"passed": false, ...} but
+# exit 0 — so the tool_result carries no is_error flag. A JSON failure verdict counts
+# as a ci-fail unless it is a timeout (CI still running is not a failure).
+CI_FAIL_RESULT_RE = re.compile(r'"passed"\s*:\s*false')
+CI_TIMEOUT_RE = re.compile(r'"reason"\s*:\s*"timeout"')
 QA_REJECT_RE = re.compile(
     r"\b(blocking|blocked|fail(ed|s)?|reject(ed)?|not?[ -]pass(ed)?|P0|P1)\b"
     r"|불합격|반려|실패|블로킹",
@@ -134,6 +139,16 @@ HOOK_DENY_RE = re.compile(
     re.IGNORECASE,
 )
 VERIFIER_DETAIL_MAXLEN = 160
+
+# Async agent verdicts never land in the spawning Agent tool_use's tool_result — that
+# result is launch metadata only. The verdict arrives later as a user record whose
+# message.content is a plain STRING carrying <teammate-message>/<task-notification>/
+# <agent-message> markup (verified against real transcripts: 24/24 qa-verifier
+# tool_results were spawn metadata). So qa-reject is ALSO mined from those strings,
+# attributed by qa-verify phrasing. The task-notification shape sometimes holds only a
+# summary (full verdict in an on-disk output file) — the summary is what gets mined.
+ASYNC_RESULT_RE = re.compile(r"<(teammate-message|task-notification|agent-message)\b")
+QA_ATTRIB_RE = re.compile(r"qa[-_ ]?verif", re.IGNORECASE)
 
 
 def encode_project(path):
@@ -468,7 +483,7 @@ def _tool_result_text(block):
     if isinstance(c, str):
         return c
     if isinstance(c, list):
-        return " ".join(b.get("text", "") for b in c
+        return " ".join((b.get("text") or "") for b in c
                         if isinstance(b, dict) and b.get("type") == "text")
     return ""
 
@@ -543,15 +558,37 @@ def scan_dir(tdir, label):
                                         pending_tools[b["id"]] = ("qa-reject", st)
                             elif name == "Bash":
                                 cmd = (b.get("input") or {}).get("command") or ""
-                                if b.get("id") and CI_COMMAND_RE.search(cmd):
+                                m = CI_COMMAND_RE.search(cmd)
+                                if b.get("id") and m:
+                                    # append the matched token: the pattern substring-
+                                    # matches compound commands, so the first 160 chars
+                                    # alone often don't show WHY the line was collected.
                                     pending_tools[b["id"]] = (
                                         "ci-fail",
-                                        cmd.replace("\n", " ")[:VERIFIER_DETAIL_MAXLEN])
+                                        cmd.replace("\n", " ")[:VERIFIER_DETAIL_MAXLEN]
+                                        + f"  [matched: {m.group(0)}]")
                     continue
 
                 if typ == "user":
                     msg = r.get("message")
                     content = msg.get("content") if isinstance(msg, dict) else None
+                    # transcript variants store failure status at record level
+                    # (toolUseResult.is_error / .error) instead of on the block —
+                    # fall back to it so those events aren't silently dropped.
+                    tur = r.get("toolUseResult")
+                    rec_err = isinstance(tur, dict) and bool(
+                        tur.get("is_error") or tur.get("error"))
+                    # async agent verdicts arrive as plain-string user records
+                    # (teammate-message / task-notification), not tool_results —
+                    # mine qa-reject from them here (see ASYNC_RESULT_RE note).
+                    if (isinstance(content, str) and ASYNC_RESULT_RE.search(content)
+                            and QA_ATTRIB_RE.search(content)):
+                        flat = content.replace("\n", " ")
+                        if QA_REJECT_RE.search(flat):
+                            sm = re.search(r'summary="([^"]*)"', flat)
+                            detail = (sm.group(1) if sm else flat)
+                            verifier_failures.append(
+                                ("qa-reject", detail[:VERIFIER_DETAIL_MAXLEN]))
                     if isinstance(content, list):
                         # tool_result blocks echoed as the user role — never prompt
                         # text (text_of returns ""), but they carry the machine
@@ -560,7 +597,7 @@ def scan_dir(tdir, label):
                             if not (isinstance(b, dict) and b.get("type") == "tool_result"):
                                 continue
                             rtxt = _tool_result_text(b).replace("\n", " ").strip()
-                            is_err = bool(b.get("is_error"))
+                            is_err = bool(b.get("is_error")) or rec_err
                             kind_meta = pending_tools.pop(b.get("tool_use_id"), None)
                             # hook-deny outranks the pending kind: a hook-blocked CI
                             # command is a denial, not a CI failure.
@@ -569,7 +606,12 @@ def scan_dir(tdir, label):
                                     ("hook-deny", rtxt[:VERIFIER_DETAIL_MAXLEN]))
                             elif kind_meta is not None:
                                 kind, meta = kind_meta
-                                if kind == "ci-fail" and is_err:
+                                # a gate script's {"passed": false} JSON verdict is a
+                                # failure even at exit 0 — unless it's a timeout.
+                                if kind == "ci-fail" and (
+                                        is_err
+                                        or (CI_FAIL_RESULT_RE.search(rtxt)
+                                            and not CI_TIMEOUT_RE.search(rtxt))):
                                     verifier_failures.append(("ci-fail", meta))
                                 elif kind == "qa-reject" and QA_REJECT_RE.search(rtxt):
                                     verifier_failures.append(

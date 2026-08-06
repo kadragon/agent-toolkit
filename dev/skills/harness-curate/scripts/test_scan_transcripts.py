@@ -318,6 +318,79 @@ def test_scan_dir_ignores_non_verifier_noise():
         )
 
 
+def test_scan_dir_collects_async_qa_reject_from_string_record():
+    """Async agent verdicts arrive as plain-string user records (teammate-message /
+    task-notification), not tool_results — the spawn's tool_result is launch metadata
+    and must NOT be classified; the string record with rejection phrasing must be."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Agent", "id": "t1",
+                                  "input": {"subagent_type": "qa-verifier",
+                                            "prompt": "verify"}}]),
+            _user_tool_result("t1", "Async agent launched successfully. agentId: abc"),
+            {"type": "user", "timestamp": "2026-01-01T00:00:02.000Z",
+             "message": {"content": 'Another Claude session sent a message:\n'
+                                    '<teammate-message teammate_id="qa-1" color="blue" '
+                                    'summary="QA verify sprint — BLOCKING findings">\n'
+                                    'Verdict: BLOCKING — criterion 2 not met\n'
+                                    '</teammate-message>'}},
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        check(
+            "async qa-verifier rejection is mined from the string record",
+            summary["verifier_failures"] == [("qa-reject",
+                                              "QA verify sprint — BLOCKING findings")],
+            f"got {summary['verifier_failures']!r}",
+        )
+
+
+def test_scan_dir_ci_fail_on_passed_false_json_without_is_error():
+    """ci-wait.sh reports failure as {"passed": false} at exit 0 — no is_error flag.
+    The JSON verdict must still count as ci-fail; a timeout verdict must not."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t1",
+                                  "input": {"command": "bash scripts/ci-wait.sh 42"}}]),
+            _user_tool_result("t1", '{"passed": false, "reason": "rework-cap"}'),
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t2",
+                                  "input": {"command": "bash scripts/ci-wait.sh 43"}}]),
+            _user_tool_result("t2", '{"passed": false, "reason": "timeout"}'),
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        kinds = [k for k, _ in summary["verifier_failures"]]
+        check(
+            "passed:false JSON verdict counts as ci-fail; timeout does not",
+            kinds == ["ci-fail"],
+            f"got {summary['verifier_failures']!r}",
+        )
+
+
+def test_emit_caps_verifier_failures_and_prints_dropped():
+    """emit() shows at most VERIFIER_CAP samples and prints the dropped count."""
+    import contextlib
+    import io
+    summary = {"label": "fixture", "sessions": 1, "prompts": [], "skill_sessions": {},
+               "agent_sessions": {}, "corrections": [], "agent_corrections": [],
+               "frictions": [],
+               "verifier_failures": [("ci-fail", f"cmd {i}")
+                                     for i in range(mod.VERIFIER_CAP + 3)]}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.emit(summary)
+    out = buf.getvalue()
+    sample_lines = [line for line in out.splitlines() if line.startswith("  [ci-fail]")]
+    check(
+        "emit prints VERIFIER-FAILURES header with dropped count",
+        "VERIFIER-FAILURES" in out and "[dropped 3]" in out,
+        f"got: {out[:400]!r}",
+    )
+    check(
+        "emit caps samples at VERIFIER_CAP",
+        len(sample_lines) == mod.VERIFIER_CAP,
+        f"got {len(sample_lines)} sample lines",
+    )
+
+
 def test_scan_dir_hook_deny_outranks_pending_ci_kind():
     """A hook-blocked CI command is a denial, not a CI failure — hook-deny wins."""
     with tempfile.TemporaryDirectory() as tdir:
@@ -395,6 +468,18 @@ SUITES = [
     (
         "scan_dir: hook-deny outranks pending ci-fail",
         test_scan_dir_hook_deny_outranks_pending_ci_kind,
+    ),
+    (
+        "scan_dir: async qa-reject mined from string record",
+        test_scan_dir_collects_async_qa_reject_from_string_record,
+    ),
+    (
+        "scan_dir: passed:false JSON is ci-fail, timeout is not",
+        test_scan_dir_ci_fail_on_passed_false_json_without_is_error,
+    ),
+    (
+        "emit: VERIFIER-FAILURES capped with dropped count",
+        test_emit_caps_verifier_failures_and_prints_dropped,
     ),
 ]
 
