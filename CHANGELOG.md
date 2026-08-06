@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] prediction re-audit step (Step 2.5) added to harness-curate (dev v4.3.3) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] validation gate wired into harness-curate Step 7 routing (dev v4.3.2) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] harness-evolution.md rewritten as the self-improvement loop contract (dev v4.3.1) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] Signal 8 verifier-grounded failure mining in harness-curate (dev v4.3.0) (2026-08-06) → docs/design/harness-self-improvement-loop.md
