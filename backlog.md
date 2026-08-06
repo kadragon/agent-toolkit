@@ -1,5 +1,35 @@
 # Backlog
 
+## Self-improvement loop — Signal 8 verifier-grounded failures (D1)
+
+Source: `docs/design/harness-self-improvement-loop.md` D1.
+
+- [ ] [HARNESS] Extend `harness-curate/scripts/scan_transcripts.py` with a capped `VERIFIER-FAILURES` block (CI/test Bash failures, qa-verifier rejection tool_results, hook denials; dropped counts printed) and document Signal 8 detection + routing brief in `references/signal-taxonomy.md` (threshold ≥2, or 1 with systematic cause); fixture-backed tests in `test_scan_transcripts.py`
+
+## Self-improvement loop — loop contract + prediction schema (D5+D3)
+
+Source: `docs/design/harness-self-improvement-loop.md` D3, D5.
+
+- [ ] [HARNESS] Rewrite `harness-init/references/harness-evolution.md` as the loop contract (editable-surface manifest, validation-gate table, change-history schema with `Predicted impact` + `Verified` columns); delete its signal-detection tables in favor of a pointer to curate's `signal-taxonomy.md`; update `harness-init/SKILL.md` Harness Evolution section and grep sibling references to renamed/deleted sections
+
+## Self-improvement loop — validation gate in curate routing (D2)
+
+Source: `docs/design/harness-self-improvement-loop.md` D2.
+
+- [ ] [HARNESS] Make the per-route objective acceptance check the exit criterion of `harness-curate` Step 7 briefs (skill→skill-creator eval, description→optimizer train/test, hook→trigger simulation, agent→failing-case re-run, docs/memory→record-only); no verifier available → land on confirmation but record `unverified`; failing check → revert *(blocked by: 1-signal8-scanner)* *(blocked by: 2-loop-contract)*
+
+## Self-improvement loop — prediction re-audit step (D4)
+
+Source: `docs/design/harness-self-improvement-loop.md` D4.
+
+- [ ] [HARNESS] Add a curate re-audit step (current/--project scope) that reads the target repo's `docs/harness-log.md`, checks `Verified: pending` rows against this run's scan output, stamps held predictions with date+evidence, and surfaces failed ones as prune/rework candidates in the Step 6 report (adversarial check before delete) *(blocked by: 1-signal8-scanner)* *(blocked by: 2-loop-contract)*
+
+## Self-improvement loop — capture prediction line (D6)
+
+Source: `docs/design/harness-self-improvement-loop.md` D6.
+
+- [ ] [HARNESS] Add a "failure this prevents" line to `harness-capture` write-back proposals (memory body, warm-path prediction field) — minimal prose delta, no auto-memory schema change *(blocked by: 2-loop-contract)*
+
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
