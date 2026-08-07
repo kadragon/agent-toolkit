@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.0.7
+version: 1.1.0
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -118,13 +118,16 @@ with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at fo
 - **Trivial**: skip plan mode.
 
 **Sprint Contract (Step 2)**
-Write a `tasks.md` Sprint Contract per `docs/eval-criteria.md`:
+Write to `tasks.md` only when running a `task-tickets`-generated backlog ticket (the
+multi-session path) — that's the only case needing `## Covers` as a deletion target for cleanup.
+Every other path (trivial, single-session-sized, unambiguous-but-not-trivial) authors the
+contract inline in the conversation and writes no file. Either way the contract has the same
+shape, per `docs/eval-criteria.md`:
 - `# heading` = a short title for the request
 - `status: active`
 - **Scope** / **Acceptance criteria** / **Out of scope** / **Lint/test command**
-- If this cycle is running a `task-tickets`-generated backlog ticket (the multi-session path), add a
-  `## Covers` line with that ticket's `- [ ]` item copied **verbatim** from `backlog.md` — this is
-  the deletion target for cleanup.
+- File-backed only: add a `## Covers` line with the ticket's `- [ ]` item copied **verbatim**
+  from `backlog.md` — this is the deletion target for cleanup.
 
 **Implement (Step 3)**
 - 1–2 files AND not `[FEAT]`/`[REFACTOR]`: inline edit.
@@ -187,7 +190,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 NODES="$SKILL_DIR/../task-next/scripts/task_nodes.py"   # one shared copy; same dev plugin
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 
-# the Sprint Contract block written above; deletes tasks.md if nothing remains
+# only if the Sprint Contract was written to tasks.md (multi-session path); deletes tasks.md if nothing remains
 python3 "$NODES" prune-tasks --file tasks.md --block "<Sprint Contract title>"
 # multi-session path only — the ## Covers ticket line, verbatim
 printf '%s\n' "<the ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md

@@ -26,8 +26,9 @@ Usage:
                   An identical line already under `## Unreleased` is left alone (re-run safe).
 
   prune-backlog   Delete the verbatim `- [ ]` lines given on stdin, then delete any heading
-                  this run left with an entirely blank region. Refuses (exit 1) on a line that
-                  matches nothing, rather than deleting an approximation of it.
+                  this run left with an entirely blank region, or with nothing left but its own
+                  intro prose. Refuses (exit 1) on a line that matches nothing, rather than
+                  deleting an approximation of it.
 
   prune-tasks     Same deletion pass, plus `--block TITLE` to delete a whole h1 sprint block.
                   Deletes the file when nothing but blank lines is left — safe only because
@@ -274,6 +275,39 @@ def _region_blank(lines: list[str], start: int, levels: dict[int, int]) -> bool:
     return all(not lines[i].strip() for i in range(start + 1, min(end, len(lines))))
 
 
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s|\d+\.\s)")
+
+
+def _region_prose_only(lines: list[str], start: int, levels: dict[int, int]) -> bool:
+    """True if `start`'s region holds only prose — at least one non-blank line, and none of them
+    a heading or a list item.
+
+    Same level-aware span as `_region_blank` (see its docstring): the region ends at the next
+    heading of level <= `start`'s, not the next heading of any level, so a surviving child
+    heading's own body is never mistaken for `start`'s. A surviving `[x]`/`[>]` line IS a list
+    item, so it keeps `start` alive here exactly as it does for `_region_blank`; a surviving
+    child heading is itself excluded by the "no heading line" half of this test.
+
+    `lines` must already have fenced/commented spans blanked out (the same `masked` view line
+    matching uses) — otherwise a fenced sample with no real prose reads as content and a heading
+    holding nothing but an illustrative example would be wrongly deleted.
+    """
+    level = levels.get(start, 1)
+    end = next(
+        (h for h in sorted(levels) if h > start and levels[h] <= level),
+        len(lines),
+    )
+    region = lines[start + 1:min(end, len(lines))]
+    if not any(ln.strip() for ln in region):
+        return False
+    for i, ln in enumerate(region, start=start + 1):
+        if not ln.strip():
+            continue
+        if i in levels or _LIST_ITEM_RE.match(ln):
+            return False
+    return True
+
+
 def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
     """Source indices to keep, collapsing only the blank runs a deletion created.
 
@@ -308,7 +342,12 @@ def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
 
 
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
-    """Delete each verbatim line in `targets`, then any heading this run left with a blank region.
+    """Delete each verbatim line in `targets`, then any heading this run left blank or prose-only.
+
+    A heading whose region this run drained down to nothing, or down to only its intro prose
+    (no surviving item, no surviving child heading), is deleted along with that region — see
+    `_region_blank` and `_region_prose_only`. A section this run never touched, or one where a
+    child heading or an `[x]`/`[>]` item survives, keeps its heading untouched either way.
 
     Returns `(new_text, problems)`. `problems` is non-empty when a target matched nothing — or
     matched more than once, which is the more dangerous case: two sections can hold identically
@@ -354,14 +393,26 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
 
     # Cascade: deleting an h3 can empty its h2 parent, but only if the parent holds nothing else —
     # including no surviving child heading, which `_region_blank`'s level-aware span enforces.
+    # A heading left with intro prose only (no surviving item, no surviving child) cascades the
+    # same way, but its prose lines are non-blank and must be dropped along with the heading —
+    # otherwise the dangling description this fix exists to remove would stay behind.
     while True:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
+        masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
         newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
-        if not newly:
+        prose_only = {
+            h for h in owned
+            if h not in drop and h not in newly and _region_prose_only(masked_surviving, h, alive)
+        }
+        if not newly and not prose_only:
             break
         drop.update(newly)
-        for h in newly:
+        for h in prose_only:
+            level = alive.get(h, 1)
+            end = next((x for x in sorted(alive) if x > h and alive[x] <= level), len(lines))
+            drop.update(range(h, min(end, len(lines))))
+        for h in newly | prose_only:
             prior = [x for x in heads if x < h and x not in drop]
             if prior:
                 owned.add(prior[-1])
@@ -745,6 +796,51 @@ Preamble prose that outlives its items.
     _assert("## Shipped" in out and "- [x] done long ago" in out,
             "a heading holding only [x] history is NOT deleted — this run did not empty it")
     _assert("## Live" not in out, "the heading this run did empty IS deleted")
+
+    # `_region_prose_only` — a heading drained to nothing but its own intro prose (PR #197).
+    prose_group = """## Group with intro prose
+
+Intro prose that describes the group.
+
+- [ ] [FIX] the only item
+
+## Untouched prose-only section
+
+Just a Source: line, no items — deliberate history, never touched by this run.
+"""
+    out, _ = prune_lines(prose_group, ["- [ ] [FIX] the only item"])
+    _assert("## Group with intro prose" not in out and "Intro prose that describes" not in out,
+            "(a) a heading drained to prose-only: heading AND its intro prose are both dropped")
+    _assert("## Untouched prose-only section" in out and "Just a Source: line" in out,
+            "(d) a prose-only section this run never touched keeps its heading and prose")
+
+    prose_survivor = """## Group with intro prose
+
+Intro prose that describes the group.
+
+- [x] done already
+- [ ] [FIX] the only open item
+"""
+    out, _ = prune_lines(prose_survivor, ["- [ ] [FIX] the only open item"])
+    _assert("## Group with intro prose" in out and "Intro prose that describes" in out
+            and "- [x] done already" in out,
+            "(b) a surviving [x] item keeps the heading and its intro prose")
+
+    prose_child_survives = """## Parent group
+
+Intro prose for the parent.
+
+- [ ] [FIX] parent-level item
+
+### Sub child
+
+- [ ] [FIX] child item
+"""
+    out, _ = prune_lines(prose_child_survives, ["- [ ] [FIX] parent-level item"])
+    _assert("## Parent group" in out and "Intro prose for the parent." in out,
+            "(c) a surviving child heading keeps the parent heading and its intro prose")
+    _assert("### Sub child" in out and "- [ ] [FIX] child item" in out,
+            "(c) the surviving child itself is untouched")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

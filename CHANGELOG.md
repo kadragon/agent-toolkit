@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] tasks.md sprint-block boundary leftovers (dev v4.4.0) (2026-08-07) → docs/design/tasks-md-sprint-block-boundary.md
 - [done] capture write-backs carry a failure-this-prevents prediction line (dev v4.3.4) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] prediction re-audit step (Step 2.5) added to harness-curate (dev v4.3.3) (2026-08-06) → docs/design/harness-self-improvement-loop.md
 - [done] validation gate wired into harness-curate Step 7 routing (dev v4.3.2) (2026-08-06) → docs/design/harness-self-improvement-loop.md

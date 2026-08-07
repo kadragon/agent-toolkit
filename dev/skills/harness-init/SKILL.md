@@ -437,7 +437,7 @@ At Level 1 the routine below is manual and worth running periodically. Only at L
 | When | Action |
 |------|--------|
 | Periodically or on "harness 점검" | `bash scripts/validate-harness.sh` — check maturity level |
-| Sprint tasks complete | `python scripts/reconcile-harness.py` — sync tasks.md → backlog.md |
+| Sprint tasks complete | `python scripts/reconcile-harness.py` — close the tasks.md sprint block (done/failed) |
 | Feedback from harness usage | Detect via `dev:harness-curate`; apply per `references/harness-evolution.md` (loop contract) |
 
 **Scripts (utilities, run from repo root):**
@@ -445,7 +445,7 @@ At Level 1 the routine below is manual and worth running periodically. Only at L
 | Script | Purpose |
 |--------|---------|
 | `scripts/validate-harness.sh` | Full structural validation + maturity level report |
-| `scripts/reconcile-harness.py` | Sync completed tasks.md items into backlog.md |
+| `scripts/reconcile-harness.py` | Close a finished (done/failed) tasks.md sprint block and report backlog state |
 | `scripts/sweep.sh` | Five-check harness audit: lint scan, doc drift, golden principle violations, freshness, finding report (not installed at init — copy and adapt on the first drift signal, Step 5) |
 | `scripts/sync-claude-md.sh` | Repair CLAUDE.md → @AGENTS.md (if manually broken) |
 | `scripts/symlink-guard.sh` | Repair .agents/skills symlink (if manually broken) |

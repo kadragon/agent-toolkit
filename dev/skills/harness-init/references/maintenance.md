@@ -83,7 +83,9 @@ Exit codes:
 
 ## C) Harness Reconciliation
 
-Run silently. Script syncs `tasks.md` status into `backlog.md`, prints one status line.
+Run silently. Script closes the `tasks.md` sprint block per its `status:` and prints one status line.
+It never writes `backlog.md` — deleting covered lines is `task_nodes.py prune-backlog`'s job, run by
+`task-next` at pre-merge cleanup.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -94,7 +96,7 @@ python3 "$SKILL_DIR/scripts/reconcile-harness.py"
 Output:
 - `Sprint active: <title>` — tasks.md active or evaluating; leave intact
 - `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
-- `Sprint '<title>' failed. Reverted to backlog.` — sprint returned to queue
+- `Sprint '<title>' failed. Sprint block closed; backlog items left queued.` — sprint returned to queue
 - `Backlog: N queued, M active` — backlog has pending items
 - `Backlog clear.` — nothing pending
 
@@ -196,7 +198,7 @@ Override threshold via env var: `CONTEXT_SIZE_LIMIT=300 bash ...`.
 | Script | Section | Purpose |
 |--------|---------|---------|
 | `scripts/sync-claude-md.sh` | B | Check CLAUDE.md state; exit 0/1/2 |
-| `scripts/reconcile-harness.py` | C | Sync tasks.md → backlog.md |
+| `scripts/reconcile-harness.py` | C | Close the tasks.md sprint block; report backlog state |
 | `scripts/symlink-guard.sh` | E | Ensure .agents/skills symlink |
 | `scripts/check-context-size.sh` | F | Warn when effective CLAUDE.md/AGENTS.md > 200 lines |
 

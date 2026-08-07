@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.4.9
+version: 1.5.0
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -35,10 +35,12 @@ list the dirty files — do NOT proceed. Ask the user to commit, stash, or disca
 dirty tree turns out to be an in-flight feature branch (not stray dirty files), route to the
 "Work already in flight" edge case below instead of hard-stopping.
 
-`tasks.md` is optional: it holds the Sprint Contract and nothing else, so it is present only
-during a sprint and absent in the idle state. Every persistent item — queued work, review
-findings, security findings — lives in `backlog.md`, which is why `backlog.md` is a prerequisite
-and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
+`tasks.md` is optional: it holds the Sprint Contract and nothing else, so it is present only when
+`## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md group with ≥2
+in-scope items — and absent otherwise, including a single-item cycle, which keeps the contract
+inline (see **Mark active** below) and never writes the file. Every persistent item — queued work,
+review findings, security findings — lives in `backlog.md`, which is why `backlog.md` is a
+prerequisite and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
 `## Review Backlog` / `## Security Fixes` section, move it to `backlog.md` verbatim before
 proceeding: those items are not selectable, and `prune-tasks` refuses to run until they move.
 
@@ -212,11 +214,16 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
   body (especially `## Acceptance criteria` if present) for implementation scope.
 
 *backlog.md group (h2 or h3) — including a `### PR #N` findings group under `## Review Backlog`:*
-  Write a `tasks.md` Sprint Contract with:
-  - `# heading` = the selected heading title (verbatim from backlog.md)
-  - `status: active`
-  - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
   Do NOT flip items to `[>]` — leave them as `[ ]` in backlog.md until deletion at pre-merge cleanup.
+
+  - **≥2 in-scope items:** write a `tasks.md` Sprint Contract with:
+    - `# heading` = the selected heading title (verbatim from backlog.md)
+    - `status: active`
+    - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
+  - **Exactly 1 in-scope item:** write no file. Author the Sprint Contract inline in the
+    conversation (same Scope / Acceptance criteria / Out of scope / Lint/test command shape as
+    below) and carry the item's verbatim `- [ ] ...` line forward yourself — it goes straight into
+    the `prune-backlog` call at pre-merge cleanup, with no `tasks.md` round-trip.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
@@ -317,7 +324,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 NODES="$SKILL_DIR/scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 
-# tasks.md h1 block — a sprint, or the Sprint Contract written for a backlog.md group
+# only if a sprint block exists in tasks.md — a pre-existing h1, or a ≥2-item Sprint Contract
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
 # backlog.md lines listed verbatim in the Sprint Contract's ## Covers
 printf '%s\n' "<each ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
@@ -380,8 +387,9 @@ no further action is required.
 Active when the user chose "라이트 패스" in Step 2.5. Runs the code cycle without PR or CI —
 implement, QA, then merge directly to `main` in the same session.
 
-Run Step 3 sub-steps normally (branch, Sprint Contract, Implement, QA, version bump, pre-merge
-cleanup) with these overrides:
+Run Step 3 sub-steps normally (branch, Sprint Contract — file-backed only for a ≥2-item group,
+inline otherwise, per **Mark active** above — Implement, QA, version bump, pre-merge cleanup)
+with these overrides:
 
 **Branch:** `git checkout -b <type>/<slug>` as normal — never commit directly to `main`.
 
@@ -434,7 +442,11 @@ action itself; always still ask yes/no.
    ```bash
    active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
    ```
-   If `$active_block` is non-zero, check what's already changed to distinguish stage. Include
+   A zero here is not proof no sprint is running — a single-item backlog.md cycle keeps its
+   Sprint Contract inline and never writes `tasks.md` (see **Mark active** in Step 3), so this
+   check alone cannot see it. If `$active_block` is zero, fall through to check 3's generic
+   fallback rather than concluding no sprint is active. If `$active_block` is non-zero, check
+   what's already changed to distinguish stage. Include
    untracked files (`git diff --stat` alone misses new files an implementer created but never
    staged — e.g. a brand-new script):
    ```bash
