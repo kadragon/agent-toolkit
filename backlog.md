@@ -1,5 +1,16 @@
 # Backlog
 
+## Harness — PR #203 follow-ups (Codex review, landed after merge)
+
+Codex's review of PR #203 returned after the merge, so these were never applied in-cycle. Items 3
+and 4 were reproduced against the merged code this session; 1 and 2 are read-verified but not
+executed.
+
+- [ ] [FIX] `reconcile-harness.py` `failed` branch closes a hand-authored `[>]` sprint without reverting its backlog line, and the next `tasks.md`-absent run deletes that `[>]` via `remove_orphan_markers` — failed work is lost instead of returning to `[ ]`. Either revert on `failed` for `[>]` lines only, or drop `[>]` from the documented state table in `references/backlog-template.md`
+- [ ] [FIX] `task_nodes.py prune_lines` prose-only exemption uses `alive.get(h, 1) > 1`, which spares EVERY h1, not just the file root. Reproduced: `# Backlog` + `# Other` + `## Group`, drain the group → `## Group` goes but `# Other` and its intro prose stay orphaned. Restrict the exemption to the first heading in the file
+- [ ] [FIX] `references/tasks-template.md` `## Covers` example shows `- [FIX] mktemp guard in codex-review.sh`, missing the `- [ ] ` prefix, and still names `# Sprint Title` as the fallback target. `prune-backlog` matches verbatim, so a contract copied from this template exits 1 and leaves items queued. Fix the example to the full checkbox line and drop the stale fallback claim
+- [ ] [PLAN] `task-next --tree` with a single-item group now writes no `tasks.md` and leaves the item `- [ ]`, so the main checkout stays clean and a second invocation re-picks the same candidate instead of seeing it in flight. Decide whether `--tree` needs an in-flight lock or should force the file-backed contract
+
 ## Self-improvement loop — Signal 8 verifier-grounded failures (D1)
 
 Source: `docs/design/harness-self-improvement-loop.md` D1.
