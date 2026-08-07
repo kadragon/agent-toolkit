@@ -2,7 +2,8 @@
 
 `backlog.md` is the **only** persistent queue: work not yet in flight, plus every finding that
 outlives the cycle that produced it — review findings, security findings, deferred follow-ups. The
-maintenance routine section C reconciles it against `tasks.md` every session.
+maintenance routine section C reports its state every session; line transitions are written by
+`task_nodes.py prune-backlog` at `task-next` pre-merge cleanup, not by reconcile.
 
 Nothing persistent belongs in `tasks.md`; that file is the current Sprint Contract and is deleted
 whole at sprint close (`references/tasks-template.md` → *Invariant*).
@@ -80,5 +81,6 @@ Rules for any such section:
 ## Related
 
 - Schema enforced by `scripts/validate-harness.sh` (init) and `sync D-1`
-- State transitions handled by `scripts/reconcile-harness.py` (sync C)
+- State transitions handled by `task_nodes.py prune-backlog` (`task-next` pre-merge cleanup);
+  `scripts/reconcile-harness.py` (sync C) only strips orphan `[>]` markers when no sprint is in flight
 - Invariants: `references/harness-invariants.md` → "Reconciliation Contract"

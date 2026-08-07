@@ -401,9 +401,15 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
         newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
+        # `alive[h] > 1` keeps the file's root heading out of this path. A `# Backlog` root owns
+        # standing preamble prose, so once its last item drains the whole file reads as prose-only
+        # and `backlog.md` would be rewritten byte-empty — losing the schema `task-next` Step 1
+        # and `validate-harness.sh` both require. `_region_blank` never reached the root while
+        # that preamble stood; this test would, so it is excluded explicitly.
         prose_only = {
             h for h in owned
-            if h not in drop and h not in newly and _region_prose_only(masked_surviving, h, alive)
+            if h not in drop and h not in newly and alive.get(h, 1) > 1
+            and _region_prose_only(masked_surviving, h, alive)
         }
         if not newly and not prose_only:
             break
@@ -839,8 +845,24 @@ Intro prose for the parent.
     out, _ = prune_lines(prose_child_survives, ["- [ ] [FIX] parent-level item"])
     _assert("## Parent group" in out and "Intro prose for the parent." in out,
             "(c) a surviving child heading keeps the parent heading and its intro prose")
+
     _assert("### Sub child" in out and "- [ ] [FIX] child item" in out,
             "(c) the surviving child itself is untouched")
+
+    # (e) The root heading is exempt: draining the file's last item must not take `# Backlog` and
+    # its standing preamble with it. `backlog.md` is a prerequisite that must keep its schema.
+    root_preamble = """# Backlog
+
+Queue of work not yet in flight. Do not delete this file.
+
+## Now
+
+- [ ] [FIX] only item
+"""
+    out, _ = prune_lines(root_preamble, ["- [ ] [FIX] only item"])
+    _assert("# Backlog" in out and "Do not delete this file." in out,
+            "(e) the root heading and its preamble prose survive draining the last item")
+    _assert("## Now" not in out, "(e) the drained h2 under the root is still deleted")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

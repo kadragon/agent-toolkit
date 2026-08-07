@@ -84,8 +84,9 @@ Exit codes:
 ## C) Harness Reconciliation
 
 Run silently. Script closes the `tasks.md` sprint block per its `status:` and prints one status line.
-It never writes `backlog.md` — deleting covered lines is `task_nodes.py prune-backlog`'s job, run by
-`task-next` at pre-merge cleanup.
+While a sprint is in flight (C-1) it never writes `backlog.md` — deleting covered lines is
+`task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. With `tasks.md`
+absent (C-2) it still strips orphan `[>]` markers and empty headings from `backlog.md`.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"

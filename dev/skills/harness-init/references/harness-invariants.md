@@ -78,9 +78,10 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 
 ## Reconciliation Contract (maintenance C)
 
-`reconcile-harness.py` closes the `tasks.md` sprint block; it does not write `backlog.md`
+`reconcile-harness.py` closes the `tasks.md` sprint block. It writes no `backlog.md`
 line deletions — those are owned by `task_nodes.py prune-backlog` at `task-next`
-pre-merge cleanup (verbatim match, refuses on ambiguity):
+pre-merge cleanup (verbatim match, refuses on ambiguity). Its one `backlog.md` write is
+the `tasks.md`-absent row below: orphan `[>]` markers and empty headings, nothing else:
 
 | `tasks.md` `status:` | Action | Outcome |
 |----------------------|--------|---------|
