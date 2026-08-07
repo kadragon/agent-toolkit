@@ -68,4 +68,4 @@ plugin.json
 1. **`plugin.json` version** — sole mechanism for marketplace update propagation; missed bump = marketplace not updated
 2. **`SKILL.md` `description:` field** — primary auto-invocation signal; directive phrasing ("ALWAYS invoke when...") outperforms descriptive
 3. **Agent roles** (`.claude/agents/*.md`) — reusable subagent definitions; Markdown body is system prompt; frontmatter controls tools/model
-4. **`backlog.md`** — queue of work not yet in flight; reconciled by `scripts/reconcile-harness.py` against `backlog.md` sprints
+4. **`backlog.md`** — queue of work not yet in flight; line deletion is owned by `task_nodes.py prune-backlog` at pre-merge cleanup, not by `scripts/reconcile-harness.py` (which closes the `tasks.md` sprint block, and touches `backlog.md` only to strip orphan markers when no sprint is in flight)

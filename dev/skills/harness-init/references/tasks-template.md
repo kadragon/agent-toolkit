@@ -4,8 +4,8 @@
 flight. It exists only between sprint start and sprint close; the rest of the
 time the file is absent (that's the idle state).
 
-The maintenance routine section C reads `status:` every session to decide whether to archive,
-revert, or leave the sprint intact.
+The maintenance routine section C reads `status:` every session to decide whether to close the
+sprint block (done/failed) or leave it intact (active/evaluating).
 
 ## Invariant: nothing persistent lives here
 
@@ -30,13 +30,14 @@ section, and tells you to move it.
 
 The file MUST contain:
 
-1. A top-level heading `# <Sprint Title>` — used by reconcile as the display name and
-   fallback anchor when no `## Covers` section is present.
+1. A top-level heading `# <Sprint Title>` — used by reconcile as the display name (in
+   print messages and the CHANGELOG entry) and by `task_nodes.py prune-backlog` as the
+   verbatim anchor for deleting the covered `backlog.md` line(s).
 2. A `status:` field on its own line, lowercase, one of:
    - `active` — work in progress
    - `evaluating` — implementation done, awaiting evaluator verdict
-   - `done` — sprint accepted; reconcile will archive it
-   - `failed` — sprint rejected; reconcile will return it to the backlog
+   - `done` — sprint accepted; reconcile closes the `tasks.md` block and appends a CHANGELOG entry
+   - `failed` — sprint rejected; reconcile closes the `tasks.md` block, backlog items are left as-is
 3. Sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` (can be empty
    initially but the headings must be present so later tooling can append)
 
@@ -51,11 +52,12 @@ section listing each bundled backlog line's exact text as a bullet:
 - [FIX] trap cleanup on exit in codex-review.sh
 ```
 
-`reconcile-harness.py` reads this section to determine which `[>]` lines to
-archive/revert in `backlog.md` on sprint close. Without `## Covers`, reconcile
-matches only `[>]` lines containing the `# Sprint Title` text (single-item behaviour).
-Each bullet must be the **verbatim** text of the matching backlog `[>]` line so the
-case-insensitive substring match is precise.
+`reconcile-harness.py` does not read this section — it only closes the `tasks.md`
+sprint block. `task_nodes.py prune-backlog` is the consumer: `task-next` feeds it
+the bundled `- [ ]` line texts (from `## Covers` when present, otherwise the single
+`# Sprint Title`) and it deletes them from `backlog.md` at pre-merge cleanup. That
+match is **verbatim**, not a case-insensitive substring, and it refuses on ambiguity
+— so each bullet here must be the exact text of the matching backlog line.
 
 ## Minimal Template to Copy
 
@@ -84,20 +86,23 @@ _filled in by the evaluator after implementation_
 
 ```
 backlog [ ]
-   │  (human promotes)
+   │  (task-next selects; backlog line stays [ ])
    ▼
-backlog [>]  +  tasks.md (status: active)
+tasks.md (status: active)
    │
    │  (implementation)
    ▼
 tasks.md (status: evaluating)
    │
-   ├── pass ──► status: done  ──► reconcile archives; [>] disappears
-   └── fail ──► status: failed ──► reconcile reverts; [>] → [ ]
+   ├── pass ──► status: done  ──► reconcile closes tasks.md, appends CHANGELOG entry;
+   │                              task-next pre-merge cleanup deletes the covered
+   │                              backlog line(s) via task_nodes.py prune-backlog
+   └── fail ──► status: failed ──► reconcile closes tasks.md; backlog line(s) untouched
 ```
 
-All of this is automatic once `status:` is set correctly — the human only
-touches `status`, never `backlog.md` directly during a sprint.
+`status:` drives reconcile's handling of `tasks.md` itself; deleting the covered
+backlog line(s) on success is a separate step owned by `task-next`'s pre-merge
+cleanup, not by reconcile.
 
 ## Related
 

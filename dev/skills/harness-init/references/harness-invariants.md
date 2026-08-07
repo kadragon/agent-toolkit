@@ -78,13 +78,16 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 
 ## Reconciliation Contract (maintenance C)
 
-`reconcile-harness.py` moves state between `tasks.md` and `backlog.md`:
+`reconcile-harness.py` closes the `tasks.md` sprint block. It writes no `backlog.md`
+line deletions — those are owned by `task_nodes.py prune-backlog` at `task-next`
+pre-merge cleanup (verbatim match, refuses on ambiguity). Its one `backlog.md` write is
+the `tasks.md`-absent row below: orphan `[>]` markers and empty headings, nothing else:
 
 | `tasks.md` `status:` | Action | Outcome |
 |----------------------|--------|---------|
 | `active` / `evaluating` | Leave intact; report sprint title | Nothing moves |
-| `done` | Remove matching `[>]` from backlog; delete tasks.md; append CHANGELOG entry if present | Sprint archived |
-| `failed` | Revert `[>]` → `[ ]` in backlog with evaluator note; delete tasks.md | Sprint returned to queue |
+| `done` | Delete tasks.md (or strip the sprint block if other content remains); append CHANGELOG entry if present | Sprint block closed; backlog line deletion happens separately via `prune-backlog` |
+| `failed` | Delete tasks.md (or strip the sprint block if other content remains) | Sprint block closed; backlog items left queued, untouched |
 | (no tasks.md) | Strip orphan `[>]` markers from backlog | Backlog idle state |
 
 For this contract to hold, init MUST create `backlog.md` with the exact schema above, and the

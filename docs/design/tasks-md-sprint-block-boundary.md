@@ -4,9 +4,10 @@
 Sprint Contract only; every persistent queue — review findings, security findings, sweep findings —
 lives in `backlog.md`. Options 1, 2 and 4 are superseded: the boundary they were hardening no longer
 separates deletable from must-survive content. Option 3's regression test shipped as the migration
-guard test in `task_nodes.py`. **Option 5 (the dead `[>]` anchor path in `reconcile-harness.py` C-1)
-is still open** — only its stale `backlog-template.md:15` claim was corrected here. Option 6 (making
-the Sprint Contract write conditional on `## Covers`) is untouched and still stands on its own.
+guard test in `task_nodes.py`. **Options 5 and 6 shipped** (dev v4.4.0): 5 by dropping the marker
+machinery rather than re-anchoring it — backlog line deletion is owned by `task_nodes.py
+prune-backlog`, and a second substring-matching deletion path would be strictly more dangerous;
+6 by writing `tasks.md` only when `## Covers` is needed. **Every option in this doc is now closed.**
 
 Everything below is the original analysis, kept as the record of why.
 
