@@ -31,13 +31,12 @@ section, and tells you to move it.
 The file MUST contain:
 
 1. A top-level heading `# <Sprint Title>` — used by reconcile as the display name (in
-   print messages and the CHANGELOG entry) and by `task_nodes.py prune-backlog` as the
-   verbatim anchor for deleting the covered `backlog.md` line(s).
+   print messages and the CHANGELOG entry).
 2. A `status:` field on its own line, lowercase, one of:
    - `active` — work in progress
    - `evaluating` — implementation done, awaiting evaluator verdict
    - `done` — sprint accepted; reconcile closes the `tasks.md` block and appends a CHANGELOG entry
-   - `failed` — sprint rejected; reconcile closes the `tasks.md` block, backlog items are left as-is
+   - `failed` — sprint rejected; reconcile closes the `tasks.md` block, backlog items are reverted to `[ ]`
 3. Sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` (can be empty
    initially but the headings must be present so later tooling can append)
 
@@ -48,21 +47,21 @@ section listing each bundled backlog line's exact text as a bullet:
 
 ```markdown
 ## Covers
-- [FIX] mktemp guard in codex-review.sh
-- [FIX] trap cleanup on exit in codex-review.sh
+- [ ] [FIX] mktemp guard in codex-review.sh
+- [ ] [FIX] trap cleanup on exit in codex-review.sh
 ```
 
 `reconcile-harness.py` does not read this section — it only closes the `tasks.md`
 sprint block. `task_nodes.py prune-backlog` is the consumer: `task-next` feeds it
-the bundled `- [ ]` line texts (from `## Covers` when present, otherwise the single
-`# Sprint Title`) and it deletes them from `backlog.md` at pre-merge cleanup. That
-match is **verbatim**, not a case-insensitive substring, and it refuses on ambiguity
-— so each bullet here must be the exact text of the matching backlog line.
+the bundled `- [ ]` line texts from `## Covers` and it deletes them from `backlog.md`
+at pre-merge cleanup. That match is **verbatim**, not a case-insensitive substring,
+and it refuses on ambiguity — so each bullet here must be the exact text of the
+matching backlog line, full `- [ ] ` prefix included.
 
 ## Minimal Template to Copy
 
 ```markdown
-# {Sprint Title — must match the backlog line}
+# {Sprint Title}
 
 status: active
 
@@ -97,12 +96,13 @@ tasks.md (status: evaluating)
    ├── pass ──► status: done  ──► reconcile closes tasks.md, appends CHANGELOG entry;
    │                              task-next pre-merge cleanup deletes the covered
    │                              backlog line(s) via task_nodes.py prune-backlog
-   └── fail ──► status: failed ──► reconcile closes tasks.md; backlog line(s) untouched
+   └── fail ──► status: failed ──► reconcile closes tasks.md, reverts [>] backlog line(s) to [ ]
 ```
 
 `status:` drives reconcile's handling of `tasks.md` itself; deleting the covered
 backlog line(s) on success is a separate step owned by `task-next`'s pre-merge
-cleanup, not by reconcile.
+cleanup, not by reconcile. On failure reconcile reverts the `[>]` marker on the
+covered backlog line(s) back to `[ ]` itself — it never deletes a line.
 
 ## Related
 

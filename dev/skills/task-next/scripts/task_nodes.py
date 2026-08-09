@@ -400,15 +400,17 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
-        newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
-        # `alive[h] > 1` keeps the file's root heading out of this path. A `# Backlog` root owns
-        # standing preamble prose, so once its last item drains the whole file reads as prose-only
-        # and `backlog.md` would be rewritten byte-empty — losing the schema `task-next` Step 1
-        # and `validate-harness.sh` both require. `_region_blank` never reached the root while
-        # that preamble stood; this test would, so it is excluded explicitly.
+        # Keep the file's first heading out of the blank cascade. It is the schema root even when
+        # a repo omits an h1 wrapper; later headings remain ordinary sections and may cascade away.
+        root_heading = heads[0] if heads else None
+        newly = {
+            h for h in owned
+            if h not in drop and h != root_heading
+            and _region_blank(surviving, h, alive)
+        }
         prose_only = {
             h for h in owned
-            if h not in drop and h not in newly and alive.get(h, 1) > 1
+            if h not in drop and h not in newly and (not heads or h != heads[0])
             and _region_prose_only(masked_surviving, h, alive)
         }
         if not newly and not prose_only:
@@ -771,7 +773,9 @@ Preamble prose that outlives its items.
     # which hid this: with no preamble, `_region_blank` used to stop at the parent's own surviving
     # child h3, call the parent empty, and delete it — orphaning that child. The section must end
     # at the next heading of level <= its own, not the next heading of any level.
-    siblings = """## Group
+    siblings = """# Root
+
+## Group
 
 ### Sub A
 
@@ -787,8 +791,8 @@ Preamble prose that outlives its items.
     _assert("### Sub B" in out and "- [ ] [FIX] item B" in out, "the surviving child is not orphaned")
 
     out, _ = prune_lines(siblings, ["- [ ] [FIX] item A", "- [ ] [FIX] item B"])
-    _assert("## Group" not in out and out == "",
-            "emptying every child still cascades the parent away — the fix does not block a full cascade")
+    _assert("# Root" in out and "## Group" not in out,
+            "emptying every child still cascades the non-root parent away")
 
     history = """## Shipped
 
@@ -804,7 +808,12 @@ Preamble prose that outlives its items.
     _assert("## Live" not in out, "the heading this run did empty IS deleted")
 
     # `_region_prose_only` — a heading drained to nothing but its own intro prose (PR #197).
-    prose_group = """## Group with intro prose
+    # Root heading ('# Root') is present so '## Group with intro prose' is NOT `heads[0]` and is
+    # therefore not exempt from the prose-only cascade (PR #203 restricted that exemption to the
+    # file's actual first heading — see the (f)/(g) fixtures below).
+    prose_group = """# Root
+
+## Group with intro prose
 
 Intro prose that describes the group.
 
@@ -863,6 +872,69 @@ Queue of work not yet in flight. Do not delete this file.
     _assert("# Backlog" in out and "Do not delete this file." in out,
             "(e) the root heading and its preamble prose survive draining the last item")
     _assert("## Now" not in out, "(e) the drained h2 under the root is still deleted")
+
+    # REGRESSION GUARD — the root exemption also covers a schema-only root with no preamble. The
+    # non-root prose-only section is removed, but the first heading remains so backlog.md is never
+    # rewritten byte-empty.
+    root_without_preamble = """# Backlog
+
+# Other
+
+Intro prose for other.
+
+- [ ] drain me
+"""
+    out, _ = prune_lines(root_without_preamble, ["- [ ] drain me"])
+    _assert("# Backlog" in out, "(e2) a schema-only root survives without preamble prose")
+    _assert("# Other" not in out and "Intro prose for other." not in out,
+            "(e2) the drained non-root prose-only section still cascades away")
+
+    # REGRESSION GUARD (codex review, PR #203) — the exemption above must cover only the file's
+    # FIRST heading, not every h1. A second top-level heading ('# Other') is not the root and must
+    # cascade like any other prose-only section once its last item drains.
+    non_root_h1 = """# Backlog
+
+Root preamble.
+
+# Other
+
+Intro prose for other.
+
+## Group
+
+- [ ] drain me
+"""
+    out, _ = prune_lines(non_root_h1, ["- [ ] drain me"])
+    _assert("# Backlog" in out and "Root preamble." in out,
+            "(f) the file's actual root heading and its preamble survive")
+    _assert("## Group" not in out, "(f) the drained h2 is deleted")
+    _assert("# Other" not in out and "Intro prose for other." not in out,
+            "(f) a non-root h1 drained to prose-only cascades away — it is not exempt")
+
+    # A file whose first heading is an h2 (no h1 at all): that h2 IS the root and must be exempt.
+    no_h1_root = """## Overview
+
+Preamble with no h1 wrapper.
+
+- [ ] [FIX] only item
+"""
+    out, _ = prune_lines(no_h1_root, ["- [ ] [FIX] only item"])
+    _assert("## Overview" in out and "Preamble with no h1 wrapper." in out,
+            "(g) the file's first heading is exempt even when it is not an h1")
+
+    no_h1_schema_only = "## Overview\n\n- [ ] only item\n"
+    out, _ = prune_lines(no_h1_schema_only, ["- [ ] only item"])
+    _assert("## Overview" in out, "(g2) a schema-only non-h1 root is not rewritten byte-empty")
+
+    no_h1_root_with_child = """## Overview
+
+### Sub
+
+- [ ] only item
+"""
+    out, _ = prune_lines(no_h1_root_with_child, ["- [ ] only item"])
+    _assert("## Overview" in out and "### Sub" not in out,
+            "(g3) a non-h1 root with a drained child still keeps the root heading")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

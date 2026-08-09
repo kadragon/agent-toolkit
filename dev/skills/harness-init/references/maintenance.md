@@ -84,9 +84,10 @@ Exit codes:
 ## C) Harness Reconciliation
 
 Run silently. Script closes the `tasks.md` sprint block per its `status:` and prints one status line.
-While a sprint is in flight (C-1) it never writes `backlog.md` — deleting covered lines is
-`task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. With `tasks.md`
-absent (C-2) it still strips orphan `[>]` markers and empty headings from `backlog.md`.
+While a sprint is active or evaluating (C-1) it never writes `backlog.md` — deleting covered lines
+is `task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. On `failed`, it
+reverts `[>]` markers back to `[ ]` and prunes empty headings; with `tasks.md` absent (C-2), it
+does the same orphan cleanup. It never removes an item line.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -97,7 +98,7 @@ python3 "$SKILL_DIR/scripts/reconcile-harness.py"
 Output:
 - `Sprint active: <title>` — tasks.md active or evaluating; leave intact
 - `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
-- `Sprint '<title>' failed. Sprint block closed; backlog items left queued.` — sprint returned to queue
+- `Sprint '<title>' failed. Sprint block closed; backlog items reverted to [ ].` — sprint returned to queue
 - `Backlog: N queued, M active` — backlog has pending items
 - `Backlog clear.` — nothing pending
 

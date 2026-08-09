@@ -60,6 +60,21 @@ def _fence_mask(lines: list) -> list:
     return mask
 
 
+def _masked_lines(text: str) -> tuple[list[str], list[str], list[bool]]:
+    """Return raw lines, markup-masked lines, and the real-content mask."""
+    raw_lines = text.splitlines(keepends=True)
+    masked_text = re.sub(
+        r"<!--.*?-->",
+        lambda match: re.sub(r"[^\r\n]", " ", match.group(0)),
+        text,
+        flags=re.DOTALL,
+    )
+    masked_lines = masked_text.splitlines(keepends=True)
+    if len(raw_lines) != len(masked_lines):
+        return raw_lines, [], []
+    return raw_lines, masked_lines, _fence_mask(masked_lines)
+
+
 def _heading_indices(lines: list, mask: list | None = None) -> list:
     """Indices of top-level '# ' heading lines, ignoring fenced code blocks.
 
@@ -159,9 +174,29 @@ def strip_sprint_block(content: str) -> str | None:
     return remainder + "\n"
 
 
-def remove_orphan_markers(backlog: str) -> str:
-    """Remove all remaining [>] lines when no tasks.md exists."""
-    return re.sub(r'^\s*-\s*\[>\].*\n?', '', backlog, flags=re.MULTILINE)
+def revert_orphan_markers(backlog: str) -> str:
+    """Revert every remaining real `[>]` backlog line to `[ ]`, in place.
+
+    An `[>]` marker with no owning sprint (either `tasks.md` is absent, or its sprint just closed
+    `failed`) means the promoted work never finished. Rewriting the checkbox back to `[ ]` returns
+    it to the queue; deleting the line would silently discard it. Backlog line deletion is the
+    exclusive property of `task_nodes.py prune-backlog` — this function only ever changes a real
+    checkbox line, leaving indentation, markup examples, and the rest of each line byte-for-byte
+    untouched.
+    """
+    raw_lines, masked_lines, fence_mask = _masked_lines(backlog)
+    if len(raw_lines) != len(masked_lines):
+        return backlog
+
+    out = []
+    for i, line in enumerate(raw_lines):
+        match = re.match(r'^\s*-\s*\[>\]', masked_lines[i])
+        if fence_mask[i] and match:
+            marker = re.search(r'\[>\]', masked_lines[i][:match.end()])
+            if marker:
+                line = line[:marker.start()] + '[ ]' + line[marker.end():]
+        out.append(line)
+    return "".join(out)
 
 
 def remove_empty_headings(backlog: str) -> str:
@@ -178,12 +213,17 @@ def remove_empty_headings(backlog: str) -> str:
     parent whose children are all empty finds no content either (the scan skips heading
     lines) and is dropped with them.
     """
-    lines = backlog.splitlines()
+    raw_lines, masked_lines, real_mask = _masked_lines(backlog)
+    if len(raw_lines) != len(masked_lines):
+        return backlog
+    lines = [line.rstrip("\r\n") for line in raw_lines]
+    masked_bodies = [line.rstrip("\r\n") for line in masked_lines]
     levels: list[int | None] = []
-    for line in lines:
+    for i, line in enumerate(masked_bodies):
         m = re.match(r'^(#+)\s', line)
-        levels.append(len(m.group(1)) if m else None)
+        levels.append(len(m.group(1)) if real_mask[i] and m else None)
 
+    root = next((i for i, level in enumerate(levels) if level is not None), None)
     drop = set()
     for i, level in enumerate(levels):
         if level is None:
@@ -198,12 +238,18 @@ def remove_empty_headings(backlog: str) -> str:
             if lines[j].strip():
                 has_content = True
                 break
-        if not has_content:
+        if not has_content and i != root:
             drop.add(i)
-    return '\n'.join(line for i, line in enumerate(lines) if i not in drop)
+    return "".join(raw_lines[i] for i in range(len(raw_lines)) if i not in drop)
 
 
 MAX_CHANGELOG_LINE = 160
+
+
+def read_text_preserving_eol(path: Path) -> str:
+    """Read UTF-8 text without universal-newline conversion."""
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 def append_changelog(title: str) -> None:
@@ -227,34 +273,51 @@ def append_changelog(title: str) -> None:
             "truncated in the entry. Shorten the tasks.md title.",
             file=sys.stderr,
         )
-    body = CHANGELOG.read_text(encoding="utf-8")
-    lines = body.splitlines()
+    body = read_text_preserving_eol(CHANGELOG)
+    eol = "\r\n" if "\r\n" in body else "\n"
+    raw_lines = body.splitlines(keepends=True)
+    lines = [line.rstrip("\r\n") for line in raw_lines]
     mask = _fence_mask(lines)  # a `## Unreleased` inside a fenced example is not the section
     for i, line in enumerate(lines):
         if mask[i] and re.match(r'^##\s+Unreleased\s*$', line, re.IGNORECASE):
             insert_at = i + 1
+            if not raw_lines[i].endswith(("\r", "\n")):
+                raw_lines[i] += eol
             # Keep exactly one blank line between the heading and the first entry.
             if insert_at < len(lines) and not lines[insert_at].strip():
                 insert_at += 1
-                lines.insert(insert_at, entry)
+                raw_lines.insert(insert_at, entry + eol)
             else:
-                lines[insert_at:insert_at] = ["", entry]
-            CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
+                raw_lines[insert_at:insert_at] = [eol, entry + eol]
+            CHANGELOG.write_bytes("".join(raw_lines).encode("utf-8"))
             return
     # No Unreleased section — create one directly under the file's h1 title. Placing it at
     # EOF would sit it below every released section and stay mis-ordered on every later run,
     # since the next call finds it there (changelogs are newest-first).
     for i, line in enumerate(lines):
         if mask[i] and re.match(r'^#\s+\S', line):
-            lines[i + 1:i + 1] = ["", "## Unreleased", "", entry]
-            CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
+            if not raw_lines[i].endswith(("\r", "\n")):
+                raw_lines[i] += eol
+            raw_lines[i + 1:i + 1] = [eol, "## Unreleased" + eol, eol, entry + eol]
+            CHANGELOG.write_bytes("".join(raw_lines).encode("utf-8"))
             return
-    CHANGELOG.write_text(body.rstrip('\n') + f"\n\n## Unreleased\n\n{entry}\n", encoding="utf-8")
+    CHANGELOG.write_bytes(
+        (body.rstrip("\r\n") + f"{eol}{eol}## Unreleased{eol}{eol}{entry}{eol}").encode("utf-8")
+    )
 
 
-def count_items(backlog: str) -> tuple[int, int]:
-    queued = len(re.findall(r'^\s*-\s*\[\s\]', backlog, re.MULTILINE))
-    active = len(re.findall(r'^\s*-\s*\[>\]', backlog, re.MULTILINE))
+def count_items(backlog: str) -> tuple[int, int] | None:
+    raw_lines, masked_lines, real_mask = _masked_lines(backlog)
+    if len(raw_lines) != len(masked_lines):
+        return None
+    queued = sum(
+        bool(real_mask[i] and re.match(r'^\s*-\s*\[\s\]', line))
+        for i, line in enumerate(masked_lines)
+    )
+    active = sum(
+        bool(real_mask[i] and re.match(r'^\s*-\s*\[>\]', line))
+        for i, line in enumerate(masked_lines)
+    )
     return queued, active
 
 
@@ -282,13 +345,20 @@ def main() -> None:
                 print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
+            if BACKLOG.exists():
+                backlog_content = read_text_preserving_eol(BACKLOG)
+                reverted = revert_orphan_markers(backlog_content)
+                cleaned = remove_empty_headings(reverted)
+                if cleaned != backlog_content:
+                    BACKLOG.write_bytes(cleaned.encode("utf-8"))
+
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:
                 TASKS.unlink()
-                print(f"Sprint '{title}' failed. Sprint block closed; backlog items left queued.")
+                print(f"Sprint '{title}' failed. Sprint block closed; backlog items reverted to [ ].")
             else:
                 TASKS.write_text(remainder, encoding="utf-8")
-                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained; backlog items left queued.")
+                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained; backlog items reverted to [ ].")
 
         elif status in ("active", "evaluating"):
             print(f"Sprint active: {title}")
@@ -321,18 +391,25 @@ def main() -> None:
             print("Backlog clear.")
             return
 
-        content = BACKLOG.read_text(encoding="utf-8")
-        cleaned = remove_orphan_markers(content)
+        content = read_text_preserving_eol(BACKLOG)
+        cleaned = revert_orphan_markers(content)
         cleaned = remove_empty_headings(cleaned)
         if cleaned != content:
-            BACKLOG.write_text(cleaned, encoding="utf-8")
+            BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
     # C-3: Report
     if not BACKLOG.exists():
         print("Backlog clear.")
         return
 
-    queued, active = count_items(BACKLOG.read_text(encoding="utf-8"))
+    counts = count_items(read_text_preserving_eol(BACKLOG))
+    if counts is None:
+        print(
+            "Backlog report unavailable: internal markup mask line-count mismatch.",
+            file=sys.stderr,
+        )
+        return
+    queued, active = counts
     if queued == 0 and active == 0:
         print("Backlog clear.")
     else:

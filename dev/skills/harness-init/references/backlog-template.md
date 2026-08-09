@@ -17,7 +17,7 @@ whole at sprint close (`references/tasks-template.md` → *Invariant*).
 | State | Meaning | Set by |
 |-------|---------|--------|
 | `[ ]` | Queued — nothing active | Human |
-| `[>]` | Active — promoted into the current `tasks.md` sprint | Human on sprint start (no automated writer — `task-next` leaves items `[ ]` and deletes them at pre-merge cleanup) |
+| `[>]` | Legacy/manual active marker for the current `tasks.md` sprint | Human or a prior workflow (current `task-next` leaves selected items `[ ]` until verbatim pre-merge deletion). `reconcile-harness.py` reverts a leftover `[>]` back to `[ ]` — on `status: failed`, and on any orphan sweep (`tasks.md` absent) — it never deletes the line |
 | `[x]` | Done — kept as history or pruned | Human (no automated writer — `reconcile-harness.py` only closes the `tasks.md` sprint block; backlog line deletion is owned by `task_nodes.py prune-backlog`) |
 
 Exactly **one** `[>]` at a time is normal for single-item sprints. Zero `[>]`
@@ -82,5 +82,7 @@ Rules for any such section:
 
 - Schema enforced by `scripts/validate-harness.sh` (init) and `sync D-1`
 - State transitions handled by `task_nodes.py prune-backlog` (`task-next` pre-merge cleanup);
-  `scripts/reconcile-harness.py` (sync C) only strips orphan `[>]` markers when no sprint is in flight
+  `scripts/reconcile-harness.py` (sync C) reverts `[>]` → `[ ]` on `status: failed` and on any
+  orphan sweep (`tasks.md` absent) — it never removes a backlog line; line deletion is
+  `prune-backlog`'s exclusive job
 - Invariants: `references/harness-invariants.md` → "Reconciliation Contract"

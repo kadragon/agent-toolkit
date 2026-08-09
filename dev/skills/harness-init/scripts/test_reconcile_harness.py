@@ -238,6 +238,12 @@ def test_strip_handles_nested_fences():
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
 
+def _read_raw(path: Path) -> str:
+    """Read text without Python's universal-newline conversion."""
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
 def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | None = None) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
@@ -248,10 +254,10 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         tpath, bpath, cpath = tmp / "tasks.md", tmp / "backlog.md", tmp / "CHANGELOG.md"
-        tpath.write_text(tasks_text, encoding="utf-8")
-        bpath.write_text(backlog_text, encoding="utf-8")
+        tpath.write_bytes(tasks_text.encode("utf-8"))
+        bpath.write_bytes(backlog_text.encode("utf-8"))
         if changelog_text is not None:
-            cpath.write_text(changelog_text, encoding="utf-8")
+            cpath.write_bytes(changelog_text.encode("utf-8"))
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
         mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
@@ -262,9 +268,9 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
             mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
         return {
             "tasks_exists": tpath.exists(),
-            "tasks_body": tpath.read_text(encoding="utf-8") if tpath.exists() else "",
-            "backlog_body": bpath.read_text(encoding="utf-8"),
-            "changelog_body": cpath.read_text(encoding="utf-8") if cpath.exists() else "",
+            "tasks_body": _read_raw(tpath) if tpath.exists() else "",
+            "backlog_body": _read_raw(bpath),
+            "changelog_body": _read_raw(cpath) if cpath.exists() else "",
             "stdout": out.getvalue(),
             "stderr": err.getvalue(),
         }
@@ -307,6 +313,16 @@ def test_main_done_changelog_single_line_under_unreleased():
     idx_unreleased = lines.index("## Unreleased")
     check("changelog: entry sits under Unreleased",
           bool(added) and 0 < lines.index(added[0]) - idx_unreleased <= 2, body)
+
+
+def test_main_done_changelog_preserves_crlf():
+    """done sprint → CHANGELOG keeps CRLF rather than normalizing the file to LF."""
+    before = "# Changelog\r\n\r\n## Unreleased\r\n\r\n- [done] earlier thing (2026-01-01)\r\n"
+    backlog = "## Now\r\n- [>] Sprint: do the thing\r\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog, changelog_text=before)
+    body = r["changelog_body"]
+    check("changelog-crlf: entry added", "- [done] Sprint: do the thing" in body, body)
+    check("changelog-crlf: no bare LF introduced", "\n" not in body.replace("\r\n", ""), repr(body))
 
 
 def test_main_done_changelog_creates_unreleased_when_absent():
@@ -372,14 +388,172 @@ def test_main_done_no_changelog_is_noop():
 
 
 def test_main_failed_preserves_review_backlog():
-    """failed sprint with Review Backlog → tasks.md retained, findings survive, backlog untouched."""
+    """failed sprint with Review Backlog → tasks.md retained, findings survive, `[>]` reverted."""
     failed_tasks = TASKS_WITH_BACKLOG.replace("status: done", "status: failed")
     backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
     r = _run_main_in_tmp(failed_tasks, backlog)
     check("main-failed: tasks.md retained", r["tasks_exists"])
     check("main-failed: open finding preserved", "open finding one" in r["tasks_body"])
     check("main-failed: sprint block gone", "# Sprint: do the thing" not in r["tasks_body"])
-    check("main-failed: backlog untouched", r["backlog_body"] == backlog, r["backlog_body"])
+    check("main-failed: [>] reverted to [ ], line kept",
+          "- [ ] Sprint: do the thing" in r["backlog_body"], r["backlog_body"])
+    check("main-failed: unrelated queued item untouched",
+          "- [ ] unrelated" in r["backlog_body"], r["backlog_body"])
+    check("main-failed: no [>] left in backlog",
+          "[>]" not in r["backlog_body"], r["backlog_body"])
+
+
+def test_main_failed_reverts_marker_keeps_line():
+    """(a) `status: failed` rewrites every `- [>]` line to `- [ ]` and deletes no line."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "## Now\n  - [>]   Sprint: solo\n- [ ] other queued item\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-revert: reverted line present, indentation/spacing preserved",
+          "  - [ ]   Sprint: solo" in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: sibling queued item untouched",
+          "- [ ] other queued item" in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: no [>] left", "[>]" not in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: no line count lost",
+          len(r["backlog_body"].splitlines()) == len(backlog.splitlines()), r["backlog_body"])
+
+
+def test_main_failed_prunes_empty_headings():
+    """(d) failed reconciliation reverts markers and prunes unrelated empty headings."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n\n## Empty\n\n## Live\n- [>] active item\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-empty-heading: empty heading pruned", "## Empty" not in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: root retained", "# Backlog" in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: active item returned to queue",
+          "- [ ] active item" in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: trailing newline preserved",
+          r["backlog_body"].endswith("\n"), repr(r["backlog_body"]))
+
+
+def test_main_failed_preserves_schema_root():
+    """(e) failed reconciliation never deletes a schema-only root or its EOF newline."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-root: schema root and newline untouched", r["backlog_body"] == backlog,
+          repr(r["backlog_body"]))
+
+
+def test_main_failed_preserves_crlf():
+    """(f) failed cleanup preserves CRLF on every surviving line, not only at EOF."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\r\n\r\n## Live\r\n- [>] active item\r\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-crlf: per-line endings preserved",
+          r["backlog_body"] == "# Backlog\r\n\r\n## Live\r\n- [ ] active item\r\n",
+          repr(r["backlog_body"]))
+
+
+def test_main_failed_ignores_markup_headings():
+    """(h) fenced headings do not terminate a real backlog section during cleanup."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = """# Backlog
+
+## Live
+
+```markdown
+# Not a real boundary
+```
+
+- [>] active item
+"""
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-markup: real section retained", "## Live" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup: real item reverted", "- [ ] active item" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup: example heading preserved as example",
+          "# Not a real boundary" in r["backlog_body"], r["backlog_body"])
+
+
+def test_main_failed_preserves_markup_only_section():
+    """failed cleanup keeps a heading that owns only documentation markup."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n\n## Examples\n\n<!-- documented example -->\n\n```markdown\n- [>] sample\n```\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-markup-only: section retained", "## Examples" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup-only: comment retained", "<!-- documented example -->" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup-only: fenced sample retained", "- [>] sample" in r["backlog_body"], r["backlog_body"])
+
+
+def test_orphan_sweep_reverts_not_deletes():
+    """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
+    backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        bpath = tmp / "backlog.md"
+        bpath.write_text(backlog, encoding="utf-8")
+        saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
+        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tmp / "tasks.md", bpath, tmp / "CHANGELOG.md"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                mod.main()
+            result = bpath.read_text(encoding="utf-8")
+        finally:
+            mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
+    check("orphan-sweep: line kept, marker reverted",
+          "- [ ] orphaned sprint" in result, result)
+    check("orphan-sweep: unrelated queued item untouched", "- [ ] unrelated" in result, result)
+    check("orphan-sweep: no [>] left", "[>]" not in result, result)
+
+
+def test_revert_orphan_markers_byte_identical_for_open_and_done():
+    """(c) `- [ ]` and `- [x]` lines are byte-identical after revert_orphan_markers."""
+    backlog = "## Now\n- [ ] queued item\n- [x] done item\n- [>] active item\n"
+    result = mod.revert_orphan_markers(backlog)
+    check("revert: [ ] line byte-identical", "- [ ] queued item" in result, result)
+    check("revert: [x] line byte-identical", "- [x] done item" in result, result)
+    check("revert: [>] reverted to [ ]", "- [ ] active item" in result, result)
+    check("revert: no [>] left", "[>]" not in result, result)
+
+
+def test_revert_orphan_markers_skips_markup():
+    """(g) fenced and commented examples are not real backlog markers."""
+    backlog = """# Backlog
+
+<!--
+- [>] commented example
+-->
+
+## Real
+- [>] real item
+
+```markdown
+- [>] fenced example
+```
+"""
+    result = mod.revert_orphan_markers(backlog)
+    check("revert-markup: real marker reverted", "- [ ] real item" in result, result)
+    check("revert-markup: comment preserved", "- [>] commented example" in result, result)
+    check("revert-markup: fence preserved", "- [>] fenced example" in result, result)
+
+    prefixed = "<!-- note --> - [>] real item after a comment\n"
+    check("revert-markup: marker after comment prefix reverted",
+          "<!-- note --> - [ ] real item after a comment" in mod.revert_orphan_markers(prefixed),
+          mod.revert_orphan_markers(prefixed))
+
+
+def test_count_items_skips_markup():
+    """Reporting ignores checkbox examples in comments and fenced code."""
+    backlog = """# Backlog
+
+<!-- - [ ] commented example -->
+
+## Real
+- [ ] queued item
+- [>] active item
+
+```markdown
+- [ ] fenced queued example
+- [>] fenced active example
+```
+"""
+    queued, active = mod.count_items(backlog)
+    check("count-markup: queued count excludes examples", queued == 1, repr((queued, active)))
+    check("count-markup: active count excludes examples", active == 1, repr((queued, active)))
 
 
 def test_main_done_backlog_byte_identical_no_marker_writes():
@@ -446,11 +620,22 @@ SUITES = [
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
+    ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),
     ("main: done changelog creates Unreleased", test_main_done_changelog_creates_unreleased_when_absent),
     ("main: done changelog skips fenced Unreleased", test_main_done_changelog_skips_fenced_unreleased),
     ("main: done changelog clamps over-cap title", test_main_done_changelog_title_over_cap_is_clamped),
     ("main: done without CHANGELOG is no-op", test_main_done_no_changelog_is_noop),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
+    ("main: failed reverts marker, keeps line", test_main_failed_reverts_marker_keeps_line),
+    ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
+    ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
+    ("main: failed preserves CRLF", test_main_failed_preserves_crlf),
+    ("main: failed ignores markup headings", test_main_failed_ignores_markup_headings),
+    ("main: failed preserves markup-only section", test_main_failed_preserves_markup_only_section),
+    ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
+    ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
+    ("revert_orphan_markers: skips markup", test_revert_orphan_markers_skips_markup),
+    ("count_items: skips markup", test_count_items_skips_markup),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),

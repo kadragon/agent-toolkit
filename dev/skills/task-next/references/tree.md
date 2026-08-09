@@ -1,9 +1,10 @@
 ## `--tree` mode (single task, worktree isolation)
 
 Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
-3) is modified so implementation and QA run in an isolated git worktree, keeping the main
-checkout on `main` throughout — useful when the user wants to preserve a clean working tree
-while a task is in flight.
+3) is modified so implementation and QA run in an isolated git worktree — the main checkout
+stays on `main` throughout, but `--tree` isolates **code changes** only. The main checkout still
+carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
+default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
 
 **Modified Branch step (replaces `git checkout -b` under `--tree`):**
 
@@ -17,9 +18,36 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
+# Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+if [[ -e "$TREE_STATE_PATH" || -e "$TREE_SNAPSHOT_PATH" ]]; then
+  echo "stale task-next tree cleanup state exists; resolve the previous run first" >&2
+  exit 1
+fi
+if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
+  if [[ -e .gitignore ]]; then
+    cp -- .gitignore "$TREE_SNAPSHOT_PATH"
+    printf '%s\n' restore > "$TREE_STATE_PATH"
+  else
+    printf '%s\n' remove > "$TREE_STATE_PATH"
+  fi
+  if [[ -s .gitignore ]]; then
+    printf '\n.worktrees/\n' >> .gitignore
+  else
+    printf '.worktrees/\n' >> .gitignore
+  fi
+  GITIGNORE_ADDED=true
+fi
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
+
+**Mark active:** runs in the main checkout, with one tree-mode exception to the default path's
+single-item inline contract: every `--tree` run writes a backlog group's Sprint Contract —
+`tasks.md`, `status: active`, and `## Covers` with the exact item line — there, uncommitted. It is
+carried onto `$BRANCH` by the collapse `git checkout` below the same way the version bump is (see
+**Version bump** further down), so a second invocation sees the run as in flight.
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
 worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
@@ -51,6 +79,32 @@ SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove --force ".worktrees/$SLUG"
 git branch -D "$BRANCH"
+# Mark active (above) may have written tasks.md in the main checkout, uncommitted — clean it up
+# too, or an abandoned run leaves a phantom `status: active` sprint behind.
+dirty=$(git status --porcelain -- tasks.md)
+if [[ -n "$dirty" ]]; then
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  NODES="$SKILL_DIR/scripts/task_nodes.py"
+  [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+  if [[ -f tasks.md ]]; then
+    python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>" || {
+      echo "Refusing to remove unexpected tasks.md content; inspect it manually." >&2
+    }
+  fi
+  if ! git cat-file -e HEAD:tasks.md 2>/dev/null; then
+    git rm --cached --ignore-unmatch -- tasks.md >/dev/null 2>&1 || true
+  fi
+fi
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+if [[ -f "$TREE_STATE_PATH" ]]; then
+  if grep -Fxq restore "$TREE_STATE_PATH"; then
+    cp -- "$TREE_SNAPSHOT_PATH" .gitignore
+  elif grep -Fxq remove "$TREE_STATE_PATH"; then
+    rm -f -- .gitignore
+  fi
+  rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH"
+fi
 ```
 Report the failure; main checkout remains on `main`.
 
@@ -65,6 +119,9 @@ SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
 git checkout "$BRANCH"                   # switch main checkout onto the feature branch
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now belongs to this branch
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on
