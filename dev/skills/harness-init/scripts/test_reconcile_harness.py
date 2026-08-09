@@ -439,6 +439,26 @@ def test_main_failed_preserves_crlf():
           repr(r["backlog_body"]))
 
 
+def test_main_failed_ignores_markup_headings():
+    """(h) fenced headings do not terminate a real backlog section during cleanup."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = """# Backlog
+
+## Live
+
+```markdown
+# Not a real boundary
+```
+
+- [>] active item
+"""
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-markup: real section retained", "## Live" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup: real item reverted", "- [ ] active item" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup: example heading preserved as example",
+          "# Not a real boundary" in r["backlog_body"], r["backlog_body"])
+
+
 def test_orphan_sweep_reverts_not_deletes():
     """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
     backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
@@ -564,6 +584,7 @@ SUITES = [
     ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
     ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
     ("main: failed preserves CRLF", test_main_failed_preserves_crlf),
+    ("main: failed ignores markup headings", test_main_failed_ignores_markup_headings),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("revert_orphan_markers: skips markup", test_revert_orphan_markers_skips_markup),

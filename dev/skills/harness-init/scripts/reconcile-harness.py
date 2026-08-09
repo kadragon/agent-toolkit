@@ -60,6 +60,21 @@ def _fence_mask(lines: list) -> list:
     return mask
 
 
+def _masked_lines(text: str) -> tuple[list[str], list[str], list[bool]]:
+    """Return raw lines, markup-masked lines, and the real-content mask."""
+    raw_lines = text.splitlines(keepends=True)
+    masked_text = re.sub(
+        r"<!--.*?-->",
+        lambda match: re.sub(r"[^\r\n]", " ", match.group(0)),
+        text,
+        flags=re.DOTALL,
+    )
+    masked_lines = masked_text.splitlines(keepends=True)
+    if len(raw_lines) != len(masked_lines):
+        return raw_lines, [], []
+    return raw_lines, masked_lines, _fence_mask(masked_lines)
+
+
 def _heading_indices(lines: list, mask: list | None = None) -> list:
     """Indices of top-level '# ' heading lines, ignoring fenced code blocks.
 
@@ -169,15 +184,7 @@ def revert_orphan_markers(backlog: str) -> str:
     checkbox line, leaving indentation, markup examples, and the rest of each line byte-for-byte
     untouched.
     """
-    raw_lines = backlog.splitlines(keepends=True)
-    masked_text = re.sub(
-        r"<!--.*?-->",
-        lambda match: re.sub(r"[^\r\n]", " ", match.group(0)),
-        backlog,
-        flags=re.DOTALL,
-    )
-    masked_lines = masked_text.splitlines(keepends=True)
-    fence_mask = _fence_mask(masked_lines)
+    raw_lines, masked_lines, fence_mask = _masked_lines(backlog)
     if len(raw_lines) != len(masked_lines):
         return backlog
 
@@ -203,12 +210,15 @@ def remove_empty_headings(backlog: str) -> str:
     parent whose children are all empty finds no content either (the scan skips heading
     lines) and is dropped with them.
     """
-    raw_lines = backlog.splitlines(keepends=True)
+    raw_lines, masked_lines, real_mask = _masked_lines(backlog)
+    if len(raw_lines) != len(masked_lines):
+        return backlog
     lines = [line.rstrip("\r\n") for line in raw_lines]
+    masked_bodies = [line.rstrip("\r\n") for line in masked_lines]
     levels: list[int | None] = []
-    for line in lines:
+    for i, line in enumerate(masked_bodies):
         m = re.match(r'^(#+)\s', line)
-        levels.append(len(m.group(1)) if m else None)
+        levels.append(len(m.group(1)) if real_mask[i] and m else None)
 
     root = next((i for i, level in enumerate(levels) if level is not None), None)
     drop = set()
@@ -222,7 +232,7 @@ def remove_empty_headings(backlog: str) -> str:
                 if child_level <= level:
                     break
                 continue
-            if lines[j].strip():
+            if real_mask[j] and masked_bodies[j].strip():
                 has_content = True
                 break
         if not has_content and i != root:
