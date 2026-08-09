@@ -18,13 +18,20 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
-# Retain GITIGNORE_ADDED and GITIGNORE_TRACKED for the QA-failure cleanup block below.
-GITIGNORE_ADDED=false
-GITIGNORE_TRACKED=false
-if git ls-files --error-unmatch -- .gitignore >/dev/null 2>&1; then
-  GITIGNORE_TRACKED=true
+# Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+if [[ -e "$TREE_STATE_PATH" || -e "$TREE_SNAPSHOT_PATH" ]]; then
+  echo "stale task-next tree cleanup state exists; resolve the previous run first" >&2
+  exit 1
 fi
 if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
+  if [[ -e .gitignore ]]; then
+    cp -- .gitignore "$TREE_SNAPSHOT_PATH"
+    printf '%s\n' restore > "$TREE_STATE_PATH"
+  else
+    printf '%s\n' remove > "$TREE_STATE_PATH"
+  fi
   if [[ -s .gitignore ]]; then
     printf '\n.worktrees/\n' >> .gitignore
   else
@@ -76,19 +83,27 @@ git branch -D "$BRANCH"
 # too, or an abandoned run leaves a phantom `status: active` sprint behind.
 dirty=$(git status --porcelain -- tasks.md)
 if [[ -n "$dirty" ]]; then
-  if git cat-file -e HEAD:tasks.md 2>/dev/null; then
-    git restore --source=HEAD --staged --worktree -- tasks.md
-  else
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  NODES="$SKILL_DIR/scripts/task_nodes.py"
+  [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
+  if [[ -f tasks.md ]]; then
+    python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>" || {
+      echo "Refusing to remove unexpected tasks.md content; inspect it manually." >&2
+    }
+  fi
+  if ! git cat-file -e HEAD:tasks.md 2>/dev/null; then
     git rm --cached --ignore-unmatch -- tasks.md >/dev/null 2>&1 || true
-    rm -f -- tasks.md
   fi
 fi
-if [[ "$GITIGNORE_ADDED" == true ]]; then
-  if [[ "$GITIGNORE_TRACKED" == true ]]; then
-    git restore --source=HEAD --staged --worktree -- .gitignore
-  else
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+if [[ -f "$TREE_STATE_PATH" ]]; then
+  if grep -Fxq restore "$TREE_STATE_PATH"; then
+    cp -- "$TREE_SNAPSHOT_PATH" .gitignore
+  elif grep -Fxq remove "$TREE_STATE_PATH"; then
     rm -f -- .gitignore
   fi
+  rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH"
 fi
 ```
 Report the failure; main checkout remains on `main`.
@@ -104,6 +119,9 @@ SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
 git checkout "$BRANCH"                   # switch main checkout onto the feature branch
+TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
+TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
+rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now belongs to this branch
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on

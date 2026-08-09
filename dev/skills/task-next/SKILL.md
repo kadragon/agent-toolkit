@@ -41,14 +41,15 @@ if [[ -n "$dirty" ]]; then
 fi
 ```
 
-If `dirty` is non-empty, `task_contract_dirty` is non-empty, and either `task_worktree` is
-non-empty or `current_branch` is not `main`/`master`, route directly to the "Work already in
-flight" edge case and inspect that matching path. Include all captured dirty paths in the
-diagnosis: source edits are expected while resuming a feature-branch sprint. This covers both a
-normal feature-branch sprint and the `--tree` exception, whose main checkout stays on `main` while
-the file-backed Sprint Contract (and optionally release bookkeeping or the ignore rule) is
-intentionally dirty. If `dirty` is non-empty and none of those conditions match, list the dirty
-files — do NOT proceed — and ask the user to commit, stash, or discard first.
+If `dirty` is non-empty and `current_branch` is not `main`/`master`, route directly to the "Work
+already in flight" edge case and inspect the matching feature branch, even when the default
+single-item path has no `tasks.md`. Include all captured dirty paths in the diagnosis: source edits
+are expected while resuming a feature-branch sprint. On `main`/`master`, route only when
+`task_contract_dirty` and `task_worktree` are both non-empty; this is the `--tree` exception, whose
+main checkout stays on `main` while the file-backed Sprint Contract (and optionally release
+bookkeeping or the ignore rule) is intentionally dirty. If `dirty` is non-empty and none of those
+conditions match, list the dirty files — do NOT proceed — and ask the user to commit, stash, or
+discard first.
 
 `tasks.md` is optional in default mode: it holds the Sprint Contract and nothing else, so it is
 present only when `## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md

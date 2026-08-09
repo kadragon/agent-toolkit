@@ -404,7 +404,11 @@ def main() -> None:
 
     counts = count_items(read_text_preserving_eol(BACKLOG))
     if counts is None:
-        raise SystemExit("Backlog report unavailable: internal markup mask line-count mismatch.")
+        print(
+            "Backlog report unavailable: internal markup mask line-count mismatch.",
+            file=sys.stderr,
+        )
+        return
     queued, active = counts
     if queued == 0 and active == 0:
         print("Backlog clear.")
