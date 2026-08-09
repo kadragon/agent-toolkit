@@ -238,6 +238,12 @@ def test_strip_handles_nested_fences():
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
 
+def _read_raw(path: Path) -> str:
+    """Read text without Python's universal-newline conversion."""
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
 def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | None = None) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
@@ -248,10 +254,10 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         tpath, bpath, cpath = tmp / "tasks.md", tmp / "backlog.md", tmp / "CHANGELOG.md"
-        tpath.write_text(tasks_text, encoding="utf-8")
-        bpath.write_text(backlog_text, encoding="utf-8")
+        tpath.write_bytes(tasks_text.encode("utf-8"))
+        bpath.write_bytes(backlog_text.encode("utf-8"))
         if changelog_text is not None:
-            cpath.write_text(changelog_text, encoding="utf-8")
+            cpath.write_bytes(changelog_text.encode("utf-8"))
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
         mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
@@ -262,9 +268,9 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
             mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
         return {
             "tasks_exists": tpath.exists(),
-            "tasks_body": tpath.read_text(encoding="utf-8") if tpath.exists() else "",
-            "backlog_body": bpath.read_text(encoding="utf-8"),
-            "changelog_body": cpath.read_text(encoding="utf-8") if cpath.exists() else "",
+            "tasks_body": _read_raw(tpath) if tpath.exists() else "",
+            "backlog_body": _read_raw(bpath),
+            "changelog_body": _read_raw(cpath) if cpath.exists() else "",
             "stdout": out.getvalue(),
             "stderr": err.getvalue(),
         }
@@ -423,6 +429,16 @@ def test_main_failed_preserves_schema_root():
           repr(r["backlog_body"]))
 
 
+def test_main_failed_preserves_crlf():
+    """(f) failed cleanup preserves CRLF on every surviving line, not only at EOF."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\r\n\r\n## Live\r\n- [>] active item\r\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-crlf: per-line endings preserved",
+          r["backlog_body"] == "# Backlog\r\n\r\n## Live\r\n- [ ] active item\r\n",
+          repr(r["backlog_body"]))
+
+
 def test_orphan_sweep_reverts_not_deletes():
     """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
     backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
@@ -452,6 +468,27 @@ def test_revert_orphan_markers_byte_identical_for_open_and_done():
     check("revert: [x] line byte-identical", "- [x] done item" in result, result)
     check("revert: [>] reverted to [ ]", "- [ ] active item" in result, result)
     check("revert: no [>] left", "[>]" not in result, result)
+
+
+def test_revert_orphan_markers_skips_markup():
+    """(g) fenced and commented examples are not real backlog markers."""
+    backlog = """# Backlog
+
+<!--
+- [>] commented example
+-->
+
+## Real
+- [>] real item
+
+```markdown
+- [>] fenced example
+```
+"""
+    result = mod.revert_orphan_markers(backlog)
+    check("revert-markup: real marker reverted", "- [ ] real item" in result, result)
+    check("revert-markup: comment preserved", "- [>] commented example" in result, result)
+    check("revert-markup: fence preserved", "- [>] fenced example" in result, result)
 
 
 def test_main_done_backlog_byte_identical_no_marker_writes():
@@ -526,8 +563,10 @@ SUITES = [
     ("main: failed reverts marker, keeps line", test_main_failed_reverts_marker_keeps_line),
     ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
     ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
+    ("main: failed preserves CRLF", test_main_failed_preserves_crlf),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
+    ("revert_orphan_markers: skips markup", test_revert_orphan_markers_skips_markup),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),

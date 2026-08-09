@@ -160,15 +160,33 @@ def strip_sprint_block(content: str) -> str | None:
 
 
 def revert_orphan_markers(backlog: str) -> str:
-    """Revert every remaining `[>]` line to `[ ]`, in place.
+    """Revert every remaining real `[>]` backlog line to `[ ]`, in place.
 
     An `[>]` marker with no owning sprint (either `tasks.md` is absent, or its sprint just closed
     `failed`) means the promoted work never finished. Rewriting the checkbox back to `[ ]` returns
     it to the queue; deleting the line would silently discard it. Backlog line deletion is the
-    exclusive property of `task_nodes.py prune-backlog` — this function only ever changes the
-    checkbox character, leaving indentation and the rest of the line byte-for-byte untouched.
+    exclusive property of `task_nodes.py prune-backlog` — this function only ever changes a real
+    checkbox line, leaving indentation, markup examples, and the rest of each line byte-for-byte
+    untouched.
     """
-    return re.sub(r'^(\s*-\s*)\[>\]', r'\1[ ]', backlog, flags=re.MULTILINE)
+    raw_lines = backlog.splitlines(keepends=True)
+    masked_text = re.sub(
+        r"<!--.*?-->",
+        lambda match: re.sub(r"[^\r\n]", " ", match.group(0)),
+        backlog,
+        flags=re.DOTALL,
+    )
+    masked_lines = masked_text.splitlines(keepends=True)
+    fence_mask = _fence_mask(masked_lines)
+    if len(raw_lines) != len(masked_lines):
+        return backlog
+
+    out = []
+    for i, line in enumerate(raw_lines):
+        if fence_mask[i] and re.match(r'^\s*-\s*\[>\]', masked_lines[i]):
+            line = re.sub(r'^(\s*-\s*)\[>\]', r'\1[ ]', line)
+        out.append(line)
+    return "".join(out)
 
 
 def remove_empty_headings(backlog: str) -> str:
@@ -185,7 +203,8 @@ def remove_empty_headings(backlog: str) -> str:
     parent whose children are all empty finds no content either (the scan skips heading
     lines) and is dropped with them.
     """
-    lines = backlog.splitlines()
+    raw_lines = backlog.splitlines(keepends=True)
+    lines = [line.rstrip("\r\n") for line in raw_lines]
     levels: list[int | None] = []
     for line in lines:
         m = re.match(r'^(#+)\s', line)
@@ -208,18 +227,16 @@ def remove_empty_headings(backlog: str) -> str:
                 break
         if not has_content and i != root:
             drop.add(i)
-    return '\n'.join(line for i, line in enumerate(lines) if i not in drop)
-
-
-def preserve_trailing_eol(original: str, cleaned: str) -> str:
-    """Keep the original file's trailing line ending after line-based cleanup."""
-    if not cleaned or not original.endswith(("\n", "\r")):
-        return cleaned
-    ending = "\r\n" if original.endswith("\r\n") else "\n"
-    return cleaned.rstrip("\r\n") + ending
+    return "".join(raw_lines[i] for i in range(len(raw_lines)) if i not in drop)
 
 
 MAX_CHANGELOG_LINE = 160
+
+
+def read_text_preserving_eol(path: Path) -> str:
+    """Read UTF-8 text without universal-newline conversion."""
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 def append_changelog(title: str) -> None:
@@ -299,11 +316,11 @@ def main() -> None:
 
         elif status == "failed":
             if BACKLOG.exists():
-                backlog_content = BACKLOG.read_text(encoding="utf-8")
+                backlog_content = read_text_preserving_eol(BACKLOG)
                 reverted = revert_orphan_markers(backlog_content)
-                cleaned = preserve_trailing_eol(backlog_content, remove_empty_headings(reverted))
+                cleaned = remove_empty_headings(reverted)
                 if cleaned != backlog_content:
-                    BACKLOG.write_text(cleaned, encoding="utf-8")
+                    BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:
@@ -344,18 +361,18 @@ def main() -> None:
             print("Backlog clear.")
             return
 
-        content = BACKLOG.read_text(encoding="utf-8")
+        content = read_text_preserving_eol(BACKLOG)
         cleaned = revert_orphan_markers(content)
-        cleaned = preserve_trailing_eol(content, remove_empty_headings(cleaned))
+        cleaned = remove_empty_headings(cleaned)
         if cleaned != content:
-            BACKLOG.write_text(cleaned, encoding="utf-8")
+            BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
     # C-3: Report
     if not BACKLOG.exists():
         print("Backlog clear.")
         return
 
-    queued, active = count_items(BACKLOG.read_text(encoding="utf-8"))
+    queued, active = count_items(read_text_preserving_eol(BACKLOG))
     if queued == 0 and active == 0:
         print("Backlog clear.")
     else:

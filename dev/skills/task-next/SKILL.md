@@ -35,14 +35,18 @@ when present; when absent, proceed and take the linter as the authority. Never s
 ```bash
 dirty=$(git status --porcelain)
 if [[ -n "$dirty" ]]; then
+  task_contract_dirty=$(git status --porcelain -- tasks.md)
   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
+  unexpected_dirty=$(git status --porcelain | grep -Ev '^[ MARC?!]{2} (tasks\.md|CHANGELOG\.md|\.gitignore|(.*/)?\.claude-plugin/plugin\.json|(.*/)?\.codex-plugin/plugin\.json)$' || true)
 fi
 ```
 
-If `dirty` is non-empty and `task_worktree` is non-empty, route directly to the "Work already in
-flight" edge case below and inspect that matching path. This is the `--tree` exception: its main
-checkout stays on `main` while the file-backed Sprint Contract is intentionally dirty. Otherwise,
-list the dirty files — do NOT proceed — and ask the user to commit, stash, or discard first.
+If `dirty`, `task_contract_dirty`, and `task_worktree` are non-empty and `unexpected_dirty` is
+empty, route directly to the "Work already in flight" edge case below and inspect that matching
+path. This is the `--tree` exception: its main checkout stays on `main` while the file-backed
+Sprint Contract (and optionally release bookkeeping or the ignore rule) is intentionally dirty.
+Otherwise, list the dirty files — do NOT proceed — and ask the user to commit, stash, or discard
+first.
 
 `tasks.md` is optional in default mode: it holds the Sprint Contract and nothing else, so it is
 present only when `## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md
