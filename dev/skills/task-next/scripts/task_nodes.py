@@ -401,14 +401,16 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
         newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
-        # `alive[h] > 1` keeps the file's root heading out of this path. A `# Backlog` root owns
-        # standing preamble prose, so once its last item drains the whole file reads as prose-only
-        # and `backlog.md` would be rewritten byte-empty — losing the schema `task-next` Step 1
-        # and `validate-harness.sh` both require. `_region_blank` never reached the root while
-        # that preamble stood; this test would, so it is excluded explicitly.
+        # `h != heads[0]` keeps only the file's ROOT heading — its first top-level heading — out of
+        # this path, not every h1. A `# Backlog` root owns standing preamble prose, so once its last
+        # item drains the whole file reads as prose-only and `backlog.md` would be rewritten
+        # byte-empty — losing the schema `task-next` Step 1 and `validate-harness.sh` both require.
+        # `_region_blank` never reached the root while that preamble stood; this test would, so it
+        # is excluded explicitly. A non-root h1 (e.g. a second top-level section in the same file)
+        # gets no such exemption — it cascades like any other heading.
         prose_only = {
             h for h in owned
-            if h not in drop and h not in newly and alive.get(h, 1) > 1
+            if h not in drop and h not in newly and (not heads or h != heads[0])
             and _region_prose_only(masked_surviving, h, alive)
         }
         if not newly and not prose_only:
@@ -804,7 +806,12 @@ Preamble prose that outlives its items.
     _assert("## Live" not in out, "the heading this run did empty IS deleted")
 
     # `_region_prose_only` — a heading drained to nothing but its own intro prose (PR #197).
-    prose_group = """## Group with intro prose
+    # Root heading ('# Root') is present so '## Group with intro prose' is NOT `heads[0]` and is
+    # therefore not exempt from the prose-only cascade (PR #203 restricted that exemption to the
+    # file's actual first heading — see the (f)/(g) fixtures below).
+    prose_group = """# Root
+
+## Group with intro prose
 
 Intro prose that describes the group.
 
@@ -863,6 +870,39 @@ Queue of work not yet in flight. Do not delete this file.
     _assert("# Backlog" in out and "Do not delete this file." in out,
             "(e) the root heading and its preamble prose survive draining the last item")
     _assert("## Now" not in out, "(e) the drained h2 under the root is still deleted")
+
+    # REGRESSION GUARD (codex review, PR #203) — the exemption above must cover only the file's
+    # FIRST heading, not every h1. A second top-level heading ('# Other') is not the root and must
+    # cascade like any other prose-only section once its last item drains.
+    non_root_h1 = """# Backlog
+
+Root preamble.
+
+# Other
+
+Intro prose for other.
+
+## Group
+
+- [ ] drain me
+"""
+    out, _ = prune_lines(non_root_h1, ["- [ ] drain me"])
+    _assert("# Backlog" in out and "Root preamble." in out,
+            "(f) the file's actual root heading and its preamble survive")
+    _assert("## Group" not in out, "(f) the drained h2 is deleted")
+    _assert("# Other" not in out and "Intro prose for other." not in out,
+            "(f) a non-root h1 drained to prose-only cascades away — it is not exempt")
+
+    # A file whose first heading is an h2 (no h1 at all): that h2 IS the root and must be exempt.
+    no_h1_root = """## Overview
+
+Preamble with no h1 wrapper.
+
+- [ ] [FIX] only item
+"""
+    out, _ = prune_lines(no_h1_root, ["- [ ] [FIX] only item"])
+    _assert("## Overview" in out and "Preamble with no h1 wrapper." in out,
+            "(g) the file's first heading is exempt even when it is not an h1")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

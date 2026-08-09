@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.0
+version: 1.5.1
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -439,6 +439,17 @@ action itself; always still ask yes/no.
    offer `task-review --auto` directly.
 
 2. **No commits ahead, but an active Sprint Contract?**
+
+   First rule out a `--tree` run: its code lives in a separate worktree, so the diff-based
+   triage below sees no code changes even while implementation is genuinely in progress there.
+   ```bash
+   other_worktrees=$(git worktree list --porcelain | grep -c '^worktree ' )
+   ```
+   `other_worktrees` counts every worktree including the main checkout, so `>1` means at least
+   one other worktree exists. If so, diagnose "`--tree` run in flight in `<path>`" (read the path
+   from `git worktree list`) and route the user to inspect/resume that worktree, or abort it via
+   `references/tree.md`'s QA-failure cleanup block, instead of the diff-based verdict below.
+
    ```bash
    active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
    ```

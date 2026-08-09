@@ -80,15 +80,16 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 
 `reconcile-harness.py` closes the `tasks.md` sprint block. It writes no `backlog.md`
 line deletions — those are owned by `task_nodes.py prune-backlog` at `task-next`
-pre-merge cleanup (verbatim match, refuses on ambiguity). Its one `backlog.md` write is
-the `tasks.md`-absent row below: orphan `[>]` markers and empty headings, nothing else:
+pre-merge cleanup (verbatim match, refuses on ambiguity). Its only `backlog.md` writes are the
+`failed` and `tasks.md`-absent rows below, and both are marker rewrites (`[>]` → `[ ]`) plus
+empty-heading pruning — never a line deletion:
 
 | `tasks.md` `status:` | Action | Outcome |
 |----------------------|--------|---------|
 | `active` / `evaluating` | Leave intact; report sprint title | Nothing moves |
 | `done` | Delete tasks.md (or strip the sprint block if other content remains); append CHANGELOG entry if present | Sprint block closed; backlog line deletion happens separately via `prune-backlog` |
-| `failed` | Delete tasks.md (or strip the sprint block if other content remains) | Sprint block closed; backlog items left queued, untouched |
-| (no tasks.md) | Strip orphan `[>]` markers from backlog | Backlog idle state |
+| `failed` | Delete tasks.md (or strip the sprint block if other content remains); revert `[>]` → `[ ]` in backlog | Sprint block closed; backlog items returned to the queue, no line removed |
+| (no tasks.md) | Revert orphan `[>]` → `[ ]` in backlog; prune empty headings | Backlog idle state |
 
 For this contract to hold, init MUST create `backlog.md` with the exact schema above, and the
 first sprint MUST write `tasks.md` to it (init never creates `tasks.md` — the idle state is its

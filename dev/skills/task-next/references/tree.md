@@ -1,9 +1,10 @@
 ## `--tree` mode (single task, worktree isolation)
 
 Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
-3) is modified so implementation and QA run in an isolated git worktree, keeping the main
-checkout on `main` throughout — useful when the user wants to preserve a clean working tree
-while a task is in flight.
+3) is modified so implementation and QA run in an isolated git worktree — the main checkout
+stays on `main` throughout, but `--tree` isolates **code changes** only. The main checkout still
+carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
+default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
 
 **Modified Branch step (replaces `git checkout -b` under `--tree`):**
 
@@ -20,6 +21,11 @@ git fetch
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
+
+**Mark active:** runs UNCHANGED in the main checkout, exactly as SKILL.md's **Mark active**
+sub-step describes for the default path. A backlog.md group's Sprint Contract — `tasks.md`,
+`status: active` — is written there, uncommitted; it is carried onto `$BRANCH` by the collapse
+`git checkout` below the same way the version bump is (see **Version bump** further down).
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
 worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
@@ -51,6 +57,13 @@ SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 git worktree remove --force ".worktrees/$SLUG"
 git branch -D "$BRANCH"
+# Mark active (above) may have written tasks.md in the main checkout, uncommitted — clean it up
+# too, or an abandoned run leaves a phantom `status: active` sprint behind.
+dirty=$(git status --porcelain -- tasks.md)
+if [[ -n "$dirty" ]]; then
+  tracked=$(git ls-files -- tasks.md)
+  [[ -n "$tracked" ]] && git checkout -- tasks.md || rm -f tasks.md
+fi
 ```
 Report the failure; main checkout remains on `main`.
 

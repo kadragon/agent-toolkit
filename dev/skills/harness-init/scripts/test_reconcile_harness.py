@@ -372,14 +372,64 @@ def test_main_done_no_changelog_is_noop():
 
 
 def test_main_failed_preserves_review_backlog():
-    """failed sprint with Review Backlog → tasks.md retained, findings survive, backlog untouched."""
+    """failed sprint with Review Backlog → tasks.md retained, findings survive, `[>]` reverted."""
     failed_tasks = TASKS_WITH_BACKLOG.replace("status: done", "status: failed")
     backlog = "## Now\n- [>] Sprint: do the thing\n- [ ] unrelated\n"
     r = _run_main_in_tmp(failed_tasks, backlog)
     check("main-failed: tasks.md retained", r["tasks_exists"])
     check("main-failed: open finding preserved", "open finding one" in r["tasks_body"])
     check("main-failed: sprint block gone", "# Sprint: do the thing" not in r["tasks_body"])
-    check("main-failed: backlog untouched", r["backlog_body"] == backlog, r["backlog_body"])
+    check("main-failed: [>] reverted to [ ], line kept",
+          "- [ ] Sprint: do the thing" in r["backlog_body"], r["backlog_body"])
+    check("main-failed: unrelated queued item untouched",
+          "- [ ] unrelated" in r["backlog_body"], r["backlog_body"])
+    check("main-failed: no [>] left in backlog",
+          "[>]" not in r["backlog_body"], r["backlog_body"])
+
+
+def test_main_failed_reverts_marker_keeps_line():
+    """(a) `status: failed` rewrites every `- [>]` line to `- [ ]` and deletes no line."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "## Now\n  - [>]   Sprint: solo\n- [ ] other queued item\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-revert: reverted line present, indentation/spacing preserved",
+          "  - [ ]   Sprint: solo" in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: sibling queued item untouched",
+          "- [ ] other queued item" in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: no [>] left", "[>]" not in r["backlog_body"], r["backlog_body"])
+    check("failed-revert: no line count lost",
+          len(r["backlog_body"].splitlines()) == len(backlog.splitlines()), r["backlog_body"])
+
+
+def test_orphan_sweep_reverts_not_deletes():
+    """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
+    backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        bpath = tmp / "backlog.md"
+        bpath.write_text(backlog, encoding="utf-8")
+        saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
+        mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tmp / "tasks.md", bpath, tmp / "CHANGELOG.md"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                mod.main()
+            result = bpath.read_text(encoding="utf-8")
+        finally:
+            mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
+    check("orphan-sweep: line kept, marker reverted",
+          "- [ ] orphaned sprint" in result, result)
+    check("orphan-sweep: unrelated queued item untouched", "- [ ] unrelated" in result, result)
+    check("orphan-sweep: no [>] left", "[>]" not in result, result)
+
+
+def test_revert_orphan_markers_byte_identical_for_open_and_done():
+    """(c) `- [ ]` and `- [x]` lines are byte-identical after revert_orphan_markers."""
+    backlog = "## Now\n- [ ] queued item\n- [x] done item\n- [>] active item\n"
+    result = mod.revert_orphan_markers(backlog)
+    check("revert: [ ] line byte-identical", "- [ ] queued item" in result, result)
+    check("revert: [x] line byte-identical", "- [x] done item" in result, result)
+    check("revert: [>] reverted to [ ]", "- [ ] active item" in result, result)
+    check("revert: no [>] left", "[>]" not in result, result)
 
 
 def test_main_done_backlog_byte_identical_no_marker_writes():
@@ -451,6 +501,9 @@ SUITES = [
     ("main: done changelog clamps over-cap title", test_main_done_changelog_title_over_cap_is_clamped),
     ("main: done without CHANGELOG is no-op", test_main_done_no_changelog_is_noop),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
+    ("main: failed reverts marker, keeps line", test_main_failed_reverts_marker_keeps_line),
+    ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
+    ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),

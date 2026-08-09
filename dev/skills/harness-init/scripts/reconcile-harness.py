@@ -159,9 +159,16 @@ def strip_sprint_block(content: str) -> str | None:
     return remainder + "\n"
 
 
-def remove_orphan_markers(backlog: str) -> str:
-    """Remove all remaining [>] lines when no tasks.md exists."""
-    return re.sub(r'^\s*-\s*\[>\].*\n?', '', backlog, flags=re.MULTILINE)
+def revert_orphan_markers(backlog: str) -> str:
+    """Revert every remaining `[>]` line to `[ ]`, in place.
+
+    An `[>]` marker with no owning sprint (either `tasks.md` is absent, or its sprint just closed
+    `failed`) means the promoted work never finished. Rewriting the checkbox back to `[ ]` returns
+    it to the queue; deleting the line would silently discard it. Backlog line deletion is the
+    exclusive property of `task_nodes.py prune-backlog` — this function only ever changes the
+    checkbox character, leaving indentation and the rest of the line byte-for-byte untouched.
+    """
+    return re.sub(r'^(\s*-\s*)\[>\]', r'\1[ ]', backlog, flags=re.MULTILINE)
 
 
 def remove_empty_headings(backlog: str) -> str:
@@ -282,13 +289,19 @@ def main() -> None:
                 print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
+            if BACKLOG.exists():
+                backlog_content = BACKLOG.read_text(encoding="utf-8")
+                reverted = revert_orphan_markers(backlog_content)
+                if reverted != backlog_content:
+                    BACKLOG.write_text(reverted, encoding="utf-8")
+
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:
                 TASKS.unlink()
-                print(f"Sprint '{title}' failed. Sprint block closed; backlog items left queued.")
+                print(f"Sprint '{title}' failed. Sprint block closed; backlog items reverted to [ ].")
             else:
                 TASKS.write_text(remainder, encoding="utf-8")
-                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained; backlog items left queued.")
+                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained; backlog items reverted to [ ].")
 
         elif status in ("active", "evaluating"):
             print(f"Sprint active: {title}")
@@ -322,7 +335,7 @@ def main() -> None:
             return
 
         content = BACKLOG.read_text(encoding="utf-8")
-        cleaned = remove_orphan_markers(content)
+        cleaned = revert_orphan_markers(content)
         cleaned = remove_empty_headings(cleaned)
         if cleaned != content:
             BACKLOG.write_text(cleaned, encoding="utf-8")
