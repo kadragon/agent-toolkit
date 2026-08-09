@@ -18,6 +18,20 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
+# Retain GITIGNORE_ADDED and GITIGNORE_TRACKED for the QA-failure cleanup block below.
+GITIGNORE_ADDED=false
+GITIGNORE_TRACKED=false
+if git ls-files --error-unmatch -- .gitignore >/dev/null 2>&1; then
+  GITIGNORE_TRACKED=true
+fi
+if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
+  if [[ -s .gitignore ]]; then
+    printf '\n.worktrees/\n' >> .gitignore
+  else
+    printf '.worktrees/\n' >> .gitignore
+  fi
+  GITIGNORE_ADDED=true
+fi
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
@@ -62,11 +76,18 @@ git branch -D "$BRANCH"
 # too, or an abandoned run leaves a phantom `status: active` sprint behind.
 dirty=$(git status --porcelain -- tasks.md)
 if [[ -n "$dirty" ]]; then
-  tracked=$(git ls-files -- tasks.md)
-  if [[ -n "$tracked" ]]; then
-    git checkout -- tasks.md
+  if git cat-file -e HEAD:tasks.md 2>/dev/null; then
+    git restore --source=HEAD --staged --worktree -- tasks.md
   else
-    rm -f tasks.md
+    git rm --cached --ignore-unmatch -- tasks.md >/dev/null 2>&1 || true
+    rm -f -- tasks.md
+  fi
+fi
+if [[ "$GITIGNORE_ADDED" == true ]]; then
+  if [[ "$GITIGNORE_TRACKED" == true ]]; then
+    git restore --source=HEAD --staged --worktree -- .gitignore
+  else
+    rm -f -- .gitignore
   fi
 fi
 ```

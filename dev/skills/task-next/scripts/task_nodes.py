@@ -400,25 +400,9 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
-        # Keep a schema root h1 out of the blank cascade, and keep a first non-h1 heading only when
-        # it has no child headings. A standalone `## Group` with child sections is an ordinary
-        # container and must still disappear when its last child drains.
-        # A `# Backlog` root owns the queue schema, so once its last item drains the whole file must
-        # not be rewritten byte-empty — even when it has no standing preamble prose. The prose-only
-        # path below retains its broader first-heading exemption for the documented root behavior.
-        root_h1 = heads[0] if heads and levels.get(heads[0]) == 1 else None
-        root_non_h1 = None
-        if heads and root_h1 is None:
-            root_level = levels[heads[0]]
-            has_child = False
-            for h in heads[1:]:
-                if levels[h] <= root_level:
-                    break
-                has_child = True
-                break
-            if not has_child:
-                root_non_h1 = heads[0]
-        root_heading = root_h1 if root_h1 is not None else root_non_h1
+        # Keep the file's first heading out of the blank cascade. It is the schema root even when
+        # a repo omits an h1 wrapper; later headings remain ordinary sections and may cascade away.
+        root_heading = heads[0] if heads else None
         newly = {
             h for h in owned
             if h not in drop and h != root_heading
@@ -789,7 +773,9 @@ Preamble prose that outlives its items.
     # which hid this: with no preamble, `_region_blank` used to stop at the parent's own surviving
     # child h3, call the parent empty, and delete it — orphaning that child. The section must end
     # at the next heading of level <= its own, not the next heading of any level.
-    siblings = """## Group
+    siblings = """# Root
+
+## Group
 
 ### Sub A
 
@@ -805,8 +791,8 @@ Preamble prose that outlives its items.
     _assert("### Sub B" in out and "- [ ] [FIX] item B" in out, "the surviving child is not orphaned")
 
     out, _ = prune_lines(siblings, ["- [ ] [FIX] item A", "- [ ] [FIX] item B"])
-    _assert("## Group" not in out and out == "",
-            "emptying every child still cascades the parent away — the fix does not block a full cascade")
+    _assert("# Root" in out and "## Group" not in out,
+            "emptying every child still cascades the non-root parent away")
 
     history = """## Shipped
 
@@ -939,6 +925,16 @@ Preamble with no h1 wrapper.
     no_h1_schema_only = "## Overview\n\n- [ ] only item\n"
     out, _ = prune_lines(no_h1_schema_only, ["- [ ] only item"])
     _assert("## Overview" in out, "(g2) a schema-only non-h1 root is not rewritten byte-empty")
+
+    no_h1_root_with_child = """## Overview
+
+### Sub
+
+- [ ] only item
+"""
+    out, _ = prune_lines(no_h1_root_with_child, ["- [ ] only item"])
+    _assert("## Overview" in out and "### Sub" not in out,
+            "(g3) a non-h1 root with a drained child still keeps the root heading")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

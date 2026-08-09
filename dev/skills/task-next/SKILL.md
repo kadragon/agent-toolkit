@@ -38,15 +38,15 @@ if [[ -n "$dirty" ]]; then
   current_branch=$(git branch --show-current)
   task_contract_dirty=$(git status --porcelain -- tasks.md)
   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
-  unexpected_dirty=$(git status --porcelain | grep -Ev '^[ MARC?!]{2} (tasks\.md|CHANGELOG\.md|\.gitignore|(.*/)?\.claude-plugin/plugin\.json|(.*/)?\.codex-plugin/plugin\.json)$' || true)
 fi
 ```
 
-If `dirty` is non-empty, `task_contract_dirty` is non-empty, and `unexpected_dirty` is empty,
-route directly to the "Work already in flight" edge case when either `task_worktree` is non-empty
-or `current_branch` is not `main`/`master`; inspect that matching path. This covers both a normal
-feature-branch sprint and the `--tree` exception, whose main checkout stays on `main` while the
-file-backed Sprint Contract (and optionally release bookkeeping or the ignore rule) is
+If `dirty` is non-empty, `task_contract_dirty` is non-empty, and either `task_worktree` is
+non-empty or `current_branch` is not `main`/`master`, route directly to the "Work already in
+flight" edge case and inspect that matching path. Include all captured dirty paths in the
+diagnosis: source edits are expected while resuming a feature-branch sprint. This covers both a
+normal feature-branch sprint and the `--tree` exception, whose main checkout stays on `main` while
+the file-backed Sprint Contract (and optionally release bookkeeping or the ignore rule) is
 intentionally dirty. If `dirty` is non-empty and none of those conditions match, list the dirty
 files — do NOT proceed — and ask the user to commit, stash, or discard first.
 

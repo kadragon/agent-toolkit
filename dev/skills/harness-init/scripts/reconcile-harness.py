@@ -275,36 +275,41 @@ def append_changelog(title: str) -> None:
         )
     body = read_text_preserving_eol(CHANGELOG)
     eol = "\r\n" if "\r\n" in body else "\n"
-    lines = body.splitlines()
+    raw_lines = body.splitlines(keepends=True)
+    lines = [line.rstrip("\r\n") for line in raw_lines]
     mask = _fence_mask(lines)  # a `## Unreleased` inside a fenced example is not the section
     for i, line in enumerate(lines):
         if mask[i] and re.match(r'^##\s+Unreleased\s*$', line, re.IGNORECASE):
             insert_at = i + 1
+            if not raw_lines[i].endswith(("\r", "\n")):
+                raw_lines[i] += eol
             # Keep exactly one blank line between the heading and the first entry.
             if insert_at < len(lines) and not lines[insert_at].strip():
                 insert_at += 1
-                lines.insert(insert_at, entry)
+                raw_lines.insert(insert_at, entry + eol)
             else:
-                lines[insert_at:insert_at] = ["", entry]
-            CHANGELOG.write_bytes((eol.join(lines) + eol).encode("utf-8"))
+                raw_lines[insert_at:insert_at] = [eol, entry + eol]
+            CHANGELOG.write_bytes("".join(raw_lines).encode("utf-8"))
             return
     # No Unreleased section — create one directly under the file's h1 title. Placing it at
     # EOF would sit it below every released section and stay mis-ordered on every later run,
     # since the next call finds it there (changelogs are newest-first).
     for i, line in enumerate(lines):
         if mask[i] and re.match(r'^#\s+\S', line):
-            lines[i + 1:i + 1] = ["", "## Unreleased", "", entry]
-            CHANGELOG.write_bytes((eol.join(lines) + eol).encode("utf-8"))
+            if not raw_lines[i].endswith(("\r", "\n")):
+                raw_lines[i] += eol
+            raw_lines[i + 1:i + 1] = [eol, "## Unreleased" + eol, eol, entry + eol]
+            CHANGELOG.write_bytes("".join(raw_lines).encode("utf-8"))
             return
     CHANGELOG.write_bytes(
         (body.rstrip("\r\n") + f"{eol}{eol}## Unreleased{eol}{eol}{entry}{eol}").encode("utf-8")
     )
 
 
-def count_items(backlog: str) -> tuple[int, int]:
+def count_items(backlog: str) -> tuple[int, int] | None:
     raw_lines, masked_lines, real_mask = _masked_lines(backlog)
     if len(raw_lines) != len(masked_lines):
-        return 0, 0
+        return None
     queued = sum(
         bool(real_mask[i] and re.match(r'^\s*-\s*\[\s\]', line))
         for i, line in enumerate(masked_lines)
@@ -397,7 +402,10 @@ def main() -> None:
         print("Backlog clear.")
         return
 
-    queued, active = count_items(read_text_preserving_eol(BACKLOG))
+    counts = count_items(read_text_preserving_eol(BACKLOG))
+    if counts is None:
+        raise SystemExit("Backlog report unavailable: internal markup mask line-count mismatch.")
+    queued, active = counts
     if queued == 0 and active == 0:
         print("Backlog clear.")
     else:
