@@ -190,8 +190,11 @@ def revert_orphan_markers(backlog: str) -> str:
 
     out = []
     for i, line in enumerate(raw_lines):
-        if fence_mask[i] and re.match(r'^\s*-\s*\[>\]', masked_lines[i]):
-            line = re.sub(r'^(\s*-\s*)\[>\]', r'\1[ ]', line)
+        match = re.match(r'^\s*-\s*\[>\]', masked_lines[i])
+        if fence_mask[i] and match:
+            marker = re.search(r'\[>\]', masked_lines[i][:match.end()])
+            if marker:
+                line = line[:marker.start()] + '[ ]' + line[marker.end():]
         out.append(line)
     return "".join(out)
 
@@ -232,7 +235,7 @@ def remove_empty_headings(backlog: str) -> str:
                 if child_level <= level:
                     break
                 continue
-            if real_mask[j] and masked_bodies[j].strip():
+            if lines[j].strip():
                 has_content = True
                 break
         if not has_content and i != root:
@@ -270,7 +273,8 @@ def append_changelog(title: str) -> None:
             "truncated in the entry. Shorten the tasks.md title.",
             file=sys.stderr,
         )
-    body = CHANGELOG.read_text(encoding="utf-8")
+    body = read_text_preserving_eol(CHANGELOG)
+    eol = "\r\n" if "\r\n" in body else "\n"
     lines = body.splitlines()
     mask = _fence_mask(lines)  # a `## Unreleased` inside a fenced example is not the section
     for i, line in enumerate(lines):
@@ -282,7 +286,7 @@ def append_changelog(title: str) -> None:
                 lines.insert(insert_at, entry)
             else:
                 lines[insert_at:insert_at] = ["", entry]
-            CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
+            CHANGELOG.write_bytes((eol.join(lines) + eol).encode("utf-8"))
             return
     # No Unreleased section — create one directly under the file's h1 title. Placing it at
     # EOF would sit it below every released section and stay mis-ordered on every later run,
@@ -290,14 +294,25 @@ def append_changelog(title: str) -> None:
     for i, line in enumerate(lines):
         if mask[i] and re.match(r'^#\s+\S', line):
             lines[i + 1:i + 1] = ["", "## Unreleased", "", entry]
-            CHANGELOG.write_text('\n'.join(lines) + '\n', encoding="utf-8")
+            CHANGELOG.write_bytes((eol.join(lines) + eol).encode("utf-8"))
             return
-    CHANGELOG.write_text(body.rstrip('\n') + f"\n\n## Unreleased\n\n{entry}\n", encoding="utf-8")
+    CHANGELOG.write_bytes(
+        (body.rstrip("\r\n") + f"{eol}{eol}## Unreleased{eol}{eol}{entry}{eol}").encode("utf-8")
+    )
 
 
 def count_items(backlog: str) -> tuple[int, int]:
-    queued = len(re.findall(r'^\s*-\s*\[\s\]', backlog, re.MULTILINE))
-    active = len(re.findall(r'^\s*-\s*\[>\]', backlog, re.MULTILINE))
+    raw_lines, masked_lines, real_mask = _masked_lines(backlog)
+    if len(raw_lines) != len(masked_lines):
+        return 0, 0
+    queued = sum(
+        bool(real_mask[i] and re.match(r'^\s*-\s*\[\s\]', line))
+        for i, line in enumerate(masked_lines)
+    )
+    active = sum(
+        bool(real_mask[i] and re.match(r'^\s*-\s*\[>\]', line))
+        for i, line in enumerate(masked_lines)
+    )
     return queued, active
 
 

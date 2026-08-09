@@ -400,15 +400,28 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
-        # Keep only a schema root h1 out of the blank cascade, not every first heading: a standalone
-        # `## Group` is an ordinary section and must still disappear when its last child drains.
+        # Keep a schema root h1 out of the blank cascade, and keep a first non-h1 heading only when
+        # it has no child headings. A standalone `## Group` with child sections is an ordinary
+        # container and must still disappear when its last child drains.
         # A `# Backlog` root owns the queue schema, so once its last item drains the whole file must
         # not be rewritten byte-empty — even when it has no standing preamble prose. The prose-only
         # path below retains its broader first-heading exemption for the documented root behavior.
         root_h1 = heads[0] if heads and levels.get(heads[0]) == 1 else None
+        root_non_h1 = None
+        if heads and root_h1 is None:
+            root_level = levels[heads[0]]
+            has_child = False
+            for h in heads[1:]:
+                if levels[h] <= root_level:
+                    break
+                has_child = True
+                break
+            if not has_child:
+                root_non_h1 = heads[0]
+        root_heading = root_h1 if root_h1 is not None else root_non_h1
         newly = {
             h for h in owned
-            if h not in drop and h != root_h1
+            if h not in drop and h != root_heading
             and _region_blank(surviving, h, alive)
         }
         prose_only = {
@@ -922,6 +935,10 @@ Preamble with no h1 wrapper.
     out, _ = prune_lines(no_h1_root, ["- [ ] [FIX] only item"])
     _assert("## Overview" in out and "Preamble with no h1 wrapper." in out,
             "(g) the file's first heading is exempt even when it is not an h1")
+
+    no_h1_schema_only = "## Overview\n\n- [ ] only item\n"
+    out, _ = prune_lines(no_h1_schema_only, ["- [ ] only item"])
+    _assert("## Overview" in out, "(g2) a schema-only non-h1 root is not rewritten byte-empty")
 
     # REGRESSION GUARD (claude review, PR #192) — heading detection honours fences/comments but
     # line matching did not, so the commented-out `- [ ] Simplest case` template harness-init

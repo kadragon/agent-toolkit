@@ -315,6 +315,16 @@ def test_main_done_changelog_single_line_under_unreleased():
           bool(added) and 0 < lines.index(added[0]) - idx_unreleased <= 2, body)
 
 
+def test_main_done_changelog_preserves_crlf():
+    """done sprint → CHANGELOG keeps CRLF rather than normalizing the file to LF."""
+    before = "# Changelog\r\n\r\n## Unreleased\r\n\r\n- [done] earlier thing (2026-01-01)\r\n"
+    backlog = "## Now\r\n- [>] Sprint: do the thing\r\n"
+    r = _run_main_in_tmp(TASKS_WITH_BACKLOG, backlog, changelog_text=before)
+    body = r["changelog_body"]
+    check("changelog-crlf: entry added", "- [done] Sprint: do the thing" in body, body)
+    check("changelog-crlf: no bare LF introduced", "\n" not in body.replace("\r\n", ""), repr(body))
+
+
 def test_main_done_changelog_creates_unreleased_when_absent():
     """CHANGELOG.md without an `## Unreleased` section → section created, one line under it."""
     before = "# Changelog\n\n## 1.0.0\n\n- [done] shipped (2026-01-01)\n"
@@ -459,6 +469,16 @@ def test_main_failed_ignores_markup_headings():
           "# Not a real boundary" in r["backlog_body"], r["backlog_body"])
 
 
+def test_main_failed_preserves_markup_only_section():
+    """failed cleanup keeps a heading that owns only documentation markup."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n\n## Examples\n\n<!-- documented example -->\n\n```markdown\n- [>] sample\n```\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-markup-only: section retained", "## Examples" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup-only: comment retained", "<!-- documented example -->" in r["backlog_body"], r["backlog_body"])
+    check("failed-markup-only: fenced sample retained", "- [>] sample" in r["backlog_body"], r["backlog_body"])
+
+
 def test_orphan_sweep_reverts_not_deletes():
     """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
     backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
@@ -509,6 +529,31 @@ def test_revert_orphan_markers_skips_markup():
     check("revert-markup: real marker reverted", "- [ ] real item" in result, result)
     check("revert-markup: comment preserved", "- [>] commented example" in result, result)
     check("revert-markup: fence preserved", "- [>] fenced example" in result, result)
+
+    prefixed = "<!-- note --> - [>] real item after a comment\n"
+    check("revert-markup: marker after comment prefix reverted",
+          "<!-- note --> - [ ] real item after a comment" in mod.revert_orphan_markers(prefixed),
+          mod.revert_orphan_markers(prefixed))
+
+
+def test_count_items_skips_markup():
+    """Reporting ignores checkbox examples in comments and fenced code."""
+    backlog = """# Backlog
+
+<!-- - [ ] commented example -->
+
+## Real
+- [ ] queued item
+- [>] active item
+
+```markdown
+- [ ] fenced queued example
+- [>] fenced active example
+```
+"""
+    queued, active = mod.count_items(backlog)
+    check("count-markup: queued count excludes examples", queued == 1, repr((queued, active)))
+    check("count-markup: active count excludes examples", active == 1, repr((queued, active)))
 
 
 def test_main_done_backlog_byte_identical_no_marker_writes():
@@ -575,6 +620,7 @@ SUITES = [
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
+    ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),
     ("main: done changelog creates Unreleased", test_main_done_changelog_creates_unreleased_when_absent),
     ("main: done changelog skips fenced Unreleased", test_main_done_changelog_skips_fenced_unreleased),
     ("main: done changelog clamps over-cap title", test_main_done_changelog_title_over_cap_is_clamped),
@@ -585,9 +631,11 @@ SUITES = [
     ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
     ("main: failed preserves CRLF", test_main_failed_preserves_crlf),
     ("main: failed ignores markup headings", test_main_failed_ignores_markup_headings),
+    ("main: failed preserves markup-only section", test_main_failed_preserves_markup_only_section),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("revert_orphan_markers: skips markup", test_revert_orphan_markers_skips_markup),
+    ("count_items: skips markup", test_count_items_skips_markup),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
     ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
