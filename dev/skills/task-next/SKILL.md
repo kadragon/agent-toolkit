@@ -35,12 +35,14 @@ list the dirty files — do NOT proceed. Ask the user to commit, stash, or disca
 dirty tree turns out to be an in-flight feature branch (not stray dirty files), route to the
 "Work already in flight" edge case below instead of hard-stopping.
 
-`tasks.md` is optional: it holds the Sprint Contract and nothing else, so it is present only when
-`## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md group with ≥2
-in-scope items — and absent otherwise, including a single-item cycle, which keeps the contract
-inline (see **Mark active** below) and never writes the file. Every persistent item — queued work,
-review findings, security findings — lives in `backlog.md`, which is why `backlog.md` is a
-prerequisite and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
+`tasks.md` is optional in default mode: it holds the Sprint Contract and nothing else, so it is
+present only when `## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md
+group with ≥2 in-scope items — and absent otherwise, including a single-item cycle, which keeps
+the contract inline (see **Mark active** below) and never writes the file. `--tree` is the
+exception: it always writes the file-backed Sprint Contract, including for one item, so the main
+checkout's dirty tracking state exposes the in-flight run to a second invocation. Every persistent
+item — queued work, review findings, security findings — lives in `backlog.md`, which is why
+`backlog.md` is a prerequisite and `tasks.md` is not. If `backlog_candidates.py` warns that `tasks.md` still holds a
 `## Review Backlog` / `## Security Fixes` section, move it to `backlog.md` verbatim before
 proceeding: those items are not selectable, and `prune-tasks` refuses to run until they move.
 
@@ -220,10 +222,12 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
     - `# heading` = the selected heading title (verbatim from backlog.md)
     - `status: active`
     - `## Covers` listing each in-scope item copied **verbatim** from backlog.md — full line including the `- [ ]` prefix (e.g., `- [ ] fix thing`). This is the deletion list; exact match required so cleanup can locate and remove the right lines.
-  - **Exactly 1 in-scope item:** write no file. Author the Sprint Contract inline in the
-    conversation (same Scope / Acceptance criteria / Out of scope / Lint/test command shape as
-    below) and carry the item's verbatim `- [ ] ...` line forward yourself — it goes straight into
-    the `prune-backlog` call at pre-merge cleanup, with no `tasks.md` round-trip.
+  - **Exactly 1 in-scope item:** in default mode, write no file. Author the Sprint Contract inline
+    in the conversation (same Scope / Acceptance criteria / Out of scope / Lint/test command shape
+    as below) and carry the item's verbatim `- [ ] ...` line forward yourself — it goes straight
+    into the `prune-backlog` call at pre-merge cleanup, with no `tasks.md` round-trip. In `--tree`
+    mode, write the same contract to `tasks.md` with `status: active` and a `## Covers` section
+    containing the item's full `- [ ] ...` line; tree mode is file-backed even for one item.
 
 **Sprint Contract (workflows.md Step 2)**
 Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
@@ -443,11 +447,11 @@ action itself; always still ask yes/no.
    First rule out a `--tree` run: its code lives in a separate worktree, so the diff-based
    triage below sees no code changes even while implementation is genuinely in progress there.
    ```bash
-   other_worktrees=$(git worktree list --porcelain | grep -c '^worktree ' )
+   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
    ```
-   `other_worktrees` counts every worktree including the main checkout, so `>1` means at least
-   one other worktree exists. If so, diagnose "`--tree` run in flight in `<path>`" (read the path
-   from `git worktree list`) and route the user to inspect/resume that worktree, or abort it via
+   `task_worktree` is empty unless the repository's documented `--tree` location has a worktree.
+   If it is non-empty, diagnose "`--tree` run in flight in `<path>`" (read the matching path from
+   `task_worktree`) and route the user to inspect/resume that worktree, or abort it via
    `references/tree.md`'s QA-failure cleanup block, instead of the diff-based verdict below.
 
    ```bash

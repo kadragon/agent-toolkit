@@ -400,14 +400,17 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         surviving = [ln if i not in drop else "" for i, ln in enumerate(lines)]
         masked_surviving = [ln if i not in drop else "" for i, ln in enumerate(masked)]
         alive = {h: lv for h, lv in levels.items() if h not in drop}
-        newly = {h for h in owned if h not in drop and _region_blank(surviving, h, alive)}
-        # `h != heads[0]` keeps only the file's ROOT heading — its first top-level heading — out of
-        # this path, not every h1. A `# Backlog` root owns standing preamble prose, so once its last
-        # item drains the whole file reads as prose-only and `backlog.md` would be rewritten
-        # byte-empty — losing the schema `task-next` Step 1 and `validate-harness.sh` both require.
-        # `_region_blank` never reached the root while that preamble stood; this test would, so it
-        # is excluded explicitly. A non-root h1 (e.g. a second top-level section in the same file)
-        # gets no such exemption — it cascades like any other heading.
+        # Keep only a schema root h1 out of the blank cascade, not every first heading: a standalone
+        # `## Group` is an ordinary section and must still disappear when its last child drains.
+        # A `# Backlog` root owns the queue schema, so once its last item drains the whole file must
+        # not be rewritten byte-empty — even when it has no standing preamble prose. The prose-only
+        # path below retains its broader first-heading exemption for the documented root behavior.
+        root_h1 = heads[0] if heads and levels.get(heads[0]) == 1 else None
+        newly = {
+            h for h in owned
+            if h not in drop and h != root_h1
+            and _region_blank(surviving, h, alive)
+        }
         prose_only = {
             h for h in owned
             if h not in drop and h not in newly and (not heads or h != heads[0])
@@ -870,6 +873,22 @@ Queue of work not yet in flight. Do not delete this file.
     _assert("# Backlog" in out and "Do not delete this file." in out,
             "(e) the root heading and its preamble prose survive draining the last item")
     _assert("## Now" not in out, "(e) the drained h2 under the root is still deleted")
+
+    # REGRESSION GUARD — the root exemption also covers a schema-only root with no preamble. The
+    # non-root prose-only section is removed, but the first heading remains so backlog.md is never
+    # rewritten byte-empty.
+    root_without_preamble = """# Backlog
+
+# Other
+
+Intro prose for other.
+
+- [ ] drain me
+"""
+    out, _ = prune_lines(root_without_preamble, ["- [ ] drain me"])
+    _assert("# Backlog" in out, "(e2) a schema-only root survives without preamble prose")
+    _assert("# Other" not in out and "Intro prose for other." not in out,
+            "(e2) the drained non-root prose-only section still cascades away")
 
     # REGRESSION GUARD (codex review, PR #203) — the exemption above must cover only the file's
     # FIRST heading, not every h1. A second top-level heading ('# Other') is not the root and must

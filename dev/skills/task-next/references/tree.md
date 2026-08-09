@@ -22,10 +22,11 @@ git fetch
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
 ```
 
-**Mark active:** runs UNCHANGED in the main checkout, exactly as SKILL.md's **Mark active**
-sub-step describes for the default path. A backlog.md group's Sprint Contract — `tasks.md`,
-`status: active` — is written there, uncommitted; it is carried onto `$BRANCH` by the collapse
-`git checkout` below the same way the version bump is (see **Version bump** further down).
+**Mark active:** runs in the main checkout, with one tree-mode exception to the default path's
+single-item inline contract: every `--tree` run writes a backlog group's Sprint Contract —
+`tasks.md`, `status: active`, and `## Covers` with the exact item line — there, uncommitted. It is
+carried onto `$BRANCH` by the collapse `git checkout` below the same way the version bump is (see
+**Version bump** further down), so a second invocation sees the run as in flight.
 
 **Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
 worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
@@ -62,7 +63,11 @@ git branch -D "$BRANCH"
 dirty=$(git status --porcelain -- tasks.md)
 if [[ -n "$dirty" ]]; then
   tracked=$(git ls-files -- tasks.md)
-  [[ -n "$tracked" ]] && git checkout -- tasks.md || rm -f tasks.md
+  if [[ -n "$tracked" ]]; then
+    git checkout -- tasks.md
+  else
+    rm -f tasks.md
+  fi
 fi
 ```
 Report the failure; main checkout remains on `main`.

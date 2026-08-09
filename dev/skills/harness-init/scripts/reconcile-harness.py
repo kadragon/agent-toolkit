@@ -292,8 +292,9 @@ def main() -> None:
             if BACKLOG.exists():
                 backlog_content = BACKLOG.read_text(encoding="utf-8")
                 reverted = revert_orphan_markers(backlog_content)
-                if reverted != backlog_content:
-                    BACKLOG.write_text(reverted, encoding="utf-8")
+                cleaned = remove_empty_headings(reverted)
+                if cleaned != backlog_content:
+                    BACKLOG.write_text(cleaned, encoding="utf-8")
 
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:

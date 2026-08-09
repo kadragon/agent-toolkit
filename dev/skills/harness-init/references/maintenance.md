@@ -85,9 +85,9 @@ Exit codes:
 
 Run silently. Script closes the `tasks.md` sprint block per its `status:` and prints one status line.
 While a sprint is active or evaluating (C-1) it never writes `backlog.md` — deleting covered lines
-is `task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. On `failed`, and
-with `tasks.md` absent (C-2), it reverts `[>]` markers back to `[ ]` and prunes empty headings from
-`backlog.md`; it never removes an item line.
+is `task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. On `failed`, it
+reverts `[>]` markers back to `[ ]` and prunes empty headings; with `tasks.md` absent (C-2), it
+does the same orphan cleanup. It never removes an item line.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"

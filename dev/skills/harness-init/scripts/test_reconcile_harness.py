@@ -401,6 +401,17 @@ def test_main_failed_reverts_marker_keeps_line():
           len(r["backlog_body"].splitlines()) == len(backlog.splitlines()), r["backlog_body"])
 
 
+def test_main_failed_prunes_empty_headings():
+    """(d) failed reconciliation reverts markers and prunes unrelated empty headings."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n\n## Empty\n\n## Live\n- [>] active item\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-empty-heading: empty heading pruned", "## Empty" not in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: root retained", "# Backlog" in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: active item returned to queue",
+          "- [ ] active item" in r["backlog_body"], r["backlog_body"])
+
+
 def test_orphan_sweep_reverts_not_deletes():
     """(b) orphan sweep (`tasks.md` absent) reverts `- [>]` → `- [ ]` instead of deleting the line."""
     backlog = "## Now\n- [>] orphaned sprint\n- [ ] unrelated\n"
@@ -502,6 +513,7 @@ SUITES = [
     ("main: done without CHANGELOG is no-op", test_main_done_no_changelog_is_noop),
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: failed reverts marker, keeps line", test_main_failed_reverts_marker_keeps_line),
+    ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
