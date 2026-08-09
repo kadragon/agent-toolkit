@@ -30,10 +30,19 @@ docs this skill executes. If any is missing, stop and point the user to `dev:har
 does not already own, so a repo whose linter owns every rule correctly has none. Read and follow it
 when present; when absent, proceed and take the linter as the authority. Never stop on its absence.
 
-**Working tree gate:** Run `git status --porcelain`. If the output is non-empty, stop and
-list the dirty files — do NOT proceed. Ask the user to commit, stash, or discard first. If the
-dirty tree turns out to be an in-flight feature branch (not stray dirty files), route to the
-"Work already in flight" edge case below instead of hard-stopping.
+**Working tree gate:** Capture the tree state before deciding whether dirty files are stray:
+
+```bash
+dirty=$(git status --porcelain)
+if [[ -n "$dirty" ]]; then
+  task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
+fi
+```
+
+If `dirty` is non-empty and `task_worktree` is non-empty, route directly to the "Work already in
+flight" edge case below and inspect that matching path. This is the `--tree` exception: its main
+checkout stays on `main` while the file-backed Sprint Contract is intentionally dirty. Otherwise,
+list the dirty files — do NOT proceed — and ask the user to commit, stash, or discard first.
 
 `tasks.md` is optional in default mode: it holds the Sprint Contract and nothing else, so it is
 present only when `## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md
@@ -328,7 +337,8 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 NODES="$SKILL_DIR/scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 
-# only if a sprint block exists in tasks.md — a pre-existing h1, or a ≥2-item Sprint Contract
+# only if a sprint block exists in tasks.md — a pre-existing h1, a ≥2-item Sprint Contract, or any
+# `--tree` run (tree mode is file-backed even for one item)
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
 # backlog.md lines listed verbatim in the Sprint Contract's ## Covers
 printf '%s\n' "<each ## Covers line>" | python3 "$NODES" prune-backlog --file backlog.md
@@ -444,15 +454,10 @@ action itself; always still ask yes/no.
 
 2. **No commits ahead, but an active Sprint Contract?**
 
-   First rule out a `--tree` run: its code lives in a separate worktree, so the diff-based
-   triage below sees no code changes even while implementation is genuinely in progress there.
-   ```bash
-   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
-   ```
-   `task_worktree` is empty unless the repository's documented `--tree` location has a worktree.
-   If it is non-empty, diagnose "`--tree` run in flight in `<path>`" (read the matching path from
-   `task_worktree`) and route the user to inspect/resume that worktree, or abort it via
-   `references/tree.md`'s QA-failure cleanup block, instead of the diff-based verdict below.
+   The working-tree gate already routes a dirty main checkout with a matching `.worktrees/` path
+   here. Diagnose "`--tree` run in flight in `<path>`" (read the matching path captured by the
+   gate) and route the user to inspect/resume that worktree, or abort it via `references/tree.md`'s
+   QA-failure cleanup block, instead of the diff-based verdict below.
 
    ```bash
    active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)

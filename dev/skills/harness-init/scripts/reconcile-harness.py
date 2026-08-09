@@ -191,6 +191,7 @@ def remove_empty_headings(backlog: str) -> str:
         m = re.match(r'^(#+)\s', line)
         levels.append(len(m.group(1)) if m else None)
 
+    root = next((i for i, level in enumerate(levels) if level is not None), None)
     drop = set()
     for i, level in enumerate(levels):
         if level is None:
@@ -205,9 +206,17 @@ def remove_empty_headings(backlog: str) -> str:
             if lines[j].strip():
                 has_content = True
                 break
-        if not has_content:
+        if not has_content and i != root:
             drop.add(i)
     return '\n'.join(line for i, line in enumerate(lines) if i not in drop)
+
+
+def preserve_trailing_eol(original: str, cleaned: str) -> str:
+    """Keep the original file's trailing line ending after line-based cleanup."""
+    if not cleaned or not original.endswith(("\n", "\r")):
+        return cleaned
+    ending = "\r\n" if original.endswith("\r\n") else "\n"
+    return cleaned.rstrip("\r\n") + ending
 
 
 MAX_CHANGELOG_LINE = 160
@@ -292,7 +301,7 @@ def main() -> None:
             if BACKLOG.exists():
                 backlog_content = BACKLOG.read_text(encoding="utf-8")
                 reverted = revert_orphan_markers(backlog_content)
-                cleaned = remove_empty_headings(reverted)
+                cleaned = preserve_trailing_eol(backlog_content, remove_empty_headings(reverted))
                 if cleaned != backlog_content:
                     BACKLOG.write_text(cleaned, encoding="utf-8")
 
@@ -337,7 +346,7 @@ def main() -> None:
 
         content = BACKLOG.read_text(encoding="utf-8")
         cleaned = revert_orphan_markers(content)
-        cleaned = remove_empty_headings(cleaned)
+        cleaned = preserve_trailing_eol(content, remove_empty_headings(cleaned))
         if cleaned != content:
             BACKLOG.write_text(cleaned, encoding="utf-8")
 

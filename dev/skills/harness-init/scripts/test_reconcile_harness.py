@@ -410,6 +410,17 @@ def test_main_failed_prunes_empty_headings():
     check("failed-empty-heading: root retained", "# Backlog" in r["backlog_body"], r["backlog_body"])
     check("failed-empty-heading: active item returned to queue",
           "- [ ] active item" in r["backlog_body"], r["backlog_body"])
+    check("failed-empty-heading: trailing newline preserved",
+          r["backlog_body"].endswith("\n"), repr(r["backlog_body"]))
+
+
+def test_main_failed_preserves_schema_root():
+    """(e) failed reconciliation never deletes a schema-only root or its EOF newline."""
+    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
+    backlog = "# Backlog\n"
+    r = _run_main_in_tmp(failed_tasks, backlog)
+    check("failed-root: schema root and newline untouched", r["backlog_body"] == backlog,
+          repr(r["backlog_body"]))
 
 
 def test_orphan_sweep_reverts_not_deletes():
@@ -514,6 +525,7 @@ SUITES = [
     ("main: failed preserves Review Backlog", test_main_failed_preserves_review_backlog),
     ("main: failed reverts marker, keeps line", test_main_failed_reverts_marker_keeps_line),
     ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
+    ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
