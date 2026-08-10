@@ -61,7 +61,8 @@ look it up instead of asking.
    caller's brief).
 2. Ask the first one, per the `Q:` / `Recommended:` format above.
 3. Wait for the user's reply. Accept a direct answer, an edit to the recommendation, or a
-   confirmation of the recommendation.
+   confirmation of the recommendation. In a non-interactive run there is no reply to wait
+   for — take Rule 4's non-interactive branch and go straight to step 5.
 4. Repeat for each remaining question, one at a time, until none are open.
 5. Summarize the resolved decisions in a fixed four-field block and hand control back to the
    caller (or continue inline if invoked standalone) — this summary is the only output; there

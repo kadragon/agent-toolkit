@@ -199,7 +199,9 @@ Read one of them rather than recalling the rules — the script header suffices 
 repo has no `docs/conventions.md`. No `scripts/bump-version.sh` → edit the manifests by hand per the
 same rules; no `plugin.json` at all → skip this step. With **neither** the script nor
 `docs/conventions.md` present, the repo has stated no release policy — ask the user for the bump
-level instead of inventing one.
+level instead of inventing one. This gate never auto-defaults: in a non-interactive run, abort and
+report rather than picking a level (`references/harness-invariants.md` → *Non-Interactive Gate
+Defaults*).
 
 **Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
 
@@ -245,6 +247,9 @@ differs. Present the choice when entering Step 3 (before branching) so the user 
 [1] 라이트 패스 — 구현+QA 후 main에 직접 머지 (PR·CI 없음)
 [2] 풀 사이클 — task-review (PR, CI, 코드리뷰 포함)
 ```
+
+Non-interactive run: resolve to **2** (full cycle) and announce — no wait
+(`dev:harness-init` → `references/harness-invariants.md` → *Non-Interactive Gate Defaults*).
 
 - User picks **1** → run Step 3 (branch, Sprint Contract, implement, QA, version bump, cleanup) then
   skip `task-review` and merge directly:
