@@ -216,7 +216,7 @@ lists the role as an available agent type, treat it as present regardless of the
 **in its initial prompt** to report via `SendMessage(to: "main")`. For a named agent, messaging
 is the delivery channel: it finishes the work and the result is silently dropped otherwise.
 There is no way to add the instruction after the spawn. Full rule: *Result-handoff rule* in
-`delegation-template.md` (bundled with `dev:harness-init`). Covers every spawn point below —
+`delegation-template.md` (bundled with `dev:harness-curate`). Covers every spawn point below —
 `explorer`, `implementer`, `qa-verifier`, and the batch/tree fan-outs in `references/tree.md`
 and `references/batch.md` — including when the result is empty.
 
