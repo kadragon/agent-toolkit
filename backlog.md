@@ -37,16 +37,6 @@ test, against this repo's mechanical-enforcement-first rule.
 
 - [ ] [HARNESS] Build a CI check that ranks each skill's `description:` against declared positive/negative prompts and flags near-collisions between two descriptions *(deferred: needs a `docs/design/` spec first — new script plus per-skill fixtures across every dev and prod skill, not one sprint)*
 
-## Review Backlog
-
-### PR #209 — batch cycle observations
-
-Observed while running the PR #209 batch cycle, 2026-08-10. Both verified against the owning file
-this session, not inferred from behavior alone.
-
-- [ ] [HARNESS] Reconcile `task-next` Step 1's fast-path description with `backlog_candidates.py` — the script's Phase B docstring caps the fast path at "up to 2 qualifying h2-or-h3 headings", while Step 1 describes a "per-source and combined cap-5 truncation" and its selection table branches on "2–5"; a 6-group backlog surfaced 2, and the orchestrator has no signal that the list is short by design
-- [ ] [HARNESS] Carry `task-review`'s result-handoff rule into `task-next`'s own spawn briefs — its implementer/QA/batch briefs never tell a named agent to deliver via `SendMessage(to: "main")`, and 3 of 4 agents in this cycle went idle without reporting until nudged by hand
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
@@ -64,3 +54,11 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Review transport accounting (edge #7)** — cut on verified grounds: `task-review/SKILL.md` already distinguishes reviewed-empty from skipped and surfaces both — see its *Collect Reviews* 600s-breach rule, the three "Reviewers Skipped: …" labels, and the reviewer prompt's *"Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled"* — and both route to the same action. Re-file only with a recorded cycle where the two states led to *different* correct actions.
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
+
+## Review Backlog
+
+### PR #211 — review findings
+
+Recorded 2026-08-10 from the PR #211 review cycle.
+
+- [ ] [HARNESS] Add a mechanical check that every "bundled with `dev:<skill>`" attribution in a shipped `SKILL.md` names the skill that actually holds the referenced file — PR #211 copied `task-review`'s *Result-handoff rule* into `task-next` and carried its wrong pointer (`delegation-template.md` ships with `dev:harness-curate`, not `dev:harness-init`) along with it; quoting a rule verbatim propagates its stale cross-reference

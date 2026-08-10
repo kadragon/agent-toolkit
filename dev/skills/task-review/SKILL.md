@@ -169,7 +169,7 @@ Send the array even when it is empty ([]) so the slot is recorded as reviewed, n
 **in its initial prompt** to report via `SendMessage(to: "main")`. For a named agent, messaging
 is the delivery channel: it finishes the review and the findings are silently dropped otherwise.
 There is no way to add the instruction after the spawn. Full rule: *Result-handoff rule* in
-`delegation-template.md` (bundled with `dev:harness-init`).
+`delegation-template.md` (bundled with `dev:harness-curate`).
 
 #### 2-2: Antigravity (agy)
 
