@@ -5,7 +5,7 @@ description: >-
   `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
   order. Confirms granularity with the user first. A single trivial task skips
   this — write one Sprint Contract directly.
-version: 1.0.1
+version: 1.1.0
 ---
 
 # To Tickets
@@ -36,7 +36,12 @@ items from approved spec").
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
-   UI"). Prefer end-to-end slices even if narrow in surface area.
+   UI"). Prefer end-to-end slices even if narrow in surface area. Concrete cap: roughly 5
+   files, confined to one subsystem — a slice that needs more is two tickets, not one (this
+   caps files at authoring time; `task-next`'s Step 2 "large-group guard" separately caps
+   open items at *execution* time — the two are independent checks, not restatements of each
+   other). A title that needs "and" to describe it is a signal of the same problem — split it
+   into two tickets rather than writing one ticket that does both.
 3. **Order topologically.** Determine which tickets depend on others (e.g. a schema change
    before the feature that reads it). Sort the ticket list so a dependency's ticket always
    precedes its dependents.
