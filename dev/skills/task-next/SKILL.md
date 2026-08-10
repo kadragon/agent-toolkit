@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.2
+version: 1.5.3
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -271,6 +271,17 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   per-unit fan-out (`references/tree.md`, `references/batch.md`) — there the main thread works
   the units itself, sequentially, one worktree at a time, since the parallelism came from the
   fan-out that is no longer available.
+- **Per-item checkpoint (≥2-item group, default mode):** work the `## Covers` items one at a time
+  and run the Sprint Contract's lint/test command after each one, before starting the next — a
+  failure in the first item must surface at that item, not be discovered at handoff. Applies to the
+  inline path and the `implementer` brief alike; when delegating, the brief must state the per-item
+  order and require the checkpoint result for each item in the returned report. Do **not** commit
+  per item — committing stays with `task-review` Step 1 (or the lite path's single commit). Fix a
+  failing checkpoint before starting the next item, under the stuck-fix stop condition below. This
+  does not replace the end-of-sprint QA pass: the checkpoint is the implementing agent's own gate,
+  and independent verification still runs once at the end per the QA step. Out of scope: a
+  single-item cycle has nothing to interleave, and batch mode already spawns a verifier per unit
+  (`references/batch.md` A5).
 - **Stuck-fix stop condition:** if the same fix is attempted 3+ times on the same file without
   the lint/test command passing (inline edits or implementer briefs alike), stop and report to
   the user instead of continuing to retry. This is a prompted constraint, not a mechanically

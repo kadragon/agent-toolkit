@@ -28,16 +28,6 @@ Source: comparison against [addyosmani/agent-skills](https://github.com/addyosma
 
 - [ ] [HARNESS] Give each interactive gate a stated default plus an announced skip when no live user is reachable (`/loop`, cron, subagent): `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer, `task-new` Step 3 plan-mode approval
 
-## Harness — per-item checkpoint inside a multi-item sprint
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/incremental-implementation/SKILL.md`), 2026-08-10. Scope is `task-next`'s default
-multi-item group path only: `task-new` runs exactly one ticket per invocation, and batch mode
-(`references/batch.md` A5) already spawns a `qa-verifier` per unit. Per-slice commits are excluded —
-the "Do NOT commit" rule reserves committing for `task-review` Step 1, one commit per review cycle.
-
-- [ ] [HARNESS] Require a per-item lint/test checkpoint inside `task-next`'s default ≥2-item group sprint instead of a single QA pass at the end, so a failure in the first item cannot hide until handoff
-
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
