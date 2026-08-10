@@ -20,11 +20,13 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-## Review Backlog
+## Harness — validate the CHANGELOG entry at write time
 
-### PR #215 findings
+Source: PR #216 review (Codex), 2026-08-10. `task_nodes.py changelog` wrote a title containing a
+`→`, which `check_changelog_entries.py` rejects (one-link limit). The rule is already mechanical,
+but it only fires in CI — after the commit and the PR exist.
 
-- [ ] [HARNESS] Teach `scripts/ci/check_harness_drift.py` to resolve the `→ *Section Name*` cross-file pointer form — it only resolves `§ "Section"` today, so every `harness-invariants.md` citation (Verifier Standing-Checks Floor, Non-Interactive Gate Defaults) is verbally enforced and a heading rename leaves dangling pointers with green CI
+- [ ] [HARNESS] Have `task_nodes.py changelog` reject a title that violates the CHANGELOG Entry Contract (extra `→`, over the character cap) before writing, so the contract fails at the point of authorship rather than in CI
 
 ## Harness — deterministic skill trigger/collision check
 

@@ -75,7 +75,22 @@ body
 
 body
 
+## Layer 0: Settings-Level Enforcement
+
+body
+
+## Ratcheted Guards
+
+body
+
 > **Validate timing when overwriting original**: run baseline first.
+"""
+
+BETA_SKILL = """# beta
+
+## Beta Only Section
+
+body
 """
 
 
@@ -83,10 +98,16 @@ def build_fixture(root: Path) -> dict:
     """Stage a two-skill plugin tree and return the resolver inputs for it."""
     alpha = write(root, "dev/skills/alpha/SKILL.md", "# alpha\n")
     notes = write(root, "dev/skills/alpha/references/notes.md", NOTES)
-    beta = write(root, "dev/skills/beta/SKILL.md", "# beta\n")
+    beta = write(root, "dev/skills/beta/SKILL.md", BETA_SKILL)
     taxonomy = write(root, "dev/skills/beta/references/signal-taxonomy.md", TAXONOMY)
     index = mod.build_basename_index([alpha, beta, notes, taxonomy])
-    return {"alpha": alpha, "notes": notes, "taxonomy": taxonomy, "index": index}
+    return {
+        "alpha": alpha,
+        "beta": beta,
+        "notes": notes,
+        "taxonomy": taxonomy,
+        "index": index,
+    }
 
 
 def run_refs(text: str, source: Path, index: dict) -> list[str]:
@@ -98,7 +119,7 @@ def main() -> int:
         root = Path(tmp)
         mod.REPO_ROOT = root
         fx = build_fixture(root)
-        alpha, notes, index = fx["alpha"], fx["notes"], fx["index"]
+        alpha, beta, notes, index = fx["alpha"], fx["beta"], fx["notes"], fx["index"]
 
         print("\nRegression — PR #181: taxonomy renumbered 8 -> 7, stale refs survive")
         stale = (
@@ -165,6 +186,191 @@ def main() -> int:
         check(
             "a uniquely-named file referencing itself is still graded",
             run_refs("`notes.md` § \"No Such Section\"", notes, index) != [],
+        )
+
+        print("\nArrow pointers — `<file>.md` → *Section* (PR #215)")
+        # Regression: this is the form the repo actually writes, so a renamed heading used to
+        # leave every `harness-invariants.md` citation dangling with green CI. Delete the
+        # ARROW_REF_RE branch in check_section_refs and this goes red.
+        check(
+            "dangling arrow pointer is reported",
+            run_refs("`references/notes.md` → *Renamed Section*", alpha, index) != [],
+            f"got {run_refs('`references/notes.md` → *Renamed Section*', alpha, index)}",
+        )
+        for label, cited in [
+            ("italic", "*header.xml Editing Guide*"),
+            ("bold", "**header.xml Editing Guide**"),
+            ("double-quoted", '"header.xml Editing Guide"'),
+            ("single-quoted", "'header.xml Editing Guide'"),
+        ]:
+            check(
+                f"live arrow pointer stays silent — {label} title",
+                run_refs(f"`references/notes.md` → {cited}", alpha, index) == [],
+            )
+        check(
+            "arrow pointer to a **bold** callout resolves",
+            run_refs(
+                "`references/notes.md` → *Validate timing when overwriting original*",
+                alpha,
+                index,
+            )
+            == [],
+        )
+        check(
+            "chained pointer grades the nearest file, not the first",
+            run_refs(
+                "`dev:beta` → `references/notes.md` → *header.xml Editing Guide*", alpha, index
+            )
+            == [],
+        )
+
+        print("\nArrow pointers — heading cited by its leading words")
+        check(
+            "prefix ending at a separator resolves (`## Layer 0: …` cited as *Layer 0*)",
+            run_refs("`references/notes.md` → *Layer 0*", alpha, index) == [],
+        )
+        check(
+            "prefix not at a word boundary is still reported (*Ratchet* vs `## Ratcheted Guards`)",
+            run_refs("`references/notes.md` → *Ratchet*", alpha, index) != [],
+        )
+
+        print("\nArrow pointers — path-qualified basename resolution")
+        # `beta/SKILL.md` from a file inside alpha/: without the qualifier this resolves to
+        # alpha's own SKILL.md and gets graded against the wrong anchors.
+        check(
+            "qualified `beta/SKILL.md` resolves against beta",
+            run_refs("`beta/SKILL.md` → *Beta Only Section*", notes, index) == [],
+        )
+        check(
+            "...and is genuinely graded there, not skipped",
+            run_refs("`beta/SKILL.md` → *No Such Section*", notes, index) != [],
+        )
+        # A qualifier that matches two files in the same skill cannot pick between them;
+        # ordering the index differently must not change the verdict.
+        decoy = write(root, "dev/skills/beta/assets/SKILL.md", "# decoy\n")
+        for order_label, ordered in [
+            ("index order A", [alpha, beta, decoy, notes]),
+            ("index order B", [alpha, decoy, beta, notes]),
+        ]:
+            check(
+                f"an ambiguous qualifier falls through instead of guessing — {order_label}",
+                run_refs(
+                    "`beta/SKILL.md` → *Beta Only Section*",
+                    notes,
+                    mod.build_basename_index(ordered),
+                )
+                == [],
+            )
+
+        print("\nArrow pointers — hard-wrapped across a line break (PR #216 review)")
+        # This repo hard-wraps markdown, so several `harness-invariants.md` citations split
+        # across the break. Grading only the physical line left them unchecked — the exact
+        # failure this check exists to close.
+        wrapped = run_refs(
+            "Read `references/notes.md` →\n*No Such Section* before editing.\n", alpha, index
+        )
+        check("a pointer wrapped after the arrow is graded", wrapped != [], f"got {wrapped}")
+        split_title = run_refs(
+            "Read `references/notes.md` → *No Such\nSection Here* before editing.\n", alpha, index
+        )
+        check(
+            "a pointer whose title itself splits is graded",
+            split_title != [],
+            f"got {split_title}",
+        )
+        check(
+            "a wrapped pointer that resolves stays silent",
+            run_refs(
+                "Read `references/notes.md` →\n*header.xml Editing Guide* before editing.\n",
+                alpha,
+                index,
+            )
+            == [],
+        )
+        check(
+            "a pointer wholly on one line is not double-reported by the wrap scan",
+            len(
+                run_refs(
+                    "intro line\n`references/notes.md` → *No Such Section*\n", alpha, index
+                )
+            )
+            == 1,
+        )
+
+        print("\nArrow pointers — prefix relaxation is bounded (PR #216 review)")
+        check(
+            "a leading word that is not a separator-bounded prefix is reported",
+            run_refs("`references/notes.md` → *Layer*", alpha, index) != [],
+        )
+        check(
+            "the relaxation does not leak into the exact `§` form",
+            run_refs('`references/notes.md` § "Layer 0"', alpha, index) != [],
+        )
+
+        print("\nArrow pointers — ambiguous basenames need a qualifier (PR #216 review)")
+        # Unqualified `SKILL.md` from a references/ source used to resolve to the referrer's
+        # own skill and fail CI with a message naming a file the author never cited.
+        check(
+            "an unqualified cross-skill `SKILL.md` is skipped, not graded against the referrer",
+            run_refs("`dev:beta` → `SKILL.md` → *Beta Only Section*", notes, index) == [],
+        )
+        sub = write(root, "dev/skills/beta/references/handbook.md", "# handbook\n\n## Deep Rule\n")
+        sub_index = mod.build_basename_index([alpha, beta, notes, fx["taxonomy"], sub])
+        check(
+            "a subdirectory-qualified mention keeps the skill segment",
+            run_refs("`beta/references/handbook.md` → *Deep Rule*", notes, sub_index) == [],
+        )
+        check(
+            "...and is genuinely graded there",
+            run_refs("`beta/references/handbook.md` → *No Such Section*", notes, sub_index) != [],
+        )
+        check(
+            "a qualifier naming a skill that does not bundle the file is skipped, not guessed",
+            run_refs("`alpha/handbook.md` → *Deep Rule*", notes, sub_index) == [],
+        )
+
+        print("\nArrow adjacency — forms that must still resolve (PR #216 review)")
+        check(
+            "an emphasis-wrapped file mention is still adjacent",
+            run_refs("**`references/notes.md`** → *No Such Section*", alpha, index) != [],
+        )
+        check(
+            "a single-quoted chain element does not break adjacency",
+            run_refs("`dev:beta` → 'refs' → `references/notes.md` → *No Such Section*", alpha, index)
+            != [],
+        )
+        check(
+            "an unresolvable references/ target is reported once, not once per arrow",
+            len(run_refs("`references/gone.md` → *A* → *B*", alpha, index)) == 1,
+            f"got {run_refs('`references/gone.md` → *A* → *B*', alpha, index)}",
+        )
+
+        print("\nArrow skip paths (must not fire)")
+        check(
+            "a code-ticked title is a token (a flag, a value), not a section pointer",
+            run_refs("`references/notes.md` → `--all`", alpha, index) == [],
+        )
+        check(
+            "an arrow whose target is a filename is a reading order, not a pointer",
+            run_refs("`references/notes.md` → `signal-taxonomy.md`", alpha, index) == [],
+        )
+        check(
+            "an unformatted arrow title is prose, not a pointer",
+            run_refs("`references/notes.md` → No Such Section", alpha, index) == [],
+        )
+        check(
+            "a non-adjacent filename does not bind to an output-label arrow",
+            run_refs(
+                "See `references/notes.md` Section 3 for the mechanic; "
+                'the verdict `refuted` → "No Such Section", never applied.',
+                alpha,
+                index,
+            )
+            == [],
+        )
+        check(
+            "an arrow pointer at a target-repo file the plugin does not bundle is skipped",
+            run_refs("`backlog.md` → *No Such Section*", alpha, index) == [],
         )
 
         print("\nSkip paths (must not fire)")

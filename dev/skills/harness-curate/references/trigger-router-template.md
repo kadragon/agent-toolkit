@@ -197,7 +197,7 @@ When the hook fires too often or never:
 - **Never fires when it should** → run the prompt verbatim through the test command above; usually the pattern is too narrow or in wrong language.
 - **Two routes conflict** → reorder routes (top wins) or split the second route's pattern.
 
-Record changes in `dev:harness-init` → `references/harness-invariants.md` → "Trigger Router Routes" so future sessions don't reintroduce removed routes.
+Record a removed route as a case in `tools/test-trigger-router.sh` asserting the prompt now stays silent, so future sessions don't reintroduce it. The hook file and that test script are the route registry — there is no separate invariants section to keep in sync.
 
 ---
 
