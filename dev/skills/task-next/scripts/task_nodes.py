@@ -36,11 +36,13 @@ Usage:
                   tasks.md still holding a `## Review Backlog` / `## Security Fixes` section and
                   names the migration to backlog.md.
 
-Deliberate non-goal — the CHANGELOG character cap is NOT enforced here. Its single enforcement
-point is `MAX_LEN` in the repo's `scripts/ci/check_changelog_entries.py`; a second hardcoded copy
-inside a shipped script is exactly the drift that single-sourcing removed. This script composes
-and places the line; the cap, and every judgment the *CHANGELOG Entry Contract* states (no
-explanatory clauses, no file lists), stay where they already live.
+The CHANGELOG contract's decidable subset is checked before the line is written, but this file
+states none of it: `changelog` locates the repo's own `scripts/ci/check_changelog_entries.py`,
+imports it, and runs its `check_file` over the composed entry. A repo without that script has
+declared no rule, so the entry is written unchecked. Nothing is re-implemented or re-hardcoded
+here — a second copy of `MAX_LEN` inside a shipped script is exactly the drift that
+single-sourcing removed. Every judgment the *CHANGELOG Entry Contract* states (no explanatory
+clauses, no file lists) stays on review, where it already lives.
 
 Heading detection is imported from the sibling `backlog_candidates.py` so the two scripts agree
 on what a heading is — fenced code blocks and HTML comments are markup in both, and a `## Fake`
@@ -52,6 +54,7 @@ Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures are in-memory or i
 from __future__ import annotations
 
 import datetime
+import importlib.util
 import io
 import os
 import re
@@ -194,6 +197,62 @@ def compose_entry(
     if link:
         line += f" → {link}"
     return line
+
+
+# The repo's own enforcement point for the contract's decidable subset. Found rather than
+# reimplemented: this script ships from a plugin cache and runs inside whatever repo the cycle
+# is in, so the rule it must honour is that repo's, at that repo's current values.
+CHECKER_RELPATH = Path("scripts") / "ci" / "check_changelog_entries.py"
+
+
+def find_entry_checker(start: Path) -> Path | None:
+    """Nearest `scripts/ci/check_changelog_entries.py` at or above `start`, else None.
+
+    None is a valid answer, not a failure: a repo that ships no checker has declared no
+    machine-decidable changelog rule, and inventing one here is how a second copy of the
+    cap gets born.
+
+    The walk stops at the first directory holding `.git`, so a nested checkout never inherits
+    an outer repo's cap — the rule that applies is the one the CHANGELOG's own repo enforces.
+    """
+    here = start.resolve()
+    for base in (here, *here.parents):
+        candidate = base / CHECKER_RELPATH
+        if candidate.is_file():
+            return candidate
+        if (base / ".git").exists():
+            return None
+    return None
+
+
+def validate_entry(entry: str, checker: Path) -> list[str]:
+    """Run `checker`'s own `check_file` over `entry` alone; return its violations.
+
+    The entry is probed inside a throwaway `## Unreleased` section because the checker scopes
+    link resolution to that section — a probe without it would skip the rule that fires most.
+    A checker that cannot be imported, or that exposes no `check_file`, yields no violations
+    and a stderr note: CI still runs the real thing, so a broken local copy must not take the
+    cycle tail down with it.
+    """
+    try:
+        spec = importlib.util.spec_from_file_location("_changelog_entry_checker", checker)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"no loader for {checker}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        check_file = getattr(module, "check_file", None)
+        if check_file is None:
+            raise AttributeError("check_file")
+    except Exception as e:  # noqa: BLE001 — any import failure degrades to "unchecked"
+        sys.stderr.write(f"Note: could not run {checker} on the entry ({e}) — writing unchecked\n")
+        return []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        probe = Path(tmp) / "CHANGELOG.md"
+        probe.write_text(f"# Changelog\n\n## Unreleased\n\n{entry}\n", encoding="utf-8")
+        raw = check_file(probe)
+    # Drop the probe's own `path:lineno:` prefix — it names a tempfile, not the real target.
+    return [re.sub(r"^\S+:\d+:\s*", "", str(v)) for v in raw]
 
 
 def insert_changelog_entry(text: str, entry: str) -> tuple[str, bool]:
@@ -529,6 +588,21 @@ def cmd_changelog(argv: list[str]) -> int:
         link=_opt(argv, "--link"),
         date=_opt(argv, "--date"),
     )
+    checker = find_entry_checker(path.parent)
+    if checker is not None:
+        problems = validate_entry(entry, checker)
+        if problems:
+            sys.stderr.write(
+                f"Error: the composed entry violates the CHANGELOG Entry Contract, per {checker}:\n"
+            )
+            for p in problems:
+                sys.stderr.write(f"  {p}\n")
+            sys.stderr.write(
+                f"  entry: {entry}\n"
+                "Shorten the title or drop the extra link — the detail belongs in the owning doc.\n"
+                "Nothing was written.\n"
+            )
+            return 1
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     new_text, inserted = insert_changelog_entry(text, entry)
     if inserted:
@@ -1151,6 +1225,80 @@ status: open
                    "--version", "1.0.0", "--date", "2026-08-03"])
         _assert(rc == 0 and c.read_text(encoding="utf-8").endswith("- [done] t (dev v1.0.0) (2026-08-03)\n"),
                 "the changelog subcommand creates the file end-to-end")
+        _assert(find_entry_checker(Path(td)) is None,
+                "a tree with no scripts/ci/ checker reports None, and the write above proceeded")
+
+        # ---- changelog: write-time contract validation ----
+        print("\nTest 6: changelog — the entry is validated before the file is written")
+        stub = (
+            "def check_file(path, *, check_links=True):\n"
+            "    out = []\n"
+            "    for i, line in enumerate(path.read_text().splitlines(), 1):\n"
+            "        if line.startswith('- [done]') and len(line) > 40:\n"
+            "            out.append(f'{path}:{i}: entry is {len(line)} chars (max 40)')\n"
+            "    return out\n"
+        )
+        repo = Path(td) / "repo"
+        (repo / "scripts" / "ci").mkdir(parents=True)
+        (repo / "scripts" / "ci" / "check_changelog_entries.py").write_text(stub, encoding="utf-8")
+        _assert(
+            find_entry_checker(repo) == (repo / "scripts" / "ci" / "check_changelog_entries.py").resolve(),
+            "the checker is discovered by walking up from the changelog's own directory",
+        )
+        rc_bad = main(["changelog", "--file", str(repo / "CHANGELOG.md"),
+                       "--title", "x" * 60, "--date", "2026-08-03"])
+        _assert(
+            rc_bad == 1 and not (repo / "CHANGELOG.md").exists(),
+            "a violating entry exits 1 and the CHANGELOG is never created",
+        )
+        rc_ok = main(["changelog", "--file", str(repo / "CHANGELOG.md"),
+                      "--title", "short", "--date", "2026-08-03"])
+        _assert(
+            rc_ok == 0 and "- [done] short (2026-08-03)" in (repo / "CHANGELOG.md").read_text(encoding="utf-8"),
+            "a compliant entry is written exactly as before the gate existed",
+        )
+        _assert(
+            validate_entry("- [done] " + "y" * 60, repo / "scripts" / "ci" / "check_changelog_entries.py")
+            == ["entry is 69 chars (max 40)"],
+            "the probe's own tempfile path:lineno prefix is stripped from the reported violation",
+        )
+
+        nested = repo / "vendor" / "inner"
+        (nested / ".git").mkdir(parents=True)
+        _assert(
+            find_entry_checker(nested) is None,
+            "the walk stops at a .git boundary — a nested checkout does not inherit the outer cap",
+        )
+
+        broken = Path(td) / "broken"
+        (broken / "scripts" / "ci").mkdir(parents=True)
+        (broken / "scripts" / "ci" / "check_changelog_entries.py").write_text(
+            "this is not python(\n", encoding="utf-8")
+        rc_broken = main(["changelog", "--file", str(broken / "CHANGELOG.md"),
+                          "--title", "t", "--date", "2026-08-03"])
+        _assert(
+            rc_broken == 0 and (broken / "CHANGELOG.md").is_file(),
+            "an unimportable checker degrades to writing unchecked rather than blocking the cycle",
+        )
+
+    # End-to-end against this repo's real checker, when task_nodes.py is running from a checkout
+    # that has one. Skipped from a plugin cache — there is no checker above it to find.
+    real = find_entry_checker(Path(__file__).resolve().parent)
+    if real is None:
+        print("  SKIP: no scripts/ci/check_changelog_entries.py above this script")
+    else:
+        _assert(
+            validate_entry("- [done] " + "z" * 200 + " (2026-08-03)", real) != [],
+            "the real checker rejects an over-cap entry through validate_entry",
+        )
+        _assert(
+            validate_entry("- [done] t (2026-08-03) → docs/a.md → docs/b.md", real) != [],
+            "the real checker rejects the two-link entry that PR #216 shipped past authorship",
+        )
+        _assert(
+            validate_entry("- [done] t (dev v1.0.0) (2026-08-03) → docs/conventions.md", real) == [],
+            "a compliant entry with a resolving link passes the real checker",
+        )
 
     print(f"\n=== Results: {PASS_COUNT} PASS, {FAIL_COUNT} FAIL ===")
     return 0 if FAIL_COUNT == 0 else 1

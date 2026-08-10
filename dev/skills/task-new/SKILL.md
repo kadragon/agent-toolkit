@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.0
+version: 1.2.1
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -224,9 +224,11 @@ python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
 
 `prune-*` refuses (exit 1) and changes nothing on a line that does not match verbatim. A heading is
 dropped only where this run emptied it — headings elsewhere with all-`[x]`/`[>]` items are
-deliberate history and stay. What the script cannot decide — the character cap, and the ban on
-explanatory clauses, file lists and narration — lives in the *CHANGELOG Entry Contract* in
-`harness-invariants.md` (bundled with `dev:harness-init`). Read it before choosing the title.
+deliberate history and stay. `changelog` refuses (exit 1, nothing written) when the repo's
+`scripts/ci/check_changelog_entries.py` rejects the composed line — over the cap, a second `→`
+link, an unresolvable link. What no script can decide — the ban on explanatory clauses, file lists
+and narration — lives in the *CHANGELOG Entry Contract* in `harness-invariants.md` (bundled with
+`dev:harness-init`). Read it before choosing the title.
 
 ## Step 4 — Hand off
 

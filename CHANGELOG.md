@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task_nodes.py changelog validates the entry before writing it (dev v4.4.10) (2026-08-10) → docs/conventions.md
 - [done] Enforce arrow-form cross-file section pointers in check_harness_drift (dev v4.4.9) (2026-08-10) → docs/runbook.md
 - [done] Non-interactive defaults for task-* interactive gates (dev v4.4.8) (2026-08-10) → dev/skills/harness-init/references/harness-invariants.md
 - [done] bundled-with attributions checked against the file's real owning skill (2026-08-10)

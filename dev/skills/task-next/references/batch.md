@@ -144,9 +144,10 @@ any worktree.
    ```
    A heading is dropped only where this batch emptied it, `## Review Backlog` in `backlog.md` goes
    the same way once empty, and `--units <N>` produces the batch entry's `(<N> units)` clause. **No
-   per-unit breakdown** in the entry — the units are enumerated in the PR body. What the script
-   cannot decide — the character cap, and the ban on explanatory clauses — lives in the *CHANGELOG
-   Entry Contract* in `harness-invariants.md`; read it rather than reconstructing the limits.
+   per-unit breakdown** in the entry — the units are enumerated in the PR body. A batch title over
+   the cap is refused at write time by the repo's `scripts/ci/check_changelog_entries.py`. What no
+   script can decide — the ban on explanatory clauses — lives in the *CHANGELOG Entry Contract* in
+   `harness-invariants.md`; read it rather than reconstructing the limits.
    - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
    Leave all edits uncommitted — `task-review` Step 1 commits them.
