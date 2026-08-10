@@ -61,9 +61,10 @@ look it up instead of asking.
    caller (or continue inline if invoked standalone) — this summary is the only output; there
    is no file to write. Fields, in order:
    ```
-   Outcome: <what changes, in one line>
+   Outcome: <what changes, in one line — feeds Sprint Contract's Scope>
    Success: <how it's verified — feeds Sprint Contract's Acceptance criteria>
-   Constraint: <non-negotiable limits surfaced during the interview — feeds Scope/boundaries>
+   Constraint: <non-negotiable limits surfaced during the interview — feeds Sprint Contract's
+     Acceptance criteria as a must-not-violate condition>
    Out of scope: <explicit exclusions — feeds Sprint Contract's Out of scope>
    ```
    Omit a field only if the interview genuinely surfaced nothing for it — do not leave it
