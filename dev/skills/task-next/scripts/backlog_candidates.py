@@ -52,7 +52,8 @@ reinterpret it):
   candidate (matches `SKILL.md` Step 2 "Deferred items"/"blocked" rules); a heading with a mix
   of marked and unmarked open items is still a candidate, counting only the unmarked ones.
   The marker counts wherever it sits in a multi-line item: `tokenize` folds an item's indented
-  continuation lines into its text, so a marker on a wrapped item's last line is seen.
+  continuation lines into its text, so a marker on a wrapped item's last line is seen — including
+  when an indented fenced block or HTML comment sits between the item and its marker.
 
   "Directly owns" (Phase B/C, full-scan rules 2-5): open `- [ ]` checkbox items collected
   from just after a heading up to (not including) the next heading of ANY level 1-3 — not
@@ -91,7 +92,11 @@ Self-check (--test):
   numbers of the real content after it are unshifted), and the fenced-code-block case (a fenced
   `## Fake` between a heading and its items neither becomes a candidate nor truncates the real
   heading's region; tilde fences, info strings, longer-closer nesting, unclosed fences, the
-  4-space-indent non-fence, and the comments-before-fences ordering all covered). All fixtures are
+  4-space-indent non-fence, and the comments-before-fences ordering all covered), and the
+  multi-line-item case (a marker on a wrapped item's indented continuation line parks the item,
+  and still counts across an indented fenced block or HTML comment nested in the item; an
+  unindented or blank-line-separated line is not folded in; the token keeps its FIRST line
+  number). All fixtures are
   in-memory strings — no real files touched. Exits 0 on PASS, 1 on FAIL.
 """
 
@@ -265,9 +270,12 @@ def tokenize(text: str) -> list[dict]:
     Only indented, non-blank lines continue an item; a blank line, a heading, a status line, a
     checkbox, or a nested bullet ends it (CommonMark lazy continuation is deliberately not
     supported — an unindented line is far more likely to be new prose than a wrapped item).
+    The indent test reads the RAW line, so an indented fenced block or HTML comment nested inside
+    an item does not close it even though the strippers blank those lines out.
     """
     tokens: list[dict] = []
     open_item: dict | None = None
+    raw_lines = text.splitlines()
     for i, line in enumerate(_strip_fenced_blocks(_strip_html_comments(text)).splitlines(), start=1):
         m = _HEADING_RE.match(line)
         if m:
@@ -290,9 +298,17 @@ def tokenize(text: str) -> list[dict]:
             open_item = None
             tokens.append({"type": "bullet", "line": i})
             continue
-        if open_item is not None and line[:1].isspace() and line.strip():
-            open_item["text"] = f"{open_item['text']} {line.strip()}".strip()
-            continue
+        if open_item is not None:
+            # Indentation is read from the RAW line, not the masked one: a fenced sample or an HTML
+            # comment nested under an item is blanked to "" by the strippers, and testing the masked
+            # line would read that as a blank separator and close the item — dropping a
+            # `*(deferred: ...)*` marker that follows the block. Folding still uses the masked text,
+            # so the code inside the fence never becomes item text.
+            raw = raw_lines[i - 1] if i <= len(raw_lines) else ""
+            if raw[:1].isspace() and raw.strip():
+                if line.strip():
+                    open_item["text"] = f"{open_item['text']} {line.strip()}".strip()
+                continue
         open_item = None
     return tokens
 
@@ -903,6 +919,48 @@ unindented prose *(deferred: not part of the item)*
     tokens = tokenize(blank_break)
     item = next(t for t in tokens if t["type"] == "checkbox")
     _assert(item["text"] == "wrapped item", "a blank line ends the item — later indented text is not folded in")
+
+    nested_fence = """## Fenced group
+- [ ] item with a fenced sample
+  ```sh
+  echo hi
+  ```
+  *(deferred: waiting on a captured response)*
+"""
+    tokens = tokenize(nested_fence)
+    item = next(t for t in tokens if t["type"] == "checkbox")
+    _assert(
+        item["text"] == "item with a fenced sample *(deferred: waiting on a captured response)*",
+        "an indented fenced block nested in an item does not close it — the marker after it still folds in",
+    )
+    _assert(
+        backlog_fast_candidates(tokens) == [],
+        "an item deferred after a nested fenced block is not surfaced as actionable",
+    )
+
+    nested_comment = """## Commented group
+- [ ] item with a nested comment
+  <!-- an aside -->
+  *(deferred: waiting)*
+"""
+    item = next(t for t in tokenize(nested_comment) if t["type"] == "checkbox")
+    _assert(
+        item["text"] == "item with a nested comment *(deferred: waiting)*",
+        "an indented HTML comment nested in an item does not close it either",
+    )
+
+    unindented_fence = """## Top-level fence group
+- [ ] item then a top-level fence
+```sh
+echo hi
+```
+  *(deferred: not part of the item)*
+"""
+    item = next(t for t in tokenize(unindented_fence) if t["type"] == "checkbox")
+    _assert(
+        item["text"] == "item then a top-level fence",
+        "an UNindented fence still ends the item — only nested (indented) blocks continue it",
+    )
 
     # ---- Test 3c: HTML-comment stripping ----
     print("\nTest 3c: HTML comments — commented-out template markup is not a candidate")
