@@ -98,9 +98,22 @@ The conventions doc captures naming patterns, coding standards, and framework-sp
 
 ```
 [TYPE] description
-
-TYPE: FEAT | FIX | REFACTOR | DOCS | CONSTRAINT | HARNESS
 ```
+
+{Define one row per type the repo actually uses. Example:}
+
+| Type | Meaning |
+|------|---------|
+| `[FEAT]` | New behavior |
+| `[FIX]` | Bug fix — requires a reproduction step before the fix |
+| `[REFACTOR]` | Structure only, no behavior change |
+| `[DOCS]` | Documentation only |
+| `[CONSTRAINT]` | Structural guards only (lint rule, CI check, schema) |
+| `[HARNESS]` | Skill / hook / agent instruction changes |
+
+{Keep the bug-fix row and its reproduction clause: where this repo generated
+`docs/eval-criteria.md`, its bug-fix reproduction rule cites this row as the owning convention,
+and dropping the row leaves that requirement with nothing to cite.}
 
 ### Branch Naming
 

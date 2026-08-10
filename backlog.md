@@ -39,13 +39,6 @@ test, against this repo's mechanical-enforcement-first rule.
 
 ## Review Backlog
 
-### PR #208 — QA contract gates
-
-Out-of-scope findings from the PR #208 review cycle (Codex + Claude), verifier-graded, 2026-08-10.
-
-- [ ] [HARNESS] Carry the standing-checks floor into the role-less verifier brief in `task-new` and `task-next` — `harness-init` creates no agent roles, so the `general-purpose` fallback brief passes only acceptance criteria, paths and lint/test command, and silently skips the floor that `docs/eval-criteria.md` now says every contract inherits *(pre-existing gap, not introduced by #208)*
-- [ ] [HARNESS] Add the `[FIX]` reproduction row to `dev/skills/harness-init/references/conventions-template.md` — it ships only the bare `TYPE: FEAT | FIX | …` line, so a repo generated from it gets the eval-criteria rule with no owning convention to cite
-
 ### PR #209 — batch cycle observations
 
 Observed while running the PR #209 batch cycle, 2026-08-10. Both verified against the owning file

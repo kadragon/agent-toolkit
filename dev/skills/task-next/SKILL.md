@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.3
+version: 1.5.4
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -314,7 +314,11 @@ verifier instead. The brief keeps the same shape a role file would have carried 
 four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
 with the Sprint Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test
 command, and telling it to verify against those criteria rather than impressions and to change
-nothing. What must never be dropped is the independence, not the role name: the agent
+nothing. **Carry the standing-checks floor in the brief too** — with no role file there is no
+`## Checks (always run)` for the brief to point at, so the gates every contract inherits reach the
+verifier only if the brief states them. Take them from `harness-init` →
+`references/harness-invariants.md` → *Verifier Standing-Checks Floor*; do not reconstruct the list
+from memory. What must never be dropped is the independence, not the role name: the agent
 that implemented — the main thread included, when the implementer fallback above was taken — does
 not verify its own output. This fallback applies to every QA spawn this skill owns, batch mode's
 per-unit verifiers included.
