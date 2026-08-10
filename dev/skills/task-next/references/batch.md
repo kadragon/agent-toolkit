@@ -36,11 +36,15 @@ Do NOT use `AskUserQuestion` (4-option cap is too small for a batch). Render a n
 one line per eligible unit: index, type tag, short slug, file:line (bundles list member count
 and area). Accept a comma list (`1,3,4`), inclusive ranges (`1-3`), `all`, or a combination.
 Map back to units; ignore out-of-range indices and report them. Empty/unparseable reply →
-re-prompt once, then stop.
+re-prompt once, then stop. Non-interactive run: skip the prompt — select every eligible unit
+(`--all` already asked for them) and announce the list, subject to the cost gate below. See
+`dev:harness-init` → `references/harness-invariants.md` → *Non-Interactive Gate Defaults*.
 
 **Cost gate** — each selected unit costs roughly implementer + qa-verifier (the review cycle
 runs only **once** for the whole batch, not per unit). If the user selects **more than 6 units**,
-state the rough multiplier and ask for explicit confirmation before A4. CLAUDE.md token economy
+state the rough multiplier and ask for explicit confirmation before A4. This gate never
+auto-defaults: in a non-interactive run, abort and report instead of confirming on the user's
+behalf. CLAUDE.md token economy
 applies — the parallelism must earn its cost.
 
 ### A4 — Parallel implement (worktrees, code only)

@@ -20,13 +20,11 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-## Harness — non-interactive defaults for `task-*` gates
+## Review Backlog
 
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(Loading Constraints in `skills/interview-me/SKILL.md`, `skills/doubt-driven-development/SKILL.md`),
-2026-08-10.
+### PR #215 findings
 
-- [ ] [HARNESS] Give each interactive gate a stated default plus an announced skip when no live user is reachable (`/loop`, cron, subagent): `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer, `task-new` Step 3 plan-mode approval
+- [ ] [HARNESS] Teach `scripts/ci/check_harness_drift.py` to resolve the `→ *Section Name*` cross-file pointer form — it only resolves `§ "Section"` today, so every `harness-invariants.md` citation (Verifier Standing-Checks Floor, Non-Interactive Gate Defaults) is verbally enforced and a heading rename leaves dangling pointers with green CI
 
 ## Harness — deterministic skill trigger/collision check
 

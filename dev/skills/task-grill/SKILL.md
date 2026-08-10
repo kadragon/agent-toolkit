@@ -5,7 +5,7 @@ description: >-
   interviewing the user one question at a time, each with a recommended answer +
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
-version: 1.0.3
+version: 1.1.0
 ---
 
 # Grill
@@ -46,6 +46,11 @@ look it up instead of asking.
    interview — none of them confirms a specific answer to the open question on the table.
    Re-ask **one** narrower version of the question; if that reply still pins down no choice,
    adopt the stated `Recommended:` answer, announce it as an assumption, and move on.
+   **Non-interactive run** (no live user reachable — see `dev:harness-init` →
+   `references/harness-invariants.md` → *Non-Interactive Gate Defaults* for the trigger list):
+   skip the wait — adopt every open question's `Recommended:` answer immediately, mark each as
+   an assumption in the four-field summary, announce per that section, and list any question the
+   interview could not resolve even with a default in the handoff.
 5. **No ADR/glossary machinery.** Do not create `CONTEXT.md`, a glossary file, or any
    standalone artifact. Hold the resolved answers in conversation context and hand them
    directly to the caller (Sprint Contract author, or `task-spec`).
@@ -56,7 +61,8 @@ look it up instead of asking.
    caller's brief).
 2. Ask the first one, per the `Q:` / `Recommended:` format above.
 3. Wait for the user's reply. Accept a direct answer, an edit to the recommendation, or a
-   confirmation of the recommendation.
+   confirmation of the recommendation. In a non-interactive run there is no reply to wait
+   for — take Rule 4's non-interactive branch and go straight to step 5.
 4. Repeat for each remaining question, one at a time, until none are open.
 5. Summarize the resolved decisions in a fixed four-field block and hand control back to the
    caller (or continue inline if invoked standalone) — this summary is the only output; there
