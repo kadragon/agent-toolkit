@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for check_harness_drift.py's section-reference gate.
+Unit tests for check_harness_drift.py's reference gates.
 
 The defect under test is PR #181's: the signal taxonomy was renumbered 8 -> 7 and five
 `Signal 8` / `§8` references survived the rename, caught by human review only. The
@@ -11,6 +11,9 @@ Also covered: chained `§2·§3`, heading and **bold callout** anchors, cross-sk
 resolution by unique basename, and the three deliberate skip paths (target-repo
 filenames the plugin does not bundle, non-markdown targets, and a bare `§N` with no
 file named on its line).
+
+Bundled-script and bundled-with attribution resolution are covered in their own blocks
+at the end; the latter reproduces PR #211's stale `delegation-template.md` pointer.
 
 Run: python3 scripts/ci/test_check_harness_drift.py
 """
@@ -278,6 +281,97 @@ def main() -> int:
         check(
             "the sibling path is not also graded as an own-skill reference",
             run_scripts('python3 "$SKILL_DIR/../beta/scripts/elsewhere.py"') == [],
+        )
+
+    print("\nBundled-with attributions name the skill that really holds the file")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        skill = write(root, "dev/skills/task-next/SKILL.md", "placeholder")
+        write(root, "dev/skills/harness-curate/references/delegation-template.md", "x")
+        write(root, "dev/skills/harness-init/references/harness-invariants.md", "x")
+        write(root, "prod/skills/hwpx/references/tables.md", "x")
+
+        def run_with(text):
+            return mod.check_bundled_with_refs(text, skill)
+
+        check(
+            "a correct attribution passes",
+            run_with("`harness-invariants.md` (bundled with `dev:harness-init`).") == [],
+        )
+        # The PR #211 defect verbatim: task-review's rule copied into task-next, stale
+        # pointer and all. Delete the owner lookup and this goes green.
+        wrong = run_with("`delegation-template.md` (bundled with `dev:harness-init`).")
+        check("regression — PR #211: a wrong owner is reported", wrong != [], f"got {wrong}")
+        check(
+            "the message names the real owner",
+            wrong and "dev:harness-curate" in wrong[0],
+            f"got {wrong}",
+        )
+        check(
+            "an attribution to a skill that does not exist is reported",
+            run_with("`delegation-template.md` (bundled with `dev:nonesuch`).") != [],
+        )
+        check(
+            "a file no skill bundles is reported, not skipped",
+            run_with("`invented.md` (bundled with `dev:harness-init`).") != [],
+        )
+        check(
+            "a cross-plugin attribution resolves",
+            run_with("`tables.md` (bundled with `prod:hwpx`).") == [],
+        )
+        check(
+            "an attribution with no filename in reach is skipped",
+            run_with("that rule (bundled with `dev:harness-init`) applies here.") == [],
+        )
+        check(
+            "a hard-wrapped filename on the line above still resolves",
+            run_with("see `delegation-template.md`\n(bundled with `dev:harness-curate`).") == [],
+        )
+        check(
+            "a hard-wrapped filename on the line above is still graded",
+            run_with("see `delegation-template.md`\n(bundled with `dev:harness-init`).") != [],
+        )
+        # Contest round on PR #214: an attribution that spells out no filename of its own
+        # must not bind to target-repo prose earlier on the line. `backlog.md`, `tasks.md`
+        # and `docs/workflows.md` are pervasive in task-next/task-new and are not shipped
+        # by any skill, so binding to them turns a legitimate sentence into a CI hard-fail.
+        check(
+            "an unnamed attribution does not bind to target-repo prose on the same line",
+            run_with(
+                "Append the item to `backlog.md` using the delegation template "
+                "(bundled with `dev:harness-curate`)."
+            )
+            == [],
+        )
+        check(
+            "an unnamed attribution does not bind to a target-repo file on the line above",
+            run_with(
+                "See `docs/workflows.md` for the cycle, then follow the template\n"
+                "(bundled with `dev:harness-curate`)."
+            )
+            == [],
+        )
+        # Adjacency must not become a licence to skip: an unresolvable name the attribution
+        # really does spell out still fails closed (deleted or renamed bundled asset).
+        check(
+            "adjacency does not weaken the fail-closed case",
+            run_with("`invented.md` (bundled with `dev:harness-init`).") != [],
+        )
+
+        # The wrap fallback must not reach across a paragraph break: an unrelated file
+        # named in the paragraph above is not what this attribution is talking about.
+        check(
+            "a filename in a preceding paragraph is not attached across a blank line",
+            run_with("`delegation-template.md` lives elsewhere.\n\n"
+                     "that rule (bundled with `dev:harness-init`) applies here.") == [],
+        )
+        check(
+            "the filename nearest the attribution wins over an earlier one",
+            run_with(
+                "unlike `harness-invariants.md`, `delegation-template.md` "
+                "(bundled with `dev:harness-curate`) lives elsewhere."
+            )
+            == [],
         )
 
     print("\n----")
