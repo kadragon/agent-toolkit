@@ -23,75 +23,82 @@ Source: `docs/design/harness-self-improvement-loop.md` D6.
 ## Harness — Definition of Done floor
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`references/definition-of-done.md`), 2026-08-10.
+(`references/definition-of-done.md`), 2026-08-10. `.claude/agents/qa-verifier.md` → `## Checks
+(always run)` already carries a standing floor (version bump, capture-before-use, lint/test exit 0),
+so this extends that one list rather than creating a second that can drift from it.
 
-- [ ] Add `docs/definition-of-done.md` — a standing, per-repo bar separate from a task's acceptance
-      criteria (regression test exists · lint/test green · no out-of-scope edits · owning doc synced),
-      then reference it from the Sprint Contract template in `docs/eval-criteria.md` and from the
-      `qa-verifier` brief in `task-new`/`task-next`, so verification no longer depends entirely on
-      how well one contract's criteria were worded.
+- [ ] [HARNESS] Extend qa-verifier's `## Checks (always run)` with the missing standing gates (no out-of-scope edits, owning doc synced) and reference that list from the Sprint Contract template in `docs/eval-criteria.md`
 
-## Harness — adversarial QA brief + finding classification
+## Harness — adversarial framing in the QA brief
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/doubt-driven-development/SKILL.md`), 2026-08-10.
+(`skills/doubt-driven-development/SKILL.md`), 2026-08-10. Both skills currently tell the verifier to
+check "against those criteria rather than impressions" — neutral phrasing, with no instruction to
+hunt for violations.
 
-- [ ] Fix the QA spawn brief in `task-new`/`task-next` to pass the contract and the artifact only,
-      never the orchestrator's own reasoning or conclusion, and to instruct the verifier to look for
-      violations rather than confirm compliance — the current brief invites agreement bias.
-- [ ] Add a finding-classification rule to the QA retry path: a finding caused by an unclear or
-      incomplete Sprint Contract fixes the **contract** first, before any implementer respawn. Today
-      both skills route every blocking finding to `implementer`, so a contract defect is silently
-      re-litigated as an implementation defect.
+- [ ] [HARNESS] Add an explicit "find violations, do not confirm compliance" instruction to the qa-verifier spawn brief in `task-new` and `task-next`, and state that the orchestrator's own reasoning is not passed to the verifier
 
-## Harness — non-interactive contract for `task-*` skills
+## Harness — contract-misread class in the QA retry path
+
+Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
+(`skills/doubt-driven-development/SKILL.md` → RECONCILE precedence), 2026-08-10.
+
+- [ ] [HARNESS] Route a blocking QA finding caused by an unclear or incomplete Sprint Contract to a contract fix before any implementer respawn — `task-new` and `task-next` today send every blocking finding to `implementer`, so a contract defect is re-litigated as an implementation defect
+
+## Harness — non-interactive defaults for `task-*` gates
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
 (Loading Constraints in `skills/interview-me/SKILL.md`, `skills/doubt-driven-development/SKILL.md`),
 2026-08-10.
 
-- [ ] Define behavior when no live user is reachable (`/loop`, cron, subagent) for the interactive
-      gates: `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer,
-      `task-new` Step 3's plan-mode approval. Each needs a stated default plus an announced skip;
-      today all of them block indefinitely waiting on a reply that cannot arrive.
+- [ ] [HARNESS] Give each interactive gate a stated default plus an announced skip when no live user is reachable (`/loop`, cron, subagent): `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer, `task-new` Step 3 plan-mode approval
 
-## Harness — task-grill restate + explicit-confirm gate
+## Harness — task-grill restate field shape and confirm gate
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/interview-me/SKILL.md`), 2026-08-10.
+(`skills/interview-me/SKILL.md`), 2026-08-10. `task-grill` Flow step 5 already summarizes resolved
+decisions and Rule 4 already blocks acting before confirmation; the delta is the field shape and the
+close condition, not the existence of a summary.
 
-- [ ] Add a closing restate block to `task-grill` (Outcome / Success / Constraint / **Out of scope**)
-      that the caller feeds straight into the Sprint Contract, plus an explicit-yes gate — "알아서
-      해줘" / "좋아 보여" / silence do not close the interview. The `Out of scope` field of every
-      Sprint Contract is currently authored with no procedure that produces it.
+- [ ] [HARNESS] Give `task-grill`'s closing summary a fixed field shape (Outcome / Success / Constraint / Out of scope) that feeds the Sprint Contract directly, and add the rule that "알아서 해줘" / "좋아 보여" / silence do not close the interview
 
-## Harness — Sprint Contract sizing and verification rules
+## Harness — concrete ticket size cap in task-tickets
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/planning-and-task-breakdown/SKILL.md`, `skills/incremental-implementation/SKILL.md`,
-`skills/test-driven-development/SKILL.md`), 2026-08-10.
+(`skills/planning-and-task-breakdown/SKILL.md` sizing table), 2026-08-10. `task-tickets` Step 2
+("sized for exactly one Sprint Contract") and Step 5 (one item per heading) are authoring-time rules
+already, but neither gives a number; the only numeric guard is `task-next`'s >8-item check, which
+fires at execution time.
 
-- [ ] `task-tickets`: cap ticket size at authoring time (≈5 files / one subsystem; a title needing
-      "and" is two tickets). Only `task-next`'s >8-item guard exists today, and it fires at execution
-      time, after the oversized ticket is already written.
-- [ ] `task-new`/`task-next`: require a per-item lint/test checkpoint inside a ≥2-item sprint instead
-      of a single QA pass at the end, so a failure in the first item cannot hide until handoff.
-      Do NOT adopt per-slice commits — they conflict with `task-review`'s single-commit contract.
-- [ ] Sprint Contract authoring: when the tag is `[FIX]`, require an acceptance criterion naming a
-      test that fails before the fix. The rule exists in the global instruction layer but no
-      contract-authoring step enforces it, so `qa-verifier` has nothing to check it against.
+- [ ] [HARNESS] Add a concrete cap to `task-tickets` Step 2 — roughly 5 files / one subsystem, and a title that needs "and" is two tickets
+
+## Harness — per-item checkpoint inside a multi-item sprint
+
+Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
+(`skills/incremental-implementation/SKILL.md`), 2026-08-10. Scope is `task-next`'s default
+multi-item group path only: `task-new` runs exactly one ticket per invocation, and batch mode
+(`references/batch.md` A5) already spawns a `qa-verifier` per unit. Per-slice commits are excluded —
+the "Do NOT commit" rule reserves committing for `task-review` Step 1, one commit per review cycle.
+
+- [ ] [HARNESS] Require a per-item lint/test checkpoint inside `task-next`'s default ≥2-item group sprint instead of a single QA pass at the end, so a failure in the first item cannot hide until handoff
+
+## Harness — `[FIX]` reproduction criterion in the Sprint Contract
+
+Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
+(`skills/test-driven-development/SKILL.md` Prove-It), 2026-08-10. `docs/conventions.md` already
+states `[FIX] | Bug fix — requires reproduction step before fix`; no contract-authoring step turns it
+into something `qa-verifier` can check.
+
+- [ ] [HARNESS] Require an acceptance criterion naming a test that fails before the fix whenever the Sprint Contract's tag is `[FIX]`, citing `docs/conventions.md` as the owning rule
 
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`evals/`, `scripts/run-evals.js` — three-tier structural / trigger-routing / behavioral split),
-2026-08-10.
+(`evals/README.md`, `scripts/run-evals.js` — structural / trigger-routing / behavioral tiers),
+2026-08-10. `docs/eval-criteria.md` weights Trigger Accuracy at 30% but prescribes a model-judged
+test, against this repo's mechanical-enforcement-first rule.
 
-- [ ] `docs/eval-criteria.md` weights Trigger Accuracy at 30% but prescribes a model-judged test,
-      which contradicts this repo's mechanical-enforcement-first rule. Build a CI check that ranks
-      each skill's `description:` against declared positive/negative prompts and flags near-collisions
-      between two descriptions. Sizing note: this is a new script + per-skill fixtures across every
-      dev and prod skill — spec it before implementing, do not treat it as one sprint.
+- [ ] [HARNESS] Build a CI check that ranks each skill's `description:` against declared positive/negative prompts and flags near-collisions between two descriptions *(deferred: needs a `docs/design/` spec first — new script plus per-skill fixtures across every dev and prod skill, not one sprint)*
 
 ## Harness — `task-*` edge enforcement (rescoped)
 
