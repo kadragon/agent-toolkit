@@ -225,15 +225,39 @@ def find_entry_checker(start: Path) -> Path | None:
     return None
 
 
-def validate_entry(entry: str, checker: Path) -> list[str]:
-    """Run `checker`'s own `check_file` over `entry` alone; return its violations.
+def validate_entry(entry: str, checker: Path, document: str | None = None) -> list[str]:
+    """Run `checker`'s own `check_file` over `entry`; return the violations it is answerable for.
 
-    The entry is probed inside a throwaway `## Unreleased` section because the checker scopes
-    link resolution to that section — a probe without it would skip the rule that fires most.
-    A checker that cannot be imported, or that exposes no `check_file`, yields no violations
-    and a stderr note: CI still runs the real thing, so a broken local copy must not take the
-    cycle tail down with it.
+    `document` is the full text the entry is about to be written into. Pass it: inserting a line
+    can *create* a violation out of what already follows it — an indented line that was fine
+    standing alone becomes a continuation under the new entry — and a probe of the entry by
+    itself cannot see that. Only violations reported on the entry's own line, or the line
+    directly beneath it where the checker reports continuations, are returned; pre-existing
+    violations elsewhere in the file are not this write's to block. Without `document` the entry
+    is probed alone inside a throwaway `## Unreleased`, because the checker scopes link
+    resolution to that section and a probe without it would skip the rule that fires most.
+
+    Every failure of the checker itself — unimportable, no `check_file`, raising, or calling
+    `sys.exit` at import because it has no `__main__` guard — yields no violations and a stderr
+    note. CI still runs the real thing, so a broken local copy must not take the cycle tail down
+    with it.
     """
+    focus: set[int] | None = None
+    if document is None:
+        probe_text = f"# Changelog\n\n## Unreleased\n\n{entry}\n"
+    else:
+        probe_text = document
+        bodies = document.splitlines()
+        if entry not in bodies:
+            return []  # cannot attribute anything to a write we cannot locate
+        at = bodies.index(entry) + 1
+        focus = {at}
+        # The line below is this write's problem only when the insertion made it a continuation
+        # — indented and non-blank. A neighbouring entry that was already over the cap is not.
+        below = bodies[at] if at < len(bodies) else ""
+        if below.strip() and below[:1].isspace():
+            focus.add(at + 1)
+
     try:
         spec = importlib.util.spec_from_file_location("_changelog_entry_checker", checker)
         if spec is None or spec.loader is None:
@@ -243,16 +267,24 @@ def validate_entry(entry: str, checker: Path) -> list[str]:
         check_file = getattr(module, "check_file", None)
         if check_file is None:
             raise AttributeError("check_file")
-    except Exception as e:  # noqa: BLE001 — any import failure degrades to "unchecked"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "CHANGELOG.md"
+            probe.write_text(probe_text, encoding="utf-8")
+            raw = check_file(probe) or []
+            # The probe's `path:lineno:` prefix names a tempfile, not the real target: it is
+            # matched exactly (paths can hold spaces) to both locate and strip it.
+            prefix = re.compile(rf"^{re.escape(str(probe))}:(\d+):\s*")
+            out = []
+            for violation in raw:
+                m = prefix.match(str(violation))
+                if focus is not None and (m is None or int(m.group(1)) not in focus):
+                    continue
+                out.append(prefix.sub("", str(violation)))
+            return out
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — a broken checker degrades to unchecked
         sys.stderr.write(f"Note: could not run {checker} on the entry ({e}) — writing unchecked\n")
         return []
-
-    with tempfile.TemporaryDirectory() as tmp:
-        probe = Path(tmp) / "CHANGELOG.md"
-        probe.write_text(f"# Changelog\n\n## Unreleased\n\n{entry}\n", encoding="utf-8")
-        raw = check_file(probe)
-    # Drop the probe's own `path:lineno:` prefix — it names a tempfile, not the real target.
-    return [re.sub(r"^\S+:\d+:\s*", "", str(v)) for v in raw]
 
 
 def insert_changelog_entry(text: str, entry: str) -> tuple[str, bool]:
@@ -588,9 +620,12 @@ def cmd_changelog(argv: list[str]) -> int:
         link=_opt(argv, "--link"),
         date=_opt(argv, "--date"),
     )
-    checker = find_entry_checker(path.parent)
-    if checker is not None:
-        problems = validate_entry(entry, checker)
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    new_text, inserted = insert_changelog_entry(text, entry)
+    if inserted:
+        # Validate the document as it would be written, then write it — never the reverse.
+        checker = find_entry_checker(path.parent)
+        problems = validate_entry(entry, checker, document=new_text) if checker else []
         if problems:
             sys.stderr.write(
                 f"Error: the composed entry violates the CHANGELOG Entry Contract, per {checker}:\n"
@@ -603,9 +638,6 @@ def cmd_changelog(argv: list[str]) -> int:
                 "Nothing was written.\n"
             )
             return 1
-    text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    new_text, inserted = insert_changelog_entry(text, entry)
-    if inserted:
         path.write_text(new_text, encoding="utf-8")
     else:
         sys.stderr.write("Note: an identical entry is already under ## Unreleased — left as is\n")
@@ -1270,15 +1302,42 @@ status: open
             "the walk stops at a .git boundary — a nested checkout does not inherit the outer cap",
         )
 
-        broken = Path(td) / "broken"
-        (broken / "scripts" / "ci").mkdir(parents=True)
-        (broken / "scripts" / "ci" / "check_changelog_entries.py").write_text(
-            "this is not python(\n", encoding="utf-8")
-        rc_broken = main(["changelog", "--file", str(broken / "CHANGELOG.md"),
-                          "--title", "t", "--date", "2026-08-03"])
+        # Every way a foreign checker can misbehave degrades to "unchecked", never to a
+        # traceback out of the cycle tail: unimportable, exiting at import (no __main__ guard),
+        # raising inside check_file, or taking arguments this caller does not pass.
+        for name, body in [
+            ("broken", "this is not python(\n"),
+            ("exits", "import sys\nsys.exit(2)\n"),
+            ("raises", "def check_file(path, *, check_links=True):\n    raise RuntimeError('boom')\n"),
+            ("mismatch", "def check_file(path, root):\n    return []\n"),
+            ("returns_none", "def check_file(path, *, check_links=True):\n    return None\n"),
+        ]:
+            bad = Path(td) / name
+            (bad / "scripts" / "ci").mkdir(parents=True)
+            (bad / "scripts" / "ci" / "check_changelog_entries.py").write_text(body, encoding="utf-8")
+            rc_bad_checker = main(["changelog", "--file", str(bad / "CHANGELOG.md"),
+                                   "--title", "t", "--date", "2026-08-03"])
+            _assert(
+                rc_bad_checker == 0 and (bad / "CHANGELOG.md").is_file(),
+                f"a checker that {name} degrades to writing unchecked rather than blocking the cycle",
+            )
+
+        # The probe lands wherever TMPDIR points, and that path can hold spaces.
+        spaced = Path(td) / "tmp dir with spaces"
+        spaced.mkdir()
+        prev_tmpdir = os.environ.get("TMPDIR")
+        os.environ["TMPDIR"] = str(spaced)
+        try:
+            spaced_out = validate_entry(
+                "- [done] " + "y" * 60, repo / "scripts" / "ci" / "check_changelog_entries.py")
+        finally:
+            if prev_tmpdir is None:
+                del os.environ["TMPDIR"]
+            else:
+                os.environ["TMPDIR"] = prev_tmpdir
         _assert(
-            rc_broken == 0 and (broken / "CHANGELOG.md").is_file(),
-            "an unimportable checker degrades to writing unchecked rather than blocking the cycle",
+            spaced_out == ["entry is 69 chars (max 40)"],
+            "the prefix strip survives a probe path containing spaces",
         )
 
     # End-to-end against this repo's real checker, when task_nodes.py is running from a checkout
@@ -1298,6 +1357,27 @@ status: open
         _assert(
             validate_entry("- [done] t (dev v1.0.0) (2026-08-03) → docs/conventions.md", real) == [],
             "a compliant entry with a resolving link passes the real checker",
+        )
+
+        # A violation the insertion CREATES: the indented line was legal until an entry landed
+        # directly above it and turned it into that entry's continuation.
+        good = "- [done] fine (2026-08-03)"
+        adopts = "# Changelog\n\n## Unreleased\n\n  a note nobody indented on purpose\n"
+        with_doc, _ = insert_changelog_entry(adopts, good)
+        _assert(
+            validate_entry(good, real, document=with_doc) != [],
+            "an entry that turns the line below it into a continuation is caught in context",
+        )
+        _assert(
+            validate_entry(good, real) == [],
+            "the same entry probed alone looks clean — which is why context is checked",
+        )
+        # ...and a pre-existing violation elsewhere is not this write's to block.
+        stale = "# Changelog\n\n## Unreleased\n\n- [done] " + "q" * 200 + " (2026-01-01)\n"
+        with_stale, _ = insert_changelog_entry(stale, good)
+        _assert(
+            validate_entry(good, real, document=with_stale) == [],
+            "an over-cap entry already in the file does not block an unrelated new entry",
         )
 
     print(f"\n=== Results: {PASS_COUNT} PASS, {FAIL_COUNT} FAIL ===")
