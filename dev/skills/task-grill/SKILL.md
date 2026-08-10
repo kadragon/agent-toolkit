@@ -5,7 +5,7 @@ description: >-
   interviewing the user one question at a time, each with a recommended answer +
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
-version: 1.0.2
+version: 1.0.3
 ---
 
 # Grill
@@ -41,7 +41,10 @@ look it up instead of asking.
    do not ask the user to restate something you can verify yourself.
 4. **Never act until the user confirms shared understanding.** Do not start implementing,
    writing a spec, or writing tickets mid-interview. The interview ends when the user has
-   answered (or explicitly waved off) every open question.
+   answered (or explicitly waved off) every open question. "알아서 해줘", "좋아 보여", or
+   silence do **not** close the interview — none of them confirms a specific answer to the
+   open question on the table. Re-ask a narrower version of the question until the user's
+   reply pins down an actual choice.
 5. **No ADR/glossary machinery.** Do not create `CONTEXT.md`, a glossary file, or any
    standalone artifact. Hold the resolved answers in conversation context and hand them
    directly to the caller (Sprint Contract author, or `task-spec`).
@@ -54,9 +57,18 @@ look it up instead of asking.
 3. Wait for the user's reply. Accept a direct answer, an edit to the recommendation, or a
    confirmation of the recommendation.
 4. Repeat for each remaining question, one at a time, until none are open.
-5. Summarize the resolved decisions in one short block and hand control back to the caller
-   (or continue inline if invoked standalone) — this summary is the only output; there is no
-   file to write.
+5. Summarize the resolved decisions in a fixed four-field block and hand control back to the
+   caller (or continue inline if invoked standalone) — this summary is the only output; there
+   is no file to write. Fields, in order:
+   ```
+   Outcome: <what changes, in one line — feeds Sprint Contract's Scope>
+   Success: <how it's verified — feeds Sprint Contract's Acceptance criteria>
+   Constraint: <non-negotiable limits surfaced during the interview — feeds Sprint Contract's
+     Acceptance criteria as a must-not-violate condition>
+   Out of scope: <explicit exclusions — feeds Sprint Contract's Out of scope>
+   ```
+   Omit a field only if the interview genuinely surfaced nothing for it — do not leave it
+   blank silently.
 
 ## Exit
 
