@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.4
+version: 1.5.5
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -84,12 +84,12 @@ and the user goes to `dev:harness-init`. Only `tasks.md` is optional.
 
 Prints one line per candidate — `[N] <source>: <heading> (<M> items)`; h1 sprint blocks omit the
 item count. The script owns the selection algorithm end to end: source order (tasks.md `status:
-open` h1 sprint blocks → backlog.md h2/h3 groups), the per-source and combined cap-5 truncation,
+open` h1 sprint blocks → backlog.md h2/h3 groups, capped at 2 groups), combined fast-path cap 3,
 skipping items marked `[x]`/`[>]`/`*(deferred: …)*`/`*(blocked by: …)*` and blocks marked
 `status: active`/`done`, and discarding headings and items buried in `<!-- ... -->` comments or
 fenced code blocks. Read the script if you need the exact rule.
 
-**Read stderr on every run, not just empty ones.** Three orchestrator decisions depend on it:
+**Read stderr on every run, not just empty ones.** Four orchestrator decisions depend on it:
 
 - `Warning: unbalanced fence opened at line N in <file>` — a stray odd fence blanks everything
   after it, so part of the queue can be hidden while other groups still surface. Relay the
@@ -100,14 +100,17 @@ fenced code blocks. Read the script if you need the exact rule.
   `backlog.md` verbatim (the item syntax is identical) before continuing, and say so.
 - On zero candidates the script writes a diagnosis naming *which kind* of empty this is. Relay it
   verbatim; **never report "queue clear" on an empty stdout alone.**
+- `Note: fast path is showing N of M candidate group(s) — ...` — the fast path's cap hid real
+  candidates. Relay the note, say how many more groups exist when offering **"더 많은 항목
+  보기"**, and never present the truncated list as the whole queue.
 
-**Fast-path selection (cap = 5):**
+**Fast-path selection (cap = 3):**
 
 | Count | Action |
 |-------|--------|
 | 0 | Follow the stderr diagnosis above, then fall through to the full scan |
 | 1 | Announce the group and proceed directly to Step 3 |
-| 2–5 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
+| 2–3 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
@@ -207,6 +210,15 @@ role_exists implementer && echo present || echo absent
 The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
 (`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
 lists the role as an available agent type, treat it as present regardless of the probe.
+
+**Result-handoff rule (applies to every agent this skill spawns).** Any agent launched with a
+`name` — and, as cheap insurance, any launched with `run_in_background: true` — must be told
+**in its initial prompt** to report via `SendMessage(to: "main")`. For a named agent, messaging
+is the delivery channel: it finishes the work and the result is silently dropped otherwise.
+There is no way to add the instruction after the spawn. Full rule: *Result-handoff rule* in
+`delegation-template.md` (bundled with `dev:harness-init`). Covers every spawn point below —
+`explorer`, `implementer`, `qa-verifier`, and the batch/tree fan-outs in `references/tree.md`
+and `references/batch.md` — including when the result is empty.
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before

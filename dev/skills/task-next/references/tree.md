@@ -61,7 +61,9 @@ to the main checkout on every call; a standalone `cd` has no persistent effect):
 > Never run `git push --force`/`--force-with-lease`, `git reset --hard`, `git clean -f`/`-fd`,
 > or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
 > If the same fix is attempted 3+ times on the same file without the lint/test command
-> passing, stop and report to the user instead of continuing to retry."
+> passing, stop and report to the user instead of continuing to retry.
+> When you finish (or get stuck), deliver your result via SendMessage(to: 'main') — do not end
+> silently, even if the result is empty or the run failed. See SKILL.md's Result-handoff rule."
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
@@ -71,7 +73,9 @@ against the Sprint Contract. Include the same CWD instructions in the brief: eve
 must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
 worktree; the same destructive-command guard applies — QA must not run
 `git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Same retry policy as Step 3
-(one fix-and-re-verify cycle).
+(one fix-and-re-verify cycle). Same result-handoff instruction too: tell it to deliver its
+verdict via SendMessage(to: 'main'), including an empty/no-blocking-findings verdict — see
+SKILL.md's Result-handoff rule.
 
 **If QA fails after one retry:** clean up and stop.
 ```bash

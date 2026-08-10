@@ -68,8 +68,11 @@ reinterpret it):
 
   Phase B (backlog.md, FAST PATH ONLY): top-to-bottom, TYPE-AGNOSTIC scan collecting up to 2
   qualifying h2-or-h3 headings in raw document order (h2/h3 interleaved as they appear).
-  Skipped entirely if Phase A already produced 5 candidates. The fast-path total across
-  Phase A + B is capped at 5.
+  Skipped entirely if Phase A already produced FAST_PATH_CAP (3) candidates. The fast-path
+  total across Phase A + B is capped at FAST_PATH_CAP (3) — matched to `AskUserQuestion`'s
+  4-option cap once the mandatory "더 많은 항목 보기" option is appended (3 candidates + 1 = 4).
+  A truncation (fewer candidates shown than a full scan would find) is signalled to the
+  orchestrator via `truncation_note()`, written to stderr in fast-path mode only — see below.
 
   Full scan is a DIFFERENT algorithm from Phase B, not a superset call to the same helper:
   rule 1 = all qualifying tasks.md h1 blocks (Phase A, uncapped); rule 2 = ALL qualifying
@@ -82,8 +85,9 @@ reinterpret it):
 Self-check (--test):
   Exercises the status-line-gap case (Phase A), the direct-items heading-boundary case
   (nested h3 item must not count toward its h2 parent), the all-parked-skip case (every item
-  `[x]`/`[>]` under a heading is not a candidate), Phase-B limit truncation (cap 5 total
-  across A+B), the Phase-B-vs-full-scan ordering divergence on backlog.md h2/h3
+  `[x]`/`[>]` under a heading is not a candidate), Phase-B limit truncation (cap 3 total
+  across A+B) and `truncation_note` in both directions (truncated -> note, not truncated ->
+  None), the Phase-B-vs-full-scan ordering divergence on backlog.md h2/h3
   interleaving, the tasks.md findings-section guard (never a candidate in either algorithm;
   reported by `tasks_persistent_sections`, and a healthy `## Scope` does not trip it),
   and the blocked/deferred-marker exclusion case (all-marked heading is not a
@@ -133,6 +137,10 @@ _BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
 # Presence of one in tasks.md is a migration signal, never a candidate source. Matched as a
 # PREFIX: security-overview writes `## Security Fixes — <repo-name>`.
 PERSISTENT_SECTION_TITLES = ("Review Backlog", "Security Fixes")
+
+# The fast path's combined Phase A + Phase B cap. Matched to `AskUserQuestion`'s 4-option cap
+# once the mandatory "더 많은 항목 보기" option (SKILL.md Step 1) is appended: 3 candidates + 1 = 4.
+FAST_PATH_CAP = 3
 
 # The Sprint Contract's own sections (lowercased). These own open `- [ ]` items legitimately —
 # `## Acceptance criteria` is checkboxes by definition — so they are the exception to "an h2 with
@@ -483,12 +491,13 @@ def backlog_h2_candidates(backlog_tokens: list[dict]) -> list[dict]:
 # ---- Orchestrators ----------------------------------------------------------------------
 
 def fast_path(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[dict]:
-    """Phase A (uncapped) + Phase B (<=2, skipped if A already >=5), truncated to 5 total."""
+    """Phase A (uncapped) + Phase B (<=2, skipped if A already >= FAST_PATH_CAP), truncated to
+    FAST_PATH_CAP total."""
     result: list[dict] = []
     result.extend(phase_a_candidates(tasks_tokens))
-    if len(result) < 5:
+    if len(result) < FAST_PATH_CAP:
         result.extend(backlog_fast_candidates(backlog_tokens, limit=2))
-    return result[:5]
+    return result[:FAST_PATH_CAP]
 
 
 def full_scan(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[dict]:
@@ -604,6 +613,24 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
     return msgs
 
 
+def truncation_note(shown: int, total: int) -> str | None:
+    """One-line stderr note when the fast path's FAST_PATH_CAP hid additional candidates.
+
+    Pure: `shown` is the count `fast_path()` actually returned, `total` is the count a full
+    scan would find. Both algorithms qualify a heading by the same test (see module docstring),
+    so `total` is a real count, not an estimate — `main()` gets it by calling `full_scan()` on
+    the already-tokenized files (no extra file I/O), and calls this only in fast-path mode, never
+    with `--full-scan`. Returns None when nothing was hidden (`total <= shown`).
+    """
+    if total <= shown:
+        return None
+    hidden = total - shown
+    return (
+        f"Note: fast path is showing {shown} of {total} candidate group(s) — {hidden} more "
+        'exist. Say how many more when offering "더 많은 항목 보기"; run --full-scan to see them all.'
+    )
+
+
 def zero_candidate_diagnosis(tasks_tokens: list[dict], backlog_tokens: list[dict]) -> list[str]:
     """Human-readable reasons an otherwise-valid run produced zero candidates.
 
@@ -710,6 +737,15 @@ def main(argv: list[str]) -> int:
         )
 
     candidates = full_scan(tasks_tokens, backlog_tokens) if full_scan_flag else fast_path(tasks_tokens, backlog_tokens)
+
+    # Truncation signal — fast-path mode only, never with --full-scan (which is already the
+    # uncapped total, so shown == total there and the note would be a no-op anyway). Reuses the
+    # tasks_tokens/backlog_tokens already parsed above — no extra file I/O.
+    if not full_scan_flag:
+        total = len(full_scan(tasks_tokens, backlog_tokens))
+        note = truncation_note(len(candidates), total)
+        if note is not None:
+            sys.stderr.write(note + "\n")
 
     if json_flag:
         print(json.dumps(candidates))
@@ -1185,18 +1221,13 @@ Some prose before the sample.
         "a partial swallow still yields candidates, so the warning must not be zero-gated",
     )
 
-    # ---- Test 4: Phase-B limit truncation (cap 5 total across A+B) ----
-    print("\nTest 4: fast_path — cap 5 total across Phase A + B")
+    # ---- Test 4: fast_path — cap FAST_PATH_CAP (3) total across Phase A + B ----
+    print("\nTest 4: fast_path — cap 3 total across Phase A + B")
+    _assert(FAST_PATH_CAP == 3, "FAST_PATH_CAP is 3")
     tasks_many = """# Sprint 1
 status: open
 
 # Sprint 2
-status: open
-
-# Sprint 3
-status: open
-
-# Sprint 4
 status: open
 """
     backlog_many = """## B group 1
@@ -1207,14 +1238,14 @@ status: open
     tasks_tokens = tokenize(tasks_many)
     backlog_tokens = tokenize(backlog_many)
     result = fast_path(tasks_tokens, backlog_tokens)
-    _assert(len(result) == 5, "fast_path truncates combined A+B to 5 candidates")
+    _assert(len(result) == 3, "fast_path truncates combined A+B to 3 candidates")
     _assert(
-        [c["title"] for c in result] == ["Sprint 1", "Sprint 2", "Sprint 3", "Sprint 4", "B group 1"],
-        "truncation keeps A(4) then only the first of B",
+        [c["title"] for c in result] == ["Sprint 1", "Sprint 2", "B group 1"],
+        "truncation keeps A(2) then only the first of B",
     )
 
-    # Phase A alone already at 5 -> B fully skipped
-    tasks_five = """# S1
+    # Phase A alone already at FAST_PATH_CAP (3) -> B fully skipped
+    tasks_three = """# S1
 status: open
 
 # S2
@@ -1222,18 +1253,38 @@ status: open
 
 # S3
 status: open
-
-# S4
-status: open
-
-# S5
-status: open
 """
-    result = fast_path(tokenize(tasks_five), tokenize(backlog_many))
-    _assert(len(result) == 5, "Phase A alone at 5 still caps combined total at 5")
+    result = fast_path(tokenize(tasks_three), tokenize(backlog_many))
+    _assert(len(result) == 3, "Phase A alone at 3 still caps combined total at 3")
     _assert(
         all(c["source"] == "tasks.md" and c["kind"] == "h1" for c in result),
-        "Phase A already at 5 skips Phase B entirely",
+        "Phase A already at FAST_PATH_CAP skips Phase B entirely",
+    )
+
+    # ---- Test 4b: truncation_note — pure signal in both directions ----
+    print("\nTest 4b: truncation_note — note when truncated, None when not")
+    _assert(
+        truncation_note(3, 3) is None,
+        "truncation_note is None when shown == total (nothing hidden)",
+    )
+    _assert(
+        truncation_note(3, 2) is None,
+        "truncation_note is None when shown > total (defensive; cannot show more than exists)",
+    )
+    note = truncation_note(3, 5)
+    _assert(
+        note is not None and "3" in note and "5" in note and "2" in note,
+        "truncation_note names shown, total, and the hidden count when total > shown",
+    )
+    _assert(
+        len(fast_path(tasks_tokens, backlog_tokens)) == 3
+        and len(full_scan(tasks_tokens, backlog_tokens)) == 4
+        and truncation_note(
+            len(fast_path(tasks_tokens, backlog_tokens)),
+            len(full_scan(tasks_tokens, backlog_tokens)),
+        )
+        is not None,
+        "end-to-end: a real fast_path/full_scan pair on tasks_many/backlog_many truncates and signals",
     )
 
     # REGRESSION GUARD: tasks.md findings sections are never candidates, whatever their shape.

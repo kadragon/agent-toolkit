@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-next fast-path cap 3 with truncation signal, plus result-handoff rule in spawn briefs (dev v4.4.7) (2026-08-10)
 - [done] role-less verifier briefs carry the standing-checks floor (dev v4.4.6) (2026-08-10) → dev/skills/harness-init/references/harness-invariants.md
 - [done] task-next per-item lint/test checkpoint in multi-item sprints (dev v4.4.5) (2026-08-10)
 - [done] task-grill close contract, task-tickets size cap, prune-backlog cascade fix (3 units) (dev v4.4.4) (2026-08-10)

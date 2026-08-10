@@ -37,16 +37,6 @@ test, against this repo's mechanical-enforcement-first rule.
 
 - [ ] [HARNESS] Build a CI check that ranks each skill's `description:` against declared positive/negative prompts and flags near-collisions between two descriptions *(deferred: needs a `docs/design/` spec first — new script plus per-skill fixtures across every dev and prod skill, not one sprint)*
 
-## Review Backlog
-
-### PR #209 — batch cycle observations
-
-Observed while running the PR #209 batch cycle, 2026-08-10. Both verified against the owning file
-this session, not inferred from behavior alone.
-
-- [ ] [HARNESS] Reconcile `task-next` Step 1's fast-path description with `backlog_candidates.py` — the script's Phase B docstring caps the fast path at "up to 2 qualifying h2-or-h3 headings", while Step 1 describes a "per-source and combined cap-5 truncation" and its selection table branches on "2–5"; a 6-group backlog surfaced 2, and the orchestrator has no signal that the list is short by design
-- [ ] [HARNESS] Carry `task-review`'s result-handoff rule into `task-next`'s own spawn briefs — its implementer/QA/batch briefs never tell a named agent to deliver via `SendMessage(to: "main")`, and 3 of 4 agents in this cycle went idle without reporting until nudged by hand
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
