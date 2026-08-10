@@ -421,7 +421,12 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
             end = next((x for x in sorted(alive) if x > h and alive[x] <= level), len(lines))
             drop.update(range(h, min(end, len(lines))))
         for h in newly | prose_only:
-            prior = [x for x in heads if x < h and x not in drop]
+            # The next owner to re-check is `h`'s actual PARENT — the nearest preceding heading
+            # of a STRICTLY LOWER level — not merely the nearest preceding heading of any level.
+            # A same-level sibling can sit between `h` and its parent; picking it here would add
+            # an untouched, unrelated section to `owned` and let the next pass sweep it away too.
+            h_level = levels.get(h, 1)
+            prior = [x for x in heads if x < h and x not in drop and levels.get(x, 1) < h_level]
             if prior:
                 owned.add(prior[-1])
 
@@ -888,6 +893,25 @@ Intro prose for other.
     _assert("# Backlog" in out, "(e2) a schema-only root survives without preamble prose")
     _assert("# Other" not in out and "Intro prose for other." not in out,
             "(e2) the drained non-root prose-only section still cascades away")
+
+    # REGRESSION GUARD — a heading whose immediately preceding sibling (same level, NOT its
+    # parent) happened to be prose-only and untouched by this run must survive. The cascade must
+    # walk up to the actual PARENT (nearest heading of a strictly lower level), not just the
+    # nearest preceding heading of any level — otherwise an untouched sibling gets swept in.
+    sibling_prose_untouched = """# Root
+
+## Untouched note
+
+Some standing prose that was never touched.
+
+## Live group
+
+- [ ] [FIX] only item
+"""
+    out, _ = prune_lines(sibling_prose_untouched, ["- [ ] [FIX] only item"])
+    _assert("## Untouched note" in out and "Some standing prose that was never touched." in out,
+            "a prose-only sibling heading preceding the drained one survives — this run never emptied it")
+    _assert("## Live group" not in out, "the heading this run actually drained is still deleted")
 
     # REGRESSION GUARD (codex review, PR #203) — the exemption above must cover only the file's
     # FIRST heading, not every h1. A second top-level heading ('# Other') is not the root and must
