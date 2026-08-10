@@ -29,8 +29,16 @@ Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     a single copy of a script (`task-new` invokes `task-next`'s `task_nodes.py`)
     rather than duplicating it and letting the copies drift.
 
-Scope note: plugin-root portability, section-reference and bundled-script
-violations are unconditional errors.
+(e) Bundled-with attributions — every `` `<file>` (bundled with `dev:<skill>`) ``
+    must name the skill that actually holds `<file>`. PR #211 copied
+    `task-review`'s *Result-handoff rule* verbatim into `task-next` and carried
+    its stale pointer along with it: `delegation-template.md` ships with
+    `dev:harness-curate`, not `dev:harness-init`. Quoting a rule verbatim
+    propagates whatever cross-reference it already had wrong, so the attribution
+    needs a mechanical owner check rather than a re-read of the source rule.
+
+Scope note: plugin-root portability, section-reference, bundled-script and
+bundled-with violations are unconditional errors.
 Capture-before-use violations are HARD-FAIL only for HARD_FAIL_SKILLS (skills
 fixed in an earlier sprint). Other skills report WARN so pre-existing debt
 remains visible without blocking CI. Extend HARD_FAIL_SKILLS as each skill is
@@ -103,6 +111,10 @@ SIBLING_SCRIPT_RE = re.compile(
     r"\$\{?SKILL_DIR\}?\"?/\.\./([A-Za-z0-9._-]+)/scripts/([A-Za-z0-9._-]+)"
 )
 SCRIPT_PLACEHOLDER_NAMES = {"...", "..", "."}
+
+# Attribution of a bundled file to its owning skill: `` (bundled with `dev:harness-curate`) ``.
+# The plugin prefix is captured too — an attribution may point across plugins (dev -> prod).
+BUNDLED_WITH_RE = re.compile(r"\(bundled with\s+`?([a-z0-9-]+):([a-z0-9-]+)`?\)")
 
 
 def find_skill_files() -> list[Path]:
@@ -233,6 +245,79 @@ def check_bundled_script_refs(text: str, path: Path) -> list[str]:
         if not target.is_file():
             report(f"$SKILL_DIR/../{sibling}/scripts/{name}", target)
 
+    return problems
+
+
+def plugins_root_of(path: Path) -> Path:
+    """Return the directory holding the `{plugin}/` dirs, derived from a checked asset.
+
+    Derived from the asset rather than REPO_ROOT so the check runs unchanged against a
+    tempdir fixture: `<root>/dev/skills/alpha/SKILL.md` -> `<root>`.
+    """
+    skill_dir = skill_dir_of(path)
+    # skill_dir = <plugins_root>/<plugin>/skills/<name>
+    return skill_dir.parent.parent.parent
+
+
+def check_bundled_with_refs(text: str, path: Path) -> list[str]:
+    """Every `` `<file>` (bundled with `<plugin>:<skill>`) `` must name the file's real owner.
+
+    A verbatim quote carries its cross-reference with it, so a pointer that was already
+    stale spreads to every skill that copies the rule (PR #211). Resolution is by the
+    file basename named just before the attribution — same line, else the nearest
+    preceding non-blank line, since this repo hard-wraps markdown. An attribution with no
+    filename anywhere in reach is skipped rather than guessed at.
+    """
+    plugins_root = plugins_root_of(path)
+    lines = text.splitlines()
+    problems: list[str] = []
+
+    def owners(basename: str) -> list[str]:
+        """`<plugin>:<skill>` for every skill in the tree that bundles this basename."""
+        found = []
+        for skills_dir in sorted(plugins_root.glob("*/skills")):
+            for skill in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+                if any(skill.rglob(basename)):
+                    found.append(f"{skills_dir.parent.name}:{skill.name}")
+        return found
+
+    for lineno, line in enumerate(lines, start=1):
+        for ref in BUNDLED_WITH_RE.finditer(line):
+            plugin, skill = ref.group(1), ref.group(2)
+            mentions = [m.group(1) for m in FILE_MENTION_RE.finditer(line[: ref.start()])]
+            if not mentions and lineno >= 2:
+                # Hard-wrapped prose: the filename can sit at the end of the line above.
+                # Bounded to the *immediately* preceding line — walking back through blank
+                # lines would attach a filename from an unrelated paragraph and report a
+                # mismatch for an attribution that never named it.
+                prev = lines[lineno - 2]
+                if prev.strip():
+                    mentions = [m.group(1) for m in FILE_MENTION_RE.finditer(prev)]
+            if not mentions:
+                continue
+            named = mentions[-1]
+
+            skill_dir = plugins_root / plugin / "skills" / skill
+            if not skill_dir.is_dir():
+                problems.append(
+                    f"line {lineno}: `{named}` is attributed to `{plugin}:{skill}`, "
+                    "which is not a skill in this repo"
+                )
+                continue
+            if any(skill_dir.rglob(named)):
+                continue
+
+            actual = owners(named)
+            if actual:
+                problems.append(
+                    f"line {lineno}: `{named}` is attributed to `{plugin}:{skill}` "
+                    f"but is bundled with {', '.join(f'`{a}`' for a in actual)}"
+                )
+            else:
+                problems.append(
+                    f"line {lineno}: `{named}` is attributed to `{plugin}:{skill}`, "
+                    "but no skill in this repo bundles it"
+                )
     return problems
 
 
@@ -425,11 +510,12 @@ def main() -> int:
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
+        with_refs = check_bundled_with_refs(text, path)
 
-        if not portability and not capture and not section_refs and not script_refs:
+        if not portability and not capture and not section_refs and not script_refs and not with_refs:
             print(
-                f"OK   {rel} ({name}): plugin-root portability "
-                "+ capture-before-use + section refs + bundled scripts clean"
+                f"OK   {rel} ({name}): plugin-root portability + capture-before-use "
+                "+ section refs + bundled scripts + bundled-with attributions clean"
             )
             continue
 
@@ -441,8 +527,10 @@ def main() -> int:
             print(f"ERROR {rel} ({name}) [section-ref]: {msg}")
         for msg in script_refs:
             print(f"ERROR {rel} ({name}) [bundled-script-ref]: {msg}")
+        for msg in with_refs:
+            print(f"ERROR {rel} ({name}) [bundled-with-ref]: {msg}")
 
-        if portability or section_refs or script_refs:
+        if portability or section_refs or script_refs or with_refs:
             hard_fail = True
         if severity == "ERROR" and capture:
             hard_fail = True
@@ -458,11 +546,12 @@ def main() -> int:
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
+        with_refs = check_bundled_with_refs(text, path)
 
-        if not portability and not capture and not section_refs and not script_refs:
+        if not portability and not capture and not section_refs and not script_refs and not with_refs:
             print(
-                f"OK   {rel} ({skill_name}): plugin-root portability "
-                "+ capture-before-use + section refs + bundled scripts clean"
+                f"OK   {rel} ({skill_name}): plugin-root portability + capture-before-use "
+                "+ section refs + bundled scripts + bundled-with attributions clean"
             )
             continue
 
@@ -474,8 +563,10 @@ def main() -> int:
             print(f"ERROR {rel} ({skill_name}) [section-ref]: {msg}")
         for msg in script_refs:
             print(f"ERROR {rel} ({skill_name}) [bundled-script-ref]: {msg}")
+        for msg in with_refs:
+            print(f"ERROR {rel} ({skill_name}) [bundled-with-ref]: {msg}")
 
-        if portability or section_refs or script_refs:
+        if portability or section_refs or script_refs or with_refs:
             hard_fail = True
 
     print("----")
