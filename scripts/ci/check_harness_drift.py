@@ -24,14 +24,28 @@ Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     The arrow form is what this repo actually writes (`§` is the minority
     spelling), so PR #215 found every `harness-invariants.md` citation verbally
     enforced. Two authoring conventions make it checkable without guessing:
-    the section title must be *formatted* (`*i*`, `**b**`, `"q"`, `'q'`, `` `c` ``),
-    which is what separates a pointer from an output label such as
+    the section title must be *emphasised or quoted* (`*i*`, `**b**`, `"q"`, `'q'`
+    — code ticks are not a title form, since `` → `--all` `` is a flag), which is
+    what separates a pointer from an output label such as
     `` `refuted` → "Refuted by contest round" ``; and the file mention must sit
     *adjacent* to the arrow, with only closing punctuation or further formatted
     chain elements between them. A chain whose middle element is unformatted
     (``SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*``) is therefore
     skipped — under-detection, which is the safe direction. An arrow whose target
     is itself a filename is a reading-order chain, not a section pointer.
+    Because this repo hard-wraps markdown, a pointer that splits across a line
+    break is graded on the two lines joined, as `(e)` already does.
+
+    A citation may name a heading by its leading words where the remainder is a
+    parenthetical or subtitle (`## Layer 0: Settings-Level Enforcement` cited as
+    *Layer 0*); the remainder must start with `:`, `(` or an em dash, so *Non*
+    does not "match" `## Non-Interactive Gate Defaults`. This applies to the
+    arrow form only — `§ "Title"` keeps its exact match.
+
+    An ambiguous basename (`SKILL.md`) resolves only within the referrer's own
+    directory; naming another skill's copy requires the `<skill>/SKILL.md`
+    qualifier, since guessing would grade the pointer against the wrong file and
+    fail CI with a message naming a file the author never cited.
 
 (d) Bundled-script references — every `$SKILL_DIR/scripts/<name>` named in a
     skill's markdown must resolve to a file that skill actually bundles, and
@@ -103,27 +117,32 @@ VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # instruction layer, not at a bundled file.
 SECTION_REF_RE = re.compile(r"§\s*(?:\"([^\"\n]+)\"|'([^'\n]+)'|(\d+[a-z]?)\b)")
 # Arrow section pointers: `` `references/harness-invariants.md` → *Section Name* ``. The title
-# must carry markdown emphasis, quotes or code ticks — an unformatted `→ some words` is prose
-# (a state transition, a routing label), not a cross-file pointer.
+# must carry markdown emphasis or quotes — an unformatted `→ some words` is prose (a state
+# transition, a routing label), not a cross-file pointer. Code ticks are deliberately NOT a
+# title form: `` → `--all` `` is a flag, and this repo's tables are full of them.
 ARROW_REF_RE = re.compile(
-    r"→\s*(?:\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|\"([^\"\n]+)\"|'([^'\n]+)'|`([^`\n]+)`)"
+    r"→\s*(?:\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|\"([^\"\n]+)\"|'([^'\n]+)')"
 )
-# What may sit between the file mention and its arrow: closing punctuation, and further
-# formatted elements of a pointer chain (`dev:harness-init` → `refs/x.md` → *Title*). Anything
-# else means the nearest filename belongs to unrelated prose earlier in the line — the same
-# adjacency reasoning ATTRIBUTION_GAP_RE applies to bundled-with attributions.
+# What may sit between the file mention and its arrow: closing punctuation (including the `*`
+# of an emphasis-wrapped mention, as ATTRIBUTION_GAP_RE already allows), and further formatted
+# elements of a pointer chain (`dev:harness-init` → `refs/x.md` → *Title*). Anything else means
+# the nearest filename belongs to unrelated prose earlier in the line — the same adjacency
+# reasoning ATTRIBUTION_GAP_RE applies to bundled-with attributions.
 ARROW_GAP_RE = re.compile(
-    r"^[`\"'”)\]]*"
-    r"(?:\s*→\s*(?:`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\"[^\"\n]+\")[`\"'”)\]]*)*"
+    r"^[`\"'”*)\]]*"
+    r"(?:\s*→\s*(?:`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\"[^\"\n]+\"|'[^'\n]+')[`\"'”*)\]]*)*"
     r"\s*$"
 )
-# A citation may name a heading by its leading words: `## Layer 0: Settings-Level Enforcement`
-# is cited as *Layer 0*. Accept a prefix only where the anchor continues with a separator or a
-# word boundary, so *Layer* still fails against `## Layered Defense`.
-ANCHOR_PREFIX_SEP_RE = re.compile(r"^[\s:(—,-]")
-# `harness-init/SKILL.md` — a path-qualified mention names the skill that owns the file, which
-# is the only way to disambiguate a basename as common as SKILL.md.
-PATH_QUALIFIER_RE = re.compile(r"([A-Za-z0-9._-]+)/$")
+# A citation may name a heading by its leading words where the rest is a parenthetical or
+# subtitle: `## Layer 0: Settings-Level Enforcement` is cited as *Layer 0*. The remainder must
+# start with a separator — a bare word boundary would let *Non* match
+# `## Non-Interactive Gate Defaults`, which is not a citation of anything.
+ANCHOR_PREFIX_SEP_RE = re.compile(r"^\s*[:(—]")
+# `harness-init/SKILL.md`, `harness-init/references/sweep-template.md` — a path-qualified
+# mention names the skill that owns the file, which is the only way to disambiguate a basename
+# as common as SKILL.md. The leading segment is the skill; any further segments are its
+# internal layout.
+PATH_QUALIFIER_RE = re.compile(r"([A-Za-z0-9._-]+)/(?:[A-Za-z0-9._-]+/)*$")
 # Known extensions only: a permissive `\.\w+` also matches prose like "e.g".
 FILE_MENTION_RE = re.compile(r"([A-Za-z0-9._-]+\.(?:md|sh|py|json|ya?ml|toml|txt))")
 SIGNAL_REF_RE = re.compile(r"\bSignals?\s+(\d+)(?:\s+and\s+(\d+))?\b")
@@ -451,12 +470,9 @@ def resolve_md_target(
     is a path segment inside a skill, not a skill name, and its unresolvable case is
     deliberately handled by the fail-closed branch in the callers.
     """
+    candidates = basename_index.get(name, [])
     if qualifier and qualifier != "references":
-        qualified = [
-            candidate
-            for candidate in basename_index.get(name, [])
-            if skill_dir_of(candidate).name == qualifier
-        ]
+        qualified = [c for c in candidates if skill_dir_of(c).name == qualifier]
         if len(qualified) == 1:
             return qualified[0]
         if qualified:
@@ -464,15 +480,28 @@ def resolve_md_target(
             # `references/notes.md`) makes the qualifier ambiguous. Picking by index order
             # would guess, and falling through is worse still — the unqualified path
             # resolves a common basename to the *referrer's* copy. Skip, as the ambiguous
-            # `SKILL.md` case below already does.
+            # case below already does.
             return None
-        # No candidate under that name: the qualifier is a plain path segment (`docs/`),
-        # not a skill. Resolve as if it were absent.
-    # `SKILL.md` is not a unique basename, so a cross-skill reference to one would resolve
-    # to the referrer itself on the first probe and be graded against the wrong anchors.
-    ambiguous = len(basename_index.get(name, [])) > 1
+        if qualifier in {skill_dir_of(p).name for paths in basename_index.values() for p in paths}:
+            # The qualifier names a real skill that does not bundle this file. Falling
+            # through would resolve it to some *other* skill's copy and report the pointer
+            # as clean, hiding the mis-attribution. Skip instead of guessing.
+            return None
+        # Otherwise the qualifier is a plain path segment (`docs/`), not a skill name —
+        # resolve as if it were absent.
+
+    # `SKILL.md` is not a unique basename, so a cross-skill reference to one resolves to the
+    # referrer's own copy on the `skill_dir` probes and gets graded against the wrong anchors.
+    # Only the referrer's own directory is an unambiguous read; anything else needs the
+    # `<skill>/SKILL.md` qualifier above.
+    ambiguous = len(candidates) > 1
     skill_dir = skill_dir_of(source)
-    for candidate in (source.parent / name, skill_dir / name, skill_dir / "references" / name):
+    probes = (
+        (source.parent / name,)
+        if ambiguous
+        else (source.parent / name, skill_dir / name, skill_dir / "references" / name)
+    )
+    for candidate in probes:
         if candidate.is_file():
             return None if (ambiguous and candidate == source) else candidate
     # Cross-skill reference (e.g. harness-init pointing at harness-curate's taxonomy):
@@ -548,7 +577,8 @@ def check_section_refs(
         taxonomy = None
 
     problems = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    lines = text.splitlines()
+    for lineno, line in enumerate(lines, start=1):
         for ref in SECTION_REF_RE.finditer(line):
             title = ref.group(1) or ref.group(2)
             number = ref.group(3)
@@ -565,34 +595,48 @@ def check_section_refs(
             if number is not None:
                 if number not in numeric_anchors:
                     problems.append(f"line {lineno}: §{number} has no section {number}. in {where}")
-            elif not anchor_matches(title, titled_anchors):
+            elif normalize_anchor(title) not in titled_anchors:
                 problems.append(f'line {lineno}: § "{title}" has no matching section in {where}')
 
-        for ref in ARROW_REF_RE.finditer(line):
-            title = next(group for group in ref.groups() if group is not None)
-            if FILE_MENTION_RE.fullmatch(title.strip()):
-                # `hwpx-format.md → editing-gotchas.md → …` is a reading order, not a pointer.
-                continue
+        # Arrow pointers are scanned twice: once over the line itself, and once over the line
+        # joined to the one above it, keeping only matches that straddle the join. This repo
+        # hard-wraps markdown, so a pointer routinely splits across the break — the same reason
+        # check_bundled_with_refs reaches back exactly one line.
+        scans = [(line, 0)]
+        previous = lines[lineno - 2] if lineno >= 2 else ""
+        if previous.strip():
+            joined = previous.rstrip() + " "
+            scans.append((joined + line, len(joined)))
 
-            target, problem, mention_end = resolve_line_target(
-                line, ref.start(), source, basename_index
-            )
-            if problem is not None:
-                problems.append(f"line {lineno}: {problem}")
-                continue
-            if target is None:
-                continue
-            if not ARROW_GAP_RE.match(line[mention_end : ref.start()]):
-                # The filename is not adjacent to the arrow, so it belongs to unrelated prose
-                # and this arrow is a label rather than a cross-file pointer.
-                continue
+        for scan, join_at in scans:
+            for ref in ARROW_REF_RE.finditer(scan):
+                if join_at and not (ref.start() < join_at <= ref.end()):
+                    # Wholly inside one of the two lines — graded when that line is its own scan.
+                    continue
+                title = next(group for group in ref.groups() if group is not None)
+                if FILE_MENTION_RE.fullmatch(title.strip()):
+                    # `hwpx-format.md → editing-gotchas.md → …` is a reading order, not a pointer.
+                    continue
 
-            _, titled_anchors = anchors(target)
-            if not anchor_matches(title, titled_anchors):
-                problems.append(
-                    f'line {lineno}: → "{title}" has no matching section in '
-                    f"{target.relative_to(REPO_ROOT)}"
+                target, problem, mention_end = resolve_line_target(
+                    scan, ref.start(), source, basename_index
                 )
+                if problem is not None:
+                    problems.append(f"line {lineno}: {problem}")
+                    continue
+                if target is None:
+                    continue
+                if not ARROW_GAP_RE.match(scan[mention_end : ref.start()]):
+                    # The filename is not adjacent to the arrow, so it belongs to unrelated
+                    # prose and this arrow is a label rather than a cross-file pointer.
+                    continue
+
+                _, titled_anchors = anchors(target)
+                if not anchor_matches(title, titled_anchors):
+                    problems.append(
+                        f'line {lineno}: → "{title}" has no matching section in '
+                        f"{target.relative_to(REPO_ROOT)}"
+                    )
 
         if taxonomy is None:
             continue
@@ -604,7 +648,10 @@ def check_section_refs(
                         f"line {lineno}: Signal {number} has no section {number}. in "
                         f"{taxonomy.relative_to(REPO_ROOT)}"
                     )
-    return problems
+    # One line can carry several references into the same unresolvable file (a `§` and an
+    # arrow, or a two-hop arrow chain). Each would repeat the identical message and inflate
+    # the violation count, so report each distinct message once, in the order it was found.
+    return list(dict.fromkeys(problems))
 
 
 def check_windows_hook_commands() -> list[str]:

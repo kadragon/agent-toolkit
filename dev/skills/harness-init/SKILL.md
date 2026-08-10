@@ -293,7 +293,7 @@ Read `references/enforcement-template.md` for detailed templates per layer.
 
 **Two Layer 1 extensions (add when appropriate):**
 - **Circuit Breaker** — stops failure cascades before token spiral; fires after N consecutive Bash failures (default: 3). See `references/enforcement-template.md` → "Circuit Breaker".
-- **Consent Gates** — halts before irreversible external actions (push, PR, deploy) until user confirms. See `references/enforcement-template.md` → "Consent Gates".
+- **Consent Gates** — halts before irreversible external actions (push, PR, deploy) until user confirms. See `references/enforcement-template.md` → "Consent Gates for External Actions".
 
 Match enforcement depth to maturity level target: Level 1 (the init default) → Layer 0 only, no hooks; Level 2 → add Layers 1 + 3; Level 3 → all layers + circuit breaker. Layer 0 deny rules apply at every level and are mandatory for a high-risk repo (auth/billing/migrations/infra). Read `references/enforcement-template.md` for templates and Agent Teams hook wiring.
 

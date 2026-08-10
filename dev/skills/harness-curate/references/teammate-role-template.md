@@ -62,7 +62,7 @@ delegation table, and keep them at or above what the platform's global
 instruction layer requires, never below. Do not replace them with a subjective
 condition ("unfamiliar module", "if unsure") or with a self-assessment that
 defers to "the caller's delegation bar": `delegation-template.md` →
-*Trigger Anti-patterns* rejects all three, and a description is read by the
+*Mandatory Gates* rejects all three, and a description is read by the
 router before any caller judgment exists to defer to.
 
 If — and only if — a role appears in the AGENTS.md delegation table as
