@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Non-interactive defaults for task-* interactive gates (dev v4.4.8) (2026-08-10) → dev/skills/harness-init/references/harness-invariants.md
 - [done] bundled-with attributions checked against the file's real owning skill (2026-08-10)
 - [done] task-next fast-path cap 3 with truncation signal, plus result-handoff rule in spawn briefs (dev v4.4.7) (2026-08-10)
 - [done] role-less verifier briefs carry the standing-checks floor (dev v4.4.6) (2026-08-10) → dev/skills/harness-init/references/harness-invariants.md

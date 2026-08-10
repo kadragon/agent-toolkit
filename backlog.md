@@ -20,14 +20,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-## Harness — non-interactive defaults for `task-*` gates
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(Loading Constraints in `skills/interview-me/SKILL.md`, `skills/doubt-driven-development/SKILL.md`),
-2026-08-10.
-
-- [ ] [HARNESS] Give each interactive gate a stated default plus an announced skip when no live user is reachable (`/loop`, cron, subagent): `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer, `task-new` Step 3 plan-mode approval
-
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)

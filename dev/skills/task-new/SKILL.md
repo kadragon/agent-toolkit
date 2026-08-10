@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.1.2
+version: 1.2.0
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -116,6 +116,10 @@ with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at fo
   `EnterPlanMode`, design the approach, call `ExitPlanMode` for user approval. If `ToolSearch`
   returns no results, present the plan as a numbered list and wait for explicit "proceed".
 - **Trivial**: skip plan mode.
+- **Non-interactive run** (no live user reachable — see `dev:harness-init` →
+  `references/harness-invariants.md` → *Non-Interactive Gate Defaults*): skip
+  `EnterPlanMode`/`ExitPlanMode` even when the request is non-trivial; record the plan in the
+  transcript and the PR body instead, announce, and proceed.
 
 **Sprint Contract (Step 2)**
 Write to `tasks.md` only when running a `task-tickets`-generated backlog ticket (the

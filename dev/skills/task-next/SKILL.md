@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.5
+version: 1.6.0
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -110,7 +110,7 @@ fenced code blocks. Read the script if you need the exact rule.
 |-------|--------|
 | 0 | Follow the stderr diagnosis above, then fall through to the full scan |
 | 1 | Announce the group and proceed directly to Step 3 |
-| 2–3 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. |
+| 2–3 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. Non-interactive run: take candidate `[1]` and announce it — no wait. |
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
@@ -136,9 +136,12 @@ empty — the full scan is for ordering and completeness, not reachability. Ever
 |-------------|--------|
 | 0 | Read the script's stderr before saying anything. **Do NOT report an empty queue** if it names work the rules could not reach — prose bullets under a heading, items above the first heading, items attributed but selected by no phase, a `tasks.md` findings section pending migration — or if it warned about an unbalanced fence, which can hide the rest of the file. Relay the diagnosis per Step 1 instead. Otherwise the queue really is clear (everything parked, no open items, or no headings at all): report "backlog and tasks are clear — nothing open", point the user to `task-new` for new work, and stop. |
 | 1 | Announce the group and proceed to Step 3. *(Full-scan path only; the fast path handles the 1-sprint case directly.)* |
-| ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. |
+| ≥2 | Print a numbered list of all groups (user explicitly requested full list): `[N] <source>: <heading title> (<M> items)`. Wait for the user to reply with a number. Non-interactive run: take candidate `[1]` and announce it — no wait. |
 
-**Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset.
+Non-interactive default (both tables above) and the rest of this section's gates: see
+`dev:harness-init` → `references/harness-invariants.md` → *Non-Interactive Gate Defaults*.
+
+**Large-group guard:** if the selected group has >8 open items, confirm with the user before proceeding — list the items numbered and ask whether to process all or a subset. This guard does **not** auto-default in a non-interactive run — abort and report instead.
 
 **Deferred/blocked items:** a group where every open item has `*(deferred: ...)*` or `*(blocked by: ...)*` is not a candidate. Skip it and surface the blocker. If all groups are deferred/blocked with unresolved blockers, report and stop. Any item you *newly* judge blocked this run (no marker yet) — or whose marker you find is now stale — is persisted at pre-merge cleanup (see **Blocked-analysis sync** in Step 3) so you don't re-analyze it next run. That sync rides the selected task's cleanup commit; in the all-blocked → stop case there is no task to ride, so it does not run.
 
@@ -164,6 +167,8 @@ re-grep only if the list is no longer in context). If ≥1 other trivial groups 
 같이 처리할 항목을 번호로 선택하세요 (복수 가능). 건너뛰려면 N.
 ```
 
+Non-interactive run: decline the nudge — no batching — and announce.
+
 If the user selects ≥1 additional groups → treat the combined selection as a **Batch mode
 (`--all`)** run: skip A1–A3 (selection already done), proceed directly to **A4** with this
 confirmed unit list. End Step 2.5 here.
@@ -177,6 +182,7 @@ confirmed unit list. End Step 2.5 here.
 
 - User picks **1** → proceed to Step 3 with the **lite path** active (see `## Lite path` section).
 - User picks **2** → proceed to Step 3 normally.
+- Non-interactive run: resolve to **2** (full cycle) and announce — no wait.
 
 ## Step 3 — Run the code cycle
 

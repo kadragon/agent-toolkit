@@ -97,6 +97,34 @@ outside the contract's Scope still fails.
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
 same commit. Cited by `dev:task-new` and `dev:task-next` at their `qa-verifier`-absent fallback.
 
+## Non-Interactive Gate Defaults
+
+Four `task-*` gates block on a live user. Unattended runs (subagent/teammate execution, `/loop`
+or cron/scheduled invocation, an explicit non-interactive flag such as `--auto`/`--yes`) need a
+stated default instead of hanging. Ambiguity resolves to **interactive** — ask, do not assume.
+
+**Announcement (mandatory).** Every applied default is announced in one line where it is taken
+(`무인 실행 — <gate>: <default> 적용`) and repeated in the run's final report / return value / PR
+body. A silently applied default violates this contract.
+
+**Per-gate defaults:**
+
+| Gate | Default | Rationale |
+|------|---------|-----------|
+| `task-grill` interview | Adopt every question's stated `Recommended:` answer, mark each as an assumption in the four-field summary, and list still-open questions in the handoff | Rule 4 already prescribes this for a non-answering user; the recommendation exists to be the default |
+| `task-next` Step 2 / fast-path selection | Take candidate `[1]` | The candidate script's ordering *is* the priority order |
+| `task-next` Step 2.5 batch nudge | Decline — no batching | Batching is an overhead optimization, never required for correctness |
+| `task-next` Step 2.5 lite-path offer | Full cycle (`task-review --auto`) | PR + CI is the reviewable path; unattended direct-to-`main` merge is the riskier branch |
+| `task-new` Step 3 plan-mode approval | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Review still happens at the PR; blocking would make unattended `task-new` useless for anything non-trivial |
+
+**Never auto-default (abort and report instead):** the working-tree gate, the destructive-command
+guard, unresolved blocking QA findings after the one allowed retry, the version-bump level when
+the repo states no release policy, and `task-next`'s large-group guard (>8 open items). These
+protect against irreversible or unreviewable outcomes; there is no safe default.
+
+Cited by `dev:task-grill`, `dev:task-next`, `dev:task-new`. When this list changes, update all
+three `SKILL.md` pointers in the same commit.
+
 ## Sweep Trigger Policy
 
 `sweep.sh` (installed by init Step 5) performs periodic load-bearing
