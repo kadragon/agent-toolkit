@@ -51,6 +51,8 @@ reinterpret it):
   effect as if it were `[>]`. A heading whose open items are ALL marked is therefore not a
   candidate (matches `SKILL.md` Step 2 "Deferred items"/"blocked" rules); a heading with a mix
   of marked and unmarked open items is still a candidate, counting only the unmarked ones.
+  The marker counts wherever it sits in a multi-line item: `tokenize` folds an item's indented
+  continuation lines into its text, so a marker on a wrapped item's last line is seen.
 
   "Directly owns" (Phase B/C, full-scan rules 2-5): open `- [ ]` checkbox items collected
   from just after a heading up to (not including) the next heading of ANY level 1-3 — not
@@ -254,26 +256,44 @@ def tokenize(text: str) -> list[dict]:
     Comments are stripped BEFORE fences, and the order is load-bearing: a doc template parked in a
     comment often contains a lone ``` opener, which — if fences ran first — would open a phantom
     unclosed fence and blank the rest of the file.
+
+    A checkbox item wrapped across several lines keeps its indented continuation lines: they are
+    folded into the token's `text` (single-space joined), so `_is_blocked` sees the whole item.
+    Without this a `*(deferred: ...)*` marker parked on a wrapped item's last line is invisible and
+    the item surfaces as an actionable candidate — the exact false positive the marker exists to
+    prevent. The token's `line` stays the FIRST line, so grep -n style reporting is unchanged.
+    Only indented, non-blank lines continue an item; a blank line, a heading, a status line, a
+    checkbox, or a nested bullet ends it (CommonMark lazy continuation is deliberately not
+    supported — an unindented line is far more likely to be new prose than a wrapped item).
     """
     tokens: list[dict] = []
+    open_item: dict | None = None
     for i, line in enumerate(_strip_fenced_blocks(_strip_html_comments(text)).splitlines(), start=1):
         m = _HEADING_RE.match(line)
         if m:
+            open_item = None
             tokens.append(
                 {"type": "heading", "level": len(m.group(1)), "title": m.group(2).strip(), "line": i}
             )
             continue
         m = _STATUS_RE.match(line)
         if m:
+            open_item = None
             tokens.append({"type": "status", "value": m.group(1), "line": i})
             continue
         m = _CHECKBOX_RE.match(line)
         if m:
-            tokens.append({"type": "checkbox", "state": m.group(1), "text": m.group(2), "line": i})
+            open_item = {"type": "checkbox", "state": m.group(1), "text": m.group(2), "line": i}
+            tokens.append(open_item)
             continue
         if _BULLET_RE.match(line):
+            open_item = None
             tokens.append({"type": "bullet", "line": i})
             continue
+        if open_item is not None and line[:1].isspace() and line.strip():
+            open_item["text"] = f"{open_item['text']} {line.strip()}".strip()
+            continue
+        open_item = None
     return tokens
 
 
@@ -829,6 +849,60 @@ status: open
         _is_blocked("item *(deferred: waiting on (infra) service)*") is True,
         "_is_blocked is True when the reason text has nested parens (non-greedy match, not [^)]*)",
     )
+
+    # ---- Test 3b2: multi-line items — marker on a continuation line still parks the item ----
+    print("\nTest 3b2: multi-line items — a marker on a wrapped item's continuation line counts")
+    wrapped_deferred = """## Wrapped group
+- [ ] Verify the endpoint against real traffic, then replace the whole-body substring
+  match with a proper response parse and let absence mean "cancelled".
+  *(deferred: needs a captured real response)*
+- [ ] Confirm one real booking appears on page 0, then drop the UNVERIFIED marker
+  from the doc comment. *(deferred: needs one real booking)*
+"""
+    tokens = tokenize(wrapped_deferred)
+    result = backlog_fast_candidates(tokens)
+    _assert(result == [], "heading whose wrapped open items are ALL deferred is not a candidate")
+
+    checkboxes = [t for t in tokens if t["type"] == "checkbox"]
+    _assert(len(checkboxes) == 2, "wrapped continuation lines do not create extra checkbox tokens")
+    _assert(
+        [t["line"] for t in checkboxes] == [2, 5],
+        "a folded item keeps the line number of its FIRST line",
+    )
+
+    wrapped_mixed = """## Wrapped mixed group
+- [ ] wrapped item one
+  continues here *(deferred: waiting on infra)*
+- [ ] wrapped item two
+  continues here with no marker
+"""
+    tokens = tokenize(wrapped_mixed)
+    result = backlog_fast_candidates(tokens)
+    _assert(
+        result == [{"source": "backlog.md", "kind": "h2", "title": "Wrapped mixed group", "line": 1, "items": 1}],
+        "only the unmarked wrapped item counts toward the open-item total",
+    )
+
+    unindented_after = """## Boundary group
+- [ ] wrapped item
+  still the item
+unindented prose *(deferred: not part of the item)*
+"""
+    tokens = tokenize(unindented_after)
+    item = next(t for t in tokens if t["type"] == "checkbox")
+    _assert(
+        item["text"] == "wrapped item still the item",
+        "an unindented following line is prose, not a lazy continuation — it is not folded in",
+    )
+
+    blank_break = """## Blank-break group
+- [ ] wrapped item
+
+  *(deferred: separated by a blank line)*
+"""
+    tokens = tokenize(blank_break)
+    item = next(t for t in tokens if t["type"] == "checkbox")
+    _assert(item["text"] == "wrapped item", "a blank line ends the item — later indented text is not folded in")
 
     # ---- Test 3c: HTML-comment stripping ----
     print("\nTest 3c: HTML comments — commented-out template markup is not a candidate")

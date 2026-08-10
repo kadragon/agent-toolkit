@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] deferred markers detected on multi-line backlog items (dev v4.4.2) (2026-08-10)
 - [done] PR #203 Codex review follow-ups (dev v4.4.1) (2026-08-09) → docs/design/tasks-md-sprint-block-boundary.md
 - [done] tasks.md sprint-block boundary leftovers (dev v4.4.0) (2026-08-07) → docs/design/tasks-md-sprint-block-boundary.md
 - [done] capture write-backs carry a failure-this-prevents prediction line (dev v4.3.4) (2026-08-06) → docs/design/harness-self-improvement-loop.md
