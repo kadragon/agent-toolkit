@@ -20,12 +20,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-## Review Backlog
-
-### PR #215 findings
-
-- [ ] [HARNESS] Teach `scripts/ci/check_harness_drift.py` to resolve the `→ *Section Name*` cross-file pointer form — it only resolves `§ "Section"` today, so every `harness-invariants.md` citation (Verifier Standing-Checks Floor, Non-Interactive Gate Defaults) is verbally enforced and a heading rename leaves dangling pointers with green CI
-
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)

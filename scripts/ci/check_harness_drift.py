@@ -10,15 +10,28 @@ Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     inside a fenced ```bash/```sh code block must have a `VAR=` capture
     earlier in the *same* block. Platform env vars (HOME, PATH) are allowlisted.
 
-(c) Section references - every `§N` / `§ "Title"` pointer that names a bundled
-    `*.md` on the same line, plus every bare `Signal N`, must resolve to a real
-    anchor in the target. PR #181 renumbered the signal taxonomy 8 -> 7 and
+(c) Section references - every `§N` / `§ "Title"` pointer and every
+    `<file>.md` → *Title* arrow pointer that names a bundled `*.md` on the same
+    line, plus every bare `Signal N`, must resolve to a real anchor in the
+    target. PR #181 renumbered the signal taxonomy 8 -> 7 and
     shipped 5 orphaned references that only human review caught; this check is
     the mechanical replacement. Scope is deliberately cross-asset: a `§N` with no
     file named on its line (the owning file may be paragraphs back) is skipped
     rather than guessed at. A `references/`-qualified name that resolves to
     nothing fails closed — that path can only mean a bundled sibling doc, so an
     unresolvable one was deleted or renamed.
+
+    The arrow form is what this repo actually writes (`§` is the minority
+    spelling), so PR #215 found every `harness-invariants.md` citation verbally
+    enforced. Two authoring conventions make it checkable without guessing:
+    the section title must be *formatted* (`*i*`, `**b**`, `"q"`, `'q'`, `` `c` ``),
+    which is what separates a pointer from an output label such as
+    `` `refuted` → "Refuted by contest round" ``; and the file mention must sit
+    *adjacent* to the arrow, with only closing punctuation or further formatted
+    chain elements between them. A chain whose middle element is unformatted
+    (``SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*``) is therefore
+    skipped — under-detection, which is the safe direction. An arrow whose target
+    is itself a filename is a reading-order chain, not a section pointer.
 
 (d) Bundled-script references — every `$SKILL_DIR/scripts/<name>` named in a
     skill's markdown must resolve to a file that skill actually bundles, and
@@ -89,6 +102,28 @@ VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # neither number nor quotes is deliberately unmatched: those point at the global
 # instruction layer, not at a bundled file.
 SECTION_REF_RE = re.compile(r"§\s*(?:\"([^\"\n]+)\"|'([^'\n]+)'|(\d+[a-z]?)\b)")
+# Arrow section pointers: `` `references/harness-invariants.md` → *Section Name* ``. The title
+# must carry markdown emphasis, quotes or code ticks — an unformatted `→ some words` is prose
+# (a state transition, a routing label), not a cross-file pointer.
+ARROW_REF_RE = re.compile(
+    r"→\s*(?:\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|\"([^\"\n]+)\"|'([^'\n]+)'|`([^`\n]+)`)"
+)
+# What may sit between the file mention and its arrow: closing punctuation, and further
+# formatted elements of a pointer chain (`dev:harness-init` → `refs/x.md` → *Title*). Anything
+# else means the nearest filename belongs to unrelated prose earlier in the line — the same
+# adjacency reasoning ATTRIBUTION_GAP_RE applies to bundled-with attributions.
+ARROW_GAP_RE = re.compile(
+    r"^[`\"'”)\]]*"
+    r"(?:\s*→\s*(?:`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\"[^\"\n]+\")[`\"'”)\]]*)*"
+    r"\s*$"
+)
+# A citation may name a heading by its leading words: `## Layer 0: Settings-Level Enforcement`
+# is cited as *Layer 0*. Accept a prefix only where the anchor continues with a separator or a
+# word boundary, so *Layer* still fails against `## Layered Defense`.
+ANCHOR_PREFIX_SEP_RE = re.compile(r"^[\s:(—,-]")
+# `harness-init/SKILL.md` — a path-qualified mention names the skill that owns the file, which
+# is the only way to disambiguate a basename as common as SKILL.md.
+PATH_QUALIFIER_RE = re.compile(r"([A-Za-z0-9._-]+)/$")
 # Known extensions only: a permissive `\.\w+` also matches prose like "e.g".
 FILE_MENTION_RE = re.compile(r"([A-Za-z0-9._-]+\.(?:md|sh|py|json|ya?ml|toml|txt))")
 SIGNAL_REF_RE = re.compile(r"\bSignals?\s+(\d+)(?:\s+and\s+(\d+))?\b")
@@ -381,14 +416,58 @@ def build_basename_index(paths: list[Path]) -> dict[str, list[Path]]:
     return index
 
 
+def anchor_matches(title: str, titled_anchors: set[str]) -> bool:
+    """True when `title` names one of `titled_anchors`, exactly or as a leading prefix.
+
+    The prefix form is how this repo cites headings that carry a parenthetical or colon
+    suffix — `## Spawn Prompt Contract (shared invariant)` is cited as *Spawn Prompt
+    Contract*. The prefix must end at a separator or word boundary so a genuinely renamed
+    heading still fails.
+    """
+    normalized = normalize_anchor(title)
+    if normalized in titled_anchors:
+        return True
+    return any(
+        anchor.startswith(normalized) and ANCHOR_PREFIX_SEP_RE.match(anchor[len(normalized):])
+        for anchor in titled_anchors
+    )
+
+
 def resolve_md_target(
-    name: str, source: Path, basename_index: dict[str, list[Path]]
+    name: str,
+    source: Path,
+    basename_index: dict[str, list[Path]],
+    qualifier: str | None = None,
 ) -> Path | None:
     """Resolve a referenced `*.md` basename to a bundled asset, or None if it isn't one.
 
     None means "not ours to check" — skills routinely name target-repo files such as
     `backlog.md`, `tasks.md`, or `docs/workflows.md`, which do not exist in this repo.
+
+    `qualifier` is the directory segment the mention was written under
+    (`harness-init/SKILL.md` -> `harness-init`). Where it names a skill that bundles the
+    file, it wins: without it an ambiguous basename falls through to the referrer's own
+    copy and the pointer gets graded against the wrong file. `references` is excluded — it
+    is a path segment inside a skill, not a skill name, and its unresolvable case is
+    deliberately handled by the fail-closed branch in the callers.
     """
+    if qualifier and qualifier != "references":
+        qualified = [
+            candidate
+            for candidate in basename_index.get(name, [])
+            if skill_dir_of(candidate).name == qualifier
+        ]
+        if len(qualified) == 1:
+            return qualified[0]
+        if qualified:
+            # A skill shipping the same basename twice (say `assets/notes.md` and
+            # `references/notes.md`) makes the qualifier ambiguous. Picking by index order
+            # would guess, and falling through is worse still — the unqualified path
+            # resolves a common basename to the *referrer's* copy. Skip, as the ambiguous
+            # `SKILL.md` case below already does.
+            return None
+        # No candidate under that name: the qualifier is a plain path segment (`docs/`),
+        # not a skill. Resolve as if it were absent.
     # `SKILL.md` is not a unique basename, so a cross-skill reference to one would resolve
     # to the referrer itself on the first probe and be graded against the wrong anchors.
     ambiguous = len(basename_index.get(name, [])) > 1
@@ -400,6 +479,49 @@ def resolve_md_target(
     # a unique basename across all bundled assets is an unambiguous target.
     matches = basename_index.get(name, [])
     return matches[0] if len(matches) == 1 else None
+
+
+def resolve_line_target(
+    line: str, ref_start: int, source: Path, basename_index: dict[str, list[Path]]
+) -> tuple[Path | None, str | None, int | None]:
+    """Resolve the bundled `*.md` a reference at `ref_start` points into.
+
+    Returns `(target, problem, mention_end)`. `target` and `problem` are never both set;
+    both are None when the line names nothing this check owns — no file mention before the
+    reference, a non-markdown target, or a target-repo file the plugin does not ship.
+    `mention_end` is the offset just past the resolved filename, so callers can measure the
+    gap between the mention and the reference.
+    """
+    mentions = [m for m in FILE_MENTION_RE.finditer(line) if m.start() < ref_start]
+    if not mentions:
+        # No file named before this reference. Prose continues across lines, so the owning
+        # file may be paragraphs back — unresolvable without guessing. Cross-asset
+        # references are the scope here; bare `§N` is left to human review.
+        return None, None, None
+    mention = mentions[-1]
+    named = mention.group(1)
+    if not named.endswith(".md"):
+        # e.g. `validate-harness.sh` §11 — a script has no heading structure.
+        return None, None, mention.end()
+
+    prefix = line[: mention.start()]
+    qualifier = PATH_QUALIFIER_RE.search(prefix)
+    target = resolve_md_target(
+        named, source, basename_index, qualifier.group(1) if qualifier else None
+    )
+    if target is None:
+        # A `references/` path names a bundled sibling doc, so failing to resolve one
+        # means it was deleted or renamed — the very drift this check exists for.
+        # Fail closed there; every other unresolved name is a target-repo file
+        # (`backlog.md`, `docs/workflows.md`) the plugin does not ship.
+        if prefix.endswith("references/"):
+            return (
+                None,
+                f"references/{named} is not a bundled file (deleted, renamed, or a typo)",
+                mention.end(),
+            )
+        return None, None, mention.end()
+    return target, None, mention.end()
 
 
 def check_section_refs(
@@ -431,27 +553,11 @@ def check_section_refs(
             title = ref.group(1) or ref.group(2)
             number = ref.group(3)
 
-            mentions = [m for m in FILE_MENTION_RE.finditer(line) if m.start() < ref.start()]
-            if not mentions:
-                # No file named on this line. Prose continues across lines, so the owning
-                # file may be paragraphs back — unresolvable without guessing. Cross-asset
-                # references are the scope here; bare `§N` is left to human review.
+            target, problem, _ = resolve_line_target(line, ref.start(), source, basename_index)
+            if problem is not None:
+                problems.append(f"line {lineno}: {problem}")
                 continue
-            named = mentions[-1].group(1)
-            if not named.endswith(".md"):
-                # e.g. `validate-harness.sh` §11 — a script has no heading structure.
-                continue
-            target = resolve_md_target(named, source, basename_index)
             if target is None:
-                # A `references/` path names a bundled sibling doc, so failing to resolve one
-                # means it was deleted or renamed — the very drift this check exists for.
-                # Fail closed there; every other unresolved name is a target-repo file
-                # (`backlog.md`, `docs/workflows.md`) the plugin does not ship.
-                if line[: mentions[-1].start()].endswith("references/"):
-                    problems.append(
-                        f"line {lineno}: references/{named} is not a bundled file "
-                        "(deleted, renamed, or a typo)"
-                    )
                 continue
 
             where = str(target.relative_to(REPO_ROOT))
@@ -459,8 +565,34 @@ def check_section_refs(
             if number is not None:
                 if number not in numeric_anchors:
                     problems.append(f"line {lineno}: §{number} has no section {number}. in {where}")
-            elif normalize_anchor(title) not in titled_anchors:
+            elif not anchor_matches(title, titled_anchors):
                 problems.append(f'line {lineno}: § "{title}" has no matching section in {where}')
+
+        for ref in ARROW_REF_RE.finditer(line):
+            title = next(group for group in ref.groups() if group is not None)
+            if FILE_MENTION_RE.fullmatch(title.strip()):
+                # `hwpx-format.md → editing-gotchas.md → …` is a reading order, not a pointer.
+                continue
+
+            target, problem, mention_end = resolve_line_target(
+                line, ref.start(), source, basename_index
+            )
+            if problem is not None:
+                problems.append(f"line {lineno}: {problem}")
+                continue
+            if target is None:
+                continue
+            if not ARROW_GAP_RE.match(line[mention_end : ref.start()]):
+                # The filename is not adjacent to the arrow, so it belongs to unrelated prose
+                # and this arrow is a label rather than a cross-file pointer.
+                continue
+
+            _, titled_anchors = anchors(target)
+            if not anchor_matches(title, titled_anchors):
+                problems.append(
+                    f'line {lineno}: → "{title}" has no matching section in '
+                    f"{target.relative_to(REPO_ROOT)}"
+                )
 
         if taxonomy is None:
             continue
