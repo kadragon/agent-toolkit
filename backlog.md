@@ -56,6 +56,14 @@ Out-of-scope findings from the PR #208 review cycle (Codex + Claude), verifier-g
 - [ ] [HARNESS] Carry the standing-checks floor into the role-less verifier brief in `task-new` and `task-next` — `harness-init` creates no agent roles, so the `general-purpose` fallback brief passes only acceptance criteria, paths and lint/test command, and silently skips the floor that `docs/eval-criteria.md` now says every contract inherits *(pre-existing gap, not introduced by #208)*
 - [ ] [HARNESS] Add the `[FIX]` reproduction row to `dev/skills/harness-init/references/conventions-template.md` — it ships only the bare `TYPE: FEAT | FIX | …` line, so a repo generated from it gets the eval-criteria rule with no owning convention to cite
 
+### PR #209 — batch cycle observations
+
+Observed while running the PR #209 batch cycle, 2026-08-10. Both verified against the owning file
+this session, not inferred from behavior alone.
+
+- [ ] [HARNESS] Reconcile `task-next` Step 1's fast-path description with `backlog_candidates.py` — the script's Phase B docstring caps the fast path at "up to 2 qualifying h2-or-h3 headings", while Step 1 describes a "per-source and combined cap-5 truncation" and its selection table branches on "2–5"; a 6-group backlog surfaced 2, and the orchestrator has no signal that the list is short by design
+- [ ] [HARNESS] Carry `task-review`'s result-handoff rule into `task-next`'s own spawn briefs — its implementer/QA/batch briefs never tell a named agent to deliver via `SendMessage(to: "main")`, and 3 of 4 agents in this cycle went idle without reporting until nudged by hand
+
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

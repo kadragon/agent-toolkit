@@ -41,10 +41,11 @@ look it up instead of asking.
    do not ask the user to restate something you can verify yourself.
 4. **Never act until the user confirms shared understanding.** Do not start implementing,
    writing a spec, or writing tickets mid-interview. The interview ends when the user has
-   answered (or explicitly waved off) every open question. "알아서 해줘", "좋아 보여", or
-   silence do **not** close the interview — none of them confirms a specific answer to the
-   open question on the table. Re-ask a narrower version of the question until the user's
-   reply pins down an actual choice.
+   answered every open question, or declared the question itself irrelevant — not merely
+   deferred it back to you. "알아서 해줘", "좋아 보여", or silence do **not** close the
+   interview — none of them confirms a specific answer to the open question on the table.
+   Re-ask **one** narrower version of the question; if that reply still pins down no choice,
+   adopt the stated `Recommended:` answer, announce it as an assumption, and move on.
 5. **No ADR/glossary machinery.** Do not create `CONTEXT.md`, a glossary file, or any
    standalone artifact. Hold the resolved answers in conversation context and hand them
    directly to the caller (Sprint Contract author, or `task-spec`).
