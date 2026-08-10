@@ -9,7 +9,7 @@ jobs:
     name: Executable line ending check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check shell and Python scripts use LF
         run: |
@@ -49,7 +49,7 @@ jobs:
     name: JSON BOM check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check JSON files carry no UTF-8 BOM
         run: |
@@ -79,7 +79,7 @@ jobs:
     name: Plugin-root portability + capture-before-use + section-ref check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run scripts/ci/test_check_harness_drift.py
         run: python3 scripts/ci/test_check_harness_drift.py
@@ -91,7 +91,7 @@ jobs:
     name: CHANGELOG Entry Contract check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run scripts/ci/test_check_changelog_entries.py
         run: python3 scripts/ci/test_check_changelog_entries.py
@@ -103,9 +103,9 @@ jobs:
     name: Ruff lint (pinned ruleset)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
@@ -144,9 +144,9 @@ jobs:
     name: commit-and-push.sh regression test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
@@ -163,9 +163,9 @@ jobs:
     name: task_nodes.py regression test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
@@ -177,9 +177,9 @@ jobs:
     name: bump-version.sh regression test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
@@ -192,7 +192,7 @@ jobs:
     name: Skill/agent/command frontmatter check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install PyYAML
         run: python3 -m pip install --quiet pyyaml
@@ -207,7 +207,7 @@ jobs:
     name: Plugin version bump check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
