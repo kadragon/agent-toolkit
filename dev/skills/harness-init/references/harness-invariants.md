@@ -61,6 +61,39 @@ Enforced by:
 
 When this contract changes, update all three places plus any existing `.claude/hooks/task-created-contract.sh` in target repos.
 
+## Verifier Standing-Checks Floor
+
+Every Sprint Contract inherits a floor of checks the verifier always runs, on top of the
+contract's own acceptance criteria. Canonical home: `.claude/agents/qa-verifier.md` →
+`## Checks (always run)`. **Where that role file exists, a verifier brief points at it and copies
+nothing** — `docs/eval-criteria.md` bans restating the floor in acceptance criteria for the same
+reason: a second copy drifts from the first.
+
+`harness-init` creates no agent roles (its Step 4b), so in a role-less repo that file is absent and
+the pointer has nothing to resolve. There the cycle skills spawn `general-purpose` as the verifier
+instead, and **the fallback brief must carry the floor itself** — otherwise the repo that most
+needs these gates is the one running without them. The floor, one line per gate:
+
+1. Plugin `plugin.json` version bumped — required iff a changed path is under that plugin's own
+   tree, per tree (a `dev/` change bumps `dev`, a `prod/` change bumps `prod`); inspect committed,
+   staged, unstaged and untracked changes, not just `git diff`. Bump size per `docs/conventions.md`
+   → *Plugin Version Bump Rules*
+2. Shell patterns in modified `SKILL.md` follow capture-before-use
+3. The Sprint Contract's lint/test command exits 0
+4. No new `$var` reference without a visible `var=$(cmd)` capture
+5. No out-of-scope edits — every changed path traces to a line in the contract's **Scope**. A path
+   outside it fails unless the contract was amended to cover it
+6. Owning doc synced — a change that alters a rule stated in `docs/` or `AGENTS.md` updates that
+   doc and its sibling references in the same change set (a new or renamed `docs/` file also
+   updates the `AGENTS.md` Docs Index)
+
+Gates 1 and 5 carry the same carve-out in both directions: paths the cycle itself writes
+(`tasks.md`, `backlog.md`, `CHANGELOG.md`, the plugin manifests) and repo-root paths outside any
+plugin tree are recorded **N/A, not fail** — no contract's Scope has to list them.
+
+When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
+same commit. Cited by `dev:task-new` and `dev:task-next` at their `qa-verifier`-absent fallback.
+
 ## Sweep Trigger Policy
 
 `sweep.sh` (installed by init Step 5) performs periodic load-bearing

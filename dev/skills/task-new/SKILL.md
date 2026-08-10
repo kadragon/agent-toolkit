@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.1.1
+version: 1.1.2
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -166,7 +166,11 @@ retry: stop and report — do NOT hand off with unresolved blockers.
 verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
 four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
 with the Sprint Contract's acceptance criteria verbatim, the in-scope paths and the lint/test
-command, and telling it to verify against those criteria and change nothing. The
+command, and telling it to verify against those criteria and change nothing. **Carry the
+standing-checks floor in the brief too** — with no role file there is no `## Checks (always run)`
+for the brief to point at, so the gates every contract inherits reach the verifier only if the
+brief states them. Take them from `harness-init` → `references/harness-invariants.md` →
+*Verifier Standing-Checks Floor*; do not reconstruct the list from memory. The
 independence is what must not be dropped, not the role name: the agent that implemented — the main
 thread included, when the implementer fallback above was taken — never verifies its own output.
 Fixes on the retry path go to `implementer`, or inline when that role is also absent.
