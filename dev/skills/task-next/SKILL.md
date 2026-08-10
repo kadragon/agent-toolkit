@@ -246,8 +246,11 @@ Once plan is approved (or trivial gate passed), derive action from the selected 
     containing the item's full `- [ ] ...` line; tree mode is file-backed even for one item.
 
 **Sprint Contract (workflows.md Step 2)**
-Per `docs/eval-criteria.md` template: **Scope** / **Acceptance criteria** / **Out of scope** /
-**Lint/test command**.
+Per `docs/eval-criteria.md` template: **Tag** / **Scope** / **Acceptance criteria** /
+**Out of scope** / **Lint/test command**. The **Tag** is the `[TYPE]` this change will commit
+under, and it must be written into the contract — the verifier grades the contract alone, so a tag
+it cannot see gates nothing. Do not recover it from the branch prefix: `task_nodes.py` falls back
+to `fix/` for untagged and mixed-tag groups alike, so the prefix cannot distinguish a real `[FIX]`.
 
 For a multi-item group: Acceptance criteria has **one concrete checkbox per item** — do not
 merge them into a single vague criterion. Scope lists all in-scope files/areas.
@@ -310,7 +313,9 @@ If the verifier reports blocking issues:
 2. **Classify each blocking finding before fixing.** A finding caused by an unclear, incomplete or
    wrong Sprint Contract is a *contract* defect: correct the contract and re-brief from it. Only a
    finding that survives a correct contract goes to `implementer` — sending a contract defect there
-   re-litigates it as an implementation defect and burns the one allowed retry.
+   re-litigates it as an implementation defect and burns the one allowed retry. This covers every
+   retry path this skill owns — `references/batch.md` A5's per-unit implementer→qa-verifier retry
+   and `references/tree.md`'s included — so classify there too rather than fanning out blind.
 3. Spawn `implementer` with the surviving findings as its brief to fix them (or fix inline, when
    `implementer` is absent).
 4. Re-run the verifier once, against the corrected contract.

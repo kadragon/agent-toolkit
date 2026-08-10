@@ -66,6 +66,15 @@ test, against this repo's mechanical-enforcement-first rule.
 
 - [ ] [HARNESS] Build a CI check that ranks each skill's `description:` against declared positive/negative prompts and flags near-collisions between two descriptions *(deferred: needs a `docs/design/` spec first — new script plus per-skill fixtures across every dev and prod skill, not one sprint)*
 
+## Review Backlog
+
+### PR #208 — QA contract gates
+
+Out-of-scope findings from the PR #208 review cycle (Codex + Claude), verifier-graded, 2026-08-10.
+
+- [ ] [HARNESS] Carry the standing-checks floor into the role-less verifier brief in `task-new` and `task-next` — `harness-init` creates no agent roles, so the `general-purpose` fallback brief passes only acceptance criteria, paths and lint/test command, and silently skips the floor that `docs/eval-criteria.md` now says every contract inherits *(pre-existing gap, not introduced by #208)*
+- [ ] [HARNESS] Add the `[FIX]` reproduction row to `dev/skills/harness-init/references/conventions-template.md` — it ships only the bare `TYPE: FEAT | FIX | …` line, so a repo generated from it gets the eval-criteria rule with no owning convention to cite
+
 ## Harness — `prune-backlog` heading cascade deletes untouched prose-only sections
 
 Found by `qa-verifier` during the QA contract gates sprint (dev v4.4.3), 2026-08-10. The cascade is

@@ -125,7 +125,10 @@ contract inline in the conversation and writes no file. Either way the contract 
 shape, per `docs/eval-criteria.md`:
 - `# heading` = a short title for the request
 - `status: active`
-- **Scope** / **Acceptance criteria** / **Out of scope** / **Lint/test command**
+- **Tag** / **Scope** / **Acceptance criteria** / **Out of scope** / **Lint/test command** — the
+  **Tag** is the `[TYPE]` this change will commit under, and it must be written into the contract:
+  the verifier grades the contract alone, so a tag it cannot see gates nothing (a `[FIX]` contract
+  missing its reproduction criterion then reads as a well-formed non-`[FIX]` one)
 - File-backed only: add a `## Covers` line with the ticket's `- [ ]` item copied **verbatim**
   from `backlog.md` — this is the deletion target for cleanup.
 
