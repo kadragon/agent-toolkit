@@ -28,25 +28,6 @@ Source: comparison against [addyosmani/agent-skills](https://github.com/addyosma
 
 - [ ] [HARNESS] Give each interactive gate a stated default plus an announced skip when no live user is reachable (`/loop`, cron, subagent): `task-grill`'s interview, `task-next` Step 2 selection and Step 2.5 lite-path offer, `task-new` Step 3 plan-mode approval
 
-## Harness — task-grill restate field shape and confirm gate
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/interview-me/SKILL.md`), 2026-08-10. `task-grill` Flow step 5 already summarizes resolved
-decisions and Rule 4 already blocks acting before confirmation; the delta is the field shape and the
-close condition, not the existence of a summary.
-
-- [ ] [HARNESS] Give `task-grill`'s closing summary a fixed field shape (Outcome / Success / Constraint / Out of scope) that feeds the Sprint Contract directly, and add the rule that "알아서 해줘" / "좋아 보여" / silence do not close the interview
-
-## Harness — concrete ticket size cap in task-tickets
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/planning-and-task-breakdown/SKILL.md` sizing table), 2026-08-10. `task-tickets` Step 2
-("sized for exactly one Sprint Contract") and Step 5 (one item per heading) are authoring-time rules
-already, but neither gives a number; the only numeric guard is `task-next`'s >8-item check, which
-fires at execution time.
-
-- [ ] [HARNESS] Add a concrete cap to `task-tickets` Step 2 — roughly 5 files / one subsystem, and a title that needs "and" is two tickets
-
 ## Harness — per-item checkpoint inside a multi-item sprint
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
@@ -74,17 +55,6 @@ Out-of-scope findings from the PR #208 review cycle (Codex + Claude), verifier-g
 
 - [ ] [HARNESS] Carry the standing-checks floor into the role-less verifier brief in `task-new` and `task-next` — `harness-init` creates no agent roles, so the `general-purpose` fallback brief passes only acceptance criteria, paths and lint/test command, and silently skips the floor that `docs/eval-criteria.md` now says every contract inherits *(pre-existing gap, not introduced by #208)*
 - [ ] [HARNESS] Add the `[FIX]` reproduction row to `dev/skills/harness-init/references/conventions-template.md` — it ships only the bare `TYPE: FEAT | FIX | …` line, so a repo generated from it gets the eval-criteria rule with no owning convention to cite
-
-## Harness — `prune-backlog` heading cascade deletes untouched prose-only sections
-
-Found by `qa-verifier` during the QA contract gates sprint (dev v4.4.3), 2026-08-10. The cascade is
-documented in `task-next`/`task-new` as "A heading is dropped only where this sprint left its whole
-section blank, so `[x]`/`[>]` history, prose and surviving child headings all keep their ancestors
-alive" — but the run that pruned this sprint's 4 items also deleted the five prose-only
-`## Self-improvement loop — …` headings, which held no `- [ ]` line before the run and were not
-emptied by it. Restored by hand in that sprint; the script is unchanged.
-
-- [ ] [FIX] Make `task_nodes.py` `prune-backlog` drop a heading only when *this run's* deletions emptied it, so a section that was already item-less (prose-only) survives — reproduction: a `backlog.md` with a prose-only h2 above the pruned group
 
 ## Harness — `task-*` edge enforcement (rescoped)
 

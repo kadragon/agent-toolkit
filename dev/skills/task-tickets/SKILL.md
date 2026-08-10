@@ -5,7 +5,7 @@ description: >-
   `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
   order. Confirms granularity with the user first. A single trivial task skips
   this — write one Sprint Contract directly.
-version: 1.1.0
+version: 1.0.2
 ---
 
 # To Tickets
