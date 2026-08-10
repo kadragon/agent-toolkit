@@ -331,6 +331,33 @@ def main() -> int:
             "a hard-wrapped filename on the line above is still graded",
             run_with("see `delegation-template.md`\n(bundled with `dev:harness-init`).") != [],
         )
+        # Contest round on PR #214: an attribution that spells out no filename of its own
+        # must not bind to target-repo prose earlier on the line. `backlog.md`, `tasks.md`
+        # and `docs/workflows.md` are pervasive in task-next/task-new and are not shipped
+        # by any skill, so binding to them turns a legitimate sentence into a CI hard-fail.
+        check(
+            "an unnamed attribution does not bind to target-repo prose on the same line",
+            run_with(
+                "Append the item to `backlog.md` using the delegation template "
+                "(bundled with `dev:harness-curate`)."
+            )
+            == [],
+        )
+        check(
+            "an unnamed attribution does not bind to a target-repo file on the line above",
+            run_with(
+                "See `docs/workflows.md` for the cycle, then follow the template\n"
+                "(bundled with `dev:harness-curate`)."
+            )
+            == [],
+        )
+        # Adjacency must not become a licence to skip: an unresolvable name the attribution
+        # really does spell out still fails closed (deleted or renamed bundled asset).
+        check(
+            "adjacency does not weaken the fail-closed case",
+            run_with("`invented.md` (bundled with `dev:harness-init`).") != [],
+        )
+
         # The wrap fallback must not reach across a paragraph break: an unrelated file
         # named in the paragraph above is not what this attribution is talking about.
         check(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harness ratchet checks for shipped plugin skills (dev/, prod/).
 
-Three independent checks, run over every `{plugin}/skills/*/SKILL.md`:
+Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
 (a) Plugin-root portability — shared skill instructions and references must not
     depend on hook-only plugin root variables to locate bundled files.
@@ -115,6 +115,11 @@ SCRIPT_PLACEHOLDER_NAMES = {"...", "..", "."}
 # Attribution of a bundled file to its owning skill: `` (bundled with `dev:harness-curate`) ``.
 # The plugin prefix is captured too — an attribution may point across plugins (dev -> prod).
 BUNDLED_WITH_RE = re.compile(r"\(bundled with\s+`?([a-z0-9-]+):([a-z0-9-]+)`?\)")
+# Only a filename *adjacent* to the attribution is the file being attributed. Anything but
+# closing punctuation between the two means the attribution names no file of its own and the
+# nearest mention belongs to unrelated prose — skills routinely name target-repo files
+# (`backlog.md`, `tasks.md`, `docs/workflows.md`) that this repo does not ship.
+ATTRIBUTION_GAP_RE = re.compile(r"^[`\"'*,;:\s]*$")
 
 
 def find_skill_files() -> list[Path]:
@@ -259,14 +264,32 @@ def plugins_root_of(path: Path) -> Path:
     return skill_dir.parent.parent.parent
 
 
+def adjacent_file_mention(prefix: str) -> str | None:
+    """Return the filename `prefix` ends on, or None if the tail is anything but punctuation.
+
+    `prefix` is the text running up to an attribution (or a whole wrapped line). Only a
+    mention the attribution butts against is the file being attributed; a mention further
+    back belongs to unrelated prose.
+    """
+    mentions = list(FILE_MENTION_RE.finditer(prefix))
+    if not mentions:
+        return None
+    last = mentions[-1]
+    return last.group(1) if ATTRIBUTION_GAP_RE.match(prefix[last.end():]) else None
+
+
 def check_bundled_with_refs(text: str, path: Path) -> list[str]:
     """Every `` `<file>` (bundled with `<plugin>:<skill>`) `` must name the file's real owner.
 
     A verbatim quote carries its cross-reference with it, so a pointer that was already
-    stale spreads to every skill that copies the rule (PR #211). Resolution is by the
-    file basename named just before the attribution — same line, else the nearest
-    preceding non-blank line, since this repo hard-wraps markdown. An attribution with no
-    filename anywhere in reach is skipped rather than guessed at.
+    stale spreads to every skill that copies the rule (PR #211). Resolution is by the file
+    basename sitting *adjacent* to the attribution — immediately before it on the same
+    line, else at the end of the immediately preceding line, since this repo hard-wraps
+    markdown. Adjacency is what makes the mention the attributed file: an attribution that
+    spells out no filename of its own is skipped rather than bound to whatever unrelated
+    prose came earlier, since skills routinely name target-repo files (`backlog.md`,
+    `tasks.md`, `docs/workflows.md`) this repo does not ship. An unresolvable adjacent name
+    still fails closed — it can only mean a bundled asset that was deleted or renamed.
     """
     plugins_root = plugins_root_of(path)
     lines = text.splitlines()
@@ -284,18 +307,17 @@ def check_bundled_with_refs(text: str, path: Path) -> list[str]:
     for lineno, line in enumerate(lines, start=1):
         for ref in BUNDLED_WITH_RE.finditer(line):
             plugin, skill = ref.group(1), ref.group(2)
-            mentions = [m.group(1) for m in FILE_MENTION_RE.finditer(line[: ref.start()])]
-            if not mentions and lineno >= 2:
+            named = adjacent_file_mention(line[: ref.start()])
+            if named is None and lineno >= 2:
                 # Hard-wrapped prose: the filename can sit at the end of the line above.
                 # Bounded to the *immediately* preceding line — walking back through blank
                 # lines would attach a filename from an unrelated paragraph and report a
                 # mismatch for an attribution that never named it.
                 prev = lines[lineno - 2]
                 if prev.strip():
-                    mentions = [m.group(1) for m in FILE_MENTION_RE.finditer(prev)]
-            if not mentions:
+                    named = adjacent_file_mention(prev)
+            if named is None:
                 continue
-            named = mentions[-1]
 
             skill_dir = plugins_root / plugin / "skills" / skill
             if not skill_dir.is_dir():
