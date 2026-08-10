@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.5.1
+version: 1.5.2
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -288,6 +288,13 @@ verify — a deliberate exception to the volume half of the repo's delegation ga
 `docs/delegation.md` → *Role Routing*. The exception covers every QA spawn this skill owns,
 batch mode's per-unit verifiers included; every non-QA delegation still needs both conditions.
 
+**Brief the verifier adversarially.** The objective in the brief is *find violations*, not *confirm
+compliance*: tell it to hunt for each way the change could fail a criterion and to record a pass
+only where it has evidence. Do **not** include the orchestrator's own reasoning about why the
+implementation is correct — the verifier grades the diff against the contract, and a supplied
+conclusion is what it will confirm. Applies to every QA spawn this skill owns, the
+`general-purpose` fallback and batch mode's per-unit verifiers included.
+
 **`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
 verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
 four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
@@ -300,10 +307,14 @@ per-unit verifiers included.
 
 If the verifier reports blocking issues:
 1. Surface findings to user.
-2. Spawn `implementer` with those findings as its brief to fix them (or fix inline, when
+2. **Classify each blocking finding before fixing.** A finding caused by an unclear, incomplete or
+   wrong Sprint Contract is a *contract* defect: correct the contract and re-brief from it. Only a
+   finding that survives a correct contract goes to `implementer` — sending a contract defect there
+   re-litigates it as an implementation defect and burns the one allowed retry.
+3. Spawn `implementer` with the surviving findings as its brief to fix them (or fix inline, when
    `implementer` is absent).
-3. Re-run the verifier once.
-4. If still blocking after one retry: stop and report — do NOT hand off with unresolved blockers.
+4. Re-run the verifier once, against the corrected contract.
+5. If still blocking after one retry: stop and report — do NOT hand off with unresolved blockers.
 
 **Version bump (workflows.md Step 5)**
 The judgment is *which* plugin and *which* bump level; the rewrite itself is scripted. Do this

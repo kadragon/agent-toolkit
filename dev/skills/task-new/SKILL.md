@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.1.0
+version: 1.1.1
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -145,9 +145,19 @@ shape, per `docs/eval-criteria.md`:
 - **If `implementer` fails or returns unusable output:** stop and report; do not proceed to QA.
 
 **QA (Step 4 — mandatory)**
-ALWAYS spawn `qa-verifier` as a separate agent. If it reports blocking issues: surface them, spawn
-`implementer` to fix, re-run `qa-verifier` **once**. If still blocking after one retry: stop and
-report — do NOT hand off with unresolved blockers.
+ALWAYS spawn `qa-verifier` as a separate agent.
+
+**Brief it adversarially.** The objective is *find violations*, not *confirm compliance* — tell it
+to hunt for each way the change could fail a criterion and to record a pass only where it has
+evidence. Do **not** pass your own reasoning about why the implementation is correct; a supplied
+conclusion is what a verifier confirms. Applies to the `general-purpose` fallback below too.
+
+If it reports blocking issues: surface them, then **classify each one first** — a finding caused by
+an unclear, incomplete or wrong Sprint Contract is a *contract* defect, so correct the contract and
+re-brief from it rather than sending it to `implementer`, which re-litigates it as an
+implementation defect and burns the one allowed retry. Spawn `implementer` on the surviving
+findings, re-run `qa-verifier` **once** against the corrected contract. If still blocking after one
+retry: stop and report — do NOT hand off with unresolved blockers.
 
 **`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
 verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`

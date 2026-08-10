@@ -29,6 +29,8 @@ Default **simple**. If failures > passes, stop at 3 failures and return early.
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
 3. Lint/test command from Sprint Contract exits 0
 4. No new `$var` references without visible `var=$(cmd)` capture
+5. No out-of-scope edits — every changed path traces to a line in the Sprint Contract's **Scope**. A path outside it fails unless the contract was amended to cover it
+6. Owning doc synced — where the change alters a rule stated in `docs/` or `AGENTS.md`, the owning doc and its sibling references are updated in the same change set (a new or renamed `docs/` file also updates the `AGENTS.md` Docs Index)
 
 ## Exit Criteria
 
