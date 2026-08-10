@@ -47,6 +47,11 @@ run by the `changelog-entries` job in `harness-check.yml` (exit 1 blocks the PR)
 value lives in that script's `MAX_LEN`, which is the enforcement point; everything the contract
 bans but a script cannot decide (explanatory clauses, file lists, narration) is on review.
 
+The cycle tails call that same script before they write: `task_nodes.py changelog` finds it by
+walking up from the changelog's directory, runs its `check_file` over the composed line, and
+exits 1 without writing on a violation. Two gates, one rule — the write-time one fails at
+authorship, CI stays the backstop for entries written by hand.
+
 ## Shell Script Conventions
 
 ### Capture-Before-Use (mandatory)

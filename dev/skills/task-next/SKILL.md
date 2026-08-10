@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.0
+version: 1.6.1
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -417,9 +417,12 @@ surviving child headings all keep their ancestors alive. **This is deliberately 
 rule it replaced** ("no open `- [ ]` items left"), which would strand surviving `[x]` lines under a
 deleted heading. `tasks.md` goes once empty — safe because it holds the Sprint Contract and
 nothing else, which `prune-tasks` verifies before touching it — and `backlog.md` never does.
-What the script cannot decide — the character cap, and the ban
-on explanatory clauses, file lists and narration — lives in `harness-invariants.md` → *CHANGELOG
-Entry Contract*. Read it before choosing the title; do not reconstruct the limits from memory.
+`changelog` runs the repo's own `scripts/ci/check_changelog_entries.py` over the composed line and
+refuses (exit 1, nothing written) when the decidable subset fails — over the cap, a second `→`
+link, a link that does not resolve — so those surface at authorship instead of in CI. What no
+script can decide — the ban on explanatory clauses, file lists and narration — lives in
+`harness-invariants.md` → *CHANGELOG Entry Contract*. Read it before choosing the title; do not
+reconstruct the limits from memory.
 
 *Blocked-analysis sync (runs for every source type):*
 

@@ -1,33 +1,5 @@
 # Backlog
 
-## Self-improvement loop — Signal 8 verifier-grounded failures (D1)
-
-Source: `docs/design/harness-self-improvement-loop.md` D1.
-
-## Self-improvement loop — loop contract + prediction schema (D5+D3)
-
-Source: `docs/design/harness-self-improvement-loop.md` D3, D5.
-
-## Self-improvement loop — validation gate in curate routing (D2)
-
-Source: `docs/design/harness-self-improvement-loop.md` D2.
-
-## Self-improvement loop — prediction re-audit step (D4)
-
-Source: `docs/design/harness-self-improvement-loop.md` D4.
-
-## Self-improvement loop — capture prediction line (D6)
-
-Source: `docs/design/harness-self-improvement-loop.md` D6.
-
-## Harness — validate the CHANGELOG entry at write time
-
-Source: PR #216 review (Codex), 2026-08-10. `task_nodes.py changelog` wrote a title containing a
-`→`, which `check_changelog_entries.py` rejects (one-link limit). The rule is already mechanical,
-but it only fires in CI — after the commit and the PR exist.
-
-- [ ] [HARNESS] Have `task_nodes.py changelog` reject a title that violates the CHANGELOG Entry Contract (extra `→`, over the character cap) before writing, so the contract fails at the point of authorship rather than in CI
-
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
