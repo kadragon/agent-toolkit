@@ -61,6 +61,7 @@ Before any implementation cycle, agree on "done":
 ```markdown
 ### Sprint Contract: {feature/fix name}
 
+**Tag:** {[FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]}
 **Scope:** {specific files or skills to modify}
 **Acceptance criteria:**
 - [ ] {criterion 1 — concrete and testable}
@@ -70,6 +71,18 @@ Before any implementation cycle, agree on "done":
 ```
 
 Both generator and verifier must agree before coding starts. Evaluator grades against this contract, not vague impressions.
+
+**Standing checks are inherited, not restated.** Every contract inherits the floor in
+`.claude/agents/qa-verifier.md` → `## Checks (always run)`. Do not copy those gates into acceptance
+criteria — criteria state what is specific to *this* change, and a second copy of the floor drifts
+from the first.
+
+**`[FIX]` requires a reproduction criterion.** When the tag is `[FIX]`, acceptance criteria must
+include one naming the test that fails before the fix and passes after — that is what makes the
+reproduction gradable rather than asserted. The **Tag** field is what carries this to the verifier:
+without it a `[FIX]` contract that silently omits the criterion is indistinguishable from a
+well-formed non-`[FIX]` one, and the omission is exactly what needs detecting. `docs/conventions.md` (the `[FIX]` row of the
+commit-type table) is the owning rule.
 
 ## Harness Component Assessment
 

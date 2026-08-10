@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] QA contract gates (4 units) (dev v4.4.3) (2026-08-10) → docs/eval-criteria.md
 - [done] deferred markers detected on multi-line backlog items (dev v4.4.2) (2026-08-10)
 - [done] PR #203 Codex review follow-ups (dev v4.4.1) (2026-08-09) → docs/design/tasks-md-sprint-block-boundary.md
 - [done] tasks.md sprint-block boundary leftovers (dev v4.4.0) (2026-08-07) → docs/design/tasks-md-sprint-block-boundary.md

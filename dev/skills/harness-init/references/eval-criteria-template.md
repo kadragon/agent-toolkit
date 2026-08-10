@@ -60,6 +60,7 @@ Before each implementation cycle, the generator and evaluator negotiate a **spri
 ### Sprint Contract: {Feature Name}
 
 **Generator proposes:**
+- Commit tag: {the `[TYPE]` this change will commit under}
 - I will build: {specific scope}
 - Success looks like: {concrete, testable criteria}
 - Out of scope: {explicit exclusions}
@@ -76,6 +77,13 @@ Before each implementation cycle, the generator and evaluator negotiate a **spri
 ```
 
 The contract matters because without it, the evaluator grades against vague expectations and the generator builds against vague goals. Both drift. A written contract gives the evaluator concrete criteria to test against and the generator a clear target.
+
+**A bug-fix contract needs a reproduction criterion.** When the commit tag is the bug-fix type, one
+agreed criterion must name the test that fails before the fix and passes after. The commit tag is
+what carries this to the evaluator — without it in the contract, a bug-fix contract that silently
+omits the criterion is indistinguishable from a well-formed one, and the omission is what needs
+detecting. Your repo's commit-convention doc owns the underlying rule; this is the step that makes
+it gradable.
 
 For long-running builds where sprint decomposition isn't needed (model can sustain coherent work for hours), the contract still applies — just at the feature level rather than the sprint level.
 

@@ -20,31 +20,6 @@ Source: `docs/design/harness-self-improvement-loop.md` D4.
 
 Source: `docs/design/harness-self-improvement-loop.md` D6.
 
-## Harness — Definition of Done floor
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`references/definition-of-done.md`), 2026-08-10. `.claude/agents/qa-verifier.md` → `## Checks
-(always run)` already carries a standing floor (version bump, capture-before-use, lint/test exit 0),
-so this extends that one list rather than creating a second that can drift from it.
-
-- [ ] [HARNESS] Extend qa-verifier's `## Checks (always run)` with the missing standing gates (no out-of-scope edits, owning doc synced) and reference that list from the Sprint Contract template in `docs/eval-criteria.md`
-
-## Harness — adversarial framing in the QA brief
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/doubt-driven-development/SKILL.md`), 2026-08-10. Both skills currently tell the verifier to
-check "against those criteria rather than impressions" — neutral phrasing, with no instruction to
-hunt for violations.
-
-- [ ] [HARNESS] Add an explicit "find violations, do not confirm compliance" instruction to the qa-verifier spawn brief in `task-new` and `task-next`, and state that the orchestrator's own reasoning is not passed to the verifier
-
-## Harness — contract-misread class in the QA retry path
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/doubt-driven-development/SKILL.md` → RECONCILE precedence), 2026-08-10.
-
-- [ ] [HARNESS] Route a blocking QA finding caused by an unclear or incomplete Sprint Contract to a contract fix before any implementer respawn — `task-new` and `task-next` today send every blocking finding to `implementer`, so a contract defect is re-litigated as an implementation defect
-
 ## Harness — non-interactive defaults for `task-*` gates
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
@@ -82,15 +57,6 @@ the "Do NOT commit" rule reserves committing for `task-review` Step 1, one commi
 
 - [ ] [HARNESS] Require a per-item lint/test checkpoint inside `task-next`'s default ≥2-item group sprint instead of a single QA pass at the end, so a failure in the first item cannot hide until handoff
 
-## Harness — `[FIX]` reproduction criterion in the Sprint Contract
-
-Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
-(`skills/test-driven-development/SKILL.md` Prove-It), 2026-08-10. `docs/conventions.md` already
-states `[FIX] | Bug fix — requires reproduction step before fix`; no contract-authoring step turns it
-into something `qa-verifier` can check.
-
-- [ ] [HARNESS] Require an acceptance criterion naming a test that fails before the fix whenever the Sprint Contract's tag is `[FIX]`, citing `docs/conventions.md` as the owning rule
-
 ## Harness — deterministic skill trigger/collision check
 
 Source: comparison against [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
@@ -99,6 +65,26 @@ Source: comparison against [addyosmani/agent-skills](https://github.com/addyosma
 test, against this repo's mechanical-enforcement-first rule.
 
 - [ ] [HARNESS] Build a CI check that ranks each skill's `description:` against declared positive/negative prompts and flags near-collisions between two descriptions *(deferred: needs a `docs/design/` spec first — new script plus per-skill fixtures across every dev and prod skill, not one sprint)*
+
+## Review Backlog
+
+### PR #208 — QA contract gates
+
+Out-of-scope findings from the PR #208 review cycle (Codex + Claude), verifier-graded, 2026-08-10.
+
+- [ ] [HARNESS] Carry the standing-checks floor into the role-less verifier brief in `task-new` and `task-next` — `harness-init` creates no agent roles, so the `general-purpose` fallback brief passes only acceptance criteria, paths and lint/test command, and silently skips the floor that `docs/eval-criteria.md` now says every contract inherits *(pre-existing gap, not introduced by #208)*
+- [ ] [HARNESS] Add the `[FIX]` reproduction row to `dev/skills/harness-init/references/conventions-template.md` — it ships only the bare `TYPE: FEAT | FIX | …` line, so a repo generated from it gets the eval-criteria rule with no owning convention to cite
+
+## Harness — `prune-backlog` heading cascade deletes untouched prose-only sections
+
+Found by `qa-verifier` during the QA contract gates sprint (dev v4.4.3), 2026-08-10. The cascade is
+documented in `task-next`/`task-new` as "A heading is dropped only where this sprint left its whole
+section blank, so `[x]`/`[>]` history, prose and surviving child headings all keep their ancestors
+alive" — but the run that pruned this sprint's 4 items also deleted the five prose-only
+`## Self-improvement loop — …` headings, which held no `- [ ]` line before the run and were not
+emptied by it. Restored by hand in that sprint; the script is unchanged.
+
+- [ ] [FIX] Make `task_nodes.py` `prune-backlog` drop a heading only when *this run's* deletions emptied it, so a section that was already item-less (prose-only) survives — reproduction: a `backlog.md` with a prose-only h2 above the pruned group
 
 ## Harness — `task-*` edge enforcement (rescoped)
 
