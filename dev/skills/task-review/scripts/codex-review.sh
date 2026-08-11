@@ -58,12 +58,14 @@ EX_LOCKED=75
 # Windows/MINGW is the only platform where the two PID spaces below diverge, so the selector is
 # resolved once. Overridable purely so both branches stay reachable from test_codex_review.py,
 # which runs on a Linux CI runner (same device test_ci_wait.sh's timing constants use).
-CODEX_REVIEW_PLATFORM="${CODEX_REVIEW_PLATFORM:-$(
+# Keep the case statement outside command substitution: macOS's Bash 3.2 rejects a case statement
+# nested inside the `${var:-$(...)}` expansion at execution time, even though `bash -n` accepts it.
+if [ -z "${CODEX_REVIEW_PLATFORM:-}" ]; then
   case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN*) printf 'windows' ;;
-    *) printf 'posix' ;;
+    MINGW* | MSYS* | CYGWIN*) CODEX_REVIEW_PLATFORM="windows" ;;
+    *) CODEX_REVIEW_PLATFORM="posix" ;;
   esac
-)}"
+fi
 
 # Liveness of a *native* PID — companion and broker PIDs are written by Node, so on MINGW they are
 # Windows PIDs that `kill -0` cannot see (Git Bash keeps its own MSYS PID space). `tasklist` output
