@@ -229,9 +229,11 @@ here.
 - **Replacing `skill-creator`'s model-judged runner.** It stays the semantic tier; this check
   is the deterministic tier beneath it. Neither subsumes the other.
 - **Embedding / LLM-based similarity, and any network call or new dependency** in CI.
-- **Rewriting descriptions into Korean, or any change to the repo's description-language
-  policy** (grill Q5 rejected this route). Only the specific cross-pointer edit §6 predicts
-  is in scope for the implementing tickets.
+- **Rewriting descriptions into Korean as a repository-wide policy**, or changing that policy,
+  remains out of scope (grill Q5 rejected this route). The approved bilingual
+  `prod/skills/hwpx/SKILL.md` description is a single corpus fixture for exercising `ko`
+  scoring; it does not change the repository-wide description-language policy. Only the
+  specific cross-pointer edit §6 predicts is otherwise in scope for the implementing tickets.
 - **A coverage floor on negative queries** — reported, not gated, until fixtures accumulate.
 - **Any claim that passing this check means a skill fires correctly.** The check's own report
   wording must not overstate it.
@@ -323,8 +325,8 @@ The head of the distribution, with each pair's mutual-pointer status at measurem
 
 Adding a pointer inserts the other skill's name tokens into a description, so it **raises** that
 pair's cosine and perturbs every IDF weight. The post-edit distribution was therefore re-measured
-rather than assumed: max **0.5880** · p99 0.3869 · p95 0.2365 · p90 0.1808 · median 0.0528 ·
-mean 0.0868 · stdev 0.0975 · min 0.0000 (floor-index percentiles, as above).
+rather than assumed: max **0.5880** · p99 0.3869 · p95 0.2365 · p90 0.1808 · median 0.0523 ·
+mean 0.0848 · stdev 0.0984 · min 0.0000 (floor-index percentiles, as above).
 
 τ = 0.25 still selects exactly the four intended pairs and nothing else: they rose (as intended,
 since each now names its neighbor), and the highest pair *without* mutual pointers is
