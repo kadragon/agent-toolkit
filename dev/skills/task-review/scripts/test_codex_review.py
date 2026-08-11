@@ -41,6 +41,15 @@ PASS = "\033[92mPASS\033[0m"
 FAIL = "\033[91mFAIL\033[0m"
 _results = []
 
+# Deliberately retain the pre-fix form so the compatibility fixture below proves that its
+# assertion actually detects the macOS Bash 3.2 parse failure.
+BROKEN_PLATFORM_SELECTOR = '''CODEX_REVIEW_PLATFORM="${CODEX_REVIEW_PLATFORM:-$(
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) printf 'windows' ;;
+    *) printf 'posix' ;;
+  esac
+)}"'''
+
 
 def bash_path(path) -> str:
     """`C:\\x\\y` → `/c/x/y`. The script consumes these as globs, which backslashes break."""
@@ -48,6 +57,46 @@ def bash_path(path) -> str:
     if os.name == "nt" and len(text) > 1 and text[1] == ":":
         return "/" + text[0].lower() + text[2:].replace("\\", "/")
     return text
+
+
+def selector_probe(selector_block: str) -> str:
+    """Run only the selector in a shell that reproduces Bash 3.2's parse behavior."""
+    return f'''set -eu
+unset CODEX_REVIEW_PLATFORM
+{selector_block}
+printf '%s\\n' "$CODEX_REVIEW_PLATFORM"
+'''
+
+
+def selector_compat_shell() -> str | None:
+    """Find a local shell that rejects the broken selector like macOS Bash 3.2."""
+    candidates = ["/bin/bash", shutil.which("dash"), "/bin/sh", shutil.which("bash")]
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        proc = subprocess.run(
+            [candidate, "-c", selector_probe(BROKEN_PLATFORM_SELECTOR)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if "syntax error" in proc.stderr:
+            return candidate
+    return None
+
+
+def platform_selector_block() -> str | None:
+    """Extract the shipped selector so the compatibility fixture tests the real source."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    start = source.find('if [ -z "${CODEX_REVIEW_PLATFORM:-}" ]; then')
+    if start < 0:
+        return None
+    end = source.find("\nfi", start)
+    if end < 0:
+        return None
+    return source[start : end + len("\nfi")]
 
 
 class LiveShell:
@@ -407,6 +456,8 @@ def case_default_platform_selector(tmp: Path, _live: int):
 
     macOS ships Bash 3.2, which rejects the old case-inside-command-substitution form at runtime.
     The existing cases override CODEX_REVIEW_PLATFORM, so this path needs an explicit regression.
+    The selector-only compatibility fixture runs the real shipped block under a shell that rejects
+    the old form, keeping the regression red on Linux CI as well as on macOS.
     """
     print("\ndefault platform selector")
     repo = make_repo(tmp, "wsdefaultselector")
@@ -417,8 +468,32 @@ def case_default_platform_selector(tmp: Path, _live: int):
     )
     proc = run(repo, tmp, platform=None, companion=bash_path(companion))
     check("default selector reaches companion", proc.returncode == 0, proc.stderr[-400:])
+    check("default selector emits no shell syntax error", "syntax error" not in proc.stderr, proc.stderr[-400:])
     check("default selector emits review", proc.stdout.strip() == "review via default selector", proc.stdout)
     check("default selector invokes companion once", calls.read_text(encoding="utf-8") == "1")
+
+    selector = platform_selector_block()
+    compat_shell = selector_compat_shell()
+    check("selector has explicit compatibility guard", selector is not None)
+    check("Bash 3.2 compatibility fixture available", compat_shell is not None)
+    if selector is None or compat_shell is None:
+        return
+
+    fixed = subprocess.run(
+        [compat_shell, "-c", selector_probe(selector)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    broken = subprocess.run(
+        [compat_shell, "-c", selector_probe(BROKEN_PLATFORM_SELECTOR)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    check("broken selector rejected by compatibility fixture", "syntax error" in broken.stderr, broken.stderr[-400:])
+    check("fixed selector accepted by compatibility fixture", "syntax error" not in fixed.stderr, fixed.stderr[-400:])
+    check("fixed selector resolves a platform", fixed.stdout.strip() in {"posix", "windows"}, fixed.stdout)
 
 
 def case_empty_payload_retries_after_prune(tmp: Path, _live: int):
