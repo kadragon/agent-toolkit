@@ -499,6 +499,155 @@ def test_ranking_regressions():
         )
 
 
+def test_fail_closed_discovery_edges():
+    print("\nfail-closed discovery edges — duplicate names, parse errors, BOM, waived shape")
+
+    # F1 — two skills declaring the same `name:` in different plugin roots must fail
+    # closed and name both paths, not silently let the later one win.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/dup/SKILL.md": skill_md("dup", "does a thing in dev"),
+                "prod/skills/dup/SKILL.md": skill_md("dup", "does a thing in prod"),
+                "dev/skills/other/SKILL.md": skill_md(
+                    "other", "manages widget inventory and warehouse restocking"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "duplicate skill name across plugin roots fails and names both paths",
+            failed
+            and "duplicate skill name" in out
+            and "dev/skills/dup/SKILL.md" in out
+            and "prod/skills/dup/SKILL.md" in out,
+            out,
+        )
+
+    # F2 — a frontmatter parse error must fail the run, not just print ERROR and
+    # exit 0 (the skill's fixture, if any, is silently dropped from scoring).
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/broken/SKILL.md": "no frontmatter here at all\n",
+                "dev/skills/inventory/SKILL.md": skill_md(
+                    "inventory", "manages widget inventory and warehouse restocking"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a frontmatter parse error fails the run, not just prints ERROR",
+            failed and "ERROR dev/skills/broken/SKILL.md" in out and "not be scored" in out,
+            out,
+        )
+
+    # F7 — a leading UTF-8 BOM must be a parse error, mirroring
+    # check_skill_frontmatter.py's split_frontmatter, not silently stripped.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/bommed/SKILL.md": (
+                    "﻿" + skill_md("bommed", "does a bommed thing")
+                ),
+                "dev/skills/inventory/SKILL.md": skill_md(
+                    "inventory", "manages widget inventory and warehouse restocking"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a leading UTF-8 BOM is treated as a parse error (fails, not stripped)",
+            failed and "ERROR dev/skills/bommed/SKILL.md" in out and "BOM" in out,
+            out,
+        )
+
+    # F3 — a waived entry without a boolean `should_trigger` is malformed, not
+    # silently skipped.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": skill_md(
+                    "inventory", "manages widget inventory and warehouse restocking"
+                ),
+                "dev/skills/inventory/evals/trigger-eval.json": json.dumps(
+                    [{"query": "restock the widgets", "waived": "some reason"}]
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a waived entry missing `should_trigger` is rejected as malformed",
+            failed and "missing a boolean `should_trigger`" in out,
+            out,
+        )
+
+    # F3 — an empty or whitespace-only `waived` reason is malformed.
+    for label, reason in [("empty", ""), ("whitespace-only", "   ")]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(
+                Path(tmp),
+                {
+                    "dev/skills/inventory/SKILL.md": skill_md(
+                        "inventory", "manages widget inventory and warehouse restocking"
+                    ),
+                    "dev/skills/inventory/evals/trigger-eval.json": json.dumps(
+                        [
+                            {
+                                "query": "restock the widgets",
+                                "should_trigger": True,
+                                "waived": reason,
+                            }
+                        ]
+                    ),
+                },
+            )
+            lines, failed = run_report(root)
+            out = "\n".join(lines)
+            check(
+                f"a `waived` reason that is {label} is rejected as malformed",
+                failed and "non-empty, non-whitespace string" in out,
+                out,
+            )
+
+    # F8 — the vacuous-floor message must name the unscorable cause when that is
+    # what actually consumed the positives, not just "language or waived".
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": skill_md(
+                    "inventory", "manages widget inventory and warehouse restocking"
+                ),
+                "dev/skills/inventory/evals/trigger-eval.json": json.dumps(
+                    [
+                        {
+                            "query": "xyzzy plugh quux corge grault",
+                            "should_trigger": True,
+                        }
+                    ]
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "vacuous-floor message names the unscorable cause, not just language/waived",
+            failed
+            and "0 scorable positive queries" in out
+            and "unscorable" in out,
+            out,
+        )
+
+
 def test_real_repo_shape():
     print("\nreal-repo sanity (invoked against this repo's own root)")
     root = mod.REPO_ROOT
@@ -510,6 +659,7 @@ def main():
     test_tokenize_and_class()
     test_corpus_ranking()
     test_ranking_regressions()
+    test_fail_closed_discovery_edges()
     test_real_repo_shape()
 
     total = len(_results)

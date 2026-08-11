@@ -130,7 +130,8 @@ matches the owning description's class**. Skipped queries are counted per skill 
 they remain in the file for `skill-creator`'s model-judged runner, which has no such limit.
 
 **Fail-closed floor:** a fixture must yield **≥1 scorable positive** query. This is
-satisfiable today (`persona-debate` has 3 English positives) and it is what stops a fixture
+satisfiable today, if barely — `persona-debate` measures 1 scorable English positive out
+of 20 declared queries (19 skipped by language mismatch) — and it is what stops a fixture
 from existing while covering nothing — the vacuous-gate failure mode
 `check_skill_frontmatter.py` already guards with its `asset_count == 0` check. No minimum is
 imposed on negatives in this slice: `persona-debate` currently has **0 scorable negatives**,

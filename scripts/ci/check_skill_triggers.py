@@ -16,11 +16,15 @@ model-judged router `skill-creator`'s `run_eval.py` performs. It scores a
 distinctive enough to win its own declared queries — never a sufficient one.
 Passing this check does not certify that a skill fires correctly in practice.
 
-Algorithm (measured against the real repo; see the ticket that added this file for
-the reference numbers):
+Algorithm (measured against the real repo — 13-skill corpus; persona-debate scores
+1/20 declared queries: 19 skipped by language mismatch, 0 scorable negatives; see
+`docs/design/skill-trigger-collision-check.md` for the full numbers):
 
 - Corpus = every discovered skill's `description:` string.
-- Tokenizer: `[a-z0-9]+|[가-힣]+` on the lowercased string.
+- Tokenizer: `[a-z0-9]+|[가-힣]+` on the lowercased string. Known limitation (tracked
+  as follow-up in `backlog.md`, not fixed here): this tokenizes Korean as whole
+  agglutinated forms, so `정책에` and `정책을` never share a token — the `ko` scoring
+  path exists but is not functional against inflected Korean today.
 - tf = 1 + log(count); idf = log((N+1)/(df+1)) + 1 (smoothed, like sklearn's
   `TfidfVectorizer(sublinear_tf=True)`); vectors L2-normalized; cosine = dot product
   of normalized vectors.
@@ -115,7 +119,15 @@ def parse_description(path: Path) -> tuple[str | None, str | None, str | None]:
         return None, None, f"could not read file: {exc}"
 
     lines = text.splitlines()
-    if not lines or lines[0].strip().lstrip("﻿") != "---":
+    if not lines:
+        return None, None, "no `---` frontmatter block to parse"
+    if lines[0].startswith("﻿"):
+        return None, None, (
+            "frontmatter delimiter is preceded by a UTF-8 BOM — the loader reads "
+            "`\\ufeff---`, not `---`, and drops all metadata "
+            "(check_skill_frontmatter.py rejects this shape; mirrored here)"
+        )
+    if lines[0].strip() != "---":
         return None, None, "no `---` frontmatter block to parse"
     end = None
     for i in range(1, len(lines)):
@@ -237,14 +249,11 @@ def load_fixture(path: Path) -> tuple[list | None, str | None]:
         if not isinstance(query, str) or not query.strip():
             return None, f"element [{i}] missing a non-empty `query` string"
         waived = entry.get("waived")
-        if waived is not None and not isinstance(waived, str):
-            return None, f"element [{i}] `waived` must be a string"
+        if waived is not None and (not isinstance(waived, str) or not waived.strip()):
+            return None, f"element [{i}] `waived` must be a non-empty, non-whitespace string"
         should_trigger = entry.get("should_trigger")
-        if waived is None:
-            if not isinstance(should_trigger, bool):
-                return None, f"element [{i}] missing a boolean `should_trigger`"
-        elif should_trigger is not None and not isinstance(should_trigger, bool):
-            return None, f"element [{i}] `should_trigger` must be a boolean when present"
+        if not isinstance(should_trigger, bool):
+            return None, f"element [{i}] missing a boolean `should_trigger`"
 
     return data, None
 
@@ -264,17 +273,30 @@ def build_report(root: Path) -> tuple[list[str], bool]:
 
     descriptions: dict[str, str] = {}
     skill_dirs: dict[str, Path] = {}
+    name_first_path: dict[str, Path] = {}
     for path in skill_files:
         name, description, error = parse_description(path)
         rel = str(path.relative_to(root))
         if error:
             lines.append(
                 f"ERROR {rel}: {error} — excluded from the ranking corpus "
-                "(check_skill_frontmatter.py is the gate for this)"
+                "(check_skill_frontmatter.py is the gate for this shape); this "
+                "skill's fixture, if any, will not be scored this run."
             )
+            failed = True
+            continue
+        if name in descriptions:
+            first_rel = str(name_first_path[name].relative_to(root))
+            lines.append(
+                f"FAIL: duplicate skill name {name!r} declared in both {first_rel} "
+                f"and {rel} — the loader routes on `name:`, so two skills sharing "
+                "one is a defect (not caught by check_skill_frontmatter.py)."
+            )
+            failed = True
             continue
         descriptions[name] = description
         skill_dirs[name] = path.parent
+        name_first_path[name] = path
 
     if not descriptions:
         lines.append("FAIL: no skill had a parsable `description:` — zero-size corpus.")
@@ -388,9 +410,17 @@ def build_report(root: Path) -> tuple[list[str], bool]:
         lines.extend(detail_lines)
 
         if scored_pos_pass + scored_pos_fail == 0:
+            causes = []
+            if skipped_lang:
+                causes.append(f"language mismatch ({skipped_lang})")
+            if skipped_unscorable:
+                causes.append(f"unscorable — zero corpus-token overlap ({skipped_unscorable})")
+            if waived_count:
+                causes.append(f"waived ({waived_count})")
+            cause_text = ", ".join(causes) if causes else "no positive queries declared"
             lines.append(
                 f"FAIL {rel_fixture}: 0 scorable positive queries "
-                "(vacuous-fixture floor — every positive was skipped by language or waived)"
+                f"(vacuous-fixture floor — every positive was skipped due to: {cause_text})"
             )
             failed = True
 
