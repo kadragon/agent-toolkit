@@ -193,6 +193,12 @@ git -c core.hooksPath=/dev/null -c commit.gpgsign=false \
 `commit.gpgsign=true` still aborts the commit before any assertion runs. Reference:
 `make_repo_with_base` in `scripts/ci/test_check_skill_triggers.py`.
 
+The same isolation rule covers the **environment**: a checker whose strictness depends on
+`GITHUB_ACTIONS` (or any ambient var) must take it as a parameter defaulted at the `main()`
+entry point, never read it inside the function the tests call. The suite itself runs under
+that variable in CI, so an in-function read silently applies production strictness to every
+throwaway fixture — green locally, red in CI, for reasons the local run cannot reproduce.
+
 ### Validator Discovery (enumerate by path, fail closed)
 
 A CI validator must decide *what it covers* from the path layout, never from the content it is

@@ -325,8 +325,15 @@ def load_fixture(path: Path) -> tuple[list | None, str | None]:
     return data, None
 
 
-def build_report(root: Path) -> tuple[list[str], bool]:
-    """Return (report lines, failed) for a repository root."""
+def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[str], bool]:
+    """Return (report lines, failed) for a repository root.
+
+    `require_diff_base` turns the ratchet's unresolvable-base skip into a failure.
+    It is a parameter rather than an in-line `os.environ` read because this function
+    runs against throwaway fixture repos too, and those legitimately have no
+    `origin/main`: reading the env here would make every fixture repo fail the moment
+    the suite itself runs under CI. `main()` is the one place that reads the env.
+    """
     lines: list[str] = []
     failed = False
 
@@ -502,7 +509,7 @@ def build_report(root: Path) -> tuple[list[str], bool]:
 
     lines.append("----")
     changed, skip_reason = changed_skill_files(root)
-    if skip_reason and os.environ.get(CI_ENV_VAR) == "true":
+    if skip_reason and require_diff_base:
         # Fail-open is a local convenience, never a CI one: in CI the base is
         # supplied by fetch-depth: 0, so an unresolvable base means that setting
         # was lost — and a silently-skipped gate is exactly the regression this
@@ -553,7 +560,9 @@ def build_report(root: Path) -> tuple[list[str], bool]:
 
 
 def main() -> int:
-    lines, failed = build_report(REPO_ROOT)
+    lines, failed = build_report(
+        REPO_ROOT, require_diff_base=os.environ.get(CI_ENV_VAR) == "true"
+    )
     for line in lines:
         print(line)
 

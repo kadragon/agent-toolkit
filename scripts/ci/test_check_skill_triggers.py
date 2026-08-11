@@ -25,7 +25,6 @@ Run: python3 scripts/ci/test_check_skill_triggers.py
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -120,8 +119,8 @@ def skill_md(name: str, description: str) -> str:
     return f"---\nname: {name}\ndescription: {json.dumps(description)}\n---\n\n# {name}\n"
 
 
-def run_report(root: Path) -> tuple[list, bool]:
-    return mod.build_report(root)
+def run_report(root: Path, **kwargs) -> tuple[list, bool]:
+    return mod.build_report(root, **kwargs)
 
 
 def test_tokenize_and_class():
@@ -829,21 +828,16 @@ def test_ratchet():
             out,
         )
 
-        # R6 — the same unresolvable state under GITHUB_ACTIONS is a lost
-        # `fetch-depth: 0`, i.e. a silently disabled gate. It must fail there,
-        # otherwise dropping that setting turns the ratchet off with a green tick.
-        previous = os.environ.get(mod.CI_ENV_VAR)
-        os.environ[mod.CI_ENV_VAR] = "true"
-        try:
-            lines, failed = run_report(root)
-        finally:
-            if previous is None:
-                del os.environ[mod.CI_ENV_VAR]
-            else:
-                os.environ[mod.CI_ENV_VAR] = previous
+        # R6 — the same unresolvable state in CI is a lost `fetch-depth: 0`, i.e. a
+        # silently disabled gate, so it must fail there. `require_diff_base` is passed
+        # explicitly rather than via os.environ: this whole suite runs under
+        # GITHUB_ACTIONS in CI, and an env read inside build_report would make every
+        # fixture repo above (none of which has an origin/main) fail.
+        lines, failed = run_report(root, require_diff_base=True)
         out = "\n".join(lines)
         check(
-            "an unresolvable diff base FAILS under GITHUB_ACTIONS (fail-open is local-only)",
+            "an unresolvable diff base FAILS when the base is required (CI); "
+            "fail-open is local-only",
             failed and "FAIL Ratchet" in out and "fetch-depth: 0" in out,
             out,
         )
