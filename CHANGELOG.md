@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- [done] Fix macOS Bash 3.2 Codex selector with CI-safe regression fixture (dev v4.4.16) (2026-08-11)
+- [done] Fix macOS Bash 3.2 selector with CI-safe cross-platform regression guard (dev v4.4.17) (2026-08-11)
 - [done] Codex review transient payload retry (dev v4.4.13) (2026-08-11)
 - [done] Harness — near-collision gate (Half B) (dev v4.4.12) (2026-08-11)
 - [done] Pin collision threshold τ=0.25 and cross-point four near-collision pairs (dev v4.4.12) (2026-08-11) → docs/design/skill-trigger-collision-check.md

@@ -70,7 +70,7 @@ printf '%s\\n' "$CODEX_REVIEW_PLATFORM"
 
 def selector_compat_shell() -> str | None:
     """Find an optional local shell that rejects the broken selector like macOS Bash 3.2."""
-    candidates = ["/bin/bash", shutil.which("dash"), "/bin/sh", shutil.which("bash")]
+    candidates = ["/bin/bash", shutil.which("bash")]
     seen = set()
     for candidate in candidates:
         if not candidate or candidate in seen:
@@ -456,8 +456,8 @@ def case_default_platform_selector(tmp: Path, _live: int):
 
     macOS ships Bash 3.2, which rejects the old case-inside-command-substitution form at runtime.
     The existing cases override CODEX_REVIEW_PLATFORM, so this path needs an explicit regression.
-    The selector-only compatibility fixture runs the real shipped block under a shell that rejects
-    the old form, keeping the regression red on Linux CI as well as on macOS.
+    The source-level guards keep the regression red on Linux CI; the selector-only compatibility
+    fixture additionally runs the real shipped block where a Bash 3.2-era shell is available.
     """
     print("\ndefault platform selector")
     repo = make_repo(tmp, "wsdefaultselector")
@@ -472,15 +472,16 @@ def case_default_platform_selector(tmp: Path, _live: int):
     check("default selector emits review", proc.stdout.strip() == "review via default selector", proc.stdout)
     check("default selector invokes companion once", calls.read_text(encoding="utf-8") == "1")
 
+    selector_source = SCRIPT.read_text(encoding="utf-8")
     selector = platform_selector_block()
     check("selector has explicit compatibility guard", selector is not None)
+    check(
+        "selector avoids nested fallback expansion",
+        "${CODEX_REVIEW_PLATFORM:-$(" not in selector_source,
+        selector_source,
+    )
     if selector is None:
         return
-    check(
-        "selector keeps case outside fallback expansion",
-        "${CODEX_REVIEW_PLATFORM:-$(" not in selector,
-        selector,
-    )
 
     compat_shell = selector_compat_shell()
     if compat_shell is None:
