@@ -325,8 +325,8 @@ The head of the distribution, with each pair's mutual-pointer status at measurem
 
 Adding a pointer inserts the other skill's name tokens into a description, so it **raises** that
 pair's cosine and perturbs every IDF weight. The post-edit distribution was therefore re-measured
-rather than assumed: max **0.5880** · p99 0.3869 · p95 0.2365 · p90 0.1808 · median 0.0528 ·
-mean 0.0868 · stdev 0.0975 · min 0.0000 (floor-index percentiles, as above).
+rather than assumed: max **0.5880** · p99 0.3869 · p95 0.2365 · p90 0.1808 · median 0.0523 ·
+mean 0.0848 · stdev 0.0984 · min 0.0000 (floor-index percentiles, as above).
 
 τ = 0.25 still selects exactly the four intended pairs and nothing else: they rose (as intended,
 since each now names its neighbor), and the highest pair *without* mutual pointers is
