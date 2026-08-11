@@ -203,6 +203,21 @@ jobs:
       - name: Run scripts/ci/check_skill_frontmatter.py
         run: python3 scripts/ci/check_skill_frontmatter.py
 
+  skill-triggers:
+    name: Skill trigger-fixture ranking check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Run scripts/ci/test_check_skill_triggers.py
+        run: python3 scripts/ci/test_check_skill_triggers.py
+
+      - name: Run scripts/ci/check_skill_triggers.py
+        run: python3 scripts/ci/check_skill_triggers.py
+
   version-bump:
     name: Plugin version bump check
     runs-on: ubuntu-latest
