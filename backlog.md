@@ -22,13 +22,6 @@ both skills in the pair and state that the fix is a cross-pointer, not a suppres
 
 - [ ] [HARNESS] Extend `check_skill_triggers.py` with the pairwise cosine collision gate at the τ recorded by ticket 2, failing only a pair at or above τ where either description does not name the other, and record the calibration basis in the module docstring *(blocked by: 2-cross-pointers)*
 
-## Harness — trigger fixture ratchet on touched SKILL.md
-
-Independent of tickets 2–3; needs only ticket 1's script and job. Converts the 12 missing
-fixtures into incremental, evidence-driven work instead of one bulk authoring sprint.
-
-- [ ] [HARNESS] Fail `check_skill_triggers.py` when `git diff origin/main...HEAD` shows a changed `*/skills/*/SKILL.md` whose skill has no `evals/trigger-eval.json`, naming the skill, and add `fetch-depth: 0` to the `skill-triggers` job so the diff base is available
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

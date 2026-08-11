@@ -56,10 +56,23 @@ Pass bar:
   overlap) never count toward this tally — a fixture whose only positive is
   unscoreable still fails the floor, correctly, since it covers nothing.
 
+Ratchet (design doc §2): 12 of the 13 skills have no fixture, and bulk-authoring them
+was rejected — a fixture reverse-engineered from the very description it is meant to
+test is circular. So coverage arrives incrementally: a branch that **changes** a
+`*/skills/*/SKILL.md` must leave that skill with an `evals/trigger-eval.json`, which
+puts each fixture in the hands of whoever is already reasoning about that skill's
+triggering. Scope is the diff, never the repo — an untouched skill without a fixture
+is not a violation. Deletions are excluded (a removed skill needs no fixture). The
+diff base is `origin/main`, resolved the way the `version-bump` job does; when it is
+unresolvable (fresh or shallow clone, no remote) the ratchet reports a NOTE and is
+skipped rather than failing, since CI supplies the base via `fetch-depth: 0` and a
+local run must not go red for lacking a remote it never fetched.
+
 Usage: python3 scripts/ci/check_skill_triggers.py
-Exit: 0 if every scored query and every fixture's floor passes, 1 on any violation
-(including discovery finding zero skills, or a malformed fixture), 2 if PyYAML is
-unavailable. Always prints a full report before the verdict.
+Exit: 0 if every scored query, every fixture's floor and the ratchet pass, 1 on any
+violation (including discovery finding zero skills, a malformed fixture, or a changed
+SKILL.md with no fixture), 2 if PyYAML is unavailable. Always prints a full report
+before the verdict.
 """
 
 from __future__ import annotations
@@ -97,14 +110,64 @@ TOKEN_RE = re.compile(r"[a-z0-9]+|[가-힣]+")
 KO_THRESHOLD = 0.30
 TIE_EPSILON = 1e-9
 
+# One pathspec for both discovery and the ratchet: a skill the ratchet can flag must be
+# a skill the corpus can see, and two copies of this glob would drift apart silently.
+SKILL_PATHSPEC = "*/skills/*/SKILL.md"
+DIFF_BASE = "origin/main"
+
 
 def list_skill_files(root: Path) -> list[Path]:
     tracked = subprocess.check_output(
-        ["git", "-c", "core.quotePath=false", "ls-files", "--", "*/skills/*/SKILL.md"],
+        ["git", "-c", "core.quotePath=false", "ls-files", "--", SKILL_PATHSPEC],
         text=True,
         cwd=root,
     ).splitlines()
     return sorted(root / rel for rel in tracked)
+
+
+def changed_skill_files(root: Path) -> tuple[list[str], str | None]:
+    """Return (rel paths of SKILL.md changed vs DIFF_BASE, skip_reason).
+
+    `skip_reason` is set (and the list empty) when the diff base cannot be resolved —
+    a fresh clone, a shallow fetch, or no remote at all. That is a *skip*, not a
+    violation: CI supplies the base with `fetch-depth: 0`, so the only runs reaching
+    this path are local ones, which must not go red for a ref they never fetched.
+    """
+    unresolved = (
+        f"diff base `{DIFF_BASE}` unresolvable — ratchet skipped "
+        "(CI's skill-triggers job fetches it via fetch-depth: 0)"
+    )
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{DIFF_BASE}^{{commit}}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode != 0:
+            return [], unresolved
+
+        changed = subprocess.check_output(
+            [
+                "git",
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--name-only",
+                # lowercase `d` EXCLUDES deletions: a removed SKILL.md is a removed
+                # skill, and demanding a fixture for it would be unsatisfiable.
+                "--diff-filter=d",
+                f"{DIFF_BASE}...HEAD",
+                "--",
+                SKILL_PATHSPEC,
+            ],
+            text=True,
+            cwd=root,
+        ).splitlines()
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return [], f"{unresolved} [{exc}]"
+
+    return sorted(rel for rel in changed if rel.strip()), None
 
 
 def parse_description(path: Path) -> tuple[str | None, str | None, str | None]:
@@ -274,6 +337,7 @@ def build_report(root: Path) -> tuple[list[str], bool]:
     descriptions: dict[str, str] = {}
     skill_dirs: dict[str, Path] = {}
     name_first_path: dict[str, Path] = {}
+    path_name: dict[str, str] = {}
     for path in skill_files:
         name, description, error = parse_description(path)
         rel = str(path.relative_to(root))
@@ -297,6 +361,7 @@ def build_report(root: Path) -> tuple[list[str], bool]:
         descriptions[name] = description
         skill_dirs[name] = path.parent
         name_first_path[name] = path
+        path_name[rel] = name
 
     if not descriptions:
         lines.append("FAIL: no skill had a parsable `description:` — zero-size corpus.")
@@ -427,8 +492,39 @@ def build_report(root: Path) -> tuple[list[str], bool]:
     if not any_fixture:
         lines.append(
             "No skill has an evals/trigger-eval.json yet — nothing to score "
-            "(the ratchet requiring one is a separate ticket)."
+            "(the ratchet below is what grows this coverage, one touched skill "
+            "at a time)."
         )
+
+    lines.append("----")
+    changed, skip_reason = changed_skill_files(root)
+    if skip_reason:
+        lines.append(f"Ratchet: NOTE — {skip_reason}")
+    elif not changed:
+        lines.append(f"Ratchet: no {SKILL_PATHSPEC} changed vs {DIFF_BASE} — nothing to require.")
+    else:
+        lines.append(
+            f"Ratchet: {len(changed)} changed {SKILL_PATHSPEC} vs {DIFF_BASE}."
+        )
+        for rel in changed:
+            skill_dir = (root / rel).parent
+            fixture_path = skill_dir / "evals" / "trigger-eval.json"
+            rel_fixture = str(fixture_path.relative_to(root))
+            # Fall back to the directory name when the frontmatter did not parse —
+            # that case already failed the run on its own, and a missing `name:` must
+            # not swallow the ratchet's verdict for the same file.
+            name = path_name.get(rel, skill_dir.name)
+            if fixture_path.exists():
+                lines.append(f"  OK   {rel} — {rel_fixture} present")
+            else:
+                lines.append(
+                    f"  FAIL {rel}: skill {name!r} changed on this branch but has no "
+                    f"{rel_fixture} — a branch touching a skill's SKILL.md must leave "
+                    "that skill with a trigger fixture (ratchet, "
+                    "docs/design/skill-trigger-collision-check.md §2). Add the queries "
+                    "this skill should and should not win."
+                )
+                failed = True
 
     lines.append("----")
     lines.append(
