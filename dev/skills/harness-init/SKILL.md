@@ -2,7 +2,8 @@
 name: harness-init
 description: >-
   Set up or validate a repo's agent infrastructure — AGENTS.md, docs/ index,
-  harness audit. Does NOT modify ~/.claude/CLAUDE.md.
+  harness audit. Does NOT modify ~/.claude/CLAUDE.md. NOT for proposing or
+  pruning individual assets from session evidence → harness-curate.
 ---
 
 # Harness Init

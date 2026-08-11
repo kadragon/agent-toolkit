@@ -6,9 +6,10 @@ description: >-
   instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
   indexed docs/ — for duplicate or conflicting rules. Also audits the auto-memory
   store and promotes repo-scoped facts stuck there into the owning repo's docs/.
-  Routes to the owning creator — never generates itself. Repo structure
-  validation → harness-init.
-version: 1.6.5
+  Routes to the owning creator — never generates itself. NOT for retrospecting
+  the current conversation → harness-capture. Repo structure validation →
+  harness-init.
+version: 1.6.6
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks

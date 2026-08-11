@@ -3,9 +3,10 @@ name: task-tickets
 description: >-
   Break an approved `docs/design/{slug}.md` spec into vertical-slice
   `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
-  order. Confirms granularity with the user first. A single trivial task skips
-  this — write one Sprint Contract directly.
-version: 1.0.2
+  order. Confirms granularity with the user first. NOT for authoring the design
+  doc itself → task-spec. A single trivial task skips this — write one Sprint
+  Contract directly.
+version: 1.0.3
 ---
 
 # To Tickets
