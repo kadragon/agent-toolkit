@@ -65,8 +65,10 @@ triggering. Scope is the diff, never the repo — an untouched skill without a f
 is not a violation. Deletions are excluded (a removed skill needs no fixture). The
 diff base is `origin/main`, resolved the way the `version-bump` job does; when it is
 unresolvable (fresh or shallow clone, no remote) the ratchet reports a NOTE and is
-skipped rather than failing, since CI supplies the base via `fetch-depth: 0` and a
-local run must not go red for lacking a remote it never fetched.
+skipped rather than failing, since a local run must not go red for lacking a remote
+it never fetched. **Under `GITHUB_ACTIONS=true` that same state is a failure, not a
+skip** — CI supplies the base via `fetch-depth: 0`, so its absence means that setting
+was lost, and a gate that quietly skips itself is worse than no gate at all.
 
 Usage: python3 scripts/ci/check_skill_triggers.py
 Exit: 0 if every scored query, every fixture's floor and the ratchet pass, 1 on any
@@ -79,6 +81,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -114,6 +117,7 @@ TIE_EPSILON = 1e-9
 # a skill the corpus can see, and two copies of this glob would drift apart silently.
 SKILL_PATHSPEC = "*/skills/*/SKILL.md"
 DIFF_BASE = "origin/main"
+CI_ENV_VAR = "GITHUB_ACTIONS"
 
 
 def list_skill_files(root: Path) -> list[Path]:
@@ -498,7 +502,18 @@ def build_report(root: Path) -> tuple[list[str], bool]:
 
     lines.append("----")
     changed, skip_reason = changed_skill_files(root)
-    if skip_reason:
+    if skip_reason and os.environ.get(CI_ENV_VAR) == "true":
+        # Fail-open is a local convenience, never a CI one: in CI the base is
+        # supplied by fetch-depth: 0, so an unresolvable base means that setting
+        # was lost — and a silently-skipped gate is exactly the regression this
+        # check exists to stop.
+        lines.append(
+            f"FAIL Ratchet: {skip_reason} — but {CI_ENV_VAR}=true, where the base "
+            "is guaranteed by `fetch-depth: 0` on the skill-triggers job. Restore "
+            "it; a skipped ratchet in CI is a disabled gate, not a pass."
+        )
+        failed = True
+    elif skip_reason:
         lines.append(f"Ratchet: NOTE — {skip_reason}")
     elif not changed:
         lines.append(f"Ratchet: no {SKILL_PATHSPEC} changed vs {DIFF_BASE} — nothing to require.")

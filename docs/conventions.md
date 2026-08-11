@@ -178,6 +178,21 @@ went red under mutation, and the suite still missed a parent with *no* preamble 
 from under its surviving child. The shared, unstated precondition was the blind spot — so when a
 fixture family holds some structural fact constant, add the case where it does not hold.
 
+### Throwaway Git Fixtures Need the Ambient Config Neutralized
+
+A test that builds a temp repo inherits the developer's global git config, so it can pass on
+one machine and fail on another. Pass the neutralizers per-command (`git -c ...`), never by
+mutating global state:
+
+```sh
+git -c core.hooksPath=/dev/null -c commit.gpgsign=false \
+    -c user.name=test -c user.email=test@example.invalid commit --no-verify -q -m msg
+```
+
+`--no-verify` is **not** sufficient on its own: it skips hooks but not signing, so a global
+`commit.gpgsign=true` still aborts the commit before any assertion runs. Reference:
+`make_repo_with_base` in `scripts/ci/test_check_skill_triggers.py`.
+
 ### Validator Discovery (enumerate by path, fail closed)
 
 A CI validator must decide *what it covers* from the path layout, never from the content it is
@@ -191,6 +206,11 @@ Two consequences, both mandatory:
    every member to be valid. Content may add files to the set, never remove them from it.
 2. An empty target set is a **failure**, not a pass. A gate that silently covers zero files is
    indistinguishable from a passing one in the CI summary.
+3. A missing **precondition** is likewise a failure in CI, whatever it may be locally. A check
+   that needs something CI guarantees — `check_skill_triggers.py`'s ratchet needs the
+   `origin/main` diff base that `fetch-depth: 0` fetches — may degrade to a skip on a
+   developer's machine, but must fail under `GITHUB_ACTIONS=true`. Otherwise deleting that one
+   workflow line disables the gate and CI still reports green.
 
 Reference implementation: `scripts/ci/check_skill_frontmatter.py`.
 

@@ -11,7 +11,8 @@ Two load-bearing groups:
   fixture whose scorable positives number 0;
 * the ratchet — a changed SKILL.md without a fixture fails and is named, one with a
   fixture passes, an untouched fixture-less skill is not flagged, a deletion is not
-  flagged, and an unresolvable diff base skips instead of failing.
+  flagged, an unresolvable diff base skips instead of failing locally, and that same
+  state FAILS under `GITHUB_ACTIONS=true`.
 
 Fixture repos are staged with `git add` (never committed), so `git ls-files` sees
 them without tripping the repo's commit-message hook. The ratchet needs real commits
@@ -24,6 +25,7 @@ Run: python3 scripts/ci/test_check_skill_triggers.py
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -73,6 +75,11 @@ def _git(root: Path, *args: str) -> None:
             "git",
             "-c",
             "core.hooksPath=/dev/null",
+            # `--no-verify` does NOT cover signing: with a global
+            # `commit.gpgsign=true` these fixture commits would fail before any
+            # ratchet assertion runs.
+            "-c",
+            "commit.gpgsign=false",
             "-c",
             "user.name=test",
             "-c",
@@ -819,6 +826,25 @@ def test_ratchet():
         check(
             "an unresolvable diff base skips the ratchet with a NOTE instead of failing",
             not failed and "Ratchet: NOTE" in out and "unresolvable" in out,
+            out,
+        )
+
+        # R6 — the same unresolvable state under GITHUB_ACTIONS is a lost
+        # `fetch-depth: 0`, i.e. a silently disabled gate. It must fail there,
+        # otherwise dropping that setting turns the ratchet off with a green tick.
+        previous = os.environ.get(mod.CI_ENV_VAR)
+        os.environ[mod.CI_ENV_VAR] = "true"
+        try:
+            lines, failed = run_report(root)
+        finally:
+            if previous is None:
+                del os.environ[mod.CI_ENV_VAR]
+            else:
+                os.environ[mod.CI_ENV_VAR] = previous
+        out = "\n".join(lines)
+        check(
+            "an unresolvable diff base FAILS under GITHUB_ACTIONS (fail-open is local-only)",
+            failed and "FAIL Ratchet" in out and "fetch-depth: 0" in out,
             out,
         )
 
