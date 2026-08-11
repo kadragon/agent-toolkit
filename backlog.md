@@ -6,33 +6,6 @@
 
 - [ ] [HARNESS] Make `check_skill_triggers.py`'s `ko` scoring path functional — `TOKEN_RE`'s `[가-힣]+` tokenizes agglutinated Korean as whole inflected forms, so `정책에` ≠ `정책을` and an on-topic Korean query against a Korean description yields an empty vector, counted unscorable; needs suffix stripping or character n-grams, and a Korean-description fixture proving a real positive scores *(blocked by: any Korean skill description existing)*
 
-## Harness — Codex review resilience against shared-broker teardown (Windows)
-
-Source: session diagnosis 2026-08-11 of `Codex payload unparsed` during `task-review` on Windows.
-Root cause is in the **openai-codex plugin**, not here: `broker-lifecycle.mjs:61` spawns the shared
-broker with `detached: true`, which on Windows does not sever the parent-child link (observed:
-broker pid 25780's parent is companion pid 22396), while every teardown path uses
-`terminateProcessTree` → `taskkill /PID x /T /F` (`process.mjs:67`, win32 branch only; the POSIX
-branch kills one process group). So killing any companion — `session-lifecycle-hook.mjs:65` at
-SessionEnd, `/codex:cancel`, or Claude Code stopping a background Bash task — takes the shared
-broker down with it, and every other client on that workspace loses its socket mid-turn. Recovery
-does not exist: `app-server.mjs:300` rejects pending requests with a plain
-`"connection closed."` carrying no `code`, and the direct-fallback condition at `codex.mjs:622`
-only matches `BROKER_BUSY` / `ENOENT` / `ECONNREFUSED`, so a mid-turn close is never retried — the
-companion dies with no JSON on stdout and `codex-review.sh` reports
-`payload status: unparsed`. Compounding: the broker is single-flight per workspace
-(`app-server-broker.mjs:174`), so two overlapping review cycles push the second onto a second
-app-server, doubling the orphan surface. Observed wreckage before cleanup: two patis review jobs
-stuck at `status: running`, three stale `broker.json` files, two orphaned `codex app-server` trees.
-
-The upstream fixes (re-parent the broker outside `taskkill /T` reach on Windows; add mid-turn
-socket close to the direct-retry condition) belong in an openai-codex issue, not this repo. These
-tickets harden *our* launcher against the failure while it exists. The stale-state prune and the
-per-workspace lock shipped in dev v4.4.11; the one ticket below is what remains. It touches `dev/`,
-so it bumps both `dev/` manifests.
-
-- [ ] [HARNESS] Treat an unparseable or empty companion payload in `codex-review.sh` as transient rather than terminal: retry the run once after pruning the workspace's `broker.json` so the retry spawns a fresh broker, emit a bounded `WARN` naming the retry, and keep the current diagnostics and exit 1 when the second attempt also fails
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

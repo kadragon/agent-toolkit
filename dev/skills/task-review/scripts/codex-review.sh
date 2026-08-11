@@ -456,78 +456,79 @@ case "$CODEX_MODE" in
     # writes its failure payload to stdout (RAW), so surface a bounded excerpt of it before
     # propagating the exit code — otherwise the caller only sees the generic fallback and
     # loses the diagnostic detail.
-    RAW=""
-    codex_status=0
-    RAW=$(node "$CODEX_COMPANION_PATH" review --base "$BASE_BRANCH" --json 2>"$LOG_FILE") || codex_status=$?
-    if [ "$codex_status" -ne 0 ]; then
-      printf 'WARN: codex companion exited %s\n' "$codex_status" >&2
-      [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
-      # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
-      [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
-      exit "$codex_status"
-    fi
-    # Extract `.codex.stdout` and nothing else. jq is the workflow-wide requirement
-    # (preflight.sh exits without it), and node is guaranteed in plugin mode — so one of the
-    # two always parses. Neither a raw-JSON nor a `.rendered` fallback is offered: both carry
-    # the reasoning trace (`.rendered` appends a "Reasoning:" section built from
-    # `reasoningSummary`), which is precisely the flood this script exists to prevent.
-    # Both parsers emit `.codex.status` on the first line and `.codex.stdout` on the rest, so
-    # an empty review body can be told apart from a failed parse: status 0 with no body is the
-    # companion's "review completed without any stdout output" case (inconclusive — see below),
-    # while an unparseable payload or a non-zero status is a genuine failure.
-    PARSED=""
-    PAYLOAD=""
-    JQ_ERR=""
-    if command -v jq >/dev/null 2>&1; then
-      _jq_err_file="$RUN_DIR/jq.err"
-      PAYLOAD=$(printf '%s' "$RAW" \
-        | jq -r '((.codex.status // "none") | tostring), (.codex.stdout // "")' 2>"$_jq_err_file") || PAYLOAD=""
-      JQ_ERR=$(cat "$_jq_err_file")
-      rm -f "$_jq_err_file"
-      if [ -n "$JQ_ERR" ]; then
-        # A parse error means jq may have emitted only a partial parse of a
-        # valid-prefix/trailing-garbage payload; the captured text is unreliable, so discard it
-        # and let the node path (or the hard failure below) decide — never emit a truncated review.
-        PAYLOAD=""
-      elif [ -n "$PAYLOAD" ]; then
-        PARSED=1
+    retry_count=0
+    while :; do
+      RAW=""
+      codex_status=0
+      RAW=$(node "$CODEX_COMPANION_PATH" review --base "$BASE_BRANCH" --json 2>"$LOG_FILE") || codex_status=$?
+      if [ "$codex_status" -ne 0 ]; then
+        printf 'WARN: codex companion exited %s\n' "$codex_status" >&2
+        [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
+        # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
+        [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
+        exit "$codex_status"
       fi
-    fi
-    if [ -z "$PARSED" ]; then
-      PAYLOAD=$(printf '%s' "$RAW" | node -e '
-        let raw = "";
-        process.stdin.on("data", (c) => { raw += c; });
-        process.stdin.on("end", () => {
-          try {
-            const p = JSON.parse(raw);
-            const status = p?.codex?.status ?? "none";
-            process.stdout.write(String(status) + "\n" + (p?.codex?.stdout || ""));
-          } catch { process.exit(3); }
-        });
-      ' 2>/dev/null) && PARSED=1 || PAYLOAD=""
-    fi
-    PAYLOAD_STATUS=""
-    TEXT=""
-    if [ -n "$PARSED" ]; then
-      # Split with parameter expansion, never `printf ... | head -n 1`: under `pipefail` the
-      # early-exiting `head` SIGPIPEs the writer once the payload passes the pipe buffer
-      # (~64 KB), and `set -e` then kills the script with 141 — silently, and precisely on the
-      # oversized payloads the truncation path below exists to handle.
-      PAYLOAD_STATUS=${PAYLOAD%%$'\n'*}
-      case "$PAYLOAD" in
-        *$'\n'*) TEXT=${PAYLOAD#*$'\n'} ;;
-        *) TEXT="" ;;
-      esac
-    fi
-    if [ -z "$TEXT" ] && [ "$PAYLOAD_STATUS" = "0" ]; then
-      # Companion ran to completion but carried no review body. `buildResultStatus` returns 0
-      # for any completed turn, and `reviewText` is only filled from an `exitedReviewMode`
-      # item — so this means the review item arrived empty, NOT that Codex found nothing.
-      # Exit 0 so the source isn't recorded as a dead reviewer, but keep the companion's own
-      # neutral wording: consolidation must read this as inconclusive, not as a clean bill.
-      TEXT="Codex review completed without any review output (empty review body) — inconclusive, not a finding-free review."
-    fi
-    if [ -z "$TEXT" ]; then
+      # Extract `.codex.stdout` and nothing else. jq is the workflow-wide requirement
+      # (preflight.sh exits without it), and node is guaranteed in plugin mode — so one of the
+      # two always parses. Neither a raw-JSON nor a `.rendered` fallback is offered: both carry
+      # the reasoning trace (`.rendered` appends a "Reasoning:" section built from
+      # `reasoningSummary`), which is precisely the flood this script exists to prevent.
+      # Both parsers emit `.codex.status` on the first line and `.codex.stdout` on the rest, so
+      # an empty review body, including status 0 with no body, is transient and retried once against
+      # freshly pruned broker state; an unparseable payload follows the same path.
+      PARSED=""
+      PAYLOAD=""
+      JQ_ERR=""
+      if command -v jq >/dev/null 2>&1; then
+        _jq_err_file="$RUN_DIR/jq.err"
+        PAYLOAD=$(printf '%s' "$RAW" \
+          | jq -r '((.codex.status // "none") | tostring), (.codex.stdout // "")' 2>"$_jq_err_file") || PAYLOAD=""
+        JQ_ERR=$(cat "$_jq_err_file")
+        rm -f "$_jq_err_file"
+        if [ -n "$JQ_ERR" ]; then
+          # A parse error means jq may have emitted only a partial parse of a
+          # valid-prefix/trailing-garbage payload; the captured text is unreliable, so discard it
+          # and let the node path (or the hard failure below) decide — never emit a truncated review.
+          PAYLOAD=""
+        elif [ -n "$PAYLOAD" ]; then
+          PARSED=1
+        fi
+      fi
+      if [ -z "$PARSED" ]; then
+        PAYLOAD=$(printf '%s' "$RAW" | node -e '
+          let raw = "";
+          process.stdin.on("data", (c) => { raw += c; });
+          process.stdin.on("end", () => {
+            try {
+              const p = JSON.parse(raw);
+              const status = p?.codex?.status ?? "none";
+              process.stdout.write(String(status) + "\n" + (p?.codex?.stdout || ""));
+            } catch { process.exit(3); }
+          });
+        ' 2>/dev/null) && PARSED=1 || PAYLOAD=""
+      fi
+      PAYLOAD_STATUS=""
+      TEXT=""
+      if [ -n "$PARSED" ]; then
+        # Split with parameter expansion, never `printf ... | head -n 1`: under `pipefail` the
+        # early-exiting `head` SIGPIPEs the writer once the payload passes the pipe buffer
+        # (~64 KB), and `set -e` then kills the script with 141 — silently, and precisely on the
+        # oversized payloads the truncation path below exists to handle.
+        PAYLOAD_STATUS=${PAYLOAD%%$'\n'*}
+        case "$PAYLOAD" in
+          *$'\n'*) TEXT=${PAYLOAD#*$'\n'} ;;
+          *) TEXT="" ;;
+        esac
+      fi
+      if [ -n "$TEXT" ]; then
+        break
+      fi
+      if [ "$retry_count" -eq 0 ]; then
+        retry_count=1
+        printf 'WARN: companion payload was empty or unparseable; retrying once after pruning broker state\n' >&2
+        prune_stale_codex_state
+        continue
+      fi
       [ -n "$JQ_ERR" ] && printf 'WARN: jq parse error: %s\n' "$JQ_ERR" >&2
       printf 'ERROR: could not extract .codex.stdout from companion JSON (payload status: %s)\n' \
         "${PAYLOAD_STATUS:-unparsed}" >&2
@@ -536,7 +537,7 @@ case "$CODEX_MODE" in
       [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
 
       exit 1
-    fi
+    done
     emit_review "$TEXT"
     ;;
   cli)

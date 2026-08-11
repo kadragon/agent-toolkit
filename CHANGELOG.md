@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Codex review transient payload retry (dev v4.4.13) (2026-08-11)
 - [done] Harness — near-collision gate (Half B) (dev v4.4.12) (2026-08-11)
 - [done] Pin collision threshold τ=0.25 and cross-point four near-collision pairs (dev v4.4.12) (2026-08-11) → docs/design/skill-trigger-collision-check.md
 - [done] Codex review stale-state prune and per-workspace lock (dev v4.4.11) (2026-08-11)
