@@ -6,13 +6,6 @@
 
 - [ ] [HARNESS] Make `check_skill_triggers.py`'s `ko` scoring path functional — `TOKEN_RE`'s `[가-힣]+` tokenizes agglutinated Korean as whole inflected forms, so `정책에` ≠ `정책을` and an on-topic Korean query against a Korean description yields an empty vector, counted unscorable; needs suffix stripping or character n-grams, and a Korean-description fixture proving a real positive scores *(blocked by: any Korean skill description existing)*
 
-## Harness — near-collision gate (Half B)
-
-Ships green because ticket 2 already added every pointer τ demands. Failure message must name
-both skills in the pair and state that the fix is a cross-pointer, not a suppression entry.
-
-- [ ] [HARNESS] Extend `check_skill_triggers.py` with the pairwise cosine collision gate at the τ recorded by ticket 2, failing only a pair at or above τ where either description does not name the other, and record the calibration basis in the module docstring
-
 ## Harness — Codex review resilience against shared-broker teardown (Windows)
 
 Source: session diagnosis 2026-08-11 of `Codex payload unparsed` during `task-review` on Windows.

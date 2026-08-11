@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic trigger-fixture ranking check (Half A of the trigger/collision spec).
+"""Deterministic trigger-fixture ranking and near-collision checks.
 
 Guards a silent failure mode one level above `check_skill_frontmatter.py`: a
 `description:` that parses fine and passes that check but no longer carries tokens
@@ -7,8 +7,18 @@ distinctive enough to win the queries it claims to answer. Nothing today scores
 `docs/eval-criteria.md`'s Trigger Accuracy criterion (weight 30%) mechanically —
 `prod/skills/persona-debate/evals/trigger-eval.json` holds 20 declared cases and no
 job reads it. See `docs/design/skill-trigger-collision-check.md` for the full spec;
-this script implements only Half A (fixture ranking). Half B (pairwise collision) is
-a separate ticket.
+this script implements Half A (fixture ranking) and Half B (pairwise collision).
+
+Half B calibration (measured against the real repo): 13 descriptions produce 78 pairs;
+before the cross-pointer edits, the distribution was max=0.5827, p99=0.3081,
+p95=0.2188, p90=0.1735, median=0.0502, mean=0.0802, stdev=0.0891, min=0.0000.
+The threshold τ=0.25 captures the deliberate-neighbor pairs because the lowest such
+pair measured 0.2685, and it sits in the widest pre-edit gap (0.2685 → 0.2188).
+After the pointers landed, the four selected pairs remained the only pairs at or above
+τ; the highest pair without mutual pointers measured 0.2365. Keeping τ=0.25 also
+catches the deliberate `task-spec` ↔ `task-tickets` pair if its pointer is removed
+(0.2685), whereas recentering at 0.278 would miss it. Re-measure the full corpus after
+any description edit because pointers perturb corpus-wide IDF weights.
 
 **What this establishes.** A TF-IDF/cosine ranker is a lexical *proxy* for the
 model-judged router `skill-creator`'s `run_eval.py` performs. It scores a
@@ -112,6 +122,7 @@ REPO_ROOT = Path(
 TOKEN_RE = re.compile(r"[a-z0-9]+|[가-힣]+")
 KO_THRESHOLD = 0.30
 TIE_EPSILON = 1e-9
+COLLISION_THRESHOLD = 0.25
 
 # One pathspec for both discovery and the ratchet: a skill the ratchet can flag must be
 # a skill the corpus can see, and two copies of this glob would drift apart silently.
@@ -245,6 +256,36 @@ def _l2_normalize(vec: dict[str, float]) -> dict[str, float]:
     if norm == 0.0:
         return {}
     return {tok: w / norm for tok, w in vec.items()}
+
+
+def cosine_similarity(left: dict[str, float], right: dict[str, float]) -> float:
+    """Return the cosine score for two already L2-normalized vectors."""
+    return sum(left[token] * right[token] for token in left.keys() & right.keys())
+
+
+def find_collision_failures(
+    corpus: "Corpus", threshold: float = COLLISION_THRESHOLD
+) -> list[tuple[str, str, float, list[str]]]:
+    """Return near-collision pairs whose descriptions lack mutual skill-name pointers."""
+    names = sorted(corpus.descriptions)
+    failures = []
+    for index, left in enumerate(names):
+        left_vec = corpus.doc_vectors[left]
+        for right in names[index + 1 :]:
+            right_vec = corpus.doc_vectors[right]
+            score = cosine_similarity(left_vec, right_vec)
+            if score < threshold:
+                continue
+
+            missing = []
+            if right not in corpus.descriptions[left]:
+                missing.append(f"{left} → {right}")
+            if left not in corpus.descriptions[right]:
+                missing.append(f"{right} → {left}")
+            if missing:
+                failures.append((left, right, score, missing))
+
+    return failures
 
 
 class Corpus:
@@ -385,6 +426,20 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
     for name in sorted(descriptions):
         lines.append(f"  {name}: class={desc_class[name]}")
     lines.append("----")
+
+    pair_count = len(descriptions) * (len(descriptions) - 1) // 2
+    collision_failures = find_collision_failures(corpus)
+    lines.append(
+        f"Near-collision gate: τ={COLLISION_THRESHOLD:.2f}; checked {pair_count} pairs."
+    )
+    for left, right, score, missing in collision_failures:
+        lines.append(
+            f"  FAIL collision {left} ↔ {right} (cosine={score:.4f} >= "
+            f"τ={COLLISION_THRESHOLD:.2f}) — missing {', '.join(missing)}; "
+            "add the cross-pointer(s), not a suppression entry."
+        )
+    if collision_failures:
+        failed = True
 
     any_fixture = False
     for name in sorted(skill_dirs):
