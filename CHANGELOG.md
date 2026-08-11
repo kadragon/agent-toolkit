@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Codex review stale-state prune and per-workspace lock (dev v4.4.11) (2026-08-11)
 - [done] Trigger-fixture ratchet on touched SKILL.md (2026-08-11) → docs/design/skill-trigger-collision-check.md
 - [done] Deterministic trigger-fixture ranking check (Half A) (2026-08-11) → docs/design/skill-trigger-collision-check.md
 - [done] task_nodes.py changelog validates the entry before writing it (dev v4.4.10) (2026-08-10) → docs/conventions.md

@@ -87,6 +87,27 @@ A fenced block nested in a Markdown list item carries the list's indentation, an
 - Shell and Python scripts shipped in plugins must use LF line endings. `.gitattributes` enforces this, and CI rejects CRLF in `*.sh`, `*.bash`, and `*.py`.
 - Tracked `*.json` must be UTF-8 **without** BOM — strict parsers reject the leading `EF BB BF`, which silently breaks manifest loading. Windows PowerShell 5.1 `Out-File`/`Set-Content -Encoding utf8` writes one; edit JSON through the file tools or git bash instead. CI rejects any BOM-carrying JSON.
 
+### Git Bash on Windows: two PID spaces, two path spaces
+
+A script that inspects processes or paths written by a *native* Windows program (Node, `codex`) is
+working in a different namespace than the one Git Bash reports for itself. All four rules below were
+measured on a real host, each after a version of the script that looked correct and silently did
+nothing (`dev/skills/task-review/scripts/codex-review.sh`, regression test `test_codex_review.py`):
+
+- **PIDs.** `$$` and `kill -0` live in the MSYS PID space; a PID a Node process wrote is a native
+  Windows PID that only `tasklist` can see. Probe each with its own tool — using one for both reports
+  every live process as dead.
+- **`tasklist` flags.** With `MSYS2_ARG_CONV_EXCL='*'` set (path conversion OFF), pass `/NH`; the
+  `//NH` form that survives conversion when it is ON arrives literally, `tasklist` rejects it, and a
+  `|| return 0` fallback then turns the failure into a silent always-alive answer.
+- **Same directory, different path strings.** MSYS mounts the Windows temp dir at `/tmp`, so cygpath
+  rewrites `C:\Users\…\AppData\Local\Temp\x` to `/tmp/x` while the same directory reached another way
+  reads `/c/Users/…/Temp/x`. Compare directories with `[ "$a" -ef "$b" ]` (device+inode), never with a
+  string prefix.
+- **Do not expect to reproduce a native program's path hash.** `fs.realpathSync.native` returns the
+  on-disk casing (`C:\Dev\…`), which git and bash do not — a hash keyed on it is unreachable from the
+  shell. When identity cannot be established, refuse to act rather than guess.
+
 ### Piping Large Variables (`pipefail` + SIGPIPE)
 
 Under `set -euo pipefail`, never split a captured variable with an early-exiting reader:
