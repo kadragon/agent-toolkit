@@ -207,7 +207,11 @@ jobs:
     name: Skill trigger-fixture ranking check
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 so the ratchet's `git diff origin/main...HEAD` has its base
+      # (same reason the version-bump job below fetches full history).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install PyYAML
         run: python3 -m pip install --quiet pyyaml

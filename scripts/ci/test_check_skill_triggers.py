@@ -8,10 +8,17 @@ Two load-bearing groups:
   a tie at rank 1 fails a positive, a negative that still ranks 1st fails, language
   mismatch is skipped not scored, a waived query is skipped with its reason echoed;
 * fail-closed discovery — zero skills, a malformed/non-array/non-UTF-8 fixture, a
-  fixture whose scorable positives number 0.
+  fixture whose scorable positives number 0;
+* the ratchet — a changed SKILL.md without a fixture fails and is named, one with a
+  fixture passes, an untouched fixture-less skill is not flagged, a deletion is not
+  flagged, an unresolvable diff base skips instead of failing locally, and that same
+  state FAILS under `GITHUB_ACTIONS=true`.
 
 Fixture repos are staged with `git add` (never committed), so `git ls-files` sees
-them without tripping the repo's commit-message hook.
+them without tripping the repo's commit-message hook. The ratchet needs real commits
+and an `origin/main` ref, so those cases use `make_repo_with_base` instead; it commits
+with `--no-verify` and a neutralized `core.hooksPath` so a global hooks directory
+cannot reach into the throwaway repo.
 
 Run: python3 scripts/ci/test_check_skill_triggers.py
 """
@@ -61,12 +68,59 @@ def make_repo(tmp: Path, files: dict) -> Path:
     return root
 
 
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            # `--no-verify` does NOT cover signing: with a global
+            # `commit.gpgsign=true` these fixture commits would fail before any
+            # ratchet assertion runs.
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            *args,
+        ],
+        cwd=root,
+        check=True,
+    )
+
+
+def make_repo_with_base(tmp: Path, base_files: dict, head_files: dict) -> Path:
+    """Build a repo with a real `origin/main` base commit and a HEAD commit on top.
+
+    `base_files` is committed and pointed at by `refs/remotes/origin/main`; then
+    `head_files` is applied (a `None` value deletes the path) and committed, so
+    `git diff origin/main...HEAD` reports exactly the intended change set.
+    """
+    root = tmp
+    _git(root, "init", "-q")
+    for rel, content in base_files.items():
+        write(root, rel, content)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-verify", "-m", "base")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    for rel, content in head_files.items():
+        if content is None:
+            (root / rel).unlink()
+        else:
+            write(root, rel, content)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-verify", "-m", "head")
+    return root
+
+
 def skill_md(name: str, description: str) -> str:
     return f"---\nname: {name}\ndescription: {json.dumps(description)}\n---\n\n# {name}\n"
 
 
-def run_report(root: Path) -> tuple[list, bool]:
-    return mod.build_report(root)
+def run_report(root: Path, **kwargs) -> tuple[list, bool]:
+    return mod.build_report(root, **kwargs)
 
 
 def test_tokenize_and_class():
@@ -493,7 +547,8 @@ def test_ranking_regressions():
         lines, failed = run_report(root)
         out = "\n".join(lines)
         check(
-            "a skill directory with no evals/ at all is silently fine (ratchet is a later ticket)",
+            "a skill directory with no evals/ at all is fine when no diff base exists "
+            "(ratchet skips)",
             not failed,
             out,
         )
@@ -648,6 +703,146 @@ def test_fail_closed_discovery_edges():
         )
 
 
+# Queries are written against the tokens the descriptions below actually carry — this
+# fixture exists to satisfy the ratchet, so it must not fail the *ranking* half and
+# leave R2 unable to tell the two failure sources apart.
+GOOD_FIXTURE = json.dumps(
+    [
+        {"query": "warehouse inventory restocking", "should_trigger": True},
+        {"query": "rotate credentials on the cluster nodes", "should_trigger": False},
+    ]
+)
+
+# A second skill so the corpus is never a single document (idf collapses at N=1) and so
+# the ratchet's diff scope can be told apart from a repo-wide fixture mandate.
+OTHER_SKILL = skill_md("shipping", "deploy the cluster nodes and rotate credentials")
+
+
+def test_ratchet():
+    print("\nratchet — changed SKILL.md must leave its skill with a fixture")
+
+    inventory = skill_md("inventory", "manages widget inventory and warehouse restocking")
+    inventory_v2 = skill_md(
+        "inventory", "manages widget inventory, warehouse restocking and reordering"
+    )
+
+    # R1 — the core rule: a changed SKILL.md with no fixture fails, naming the skill
+    # AND the fixture path the author has to create.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo_with_base(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": inventory,
+                "dev/skills/shipping/SKILL.md": OTHER_SKILL,
+            },
+            {"dev/skills/inventory/SKILL.md": inventory_v2},
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a changed SKILL.md with no fixture fails, naming the skill and the fixture path",
+            failed
+            and "'inventory'" in out
+            and "dev/skills/inventory/evals/trigger-eval.json" in out
+            and "changed on this branch" in out,
+            out,
+        )
+        check(
+            "the ratchet failure does not flag the untouched fixture-less skill",
+            "shipping" not in out.split("Ratchet:")[-1],
+            out,
+        )
+
+    # R2 — a changed SKILL.md that already carries a fixture satisfies the ratchet.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo_with_base(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": inventory,
+                "dev/skills/inventory/evals/trigger-eval.json": GOOD_FIXTURE,
+                "dev/skills/shipping/SKILL.md": OTHER_SKILL,
+            },
+            {"dev/skills/inventory/SKILL.md": inventory_v2},
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a changed SKILL.md that has a fixture passes the ratchet",
+            not failed and "OK   dev/skills/inventory/SKILL.md" in out,
+            out,
+        )
+
+    # R3 — scope is the diff, not the repo: touching an unrelated file must not demand
+    # fixtures for the 12 skills that have none.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo_with_base(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": inventory,
+                "dev/skills/shipping/SKILL.md": OTHER_SKILL,
+                "docs/notes.md": "before\n",
+            },
+            {"docs/notes.md": "after\n"},
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "an untouched fixture-less skill is not flagged (ratchet is diff-scoped)",
+            not failed and "nothing to require" in out,
+            out,
+        )
+
+    # R4 — a deleted SKILL.md is a removed skill; demanding a fixture for it would be
+    # unsatisfiable, so `--diff-filter=d` must exclude it.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo_with_base(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": inventory,
+                "dev/skills/shipping/SKILL.md": OTHER_SKILL,
+            },
+            {"dev/skills/inventory/SKILL.md": None},
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "a deleted SKILL.md does not trip the ratchet",
+            not failed and "nothing to require" in out,
+            out,
+        )
+
+    # R5 — no origin/main (fresh clone, no remote): skip with a NOTE, never fail.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/inventory/SKILL.md": inventory,
+                "dev/skills/shipping/SKILL.md": OTHER_SKILL,
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "an unresolvable diff base skips the ratchet with a NOTE instead of failing",
+            not failed and "Ratchet: NOTE" in out and "unresolvable" in out,
+            out,
+        )
+
+        # R6 — the same unresolvable state in CI is a lost `fetch-depth: 0`, i.e. a
+        # silently disabled gate, so it must fail there. `require_diff_base` is passed
+        # explicitly rather than via os.environ: this whole suite runs under
+        # GITHUB_ACTIONS in CI, and an env read inside build_report would make every
+        # fixture repo above (none of which has an origin/main) fail.
+        lines, failed = run_report(root, require_diff_base=True)
+        out = "\n".join(lines)
+        check(
+            "an unresolvable diff base FAILS when the base is required (CI); "
+            "fail-open is local-only",
+            failed and "FAIL Ratchet" in out and "fetch-depth: 0" in out,
+            out,
+        )
+
+
 def test_real_repo_shape():
     print("\nreal-repo sanity (invoked against this repo's own root)")
     root = mod.REPO_ROOT
@@ -660,6 +855,7 @@ def main():
     test_corpus_ranking()
     test_ranking_regressions()
     test_fail_closed_discovery_edges()
+    test_ratchet()
     test_real_repo_shape()
 
     total = len(_results)
