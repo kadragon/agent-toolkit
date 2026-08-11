@@ -12,10 +12,12 @@ run; the lock stops two cycles from racing into it.
 Covered: dead-PID job records are rewritten and mirrored into state.json, live and already-finished
 records are left byte-identical, a dead broker record takes its `cxc-*` session dir with it, a live
 one survives, an unreadable liveness probe counts as alive, another workspace's directory is never
-touched, and the lock skips with status 75 for a live owner while reclaiming a stale one.
+touched, the lock skips with status 75 for a live owner while reclaiming a stale one, and an empty
+or unparseable companion payload gets one retry after the broker record is pruned.
 
-None of the cases reach the companion: both the lock and the prune run before it is launched, so
-the stub path is deliberately non-existent and the resulting non-zero exit is expected.
+Most state and lock cases do not reach the companion: the lock and prune run before it is launched,
+so the stub path is deliberately non-existent and the resulting non-zero exit is expected. The
+sequenced companion cases exercise the retry and bounded-diagnostic paths directly.
 
 Run: python3 dev/skills/task-review/scripts/test_codex_review.py
 """
@@ -139,6 +141,26 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
         env=env,
         timeout=60,
     )
+
+
+def make_sequenced_companion(tmp: Path, name: str, outputs: list[str], broker_path: Path | None = None):
+    """Write a deterministic companion stub that emits one output per invocation."""
+    script = tmp / f"{name}.mjs"
+    calls = tmp / f"{name}.calls"
+    script.write_text(
+        "import fs from 'node:fs';\n"
+        f"const calls = {json.dumps(str(calls))};\n"
+        f"const outputs = {json.dumps(outputs)};\n"
+        f"const broker = {json.dumps(str(broker_path) if broker_path else '')};\n"
+        "const count = (fs.existsSync(calls) ? Number(fs.readFileSync(calls, 'utf8')) : 0) + 1;\n"
+        "fs.writeFileSync(calls, String(count));\n"
+        "if (count === 1 && broker) {\n"
+        "  fs.writeFileSync(broker, JSON.stringify({pid: 4294967290}));\n"
+        "}\n"
+        "process.stdout.write(outputs[Math.min(count - 1, outputs.length - 1)] ?? '');\n",
+        encoding="utf-8",
+    )
+    return script, calls
 
 
 def read(path: Path):
@@ -377,6 +399,102 @@ def case_ambiguous_workspace_skipped(tmp: Path, _live: int):
     check("ambiguity reported", "cannot identify this workspace" in proc.stderr, proc.stderr[-400:])
 
 
+def case_empty_payload_retries_after_prune(tmp: Path, _live: int):
+    print("\nempty companion payload retries")
+    repo = make_repo(tmp, "wsretry")
+    ws = make_workspace(tmp / "state", "wsretry", [])
+    broker = ws / "broker.json"
+    companion, calls = make_sequenced_companion(
+        tmp,
+        "empty-payload",
+        ["", '{"codex":{"status":0,"stdout":"review after retry"}}'],
+        broker,
+    )
+    proc = run(
+        repo,
+        tmp,
+        companion=bash_path(companion),
+        CODEX_REVIEW_TEST_CALLS=str(calls),
+        CODEX_REVIEW_TEST_BROKER=str(broker),
+    )
+    check("empty payload → retry succeeds", proc.returncode == 0, proc.stderr)
+    check("companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
+    check("broker record pruned before retry", not broker.exists())
+    check("retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
+    check("retry review text emitted", proc.stdout.strip() == "review after retry", proc.stdout)
+
+
+def case_empty_json_stdout_retries_after_prune(tmp: Path, _live: int):
+    print("\nvalid JSON with missing stdout retries")
+    repo = make_repo(tmp, "wsemptyjson")
+    ws = make_workspace(tmp / "state", "wsemptyjson", [])
+    broker = ws / "broker.json"
+    companion, calls = make_sequenced_companion(
+        tmp,
+        "empty-json-stdout",
+        ['{"codex":{"status":0}}', '{"codex":{"status":0,"stdout":"review after retry"}}'],
+        broker,
+    )
+    proc = run(repo, tmp, companion=bash_path(companion))
+    check("missing stdout → retry succeeds", proc.returncode == 0, proc.stderr)
+    check("missing stdout companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
+    check("missing stdout broker record pruned before retry", not broker.exists())
+    check("missing stdout retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
+    check("missing stdout retry review text emitted", proc.stdout.strip() == "review after retry", proc.stdout)
+
+
+def case_empty_json_stdout_retries_then_fails(tmp: Path, _live: int):
+    print("\nvalid JSON with empty stdout retries then fails")
+    repo = make_repo(tmp, "wsemptyjsonfail")
+    ws = make_workspace(tmp / "state", "wsemptyjsonfail", [])
+    broker = ws / "broker.json"
+    companion, calls = make_sequenced_companion(
+        tmp,
+        "empty-json-stdout-fail",
+        [
+            '{"codex":{"status":0,"stdout":""}}',
+            '{"codex":{"status":0,"stdout":""}}',
+        ],
+        broker,
+    )
+    proc = run(repo, tmp, companion=bash_path(companion))
+    check("second empty stdout payload → exit 1", proc.returncode == 1, proc.stderr)
+    check("empty stdout companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
+    check("empty stdout broker record pruned before retry", not broker.exists())
+    check("empty stdout retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
+    check("empty stdout current payload status diagnostic kept", "payload status: 0" in proc.stderr, proc.stderr)
+    check(
+        "empty stdout bounded payload diagnostic kept",
+        "companion stdout (last 2000 bytes; full payload:" in proc.stderr,
+        proc.stderr,
+    )
+
+
+def case_unparseable_payload_retries_then_fails(tmp: Path, _live: int):
+    print("\nunparseable companion payload retries then fails")
+    repo = make_repo(tmp, "wsretryfail")
+    ws = make_workspace(tmp / "state", "wsretryfail", [])
+    broker = ws / "broker.json"
+    companion, calls = make_sequenced_companion(
+        tmp,
+        "unparseable-payload",
+        ["not-json", "still-not-json"],
+        broker,
+    )
+    proc = run(
+        repo,
+        tmp,
+        companion=bash_path(companion),
+        CODEX_REVIEW_TEST_CALLS=str(calls),
+        CODEX_REVIEW_TEST_BROKER=str(broker),
+    )
+    check("second unparseable payload → exit 1", proc.returncode == 1, proc.stderr)
+    check("failed companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
+    check("retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
+    check("current payload status diagnostic kept", "payload status: unparsed" in proc.stderr, proc.stderr)
+    check("current bounded payload diagnostic kept", "still-not-json" in proc.stderr, proc.stderr)
+
+
 def case_lock(tmp: Path, live: int):
     print("\nper-workspace lock")
     repo = make_repo(tmp, "wslock")
@@ -428,6 +546,10 @@ def main():
             case_other_workspace_untouched,
             case_session_dir_outside_temp,
             case_ambiguous_workspace_skipped,
+            case_empty_payload_retries_after_prune,
+            case_empty_json_stdout_retries_after_prune,
+            case_empty_json_stdout_retries_then_fails,
+            case_unparseable_payload_retries_then_fails,
             case_lock,
             case_malformed_state_is_survivable,
         ):
