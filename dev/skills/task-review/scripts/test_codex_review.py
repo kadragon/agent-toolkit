@@ -69,7 +69,7 @@ printf '%s\\n' "$CODEX_REVIEW_PLATFORM"
 
 
 def selector_compat_shell() -> str | None:
-    """Find a local shell that rejects the broken selector like macOS Bash 3.2."""
+    """Find an optional local shell that rejects the broken selector like macOS Bash 3.2."""
     candidates = ["/bin/bash", shutil.which("dash"), "/bin/sh", shutil.which("bash")]
     seen = set()
     for candidate in candidates:
@@ -473,10 +473,18 @@ def case_default_platform_selector(tmp: Path, _live: int):
     check("default selector invokes companion once", calls.read_text(encoding="utf-8") == "1")
 
     selector = platform_selector_block()
-    compat_shell = selector_compat_shell()
     check("selector has explicit compatibility guard", selector is not None)
-    check("Bash 3.2 compatibility fixture available", compat_shell is not None)
-    if selector is None or compat_shell is None:
+    if selector is None:
+        return
+    check(
+        "selector keeps case outside fallback expansion",
+        "${CODEX_REVIEW_PLATFORM:-$(" not in selector,
+        selector,
+    )
+
+    compat_shell = selector_compat_shell()
+    if compat_shell is None:
+        print("  SKIP  Bash 3.2 runtime fixture unavailable; source guard remains active")
         return
 
     fixed = subprocess.run(
