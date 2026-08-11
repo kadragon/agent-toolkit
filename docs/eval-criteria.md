@@ -16,7 +16,10 @@ Does the skill fire when it should, and not fire when it shouldn't?
 | 2 | Description too vague; frequently missed |
 | 1 | Never triggers automatically |
 
-**How to test:** Auto-invocation is description-driven and model-judged (no mechanical router in this repo). Draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills.
+**How to test:** Two tiers, sharing one fixture (`{skill}/evals/trigger-eval.json`, `{query, should_trigger}`).
+
+- **Mechanical (necessary condition, merge-blocking):** `scripts/ci/check_skill_triggers.py` ranks each declared fixture query by TF-IDF cosine similarity over all skill descriptions and asserts `should_trigger: true` queries rank the owning skill 1st without a tie, and `should_trigger: false` queries do not. Queries whose script class (`ko`/`en`) mismatches the owning description, that carry a `waived` reason, or that have zero corpus-token overlap are skipped and only counted, not scored — the report's skip counts are what state the real coverage. It establishes only that the description carries tokens distinctive enough to win its own declared queries — passing does not certify the skill fires correctly in practice. **Ratchet:** a branch that changes a skill's `SKILL.md` must leave that skill with an `evals/trigger-eval.json`, or the check fails naming the skill — fixture coverage grows with whoever is already reasoning about that skill's triggering.
+- **Model-judged (sufficient condition, above the mechanical floor):** Auto-invocation is description-driven. Draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills.
 
 ### 2. Correctness (weight: 40%)
 

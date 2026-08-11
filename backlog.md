@@ -1,17 +1,10 @@
 # Backlog
 
-## Harness — skill description fixture ranking check (Half A)
+## Review Backlog
 
-Spec: `docs/design/skill-trigger-collision-check.md`. Source: comparison against
-[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (`evals/README.md`,
-`scripts/run-evals.js` — structural / trigger-routing / behavioral tiers), 2026-08-10.
-`docs/eval-criteria.md` weights Trigger Accuracy at 30% but prescribes a model-judged test,
-against this repo's mechanical-enforcement-first rule. Fixture format is the external
-`skill-creator` plugin's `{query, should_trigger}` shape, already on disk at
-`prod/skills/persona-debate/evals/trigger-eval.json`. Supersedes the umbrella item this
-section replaces, now decomposed into tickets 1–4.
+### PR #219
 
-- [ ] [HARNESS] Add `scripts/ci/check_skill_triggers.py` scoring each skill's `evals/trigger-eval.json` by TF-IDF rank over all skill descriptions (positive = tie-free top-1, negative = not top-1), skipping script-class-mismatched and `"waived"` queries with counts reported, failing a fixture with zero scorable positives, plus `test_check_skill_triggers.py`, a `skill-triggers` job in `harness-check.yml`, and a `docs/eval-criteria.md` §1 *How to test* amendment pointing at the script as the mechanical tier
+- [ ] [HARNESS] Make `check_skill_triggers.py`'s `ko` scoring path functional — `TOKEN_RE`'s `[가-힣]+` tokenizes agglutinated Korean as whole inflected forms, so `정책에` ≠ `정책을` and an on-topic Korean query against a Korean description yields an empty vector, counted unscorable; needs suffix stripping or character n-grams, and a Korean-description fixture proving a real positive scores *(blocked by: any Korean skill description existing)*
 
 ## Harness — cross-point every near-collision description pair
 
@@ -20,7 +13,7 @@ and the pointer edits cannot be chosen without τ. Landing these edits *before* 
 is what lets ticket 3 merge green. Predicted finding: `harness-capture`'s description names
 `harness-curate`, but `harness-curate`'s names `harness-init`, not `harness-capture`.
 
-- [ ] [HARNESS] Measure the 13×13 description pair-similarity distribution with ticket 1's ranker, pin τ per the spec's two conditions, append the measured distribution and τ to `docs/design/skill-trigger-collision-check.md` as a *Measured calibration* section, then add the missing mutual name pointer to every description in a pair at or above τ and bump both `dev/` manifests *(blocked by: 1-half-a-ranker)*
+- [ ] [HARNESS] Measure the 13×13 description pair-similarity distribution with ticket 1's ranker, pin τ per the spec's two conditions, append the measured distribution and τ to `docs/design/skill-trigger-collision-check.md` as a *Measured calibration* section, then add the missing mutual name pointer to every description in a pair at or above τ and bump both `dev/` manifests
 
 ## Harness — near-collision gate (Half B)
 
@@ -28,13 +21,6 @@ Ships green because ticket 2 already added every pointer τ demands. Failure mes
 both skills in the pair and state that the fix is a cross-pointer, not a suppression entry.
 
 - [ ] [HARNESS] Extend `check_skill_triggers.py` with the pairwise cosine collision gate at the τ recorded by ticket 2, failing only a pair at or above τ where either description does not name the other, and record the calibration basis in the module docstring *(blocked by: 2-cross-pointers)*
-
-## Harness — trigger fixture ratchet on touched SKILL.md
-
-Independent of tickets 2–3; needs only ticket 1's script and job. Converts the 12 missing
-fixtures into incremental, evidence-driven work instead of one bulk authoring sprint.
-
-- [ ] [HARNESS] Fail `check_skill_triggers.py` when `git diff origin/main...HEAD` shows a changed `*/skills/*/SKILL.md` whose skill has no `evals/trigger-eval.json`, naming the skill, and add `fetch-depth: 0` to the `skill-triggers` job so the diff base is available *(blocked by: 1-half-a-ranker)*
 
 ## Harness — Codex review resilience against shared-broker teardown (Windows)
 
