@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Unit tests for check_skill_triggers.py — the Half-A trigger-fixture ranking gate.
+Unit tests for check_skill_triggers.py — the trigger-fixture ranking and collision gates.
 
 Two load-bearing groups:
 
 * ranking correctness — a stripped-of-distinctive-tokens description loses rank 1,
   a tie at rank 1 fails a positive, a negative that still ranks 1st fails, language
   mismatch is skipped not scored, a waived query is skipped with its reason echoed;
+* collision correctness — a pair at or above the threshold needs mutual pointers,
+  while a pair below it does not;
 * fail-closed discovery — zero skills, a malformed/non-array/non-UTF-8 fixture, a
   fixture whose scorable positives number 0;
 * the ratchet — a changed SKILL.md without a fixture fails and is named, one with a
@@ -175,6 +177,101 @@ def test_corpus_ranking():
         "ranking an empty query vector does not divide by zero",
         len(ranked_oov) == 3 and all(s == 0.0 for _, s in ranked_oov),
         str(ranked_oov),
+    )
+
+
+def test_collision_gate():
+    print("\nnear-collision gate — threshold, pointer, and below-threshold cases")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/alpha/SKILL.md": skill_md(
+                    "alpha", "routes shared trigger signals"
+                ),
+                "dev/skills/beta/SKILL.md": skill_md(
+                    "beta", "routes shared trigger signals"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "pair at or above threshold with no pointers fails and names both skills",
+            failed
+            and "alpha" in out
+            and "beta" in out
+            and "cross-pointer" in out
+            and "not a suppression entry" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/alpha/SKILL.md": skill_md(
+                    "alpha", "routes shared trigger signals; not for beta"
+                ),
+                "dev/skills/beta/SKILL.md": skill_md(
+                    "beta", "routes shared trigger signals"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "one-way pointer at or above threshold still fails",
+            failed and "alpha" in out and "beta" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/alpha/SKILL.md": skill_md(
+                    "alpha", "routes shared trigger signals; not for beta"
+                ),
+                "dev/skills/beta/SKILL.md": skill_md(
+                    "beta", "routes shared trigger signals; not for alpha"
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "mutual pointers at or above threshold pass",
+            not failed and "FAIL collision" not in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/alpha/SKILL.md": skill_md("alpha", "manages apples"),
+                "dev/skills/beta/SKILL.md": skill_md("beta", "writes zebras"),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "pair below threshold passes without pointers",
+            not failed and "FAIL collision" not in out,
+            out,
+        )
+
+    corpus = mod.Corpus({"alpha": "shared signal", "beta": "shared signal"})
+    score = mod.cosine_similarity(
+        corpus.doc_vectors["alpha"], corpus.doc_vectors["beta"]
+    )
+    failures = mod.find_collision_failures(corpus, threshold=score)
+    check(
+        "threshold comparison is inclusive",
+        len(failures) == 1 and failures[0][0:2] == ("alpha", "beta"),
+        str(failures),
     )
 
 
@@ -853,6 +950,7 @@ def test_real_repo_shape():
 def main():
     test_tokenize_and_class()
     test_corpus_ranking()
+    test_collision_gate()
     test_ranking_regressions()
     test_fail_closed_discovery_edges()
     test_ratchet()
