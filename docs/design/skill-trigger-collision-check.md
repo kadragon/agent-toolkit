@@ -264,3 +264,69 @@ in slice 1: it depends on a number nobody has measured yet.
 marker on the `## Harness — deterministic skill trigger/collision check` item in `backlog.md`.
 That marker is cleared by `task_nodes.py prune-backlog` when the implementing tickets land,
 not by this document.
+
+## Measured Calibration
+
+Recorded by slice 2, using slice 1's shipped ranker (`scripts/ci/check_skill_triggers.py` —
+`Corpus`, sublinear TF, smoothed IDF, L2-normalized cosine) over the 13 discovered
+descriptions. §6 required τ to be measured rather than guessed; this section is that
+measurement. Slice 3 copies τ and this basis into the Half B module docstring.
+
+### Distribution before the cross-pointer edits
+
+78 pairs. max **0.5827** · p99 0.3081 · p95 0.2188 · p90 0.1735 · median 0.0502 ·
+mean 0.0802 · stdev 0.0891 · min 0.0000.
+
+The head of the distribution, with each pair's mutual-pointer status at measurement time
+(*mutual* = each description contains the other's `name:`, the test Half B implements):
+
+| pair | cosine | pointers before |
+|------|--------|-----------------|
+| `task-new` ↔ `task-next` | 0.5827 | mutual |
+| `harness-curate` ↔ `harness-init` | 0.3081 | one-way (curate → init) |
+| `harness-capture` ↔ `harness-curate` | 0.3034 | one-way (capture → curate) |
+| `task-spec` ↔ `task-tickets` | 0.2685 | neither |
+| `task-grill` ↔ `task-tickets` | 0.2188 | neither |
+| `task-grill` ↔ `task-new` | 0.2071 | neither |
+| `task-new` ↔ `task-spec` | 0.1859 | neither |
+| `harness-capture` ↔ `harness-init` | 0.1810 | neither |
+
+§6's *expected first-run finding* is confirmed: `harness-capture`'s description named
+`harness-curate`, and `harness-curate`'s named `harness-init` but not `harness-capture`.
+
+### τ = 0.25
+
+- **Condition (b) — low enough to capture the deliberate neighbors — is the binding one.**
+  The spec names `task-new`↔`task-next`, `task-spec`↔`task-tickets` and
+  `harness-capture`↔`harness-curate` as deliberate adjacents. The lowest of the three measures
+  0.2685, so τ ≤ 0.2685 is forced by the spec's own examples, not chosen.
+- **Pinned to the widest gap in the band.** Below the 0.5827 outlier, the largest interval
+  between consecutive pairs is 0.2685 → 0.2188 (0.0497). τ = 0.25 sits inside it, so no pair
+  sits near enough to the threshold to cross it on an unrelated wording tweak.
+- **Condition (a) — every pair at or above τ carries mutual pointers — holds after this
+  slice's edits**, which is the whole point of sequencing them before the Half B gate.
+
+τ = 0.25 selects exactly four pairs, every one a deliberate neighbor:
+
+| pair | cosine after edits | pointer added by this slice |
+|------|--------------------|-----------------------------|
+| `task-new` ↔ `task-next` | 0.5880 | none — already mutual |
+| `task-spec` ↔ `task-tickets` | 0.3869 | both directions |
+| `harness-capture` ↔ `harness-curate` | 0.3392 | `harness-curate` → `harness-capture` |
+| `harness-curate` ↔ `harness-init` | 0.3203 | `harness-init` → `harness-curate` |
+
+### Distribution after the cross-pointer edits
+
+Adding a pointer inserts the other skill's name tokens into a description, so it **raises** that
+pair's cosine and perturbs every IDF weight. The post-edit distribution was therefore re-measured
+rather than assumed: max **0.5880** · p99 0.3869 · p95 0.2365 · p90 0.1808 · median 0.0528 ·
+mean 0.0868 · stdev 0.0975 · min 0.0000.
+
+τ = 0.25 is stable under its own edits: the four selected pairs rose (as intended, since each
+now names its neighbor), and the highest pair *without* mutual pointers is
+`task-new` ↔ `task-spec` at **0.2365** — still below τ. The gap around the threshold widened
+from 0.0497 to 0.0838 (0.3203 → 0.2365).
+
+**Re-measure when a skill is added or a description is rewritten.** Both perturb the IDF
+weights corpus-wide, which is the *τ drift* risk under *Open risks* — the intended failure is
+a pair that genuinely needs a pointer, and the fix is the pointer, never a lowered τ.

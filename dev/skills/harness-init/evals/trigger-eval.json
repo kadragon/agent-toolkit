@@ -1,0 +1,10 @@
+[
+  {"query": "set up the agent infrastructure for this repo — AGENTS.md and a docs index", "should_trigger": true},
+  {"query": "validate this repo's harness and audit whether the docs index is complete", "should_trigger": true},
+  {"query": "this repo has no AGENTS.md yet, scaffold the agent infrastructure for it", "should_trigger": true},
+  {"query": "run a harness audit on this repository's agent setup", "should_trigger": true},
+
+  {"query": "mine my session transcripts and propose new skills to add", "should_trigger": false},
+  {"query": "break this approved design doc into backlog tickets", "should_trigger": false},
+  {"query": "add a retry with exponential backoff to the fetch helper", "should_trigger": false}
+]

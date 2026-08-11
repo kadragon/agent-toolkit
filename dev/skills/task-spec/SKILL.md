@@ -3,9 +3,10 @@ name: task-spec
 description: >-
   Synthesize known context into a `docs/design/{slug}.md` design doc for
   multi-session or architecturally significant work. Does NOT interview — run
-  `Skill(dev:task-grill)` first if scope is still ambiguous. Trivial work skips
+  `Skill(dev:task-grill)` first if scope is still ambiguous. NOT for splitting
+  an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
-version: 1.0.1
+version: 1.0.2
 ---
 
 # To Spec

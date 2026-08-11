@@ -6,21 +6,12 @@
 
 - [ ] [HARNESS] Make `check_skill_triggers.py`'s `ko` scoring path functional — `TOKEN_RE`'s `[가-힣]+` tokenizes agglutinated Korean as whole inflected forms, so `정책에` ≠ `정책을` and an on-topic Korean query against a Korean description yields an empty vector, counted unscorable; needs suffix stripping or character n-grams, and a Korean-description fixture proving a real positive scores *(blocked by: any Korean skill description existing)*
 
-## Harness — cross-point every near-collision description pair
-
-Blocked until ticket 1's ranker exists: τ cannot be pinned without the measured distribution,
-and the pointer edits cannot be chosen without τ. Landing these edits *before* the Half B gate
-is what lets ticket 3 merge green. Predicted finding: `harness-capture`'s description names
-`harness-curate`, but `harness-curate`'s names `harness-init`, not `harness-capture`.
-
-- [ ] [HARNESS] Measure the 13×13 description pair-similarity distribution with ticket 1's ranker, pin τ per the spec's two conditions, append the measured distribution and τ to `docs/design/skill-trigger-collision-check.md` as a *Measured calibration* section, then add the missing mutual name pointer to every description in a pair at or above τ and bump both `dev/` manifests
-
 ## Harness — near-collision gate (Half B)
 
 Ships green because ticket 2 already added every pointer τ demands. Failure message must name
 both skills in the pair and state that the fix is a cross-pointer, not a suppression entry.
 
-- [ ] [HARNESS] Extend `check_skill_triggers.py` with the pairwise cosine collision gate at the τ recorded by ticket 2, failing only a pair at or above τ where either description does not name the other, and record the calibration basis in the module docstring *(blocked by: 2-cross-pointers)*
+- [ ] [HARNESS] Extend `check_skill_triggers.py` with the pairwise cosine collision gate at the τ recorded by ticket 2, failing only a pair at or above τ where either description does not name the other, and record the calibration basis in the module docstring
 
 ## Harness — Codex review resilience against shared-broker teardown (Windows)
 

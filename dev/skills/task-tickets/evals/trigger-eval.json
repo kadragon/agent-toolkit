@@ -1,0 +1,9 @@
+[
+  {"query": "break this approved design doc into vertical-slice backlog items in dependency order", "should_trigger": true},
+  {"query": "split the spec into tickets each sized for exactly one sprint contract", "should_trigger": true},
+  {"query": "turn the approved design into backlog.md items I can work one at a time", "should_trigger": true},
+
+  {"query": "synthesize the context we have into a design doc", "should_trigger": false},
+  {"query": "set up the repo harness and audit the docs index", "should_trigger": false},
+  {"query": "pull the next item off the backlog and implement it", "should_trigger": false}
+]
