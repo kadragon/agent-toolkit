@@ -132,6 +132,13 @@ def test_tokenize_and_class():
         mod.tokenize("Hello 세계 42") == ["hello", "세계", "42"],
         str(mod.tokenize("Hello 세계 42")),
     )
+    left = set(mod.tokenize("정책에"))
+    right = set(mod.tokenize("정책을"))
+    check(
+        "Korean inflections share a lexical feature",
+        bool(left & right),
+        f"left={left}, right={right}",
+    )
     check("pure english classifies en", mod.script_class("hello world") == "en")
     check("pure korean classifies ko", mod.script_class("안녕하세요 세계") == "ko")
     check(
@@ -423,6 +430,35 @@ def test_ranking_regressions():
         check(
             "korean query against an english description is skipped and counted, not scored",
             not failed and "skipped-by-language=1" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/policy/SKILL.md": skill_md(
+                    "policy", "정책 분석 도구"
+                ),
+                "dev/skills/policy/evals/trigger-eval.json": json.dumps(
+                    [
+                        {
+                            "query": "정책을 검토해줘",
+                            "should_trigger": True,
+                        }
+                    ]
+                ),
+            },
+        )
+        lines, failed = run_report(root)
+        out = "\n".join(lines)
+        check(
+            "Korean positive query against a Korean description is scored",
+            not failed
+            and "scored=1" in out
+            and "skipped-by-language=0" in out
+            and "unscorable=0" in out
+            and "positive pass=1" in out,
             out,
         )
 

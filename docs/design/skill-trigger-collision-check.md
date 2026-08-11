@@ -229,9 +229,11 @@ here.
 - **Replacing `skill-creator`'s model-judged runner.** It stays the semantic tier; this check
   is the deterministic tier beneath it. Neither subsumes the other.
 - **Embedding / LLM-based similarity, and any network call or new dependency** in CI.
-- **Rewriting descriptions into Korean, or any change to the repo's description-language
-  policy** (grill Q5 rejected this route). Only the specific cross-pointer edit §6 predicts
-  is in scope for the implementing tickets.
+- **Rewriting descriptions into Korean as a repository-wide policy**, or changing that policy,
+  remains out of scope (grill Q5 rejected this route). The approved bilingual
+  `prod/skills/hwpx/SKILL.md` description is a single corpus fixture for exercising `ko`
+  scoring; it does not change the repository-wide description-language policy. Only the
+  specific cross-pointer edit §6 predicts is otherwise in scope for the implementing tickets.
 - **A coverage floor on negative queries** — reported, not gated, until fixtures accumulate.
 - **Any claim that passing this check means a skill fires correctly.** The check's own report
   wording must not overstate it.

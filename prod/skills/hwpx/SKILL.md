@@ -1,10 +1,10 @@
 ---
 name: hwpx
 description: >-
-  Create, edit, or read HWPX (Hancom/한글) documents — text, tables, styles,
-  OWPML, Korean gov/biz forms. Reading an attached .hwpx (extract, translate,
-  summarize) goes through here too. NOT .docx/.xlsx/PDF/Markdown, NOT legacy
-  binary .hwp, NOT 한글 app GUI how-to.
+  한글 HWPX 문서를 만들고, 편집하고, 읽는 작업 지원. 텍스트, 표, 스타일, OWPML,
+  한국 정부·기업 양식 처리. 첨부된 .hwpx 파일 추출·번역·요약도 지원. Create, edit,
+  or read HWPX documents. NOT .docx/.xlsx/PDF/Markdown, NOT legacy binary .hwp,
+  NOT 한글 앱 GUI 사용법.
 ---
 
 # HWPX Document Skill — XML-first Workflow

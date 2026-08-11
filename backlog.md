@@ -1,11 +1,5 @@
 # Backlog
 
-## Review Backlog
-
-### PR #219
-
-- [ ] [HARNESS] Make `check_skill_triggers.py`'s `ko` scoring path functional — `TOKEN_RE`'s `[가-힣]+` tokenizes agglutinated Korean as whole inflected forms, so `정책에` ≠ `정책을` and an on-topic Korean query against a Korean description yields an empty vector, counted unscorable; needs suffix stripping or character n-grams, and a Korean-description fixture proving a real positive scores *(blocked by: any Korean skill description existing)*
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

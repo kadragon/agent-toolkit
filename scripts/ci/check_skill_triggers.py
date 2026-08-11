@@ -31,10 +31,10 @@ Algorithm (measured against the real repo — 13-skill corpus; persona-debate sc
 `docs/design/skill-trigger-collision-check.md` for the full numbers):
 
 - Corpus = every discovered skill's `description:` string.
-- Tokenizer: `[a-z0-9]+|[가-힣]+` on the lowercased string. Known limitation (tracked
-  as follow-up in `backlog.md`, not fixed here): this tokenizes Korean as whole
-  agglutinated forms, so `정책에` and `정책을` never share a token — the `ko` scoring
-  path exists but is not functional against inflected Korean today.
+- Tokenizer: `[a-z0-9]+|[가-힣]+` on the lowercased string. Full tokens are
+  preserved; Hangul tokens longer than two characters also add overlapping
+  2-character Hangul n-gram features. Thus `정책에` and `정책을` share `정책`, while
+  full Hangul tokens and Latin token behavior remain intact.
 - tf = 1 + log(count); idf = log((N+1)/(df+1)) + 1 (smoothed, like sklearn's
   `TfidfVectorizer(sublinear_tf=True)`); vectors L2-normalized; cosine = dot product
   of normalized vectors.
@@ -120,6 +120,7 @@ REPO_ROOT = Path(
 )
 
 TOKEN_RE = re.compile(r"[a-z0-9]+|[가-힣]+")
+HANGUL_NGRAM_SIZE = 2
 KO_THRESHOLD = 0.30
 TIE_EPSILON = 1e-9
 COLLISION_THRESHOLD = 0.25
@@ -233,7 +234,18 @@ def parse_description(path: Path) -> tuple[str | None, str | None, str | None]:
 
 
 def tokenize(text: str) -> list[str]:
-    return TOKEN_RE.findall(text.lower())
+    tokens = []
+    for token in TOKEN_RE.findall(text.lower()):
+        tokens.append(token)
+        if (
+            len(token) > HANGUL_NGRAM_SIZE
+            and all("가" <= char <= "힣" for char in token)
+        ):
+            tokens.extend(
+                token[index : index + HANGUL_NGRAM_SIZE]
+                for index in range(len(token) - HANGUL_NGRAM_SIZE + 1)
+            )
+    return tokens
 
 
 def script_class(text: str) -> str:
