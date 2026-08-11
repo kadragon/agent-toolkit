@@ -125,6 +125,9 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
             "CODEX_REVIEW_PLATFORM": platform,
             "CODEX_REVIEW_STATE_ROOTS": bash_path(tmp / "state"),
             "CODEX_REVIEW_LOCK_ROOT": bash_path(tmp / "locks"),
+            # The fixture tree stands in for the OS temp root, so session-dir deletion is decided
+            # against a path this test controls rather than the runner's real %TEMP%.
+            "CODEX_REVIEW_TEMP_ROOTS": bash_path(tmp),
         }
     )
     env.update({k: str(v) for k, v in env_overrides.items()})
@@ -140,6 +143,26 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
 
 def read(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def lock_dir_for(repo: Path, tmp: Path) -> Path:
+    """The lock path the script derives: slug + a cksum of the canonical workspace path."""
+    # Mirror the script's own derivation, canonicalization included — computing it any other way
+    # would key the fixture to a path the script never looks at, and every lock check would pass
+    # vacuously by taking a fresh lock.
+    key = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'top=$(git rev-parse --show-toplevel); root=$(cd "$top" && pwd -P); '
+            "printf '%s' \"$root\" | cksum | tr -d ' \\t'",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return tmp / "locks" / f"codex-review-{repo.name}-{key}.lock"
 
 
 def case_prunes_dead_job(tmp: Path, _live: int):
@@ -191,6 +214,32 @@ def case_broker_alive(tmp: Path, live: int):
     check("session dir kept", session.exists())
 
 
+def case_null_pid_is_no_evidence(tmp: Path, _live: int):
+    """`pid: null` is absence of evidence, not evidence of death.
+
+    Both `broker-lifecycle.mjs` and `codex-companion.mjs` write `child.pid ?? null`, so a null PID
+    record can belong to a live broker. Deleting its endpoint would break every other client on the
+    workspace — the exact failure this whole change exists to stop.
+    """
+    print("\nrecords carrying no PID")
+    repo = make_repo(tmp, "wsnullpid")
+    session = tmp / "cxc-nullpid"
+    ws = make_workspace(
+        tmp / "state", "wsnullpid", [job("review-nopid", "running", None)], broker_pid=None, session_dir=session
+    )
+    # `make_workspace` only writes broker.json when a pid is passed, so write the null-pid one here.
+    session.mkdir(parents=True, exist_ok=True)
+    (ws / "broker.json").write_text(
+        json.dumps({"endpoint": "unix:/tmp/b.sock", "pid": None, "sessionDir": str(session)}, indent=2),
+        encoding="utf-8",
+    )
+    before = (ws / "jobs" / "review-nopid.json").read_bytes()
+    run(repo, tmp)
+    check("null-pid job record untouched", (ws / "jobs" / "review-nopid.json").read_bytes() == before)
+    check("null-pid broker.json kept", (ws / "broker.json").exists())
+    check("its session dir kept", session.exists())
+
+
 def case_foreign_session_dir_kept(tmp: Path, _live: int):
     print("\nbroker record naming a non-plugin directory")
     repo = make_repo(tmp, "wsforeign")
@@ -211,6 +260,45 @@ def case_unreadable_probe_counts_alive(tmp: Path, _live: int):
     check(
         "record left untouched when the probe is missing",
         (ws / "jobs" / "review-dead.json").read_bytes() == before,
+    )
+
+
+def case_windows_probe_flag_form(tmp: Path, _live: int):
+    """The tasklist flag form is load-bearing and its failure mode is silent.
+
+    `MSYS2_ARG_CONV_EXCL='*'` turns MSYS path conversion off, so the flags must be plain `/NH`.
+    Passing `//NH` — the form that survives conversion when it is ON — makes real tasklist exit
+    non-zero, which the fail-safe reads as "alive", disabling the prune entirely on Windows. The
+    stub reproduces that rejection, so the regression is caught on a Linux runner.
+    """
+    print("\nwindows probe flag form")
+    repo = make_repo(tmp, "wsflags")
+    ws = make_workspace(tmp / "state", "wsflags", [job("review-dead", "running", DEAD_PID)])
+    stub_dir = tmp / "stub-bin"
+    stub_dir.mkdir(exist_ok=True)
+    argv_log = tmp / "tasklist-argv.txt"
+    (stub_dir / "tasklist").write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$*" >> "{bash_path(argv_log)}"\n'
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        # Real tasklist rejects an unconverted `//NH` outright.
+        '    //*) echo "ERROR: Invalid argument/option - \'$arg\'." >&2; exit 1 ;;\n'
+        "  esac\n"
+        "done\n"
+        # No process matches this fixture's PID: the not-found reply carries no image name.
+        'echo "INFO: No tasks are running which match the specified criteria."\n',
+        encoding="utf-8",
+    )
+    (stub_dir / "tasklist").chmod(0o755)
+    env_path = f"{bash_path(stub_dir)}{os.pathsep}{os.environ['PATH']}"
+    run(repo, tmp, platform="windows", PATH=env_path)
+    logged = argv_log.read_text(encoding="utf-8") if argv_log.exists() else ""
+    check("tasklist was invoked", bool(logged.strip()), repr(logged))
+    check("flags passed as /NH, not //NH", "//" not in logged, repr(logged))
+    check(
+        "dead record pruned through the windows probe",
+        read(ws / "jobs" / "review-dead.json")["status"] == "failed",
     )
 
 
@@ -252,11 +340,48 @@ def case_other_workspace_untouched(tmp: Path, _live: int):
     )
 
 
+def case_session_dir_outside_temp(tmp: Path, _live: int):
+    """A `cxc-` name is not evidence of being a plugin-created temp dir.
+
+    `createBrokerSessionDir` is `mkdtempSync(join(os.tmpdir(), "cxc-"))`, so a `sessionDir` that
+    names `cxc-cache` inside a project tree is either corrupt or someone else's data — recursively
+    deleting it on the strength of the name alone is the worst thing this prune could do.
+    """
+    print("\nsession dir outside every temp root")
+    repo = make_repo(tmp, "wsoutside")
+    outside = tmp / "not-temp" / "cxc-cache"
+    ws = make_workspace(tmp / "state", "wsoutside", [], broker_pid=DEAD_PID, session_dir=outside)
+    proc = run(repo, tmp, CODEX_REVIEW_TEMP_ROOTS=bash_path(tmp / "state"))
+    check("broker.json still deleted", not (ws / "broker.json").exists())
+    check("dir outside the temp roots kept", outside.exists())
+    check("kept dir reported", "outside every temp root" in proc.stderr, proc.stderr[-400:])
+
+
+def case_ambiguous_workspace_skipped(tmp: Path, _live: int):
+    """Two checkouts sharing a basename cannot be told apart from the shell, so neither is touched.
+
+    The directory suffix is `sha256(canonical native path)[:16]` over the path Node canonicalizes —
+    on Windows that carries the on-disk casing, which git and bash do not report — so there is no
+    way here to decide which of two same-basename directories belongs to this checkout.
+    """
+    print("\nambiguous same-basename workspaces")
+    repo = make_repo(tmp, "wsdupe")
+    a = make_workspace(tmp / "state", "wsdupe", [job("review-a", "running", DEAD_PID)])
+    b = make_workspace(
+        tmp / "state", "wsdupe", [job("review-b", "running", DEAD_PID)], suffix="fedcba9876543210"
+    )
+    before = ((a / "jobs" / "review-a.json").read_bytes(), (b / "jobs" / "review-b.json").read_bytes())
+    proc = run(repo, tmp)
+    check("first candidate untouched", (a / "jobs" / "review-a.json").read_bytes() == before[0])
+    check("second candidate untouched", (b / "jobs" / "review-b.json").read_bytes() == before[1])
+    check("ambiguity reported", "cannot identify this workspace" in proc.stderr, proc.stderr[-400:])
+
+
 def case_lock(tmp: Path, live: int):
     print("\nper-workspace lock")
     repo = make_repo(tmp, "wslock")
     make_workspace(tmp / "state", "wslock", [])
-    lock_dir = tmp / "locks" / "codex-review-wslock.lock"
+    lock_dir = lock_dir_for(repo, tmp)
 
     proc = run(repo, tmp)
     check("lock released on exit", not lock_dir.exists(), f"rc={proc.returncode}")
@@ -296,9 +421,13 @@ def main():
             case_keeps_live_and_finished,
             case_broker_dead,
             case_broker_alive,
+            case_null_pid_is_no_evidence,
             case_foreign_session_dir_kept,
             case_unreadable_probe_counts_alive,
+            case_windows_probe_flag_form,
             case_other_workspace_untouched,
+            case_session_dir_outside_temp,
+            case_ambiguous_workspace_skipped,
             case_lock,
             case_malformed_state_is_survivable,
         ):

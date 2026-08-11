@@ -196,8 +196,13 @@ CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")  # from Se
 codex_status=0
 bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" \
   || codex_status=$?
-[ "$codex_status" -eq 75 ] && echo '{"codex_review":"locked"}' >&2
-[ "$codex_status" -ne 0 ] && [ "$codex_status" -ne 75 ] && echo '{"codex_review":"failed"}' >&2
+# if/elif, not a trailing `[ ... ] && echo`: a false test at the end of the block would make the
+# whole block exit non-zero on the success path — a passing review reported as a failed command.
+if [ "$codex_status" -eq 75 ]; then
+  echo '{"codex_review":"locked"}' >&2
+elif [ "$codex_status" -ne 0 ]; then
+  echo '{"codex_review":"failed"}' >&2
+fi
 ```
 
 Exit `75` is not a failed review — it is the script's per-workspace lock reporting that another

@@ -57,8 +57,9 @@ stuck at `status: running`, three stale `broker.json` files, two orphaned `codex
 
 The upstream fixes (re-parent the broker outside `taskkill /T` reach on Windows; add mid-turn
 socket close to the direct-retry condition) belong in an openai-codex issue, not this repo. These
-tickets harden *our* launcher against the failure while it exists. All three touch `dev/`, so each
-bumps both `dev/` manifests.
+tickets harden *our* launcher against the failure while it exists. The stale-state prune and the
+per-workspace lock shipped in dev v4.4.11; the one ticket below is what remains. It touches `dev/`,
+so it bumps both `dev/` manifests.
 
 - [ ] [HARNESS] Treat an unparseable or empty companion payload in `codex-review.sh` as transient rather than terminal: retry the run once after pruning the workspace's `broker.json` so the retry spawns a fresh broker, emit a bounded `WARN` naming the retry, and keep the current diagnostics and exit 1 when the second attempt also fails
 

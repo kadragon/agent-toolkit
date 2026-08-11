@@ -40,7 +40,12 @@ KEEP_RUN_DIR=""
 LOCK_DIR=""
 LOCK_HELD=""
 cleanup() {
-  [ -n "$LOCK_HELD" ] && [ -n "$LOCK_DIR" ] && rm -rf "$LOCK_DIR"
+  # Release only a lock this process still owns: after a reclaim race the directory at that path can
+  # belong to someone else, and dropping it would admit a third run.
+  if [ -n "$LOCK_HELD" ] && [ -n "$LOCK_DIR" ] &&
+    [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
+    rm -rf "$LOCK_DIR"
+  fi
   [ -n "$KEEP_RUN_DIR" ] || rm -rf "$RUN_DIR"
 }
 trap cleanup EXIT INT TERM
@@ -62,19 +67,27 @@ CODEX_REVIEW_PLATFORM="${CODEX_REVIEW_PLATFORM:-$(
 
 # Liveness of a *native* PID — companion and broker PIDs are written by Node, so on MINGW they are
 # Windows PIDs that `kill -0` cannot see (Git Bash keeps its own MSYS PID space). `tasklist` output
-# is localized (cp949 on a Korean host), so match the PID column rather than any message text, and
-# pass the flags in `//X` form so MSYS path conversion leaves them alone.
+# is localized (cp949 on a Korean host), so match on the image name rather than any message text.
 #
-# Fails SAFE: an unreadable probe — no `tasklist`, non-zero exit — reports alive, so nothing is
-# pruned on evidence we do not have.
+# Flag form is load-bearing and the two halves must agree: `MSYS2_ARG_CONV_EXCL='*'` switches MSYS
+# path conversion off, so the flags must be written `/NH` and reach tasklist verbatim. Writing them
+# `//NH` — the form that survives conversion when it is ON — passes a literal `//NH`, which tasklist
+# rejects with "invalid argument/option" and a non-zero exit; the `|| return 0` below would then
+# report every PID as alive and silently disable the prune on the one platform it exists for.
+#
+# Fails SAFE in every direction: an unreadable probe — no `tasklist`, non-zero exit — reports alive,
+# and so does a PID we cannot read at all. Both `broker-lifecycle.mjs` and `codex-companion.mjs`
+# write `pid: child.pid ?? null`, so a null PID is a record whose owner we have NO evidence about;
+# calling that dead would delete a possibly-live broker's endpoint out from under every other client
+# on the workspace. Nothing is pruned on evidence we do not have.
 native_pid_alive() {
   local pid="$1" out=""
   case "$pid" in
-    "" | *[!0-9]*) return 1 ;;
+    "" | null | *[!0-9]*) return 0 ;;
   esac
   if [ "$CODEX_REVIEW_PLATFORM" = "windows" ]; then
     command -v tasklist >/dev/null 2>&1 || return 0
-    out=$(MSYS2_ARG_CONV_EXCL='*' tasklist //NH //FI "PID eq $pid" 2>/dev/null) || return 0
+    out=$(MSYS2_ARG_CONV_EXCL='*' tasklist /NH /FI "PID eq $pid" 2>/dev/null) || return 0
     # The filter already narrows output to this PID, so presence of any image name means alive;
     # the not-found case is a localized sentence with no image name. Matching `.exe` rather than
     # the PID column avoids a false hit on a digit run inside the memory column.
@@ -86,10 +99,10 @@ native_pid_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
-# Slug the companion builds its state directory from: `<basename>-<sha256(realpath)[:16]>`. Only the
-# basename half is reproducible from bash (the hash is taken over Node's canonicalized path), which
-# is enough to scope the prune to this workspace — the PID check is what makes each individual
-# removal safe.
+# Basename half of the companion's state directory name, `<basename>-<sha256(realpath)[:16]>`. Only
+# this half is reproducible from bash; the hash is taken over Node's canonicalized native path, which
+# the shell cannot reconstruct (see the measurement in prune_stale_codex_state). Ambiguity between
+# two same-basename workspaces is therefore resolved by refusing to act, not by guessing.
 workspace_slug() {
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
@@ -124,30 +137,123 @@ prune_job_record() {
 # reuses and then dies against mid-turn with no JSON on stdout.
 #
 # Never fatal: a review that cannot pre-clean is still worth running, so every failure here warns
-# and returns 0.
+# and returns 0. The helpers it is built from follow.
+
+# One temp root per line — the only place a broker session dir may legitimately live, since
+# `createBrokerSessionDir` builds it with `fs.mkdtempSync(path.join(os.tmpdir(), "cxc-"))`.
+temp_roots() {
+  local root
+  if [ -n "${CODEX_REVIEW_TEMP_ROOTS:-}" ]; then
+    printf '%s\n' "$CODEX_REVIEW_TEMP_ROOTS"
+    return 0
+  fi
+  for root in "${TMPDIR:-}" "${TEMP:-}" "${TMP:-}" /tmp; do
+    [ -n "$root" ] || continue
+    if command -v cygpath >/dev/null 2>&1; then
+      root=$(cygpath -u "$root" 2>/dev/null || printf '%s' "$root")
+    fi
+    [ -d "$root" ] && printf '%s\n' "${root%/}"
+  done
+  return 0
+}
+
+# One state root per line. The override collapses the set to a single fixture tree for the test.
+# The default mirrors the companion's own `resolveStateDir`: `$CLAUDE_PLUGIN_DATA/state` when that
+# env var is set, otherwise `<os.tmpdir()>/codex-companion` — plus every installed marketplace copy
+# under the plugins data dir. Miss these and the prune quietly finds nothing in exactly the setups
+# that deviate from the default install.
+state_roots() {
+  local root
+  if [ -n "${CODEX_REVIEW_STATE_ROOTS:-}" ]; then
+    printf '%s\n' "$CODEX_REVIEW_STATE_ROOTS"
+    return 0
+  fi
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -d "$CLAUDE_PLUGIN_DATA/state" ] && printf '%s\n' "$CLAUDE_PLUGIN_DATA/state"
+  while IFS= read -r root; do
+    [ -d "$root/codex-companion" ] && printf '%s\n' "$root/codex-companion"
+  done <<EOF
+$(temp_roots)
+EOF
+  for root in "$HOME"/.claude/plugins/data/*/state; do
+    [ -d "$root" ] && printf '%s\n' "$root"
+  done
+  return 0
+}
+
+# True when the candidate directory is an immediate child of one of the temp roots above.
+#
+# Identity is tested with `-ef` (same device+inode), not a string prefix: MSYS mounts the Windows
+# temp dir at `/tmp`, so cygpath rewrites `C:\Users\...\AppData\Local\Temp\x` to `/tmp/x` while the
+# same directory reached another way reads `/c/Users/.../Temp/x`. A prefix comparison calls those
+# two different places and would wrongly refuse to clean up on Windows.
+#
+# Immediate child, not "anywhere below": `createBrokerSessionDir` is
+# `mkdtempSync(join(os.tmpdir(), "cxc-"))`, so a real session dir's parent IS the temp root.
+under_temp_root() {
+  local candidate="$1" parent root
+  [ -d "$candidate" ] || return 1
+  parent=$(dirname "$candidate")
+  while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    [ -d "$root" ] || continue
+    if [ "$parent" -ef "$root" ]; then
+      return 0
+    fi
+  done <<EOF
+$(temp_roots)
+EOF
+  return 1
+}
+
 prune_stale_codex_state() {
   command -v jq >/dev/null 2>&1 || { printf 'WARN: jq unavailable — skipping stale codex state prune\n' >&2; return 0; }
   local slug
   slug=$(workspace_slug) || { printf 'WARN: not a git repository — skipping stale codex state prune\n' >&2; return 0; }
   [ -n "$slug" ] || return 0
 
-  local roots ws ws_suffix job_file job_id status pid broker_pid session_dir
-  # Default covers every installed marketplace copy of the plugin's data dir; the override collapses
-  # it to one fixture tree for the test.
-  roots="${CODEX_REVIEW_STATE_ROOTS:-$HOME/.claude/plugins/data/*/state}"
+  local root ws ws_suffix job_file job_id status pid broker_pid session_dir
+  local matches="" match_count=0
 
-  # shellcheck disable=SC2086  # both halves are globs on purpose: the root list and the slug suffix
-  for ws in ${roots}/${slug}-*; do
+  # Roots are iterated, never held in one word-split string: `$HOME` on Windows routinely contains a
+  # space (`/c/Users/First Last`), and splitting the default on IFS would turn it into two paths that
+  # match nothing — the prune silently becoming a no-op on the platform it exists for.
+  while IFS= read -r root; do
+    [ -d "$root" ] || continue
+    # Quoting the variable still leaves the trailing `*` to glob; it only stops the *root* from being
+    # re-split or re-globbed.
+    for ws in "$root"/"$slug"-*; do
+      [ -d "$ws" ] || continue
+      # `${slug}-*` is a prefix match, and a prefix is not an identity: from repo `foo` it also
+      # matches repo `foo-bar`'s directory `foo-bar-<hash>`. What the companion actually appends is
+      # `-` plus exactly 16 hex digits, so require that shape before collecting the directory.
+      ws_suffix=$(basename "$ws")
+      ws_suffix=${ws_suffix#"$slug"-}
+      [ ${#ws_suffix} -eq 16 ] || continue
+      case "$ws_suffix" in
+        *[!0-9a-f]*) continue ;;
+      esac
+      matches="${matches}${ws}
+"
+      match_count=$((match_count + 1))
+    done
+  done <<EOF
+$(state_roots)
+EOF
+
+  # Shape is not identity either. The suffix is `sha256(canonical native path)[:16]`, and that hash
+  # is NOT reproducible from the shell: measured on this repo, the live directory's suffix hashes
+  # `C:\Dev\agent-toolkit` — the on-disk casing `fs.realpathSync.native` returns — while git and bash
+  # both report `C:/dev/agent-toolkit`. So when two checkouts share a basename (`/a/foo`, `/b/foo`)
+  # there is no way here to tell which directory is ours. One match is unambiguous; more than one is
+  # not, and touching either would be the cross-workspace write this prune must never do.
+  if [ "$match_count" -gt 1 ]; then
+    printf 'WARN: %s codex state directories share the basename "%s"; cannot identify this workspace from the shell — skipping prune\n' \
+      "$match_count" "$slug" >&2
+    return 0
+  fi
+
+  while IFS= read -r ws; do
     [ -d "$ws" ] || continue
-    # `${slug}-*` is a prefix match, and a prefix is not an identity: from repo `foo` it also
-    # matches repo `foo-bar`'s directory `foo-bar-<hash>`. What the companion actually appends is
-    # `-` plus exactly 16 hex digits, so require that shape before touching anything inside.
-    ws_suffix=$(basename "$ws")
-    ws_suffix=${ws_suffix#"$slug"-}
-    [ ${#ws_suffix} -eq 16 ] || continue
-    case "$ws_suffix" in
-      *[!0-9a-f]*) continue ;;
-    esac
     for job_file in "$ws"/jobs/*.json; do
       [ -f "$job_file" ] || continue
       status=$(jq -r '.status // ""' "$job_file" 2>/dev/null) || continue
@@ -177,14 +283,29 @@ prune_stale_codex_state() {
     if [ -n "$session_dir" ] && command -v cygpath >/dev/null 2>&1; then
       session_dir=$(cygpath -u "$session_dir" 2>/dev/null || printf '%s' "$session_dir")
     fi
-    rm -f "$ws/broker.json"
-    # Only ever remove a directory the plugin itself created: `createBrokerSessionDir` names it
-    # `cxc-XXXXXX` under the OS temp dir. Anything else is not ours to delete.
+    # Guarded, not bare: an unguarded `rm` that hits a read-only or locked file returns non-zero,
+    # and under `set -e` that would abort the whole review before the companion ever launches —
+    # the opposite of this function's "never fatal" contract.
+    rm -f "$ws/broker.json" 2>/dev/null ||
+      printf 'WARN: could not remove stale broker record %s\n' "$ws/broker.json" >&2
+    # Only ever remove a directory the plugin itself created: `createBrokerSessionDir` is
+    # `mkdtempSync(join(os.tmpdir(), "cxc-"))`, so BOTH halves must hold — the `cxc-` name and a
+    # location under a temp root. The name alone is not evidence: a `sessionDir` of
+    # `/some/project/cxc-cache`, or a relative path, would otherwise be recursively deleted.
     case "$(basename "${session_dir:-.}")" in
-      cxc-?*) [ -d "$session_dir" ] && rm -rf "$session_dir" ;;
+      cxc-?*)
+        if [ -d "$session_dir" ] && under_temp_root "$session_dir"; then
+          rm -rf "$session_dir" 2>/dev/null ||
+            printf 'WARN: could not remove stale broker session dir %s\n' "$session_dir" >&2
+        elif [ -d "$session_dir" ]; then
+          printf 'WARN: broker session dir %s is outside every temp root — left in place\n' "$session_dir" >&2
+        fi
+        ;;
     esac
     printf 'WARN: pruned stale codex broker record (pid %s dead)\n' "${broker_pid:-none}" >&2
-  done
+  done <<EOF
+$matches
+EOF
   return 0
 }
 
@@ -196,8 +317,42 @@ prune_stale_codex_state() {
 # in Git Bash. The owner PID recorded inside is *this bash process*, so it is probed with `kill -0`
 # and NOT with native_pid_alive — on MINGW `$$` is an MSYS PID that `tasklist` cannot see, and
 # probing it there would report every live holder as dead and steal the lock from under it.
+claim_workspace_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null || return 1
+  printf '%s\n' "$$" >"$LOCK_DIR/pid" 2>/dev/null || return 1
+  LOCK_HELD=1
+  return 0
+}
+
+# Take over a lock whose recorded owner is gone, WITHOUT ever deleting a directory in place.
+#
+# A plain `rm -rf` + `mkdir` loses mutual exclusion in exactly the case the lock exists for: stale
+# locks are the common path here (SIGKILL/taskkill teardown is the documented failure mode), and two
+# runs that both find one can interleave so that the second deletes the first's freshly created lock
+# and both believe they hold it. `mv` is the arbiter instead — a rename of a directory that another
+# process already renamed simply fails, so exactly one reclaimer proceeds.
+#
+# The moved-aside PID is then compared against the dead owner this run actually inspected. A
+# mismatch means a live claim landed between the inspection and the rename, so the directory goes
+# back untouched and this run reports contention rather than stealing a live lock.
+reclaim_stale_lock() {
+  local dead_owner="$1" aside="$LOCK_DIR.stale.$$" moved_owner
+  mv "$LOCK_DIR" "$aside" 2>/dev/null || return 1
+  moved_owner=$(cat "$aside/pid" 2>/dev/null || true)
+  if [ "$moved_owner" != "$dead_owner" ]; then
+    if [ -e "$LOCK_DIR" ]; then
+      rm -rf "$aside"
+    else
+      mv "$aside" "$LOCK_DIR" 2>/dev/null || rm -rf "$aside"
+    fi
+    return 1
+  fi
+  rm -rf "$aside"
+  claim_workspace_lock
+}
+
 acquire_workspace_lock() {
-  local slug lock_root owner
+  local slug root lock_root lock_key owner
   slug=$(workspace_slug) || return 0
   [ -n "$slug" ] || return 0
   lock_root="${CODEX_REVIEW_LOCK_ROOT:-${TMPDIR:-/tmp}}"
@@ -205,11 +360,21 @@ acquire_workspace_lock() {
     printf 'WARN: cannot create the lock root %s — running unserialized\n' "$lock_root" >&2
     return 0
   fi
-  LOCK_DIR="$lock_root/codex-review-${slug}.lock"
 
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    LOCK_HELD=1
-    printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  # Key on the canonical path, not the basename alone: the broker is single-flight per workspace
+  # *path*, so `~/dev/foo` and `~/work/foo` do not contend and must not share a lock. `cksum` is the
+  # portable digest here — `sha256sum` is absent on macOS, `shasum` on some Linux images.
+  #
+  # Canonicalize the way the companion does (`fs.realpathSync.native`) before hashing, or one
+  # workspace reached through a symlink — or, on Windows, through a differently-cased path, which
+  # `show-toplevel` echoes verbatim from the cwd — yields two locks for the single broker they share.
+  root=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$slug")
+  root=$(cd "$root" 2>/dev/null && pwd -P) || root=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$slug")
+  [ "$CODEX_REVIEW_PLATFORM" = "windows" ] && root=$(printf '%s' "$root" | tr '[:upper:]' '[:lower:]')
+  lock_key=$(printf '%s' "$root" | cksum | tr -d ' \t' 2>/dev/null || printf '%s' "0")
+  LOCK_DIR="$lock_root/codex-review-${slug}-${lock_key}.lock"
+
+  if claim_workspace_lock; then
     return 0
   fi
 
@@ -221,10 +386,7 @@ acquire_workspace_lock() {
   fi
 
   # Stale lock: the recorded owner is gone (or never got as far as writing its PID).
-  rm -rf "$LOCK_DIR"
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    LOCK_HELD=1
-    printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  if reclaim_stale_lock "$owner"; then
     printf 'WARN: reclaimed stale codex review lock (owner %s gone)\n' "${owner:-unknown}" >&2
     return 0
   fi
@@ -280,8 +442,10 @@ case "$CODEX_MODE" in
       echo "ERROR: codex_companion_path is required for plugin mode" >&2
       exit 1
     fi
-    # Lock first, prune second: the prune reads state another live cycle is actively writing, and
-    # taking the lock is what makes "this PID is dead" a safe conclusion rather than a race.
+    # Lock first, prune second: the lock keeps two *review cycles* off the same state at once. It
+    # says nothing about the companion's own writers — `saveState()` is a non-atomic
+    # load-mutate-write — so a background codex job completing mid-prune can still interleave. The
+    # PID check is what keeps each individual removal safe; the lock only narrows the window.
     acquire_workspace_lock || exit "$EX_LOCKED"
     prune_stale_codex_state
     # --json disables the companion's live reasoning stream (stderr) and the reasoning section
