@@ -193,9 +193,18 @@ PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated h
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")  # from Setup
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")  # from Setup
+codex_status=0
 bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" \
-  || echo '{"codex_review":"failed"}' >&2
+  || codex_status=$?
+[ "$codex_status" -eq 75 ] && echo '{"codex_review":"locked"}' >&2
+[ "$codex_status" -ne 0 ] && [ "$codex_status" -ne 75 ] && echo '{"codex_review":"failed"}' >&2
 ```
+
+Exit `75` is not a failed review — it is the script's per-workspace lock reporting that another
+cycle already holds this workspace's Codex slot, so no companion was launched. Record it as
+`Reviewers Skipped: codex review already running` and do **not** count it as a dead reviewer:
+nothing ran, so there is no review to treat as empty, and the run is retryable as-is once the
+other cycle finishes.
 
 If all sources fail → inline review + note in consolidation.
 

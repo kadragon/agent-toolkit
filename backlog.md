@@ -60,9 +60,7 @@ socket close to the direct-retry condition) belong in an openai-codex issue, not
 tickets harden *our* launcher against the failure while it exists. All three touch `dev/`, so each
 bumps both `dev/` manifests.
 
-- [ ] [HARNESS] Add a stale-state prune to `codex-review.sh` plugin mode that runs before launching the companion: rewrite every `~/.claude/plugins/data/*/state/<workspace>/jobs/*.json` record stuck at `running`/`queued` whose `pid` is dead to `failed` (mirroring the entry in `state.json`), and delete `broker.json` plus its `sessionDir` when its `pid` is dead — probing liveness with `tasklist` on MINGW/Windows and `kill -0` elsewhere, decoding `tasklist` output leniently since it is localized, and never touching a record whose pid is alive
-- [ ] [HARNESS] Serialize `codex-review.sh` per workspace with an atomic `mkdir` lockdir holding the owner pid, released on `EXIT`/`INT`/`TERM` and stolen only when the recorded pid is dead: a second cycle whose lock is held by a live pid exits with a distinct status so `task-review` records `Reviewers Skipped: codex review already running` instead of a dead reviewer, with the new label added to `SKILL.md` §2-3
-- [ ] [HARNESS] Treat an unparseable or empty companion payload in `codex-review.sh` as transient rather than terminal: retry the run once after pruning the workspace's `broker.json` so the retry spawns a fresh broker, emit a bounded `WARN` naming the retry, and keep the current diagnostics and exit 1 when the second attempt also fails *(blocked by: 1-stale-state-prune)*
+- [ ] [HARNESS] Treat an unparseable or empty companion payload in `codex-review.sh` as transient rather than terminal: retry the run once after pruning the workspace's `broker.json` so the retry spawns a fresh broker, emit a bounded `WARN` naming the retry, and keep the current diagnostics and exit 1 when the second attempt also fails
 
 ## Harness — `task-*` edge enforcement (rescoped)
 
