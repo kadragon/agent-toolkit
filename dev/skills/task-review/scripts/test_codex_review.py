@@ -124,7 +124,6 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
     env = dict(os.environ)
     env.update(
         {
-            "CODEX_REVIEW_PLATFORM": platform,
             "CODEX_REVIEW_STATE_ROOTS": bash_path(tmp / "state"),
             "CODEX_REVIEW_LOCK_ROOT": bash_path(tmp / "locks"),
             # The fixture tree stands in for the OS temp root, so session-dir deletion is decided
@@ -132,6 +131,10 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
             "CODEX_REVIEW_TEMP_ROOTS": bash_path(tmp),
         }
     )
+    if platform is None:
+        env.pop("CODEX_REVIEW_PLATFORM", None)
+    else:
+        env["CODEX_REVIEW_PLATFORM"] = platform
     env.update({k: str(v) for k, v in env_overrides.items()})
     return subprocess.run(
         ["bash", str(repo / "scripts" / "codex-review.sh"), "plugin", "main", companion],
@@ -399,6 +402,25 @@ def case_ambiguous_workspace_skipped(tmp: Path, _live: int):
     check("ambiguity reported", "cannot identify this workspace" in proc.stderr, proc.stderr[-400:])
 
 
+def case_default_platform_selector(tmp: Path, _live: int):
+    """The platform selector must execute when no override is provided.
+
+    macOS ships Bash 3.2, which rejects the old case-inside-command-substitution form at runtime.
+    The existing cases override CODEX_REVIEW_PLATFORM, so this path needs an explicit regression.
+    """
+    print("\ndefault platform selector")
+    repo = make_repo(tmp, "wsdefaultselector")
+    companion, calls = make_sequenced_companion(
+        tmp,
+        "default-platform-selector",
+        ['{"codex":{"status":0,"stdout":"review via default selector"}}'],
+    )
+    proc = run(repo, tmp, platform=None, companion=bash_path(companion))
+    check("default selector reaches companion", proc.returncode == 0, proc.stderr[-400:])
+    check("default selector emits review", proc.stdout.strip() == "review via default selector", proc.stdout)
+    check("default selector invokes companion once", calls.read_text(encoding="utf-8") == "1")
+
+
 def case_empty_payload_retries_after_prune(tmp: Path, _live: int):
     print("\nempty companion payload retries")
     repo = make_repo(tmp, "wsretry")
@@ -546,6 +568,7 @@ def main():
             case_other_workspace_untouched,
             case_session_dir_outside_temp,
             case_ambiguous_workspace_skipped,
+            case_default_platform_selector,
             case_empty_payload_retries_after_prune,
             case_empty_json_stdout_retries_after_prune,
             case_empty_json_stdout_retries_then_fails,
