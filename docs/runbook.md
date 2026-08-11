@@ -32,6 +32,7 @@ codex plugin add prod@kadragon
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 | `python3 scripts/ci/check_harness_drift.py` | Over shipped skills: plugin-root portability, capture-before-use, `§`/`Signal N`/`<file>.md` → *Section* refs, `$SKILL_DIR/scripts/*` refs, and `(bundled with <plugin>:<skill>)` attributions |
 | `python3 scripts/ci/check_skill_frontmatter.py` | Skill/agent/command frontmatter parses as YAML, required keys present (needs PyYAML) |
+| `python3 scripts/ci/check_skill_triggers.py` | Deterministic trigger-fixture ranking: each skill's `evals/trigger-eval.json` queries rank the owning skill's `description:` correctly by TF-IDF/cosine (needs PyYAML) |
 | `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
 | `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
 
