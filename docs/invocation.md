@@ -151,13 +151,35 @@ create a call where none belongs:
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 
-The enforcement checker must exempt these three alongside the four router-prose sites above.
+These three carry markers. The four router-prose sites above need none: the checker's regex is
+namespace-anchored, so the `Use Skill(X)` form is outside the rule by construction rather than
+by exemption — which is why the marked set is these three plus the one namespaced example in
+`trigger-router-template.md`, not seven.
 
-No marker exists at any of those sites today — they are listed here by inspection, not by
-annotation. Each must carry an explicit marker by the time a checker enforces the notation
-rule, per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker, Not a Standing
-Warning*; adding them is part of that checker's ticket. A silent path allowlist inside the
-checker is not an acceptable substitute: the exemption has to be visible where the text is.
+**The markers now exist.** `scripts/ci/check_skill_frontmatter.py` enforces the notation rule,
+and each exempt site carries its own marker where the text is — never a path allowlist inside the
+checker, per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker, Not a Standing
+Warning*:
+
+```
+<!-- notation-exempt: <reason> -->        markdown prose
+# notation-exempt: <reason>               inside a YAML frontmatter block
+```
+
+Accepted on the flagged line, the line above it, or the line above an enclosing code fence,
+and only as a complete HTML comment — prose that merely *mentions* `notation-exempt:` is not
+a marker, or a page explaining this convention would exempt its own examples.
+A `<!-- call-graph-exempt: <reason> -->` marker does the same job for a line that names a
+user-invoked skill in order to *describe* the invariant rather than call it.
+**Inside frontmatter the rule is narrower, deliberately:** the marker sits on its own
+unindented line directly under the key it covers, and covers *only that key* — a folded scalar has no line a
+marker can share without leaking into the value the loader reads, but a block-wide exemption
+would let one justified marker launder an unrelated violation under the next key. An
+*indented* `#` line is not a marker at all — YAML folds it into the scalar above, so it
+would leak into the description and exempt itself. Only four
+sites need one today: the
+checker's regex is namespace-anchored, so the router-prose `Use Skill(X)` form is outside the
+rule by construction rather than by exemption.
 
 `docs/design/*.md` are historical records of decisions as they were made. They are out of
 scope for every rule on this page — do not rewrite their notation.

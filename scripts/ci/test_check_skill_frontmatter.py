@@ -318,6 +318,333 @@ def test_discovery():
         )
 
 
+
+
+# --- invocation axis (docs/invocation.md) ------------------------------------
+
+LOCKED_SKILL = """---
+name: task-review
+description: Post-dev review cycle for this branch.
+disable-model-invocation: true
+---
+
+# Dev Review Cycle
+"""
+
+OPEN_SKILL = """---
+name: task-grill
+description: Resolve material ambiguity by interviewing the user.
+---
+
+# To Grill
+"""
+
+SIDECAR_LOCKED = 'interface:\n  display_name: "Review"\npolicy:\n  allow_implicit_invocation: false\n'
+
+
+def axis_repo(tmp: Path, extra: dict) -> Path:
+    """A minimal coherent repo: one locked skill with its sidecar, one open skill."""
+    files = {
+        "dev/skills/task-review/SKILL.md": LOCKED_SKILL,
+        "dev/skills/task-review/agents/openai.yaml": SIDECAR_LOCKED,
+        "dev/skills/task-grill/SKILL.md": OPEN_SKILL,
+    }
+    files.update(extra)
+    return make_repo(tmp, files)
+
+
+def test_axis_coherence():
+    print("\naxis coherence")
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out = run_main(axis_repo(Path(tmp), {}))
+        check("coherent tree passes", code == 0 and "both platform halves agree" in out, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Claude half only — the sidecar is simply absent.
+        root = make_repo(Path(tmp), {"dev/skills/task-review/SKILL.md": LOCKED_SKILL})
+        code, out = run_main(root)
+        check(
+            "Claude-only lock fails",
+            code == 1 and "its Codex half does not match" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Codex half only.
+        root = make_repo(
+            Path(tmp),
+            {
+                "dev/skills/task-grill/SKILL.md": OPEN_SKILL,
+                "dev/skills/task-grill/agents/openai.yaml": SIDECAR_LOCKED,
+            },
+        )
+        code, out = run_main(root)
+        check(
+            "Codex-only lock fails",
+            code == 1 and "does not set `disable-model-invocation: true`" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = axis_repo(Path(tmp), {})
+        (root / "dev/skills/task-review/agents/openai.yaml").write_text(
+            "policy: [not, a, mapping\n", encoding="utf-8"
+        )
+        code, out = run_main(root)
+        check(
+            "unparseable sidecar fails rather than being skipped",
+            code == 1 and "does not parse as YAML" in out,
+            out,
+        )
+
+
+def test_call_graph():
+    print("\ncall graph")
+    caller = OPEN_SKILL + '\nCall the Skill tool with "dev:task-review" and `args: --auto`.\n'
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": caller}))
+        check(
+            "a MODEL-invoked caller naming a user-invoked skill fails",
+            code == 1 and "names user-invoked skill `dev:task-review`" in out,
+            out,
+        )
+
+    ok_caller = OPEN_SKILL + '\nCall the Skill tool with "dev:task-grill".\n'
+    with tempfile.TemporaryDirectory() as tmp:
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": ok_caller}))
+        check("calling a model-invoked skill passes", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ref = 'Hand off: call the Skill tool with "dev:task-review" and `args: --auto`.\n'
+        code, out = run_main(
+            axis_repo(Path(tmp), {"dev/skills/task-grill/references/tree.md": ref})
+        )
+        check(
+            "a bundled reference file is scanned too, not just SKILL.md",
+            code == 1 and "references/tree.md" in out,
+            out,
+        )
+
+
+def test_notation():
+    print("\nnotation")
+    with tempfile.TemporaryDirectory() as tmp:
+        body = OPEN_SKILL + "\nSee `Skill(dev:task-spec)` for the spec step.\n"
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": body}))
+        check("residual Skill(ns:name) fails", code == 1 and "retired `Skill(ns:name)`" in out, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        marked = OPEN_SKILL + (
+            "\n<!-- notation-exempt: label a hook prints, not a call -->\n"
+            "See `Skill(dev:task-spec)` for the spec step.\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": marked}))
+        check("a marker on the line above exempts the site", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fenced = OPEN_SKILL + (
+            "\n<!-- notation-exempt: emitted string, not a call -->\n"
+            "```json\n"
+            '{"instruction": "Use Skill(dev:task-spec) to run it"}\n'
+            "```\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": fenced}))
+        check("a marker above a fence covers the code inside it", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Router prose with no namespace is outside the rule by construction.
+        router = OPEN_SKILL + "\nThe hook emits `Use Skill(X)` on match.\n"
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": router}))
+        check("namespace-less `Skill(X)` is not flagged", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fm_marked = (
+            "---\nname: task-grill\n"
+            "description: Callable from other skills via `Skill(dev:task-grill)`.\n"
+            "# notation-exempt: description text, decided separately\n---\n\n# To Grill\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": fm_marked}))
+        check("a frontmatter marker covers the key block above it", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # One justified exemption must not launder a second, unmarked violation
+        # sitting under a different key in the same frontmatter block.
+        two_keys = (
+            "---\nname: task-grill\n"
+            "description: Callable from other skills via `Skill(dev:task-grill)`.\n"
+            "# notation-exempt: description text, decided separately\n"
+            "when_to_use: see `Skill(dev:task-review)` for the review step\n"
+            "---\n\n# To Grill\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": two_keys}))
+        check(
+            "a marker does NOT exempt an unmarked violation under another key",
+            code == 1 and "SKILL.md:5 uses" in out and "SKILL.md:3 uses" not in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # An indented `#` is a continuation line of the folded scalar above it: YAML
+        # folds it into the description the loader reads, so honouring it as a marker
+        # would both leak the marker text and exempt the line it sits in.
+        indented = (
+            "---\nname: task-grill\n"
+            "description: >-\n"
+            "  text with `Skill(dev:task-review)`\n"
+            "  # notation-exempt: indented, so not a marker\n"
+            "  more text\n"
+            "---\n\n# To Grill\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": indented}))
+        check(
+            "an indented marker inside a folded scalar is not honoured",
+            code == 1 and "retired `Skill(ns:name)`" in out,
+            out,
+        )
+
+
+def test_pre_migration_tree_fails():
+    """The item's own acceptance bar: the checks must reject the shape the repo had
+    before the invocation-axis migration — all three violations at once."""
+    print("\npre-migration tree")
+    pre_caller = (
+        "---\nname: task-next\ndescription: Pull the next queued item.\n---\n\n"
+        "Invoke `Skill(dev:task-review)` with `args: --auto`.\n"
+        'Call the Skill tool with "dev:task-review" and `args: --auto`.\n'
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(
+            Path(tmp),
+            {
+                # user-invoked in Claude, no Codex sidecar
+                "dev/skills/task-review/SKILL.md": LOCKED_SKILL,
+                "dev/skills/task-next/SKILL.md": pre_caller,
+            },
+        )
+        code, out = run_main(root)
+        check("pre-migration tree exits non-zero", code == 1, out)
+        check("  ...on axis coherence", "its Codex half does not match" in out, out)
+        check("  ...on the call graph", "names user-invoked skill" in out, out)
+        check("  ...on notation", "retired `Skill(ns:name)`" in out, out)
+
+
+
+
+def test_axis_flag_strictness():
+    print("\nboolean strictness")
+    with tempfile.TemporaryDirectory() as tmp:
+        quoted = (
+            "---\nname: task-review\ndescription: d\n"
+            'disable-model-invocation: "true"\n---\n\n# x\n'
+        )
+        root = make_repo(Path(tmp), {"dev/skills/task-review/SKILL.md": quoted})
+        code, out = run_main(root)
+        check(
+            "a quoted `\"true\"` fails instead of reading as unlocked",
+            code == 1 and "is not a YAML boolean" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = axis_repo(Path(tmp), {})
+        (root / "dev/skills/task-review/agents/openai.yaml").write_text(
+            'policy:\n  allow_implicit_invocation: "false"\n', encoding="utf-8"
+        )
+        code, out = run_main(root)
+        check(
+            "a quoted sidecar boolean fails too",
+            code == 1 and "is not a YAML boolean" in out,
+            out,
+        )
+
+
+def test_call_graph_spellings():
+    print("\ncall spellings")
+    forms = {
+        "backticked": "Call the Skill tool with `dev:task-review`.",
+        "single-quoted": "Call the Skill tool with 'dev:task-review'.",
+        "unquoted": "Call the Skill tool with dev:task-review now.",
+        "target before the tool name": "Invoke dev:task-review via the Skill tool.",
+        "wrapped across two lines": 'Call the Skill tool with\n"dev:task-review".',
+    }
+    for label, call in forms.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            body = OPEN_SKILL + "\n" + call + "\n"
+            code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": body}))
+            check(f"{label} call is caught", code == 1 and "names user-invoked skill" in out, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        two = OPEN_SKILL + (
+            '\nCall the Skill tool twice, for "dev:task-grill" and "dev:task-review".\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": two}))
+        check(
+            "the SECOND target of a two-call line is checked",
+            code == 1 and "dev:task-review" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Verbatim shape from dev/skills/task-new/SKILL.md — "Skill tool" on one line,
+        # BOTH targets on the next. The per-line, first-target-only reading missed it,
+        # and it is the exact phrasing docs/invocation.md → Notation prescribes.
+        in_tree = OPEN_SKILL + (
+            "\n- **Multi-session** → call the Skill tool twice: first with\n"
+            '  "dev:task-grill" to resolve scope, then with "dev:task-review" to land it.\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": in_tree}))
+        check(
+            "the wrapped two-target form used in-tree is caught",
+            code == 1 and "dev:task-review" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        described = OPEN_SKILL + (
+            "\n<!-- call-graph-exempt: states the rule, does not call it -->\n"
+            'The Skill tool listing shows "dev:task-review" as user-invoked; never call it.\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": described}))
+        check("a marked descriptive mention is not a call", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        other_ns = OPEN_SKILL + '\nCall the Skill tool with "other:task-review".\n'
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": other_ns}))
+        check("a different namespace is a different skill", code == 0, out)
+
+
+def test_marker_blast_radius():
+    print("\nmarker blast radius")
+    with tempfile.TemporaryDirectory() as tmp:
+        # Opening fence on line 1 must not leave a stale intro that exempts the rest.
+        leaky = "```\ncode notation-exempt: whatever\n```\n`Skill(dev:task-spec)` unmarked!\n"
+        code, out = run_main(
+            axis_repo(Path(tmp), {"dev/skills/task-grill/references/r.md": leaky})
+        )
+        check(
+            "a leading fence does not exempt the rest of the file",
+            code == 1 and "retired `Skill(ns:name)`" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prose = OPEN_SKILL + (
+            "\nMark such a site `notation-exempt: <reason>` to opt out.\n"
+            "`Skill(dev:task-spec)` here is NOT exempt.\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": prose}))
+        check(
+            "prose describing the marker is not itself a marker",
+            code == 1 and "retired `Skill(ns:name)`" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        agent = "---\nname: helper\ndescription: d\n---\n\nUse `Skill(dev:task-spec)` here.\n"
+        code, out = run_main(axis_repo(Path(tmp), {"dev/agents/helper.md": agent}))
+        check("agent definitions are scanned too", code == 1 and "dev/agents/helper.md" in out, out)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -326,6 +653,13 @@ def main():
         test_name_path_agreement(root)
         test_asset_shapes(root)
     test_discovery()
+    test_axis_coherence()
+    test_call_graph()
+    test_notation()
+    test_pre_migration_tree_fails()
+    test_axis_flag_strictness()
+    test_call_graph_spellings()
+    test_marker_blast_radius()
 
     total = len(_results)
     passed = sum(_results)

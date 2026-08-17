@@ -129,6 +129,7 @@ exit 0
 
 Populate during harness-init Step 7b with one route per orchestrator skill and per high-leverage agent role. **Routes must be specific** — overly broad patterns hijack normal conversation.
 
+<!-- notation-exempt: the `instruction` values below are strings a hook prints, not calls this file makes -->
 ```json
 [
   {
