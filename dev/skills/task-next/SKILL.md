@@ -435,17 +435,23 @@ force a full scan just to annotate. Sync **both** directions:
 - **Mark newly-found blocked items.** An open `- [ ]` item you confirmed this run is blocked by
   an unresolved dependency (or otherwise non-actionable) and that carries NO
   `*(blocked by: ...)*`/`*(deferred: ...)*` marker → append a marker to that line:
-  `*(blocked by: <n>-<slug>)*` when the blocker is another queue item, else
-  `*(deferred: <short reason>)*`. Only when you verified the blocker is unresolved this session
-  — verify, never guess.
-- **Clear stale markers.** An item carrying `*(blocked by: <n>-<slug>)*` whose referenced
-  blocker is no longer an open item (it landed or was removed), or a
-  `*(deferred: ...)*` whose reason you confirmed resolved this run → delete the marker so the
-  item becomes a candidate again next run. Only when the resolution is verifiable from files/
-  command output read this session — never guess. **Match on `<slug>`, never on `<n>`**: the
-  number is frozen at authoring and nothing renumbers it, so a number that no longer matches
-  any heading position is expected and is not evidence the blocker landed
-  (`dev:task-tickets` step 6).
+  `*(blocked by: <slug>)*` when the blocker is another queue item, else
+  `*(deferred: <short reason>)*`. Write the slug alone — the `<n>-` prefix on older markers is
+  authoring residue this skill never invents (`dev:task-tickets` step 6). Only when you verified
+  the blocker is unresolved this session — verify, never guess.
+- **Clear stale markers.** An item carrying `*(blocked by: ...)*` whose referenced blocker is no
+  longer an open item (it landed or was removed), or a `*(deferred: ...)*` whose reason you
+  confirmed resolved this run → delete the marker so the item becomes a candidate again next run.
+  Only when the resolution is verifiable from files/command output read this session — never guess.
+  Three rules govern the match, and the last is the one that keeps this safe:
+  - **Match on the slug, never on any `<n>-` prefix.** The number is authoring residue that nothing
+    renumbers, so a number matching no heading position is expected (`dev:task-tickets` step 6).
+  - **The slug is abbreviated, so match it by judgment against the blocker's heading and item
+    text** — not by string equality. `user-invoked-descriptions` is the marker for
+    `## Invocation axis — user-invoked descriptions`; a literal comparison would find nothing.
+  - **Failing to find a match is never evidence the blocker landed.** Clear a marker only on
+    positive evidence — the blocker's item now reads `[x]`, or its removal is visible in git.
+    When you cannot resolve the slug at all, leave the marker and say so.
 
 These edits ride the same cleanup commit. Disclose them in the PR body (or lite-path commit
 message), e.g. "synced N blocked markers in backlog.md", so review does not read them as scope

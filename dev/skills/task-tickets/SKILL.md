@@ -63,9 +63,11 @@ items from approved spec").
    ```
    - [ ] [FEAT] <ticket description> *(blocked by: <n>-<slug>)*
    ```
-   where `<n>` is the blocking ticket's position number in this batch (or an existing
-   reference number/slug if blocking on prior work) and `<slug>` is its kebab-case short
-   name. **`<slug>` is the identifying half.** `<n>` is frozen at authoring time and is never
+   where `<n>` is the blocking ticket's position number in this batch (omit it when blocking on
+   prior work outside this batch — write the slug alone) and `<slug>` is its kebab-case short
+   name. **Never write a number without its slug:** the slug is the identifying half, so a
+   number-only marker can never be resolved or cleared and the item stays invisible to candidate
+   selection forever. `<n>` is frozen at authoring time and is never
    renumbered as items land or headings are deleted — nothing maintains it, so a marker whose
    number no longer matches any position is normal, not stale. Resolve a marker by its slug;
    never treat a number mismatch as evidence the blocker is gone.
