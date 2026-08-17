@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.4
+version: 1.6.5
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -461,7 +461,7 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 
 ## Step 4 — Hand off
 
-Call the Skill tool with "dev:task-review-cycle" and `args: --auto`.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto`.
 
 `task-review-cycle --auto` commits (including the cleanup changes above), creates PR, collects
 reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
@@ -499,7 +499,7 @@ git push origin main
 git branch -d <type>/<slug>
 ```
 
-**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule requires PRs), reset local main (`git reset --hard origin/main`), check out the feature branch (`git checkout <type>/<slug>`), and fall back to calling the Skill tool with "dev:task-review-cycle" and `args: --auto`.
+**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule requires PRs), reset local main (`git reset --hard origin/main`), check out the feature branch (`git checkout <type>/<slug>`), and fall back to calling the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto`.
 
 Report on completion: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 
@@ -561,7 +561,7 @@ action itself; always still ask yes/no.
    `task-review-cycle --auto`?"
 
 Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
-- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --auto` for
+- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` for
   check 1 / the generic fallback).
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.

@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.3
+version: 1.2.4
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -233,7 +233,7 @@ and narration — lives in the *CHANGELOG Entry Contract* in `harness-invariants
 
 ## Step 4 — Hand off
 
-Call the Skill tool with "dev:task-review-cycle" and `args: --auto`. It commits (including the cleanup
+Call the Skill tool with "dev:task-review-cycle" and `args: --from task-new --auto`. It commits (including the cleanup
 above), creates the PR, collects reviews, applies in-scope findings, records out-of-scope items to
 `backlog.md`, waits for CI, and merges.
 
@@ -271,7 +271,7 @@ git branch -d <type>/<slug>
 
   **Branch-protection caveat:** if `git push origin main` is rejected (PR-only rule), reset local
   main (`git reset --hard origin/main`), check out the feature branch, and fall back to calling
-  the Skill tool with "dev:task-review-cycle" and `args: --auto`.
+  the Skill tool with "dev:task-review-cycle" and `args: --from task-new --auto`.
 
   Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 - User picks **2** → proceed to Step 3 / Step 4 normally.
