@@ -12,16 +12,19 @@
 # Requires the `claude` CLI to be installed AND authenticated in the caller's
 # environment. If it is not, the caller records "Reviewers Skipped".
 #
-# Usage: claude-review.sh <base_branch>
+# Usage: claude-review.sh <base_branch> [effort]
 #   The review skill is fixed to "code-review" — SKILL.md Step 2-1 pins the
-#   Claude slot to exactly one skill, so this script takes no slot argument.
+#   Claude slot to exactly one skill, so there is no slot argument. The optional
+#   effort arg mirrors that step's escalation: the caller passes "high" when its
+#   SECURITY_HIT capture is non-empty, and nothing otherwise.
 # Output: JSON array of findings on stdout — same contract as the 2-1 Agent
 #         path, so Step 3 consolidation treats both identically.
 
 set -euo pipefail
 
-BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch>}"
+BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch> [effort]}"
 SLOT_ID="code-review"
+EFFORT="${2:-}"
 
 command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; exit 1; }
 
@@ -31,7 +34,7 @@ command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; e
 PROMPT=$(cat <<EOF
 Review changes on the current branch against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
-2. Invoke Skill "${SLOT_ID}" to review. Do not invoke any other review skill or command.
+2. Invoke Skill "${SLOT_ID}" with args "${EFFORT}" to review — the skill name is exactly \`${SLOT_ID}\`; the effort goes in the args field, never in the name. Empty args = default effort. Do not invoke any other review skill or command.
 3. Return findings as a JSON array and NOTHING else — no prose, no code fence:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.

@@ -100,7 +100,7 @@ All in-scope findings are applied before merge, regardless of severity. Sort by 
 Present the consolidated list as a table with:
 - Priority (P0-P3) — rows sorted by severity (P0 first) so critical items are visible at the top
 - Title
-- Source attribution (skill id, e.g. `pr-review-toolkit:review-pr` / `agy` / `codex`)
+- Source attribution (`code-review` / `agy` / `codex`)
 - Verdict column: `confirmed` / `uncertain` for P0/P1 candidates (from the verifier gate); `contest-confirmed` for any severity upgraded via the Contest Round
 - Scope column (In / Out)
 - Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope

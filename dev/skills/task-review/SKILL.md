@@ -103,15 +103,17 @@ FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
+EFFORT=""; [[ -n "$SECURITY_HIT" ]] && EFFORT="high"   # the ONLY security-escalation condition — both launch paths read this
 ```
 
 **One reviewer, one skill — `SLOT_ID="code-review"`, always.** The Claude slot is pinned: no
 candidate discovery, no per-domain second slot, no other review skill or `/review`-style command
 is invoked from this cycle. `code-review` already covers correctness plus reuse/simplification;
 the panel's breadth comes from the *other engines* (agy in 2-2, Codex in 2-3), not from stacking
-more Claude review skills. A security-sensitive diff raises the effort level — say
-`code-review high` in the reviewer prompt when `SECURITY_HIT` is non-empty — it does **not** add a
-second reviewer. Anything else the user wants reviewed (`security-review`, a PR-review command) is
+more Claude review skills. A security-sensitive diff raises the effort level — `EFFORT="high"`,
+passed as the skill's *argument*, never spliced into its name — it does **not** add a second
+reviewer. Both launch paths below take `EFFORT` from the same `SECURITY_HIT` capture above; never
+re-derive the condition from a prose path list. Anything else the user wants reviewed (`security-review`, a PR-review command) is
 theirs to run outside this cycle.
 
 - **Trivial short-circuit** — `FILE_COUNT ≤ 3` AND `LINE_DELTA ≤ 10` AND `SECURITY_HIT` empty → skip the Claude sub-agent; do inline review (read diff, assess naming/error-handling/coverage). Record "Reviewers Skipped: trivial diff". Skip to 2-2.
@@ -125,16 +127,19 @@ How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_
   [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
   PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
   BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
-  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" \
+  CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)  # from 2-1
+  SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from 2-1
+  EFFORT=""; [[ -n "$SECURITY_HIT" ]] && EFFORT="high"  # from 2-1
+  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" \
     || echo '[]'
   ```
-  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt), so Step 3 consolidates both identically.
+  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt, including the `EFFORT` argument), so Step 3 consolidates both identically.
 
 Reviewer prompt (Agent path):
 ```
 Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
-2. Invoke Skill "code-review" to review (append ` high` when the diff touches auth/crypto/secret/permission/network paths). Do not invoke any other review skill or command.
+2. Invoke Skill "code-review" with args "${EFFORT}" to review — the skill name is exactly `code-review`; the effort goes in the args field, never in the name. Empty args = default effort. Do not invoke any other review skill or command.
 3. Return findings as JSON array:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"code-review"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
