@@ -1,13 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bash */skills/task-review/scripts/merge-and-cleanup.sh *)"
+      "Bash(bash */skills/task-review-cycle/scripts/merge-and-cleanup.sh *)"
     ]
   },
   "autoMode": {
     "allow": [
       "$defaults",
-      "Bash(bash */skills/task-review/scripts/merge-and-cleanup.sh *)"
+      "Bash(bash */skills/task-review-cycle/scripts/merge-and-cleanup.sh *)"
     ]
   },
   "enabledPlugins": {
