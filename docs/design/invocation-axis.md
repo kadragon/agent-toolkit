@@ -41,10 +41,11 @@ model-invoked (model or human). The test, quoted from mattpocock's
 
 Reuse alone never justifies leaving a skill model-invoked.
 
-**The invariant.** A user-invoked skill may call model-invoked skills; it may never
-call another user-invoked skill. When a step's precondition is a user-invoked
-skill, phrase it as an instruction for the human ("tell the user to run
-`/task-review`"), never as a tool call.
+**The invariant.** No skill may call a user-invoked skill — the caller's own axis is
+irrelevant. When a step's precondition is a user-invoked skill, phrase it as an
+instruction for the human ("tell the user to run `/task-review`"), never as a tool
+call. The live case for the model-invoked-caller half is `task-tickets` → *Hand off*,
+which names `task-next`.
 
 **The notation.** Operative cross-skill instructions read
 `Call the Skill tool with "dev:task-grill"`. One skill per call; a step needing two
@@ -122,8 +123,8 @@ Extend `scripts/ci/check_skill_frontmatter.py` (already wired into
    `policy.allow_implicit_invocation: false` in its Codex sidecar, and vice versa.
    User-invoked in both harnesses or neither.
 2. **Call graph** — scan `dev/skills/**` and `prod/skills/**` for
-   `Call the Skill tool with "<ns>:<name>"`, resolve each target, and fail when the
-   caller and the target are both user-invoked.
+   `Call the Skill tool with "<ns>:<name>"`, resolve each target, and fail whenever the
+   target is user-invoked, regardless of the caller's axis.
 3. **Notation** — inside skill files, fail on residual `Skill(<ns>:<name>)`
    pseudo-code in operative prose.
 

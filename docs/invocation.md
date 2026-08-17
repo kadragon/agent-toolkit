@@ -1,8 +1,10 @@
 # Invocation
 
-Who may fire a skill. This is the one axis every skill in this repo is classified on, and
-the rules below are what tickets 2–7 of `docs/design/invocation-axis.md` migrate the repo
-onto. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
+Who may fire a skill. This is the one axis every skill in this repo is classified on. The
+rules below are the target state — the repo is **not yet migrated onto them**; the six
+`## Invocation axis — …` items in `backlog.md` do that work, and
+`docs/design/invocation-axis.md` holds the rationale. Field syntax lives in
+`docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
 (PR #878, PR #880), with one deviation — this repo ships two plugins, so every cross-skill
@@ -12,9 +14,22 @@ call carries its namespace.
 
 | | user-invoked | model-invoked |
 |---|---|---|
-| Who fires it | the human typing its name (`/task-next`) — nothing else | model **or** human |
-| `description` reader | a person browsing the slash-command list | the model, deciding whether to reach for it |
-| `description` shape | one human-facing line; no trigger lists, no `NOT for … →` arrows | rich trigger phrasing — auto-invocation depends on it |
+| Who fires it | the human, explicitly — nothing else | model **or** human |
+| `description` reader | a person picking it from a list | the model, deciding whether to reach for it |
+| `description` shape | one human-facing line; no trigger lists (but see the collision carve-out below) | rich trigger phrasing — auto-invocation depends on it |
+
+"The human, explicitly" is spelled differently per harness: Claude Code exposes a
+user-invoked skill as `/name` in the slash-command list; Codex has no `commands/` analog
+(`docs/platform-specs.md` → *Quick Comparison*), so there it is the skill picker entry named
+by `interface.display_name` in the sidecar. Do not write repo docs as if `/name` were the
+path on both.
+
+**Collision carve-out.** Stripping trigger phrasing must not strip a *mutual skill-name
+pointer*. `scripts/ci/check_skill_triggers.py` fails any description pair at cosine ≥ 0.25
+"whose descriptions lack mutual skill-name pointers" — `task-new` ↔ `task-next` is the
+corpus's closest pair and passes only because each names the other. Both are user-invoked, so
+a one-liner that drops `→ task-next` / `→ task-new` turns CI red. Trim the trigger *list*;
+keep the pointer.
 | What it holds | orchestration: order, gates, side effects | reusable discipline |
 
 The test, quoted from upstream:
@@ -46,8 +61,16 @@ skill, confirm no agent definition in `.claude/agents/` reaches it implicitly.
 
 ## The invariant
 
-**A user-invoked skill may call model-invoked skills. It may never call another user-invoked
-skill.**
+**No skill may call a user-invoked skill — not a user-invoked one, not a model-invoked one.**
+A user-invoked skill is reachable by the human and by nothing else. Upstream states it as:
+
+> A user-invoked skill can never be reached this way, full stop — per the invariant above, no
+> other skill can call it, including by naming it to the Skill tool.
+
+Do not weaken this to "user-invoked may not call user-invoked": that reading lets a
+model-invoked skill fire a destructive orchestrator. The live example is
+`dev/skills/task-tickets/SKILL.md` → *Hand off*, which names `task-next` — a model-invoked
+caller pointing at a user-invoked target.
 
 Orchestrators calling orchestrators makes it untraceable which skill owns the commit and how
 many times a gate ran in one cycle. When a step's precondition is a user-invoked skill, write
@@ -59,8 +82,11 @@ RIGHT:   Tell the user to run `/task-review`.
 ```
 
 The usual fix when automation must survive the ban is to extract the callable half as a
-model-invoked skill and leave the human entry point as a thin wrapper over it — how
-`task-review` and `task-review-cycle` are split.
+model-invoked skill and leave the human entry point as a thin wrapper over it. That is what
+`backlog.md` → *Invocation axis — split `task-review`* will do; `task-review-cycle` does not
+exist yet. When a call is repointed at an extracted half, carry the caller's flags across —
+all six `task-review` call sites pass `args: --auto`, and dropping it would stall an
+unattended cycle at the confirmation gate.
 
 ## Notation
 
@@ -83,8 +109,10 @@ Call the Skill tool twice, for "dev:task-spec" and "dev:task-tickets".
 
 "Call it with X and Y" reads as a single call taking both, which is not a thing the tool does.
 
-Shared reference material lives inside the skill that owns it; another skill reaches it by
-calling that skill, not by linking across folders.
+This rule governs **operative** instructions only. A read-only pointer at another skill's
+reference file — the `dev:harness-curate → references/delegation-template.md` form used in
+about eighteen places today — invokes nothing and stays as it is. It is also the only form
+available when the owning skill is user-invoked, since the invariant forbids calling it.
 
 ## What is not an invocation
 
@@ -107,7 +135,8 @@ scope for every rule on this page — do not rewrite their notation.
 
 ## Classification — `dev/`
 
-The single source tickets 4–5 apply. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
+The single source the `backlog.md` migration items apply. Nothing here is in force yet — no
+`SKILL.md` carries the field and no sidecar exists. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
 are all model-invoked, which is the default, so they carry no fields and need no change.
 
 | Skill | Axis | Why |
@@ -122,6 +151,6 @@ are all model-invoked, which is the default, so they carry no fields and need no
 | `task-spec` | model | Writes one design doc; no destructive effect. |
 | `task-tickets` | model | Splits an approved spec. |
 | `harness-capture` | model | Retrospect discipline; called mid-review by design. |
-| `task-review-cycle` | model | The callable half of the review cycle. |
+| `task-review-cycle` | model | *(does not exist yet)* The callable half of the review cycle. |
 
 Adding a skill means placing it in this table in the same PR.
