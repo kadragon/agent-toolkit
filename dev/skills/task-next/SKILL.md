@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.3
+version: 1.6.4
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -439,10 +439,13 @@ force a full scan just to annotate. Sync **both** directions:
   `*(deferred: <short reason>)*`. Only when you verified the blocker is unresolved this session
   — verify, never guess.
 - **Clear stale markers.** An item carrying `*(blocked by: <n>-<slug>)*` whose referenced
-  blocker `<n>-<slug>` is no longer an open item (it landed or was removed), or a
+  blocker is no longer an open item (it landed or was removed), or a
   `*(deferred: ...)*` whose reason you confirmed resolved this run → delete the marker so the
   item becomes a candidate again next run. Only when the resolution is verifiable from files/
-  command output read this session — never guess.
+  command output read this session — never guess. **Match on `<slug>`, never on `<n>`**: the
+  number is frozen at authoring and nothing renumbers it, so a number that no longer matches
+  any heading position is expected and is not evidence the blocker landed
+  (`dev:task-tickets` step 6).
 
 These edits ride the same cleanup commit. Disclose them in the PR body (or lite-path commit
 message), e.g. "synced N blocked markers in backlog.md", so review does not read them as scope
