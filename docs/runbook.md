@@ -49,7 +49,7 @@ python3 -m venv .venv && .venv/bin/pip install pyyaml
 1. Make changes to skill/agent files
 2. Bump versions: `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (see `docs/conventions.md` — semver rules)
 3. Run harness validate
-4. Commit + push + PR via `dev:task-review-cycle` (or run `/task-review` yourself — it is user-invoked)
+4. Commit + push + PR via `dev:task-review-cycle` with `args: --from <your skill name> --auto` — the `--from` token is required (`dev:task-review-cycle` → *Caller gate*). Or run `/task-review` yourself; it is user-invoked and supplies the token for you
 5. Merge triggers marketplace update
 
 ### Version bump check

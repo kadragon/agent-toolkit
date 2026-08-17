@@ -46,7 +46,7 @@ conditions.
 
 | Trigger | Delegate to | Context |
 |---------|-------------|---------|
-| Every PR | `dev:task-review-cycle` skill (`/task-review` is the human entry point) | PR number or current branch |
+| Every PR | `dev:task-review-cycle` skill, with `--from <your skill name>` (`/task-review` is the human entry point and supplies the token itself) | PR number or current branch |
 | Harness check request | `dev:harness-curate` skill | — |
 
 ## Escalation
