@@ -17,3 +17,35 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Review transport accounting (edge #7)** — cut on verified grounds: `task-review/SKILL.md` already distinguishes reviewed-empty from skipped and surfaces both — see its *Collect Reviews* 600s-breach rule, the three "Reviewers Skipped: …" labels, and the reviewer prompt's *"Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled"* — and both route to the same action. Re-file only with a recorded cycle where the two states led to *different* correct actions.
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
+
+## Invocation axis — contract doc
+
+Source: `docs/design/invocation-axis.md`. Tickets 1–7 below are that spec, sliced in dependency
+order. Every ticket touching `dev/` bumps both `plugin.json` files per Golden Principle 1; the
+series lands dev at `4.5.0` or above.
+
+- [ ] [DOCS] Write `docs/invocation.md` — axis definition, per-platform fields, the user-invoked→user-invoked ban, the `Call the Skill tool with "ns:name"` notation standard, and the router-prose exemption rule. Index it from the AGENTS.md Docs Index and add a pointer from `docs/platform-specs.md` (which keeps the raw field syntax, not the policy).
+
+## Invocation axis — split `task-review`
+
+- [ ] [REFACTOR] Move the full review workflow (Arguments, Prerequisites, Setup, Steps 0–6, Error Handling, Scripts Reference) and the `scripts/` directory into a new model-invoked `dev/skills/task-review-cycle/`; leave `task-review` as the user-invoked entry point that parses flags and calls the Skill tool with `dev:task-review-cycle`. Keep the `task-review` name — renaming it would force a major bump. *(blocked by: 1-invocation-contract)*
+
+## Invocation axis — call notation migration
+
+- [ ] [REFACTOR] Rewrite the 22 `Skill(ns:name)` sites across `dev/skills/**` and `prod/skills/**` to `Call the Skill tool with "ns:name"`, splitting any two-skill step into two explicit calls, and repoint the four `task-review` callers (`task-new` ×2, `task-next` SKILL.md, `references/batch.md`, `references/tree.md`) at `dev:task-review-cycle`. Leave `docs/design/*.md` and the router-prose sites untouched. *(blocked by: 2-task-review-split)*
+
+## Invocation axis — Claude frontmatter fields
+
+- [ ] [FEAT] Add `disable-model-invocation: true` to the six user-invoked skills (`task-new`, `task-next`, `task-review`, `harness-init`, `harness-curate`, `repo-dependabot`); leave the model-invoked five unmarked. *(blocked by: 3-skill-call-notation)*
+
+## Invocation axis — Codex sidecars
+
+- [ ] [FEAT] Create `agents/openai.yaml` beside each of the six user-invoked skills carrying `policy.allow_implicit_invocation: false` plus the Codex UI metadata. This is a new file type for this repo — no sidecar exists today — so confirm the path Codex actually reads before landing. *(blocked by: 4-claude-axis-fields)*
+
+## Invocation axis — user-invoked descriptions
+
+- [ ] [DOCS] Rewrite the six user-invoked `description` fields as human-facing one-liners for the slash-command list, stripping trigger lists and `NOT for … →` disambiguation arrows. Model-invoked descriptions keep their trigger phrasing. Confirm `scripts/ci/check_skill_triggers.py` still passes on the shortened text. *(blocked by: 5-codex-sidecars)*
+
+## Invocation axis — CI enforcement
+
+- [ ] [FEAT] Extend `scripts/ci/check_skill_frontmatter.py` and its test with three checks: axis coherence (Claude field ↔ Codex sidecar agree), call graph (fail on a user-invoked skill calling another user-invoked skill), and notation (fail on residual `Skill(ns:name)` in operative skill prose). Router-prose exemptions carry an explicit marker per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker*, not a silent path allowlist. Verify the checks exit non-zero on the pre-migration tree. *(blocked by: 6-user-invoked-descriptions)*
