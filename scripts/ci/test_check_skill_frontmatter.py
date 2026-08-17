@@ -585,6 +585,21 @@ def test_call_graph_spellings():
         )
 
     with tempfile.TemporaryDirectory() as tmp:
+        # Verbatim shape from dev/skills/task-new/SKILL.md — "Skill tool" on one line,
+        # BOTH targets on the next. The per-line, first-target-only reading missed it,
+        # and it is the exact phrasing docs/invocation.md → Notation prescribes.
+        in_tree = OPEN_SKILL + (
+            "\n- **Multi-session** → call the Skill tool twice: first with\n"
+            '  "dev:task-grill" to resolve scope, then with "dev:task-review" to land it.\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": in_tree}))
+        check(
+            "the wrapped two-target form used in-tree is caught",
+            code == 1 and "dev:task-review" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
         described = OPEN_SKILL + (
             "\n<!-- call-graph-exempt: states the rule, does not call it -->\n"
             'The Skill tool listing shows "dev:task-review" as user-invoked; never call it.\n'
