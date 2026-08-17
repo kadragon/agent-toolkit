@@ -173,7 +173,7 @@ Implicit invocation = Codex auto-selects skill from description match (same as C
 `~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py` errors unless
 `disable-model-invocation` is absent or `false`; measured on `codex-cli 0.147.0`, running it against
 this repo's `dev/` plugin reports one error per locked skill ("must be false"), plus a pre-existing
-`plugin.json field `hooks` is not accepted` that predates the invocation axis. Codex expects the lock
+``plugin.json field `hooks` is not accepted`` error that predates the invocation axis. Codex expects the lock
 to ride on `policy.allow_implicit_invocation: false` **alone**. This repo keeps the Claude field
 anyway — Claude Code has no other way to express the axis — and accepts that the bundled validator is
 not a gate `dev/` passes today. Decide this before publishing through any pipeline that runs it; the
