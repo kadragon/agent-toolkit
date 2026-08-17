@@ -27,14 +27,14 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 
 - [ ] [HARNESS] `.claude/settings.json` still allows `Bash(bash */skills/task-review/scripts/merge-and-cleanup.sh *)` at two sites (`permissions.allow`, `autoMode.allow`), but PR #228 moved the script to `*/skills/task-review-cycle/scripts/`. Unattended `--auto` cycles hit a permission prompt at merge instead of the pre-approved glob. **This harness never edits `settings.json` permissions, so the edit is the user's** — this item exists only so the reminder is tracked rather than lost with the PR body. All three reviewers (Claude, agy, Codex) flagged it independently.
 
-## Invocation axis — Codex sidecars
-
-- [ ] [FEAT] Create `agents/openai.yaml` beside each of the six user-invoked skills carrying `policy.allow_implicit_invocation: false` plus the Codex UI metadata. This is a new file type for this repo — no sidecar exists today — so confirm the path Codex actually reads before landing.
-
 ## Invocation axis — user-invoked descriptions
 
-- [ ] [DOCS] Rewrite the six user-invoked `description` fields as human-facing one-liners for the slash-command list, stripping trigger lists. Model-invoked descriptions keep their trigger phrasing. **Hard constraint, not a post-hoc check:** keep every mutual skill-name pointer — `check_skill_triggers.py` fails a pair at cosine ≥ 0.25 whose descriptions lack one, and `task-new` ↔ `task-next` (both user-invoked) is the corpus's closest pair, passing only on its `→ task-new` / `→ task-next` arrows. Trim the list, keep the arrow. Then confirm `scripts/ci/check_skill_triggers.py` passes. *(blocked by: 5-codex-sidecars)*
+- [ ] [DOCS] Rewrite the six user-invoked `description` fields as human-facing one-liners for the slash-command list, stripping trigger lists. Model-invoked descriptions keep their trigger phrasing. **Hard constraint, not a post-hoc check:** keep every mutual skill-name pointer — `check_skill_triggers.py` fails a pair at cosine ≥ 0.25 whose descriptions lack one, and `task-new` ↔ `task-next` (both user-invoked) is the corpus's closest pair, passing only on its `→ task-new` / `→ task-next` arrows. Trim the list, keep the arrow. Then confirm `scripts/ci/check_skill_triggers.py` passes.
 
 ## Invocation axis — CI enforcement
 
 - [ ] [FEAT] Extend `scripts/ci/check_skill_frontmatter.py` and its test with three checks: axis coherence (Claude field ↔ Codex sidecar agree), call graph (fail on **any** skill calling a user-invoked skill, whatever the caller's own axis), and notation (fail on residual `Skill(ns:name)` in operative skill prose). Add the explicit exemption marker to the four router-prose sites listed in `docs/invocation.md` → *What is not an invocation* (none carries one today), per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker* — not a silent path allowlist in the checker. Verify the checks exit non-zero on the pre-migration tree. *(blocked by: 6-user-invoked-descriptions)*
+
+## Harness — `blocked by` marker number is unspecified
+
+- [ ] [DOCS] Neither `dev/skills/task-tickets/SKILL.md` step 6 nor `dev/skills/task-next/SKILL.md` → *Blocked-analysis sync* says whether the `<n>` in `*(blocked by: <n>-<slug>)*` is frozen at authoring time or tracks the item's current heading position in `backlog.md`. On PR #230 two independent reviewers read the same two files and reached opposite conclusions; the markers authored in `74abee8` did match heading positions exactly, and deleting a landed section desynchronizes the survivors. Nothing breaks today because the stale-marker sweep resolves on the slug, but the ambiguity has already cost one review round. One line in `task-tickets` step 6 settles it — state which half identifies the blocker, and say explicitly that the other half is not maintained.

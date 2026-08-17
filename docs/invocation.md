@@ -2,9 +2,9 @@
 
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
 rules below are the target state — the repo is **partially migrated onto them**: the
-`task-review` / `task-review-cycle` split, the *Notation* migration and the Claude half of
+`task-review` / `task-review-cycle` split, the *Notation* migration and both halves of
 *Per-platform fields* have landed; the remaining `## Invocation axis — …` items in `backlog.md`
-(Codex sidecars, user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
+(user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
 holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
@@ -46,10 +46,8 @@ user-invoked even though callers exist.
 ## Per-platform fields
 
 A skill is user-invoked in **both** harnesses or neither. Marking one and not the other is a
-defect, not a partial rollout — with one bounded exception the repo is living in right now: the
-Claude fields landed ahead of the Codex sidecars, so the six user-invoked skills are locked in
-Claude Code and still implicitly invocable in Codex. That gap is the open
-`## Invocation axis — Codex sidecars` backlog item, not a licence to ship one-sided marks.
+defect, not a partial rollout. Both halves are in force in this repo: each `user` skill below
+carries the Claude frontmatter field *and* an `agents/openai.yaml` sidecar.
 
 | Platform | Field | Value for user-invoked |
 |---|---|---|
@@ -155,10 +153,9 @@ scope for every rule on this page — do not rewrite their notation.
 
 ## Classification — `dev/`
 
-The single source the `backlog.md` migration items apply. The **Claude half is in force**: each
-skill marked `user` below carries `disable-model-invocation: true` in its `SKILL.md`. The Codex
-half is not — no `agents/openai.yaml` sidecar exists yet, so a skill locked here is still
-implicitly invocable there. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
+The single source the `backlog.md` migration items apply. **Both halves are in force**: each
+skill marked `user` below carries `disable-model-invocation: true` in its `SKILL.md` and
+`policy.allow_implicit_invocation: false` in its `agents/openai.yaml`. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
 are all model-invoked, which is the default, so they carry no fields and need no change.
 
 | Skill | Axis | Why |

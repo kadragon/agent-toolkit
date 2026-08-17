@@ -141,13 +141,18 @@ Same file as Claude Code, but Codex reads an additional sidecar:
 
 ```yaml
 # skills/{name}/agents/openai.yaml
+interface:
+  display_name: "UI Name Override"
+  short_description: "One line for the skill picker"
+  icon_large: "./assets/preview.png"   # optional; a path that does not resolve is worse than omitting
+  default_prompt: "The prompt the picker entry fires"
 policy:
   allow_implicit_invocation: true
-display_name: "UI Name Override"
-icon: "path/to/icon.svg"
-mcp_tools:
-  - "server_name__tool_name"
 ```
+
+Shape verified against the sidecars shipped with `codex-cli 0.147.0` (20+ installed skills under
+`~/.codex/skills/*/agents/openai.yaml` and `~/.codex/plugins/cache/**`), not inferred: the UI keys
+live **nested under `interface:`**, and `policy:` is a sibling block.
 
 Implicit invocation = Codex auto-selects skill from description match (same as Claude Code).
 
