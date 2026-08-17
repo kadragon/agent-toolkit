@@ -1,6 +1,6 @@
 interface:
   display_name: "Harness Init"
   short_description: "Set up or validate this repo's agent infrastructure"
-  default_prompt: "Set up this repo's agent harness — AGENTS.md and the docs index."
+  default_prompt: "Use $harness-init to set up this repo's agent harness — AGENTS.md and the docs index."
 policy:
   allow_implicit_invocation: false

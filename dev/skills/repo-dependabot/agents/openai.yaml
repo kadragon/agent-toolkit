@@ -1,6 +1,6 @@
 interface:
   display_name: "Dependabot Manager"
   short_description: "Triage and batch-merge dependabot PRs across owned repos"
-  default_prompt: "Triage the dependabot PRs across my repos."
+  default_prompt: "Use $repo-dependabot to triage the dependabot PRs across my repos."
 policy:
   allow_implicit_invocation: false

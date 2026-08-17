@@ -1,6 +1,6 @@
 interface:
   display_name: "New Task"
   short_description: "Take a new request from intake through the full code cycle"
-  default_prompt: "Take the work I just described through the full code cycle."
+  default_prompt: "Use $task-new to take the work I just described through the full code cycle."
 policy:
   allow_implicit_invocation: false

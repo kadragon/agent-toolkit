@@ -1,6 +1,6 @@
 interface:
-  display_name: "Review Cycle"
+  display_name: "Review and Merge"
   short_description: "Commit, collect reviews, apply findings, wait for CI, and merge"
-  default_prompt: "Run the review cycle on this branch and merge once CI is green."
+  default_prompt: "Use $task-review to review this branch and merge it once CI is green."
 policy:
   allow_implicit_invocation: false

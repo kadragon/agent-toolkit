@@ -144,7 +144,7 @@ Same file as Claude Code, but Codex reads an additional sidecar:
 interface:
   display_name: "UI Name Override"
   short_description: "One line for the skill picker"
-  icon_large: "./assets/preview.png"   # optional; a path that does not resolve is worse than omitting
+  icon_large: "./assets/preview.png"   # optional; real sidecars use a repo-relative ./assets/... path
   default_prompt: "The prompt the picker entry fires"
 policy:
   allow_implicit_invocation: true
@@ -154,9 +154,28 @@ Shape verified against the sidecars shipped with `codex-cli 0.147.0` (20+ instal
 `~/.codex/skills/*/agents/openai.yaml` and `~/.codex/plugins/cache/**`), not inferred: the UI keys
 live **nested under `interface:`**, and `policy:` is a sibling block.
 
+Beyond the keys above, real sidecars also use `interface.icon_small`, `interface.brand_color`, and a
+`dependencies.tools[]` block (`type` — only `mcp` today — `value`, `description`, `transport`, `url`)
+for MCP dependencies. The authoring contract is Codex's own
+`~/.codex/skills/.system/skill-creator/references/openai_yaml.md`; read it rather than extending this
+example from memory. Two rules from it bite immediately: `short_description` is a 25–64 char blurb, and
+`default_prompt` **must name the skill as `$skill-name`** — a locked skill is not injected into model
+context, so the `$` handle is the only way the prompt reaches it. Codex's own locked `review-agent`
+sidecar follows both.
+
 Implicit invocation = Codex auto-selects skill from description match (same as Claude Code).
 
 `policy.allow_implicit_invocation: false` is the Codex half of a user-invoked skill and must agree with the Claude Code field above — see `docs/invocation.md`.
+
+**Known conflict — Codex's bundled validator rejects the Claude field.**
+`~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py` errors unless
+`disable-model-invocation` is absent or `false`; measured on `codex-cli 0.147.0`, running it against
+this repo's `dev/` plugin reports one error per locked skill ("must be false"), plus a pre-existing
+`plugin.json field `hooks` is not accepted` that predates the invocation axis. Codex expects the lock
+to ride on `policy.allow_implicit_invocation: false` **alone**. This repo keeps the Claude field
+anyway — Claude Code has no other way to express the axis — and accepts that the bundled validator is
+not a gate `dev/` passes today. Decide this before publishing through any pipeline that runs it; the
+open `backlog.md` item tracks it.
 
 ### hooks.json (Codex)
 
@@ -203,7 +222,11 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 ### When adding a skill
 
 1. Write `SKILL.md` — same file works for both platforms
-2. Optionally add `skills/{name}/agents/openai.yaml` for Codex-specific metadata
+2. `skills/{name}/agents/openai.yaml` — **required** for a user-invoked skill: it carries
+   `policy.allow_implicit_invocation: false`, which must agree with the `disable-model-invocation: true`
+   in the same skill's frontmatter (`docs/invocation.md` → *Per-platform fields*: both harnesses or
+   neither). Optional for a model-invoked skill, and then only for Codex UI metadata — never write
+   the permissive `allow_implicit_invocation: true`, which says nothing the default does not
 3. No `commands/` analog in Codex — do not rely on slash-command invocation for cross-platform skills
 
 ### When adding a hook

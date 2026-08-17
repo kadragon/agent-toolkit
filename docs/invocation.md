@@ -54,6 +54,11 @@ carries the Claude frontmatter field *and* an `agents/openai.yaml` sidecar.
 | Claude Code | `SKILL.md` frontmatter | `disable-model-invocation: true` |
 | Codex | `skills/{name}/agents/openai.yaml` | `policy.allow_implicit_invocation: false` |
 
+Codex's bundled `plugin-creator` validator rejects `disable-model-invocation: true` outright — it
+expects the lock to ride on the sidecar alone. This repo keeps both halves anyway, because Claude
+Code has no other way to express the axis; `docs/platform-specs.md` → *SKILL.md frontmatter (Codex)*
+records the measured conflict and what it costs.
+
 Model-invoked is the default: omit the frontmatter key, omit the `policy` block. Do not write
 the permissive value explicitly — it says nothing the default does not, and it costs a version
 bump to add.
