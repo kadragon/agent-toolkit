@@ -6,7 +6,7 @@ description: >-
   order. Confirms granularity with the user first. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.3
+version: 1.0.4
 ---
 
 # To Tickets
@@ -23,8 +23,8 @@ reuses and generalizes the `*(deferred: ...)*` skip pattern already present in
 
 ## When to use
 
-Input is either an approved `docs/design/{slug}.md` (the common case, produced by
-`Skill(dev:task-spec)`) or a conversation that has already resolved enough scope to
+Input is either an approved `docs/design/{slug}.md` (the common case, produced when a caller
+calls the Skill tool with "dev:task-spec") or a conversation that has already resolved enough scope to
 decompose directly (skip `task-spec` for smaller multi-ticket work that doesn't warrant a full
 spec doc). Automates `docs/workflows.md` `plan` workflow **step 3** ("Generate `backlog.md`
 items from approved spec").
@@ -68,7 +68,7 @@ items from approved spec").
    name. `backlog_candidates.py` already skips a heading whose every open item carries a
    `*(deferred: ...)*` or `*(blocked by: ...)*` marker — do not invent a new
    dependency-graph engine or a separate marker syntax.
-7. **Hand off.** Report the written tickets and their order. The next `Skill(dev:task-next)` run (Step 1 candidate-gathering) picks them up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).
+7. **Hand off.** Report the written tickets and their order, and tell the user to run `/task-next` when they are ready — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).
 
 ## Boundaries
 

@@ -6,7 +6,7 @@ description: >-
   `Skill(dev:task-grill)` first if scope is still ambiguous. NOT for splitting
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
-version: 1.0.2
+version: 1.0.3
 ---
 
 # To Spec
@@ -14,8 +14,8 @@ version: 1.0.2
 > Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
 
 Synthesizes an approved scope into a spec document. This skill does **not** ask the user
-questions — if scope is still ambiguous when this skill is invoked, call
-`Skill(dev:task-grill)` first (or let the caller, e.g. `task-new`, do so) and only
+questions — if scope is still ambiguous when this skill is invoked, call the Skill tool with
+"dev:task-grill" first (or let the caller, e.g. `task-new`, do so) and only
 invoke `task-spec` once the open questions are resolved.
 
 ## When to use
@@ -25,8 +25,8 @@ cross-cutting change, or anything that won't fit in one Sprint Contract. Trivial
 single-session work skips this skill entirely and goes straight to a Sprint Contract.
 
 This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand into
-`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate `backlog.md` items) is
-`Skill(dev:task-tickets)`'s job, not this skill's.
+`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate `backlog.md` items) is what a
+caller does by calling the Skill tool with "dev:task-tickets", not this skill's job.
 
 ## Flow
 
@@ -38,8 +38,9 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    [[ -d "$DESIGN_DIR" ]] || mkdir -p "$DESIGN_DIR"
    ```
 2. **Synthesize, do not interview.** Gather everything already known: the conversation so
-   far, any resolved `Skill(dev:task-grill)` output, and relevant existing code/docs. If a
-   genuine open question surfaces during synthesis, stop and call `Skill(dev:task-grill)` —
+   far, any output already resolved by a Skill tool call with "dev:task-grill", and relevant
+   existing code/docs. If a genuine open question surfaces during synthesis, stop and call the
+   Skill tool with "dev:task-grill" —
    do not guess and do not ask the user directly from inside this skill.
 3. **Write `docs/design/{slug}.md`** using this template, verbatim section order:
 
@@ -72,8 +73,8 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 4. **Review with user.** Present the written spec (or a summary + file path) and wait for
    explicit approval before any downstream skill (`task-tickets`, or direct implementation)
    proceeds. This mirrors `plan` workflow step 2 — do not skip it.
-5. **Hand off.** Once approved, the caller (typically `task-new`) proceeds to
-   `Skill(dev:task-tickets)` to break the spec into backlog items.
+5. **Hand off.** Once approved, the caller (typically `task-new`) proceeds by calling the Skill
+   tool with "dev:task-tickets" to break the spec into backlog items.
 
 ## Boundaries
 

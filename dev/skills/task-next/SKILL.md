@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.1
+version: 1.6.2
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
@@ -11,7 +11,7 @@ description: >-
 # Next Tasks
 
 Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
-run the cycle, and hand off to `task-review --auto`. Delegate the heavy lifting — this
+run the cycle, and hand off to `task-review-cycle --auto`. Delegate the heavy lifting — this
 skill is the **decision and sequencing layer**, not the implementation engine.
 
 **Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`
@@ -451,9 +451,9 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 
 ## Step 4 — Hand off
 
-Invoke `Skill(dev:task-review)` with `args: --auto`.
+Call the Skill tool with "dev:task-review-cycle" and `args: --auto`.
 
-`task-review --auto` commits (including the cleanup changes above), creates PR, collects
+`task-review-cycle --auto` commits (including the cleanup changes above), creates PR, collects
 reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
 
 **If task-review reports CI failure and the PR must be abandoned:** close the PR and delete
@@ -489,7 +489,7 @@ git push origin main
 git branch -d <type>/<slug>
 ```
 
-**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule requires PRs), reset local main (`git reset --hard origin/main`), check out the feature branch (`git checkout <type>/<slug>`), and fall back to `Skill(dev:task-review)` with `args: --auto`.
+**Branch-protection caveat:** if `git push origin main` is rejected (branch protection rule requires PRs), reset local main (`git reset --hard origin/main`), check out the feature branch (`git checkout <type>/<slug>`), and fall back to calling the Skill tool with "dev:task-review-cycle" and `args: --auto`.
 
 Report on completion: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 
@@ -515,7 +515,7 @@ action itself; always still ask yes/no.
    [[ -n "$commits" ]] && echo "commits exist — task-review Step 1 already ran"
    ```
    If `$commits` is non-empty, `task-review` Step 1 (commit) already ran. Diagnosis:
-   offer `task-review --auto` directly.
+   offer `task-review-cycle --auto` directly.
 
 2. **No commits ahead, but an active Sprint Contract?**
 
@@ -548,10 +548,10 @@ action itself; always still ask yes/no.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
-   `task-review --auto`?"
+   `task-review-cycle --auto`?"
 
 Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
-- **Yes:** resume at the diagnosed step (or invoke `task-review --auto` directly for
+- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --auto` for
   check 1 / the generic fallback).
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.

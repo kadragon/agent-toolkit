@@ -9,7 +9,7 @@ description: >-
   Routes to the owning creator — never generates itself. NOT for retrospecting
   the current conversation → harness-capture. Repo structure validation →
   harness-init.
-version: 1.6.6
+version: 1.6.7
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
@@ -342,7 +342,7 @@ Ask whether to act on the **top** candidate now. Do not auto-create. On yes, inv
   # and the pair re-fires next run.
   python3 "$OSTATE" --dismiss --project "$REPO_ROOT" < pairs.json
   ```
-- Memory → `docs/` promotion (memory-sourced Signal 6) → show the memory quoted with `file:line` and the proposed `docs/<topic>.md`. On confirmation, write the fact to `docs/<topic>.md` and add the one-line pointer to the AGENTS.md Docs Index — the fact itself never goes into AGENTS.md/CLAUDE.md. Then **invoke `Skill(dev:harness-capture)` (Memory hygiene) to delete the promoted memory file and repair the `MEMORY.md` index**: capture owns destructive memory prunes, and this skill does not reimplement an owner's job any more than it reimplements `skill-creator`. An `already-promoted` candidate skips the docs write and goes straight to that deletion route. Record the decision — promoted *or* consciously kept — with `--dismiss` using the same pairs.json shape as the Step 2 check, or it re-fires next run.
+- Memory → `docs/` promotion (memory-sourced Signal 6) → show the memory quoted with `file:line` and the proposed `docs/<topic>.md`. On confirmation, write the fact to `docs/<topic>.md` and add the one-line pointer to the AGENTS.md Docs Index — the fact itself never goes into AGENTS.md/CLAUDE.md. Then **call the Skill tool with "dev:harness-capture" (Memory hygiene) to delete the promoted memory file and repair the `MEMORY.md` index**: capture owns destructive memory prunes, and this skill does not reimplement an owner's job any more than it reimplements `skill-creator`. An `already-promoted` candidate skips the docs write and goes straight to that deletion route. Record the decision — promoted *or* consciously kept — with `--dismiss` using the same pairs.json shape as the Step 2 check, or it re-fires next run.
 - Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
 
 When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that plugin's `.claude-plugin/plugin.json` version (project CLAUDE.md rule).

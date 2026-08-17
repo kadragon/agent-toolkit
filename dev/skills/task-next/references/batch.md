@@ -151,7 +151,7 @@ any worktree.
    - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
    Leave all edits uncommitted — `task-review` Step 1 commits them.
-6. **Hand off — once.** `Skill(dev:task-review)` with `args: --auto`. Running from the
+6. **Hand off — once.** Call the Skill tool with "dev:task-review-cycle" and `args: --auto`. Running from the
    main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
    work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
    to `backlog.md`, waits CI, and merges.

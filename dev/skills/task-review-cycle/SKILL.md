@@ -226,7 +226,7 @@ Reflect on this cycle **before committing**, so any durable lesson lands *inside
 
 Quick self-check: did this cycle surface a **user correction**, a **recurring gotcha / setup fix**, or a **reusable workflow**? If none, skip and go to Step 5 — silence is the normal outcome, not a failure.
 
-If a signal exists, invoke `Skill(dev:harness-capture)` and route its write-back **by weight** so the PR stays scoped:
+If a signal exists, call the Skill tool with "dev:harness-capture" and route its write-back **by weight** so the PR stays scoped:
 
 | Lesson | Write-back |
 |--------|-----------|
