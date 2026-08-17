@@ -134,9 +134,11 @@ skill without instructing anyone to run it right now, so rewriting them into too
 create a call where none belongs:
 
 - `dev/skills/task-grill/SKILL.md` and `dev/skills/task-spec/SKILL.md` `description:` frontmatter
-  — these still spell `Skill(dev:task-grill)`. Descriptions are trigger-scored and cost a version
-  bump, so they are rewritten with the rest of the descriptions under the queued
-  `## Invocation axis — user-invoked descriptions` item, not piecemeal.
+  — these still spell `Skill(dev:task-grill)`. Both skills are **model-invoked**, so the queued
+  `## Invocation axis — user-invoked descriptions` item does not reach them: that item rewrites
+  only the six user-invoked descriptions and leaves model-invoked trigger phrasing intact.
+  Rewording these two is a separate, unqueued decision — descriptions are trigger-scored, so any
+  edit has to be measured against `scripts/ci/check_skill_triggers.py` before it lands.
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 
