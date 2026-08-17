@@ -159,9 +159,11 @@ Beyond the keys above, real sidecars also use `interface.icon_small`, `interface
 for MCP dependencies. The authoring contract is Codex's own
 `~/.codex/skills/.system/skill-creator/references/openai_yaml.md`; read it rather than extending this
 example from memory. Two rules from it bite immediately: `short_description` is a 25–64 char blurb, and
-`default_prompt` **must name the skill as `$skill-name`** — a locked skill is not injected into model
-context, so the `$` handle is the only way the prompt reaches it. Codex's own locked `review-agent`
-sidecar follows both.
+`default_prompt` **must name the skill as `$skill-name`** (that reference's wording). The same file
+says a skill with `allow_implicit_invocation: false` "is not injected into the model context by
+default, but can still be invoked explicitly via `$skill`" — so the handle is what makes the picker
+prompt reach a locked skill. Codex's own locked `review-agent` sidecar follows both rules; note the
+bundled `openai-templates` skills are locked *without* the handle, so the corpus is not unanimous.
 
 Implicit invocation = Codex auto-selects skill from description match (same as Claude Code).
 
