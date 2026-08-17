@@ -1,8 +1,9 @@
 [
-  {"query": "pull the next item off the backlog queue and run the code cycle on it", "should_trigger": true},
-  {"query": "work the next queued backlog item with --all in parallel", "should_trigger": true},
-  {"query": "run the next backlog queue item in worktree isolation with --tree", "should_trigger": true},
-  {"query": "take work I just described from intake through the cycle", "should_trigger": false},
-  {"query": "triage dependabot PRs across my repos", "should_trigger": false},
-  {"query": "mine session transcripts for unused harness assets", "should_trigger": false}
+  {"query": "pull the next item from backlog.md and run the full code cycle on it", "should_trigger": true},
+  {"query": "process every queued backlog item with --all in parallel", "should_trigger": true},
+  {"query": "take the next queue item with --tree worktree isolation", "should_trigger": true},
+
+  {"query": "here is a brand new request with no tracking entry — take it from intake", "should_trigger": false},
+  {"query": "run the post-dev review cycle: commit, reviews, CI, merge", "should_trigger": false},
+  {"query": "make a bar chart of these quarterly revenue numbers", "should_trigger": false}
 ]

@@ -2,7 +2,9 @@
 name: task-next
 version: 1.6.6
 description: >-
-  Pull the next item off the backlog queue and run it through the full code cycle. For new work you just described → task-new.
+  Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
+  Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
+  --tree (worktree isolation). New work you just described → task-new.
 disable-model-invocation: true
 ---
 

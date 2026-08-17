@@ -2,7 +2,9 @@
 name: task-new
 version: 1.2.5
 description: >-
-  Take work you just described from intake through the full code cycle. For an item already on the queue → task-next.
+  Intake for new work you just described — classify, size, then run the full code cycle:
+  branch, Sprint Contract, implement, verify, version bump, review. Already on the queue
+  instead → task-next.
 disable-model-invocation: true
 ---
 

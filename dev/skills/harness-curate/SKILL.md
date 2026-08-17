@@ -1,7 +1,10 @@
 ---
 name: harness-curate
 description: >-
-  Mine session transcripts to propose or retire harness assets, reconcile overlapping instruction layers, and tidy the auto-memory store. For the conversation you are in → harness-capture.
+  Mine session transcripts to propose or prune harness assets, audit instruction layers for
+  duplicate or conflicting rules, and promote repo-scoped facts stuck in the auto-memory
+  store. Retrospecting the conversation you are in → harness-capture. Repo structure
+  validation → harness-init.
 version: 1.6.9
 disable-model-invocation: true
 ---

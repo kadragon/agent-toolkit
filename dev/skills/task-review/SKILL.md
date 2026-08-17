@@ -1,7 +1,8 @@
 ---
 name: task-review
 description: >-
-  Run the post-dev review cycle on this branch — commit, reviews, CI, merge.
+  Post-dev review cycle for this branch — commit, collect reviews, apply findings, retrospect,
+  wait for CI, merge. Flags: --no-hub (local only), --auto (skip confirmation).
 disable-model-invocation: true
 ---
 
