@@ -4,9 +4,9 @@ Detailed procedure for consolidating multi-reviewer feedback (Step 3 of task-rev
 
 ## Source Attribution
 
-Step 2-1 now launches 1–N skill-based reviewers in parallel. Each sub-agent tags its findings with a `source` field (the skill `id`, e.g., `pr-review-toolkit:review-pr`, `code-review`, `security-review`). Antigravity uses source `agy`; Codex uses source `codex`.
+Exactly three sources feed Step 3: the Claude reviewer (2-1) tags its findings `code-review` — the only Claude review skill this cycle invokes — Antigravity (2-2) uses `agy`, and Codex (2-3) uses `codex`.
 
-When consolidating, preserve the source tags in the table's **Source** column. If multiple reviewers flag the same issue, merge them into one row and list all sources (e.g., `pr-review-toolkit:review-pr, codex`).
+When consolidating, preserve the source tags in the table's **Source** column. If multiple reviewers flag the same issue, merge them into one row and list all sources (e.g., `code-review, codex`).
 
 ## Consolidation Procedure
 
@@ -14,7 +14,7 @@ All reviewers use the same P0-P3 priority scheme, making deduplication straightf
 
 ### 1. Deduplicate
 
-Merge identical issues flagged by multiple reviewers into a single entry, listing all source skill ids (e.g., `pr-review-toolkit:review-pr, codex`).
+Merge identical issues flagged by multiple reviewers into a single entry, listing all sources (e.g., `code-review, codex`).
 
 ### 2. Re-verify Against the Diff
 
@@ -109,7 +109,7 @@ Present the consolidated list as a table with:
 After the findings table, add:
 - A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Refuted by contest round" section listing contestable findings (Step 3) the contest round rejected, with its one-line evidence — visible so the user can override a wrong refutation.
-- A "Reviewers Skipped" section listing any review candidates that were not launched, with reason (e.g., "trivial diff — single reviewer sufficient", "out of scope for this diff", "exceeds 4-agent cap").
+- A "Reviewers Skipped" section listing any of the three sources that was not launched or did not return, with reason (e.g., "trivial diff", "claude CLI unavailable", "timeout (>600s)").
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 

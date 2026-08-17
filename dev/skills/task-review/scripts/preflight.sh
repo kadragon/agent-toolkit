@@ -141,13 +141,6 @@ else
   [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
 fi
 
-# --- Detect installed review skills ---
-REVIEW_CANDIDATES='{"candidates":[],"count":0}'
-if [[ -f "${SCRIPT_DIR}/detect-review-skills.sh" ]]; then
-  REVIEW_CANDIDATES=$(bash "${SCRIPT_DIR}/detect-review-skills.sh" 2>/dev/null) || REVIEW_CANDIDATES='{"candidates":[],"count":0}'
-  jq -e . <<< "$REVIEW_CANDIDATES" >/dev/null 2>&1 || REVIEW_CANDIDATES='{"candidates":[],"count":0}'
-fi
-
 # --- Build JSON safely with jq ---
 ERRORS_JSON="[]"
 if [ ${#errors[@]} -gt 0 ]; then
@@ -169,7 +162,6 @@ jq -n \
   --arg owner_repo "$OWNER_REPO" \
   --argjson merge_strategy "$MERGE_INFO" \
   --argjson errors "$ERRORS_JSON" \
-  --argjson review_candidates "$REVIEW_CANDIDATES" \
   '{
     no_hub: $no_hub,
     hub_type: $hub_type,
@@ -184,7 +176,6 @@ jq -n \
     base_branch: $base_branch,
     owner_repo: $owner_repo,
     merge_strategy: $merge_strategy,
-    review_candidates: $review_candidates,
     has_errors: (($errors | length) > 0),
     errors: $errors
   }'

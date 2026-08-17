@@ -12,15 +12,16 @@
 # Requires the `claude` CLI to be installed AND authenticated in the caller's
 # environment. If it is not, the caller records "Reviewers Skipped".
 #
-# Usage: claude-review.sh <base_branch> <slot_id>
-#   slot_id: the review skill to invoke (e.g. "review", "security-review").
+# Usage: claude-review.sh <base_branch>
+#   The review skill is fixed to "code-review" — SKILL.md Step 2-1 pins the
+#   Claude slot to exactly one skill, so this script takes no slot argument.
 # Output: JSON array of findings on stdout — same contract as the 2-1 Agent
 #         path, so Step 3 consolidation treats both identically.
 
 set -euo pipefail
 
-BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch> <slot_id>}"
-SLOT_ID="${2:?Usage: claude-review.sh <base_branch> <slot_id>}"
+BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch>}"
+SLOT_ID="code-review"
 
 command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; exit 1; }
 
@@ -30,7 +31,7 @@ command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; e
 PROMPT=$(cat <<EOF
 Review changes on the current branch against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
-2. Invoke Skill "${SLOT_ID}" to review.
+2. Invoke Skill "${SLOT_ID}" to review. Do not invoke any other review skill or command.
 3. Return findings as a JSON array and NOTHING else — no prose, no code fence:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.

@@ -91,7 +91,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 **All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. On a 600s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>600s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 600s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
 
-#### 2-1: Claude Skill Reviewers
+#### 2-1: Claude Reviewer (`code-review`, fixed)
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -103,36 +103,20 @@ FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
-REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")
 ```
 
-**Two-slot model:**
+**One reviewer, one skill — `SLOT_ID="code-review"`, always.** The Claude slot is pinned: no
+candidate discovery, no per-domain second slot, no other review skill or `/review`-style command
+is invoked from this cycle. `code-review` already covers correctness plus reuse/simplification;
+the panel's breadth comes from the *other engines* (agy in 2-2, Codex in 2-3), not from stacking
+more Claude review skills. A security-sensitive diff raises the effort level — say
+`code-review high` in the reviewer prompt when `SECURITY_HIT` is non-empty — it does **not** add a
+second reviewer. Anything else the user wants reviewed (`security-review`, a PR-review command) is
+theirs to run outside this cycle.
 
-- **Trivial short-circuit** — `FILE_COUNT ≤ 3` AND `LINE_DELTA ≤ 10` AND `SECURITY_HIT` empty → skip all Claude skill sub-agents; do inline review (read diff, assess naming/error-handling/coverage). Record all candidates as "Reviewers Skipped: trivial diff". Skip to 2-2.
-- **Slot 1 (general, always 1):**
-  ```bash
-  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-  [[ -f "$SKILL_DIR/scripts/preflight.sh" ]] || { echo "Bundled preflight unavailable: $SKILL_DIR/scripts/preflight.sh" >&2; exit 1; }
-  PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
-  REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")  # from 2-1
-  SLOT1=$(jq -r '[.candidates[] | select(.domain=="general")] | first | .id // empty' <<<"$REVIEW_CANDIDATES_JSON")
-  ```
-  Skip `kind=command` slots unless `HUB_TYPE=github` AND PR exists.
-- **Slot 2 (security, conditional):**
-  ```bash
-  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-  [[ -f "$SKILL_DIR/scripts/preflight.sh" ]] || { echo "Bundled preflight unavailable: $SKILL_DIR/scripts/preflight.sh" >&2; exit 1; }
-  PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
-  BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
-  CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)  # from 2-1
-  SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from 2-1
-  REVIEW_CANDIDATES_JSON=$(jq -c '.review_candidates' <<<"$PREFLIGHT")  # from 2-1
-  [[ -n "$SECURITY_HIT" ]] && \
-    SLOT2=$(jq -r '[.candidates[] | select(.domain=="security")] | first | .id // empty' <<<"$REVIEW_CANDIDATES_JSON")
-  ```
-- All other candidates → "Reviewers Skipped: redundant domain".
+- **Trivial short-circuit** — `FILE_COUNT ≤ 3` AND `LINE_DELTA ≤ 10` AND `SECURITY_HIT` empty → skip the Claude sub-agent; do inline review (read diff, assess naming/error-handling/coverage). Record "Reviewers Skipped: trivial diff". Skip to 2-2.
 
-For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (Slot 2). How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_ENGINE`, from Setup) — the goal is that a **Claude** engine is always in the panel, alongside agy (2-2) and Codex (2-3), no matter which runtime drives:
+How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_ENGINE`, from Setup) — the goal is that a **Claude** engine is always in the panel, alongside agy (2-2) and Codex (2-3), no matter which runtime drives:
 
 - **`NATIVE_ENGINE == "claude"`** (Claude Code is driving) — launch one Agent (`run_in_background: true`, no `subagent_type`) with the prompt below. Do not pin a model — omit the `model` field so each reviewer inherits the session's model (an Opus session reviews with Opus, a Sonnet session with Sonnet).
 - **otherwise** (a non-Claude runtime such as Codex is driving) — the in-process agent would review as that runtime's own engine, not Claude, so shell out to the `claude` CLI to keep a Claude reviewer in the panel (mirror of how 2-2/2-3 summon their engines via companion scripts). If `CLAUDE_CLI_AVAILABLE == false`, skip this slot and record "Reviewers Skipped: claude CLI unavailable". Otherwise launch in the same turn with `run_in_background: true`:
@@ -141,8 +125,7 @@ For each selected slot, set `SLOT_ID="$SLOT1"` (Slot 1) or `SLOT_ID="$SLOT2"` (S
   [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
   PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
   BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
-  SLOT_ID="<the selected slot's review skill id — Slot 1's general or Slot 2's security, chosen above>"
-  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${SLOT_ID}" \
+  bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" \
     || echo '[]'
   ```
   `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt), so Step 3 consolidates both identically.
@@ -151,9 +134,9 @@ Reviewer prompt (Agent path):
 ```
 Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
-2. Invoke Skill "${SLOT_ID}" to review.
+2. Invoke Skill "code-review" to review (append ` high` when the diff touches auth/crypto/secret/permission/network paths). Do not invoke any other review skill or command.
 3. Return findings as JSON array:
-   [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
+   [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"code-review"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this PR.
