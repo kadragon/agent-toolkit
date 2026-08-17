@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] merge permission glob repointed at the task-review-cycle path (2026-08-17)
 - [done] CI enforces the invocation axis: coherence, call graph, notation (dev v4.5.7) (2026-08-17) → docs/invocation.md
 - [done] workflows.md no longer prescribes --auto as the default hand-off flag (2026-08-17) → docs/workflows.md
 - [done] User-invoked skills get human-facing one-line descriptions (dev v4.5.6) (2026-08-17) → docs/invocation.md
