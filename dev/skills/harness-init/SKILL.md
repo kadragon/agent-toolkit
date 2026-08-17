@@ -1,9 +1,9 @@
 ---
 name: harness-init
 description: >-
-  Set up or validate a repo's agent infrastructure — AGENTS.md, docs/ index,
-  harness audit. Does NOT modify ~/.claude/CLAUDE.md. NOT for proposing or
-  pruning individual assets from session evidence → harness-curate.
+  Set up or validate a repo's agent infrastructure — AGENTS.md, the docs/ index, harness
+  audit. Proposing or pruning individual assets from session evidence instead → harness-
+  curate.
 disable-model-invocation: true
 ---
 
@@ -47,7 +47,7 @@ Roles arrive **on evidence, not on setup**: `dev:harness-curate` mines the trans
 
 **Create a role or orchestrator during init only if the user explicitly asks for it in this session.** Then it is their call, not the skill's guess: build exactly what they named, apply the reachability check in Step 4b to that candidate, and skip the rest.
 
-**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing any delegation wording. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, the generated docs must not read stricter than it. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
+**Second sizing input — the operator's own instruction layer.** Read the invoking platform's global instruction file — `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex) — (and note what the platform's base instructions say) before writing any delegation wording. **This skill reads that file and never writes to it** — every artifact it generates lands in the repo, so a conflict with the global layer is resolved by softening the repo file, never by editing the operator's own. If that layer says *default inline, delegate only above N files*, or forbids spawning agents unless the user asks, the generated docs must not read stricter than it. A blocking gate that contradicts a higher-precedence file does not win — it gets ignored, and teaches the operator the harness is noise. See `examples/agents-md-example.md` → Delegation for the calibration note to carry into the generated file.
 
 Delegation is only the axis where narrowing is a safe automatic fix. Every other axis goes through Step 0b.
 

@@ -10,7 +10,7 @@
   {"query": "run the dev review cycle end to end and merge the PR once CI is green", "should_trigger": false},
 
   {"query": "do a code review on the current diff", "should_trigger": false,
-   "waived": "lexical proxy false positive, measured with the checker's own Corpus/rank: task-review-cycle ranks 1st at 0.2502 (harness-capture 0.2406) while the wrapper task-review sits at 0.0470. The primitive's description is the only one in the corpus carrying `review` plus `cycle` vocabulary, and the checker excludes the built-in code-review skill that would plausibly win this query in the real router. The actual defense against auto-selection is the *Caller gate* in SKILL.md, not this ranking. A real non-trigger case — kept for skill-creator's model-judged runner."},
+   "waived": "lexical proxy false positive, re-measured on this branch after the user-invoked description rewrite: task-review-cycle 0.2551, task-new 0.2364, harness-capture 0.2332, wrapper task-review below them. The primitive's description is the only one in the corpus carrying `review` plus `cycle` vocabulary, and the checker excludes the built-in code-review skill that would plausibly win this query in the real router. The actual defense against auto-selection is the *Caller gate* in SKILL.md, not this ranking. Revisit when either description changes: re-measure and unwaive if the wrapper leads. A real non-trigger case — kept for skill-creator's model-judged runner."},
   {"query": "review my PR", "should_trigger": false},
   {"query": "can you review my code changes", "should_trigger": false},
   {"query": "review this branch before I merge", "should_trigger": false},

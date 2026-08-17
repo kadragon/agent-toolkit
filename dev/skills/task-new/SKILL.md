@@ -1,11 +1,10 @@
 ---
 name: task-new
-version: 1.2.4
+version: 1.2.5
 description: >-
-  Intake for NEW work the prompt itself describes: classify → grill → spec and
-  tickets if large → full code cycle (branch → Sprint Contract → implement →
-  qa-verifier → version bump → task-review). Trivial work gets a lite path.
-  Pulling the next item from the existing queue instead → task-next.
+  Intake for new work you just described — classify, size, then run the full code cycle:
+  branch, Sprint Contract, implement, verify, version bump, review. Already on the queue
+  instead → task-next.
 disable-model-invocation: true
 ---
 

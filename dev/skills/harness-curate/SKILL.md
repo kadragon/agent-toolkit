@@ -1,15 +1,11 @@
 ---
 name: harness-curate
 description: >-
-  Mine session transcripts across projects to propose or prune harness assets
-  (skills/agents/hooks), and audit instruction layers — the model's own base
-  instructions, global CLAUDE.md, repo CLAUDE.md/AGENTS.md, and the repo's
-  indexed docs/ — for duplicate or conflicting rules. Also audits the auto-memory
-  store and promotes repo-scoped facts stuck there into the owning repo's docs/.
-  Routes to the owning creator — never generates itself. NOT for retrospecting
-  the current conversation → harness-capture. Repo structure validation →
-  harness-init.
-version: 1.6.8
+  Mine session transcripts to propose or prune harness assets, audit instruction layers for
+  duplicate or conflicting rules, and promote repo-scoped facts stuck in the auto-memory
+  store. Retrospecting the conversation you are in → harness-capture. Repo structure
+  validation → harness-init.
+version: 1.6.9
 disable-model-invocation: true
 ---
 

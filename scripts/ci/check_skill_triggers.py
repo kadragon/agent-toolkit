@@ -15,7 +15,13 @@ p95=0.2188, p90=0.1735, median=0.0502, mean=0.0802, stdev=0.0891, min=0.0000.
 The threshold τ=0.25 captures the deliberate-neighbor pairs because the lowest such
 pair measured 0.2685, and it sits in the widest pre-edit gap (0.2685 → 0.2188).
 After the pointers landed, the four selected pairs remained the only pairs at or above
-τ; the highest pair without mutual pointers measured 0.2365. Keeping τ=0.25 also
+τ; the highest pair without mutual pointers measured 0.2365. Re-measured 2026-08-17
+after the six user-invoked descriptions were rewritten: three pairs now sit at or above
+τ — `task-new` ↔ `task-next` 0.5666, `task-spec` ↔ `task-tickets` 0.3990,
+`harness-capture` ↔ `harness-curate` 0.2905 — and the highest pair without mutual
+pointers is `harness-curate` ↔ `harness-init` at 0.2361, 0.0139 below τ. That pair is
+the live one: the next description edit anywhere in the corpus can push it over.
+Keeping τ=0.25 also
 catches the deliberate `task-spec` ↔ `task-tickets` pair if its pointer is removed
 (0.2685), whereas recentering at 0.278 would miss it. Re-measure the full corpus after
 any description edit because pointers perturb corpus-wide IDF weights.
