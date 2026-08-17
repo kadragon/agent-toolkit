@@ -163,7 +163,11 @@ Warning*:
 # notation-exempt: <reason>               inside a YAML frontmatter block
 ```
 
-Accepted on the flagged line, the line above it, or the line above an enclosing code fence.
+Accepted on the flagged line, the line above it, or the line above an enclosing code fence,
+and only as a complete HTML comment — prose that merely *mentions* `notation-exempt:` is not
+a marker, or a page explaining this convention would exempt its own examples.
+A `<!-- call-graph-exempt: <reason> -->` marker does the same job for a line that names a
+user-invoked skill in order to *describe* the invariant rather than call it.
 **Inside frontmatter the rule is narrower, deliberately:** the marker sits on its own
 unindented line directly under the key it covers, and covers *only that key* — a folded scalar has no line a
 marker can share without leaking into the value the loader reads, but a block-wide exemption

@@ -90,27 +90,42 @@ ASSET_RULES = {
 # The axis is documented prose; these three checks are what hold it. Each mirrors one
 # section of docs/invocation.md and fails with the fix, not just the violation.
 
-# An operative cross-skill call: `Call the Skill tool with "dev:task-grill"`.
-CALL_RE = re.compile(r'Skill tool\b[^\n]*?"([a-z][a-z0-9-]*):([a-z][a-z0-9-]*)"')
+# A cross-skill target, however the prose quotes it: "dev:task-grill", `dev:task-grill`,
+# 'dev:task-grill', or bare. Matching only the double-quoted form would miss the
+# spelling this repo actually reaches for — it backticks skill names everywhere.
+TARGET_RE = re.compile(r"[\"'`]?([a-z][a-z0-9-]*):([a-z][a-z0-9-]*)[\"'`]?")
 
 # The retired notation. Namespace-anchored on purpose: the router-prose `Use Skill(X)` /
 # `Use Skill(deploy-orchestrator)` forms carry no namespace and are not this rule's business.
 NOTATION_RE = re.compile(r"Skill\([a-z][a-z0-9-]*:[a-z][a-z0-9-]*\)")
 
-# Adjudicated exception, per docs/conventions.md → Adjudicated Exceptions Need a Marker.
-# Accepted on the flagged line or the line immediately above it.
-NOTATION_EXEMPT_RE = re.compile(r"notation-exempt:\s*\S")
+# Adjudicated exceptions, per docs/conventions.md → Adjudicated Exceptions Need a Marker.
+# Anchored to a comment so prose *about* the marker does not silently become one.
+NOTATION_EXEMPT_RE = re.compile(r"<!--\s*notation-exempt:\s*[^>]*-->")
+CALLGRAPH_EXEMPT_RE = re.compile(r"<!--\s*call-graph-exempt:\s*[^>]*-->")
+FM_EXEMPT_RE = re.compile(r"^#\s*notation-exempt:\s*\S")
+
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*\S*\s*$")
 
 SIDECAR_REL = Path("agents") / "openai.yaml"
 
 
-def skill_dirs(root: Path) -> dict[str, Path]:
-    """Map skill name -> its directory, for every `*/skills/*/SKILL.md` in the repo."""
+def plugin_of(rel: str) -> str:
+    """The plugin namespace a repo-relative path belongs to (`dev`, `prod`, ...)."""
+    return Path(rel).parts[0]
+
+
+def skill_dirs(root: Path, tracked: list[Path]) -> dict[str, Path]:
+    """Map `plugin:skill` -> its directory, for every `*/skills/*/SKILL.md` in the repo.
+
+    Keyed by namespace, not bare name: `dev:x` and `prod:x` are different skills, and a
+    bare-name map would silently drop one of them.
+    """
     found: dict[str, Path] = {}
-    for path in list_tracked_markdown(root):
+    for path in tracked:
         rel = str(path.relative_to(root))
         if classify(rel) == "skill":
-            found[Path(rel).parent.name] = root / Path(rel).parent
+            found[f"{plugin_of(rel)}:{Path(rel).parent.name}"] = root / Path(rel).parent
     return found
 
 
@@ -133,9 +148,28 @@ def frontmatter_mapping(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def axis_flag(value, label: str) -> tuple[bool, str | None]:
+    """Read a boolean axis field strictly. Returns (locked, error).
+
+    A quote-wrapped `"true"` is a string; the loader does not honour it, so reading it
+    as merely "not locked" would let the gate confirm coherence on a skill the author
+    meant to lock — in both harnesses at once. Wrong values fail rather than default.
+    """
+    if value is None:
+        return False, None
+    if not isinstance(value, bool):
+        return False, (
+            f"`{label}: {value!r}` is not a YAML boolean — a quote-wrapped `\"true\"` is a "
+            "string and neither harness honours it. Write it unquoted, or drop the key"
+        )
+    return value, None
+
+
 def is_user_invoked(skill_dir: Path) -> bool:
     """True when the skill's Claude Code half declares it user-invoked."""
-    return frontmatter_mapping(skill_dir / "SKILL.md").get("disable-model-invocation") is True
+    raw = frontmatter_mapping(skill_dir / "SKILL.md").get("disable-model-invocation")
+    locked, _ = axis_flag(raw, "disable-model-invocation")
+    return locked
 
 
 def check_axis_coherence(name: str, skill_dir: Path) -> list[str]:
@@ -144,9 +178,12 @@ def check_axis_coherence(name: str, skill_dir: Path) -> list[str]:
     Marking one and not the other is the defect this catches: the human still fires it
     by name in the marked harness while the model keeps auto-selecting it in the other.
     """
-    claude_locked = is_user_invoked(skill_dir)
-    sidecar = skill_dir / SIDECAR_REL
+    raw_claude = frontmatter_mapping(skill_dir / "SKILL.md").get("disable-model-invocation")
+    claude_locked, claude_error = axis_flag(raw_claude, "disable-model-invocation")
+    if claude_error:
+        return [f"skill `{name}`: {claude_error}."]
 
+    sidecar = skill_dir / SIDECAR_REL
     codex_locked = False
     if sidecar.is_file():
         try:
@@ -160,7 +197,11 @@ def check_axis_coherence(name: str, skill_dir: Path) -> list[str]:
         if isinstance(data, dict):
             policy = data.get("policy")
             if isinstance(policy, dict):
-                codex_locked = policy.get("allow_implicit_invocation") is False
+                raw_codex = policy.get("allow_implicit_invocation")
+                permissive, codex_error = axis_flag(raw_codex, "policy.allow_implicit_invocation")
+                if codex_error:
+                    return [f"skill `{name}`: `{SIDECAR_REL}` {codex_error}."]
+                codex_locked = raw_codex is False
 
     if claude_locked and not codex_locked:
         return [
@@ -179,9 +220,30 @@ def check_axis_coherence(name: str, skill_dir: Path) -> list[str]:
     return []
 
 
-def bundled_markdown(skill_dir: Path, root: Path) -> list[Path]:
-    """Every tracked markdown file that ships with one skill, SKILL.md included."""
-    return [p for p in list_tracked_markdown(root) if skill_dir in p.parents or p.parent == skill_dir]
+def fence_mask(lines: list[str]) -> list[str | None]:
+    """Per line: the text above the enclosing fence, or None when outside a fence.
+
+    A fence closes only on a run at least as long as the one that opened it, so a
+    4-backtick block quoting 3-backtick lines does not flip the state. Fence lines
+    themselves map to None, which is why an inline ```code``` span — not a fence line
+    by FENCE_RE — is still scanned for violations.
+    """
+    mask: list[str | None] = [None] * len(lines)
+    open_run = 0
+    intro: str | None = None
+    for i, line in enumerate(lines):
+        match = FENCE_RE.match(line)
+        if match and not open_run:
+            open_run = len(match.group(1))
+            intro = lines[i - 1] if i >= 1 else ""
+            continue
+        if match and len(match.group(1)) >= open_run:
+            open_run = 0
+            intro = None
+            continue
+        if open_run:
+            mask[i] = intro if intro is not None else ""
+    return mask
 
 
 def check_call_graph(rel: str, text: str, user_invoked: set[str]) -> list[str]:
@@ -192,14 +254,32 @@ def check_call_graph(rel: str, text: str, user_invoked: set[str]) -> list[str]:
     destructive orchestrator. docs/invocation.md → The invariant.
     """
     problems = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        for namespace, target in CALL_RE.findall(line):
-            if target in user_invoked:
+    lines = text.splitlines()
+    for lineno, line in enumerate(lines, 1):
+        # Report at the line carrying the target, but let the tool name sit on either
+        # neighbour: a call may wrap, and the target may precede it ("invoke `dev:x`
+        # with the Skill tool"). Anchoring on the target is also what keeps one call
+        # from being reported twice.
+        before = lines[lineno - 2] if lineno >= 2 else ""
+        after = lines[lineno] if lineno < len(lines) else ""
+        if "Skill tool" not in f"{before} {line} {after}":
+            continue
+        if CALLGRAPH_EXEMPT_RE.search(line) or CALLGRAPH_EXEMPT_RE.search(before):
+            continue
+        seen = set()
+        # Every target on the line, not just the first: docs/invocation.md → Notation
+        # sanctions `Call the Skill tool twice, for "dev:task-spec" and "dev:task-tickets"`.
+        for namespace, target in TARGET_RE.findall(line):
+            qualified = f"{namespace}:{target}"
+            if qualified in user_invoked and qualified not in seen:
+                seen.add(qualified)
                 problems.append(
-                    f"{rel}:{lineno} calls user-invoked skill `{namespace}:{target}` with the "
-                    "Skill tool. A user-invoked skill is reachable by the human and nothing "
-                    "else — write it as an instruction to run it, or call the model-invoked "
-                    "half instead (docs/invocation.md → The invariant)."
+                    f"{rel}:{lineno} names user-invoked skill `{qualified}` to the Skill "
+                    "tool. A user-invoked skill is reachable by the human and nothing else "
+                    "— write it as an instruction to run it, or call the model-invoked half "
+                    "instead. If this line only *describes* the rule, mark it "
+                    "`<!-- call-graph-exempt: <reason> -->` (docs/invocation.md → The "
+                    "invariant)."
                 )
     return problems
 
@@ -208,28 +288,33 @@ def notation_problem(rel: str, lineno: int) -> str:
     return (
         f"{rel}:{lineno} uses the retired `Skill(ns:name)` notation. Write "
         'Call the Skill tool with "ns:name" (docs/invocation.md → Notation), or, if this '
-        "site invokes nothing, mark it `notation-exempt: <reason>` on the line, the one "
-        "above, the line above an enclosing code fence, or — in frontmatter — its own line "
-        "directly under the key it covers (docs/conventions.md → Adjudicated Exceptions "
-        "Need a Marker)."
+        "site invokes nothing, mark it `<!-- notation-exempt: <reason> -->` on the line, the "
+        "one above, or the line above an enclosing code fence — in frontmatter, an "
+        "unindented `# notation-exempt:` line directly under the key it covers "
+        "(docs/conventions.md → Adjudicated Exceptions Need a Marker)."
     )
+
+
+def frontmatter_span(lines: list[str]) -> int:
+    """Index of the closing `---`, or 0 when the file has no frontmatter block."""
+    if not lines or lines[0].strip() != DELIMITER:
+        return 0
+    for i in range(1, len(lines)):
+        if lines[i].strip() == DELIMITER:
+            return i
+    return 0
 
 
 def frontmatter_exempt_lines(lines: list[str]) -> set[int]:
     """1-based line numbers inside the frontmatter block that a marker covers.
 
-    A folded scalar has no line a marker could sit on without leaking into the value
-    the loader reads, so inside frontmatter the marker sits on its own line — and
-    covers **only the key block immediately above it**. Covering the whole block would
-    let one justified exemption launder an unrelated violation under another key.
+    A folded scalar has no line a marker could share without leaking into the value the
+    loader reads, so inside frontmatter the marker sits on its own **unindented** line
+    and covers **only the key block immediately above it**. Covering the whole block
+    would let one justified exemption launder an unrelated violation under another key;
+    honouring an indented `#` would make the marker part of the scalar it exempts.
     """
-    if not lines or lines[0].strip() != DELIMITER:
-        return set()
-    end = 0
-    for i in range(1, len(lines)):
-        if lines[i].strip() == DELIMITER:
-            end = i
-            break
+    end = frontmatter_span(lines)
     if not end:
         return set()
 
@@ -237,14 +322,11 @@ def frontmatter_exempt_lines(lines: list[str]) -> set[int]:
     key_start = None
     for i in range(1, end):
         raw = lines[i]
-        # Column 0 only: an indented `#` is a continuation line of the folded scalar
-        # above it, so YAML folds it into the value the loader reads — it would both
-        # leak the marker text into the description and exempt the very line it sits in.
-        if raw.startswith("#") and NOTATION_EXEMPT_RE.search(raw):
+        if FM_EXEMPT_RE.match(raw):
             if key_start is not None:
                 covered.update(range(key_start + 1, i + 1))
             continue
-        if raw[:1] not in (" ", "\t", "#", "") :
+        if raw[:1] not in (" ", "\t", "#", ""):
             key_start = i
     return covered
 
@@ -258,30 +340,21 @@ def check_notation(rel: str, text: str) -> list[str]:
     problems = []
     lines = text.splitlines()
     fm_exempt_lines = frontmatter_exempt_lines(lines)
-    fm_end = max(fm_exempt_lines, default=0)
-    if lines and lines[0].strip() == DELIMITER:
-        for i in range(1, len(lines)):
-            if lines[i].strip() == DELIMITER:
-                fm_end = i
-                break
-    # Line above the currently-open fence, so an example inside a code block can be
-    # exempted without putting a markdown comment inside the code.
-    fence_intro = None
+    fm_end = frontmatter_span(lines)
+    fences = fence_mask(lines)
+
     for lineno, line in enumerate(lines, 1):
-        if line.lstrip().startswith("```"):
-            fence_intro = lines[lineno - 2] if (fence_intro is None and lineno >= 2) else None
-            continue
         if not NOTATION_RE.search(line):
             continue
         if lineno <= fm_end:
             # Inside frontmatter only the key-scoped rule applies. The generic
             # "line above" rule would let a marker justifying one key silently
-            # exempt the next one.
-            if lineno in fm_exempt_lines:
-                continue
-            problems.append(notation_problem(rel, lineno))
+            # exempt the next one — the marker line *is* the line above it.
+            if lineno not in fm_exempt_lines:
+                problems.append(notation_problem(rel, lineno))
             continue
         candidates = [line, lines[lineno - 2] if lineno >= 2 else ""]
+        fence_intro = fences[lineno - 1]
         if fence_intro is not None:
             candidates.append(fence_intro)
         if any(NOTATION_EXEMPT_RE.search(c) for c in candidates):
@@ -292,7 +365,8 @@ def check_notation(rel: str, text: str) -> list[str]:
 
 def check_invocation_axis(root: Path) -> tuple[list[str], bool]:
     """Run all three axis checks. Returns (report lines, failed)."""
-    dirs = skill_dirs(root)
+    tracked = list_tracked_markdown(root)
+    dirs = skill_dirs(root, tracked)
     user_invoked = {name for name, d in dirs.items() if is_user_invoked(d)}
     lines: list[str] = []
     failed = False
@@ -306,18 +380,29 @@ def check_invocation_axis(root: Path) -> tuple[list[str], bool]:
         else:
             lines.append(f"OK   skill `{name}` ({axis}-invoked): both platform halves agree")
 
-    for name in sorted(dirs):
-        for path in bundled_markdown(dirs[name], root):
-            rel = str(path.relative_to(root))
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            problems = check_call_graph(rel, text, user_invoked) + check_notation(rel, text)
-            if problems:
-                failed = True
-                lines.extend(f"ERROR {p}" for p in problems)
+    # Scope: everything a plugin ships that an agent reads as instructions — skill
+    # bundles, agent definitions, and commands. An agent file naming a user-invoked
+    # skill breaks the same invariant a skill file does.
+    scanned = 0
+    for path in tracked:
+        rel = str(path.relative_to(root))
+        in_skill_bundle = any(d in path.parents for d in dirs.values())
+        if not (in_skill_bundle or classify(rel) in ("agent", "command")):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        scanned += 1
+        problems = check_call_graph(rel, text, user_invoked) + check_notation(rel, text)
+        if problems:
+            failed = True
+            lines.extend(f"ERROR {p}" for p in problems)
 
+    lines.append(
+        f"OK   call graph + notation: {scanned} shipped markdown files scanned "
+        f"({len(user_invoked)} user-invoked skills)"
+    )
     return lines, failed
 
 

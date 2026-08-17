@@ -405,7 +405,7 @@ def test_call_graph():
         code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": caller}))
         check(
             "a MODEL-invoked caller naming a user-invoked skill fails",
-            code == 1 and "calls user-invoked skill `dev:task-review`" in out,
+            code == 1 and "names user-invoked skill `dev:task-review`" in out,
             out,
         )
 
@@ -479,7 +479,7 @@ def test_notation():
         code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": two_keys}))
         check(
             "a marker does NOT exempt an unmarked violation under another key",
-            code == 1 and "retired `Skill(ns:name)`" in out,
+            code == 1 and "SKILL.md:5 uses" in out and "SKILL.md:3 uses" not in out,
             out,
         )
 
@@ -524,8 +524,110 @@ def test_pre_migration_tree_fails():
         code, out = run_main(root)
         check("pre-migration tree exits non-zero", code == 1, out)
         check("  ...on axis coherence", "its Codex half does not match" in out, out)
-        check("  ...on the call graph", "calls user-invoked skill" in out, out)
+        check("  ...on the call graph", "names user-invoked skill" in out, out)
         check("  ...on notation", "retired `Skill(ns:name)`" in out, out)
+
+
+
+
+def test_axis_flag_strictness():
+    print("\nboolean strictness")
+    with tempfile.TemporaryDirectory() as tmp:
+        quoted = (
+            "---\nname: task-review\ndescription: d\n"
+            'disable-model-invocation: "true"\n---\n\n# x\n'
+        )
+        root = make_repo(Path(tmp), {"dev/skills/task-review/SKILL.md": quoted})
+        code, out = run_main(root)
+        check(
+            "a quoted `\"true\"` fails instead of reading as unlocked",
+            code == 1 and "is not a YAML boolean" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = axis_repo(Path(tmp), {})
+        (root / "dev/skills/task-review/agents/openai.yaml").write_text(
+            'policy:\n  allow_implicit_invocation: "false"\n', encoding="utf-8"
+        )
+        code, out = run_main(root)
+        check(
+            "a quoted sidecar boolean fails too",
+            code == 1 and "is not a YAML boolean" in out,
+            out,
+        )
+
+
+def test_call_graph_spellings():
+    print("\ncall spellings")
+    forms = {
+        "backticked": "Call the Skill tool with `dev:task-review`.",
+        "single-quoted": "Call the Skill tool with 'dev:task-review'.",
+        "unquoted": "Call the Skill tool with dev:task-review now.",
+        "target before the tool name": "Invoke dev:task-review via the Skill tool.",
+        "wrapped across two lines": 'Call the Skill tool with\n"dev:task-review".',
+    }
+    for label, call in forms.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            body = OPEN_SKILL + "\n" + call + "\n"
+            code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": body}))
+            check(f"{label} call is caught", code == 1 and "names user-invoked skill" in out, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        two = OPEN_SKILL + (
+            '\nCall the Skill tool twice, for "dev:task-grill" and "dev:task-review".\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": two}))
+        check(
+            "the SECOND target of a two-call line is checked",
+            code == 1 and "dev:task-review" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        described = OPEN_SKILL + (
+            "\n<!-- call-graph-exempt: states the rule, does not call it -->\n"
+            'The Skill tool listing shows "dev:task-review" as user-invoked; never call it.\n'
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": described}))
+        check("a marked descriptive mention is not a call", code == 0, out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        other_ns = OPEN_SKILL + '\nCall the Skill tool with "other:task-review".\n'
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": other_ns}))
+        check("a different namespace is a different skill", code == 0, out)
+
+
+def test_marker_blast_radius():
+    print("\nmarker blast radius")
+    with tempfile.TemporaryDirectory() as tmp:
+        # Opening fence on line 1 must not leave a stale intro that exempts the rest.
+        leaky = "```\ncode notation-exempt: whatever\n```\n`Skill(dev:task-spec)` unmarked!\n"
+        code, out = run_main(
+            axis_repo(Path(tmp), {"dev/skills/task-grill/references/r.md": leaky})
+        )
+        check(
+            "a leading fence does not exempt the rest of the file",
+            code == 1 and "retired `Skill(ns:name)`" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prose = OPEN_SKILL + (
+            "\nMark such a site `notation-exempt: <reason>` to opt out.\n"
+            "`Skill(dev:task-spec)` here is NOT exempt.\n"
+        )
+        code, out = run_main(axis_repo(Path(tmp), {"dev/skills/task-grill/SKILL.md": prose}))
+        check(
+            "prose describing the marker is not itself a marker",
+            code == 1 and "retired `Skill(ns:name)`" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        agent = "---\nname: helper\ndescription: d\n---\n\nUse `Skill(dev:task-spec)` here.\n"
+        code, out = run_main(axis_repo(Path(tmp), {"dev/agents/helper.md": agent}))
+        check("agent definitions are scanned too", code == 1 and "dev/agents/helper.md" in out, out)
 
 
 def main():
@@ -540,6 +642,9 @@ def main():
     test_call_graph()
     test_notation()
     test_pre_migration_tree_fails()
+    test_axis_flag_strictness()
+    test_call_graph_spellings()
+    test_marker_blast_radius()
 
     total = len(_results)
     passed = sum(_results)
