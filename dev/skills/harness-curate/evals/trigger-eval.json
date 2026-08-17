@@ -1,10 +1,8 @@
 [
-  {"query": "mine session transcripts across my projects and propose or prune harness assets", "should_trigger": true},
-  {"query": "audit my instruction layers for duplicate or conflicting rules", "should_trigger": true},
-  {"query": "check the auto-memory store and promote repo-scoped facts into the owning repo's docs", "should_trigger": true},
-  {"query": "which of my skills and hooks are unused? prune them based on transcript evidence", "should_trigger": true},
-
-  {"query": "set up AGENTS.md and the docs index for this new repo", "should_trigger": false},
-  {"query": "retrospect this conversation and record what we learned", "should_trigger": false},
-  {"query": "write a design doc for the new caching layer", "should_trigger": false}
+  {"query": "mine my session transcripts and propose which harness assets to retire", "should_trigger": true},
+  {"query": "reconcile the overlapping instruction layers across my instruction files", "should_trigger": true},
+  {"query": "tidy the auto-memory store and propose harness assets from past transcripts", "should_trigger": true},
+  {"query": "retrospect on the conversation I am in right now", "should_trigger": false},
+  {"query": "run the post-dev review cycle on this branch", "should_trigger": false},
+  {"query": "pull the next item off the backlog queue", "should_trigger": false}
 ]

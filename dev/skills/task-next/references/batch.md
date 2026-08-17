@@ -2,7 +2,7 @@
 
 Triggered by `--all`. Implements **multiple** units in parallel (each in its own git worktree),
 then collapses them onto **one integration branch** that goes through a **single** version bump,
-cleanup pass, and `task-review-cycle --auto` → one PR, one CI run, one merge.
+cleanup pass, and `task-review-cycle --from task-next --auto` → one PR, one CI run, one merge.
 
 **Why one integration branch, not N PRs.** The shared single-copy files — `plugin.json` manifests,
 `backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited per-unit in parallel without collision.

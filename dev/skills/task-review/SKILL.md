@@ -1,9 +1,7 @@
 ---
 name: task-review
 description: >-
-  Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply →
-  retrospect → CI → merge. Flags: --no-hub (local only), --auto (skip
-  confirmation).
+  Run the post-dev review cycle on this branch — commit, reviews, CI, merge.
 disable-model-invocation: true
 ---
 

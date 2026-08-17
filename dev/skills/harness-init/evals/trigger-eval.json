@@ -1,10 +1,8 @@
 [
-  {"query": "set up the agent infrastructure for this repo — AGENTS.md and a docs index", "should_trigger": true},
-  {"query": "validate this repo's harness and audit whether the docs index is complete", "should_trigger": true},
-  {"query": "this repo has no AGENTS.md yet, scaffold the agent infrastructure for it", "should_trigger": true},
-  {"query": "run a harness audit on this repository's agent setup", "should_trigger": true},
-
-  {"query": "mine my session transcripts and propose new skills to add", "should_trigger": false},
-  {"query": "break this approved design doc into backlog tickets", "should_trigger": false},
-  {"query": "add a retry with exponential backoff to the fetch helper", "should_trigger": false}
+  {"query": "set up this repo's agent infrastructure \u2014 AGENTS.md and the docs index", "should_trigger": true},
+  {"query": "validate the harness scaffolding in this repo", "should_trigger": true},
+  {"query": "audit whether this repo's agent infrastructure is in place", "should_trigger": true},
+  {"query": "mine session transcripts to retire unused harness assets", "should_trigger": false},
+  {"query": "run the post-dev review cycle on this branch", "should_trigger": false},
+  {"query": "triage dependabot PRs across my repos", "should_trigger": false}
 ]

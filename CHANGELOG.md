@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] User-invoked skills get human-facing one-line descriptions (dev v4.5.6) (2026-08-17) → docs/invocation.md
 - [done] Decision: keep both invocation-axis halves despite the Codex validator (2026-08-17) → docs/platform-specs.md
 - [done] task-review-cycle caller gate: --from task-review (dev v4.5.5) (2026-08-17) → docs/invocation.md
 - [done] blocked-by marker: slug identifies the blocker, number is frozen (dev v4.5.4) (2026-08-17)

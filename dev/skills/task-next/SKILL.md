@@ -1,11 +1,8 @@
 ---
 name: task-next
-version: 1.6.5
+version: 1.6.6
 description: >-
-  Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
-  pick → branch → Sprint Contract → implement → qa-verifier → version bump →
-  task-review. Flags: --all (parallel batch), --tree (worktree isolation).
-  Trivial tasks get a lite path. New work the prompt describes → task-new.
+  Pull the next item off the backlog queue and run it through the full code cycle. For new work you just described → task-new.
 disable-model-invocation: true
 ---
 
@@ -463,7 +460,7 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 
 Call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto`.
 
-`task-review-cycle --auto` commits (including the cleanup changes above), creates PR, collects
+`task-review-cycle --from task-next --auto` commits (including the cleanup changes above), creates PR, collects
 reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
 
 **If task-review reports CI failure and the PR must be abandoned:** close the PR and delete
@@ -509,7 +506,7 @@ Runs single-pick through an isolated git worktree so the main checkout stays on 
 
 ## Batch mode (`--all`)
 
-Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and `task-review-cycle --auto` run. See `references/batch.md` for full detail.
+Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and one `task-review-cycle --from task-next --auto` run. See `references/batch.md` for full detail.
 
 ## Edge cases
 
@@ -525,7 +522,7 @@ action itself; always still ask yes/no.
    [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
    ```
    If `$commits` is non-empty, `task-review-cycle` Step 1 (commit) already ran. Diagnosis:
-   offer `task-review-cycle --auto` directly.
+   offer `task-review-cycle --from task-next --auto` directly.
 
 2. **No commits ahead, but an active Sprint Contract?**
 
@@ -558,7 +555,7 @@ action itself; always still ask yes/no.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
-   `task-review-cycle --auto`?"
+   `task-review-cycle --from task-next --auto`?"
 
 Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
 - **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` for

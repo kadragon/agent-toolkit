@@ -1,11 +1,9 @@
 [
-  {"query": "triage the dependabot pull requests across every repo I own and batch merge the safe ones", "should_trigger": true},
-  {"query": "audit dependabot status across my repos and configure grouped updates", "should_trigger": true},
-  {"query": "bulk merge the open dependabot bumps in all my owned repos", "should_trigger": true},
-
-  {"query": "rebase this one dependabot PR because it conflicts", "should_trigger": false,
-   "waived": "lexical proxy false positive, measured: repo-dependabot ranks 1st at 0.5146, next is task-tickets at 0.1595. Five query tokens survive the corpus filter — dependabot, one, pr, rebase, this — and three of them (`dependabot`, `pr`, `rebase`) come from this skill's own description, with `rebase` appearing there only inside the `Not for a single-PR rebase` carve-out. That carve-out is a negation a TF-IDF bag of words cannot represent, so the tokens that should exclude the skill score for it instead. A real non-trigger case — kept for skill-creator's model-judged runner."},
-  {"query": "retrospect on this conversation and save the lesson", "should_trigger": false},
-  {"query": "pull the next item off the backlog and implement it", "should_trigger": false},
-  {"query": "set up this repo's agent scaffolding and docs index", "should_trigger": false}
+  {"query": "triage and batch-merge dependabot PRs across every repo I own", "should_trigger": true},
+  {"query": "batch merge the open dependabot PRs in all my owned repos", "should_trigger": true},
+  {"query": "dependabot PR triage across everything I own", "should_trigger": true},
+  {"query": "run the post-dev review cycle on this branch", "should_trigger": false},
+  {"query": "pull the next item off the backlog queue", "should_trigger": false},
+  {"query": "set up this repo's agent infrastructure", "should_trigger": false},
+  {"query": "rebase this one dependabot PR because it conflicts", "should_trigger": false, "waived": "lexical proxy false positive, measured: repo-dependabot ranks 1st at 0.5146, next is task-tickets at 0.1595. Five query tokens survive the corpus filter \u2014 dependabot, one, pr, rebase, this \u2014 and three of them (`dependabot`, `pr`, `rebase`) come from this skill's own description, with `rebase` appearing there only inside the `Not for a single-PR rebase` carve-out. That carve-out is a negation a TF-IDF bag of words cannot represent, so the tokens that should exclude the skill score for it instead. A real non-trigger case \u2014 kept for skill-creator's model-judged runner."}
 ]

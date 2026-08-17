@@ -3,8 +3,8 @@
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
 rules below are the target state — the repo is **partially migrated onto them**: the
 `task-review` / `task-review-cycle` split, the *Notation* migration and both halves of
-*Per-platform fields* have landed; the remaining `## Invocation axis — …` items in `backlog.md`
-(user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
+*Per-platform fields* have landed, as have the user-invoked one-line descriptions; only the
+`## Invocation axis — CI enforcement` item in `backlog.md` is still open. `docs/design/invocation-axis.md`
 holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
@@ -143,11 +143,11 @@ skill without instructing anyone to run it right now, so rewriting them into too
 create a call where none belongs:
 
 - `dev/skills/task-grill/SKILL.md` and `dev/skills/task-spec/SKILL.md` `description:` frontmatter
-  — these still spell `Skill(dev:task-grill)`. Both skills are **model-invoked**, so the queued
-  `## Invocation axis — user-invoked descriptions` item does not reach them: that item rewrites
-  only the six user-invoked descriptions and leaves model-invoked trigger phrasing intact.
-  Rewording these two is a separate, unqueued decision — descriptions are trigger-scored, so any
-  edit has to be measured against `scripts/ci/check_skill_triggers.py` before it lands.
+  — these still spell `Skill(dev:task-grill)`. Both skills are **model-invoked**, so the
+  user-invoked description rewrite passed them by: it touched only the six human-facing
+  descriptions and left model-invoked trigger phrasing intact. Rewording these two is a separate,
+  unqueued decision — descriptions are trigger-scored, so any edit has to be measured against
+  `scripts/ci/check_skill_triggers.py` before it lands.
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 

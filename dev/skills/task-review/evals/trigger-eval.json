@@ -1,23 +1,8 @@
 [
-  {"query": "run the post-dev review cycle on this branch: commit, collect reviews, apply findings, wait for CI, then merge", "should_trigger": true},
-  {"query": "start the review cycle with --auto so it skips the confirmation", "should_trigger": true},
-  {"query": "review cycle with --no-hub — local only, no PR and no CI", "should_trigger": true},
-  {"query": "collect reviews from Claude, agy and Codex on this branch and consolidate them", "should_trigger": true},
-  {"query": "commit what I have, then reviews, then CI, then merge", "should_trigger": true},
-  {"query": "review cycle please — commit, reviews from agy and Codex, then merge", "should_trigger": true},
-  {"query": "run the dev review cycle end to end and merge the PR once CI is green", "should_trigger": true},
-  {"query": "apply the in-scope review findings, then wait for CI and merge the PR", "should_trigger": true},
-  {"query": "kick off the post-dev review cycle for this feature branch", "should_trigger": true},
-  {"query": "reviews, apply, retrospect, CI, merge — the whole post-dev cycle", "should_trigger": true},
-
-  {"query": "review the current diff for correctness bugs and simplification cleanups", "should_trigger": false},
-  {"query": "complete a security review of the pending changes on this branch", "should_trigger": false},
-  {"query": "pull the next item from the backlog and implement it", "should_trigger": false},
-  {"query": "write a design doc for this multi-session feature", "should_trigger": false},
-  {"query": "break this approved spec into vertical-slice backlog items", "should_trigger": false},
-  {"query": "create a new skill from scratch and run evals on it", "should_trigger": false},
-  {"query": "find the note about the vault migration in my markdown knowledge base", "should_trigger": false},
-  {"query": "set up this repo's AGENTS.md and the docs index", "should_trigger": false},
-  {"query": "schedule this task to run every morning at nine", "should_trigger": false},
-  {"query": "make a bar chart of these quarterly revenue numbers", "should_trigger": false}
+  {"query": "run the post-dev review cycle on this branch", "should_trigger": true},
+  {"query": "commit this branch, collect reviews, wait for CI, then merge", "should_trigger": true},
+  {"query": "take this branch through reviews and merge it", "should_trigger": true},
+  {"query": "pull the next item off the backlog queue", "should_trigger": false},
+  {"query": "set up this repo's agent infrastructure", "should_trigger": false},
+  {"query": "triage dependabot PRs across my repos", "should_trigger": false}
 ]
