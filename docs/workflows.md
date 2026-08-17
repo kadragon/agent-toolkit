@@ -46,7 +46,7 @@ it must go to `qa-verifier` — never to the agent that implemented the change.
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Use `dev:task-review` skill. Do NOT inline-manage review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
+Call the Skill tool with "dev:task-review-cycle" (the model-invoked half; `/task-review` is the human entry point and no skill may call it). Do NOT inline-manage the review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
 
 ## `draft` — Documentation
 
