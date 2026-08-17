@@ -2,7 +2,7 @@
 
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
 rules below are the target state — the repo is **partially migrated onto them**: the
-`task-review` / `task-review-cycle` split has landed, the remaining five
+`task-review` / `task-review-cycle` split has landed, the remaining
 `## Invocation axis — …` items in `backlog.md` have not. `docs/design/invocation-axis.md`
 holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
@@ -83,8 +83,8 @@ RIGHT:   Tell the user to run `/task-review`.
 
 The usual fix when automation must survive the ban is to extract the callable half as a
 model-invoked skill and leave the human entry point as a thin wrapper over it. That is what
-`backlog.md` → *Invocation axis — split `task-review`* did: `task-review-cycle` now holds the
-callable workflow, and `task-review` forwards to it. When a call is repointed at an extracted
+`docs/design/invocation-axis.md` → *2. `task-review` split* did: `task-review-cycle` now holds
+the callable workflow, and `task-review` forwards to it. When a call is repointed at an extracted
 half, carry the caller's flags across — all six `task-review` call sites pass `args: --auto`,
 and dropping it would stall an unattended cycle at the confirmation gate.
 

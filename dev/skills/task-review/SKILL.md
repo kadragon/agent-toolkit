@@ -11,7 +11,7 @@ description: >-
 ## Arguments
 
 - `--no-hub` — no push, no PR, no CI, no merge. Commits locally, reviews from local diff.
-- `--auto` — skip user confirmation in Step 3. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
+- `--auto` — skip the consolidation confirmation gate. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
 
 Call the Skill tool with "dev:task-review-cycle", forwarding this invocation's `args` unchanged.
 
