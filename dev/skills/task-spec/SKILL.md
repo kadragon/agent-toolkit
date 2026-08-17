@@ -6,7 +6,8 @@ description: >-
   `Skill(dev:task-grill)` first if scope is still ambiguous. NOT for splitting
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
-version: 1.0.3
+# notation-exempt: description text, rewritten only under a separate decision
+version: 1.0.4
 ---
 
 # To Spec

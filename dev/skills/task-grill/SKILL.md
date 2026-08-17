@@ -5,7 +5,8 @@ description: >-
   interviewing the user one question at a time, each with a recommended answer +
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
-version: 1.1.1
+# notation-exempt: description text, rewritten only under a separate decision
+version: 1.1.2
 ---
 
 # Grill
