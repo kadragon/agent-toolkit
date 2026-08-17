@@ -203,7 +203,7 @@ level instead of inventing one. This gate never auto-defaults: in a non-interact
 report rather than picking a level (`references/harness-invariants.md` → *Non-Interactive Gate
 Defaults*).
 
-**Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
+**Do NOT commit.** Leave everything uncommitted — `task-review-cycle` Step 1 makes the single commit.
 
 **Pre-merge cleanup (before handoff)**
 Leave everything uncommitted so it lands in the initial PR commit.

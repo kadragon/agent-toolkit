@@ -68,7 +68,7 @@ items from approved spec").
    name. `backlog_candidates.py` already skips a heading whose every open item carries a
    `*(deferred: ...)*` or `*(blocked by: ...)*` marker — do not invent a new
    dependency-graph engine or a separate marker syntax.
-7. **Hand off.** Report the written tickets and their order, and tell the user to run `/task-next` when they are ready — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).
+7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).
 
 ## Boundaries
 

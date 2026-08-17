@@ -21,9 +21,8 @@ feeds directly into whichever document is being built next: a Sprint Contract
 
 ## When to use
 
-Call this skill — directly, or when `task-new`/`task-spec` call the Skill tool with
-"dev:task-grill" — only
-when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
+Use this skill — whether fired directly, or by `task-new`/`task-spec` calling the Skill tool
+with "dev:task-grill" — only when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
 If the answer is discoverable by reading a file, running a command, or checking a manifest,
 look it up instead of asking.
 

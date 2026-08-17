@@ -1,0 +1,9 @@
+[
+  {"query": "interview me one question at a time to resolve the ambiguity, each question with a recommended answer", "should_trigger": true},
+  {"query": "ask your open questions one at a time with a recommendation and the rationale for it", "should_trigger": true},
+  {"query": "resolve the material ambiguity by interviewing me, one question per turn, with a recommended answer", "should_trigger": true},
+
+  {"query": "pull the next item off the backlog and implement it", "should_trigger": false},
+  {"query": "synthesize what we know into a design doc", "should_trigger": false},
+  {"query": "break the approved spec into backlog tickets in dependency order", "should_trigger": false}
+]

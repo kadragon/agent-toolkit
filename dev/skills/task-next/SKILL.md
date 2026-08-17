@@ -299,7 +299,7 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   failure in the first item must surface at that item, not be discovered at handoff. Applies to the
   inline path and the `implementer` brief alike; when delegating, the brief must state the per-item
   order and require the checkpoint result for each item in the returned report. Do **not** commit
-  per item — committing stays with `task-review` Step 1 (or the lite path's single commit). Fix a
+  per item — committing stays with `task-review-cycle` Step 1 (or the lite path's single commit). Fix a
   failing checkpoint before starting the next item, under the stuck-fix stop condition below. This
   does not replace the end-of-sprint QA pass: the checkpoint is the implementing agent's own gate,
   and independent verification still runs once at the end per the QA step. Out of scope: a
@@ -383,7 +383,7 @@ present, the repo has stated no release policy — ask the user for the bump lev
 inventing one. This gate never auto-defaults: in a non-interactive run, abort and report rather
 than picking a level (`references/harness-invariants.md` → *Non-Interactive Gate Defaults*).
 
-**Do NOT commit.** Leave all changes uncommitted. `task-review` Step 1 commits everything
+**Do NOT commit.** Leave all changes uncommitted. `task-review-cycle` Step 1 commits everything
 so there is one clean commit per review/merge cycle.
 
 **Pre-merge cleanup (do before Step 4)**
@@ -512,9 +512,9 @@ action itself; always still ask yes/no.
 1. **Commits already ahead of `main`?**
    ```bash
    commits=$(git log main..HEAD --oneline 2>/dev/null)
-   [[ -n "$commits" ]] && echo "commits exist — task-review Step 1 already ran"
+   [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
    ```
-   If `$commits` is non-empty, `task-review` Step 1 (commit) already ran. Diagnosis:
+   If `$commits` is non-empty, `task-review-cycle` Step 1 (commit) already ran. Diagnosis:
    offer `task-review-cycle --auto` directly.
 
 2. **No commits ahead, but an active Sprint Contract?**
