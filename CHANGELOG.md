@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Invocation axis: six user-invoked skills locked with disable-model-invocation (dev v4.5.2) (2026-08-17) → docs/invocation.md
 - [done] Invocation axis: skill call notation migrated to explicit Skill tool form (dev v4.5.1) (2026-08-17) → docs/invocation.md
 - [done] split task-review into a user-invoked wrapper over the model-invoked task-review-cycle (dev v4.5.0) (2026-08-17) → docs/invocation.md
 - [done] invocation axis contract doc (2026-08-17) → docs/invocation.md

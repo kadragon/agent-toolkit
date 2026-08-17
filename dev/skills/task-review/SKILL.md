@@ -4,6 +4,7 @@ description: >-
   Post-dev review cycle — commit → reviews (Claude + agy + Codex) → apply →
   retrospect → CI → merge. Flags: --no-hub (local only), --auto (skip
   confirmation).
+disable-model-invocation: true
 ---
 
 # Dev Review Cycle

@@ -9,7 +9,8 @@ description: >-
   Routes to the owning creator — never generates itself. NOT for retrospecting
   the current conversation → harness-capture. Repo structure validation →
   harness-init.
-version: 1.6.7
+version: 1.6.8
+disable-model-invocation: true
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks

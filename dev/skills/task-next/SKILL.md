@@ -1,11 +1,12 @@
 ---
 name: task-next
-version: 1.6.2
+version: 1.6.3
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
   task-review. Flags: --all (parallel batch), --tree (worktree isolation).
   Trivial tasks get a lite path. New work the prompt describes → task-new.
+disable-model-invocation: true
 ---
 
 # Next Tasks
