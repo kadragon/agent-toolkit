@@ -58,6 +58,8 @@ disable-model-invocation: false
 
 Key: the `description` field drives auto-invocation (description-driven; no router hook in this repo).
 
+When to set `disable-model-invocation`, and what it obliges on the Codex side, is policy — see `docs/invocation.md`.
+
 ### hooks.json (Claude Code)
 
 ```json
@@ -148,6 +150,8 @@ mcp_tools:
 ```
 
 Implicit invocation = Codex auto-selects skill from description match (same as Claude Code).
+
+`policy.allow_implicit_invocation: false` is the Codex half of a user-invoked skill and must agree with the Claude Code field above — see `docs/invocation.md`.
 
 ### hooks.json (Codex)
 

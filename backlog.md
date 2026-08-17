@@ -18,17 +18,9 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Invocation axis — contract doc
-
-Source: `docs/design/invocation-axis.md`. Tickets 1–7 below are that spec, sliced in dependency
-order. Every ticket touching `dev/` bumps both `plugin.json` files per Golden Principle 1; the
-series lands dev at `4.5.0` or above.
-
-- [ ] [DOCS] Write `docs/invocation.md` — axis definition, per-platform fields, the user-invoked→user-invoked ban, the `Call the Skill tool with "ns:name"` notation standard, and the router-prose exemption rule. Index it from the AGENTS.md Docs Index and add a pointer from `docs/platform-specs.md` (which keeps the raw field syntax, not the policy).
-
 ## Invocation axis — split `task-review`
 
-- [ ] [REFACTOR] Move the full review workflow (Arguments, Prerequisites, Setup, Steps 0–6, Error Handling, Scripts Reference) and the `scripts/` directory into a new model-invoked `dev/skills/task-review-cycle/`; leave `task-review` as the user-invoked entry point that parses flags and calls the Skill tool with `dev:task-review-cycle`. Keep the `task-review` name — renaming it would force a major bump. *(blocked by: 1-invocation-contract)*
+- [ ] [REFACTOR] Move the full review workflow (Arguments, Prerequisites, Setup, Steps 0–6, Error Handling, Scripts Reference) and the `scripts/` directory into a new model-invoked `dev/skills/task-review-cycle/`; leave `task-review` as the user-invoked entry point that parses flags and calls the Skill tool with `dev:task-review-cycle`. Keep the `task-review` name — renaming it would force a major bump.
 
 ## Invocation axis — call notation migration
 
@@ -48,4 +40,4 @@ series lands dev at `4.5.0` or above.
 
 ## Invocation axis — CI enforcement
 
-- [ ] [FEAT] Extend `scripts/ci/check_skill_frontmatter.py` and its test with three checks: axis coherence (Claude field ↔ Codex sidecar agree), call graph (fail on a user-invoked skill calling another user-invoked skill), and notation (fail on residual `Skill(ns:name)` in operative skill prose). Router-prose exemptions carry an explicit marker per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker*, not a silent path allowlist. Verify the checks exit non-zero on the pre-migration tree. *(blocked by: 6-user-invoked-descriptions)*
+- [ ] [FEAT] Extend `scripts/ci/check_skill_frontmatter.py` and its test with three checks: axis coherence (Claude field ↔ Codex sidecar agree), call graph (fail on a user-invoked skill calling another user-invoked skill), and notation (fail on residual `Skill(ns:name)` in operative skill prose). Add the explicit exemption marker to the four router-prose sites listed in `docs/invocation.md` → *What is not an invocation* (none carries one today), per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker* — not a silent path allowlist in the checker. Verify the checks exit non-zero on the pre-migration tree. *(blocked by: 6-user-invoked-descriptions)*
