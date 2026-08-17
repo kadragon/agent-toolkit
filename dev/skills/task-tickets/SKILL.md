@@ -6,7 +6,7 @@ description: >-
   order. Confirms granularity with the user first. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.4
+version: 1.0.5
 ---
 
 # To Tickets
@@ -63,9 +63,15 @@ items from approved spec").
    ```
    - [ ] [FEAT] <ticket description> *(blocked by: <n>-<slug>)*
    ```
-   where `<n>` is the blocking ticket's position number in this batch (or an existing
-   reference number/slug if blocking on prior work) and `<slug>` is its kebab-case short
-   name. `backlog_candidates.py` already skips a heading whose every open item carries a
+   where `<n>` is the blocking ticket's position number in this batch (omit it when blocking on
+   prior work outside this batch — write the slug alone) and `<slug>` is its kebab-case short
+   name. **Never write a number without its slug:** the slug is the identifying half, so a
+   number-only marker can never be resolved or cleared and the item stays invisible to candidate
+   selection forever. `<n>` is frozen at authoring time and is never
+   renumbered as items land or headings are deleted — nothing maintains it, so a marker whose
+   number no longer matches any position is normal, not stale. Resolve a marker by its slug;
+   never treat a number mismatch as evidence the blocker is gone.
+   `backlog_candidates.py` already skips a heading whose every open item carries a
    `*(deferred: ...)*` or `*(blocked by: ...)*` marker — do not invent a new
    dependency-graph engine or a separate marker syntax.
 7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).

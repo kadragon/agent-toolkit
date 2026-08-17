@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] blocked-by marker: slug identifies the blocker, number is frozen (dev v4.5.4) (2026-08-17)
 - [done] Invocation axis: Codex sidecars lock the six user-invoked skills (dev v4.5.3) (2026-08-17) → docs/invocation.md
 - [done] Invocation axis: six user-invoked skills locked with disable-model-invocation (dev v4.5.2) (2026-08-17) → docs/invocation.md
 - [done] Invocation axis: skill call notation migrated to explicit Skill tool form (dev v4.5.1) (2026-08-17) → docs/invocation.md
