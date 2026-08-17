@@ -151,7 +151,10 @@ create a call where none belongs:
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 
-The enforcement checker must exempt these three alongside the four router-prose sites above.
+These three carry markers. The four router-prose sites above need none: the checker's regex is
+namespace-anchored, so the `Use Skill(X)` form is outside the rule by construction rather than
+by exemption — which is why the marked set is these three plus the one namespaced example in
+`trigger-router-template.md`, not seven.
 
 **The markers now exist.** `scripts/ci/check_skill_frontmatter.py` enforces the notation rule,
 and each exempt site carries its own marker where the text is — never a path allowlist inside the
