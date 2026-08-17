@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.1
+version: 1.2.2
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
@@ -70,7 +70,7 @@ absent from the roster) to estimate it before classifying.
 the request and go to Step 3. The Step 3 lite-path offer still applies.
 
 **Non-trivial and ambiguous** (scope, requirements, or a design decision is not already clear from
-the request) → `Skill(dev:task-grill)` to resolve scope. Do not proceed until task-grill reports the
+the request) → call the Skill tool with "dev:task-grill" to resolve scope. Do not proceed until task-grill reports the
 open questions resolved.
 
 **After resolution, judge size:**
@@ -78,8 +78,8 @@ open questions resolved.
 - **Single-session-sized** → build the Sprint Contract directly from the task-grill output (or directly
   from the request, if task-grill was skipped because it was unambiguous but not trivial) and go to
   Step 3.
-- **Multi-session or architecturally significant** → `Skill(dev:task-spec)` to write
-  `docs/design/{slug}.md`, then `Skill(dev:task-tickets)` to break the approved spec into
+- **Multi-session or architecturally significant** → call the Skill tool twice: first with
+  "dev:task-spec" to write `docs/design/{slug}.md`, then with "dev:task-tickets" to break the approved spec into
   ordered `backlog.md` items. Once `task-tickets` has written the tickets, **pick the first
   ready ticket** (the topologically-first item with no unresolved `*(blocked by: ...)*` marker) and
   run Step 3 on that single ticket. The remaining tickets stay in `backlog.md` for future
@@ -203,7 +203,7 @@ level instead of inventing one. This gate never auto-defaults: in a non-interact
 report rather than picking a level (`references/harness-invariants.md` → *Non-Interactive Gate
 Defaults*).
 
-**Do NOT commit.** Leave everything uncommitted — `task-review` Step 1 makes the single commit.
+**Do NOT commit.** Leave everything uncommitted — `task-review-cycle` Step 1 makes the single commit.
 
 **Pre-merge cleanup (before handoff)**
 Leave everything uncommitted so it lands in the initial PR commit.
@@ -232,7 +232,7 @@ and narration — lives in the *CHANGELOG Entry Contract* in `harness-invariants
 
 ## Step 4 — Hand off
 
-Invoke `Skill(dev:task-review)` with `args: --auto`. It commits (including the cleanup
+Call the Skill tool with "dev:task-review-cycle" and `args: --auto`. It commits (including the cleanup
 above), creates the PR, collects reviews, applies in-scope findings, records out-of-scope items to
 `backlog.md`, waits for CI, and merges.
 
@@ -269,8 +269,8 @@ git branch -d <type>/<slug>
 ```
 
   **Branch-protection caveat:** if `git push origin main` is rejected (PR-only rule), reset local
-  main (`git reset --hard origin/main`), check out the feature branch, and fall back to
-  `Skill(dev:task-review)` with `args: --auto`.
+  main (`git reset --hard origin/main`), check out the feature branch, and fall back to calling
+  the Skill tool with "dev:task-review-cycle" and `args: --auto`.
 
   Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 - User picks **2** → proceed to Step 3 / Step 4 normally.

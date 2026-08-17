@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Invocation axis: skill call notation migrated to explicit Skill tool form (dev v4.5.1) (2026-08-17) → docs/invocation.md
 - [done] split task-review into a user-invoked wrapper over the model-invoked task-review-cycle (dev v4.5.0) (2026-08-17) → docs/invocation.md
 - [done] invocation axis contract doc (2026-08-17) → docs/invocation.md
 - [done] Korean trigger scoring (prod v3.0.5) (2026-08-11) → docs/design/skill-trigger-collision-check.md

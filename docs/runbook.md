@@ -67,6 +67,12 @@ git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
 **Cause:** Modified files in `dev/` or `prod/` but didn't bump `plugin.json`
 **Fix:** `bash scripts/bump-version.sh <plugin> patch` (or minor/major per semver table in `docs/conventions.md`)
 
+### `check_skill_triggers.py` passes locally, then fails in CI
+
+**Symptom:** the local run prints `Ratchet: no */skills/*/SKILL.md changed vs origin/main — nothing to require`, but CI reports `skill 'X' changed on this branch but has no evals/trigger-eval.json`.
+**Cause:** the ratchet diffs **committed** state against `origin/main`. Run before committing, it sees no changed `SKILL.md` and reports a false green.
+**Fix:** re-run it after the commit and push (and after `git fetch origin main`). Any branch touching a skill's `SKILL.md` must leave that skill with an `evals/trigger-eval.json`.
+
 ### plugin.json version conflict after pulling remote changes
 
 **Symptom:** `git stash pop` (or rebase) conflicts on the `"version"` line in `plugin.json` — local had an uncommitted bump, remote advanced the same file further.

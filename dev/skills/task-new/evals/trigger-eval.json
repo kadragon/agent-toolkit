@@ -1,0 +1,9 @@
+[
+  {"query": "here is a brand new request that is not tracked anywhere yet — take it from intake through the whole code cycle", "should_trigger": true},
+  {"query": "intake this fresh free-text request, classify and size it, then run it end to end", "should_trigger": true},
+  {"query": "I am describing new work with no tracking entry — classify it and drive the cycle", "should_trigger": true},
+
+  {"query": "pull the next item from backlog.md and run the code cycle on it", "should_trigger": false},
+  {"query": "run the post-dev review cycle: commit, reviews, CI, merge", "should_trigger": false},
+  {"query": "make a bar chart of these quarterly revenue numbers", "should_trigger": false}
+]

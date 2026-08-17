@@ -2,8 +2,9 @@
 
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
 rules below are the target state — the repo is **partially migrated onto them**: the
-`task-review` / `task-review-cycle` split has landed, the remaining
-`## Invocation axis — …` items in `backlog.md` have not. `docs/design/invocation-axis.md`
+`task-review` / `task-review-cycle` split and the *Notation* migration below have landed; the
+remaining `## Invocation axis — …` items in `backlog.md` (per-platform fields, Codex sidecars,
+user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
 holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
@@ -68,9 +69,10 @@ A user-invoked skill is reachable by the human and by nothing else. Upstream sta
 > other skill can call it, including by naming it to the Skill tool.
 
 Do not weaken this to "user-invoked may not call user-invoked": that reading lets a
-model-invoked skill fire a destructive orchestrator. The live example is
-`dev/skills/task-tickets/SKILL.md` → *Hand off*, which names `task-next` — a model-invoked
-caller pointing at a user-invoked target.
+model-invoked skill fire a destructive orchestrator. The repo shipped exactly that violation —
+`dev/skills/task-tickets/SKILL.md` → *Hand off* named `task-next`, a model-invoked caller
+pointing at a user-invoked target — until the *Notation* migration rewrote it as an instruction
+for the human.
 
 Orchestrators calling orchestrators makes it untraceable which skill owns the commit and how
 many times a gate ran in one cycle. When a step's precondition is a user-invoked skill, write
@@ -123,6 +125,19 @@ Prose that names skills as **labels** — for a human to pick from, or as a stri
 - `dev/skills/harness-curate/references/orchestrator-template.md`
 - `dev/skills/harness-init/SKILL.md` — trigger-router section
 - `dev/skills/harness-init/examples/agents-md-example.md`
+
+Three further sites survive the *Notation* migration for a different reason — they mention a
+skill without instructing anyone to run it right now, so rewriting them into tool calls would
+create a call where none belongs:
+
+- `dev/skills/task-grill/SKILL.md` and `dev/skills/task-spec/SKILL.md` `description:` frontmatter
+  — these still spell `Skill(dev:task-grill)`. Descriptions are trigger-scored and cost a version
+  bump, so they are rewritten with the rest of the descriptions under the queued
+  `## Invocation axis — user-invoked descriptions` item, not piecemeal.
+- `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
+  is available when the conflicts need real interviewing"), not a step.
+
+The enforcement checker must exempt these three alongside the four router-prose sites above.
 
 No marker exists at any of those sites today — they are listed here by inspection, not by
 annotation. Each must carry an explicit marker by the time a checker enforces the notation

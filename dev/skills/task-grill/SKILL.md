@@ -5,7 +5,7 @@ description: >-
   interviewing the user one question at a time, each with a recommended answer +
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
-version: 1.1.0
+version: 1.1.1
 ---
 
 # Grill
@@ -21,8 +21,8 @@ feeds directly into whichever document is being built next: a Sprint Contract
 
 ## When to use
 
-Call this skill (directly, or via `Skill(dev:task-grill)` from `task-new`/`task-spec`) only
-when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
+Use this skill — whether fired directly, or by `task-new`/`task-spec` calling the Skill tool
+with "dev:task-grill" — only when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
 If the answer is discoverable by reading a file, running a command, or checking a manifest,
 look it up instead of asking.
 

@@ -2,11 +2,11 @@
 
 Triggered by `--all`. Implements **multiple** units in parallel (each in its own git worktree),
 then collapses them onto **one integration branch** that goes through a **single** version bump,
-cleanup pass, and `task-review --auto` → one PR, one CI run, one merge.
+cleanup pass, and `task-review-cycle --auto` → one PR, one CI run, one merge.
 
 **Why one integration branch, not N PRs.** The shared single-copy files — `plugin.json` manifests,
 `backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited per-unit in parallel without collision.
-`task-review` also detects its branch from the session's current checkout and cannot be aimed
+`task-review-cycle` also detects its branch from the session's current checkout and cannot be aimed
 at a worktree. So worktrees do **code only**; every shared-file edit happens once, serially, on
 the integration branch in the main checkout. This sidesteps the whole class of cross-worktree
 merge/CWD failures.
@@ -150,8 +150,8 @@ any worktree.
    `harness-invariants.md`; read it rather than reconstructing the limits.
    - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
-   Leave all edits uncommitted — `task-review` Step 1 commits them.
-6. **Hand off — once.** `Skill(dev:task-review)` with `args: --auto`. Running from the
+   Leave all edits uncommitted — `task-review-cycle` Step 1 commits them.
+6. **Hand off — once.** Call the Skill tool with "dev:task-review-cycle" and `args: --auto`. Running from the
    main checkout on `<type>/batch-<slug>`, it correctly detects the branch, commits the integration
    work, opens **one** PR, collects reviews, applies in-scope findings, records out-of-scope items
    to `backlog.md`, waits CI, and merges.
