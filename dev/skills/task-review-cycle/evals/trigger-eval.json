@@ -1,0 +1,17 @@
+[
+  {"query": "invoke the task-review-cycle primitive that the task-review wrapper delegates to", "should_trigger": true},
+  {"query": "call the task-review-cycle skill directly as the caller task-review forwards to, with --auto", "should_trigger": true},
+  {"query": "task-review-cycle is the internal primitive task-review calls — invoke it as that caller", "should_trigger": true},
+
+  {"query": "run the post-dev review cycle on this branch: commit, collect reviews, apply findings, wait for CI, then merge", "should_trigger": false},
+  {"query": "start the review cycle with --auto so it skips the confirmation", "should_trigger": false},
+  {"query": "review cycle with --no-hub — local only, no PR and no CI", "should_trigger": false},
+  {"query": "commit what I have, then reviews, then CI, then merge", "should_trigger": false},
+  {"query": "run the dev review cycle end to end and merge the PR once CI is green", "should_trigger": false},
+
+  {"query": "write a design doc for this multi-session feature", "should_trigger": false},
+  {"query": "pull the next item from the backlog and implement it", "should_trigger": false},
+  {"query": "make a bar chart of these quarterly revenue numbers", "should_trigger": false},
+  {"query": "find the note about the vault migration in my markdown knowledge base", "should_trigger": false},
+  {"query": "schedule this task to run every morning at nine", "should_trigger": false}
+]

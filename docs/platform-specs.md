@@ -245,7 +245,7 @@ The same Windows constraint reaches **any shipped script that shells out to an i
 PY=$(command -v python3 || command -v python || true)
 ```
 
-Shipped precedents: `hooks/session-start/run.sh` and `skills/task-review/scripts/commit-and-push.sh`.
+Shipped precedents: `hooks/session-start/run.sh` and `skills/task-review-cycle/scripts/commit-and-push.sh`.
 
 ## Executable Line Endings
 

@@ -1,6 +1,6 @@
 # CI Failure Handling Guide
 
-Detailed procedure for handling CI failures (Step 6 of task-review).
+Detailed procedure for handling CI failures (Step 6 of task-review-cycle).
 
 ## Wait for CI
 

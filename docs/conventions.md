@@ -92,7 +92,7 @@ A fenced block nested in a Markdown list item carries the list's indentation, an
 A script that inspects processes or paths written by a *native* Windows program (Node, `codex`) is
 working in a different namespace than the one Git Bash reports for itself. All four rules below were
 measured on a real host, each after a version of the script that looked correct and silently did
-nothing (`dev/skills/task-review/scripts/codex-review.sh`, regression test `test_codex_review.py`):
+nothing (`dev/skills/task-review-cycle/scripts/codex-review.sh`, regression test `test_codex_review.py`):
 
 - **PIDs.** `$$` and `kill -0` live in the MSYS PID space; a PID a Node process wrote is a native
   Windows PID that only `tasklist` can see. Probe each with its own tool — using one for both reports

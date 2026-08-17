@@ -1,10 +1,10 @@
 # Invocation
 
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
-rules below are the target state — the repo is **not yet migrated onto them**; the six
-`## Invocation axis — …` items in `backlog.md` do that work, and
-`docs/design/invocation-axis.md` holds the rationale. Field syntax lives in
-`docs/platform-specs.md`; the policy lives here.
+rules below are the target state — the repo is **partially migrated onto them**: the
+`task-review` / `task-review-cycle` split has landed, the remaining five
+`## Invocation axis — …` items in `backlog.md` have not. `docs/design/invocation-axis.md`
+holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
 (PR #878, PR #880), with one deviation — this repo ships two plugins, so every cross-skill
@@ -83,10 +83,10 @@ RIGHT:   Tell the user to run `/task-review`.
 
 The usual fix when automation must survive the ban is to extract the callable half as a
 model-invoked skill and leave the human entry point as a thin wrapper over it. That is what
-`backlog.md` → *Invocation axis — split `task-review`* will do; `task-review-cycle` does not
-exist yet. When a call is repointed at an extracted half, carry the caller's flags across —
-all six `task-review` call sites pass `args: --auto`, and dropping it would stall an
-unattended cycle at the confirmation gate.
+`backlog.md` → *Invocation axis — split `task-review`* did: `task-review-cycle` now holds the
+callable workflow, and `task-review` forwards to it. When a call is repointed at an extracted
+half, carry the caller's flags across — all six `task-review` call sites pass `args: --auto`,
+and dropping it would stall an unattended cycle at the confirmation gate.
 
 ## Notation
 
@@ -151,6 +151,6 @@ are all model-invoked, which is the default, so they carry no fields and need no
 | `task-spec` | model | Writes one design doc; no destructive effect. |
 | `task-tickets` | model | Splits an approved spec. |
 | `harness-capture` | model | Retrospect discipline; called mid-review by design. |
-| `task-review-cycle` | model | *(does not exist yet)* The callable half of the review cycle. |
+| `task-review-cycle` | model | The callable half of the review cycle, extracted from `task-review`. |
 
 Adding a skill means placing it in this table in the same PR.

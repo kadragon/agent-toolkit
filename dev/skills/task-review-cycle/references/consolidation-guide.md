@@ -1,6 +1,6 @@
 # Review Consolidation Guide
 
-Detailed procedure for consolidating multi-reviewer feedback (Step 3 of task-review).
+Detailed procedure for consolidating multi-reviewer feedback (Step 3 of task-review-cycle).
 
 ## Source Attribution
 
