@@ -47,12 +47,14 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 ## 5. Harness friction (over-protection)
 
-**Detect:** Lines in `HARNESS-FRICTION` — the user complaining about a **recurring imposed behavior** ("you keep …", "every time …", "자꾸 …", "매번 …"). Unlike a correction, this targets the *harness*, not the answer: a hook firing too often, a permission gate re-asking, or a CLAUDE.md rule the user keeps working around. These carry no skill/agent attribution, so the scanner collects them standalone.
+**Detect:** Lines in `HARNESS-FRICTION` — the user complaining about a **recurring imposed behavior** ("you keep …", "every time …", "자꾸 …", "매번 …"). Unlike a correction, this targets the *harness*, not the answer: a hook firing too often or a CLAUDE.md rule the user keeps working around. These carry no skill/agent attribution, so the scanner collects them standalone.
+
+**Out of scope — tool-approval prompts.** Complaints about permission prompts ("또 물어봐", "매번 허용 눌러야 해") are NOT routed here and this skill never edits a `permissions` block in any `settings.json`. Approval policy is the user's session-level choice (auto-approve mode, `/permissions`, `fewer-permission-prompts`); drop such lines during the confirm read instead of proposing an allowlist edit.
 
 **Confirm before routing:** read each sample. The block deliberately over-collects (a "every time it crashes" task complaint matches the same phrasing) — keep only complaints aimed at a guardrail. Map the complaint to the specific hook (`.claude/settings.json`) or rule (CLAUDE.md / AGENTS.md) that produces the behavior.
 
 **Route:**
-- Over-firing hook / permission gate → `update-config` to narrow its matcher or add a staleness/scope guard (loosen, don't delete a safety hook outright).
+- Over-firing hook → `update-config` to narrow its matcher or add a staleness/scope guard (loosen, don't delete a safety hook outright). Hook definitions only — never the `permissions` block.
 - CLAUDE.md / AGENTS.md rule the user keeps overriding → propose shrinking or making it conditional (CLAUDE.md "Bloat signal" + "On model upgrade: re-examine guardrails"). Surface the line; let the user decide — never auto-edit global instructions.
 
 **Caution:** one complaint is a mood, not a signal. Require **≥2** complaints about the same behavior, or one with an obvious systematic cause, before routing. A guardrail the user dislikes once may still be load-bearing — same adversarial caution as DELETE.
