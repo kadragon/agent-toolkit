@@ -1,0 +1,6 @@
+interface:
+  display_name: "Next Task"
+  short_description: "Pull the next queued backlog item and run the full code cycle"
+  default_prompt: "Use $task-next to pull the next item from the backlog and run the code cycle on it."
+policy:
+  allow_implicit_invocation: false
