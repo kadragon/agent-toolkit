@@ -1,11 +1,12 @@
 ---
 name: task-new
-version: 1.2.2
+version: 1.2.3
 description: >-
   Intake for NEW work the prompt itself describes: classify → grill → spec and
   tickets if large → full code cycle (branch → Sprint Contract → implement →
   qa-verifier → version bump → task-review). Trivial work gets a lite path.
   Pulling the next item from the existing queue instead → task-next.
+disable-model-invocation: true
 ---
 
 # New Task
@@ -89,7 +90,7 @@ Either way, Step 3 runs **exactly one** code cycle before handoff.
 
 ## Step 3 — Run the code cycle
 
-Execute `docs/workflows.md` → `code` cycle (Steps 0–6). This skill is a thin front-end over that
+Execute `docs/workflows.md` → `code` cycle (Steps 0–5; workflows.md Step 6 is this skill's Step 4 hand-off). This skill is a thin front-end over that
 cycle; the overrides below are what differ for a **request-sourced** task. Standard steps apply
 where not overridden.
 

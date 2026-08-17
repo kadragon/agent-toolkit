@@ -1,17 +1,18 @@
 ---
 name: task-next
-version: 1.6.2
+version: 1.6.3
 description: >-
   Pull the next item from `backlog.md`/`tasks.md` and run the full code cycle:
   pick → branch → Sprint Contract → implement → qa-verifier → version bump →
   task-review. Flags: --all (parallel batch), --tree (worktree isolation).
   Trivial tasks get a lite path. New work the prompt describes → task-new.
+disable-model-invocation: true
 ---
 
 # Next Tasks
 
 Act as the thin orchestration layer over the `code` cycle in `docs/workflows.md`. Pick work,
-run the cycle, and hand off to `task-review-cycle --auto`. Delegate the heavy lifting — this
+run the cycle, and hand off to the review cycle (Step 4 makes that call). Delegate the heavy lifting — this
 skill is the **decision and sequencing layer**, not the implementation engine.
 
 **Mode routing:** default = single-pick (Steps 1–4 below). If the invocation carries `--all`

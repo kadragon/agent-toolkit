@@ -2,9 +2,9 @@
 
 Who may fire a skill. This is the one axis every skill in this repo is classified on. The
 rules below are the target state — the repo is **partially migrated onto them**: the
-`task-review` / `task-review-cycle` split and the *Notation* migration below have landed; the
-remaining `## Invocation axis — …` items in `backlog.md` (per-platform fields, Codex sidecars,
-user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
+`task-review` / `task-review-cycle` split, the *Notation* migration and the Claude half of
+*Per-platform fields* have landed; the remaining `## Invocation axis — …` items in `backlog.md`
+(Codex sidecars, user-invoked descriptions, CI enforcement) have not. `docs/design/invocation-axis.md`
 holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
@@ -46,7 +46,10 @@ user-invoked even though callers exist.
 ## Per-platform fields
 
 A skill is user-invoked in **both** harnesses or neither. Marking one and not the other is a
-defect, not a partial rollout.
+defect, not a partial rollout — with one bounded exception the repo is living in right now: the
+Claude fields landed ahead of the Codex sidecars, so the six user-invoked skills are locked in
+Claude Code and still implicitly invocable in Codex. That gap is the open
+`## Invocation axis — Codex sidecars` backlog item, not a licence to ship one-sided marks.
 
 | Platform | Field | Value for user-invoked |
 |---|---|---|
@@ -131,9 +134,11 @@ skill without instructing anyone to run it right now, so rewriting them into too
 create a call where none belongs:
 
 - `dev/skills/task-grill/SKILL.md` and `dev/skills/task-spec/SKILL.md` `description:` frontmatter
-  — these still spell `Skill(dev:task-grill)`. Descriptions are trigger-scored and cost a version
-  bump, so they are rewritten with the rest of the descriptions under the queued
-  `## Invocation axis — user-invoked descriptions` item, not piecemeal.
+  — these still spell `Skill(dev:task-grill)`. Both skills are **model-invoked**, so the queued
+  `## Invocation axis — user-invoked descriptions` item does not reach them: that item rewrites
+  only the six user-invoked descriptions and leaves model-invoked trigger phrasing intact.
+  Rewording these two is a separate, unqueued decision — descriptions are trigger-scored, so any
+  edit has to be measured against `scripts/ci/check_skill_triggers.py` before it lands.
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 
@@ -150,8 +155,10 @@ scope for every rule on this page — do not rewrite their notation.
 
 ## Classification — `dev/`
 
-The single source the `backlog.md` migration items apply. Nothing here is in force yet — no
-`SKILL.md` carries the field and no sidecar exists. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
+The single source the `backlog.md` migration items apply. The **Claude half is in force**: each
+skill marked `user` below carries `disable-model-invocation: true` in its `SKILL.md`. The Codex
+half is not — no `agents/openai.yaml` sidecar exists yet, so a skill locked here is still
+implicitly invocable there. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
 are all model-invoked, which is the default, so they carry no fields and need no change.
 
 | Skill | Axis | Why |

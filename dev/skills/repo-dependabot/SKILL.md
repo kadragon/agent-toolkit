@@ -3,6 +3,7 @@ name: repo-dependabot
 description: >-
   Bulk dependabot PR triage across owned repos — batch merge, grouped-update
   config, status audit. Not for a single-PR rebase (use `@dependabot rebase`).
+disable-model-invocation: true
 ---
 
 # Dependabot Manager

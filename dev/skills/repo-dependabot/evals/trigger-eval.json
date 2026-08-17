@@ -1,0 +1,11 @@
+[
+  {"query": "triage the dependabot pull requests across every repo I own and batch merge the safe ones", "should_trigger": true},
+  {"query": "audit dependabot status across my repos and configure grouped updates", "should_trigger": true},
+  {"query": "bulk merge the open dependabot bumps in all my owned repos", "should_trigger": true},
+
+  {"query": "rebase this one dependabot PR because it conflicts", "should_trigger": false,
+   "waived": "lexical proxy false positive, measured: repo-dependabot ranks 1st at 0.5146, next is task-tickets at 0.1595. `dependabot` is the only discriminating token in the query and it is this skill's own trigger vocabulary; the checker has no way to weigh the description's `Not for a single-PR rebase` carve-out, which is a negation the TF-IDF bag-of-words cannot represent. A real non-trigger case — kept for skill-creator's model-judged runner."},
+  {"query": "retrospect on this conversation and save the lesson", "should_trigger": false},
+  {"query": "pull the next item off the backlog and implement it", "should_trigger": false},
+  {"query": "set up this repo's agent scaffolding and docs index", "should_trigger": false}
+]

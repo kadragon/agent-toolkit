@@ -27,13 +27,9 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 
 - [ ] [HARNESS] `.claude/settings.json` still allows `Bash(bash */skills/task-review/scripts/merge-and-cleanup.sh *)` at two sites (`permissions.allow`, `autoMode.allow`), but PR #228 moved the script to `*/skills/task-review-cycle/scripts/`. Unattended `--auto` cycles hit a permission prompt at merge instead of the pre-approved glob. **This harness never edits `settings.json` permissions, so the edit is the user's** — this item exists only so the reminder is tracked rather than lost with the PR body. All three reviewers (Claude, agy, Codex) flagged it independently.
 
-## Invocation axis — Claude frontmatter fields
-
-- [ ] [FEAT] Add `disable-model-invocation: true` to the six user-invoked skills (`task-new`, `task-next`, `task-review`, `harness-init`, `harness-curate`, `repo-dependabot`); leave the model-invoked five unmarked. Two preconditions, both verified in the same PR: (a) the field also drops a skill from subagent preload (`harness-curate/references/orchestrator-template.md`), so confirm no `.claude/agents/*.md` or spawn brief reaches these skills implicitly; (b) `check_skill_triggers.py`'s ratchet wants `evals/trigger-eval.json` for every changed `*/skills/*/SKILL.md` — `task-new`, `task-next` and `repo-dependabot` have none today, so add fixtures or the `skill-triggers` job fails.
-
 ## Invocation axis — Codex sidecars
 
-- [ ] [FEAT] Create `agents/openai.yaml` beside each of the six user-invoked skills carrying `policy.allow_implicit_invocation: false` plus the Codex UI metadata. This is a new file type for this repo — no sidecar exists today — so confirm the path Codex actually reads before landing. *(blocked by: 4-claude-axis-fields)*
+- [ ] [FEAT] Create `agents/openai.yaml` beside each of the six user-invoked skills carrying `policy.allow_implicit_invocation: false` plus the Codex UI metadata. This is a new file type for this repo — no sidecar exists today — so confirm the path Codex actually reads before landing.
 
 ## Invocation axis — user-invoked descriptions
 
