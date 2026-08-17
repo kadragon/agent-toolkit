@@ -129,4 +129,4 @@ rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now be
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on
-`$BRANCH`, then hand off: call the Skill tool with "dev:task-review-cycle" and `args: --auto` (Step 4).
+`$BRANCH`, then hand off: call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` (Step 4).

@@ -7,8 +7,29 @@ description: >-
 
 # Dev Review Cycle
 
+## Caller gate
+
+This skill is a callable primitive, not a standalone entry point. Before Setup, check the invocation
+for a caller token of the form `--from <caller>`.
+
+- **Token present** → strip it from `args` and run normally; everything else is the caller's own
+  flags. The callers that exist today are `--from task-review` (the human's wrapper),
+  `--from task-new` and `--from task-next` (their Step 4 hand-offs, including batch and tree mode).
+  An unrecognised caller name is still a caller — run, and note which one in the PR body.
+- **Token absent** → stop before Step 0. Do not commit, push, open a PR, or merge. Say that the
+  review cycle is reached through `/task-review` (Claude Code) or the `task-review` picker entry
+  (Codex) and let the human fire it. This is the invariant in `docs/invocation.md` → *The invariant*
+  seen from the callee's side: a user-invoked wrapper exists precisely so the human times these side
+  effects, and a primitive the model auto-selected would bypass that.
+
+The gate is prompted, not mechanical — nothing in CI enforces it. It exists because this skill's
+`description` alone cannot stop the model from selecting it: measured with
+`scripts/ci/check_skill_triggers.py`'s own `Corpus`/`rank()`, a short request like
+`"do a code review on the current diff"` ranks `task-review-cycle` first.
+
 ## Arguments
 
+- `--from <caller>` — required caller token, supplied by whichever skill invoked this one. See *Caller gate*.
 - `--no-hub` — no push, no PR, no CI, no merge. Commits locally, reviews from local diff.
 - `--auto` — skip user confirmation in Step 3. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
 

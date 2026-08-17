@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review-cycle caller gate: --from task-review (dev v4.5.5) (2026-08-17) → docs/invocation.md
 - [done] blocked-by marker: slug identifies the blocker, number is frozen (dev v4.5.4) (2026-08-17)
 - [done] Invocation axis: Codex sidecars lock the six user-invoked skills (dev v4.5.3) (2026-08-17) → docs/invocation.md
 - [done] Invocation axis: six user-invoked skills locked with disable-model-invocation (dev v4.5.2) (2026-08-17) → docs/invocation.md

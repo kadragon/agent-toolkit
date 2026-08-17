@@ -93,8 +93,11 @@ The usual fix when automation must survive the ban is to extract the callable ha
 model-invoked skill and leave the human entry point as a thin wrapper over it. That is what
 `docs/design/invocation-axis.md` → *2. `task-review` split* did: `task-review-cycle` now holds
 the callable workflow, and `task-review` forwards to it. When a call is repointed at an extracted
-half, carry the caller's flags across — all six `task-review` call sites pass `args: --auto`,
-and dropping it would stall an unattended cycle at the confirmation gate.
+half, carry the caller's flags across — every `task-review-cycle` call site passes `args: --auto`,
+and dropping it would stall an unattended cycle at the confirmation gate. The extracted half also
+takes a `--from <caller>` token so it can refuse a call that came from nobody: see
+`dev:task-review-cycle` → *Caller gate*. The token is what makes the primitive's "not a standalone
+entry point" a checkable precondition rather than a wish.
 
 ## Notation
 

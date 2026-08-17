@@ -176,8 +176,9 @@ this repo's `dev/` plugin reports one error per locked skill ("must be false"), 
 ``plugin.json field `hooks` is not accepted`` error that predates the invocation axis. Codex expects the lock
 to ride on `policy.allow_implicit_invocation: false` **alone**. This repo keeps the Claude field
 anyway — Claude Code has no other way to express the axis — and accepts that the bundled validator is
-not a gate `dev/` passes today. Decide this before publishing through any pipeline that runs it; the
-open `backlog.md` item tracks it.
+not a gate `dev/` passes today. **Decided 2026-08-17: keep both halves.** Claude Code has no other way to express the axis, and
+`dev/` already failed this validator on `hooks` before the axis existed, so nothing regressed from
+green. Revisit only if publishing moves to a pipeline that runs the validator.
 
 ### hooks.json (Codex)
 
