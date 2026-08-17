@@ -153,17 +153,17 @@ jobs:
       - name: Run dev/hooks/commit-guard/guard.py --test
         run: python3 dev/hooks/commit-guard/guard.py --test
 
-      - name: Run dev/skills/task-review/scripts/test_commit_and_push.py
-        run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
+      - name: Run dev/skills/task-review-cycle/scripts/test_commit_and_push.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_commit_and_push.py
 
-      - name: Run dev/skills/task-review/scripts/test_ci_wait.py
-        run: python3 dev/skills/task-review/scripts/test_ci_wait.py
+      - name: Run dev/skills/task-review-cycle/scripts/test_ci_wait.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 
       # Covers both probe branches on a Linux runner: the platform selector is env-overridable, and
       # the Windows case stubs `tasklist` on PATH — which is what pins the `/NH` vs `//NH` flag form
       # whose failure silently disables the prune on MINGW.
-      - name: Run dev/skills/task-review/scripts/test_codex_review.py
-        run: python3 dev/skills/task-review/scripts/test_codex_review.py
+      - name: Run dev/skills/task-review-cycle/scripts/test_codex_review.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_codex_review.py
 
   task-nodes-test:
     name: task_nodes.py regression test

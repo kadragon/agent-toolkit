@@ -12,7 +12,7 @@ guards were inert on the repo's primary commit path. The script now calls
 guard.py's --precommit-check mode directly; these cases pin that it fires, that
 the allow-main marker still opts out, and that a missing guard fails open loudly.
 
-Run: python3 dev/skills/task-review/scripts/test_commit_and_push.py
+Run: python3 dev/skills/task-review-cycle/scripts/test_commit_and_push.py
 Exits 0 on success, 1 on the first failure.
 """
 
@@ -227,7 +227,7 @@ def case_guard_missing(tmp):
     Staged into a bare directory tree so the script's
     `$SCRIPT_DIR/../../../hooks/commit-guard/guard.py` resolves to nothing.
     """
-    stand_in = Path(tmp) / "standin" / "skills" / "task-review" / "scripts"
+    stand_in = Path(tmp) / "standin" / "skills" / "task-review-cycle" / "scripts"
     stand_in.mkdir(parents=True)
     shutil.copy(SCRIPT, stand_in / SCRIPT.name)
 

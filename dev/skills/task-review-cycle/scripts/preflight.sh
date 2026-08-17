@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-flight checks for task-review
+# Pre-flight checks for task-review-cycle
 # Detects available tools and repository metadata, outputs JSON.
 #
 # Usage: preflight.sh [--no-hub]

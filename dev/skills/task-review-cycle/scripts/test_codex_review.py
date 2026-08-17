@@ -19,7 +19,7 @@ Most state and lock cases do not reach the companion: the lock and prune run bef
 so the stub path is deliberately non-existent and the resulting non-zero exit is expected. The
 sequenced companion cases exercise the retry and bounded-diagnostic paths directly.
 
-Run: python3 dev/skills/task-review/scripts/test_codex_review.py
+Run: python3 dev/skills/task-review-cycle/scripts/test_codex_review.py
 """
 
 import json

@@ -45,6 +45,7 @@ npx skills add kadragon/agent-toolkit
 npx skills add kadragon/agent-toolkit --skill hwpx
 npx skills add kadragon/agent-toolkit --skill persona-debate
 npx skills add kadragon/agent-toolkit --skill task-review
+npx skills add kadragon/agent-toolkit --skill task-review-cycle  # required — task-review only forwards to it
 npx skills add kadragon/agent-toolkit --skill harness-init
 ```
 

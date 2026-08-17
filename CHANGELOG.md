@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] split task-review into a user-invoked wrapper over the model-invoked task-review-cycle (dev v4.5.0) (2026-08-17) → docs/invocation.md
 - [done] invocation axis contract doc (2026-08-17) → docs/invocation.md
 - [done] Korean trigger scoring (prod v3.0.5) (2026-08-11) → docs/design/skill-trigger-collision-check.md
 - [done] Fix macOS Bash 3.2 selector with CI-safe cross-platform regression guard (dev v4.4.17) (2026-08-11)

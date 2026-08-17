@@ -100,7 +100,7 @@ REFERENCE_GLOBS = [
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
 # All other skills are warn-only until brought into compliance separately.
-HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review"}
+HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review", "task-review-cycle"}
 
 ALLOWLIST_VARS = {"HOME", "PATH"}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")

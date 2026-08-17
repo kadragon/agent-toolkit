@@ -14,7 +14,7 @@ no-checks-grace branches are reachable here without editing the script.
 ci-wait.sh resolves hub.sh relative to its own directory, so each case runs against a
 stub hub.sh in a throwaway git repo — no network, no gh.
 
-Run: python3 dev/skills/task-review/scripts/test_ci_wait.py
+Run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 """
 
 import json

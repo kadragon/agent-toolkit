@@ -89,7 +89,7 @@ if [ -n "$FILES" ]; then
   # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
   # `commandWindows: python ...` for exactly that reason, and
   # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
-  # here would leave every task-review commit unguarded on those installs while
+  # here would leave every task-review-cycle commit unguarded on those installs while
   # reporting a clean run.
   PY=$(command -v python3 || command -v python || true)
   if [ ! -f "$GUARD" ]; then
