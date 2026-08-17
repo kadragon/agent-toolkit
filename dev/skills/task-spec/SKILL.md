@@ -25,8 +25,8 @@ cross-cutting change, or anything that won't fit in one Sprint Contract. Trivial
 single-session work skips this skill entirely and goes straight to a Sprint Contract.
 
 This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand into
-`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate `backlog.md` items) is what a
-caller does by calling the Skill tool with "dev:task-tickets", not this skill's job.
+`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate `backlog.md` items) is
+`task-tickets`'s job, not this skill's.
 
 ## Flow
 

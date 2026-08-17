@@ -126,6 +126,19 @@ Prose that names skills as **labels** — for a human to pick from, or as a stri
 - `dev/skills/harness-init/SKILL.md` — trigger-router section
 - `dev/skills/harness-init/examples/agents-md-example.md`
 
+Three further sites survive the *Notation* migration for a different reason — they mention a
+skill without instructing anyone to run it right now, so rewriting them into tool calls would
+create a call where none belongs:
+
+- `dev/skills/task-grill/SKILL.md` and `dev/skills/task-spec/SKILL.md` `description:` frontmatter
+  — these still spell `Skill(dev:task-grill)`. Descriptions are trigger-scored and cost a version
+  bump, so they are rewritten with the rest of the descriptions under the queued
+  `## Invocation axis — user-invoked descriptions` item, not piecemeal.
+- `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
+  is available when the conflicts need real interviewing"), not a step.
+
+The enforcement checker must exempt these three alongside the four router-prose sites above.
+
 No marker exists at any of those sites today — they are listed here by inspection, not by
 annotation. Each must carry an explicit marker by the time a checker enforces the notation
 rule, per `docs/conventions.md` → *Adjudicated Exceptions Need a Marker, Not a Standing

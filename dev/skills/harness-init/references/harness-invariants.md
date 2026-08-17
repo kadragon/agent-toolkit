@@ -102,7 +102,7 @@ same commit. Cited by `dev:task-new` and `dev:task-next` at their `qa-verifier`-
 The `task-*` gates listed below block on a live user. Unattended runs need a stated default
 instead of hanging. A run is unattended when any holds: the skill executes inside a
 subagent/teammate; the turn was fired by `/loop` or a cron/scheduled routine rather than a user
-message; the skill's own invocation carried a non-interactive flag (`--yes`). `task-review --auto`
+message; the skill's own invocation carried a non-interactive flag (`--yes`). `task-review-cycle --auto`
 is **not** such a flag — it skips that skill's own Step 3 confirmation and is passed
 unconditionally at handoff by `task-next` and `task-new`, including on fully interactive runs.
 Ambiguity resolves to **interactive** — ask, do not assume.
@@ -118,7 +118,7 @@ return value / PR body. A silently applied default violates this contract.
 | `task-grill` interview | Adopt every question's stated `Recommended:` answer, mark each as an assumption in the four-field summary, and list still-open questions in the handoff | Rule 4 already prescribes this for a non-answering user; the recommendation exists to be the default |
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
 | `task-next` Step 2.5 batch nudge | Decline — no batching | Batching is an overhead optimization, never required for correctness |
-| `task-next` Step 2.5 lite-path offer | Full cycle (`task-review --auto`) | PR + CI is the reviewable path; unattended direct-to-`main` merge is the riskier branch |
+| `task-next` Step 2.5 lite-path offer | Full cycle (`task-review-cycle --auto`) | PR + CI is the reviewable path; unattended direct-to-`main` merge is the riskier branch |
 | `task-next` Step 3 plan-mode approval | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Same gate, same argument as the `task-new` row below — the two must not diverge |
 | `task-next --all` A3 unit selection | Take every unit the full scan returned, subject to the A4 cost gate below | The `--all` invocation already asked for all of them; re-prompting adds nothing |
 | `task-new` Step 3 plan-mode approval | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Review still happens at the PR; blocking would make unattended `task-new` useless for anything non-trivial |

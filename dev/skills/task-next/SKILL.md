@@ -499,7 +499,7 @@ Runs single-pick through an isolated git worktree so the main checkout stays on 
 
 ## Batch mode (`--all`)
 
-Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and `task-review --auto` run. See `references/batch.md` for full detail.
+Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and `task-review-cycle --auto` run. See `references/batch.md` for full detail.
 
 ## Edge cases
 

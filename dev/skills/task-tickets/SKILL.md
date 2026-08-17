@@ -23,8 +23,8 @@ reuses and generalizes the `*(deferred: ...)*` skip pattern already present in
 
 ## When to use
 
-Input is either an approved `docs/design/{slug}.md` (the common case, produced when a caller
-calls the Skill tool with "dev:task-spec") or a conversation that has already resolved enough scope to
+Input is either an approved `docs/design/{slug}.md` (the common case, produced by `task-spec`)
+or a conversation that has already resolved enough scope to
 decompose directly (skip `task-spec` for smaller multi-ticket work that doesn't warrant a full
 spec doc). Automates `docs/workflows.md` `plan` workflow **step 3** ("Generate `backlog.md`
 items from approved spec").

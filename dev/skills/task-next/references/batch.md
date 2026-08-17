@@ -2,11 +2,11 @@
 
 Triggered by `--all`. Implements **multiple** units in parallel (each in its own git worktree),
 then collapses them onto **one integration branch** that goes through a **single** version bump,
-cleanup pass, and `task-review --auto` → one PR, one CI run, one merge.
+cleanup pass, and `task-review-cycle --auto` → one PR, one CI run, one merge.
 
 **Why one integration branch, not N PRs.** The shared single-copy files — `plugin.json` manifests,
 `backlog.md`, `tasks.md`, `CHANGELOG.md` — cannot be edited per-unit in parallel without collision.
-`task-review` also detects its branch from the session's current checkout and cannot be aimed
+`task-review-cycle` also detects its branch from the session's current checkout and cannot be aimed
 at a worktree. So worktrees do **code only**; every shared-file edit happens once, serially, on
 the integration branch in the main checkout. This sidesteps the whole class of cross-worktree
 merge/CWD failures.
