@@ -55,6 +55,12 @@ PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
 
 Stop immediately if the loaded skill's bundled scripts cannot be resolved. Stop if `has_errors: true`.
 
+Every block below re-runs `preflight.sh` so it stays runnable standalone; that is cheap, because
+the script caches its own result per branch under `$(git rev-parse --git-dir)` and only the first
+run in a cycle pays the hub probes. The cache is keyed on the current branch, so the Setup-era
+entry is discarded the moment Step 0 cuts the feature branch — no block ever reads a stale
+`feature_branch`. Pass `--refresh` if you need to force a live probe.
+
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/preflight.sh" ]] || { echo "Bundled preflight unavailable: $SKILL_DIR/scripts/preflight.sh" >&2; exit 1; }
@@ -114,7 +120,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 **All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
 
-#### 2-1: Claude Reviewer (`code-review`, fixed)
+#### Panel short-circuit — evaluate once, before launching anything
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -122,10 +128,37 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
-FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || true)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
+```
+
+`LINE_DELTA ≤ 30` AND `SECURITY_HIT` empty → **skip 2-1, 2-2 and 2-3 all three**; do the inline
+review instead (read the diff, assess naming, error handling, coverage). Record
+`Reviewers Skipped: trivial diff (all engines, LINE_DELTA ≤ 30)` in the consolidation table and go
+straight to Step 3. Otherwise launch all three sources as described below.
+
+**There is no file-count term, deliberately.** The gate this replaced also required
+`FILE_COUNT ≤ 3`, which is exactly what stopped it firing: this repo's changes are wide and
+shallow (a 16-file, +48/-51 doc sweep cleared no gate), so of the last 15 merged PRs exactly one
+qualified. Line delta alone is what tracks review-worthiness across that shape. Re-adding a file
+cap re-introduces the bug.
+
+**`SECURITY_HIT` is an absolute override** — a non-empty hit runs the whole panel no matter how
+small the diff, and separately raises the Claude slot's effort to `high` in 2-1. The two uses read
+the same capture; never re-derive the condition from a prose path list.
+
+#### 2-1: Claude Reviewer (`code-review`, fixed)
+
+Reached only when the panel short-circuit above did not fire.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -f "$SKILL_DIR/scripts/preflight.sh" ]] || { echo "Bundled preflight unavailable: $SKILL_DIR/scripts/preflight.sh" >&2; exit 1; }
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
+BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
+CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)  # from the panel short-circuit
+SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from the panel short-circuit
 EFFORT=""; [[ -n "$SECURITY_HIT" ]] && EFFORT="high"   # the ONLY security-escalation condition — both launch paths read this
 ```
 
@@ -135,11 +168,9 @@ is invoked from this cycle. `code-review` already covers correctness plus reuse/
 the panel's breadth comes from the *other engines* (agy in 2-2, Codex in 2-3), not from stacking
 more Claude review skills. A security-sensitive diff raises the effort level — `EFFORT="high"`,
 passed as the skill's *argument*, never spliced into its name — it does **not** add a second
-reviewer. Both launch paths below take `EFFORT` from the same `SECURITY_HIT` capture above; never
-re-derive the condition from a prose path list. Anything else the user wants reviewed (`security-review`, a PR-review command) is
+reviewer. Both launch paths below take `EFFORT` from the same `SECURITY_HIT` capture as the panel
+short-circuit; never re-derive the condition from a prose path list. Anything else the user wants reviewed (`security-review`, a PR-review command) is
 theirs to run outside this cycle.
-
-- **Trivial short-circuit** — `FILE_COUNT ≤ 3` AND `LINE_DELTA ≤ 10` AND `SECURITY_HIT` empty → skip the Claude sub-agent; do inline review (read diff, assess naming/error-handling/coverage). Record "Reviewers Skipped: trivial diff". Skip to 2-2.
 
 How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_ENGINE`, from Setup) — the goal is that a **Claude** engine is always in the panel, alongside agy (2-2) and Codex (2-3), no matter which runtime drives:
 
@@ -323,7 +354,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 
 | Script | Usage |
 |--------|-------|
-| `scripts/preflight.sh` | Pre-flight checks, outputs JSON |
+| `scripts/preflight.sh` | Pre-flight checks, outputs JSON. Caches the result per branch at `$(git rev-parse --git-dir)/task-review-cycle-preflight.json`, so only the first run in a cycle pays the hub probes; `--refresh` forces a live run |
 | `scripts/commit-and-push.sh` | Stage, commit, push, create PR; idempotent with `--pr`. Calls `hooks/commit-guard/guard.py --precommit-check` before committing (the PreToolUse hook cannot see a commit made inside a script); reports `guard_skipped` when it could not |
 | `scripts/agy-review.sh` | Antigravity review launcher |
 | `scripts/codex-review.sh` | Codex review launcher |

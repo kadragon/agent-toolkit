@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.5
+version: 1.2.6
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, verify, version bump, review. Already on the queue
@@ -115,6 +115,10 @@ with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at fo
   `ToolSearch` (`query: "select:EnterPlanMode,ExitPlanMode"`) to load plan-mode tools, call
   `EnterPlanMode`, design the approach, call `ExitPlanMode` for user approval. If `ToolSearch`
   returns no results, present the plan as a numbered list and wait for explicit "proceed".
+  **Write the drafted Sprint Contract into the plan body**, in the shape the *Sprint Contract*
+  step below specifies, so one approval covers approach *and* contract instead of two round
+  trips. This never collides with the lite-path offer: the lite path is trivial-only and plan
+  mode is non-trivial-only, so at most one of the two is ever live.
 - **Trivial**: skip plan mode.
 - **Non-interactive run** (no live user reachable — see `dev:harness-init` →
   `references/harness-invariants.md` → *Non-Interactive Gate Defaults*): skip

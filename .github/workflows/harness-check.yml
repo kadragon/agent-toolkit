@@ -159,6 +159,10 @@ jobs:
       - name: Run dev/skills/task-review-cycle/scripts/test_ci_wait.py
         run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 
+      # Cache hits are asserted by counting hub.sh calls, so this needs no network and no gh.
+      - name: Run dev/skills/task-review-cycle/scripts/test_preflight.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_preflight.py
+
       # Covers both probe branches on a Linux runner: the platform selector is env-overridable, and
       # the Windows case stubs `tasklist` on PATH — which is what pins the `/NH` vs `//NH` flag form
       # whose failure silently disables the prune on MINGW.

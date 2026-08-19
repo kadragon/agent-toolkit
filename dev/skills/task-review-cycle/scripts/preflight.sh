@@ -2,7 +2,22 @@
 # Pre-flight checks for task-review-cycle
 # Detects available tools and repository metadata, outputs JSON.
 #
-# Usage: preflight.sh [--no-hub]
+# Usage: preflight.sh [--no-hub] [--refresh]
+#
+# Per-cycle cache: one review cycle invokes this script from ~7 separate SKILL.md blocks, each
+# block re-running it purely so it reads standalone. Every run costs two hub.sh round trips plus
+# a `git fetch`. The result is cached at $(git rev-parse --git-dir)/task-review-cycle-preflight.json
+# and served back when it is still valid, so only the first run in a cycle pays.
+#
+# Validity is keyed on the *current branch*, not on time alone: Setup runs before the cycle's
+# Step 0 creates the feature branch, so a Setup-era entry names the wrong `feature_branch` the
+# moment the branch is cut, and must not be reused. A cache hit therefore requires all of:
+# same feature_branch, same --no-hub mode, has_errors false, and younger than the TTL.
+# An errored result is never written, so a failure always re-surfaces on the next run.
+#
+#   --refresh                  force a live run and rewrite the cache
+#   PREFLIGHT_CACHE=0          disable the cache entirely (read and write)
+#   PREFLIGHT_CACHE_TTL_MIN=N  TTL in minutes (default 15)
 
 set -euo pipefail
 
@@ -13,11 +28,42 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 NO_HUB=false
+REFRESH=false
 for arg in "$@"; do
   [[ "$arg" == "--no-hub" ]] && NO_HUB=true
+  [[ "$arg" == "--refresh" ]] && REFRESH=true
 done
 
 errors=()
+
+# --- Per-cycle cache ---------------------------------------------------------
+CACHE_ENABLED="${PREFLIGHT_CACHE:-1}"
+CACHE_TTL_MIN="${PREFLIGHT_CACHE_TTL_MIN:-15}"
+CACHE_FILE=""
+if [ "$CACHE_ENABLED" != "0" ]; then
+  GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null || true)
+  [ -n "$GIT_DIR_PATH" ] && CACHE_FILE="${GIT_DIR_PATH}/task-review-cycle-preflight.json"
+fi
+
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+
+if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; then
+  # -mmin is honoured by both GNU and BSD find; an empty result means "older than the TTL".
+  CACHE_FRESH=$(find "$CACHE_FILE" -mmin "-${CACHE_TTL_MIN}" 2>/dev/null || true)
+  if [ -n "$CACHE_FRESH" ]; then
+    CACHE_VALID=$(jq -r \
+      --arg branch "$CURRENT_BRANCH" \
+      --argjson no_hub "$NO_HUB" \
+      'if (.feature_branch == $branch
+           and .no_hub == $no_hub
+           and (.has_errors // false | not))
+       then "yes" else "no" end' "$CACHE_FILE" 2>/dev/null || echo "no")
+    if [ "$CACHE_VALID" = "yes" ]; then
+      cat "$CACHE_FILE"
+      exit 0
+    fi
+  fi
+fi
 
 # --- Hub detection (GitHub via gh, Forgejo/Gitea via REST) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -147,7 +193,7 @@ if [ ${#errors[@]} -gt 0 ]; then
   ERRORS_JSON=$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s .)
 fi
 
-jq -n \
+PREFLIGHT_JSON=$(jq -n \
   --argjson no_hub "$NO_HUB" \
   --arg hub_type "$HUB_TYPE" \
   --argjson hub_authenticated "$HUB_AUTHENTICATED" \
@@ -178,4 +224,12 @@ jq -n \
     merge_strategy: $merge_strategy,
     has_errors: (($errors | length) > 0),
     errors: $errors
-  }'
+  }')
+
+# Cache only a clean result: an errored probe must re-run rather than be served back.
+if [ -n "$CACHE_FILE" ] \
+  && [ "$(jq -r '.has_errors' <<<"$PREFLIGHT_JSON")" = "false" ]; then
+  printf '%s\n' "$PREFLIGHT_JSON" >"$CACHE_FILE" 2>/dev/null || true
+fi
+
+printf '%s\n' "$PREFLIGHT_JSON"
