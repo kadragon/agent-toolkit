@@ -12,6 +12,12 @@ moment the branch is cut. Reusing it would hand the reviewer prompt `${FEATURE_B
 That invalidation is the case these tests exist to pin, alongside the `--no-hub` mode key, the
 TTL, `--refresh`, `PREFLIGHT_CACHE=0`, and the rule that an errored probe is never cached.
 
+Two things deliberately survive a cache hit, and both are pinned here because review found them
+missing: the env-derived tool probes (agy/codex/claude CLI/native engine) are re-run and overlaid,
+since a stale `native_engine` decides 2-1's launch path and would silently drop the Claude slot
+from the panel; and the base-branch fast-forward still runs, since the base can move while a 1200s
+review panel waits and a stale local base mis-scopes every later `git diff base...HEAD`.
+
 Cache hits are asserted by *counting hub.sh invocations*, not by timing: a served cache makes
 zero calls. The stub hub.sh is resolved by preflight.sh relative to its own directory, so every
 case runs against a throwaway git repo — no network, no gh, no agy/codex assumptions.
@@ -79,6 +85,35 @@ def make_repo(tmp: Path, name: str, stub: str = STUB_HUB) -> Path:
     hub.write_text(stub, encoding="utf-8")
     hub.chmod(0o755)
     return repo
+
+
+def make_repo_with_origin(tmp: Path, name: str) -> tuple[Path, Path]:
+    """A repo whose `origin` is a local bare repo, so the base-branch fast-forward is observable."""
+    origin = tmp / f"{name}-origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    repo = make_repo(tmp, name)
+    subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "main"], cwd=repo, check=True)
+    return repo, origin
+
+
+def advance_origin(repo: Path, origin: Path, tmp: Path, name: str) -> str:
+    """Add a commit to origin/main from a side clone; returns the new sha."""
+    side = tmp / f"{name}-side"
+    subprocess.run(["git", "clone", "-q", str(origin), str(side)], check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=side, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=side, check=True)
+    (side / "moved.txt").write_text("moved\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=side, check=True)
+    subprocess.run(["git", "commit", "-qm", "advance"], cwd=side, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "main"], cwd=side, check=True)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=side,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def local_sha(repo: Path, ref: str) -> str:
+    return subprocess.run(["git", "rev-parse", ref], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
 
 
 def call_count(repo: Path) -> int:
@@ -205,6 +240,45 @@ def main() -> int:
         run(bad)
         check("the failure re-surfaces on the next run", call_count(bad) == 2,
               f"calls={call_count(bad)}")
+
+        print("\n-- a cache hit re-probes the env-derived engine fields --")
+        engine = make_repo(tmp, "engine")
+        under_claude = run(engine, CLAUDECODE="1")
+        check("a Claude-driven run reports native_engine=claude",
+              under_claude.get("native_engine") == "claude", f"got {under_claude}")
+        reset_calls(engine)
+        # Same branch, same mode, inside the TTL: this IS a cache hit. The engine field must
+        # still follow the current environment, or 2-1 launches down the wrong path.
+        under_other = run(engine, CLAUDECODE="")
+        check("the cache is still served (no hub calls)", call_count(engine) == 0,
+              f"calls={call_count(engine)}")
+        check("native_engine follows the current runtime, not the cached one",
+              under_other.get("native_engine") == "other", f"got {under_other}")
+
+        print("\n-- a cache hit still fast-forwards the base branch --")
+        synced, origin = make_repo_with_origin(tmp, "synced")
+        checkout(synced, "feat/work")
+        run(synced)                       # live run: writes the cache, syncs main
+        moved = advance_origin(synced, origin, tmp, "synced")
+        check("origin/main really moved", local_sha(synced, "main") != moved)
+        reset_calls(synced)
+        run(synced)                       # cache hit
+        check("the hit made no hub calls", call_count(synced) == 0,
+              f"calls={call_count(synced)}")
+        check("local main was fast-forwarded anyway",
+              local_sha(synced, "main") == moved,
+              f"{local_sha(synced, 'main')} != {moved}")
+
+        print("\n-- --no-hub never touches the remote, cache hit included --")
+        offline, off_origin = make_repo_with_origin(tmp, "offline")
+        checkout(offline, "feat/offline")
+        run(offline, "--no-hub")          # live --no-hub run: writes the cache
+        off_moved = advance_origin(offline, off_origin, tmp, "offline")
+        before = local_sha(offline, "main")
+        run(offline, "--no-hub")          # cache hit
+        check("origin moved but the local base was left alone",
+              local_sha(offline, "main") == before != off_moved,
+              f"local={local_sha(offline, 'main')} before={before} origin={off_moved}")
 
         print("\n-- a corrupt cache file degrades to a live run, not a crash --")
         corrupt = make_repo(tmp, "corrupt")

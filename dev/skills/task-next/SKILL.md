@@ -131,6 +131,12 @@ carry them, or the user is answering about a path that cannot apply.
 any scoping; Step 2.5 re-judges the *selected* group properly. If the pick turns out non-trivial
 once scoped, discard the Q2/Q3 answers, say so in one line, and run the full cycle.
 
+**Discard the Q2/Q3 answers whenever the selection is re-made**, not only on that non-trivial
+outcome. Picking **"더 많은 항목 보기"** re-opens the choice, so the batch and lite-path answers
+now describe a task the user is no longer running — carrying them into Step 2.5 would merge a
+*different* item straight to `main` with no PR and no CI on the strength of an answer given about
+something else. Re-ask after any re-pick.
+
 Non-interactive run: ask nothing — the full-scan `[1]` default applies, no batching, full cycle.
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:

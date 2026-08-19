@@ -9,11 +9,21 @@
 # a `git fetch`. The result is cached at $(git rev-parse --git-dir)/task-review-cycle-preflight.json
 # and served back when it is still valid, so only the first run in a cycle pays.
 #
+# Only the *expensive* fields are cached: hub type/auth and the repo metadata behind them. The
+# tool probes (agy, codex, claude CLI, native engine) are plain `command -v` calls costing nothing,
+# so they are re-run on every invocation and overlaid onto a cache hit. Caching them would let an
+# entry written under one runtime be served to another within the TTL — the exact case that decides
+# 2-1's launch path, so a stale `native_engine` would silently drop the Claude slot from the panel.
+#
 # Validity is keyed on the *current branch*, not on time alone: Setup runs before the cycle's
 # Step 0 creates the feature branch, so a Setup-era entry names the wrong `feature_branch` the
 # moment the branch is cut, and must not be reused. A cache hit therefore requires all of:
 # same feature_branch, same --no-hub mode, has_errors false, and younger than the TTL.
 # An errored result is never written, so a failure always re-surfaces on the next run.
+#
+# A cache hit still fast-forwards the local base branch. That sync is what keeps a downstream
+# `git diff base...HEAD` from being scoped against a stale ref, and the base can move while a
+# review panel waits — so it must not become a side effect only the first run of a cycle performs.
 #
 #   --refresh                  force a live run and rewrite the cache
 #   PREFLIGHT_CACHE=0          disable the cache entirely (read and write)
@@ -27,6 +37,29 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# --- Keep local base branch current so downstream `git diff base...HEAD` isn't scoped against a
+# --- stale ref (picks up already-merged commits otherwise). Only fast-forward: skip if it's
+# --- checked out, has diverged, or fetch fails. Called on the live path AND on a cache hit —
+# --- the base can move while a 1200s review panel waits, so this cannot be a first-run-only
+# --- side effect.
+sync_base_branch() {
+  local base="$1" feature="$2"
+  [ -n "$base" ] || return 0
+  if [ "$base" != "$feature" ] \
+    && git show-ref --verify --quiet "refs/heads/${base}" 2>/dev/null \
+    && git fetch -q origin "${base}" 2>/dev/null; then
+    local local_sha remote_sha merge_base
+    local_sha=$(git rev-parse "refs/heads/${base}" 2>/dev/null || true)
+    remote_sha=$(git rev-parse "FETCH_HEAD" 2>/dev/null || true)
+    if [ -n "$local_sha" ] && [ -n "$remote_sha" ] && [ "$local_sha" != "$remote_sha" ]; then
+      merge_base=$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null || true)
+      if [ "$merge_base" = "$local_sha" ]; then
+        git fetch -q origin "${base}:${base}" 2>/dev/null || true
+      fi
+    fi
+  fi
+}
+
 NO_HUB=false
 REFRESH=false
 for arg in "$@"; do
@@ -35,6 +68,8 @@ for arg in "$@"; do
 done
 
 errors=()
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Per-cycle cache ---------------------------------------------------------
 CACHE_ENABLED="${PREFLIGHT_CACHE:-1}"
@@ -46,38 +81,6 @@ if [ "$CACHE_ENABLED" != "0" ]; then
 fi
 
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
-
-if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; then
-  # -mmin is honoured by both GNU and BSD find; an empty result means "older than the TTL".
-  CACHE_FRESH=$(find "$CACHE_FILE" -mmin "-${CACHE_TTL_MIN}" 2>/dev/null || true)
-  if [ -n "$CACHE_FRESH" ]; then
-    CACHE_VALID=$(jq -r \
-      --arg branch "$CURRENT_BRANCH" \
-      --argjson no_hub "$NO_HUB" \
-      'if (.feature_branch == $branch
-           and .no_hub == $no_hub
-           and (.has_errors // false | not))
-       then "yes" else "no" end' "$CACHE_FILE" 2>/dev/null || echo "no")
-    if [ "$CACHE_VALID" = "yes" ]; then
-      cat "$CACHE_FILE"
-      exit 0
-    fi
-  fi
-fi
-
-# --- Hub detection (GitHub via gh, Forgejo/Gitea via REST) ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HUB_TYPE="none"
-HUB_AUTHENTICATED=false
-if [ "$NO_HUB" = "false" ]; then
-  DETECT=$(bash "${SCRIPT_DIR}/hub.sh" detect 2>/dev/null || echo '{}')
-  HUB_TYPE=$(jq -r '.hub_type // "none"' <<<"$DETECT")
-  HUB_AUTHENTICATED=$(jq -r '.token_present // false' <<<"$DETECT")
-  DETECT_ERRORS=$(jq -r '(.errors // [])[]' <<<"$DETECT")
-  if [ -n "$DETECT_ERRORS" ]; then
-    while IFS= read -r e; do errors+=("$e"); done <<<"$DETECT_ERRORS"
-  fi
-fi
 
 # --- Antigravity (agy) CLI ---
 AGY_AVAILABLE=false
@@ -144,6 +147,59 @@ NATIVE_ENGINE="other"
 CLAUDE_CLI_AVAILABLE=false
 command -v claude >/dev/null 2>&1 && CLAUDE_CLI_AVAILABLE=true
 
+if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; then
+  # -mmin is honoured by both GNU and BSD find; an empty result means "older than the TTL".
+  CACHE_FRESH=$(find "$CACHE_FILE" -mmin "-${CACHE_TTL_MIN}" 2>/dev/null || true)
+  if [ -n "$CACHE_FRESH" ]; then
+    CACHE_VALID=$(jq -r \
+      --arg branch "$CURRENT_BRANCH" \
+      --argjson no_hub "$NO_HUB" \
+      'if (.feature_branch == $branch
+           and .no_hub == $no_hub
+           and (.has_errors // false | not))
+       then "yes" else "no" end' "$CACHE_FILE" 2>/dev/null || echo "no")
+    if [ "$CACHE_VALID" = "yes" ]; then
+      # Overlay the freshly-probed tool availability: those fields are env-derived and free to
+      # re-read, and serving a stale `native_engine` would send 2-1 down the wrong launch path.
+      # Fast-forward the base branch too — it can move while a review panel waits, so that sync
+      # must not be a side effect only the first run of a cycle performs.
+      # --no-hub promises no remote access, and sync_base_branch fetches — so it is gated the
+      # same way the live path gates it, not run unconditionally.
+      if [ "$NO_HUB" = "false" ]; then
+        CACHED_BASE=$(jq -r '.base_branch // ""' "$CACHE_FILE")
+        sync_base_branch "$CACHED_BASE" "$CURRENT_BRANCH"
+      fi
+      jq \
+        --argjson agy_available "$AGY_AVAILABLE" \
+        --argjson codex_available "$CODEX_AVAILABLE" \
+        --arg codex_mode "$CODEX_MODE" \
+        --arg codex_companion_path "$CODEX_COMPANION_PATH" \
+        --arg native_engine "$NATIVE_ENGINE" \
+        --argjson claude_cli_available "$CLAUDE_CLI_AVAILABLE" \
+        '.agy_available = $agy_available
+         | .codex_available = $codex_available
+         | .codex_mode = $codex_mode
+         | .codex_companion_path = $codex_companion_path
+         | .native_engine = $native_engine
+         | .claude_cli_available = $claude_cli_available' "$CACHE_FILE"
+      exit 0
+    fi
+  fi
+fi
+
+# --- Hub detection (GitHub via gh, Forgejo/Gitea via REST) ---
+HUB_TYPE="none"
+HUB_AUTHENTICATED=false
+if [ "$NO_HUB" = "false" ]; then
+  DETECT=$(bash "${SCRIPT_DIR}/hub.sh" detect 2>/dev/null || echo '{}')
+  HUB_TYPE=$(jq -r '.hub_type // "none"' <<<"$DETECT")
+  HUB_AUTHENTICATED=$(jq -r '.token_present // false' <<<"$DETECT")
+  DETECT_ERRORS=$(jq -r '(.errors // [])[]' <<<"$DETECT")
+  if [ -n "$DETECT_ERRORS" ]; then
+    while IFS= read -r e; do errors+=("$e"); done <<<"$DETECT_ERRORS"
+  fi
+fi
+
 # --- Repository metadata ---
 FEATURE_BRANCH=$(git branch --show-current)
 
@@ -158,21 +214,7 @@ if [ "$NO_HUB" = "false" ]; then
   [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
   MERGE_INFO=$(jq -c '.merge_strategy // {}' <<<"$REPO_INFO")
 
-  # --- Keep local base branch current so downstream `git diff base...HEAD` isn't
-  # --- scoped against a stale ref (picks up already-merged commits otherwise).
-  # --- Only fast-forward: skip if it's checked out, has diverged, or fetch fails.
-  if [ "$BASE_BRANCH" != "$FEATURE_BRANCH" ] \
-    && git show-ref --verify --quiet "refs/heads/${BASE_BRANCH}" 2>/dev/null \
-    && git fetch -q origin "${BASE_BRANCH}" 2>/dev/null; then
-    LOCAL_SHA=$(git rev-parse "refs/heads/${BASE_BRANCH}" 2>/dev/null || true)
-    REMOTE_SHA=$(git rev-parse "FETCH_HEAD" 2>/dev/null || true)
-    if [ -n "$LOCAL_SHA" ] && [ -n "$REMOTE_SHA" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
-      MERGE_BASE=$(git merge-base "$LOCAL_SHA" "$REMOTE_SHA" 2>/dev/null || true)
-      if [ "$MERGE_BASE" = "$LOCAL_SHA" ]; then
-        git fetch -q origin "${BASE_BRANCH}:${BASE_BRANCH}" 2>/dev/null || true
-      fi
-    fi
-  fi
+  sync_base_branch "$BASE_BRANCH" "$FEATURE_BRANCH"
 else
   # Detect base branch purely locally — no remote references
   BASE_BRANCH=$(git config init.defaultBranch 2>/dev/null || true)

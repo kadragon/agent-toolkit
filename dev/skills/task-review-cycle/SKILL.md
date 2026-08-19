@@ -131,12 +131,21 @@ CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
 LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
   | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
+BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | awk '$1 == "-" || $2 == "-"' | head -1 || true)
+MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
 ```
 
-`LINE_DELTA ≤ 30` AND `SECURITY_HIT` empty → **skip 2-1, 2-2 and 2-3 all three**; do the inline
-review instead (read the diff, assess naming, error handling, coverage). Record
-`Reviewers Skipped: trivial diff (all engines, LINE_DELTA ≤ 30)` in the consolidation table and go
-straight to Step 3. Otherwise launch all three sources as described below.
+`1 ≤ LINE_DELTA ≤ 30` AND `SECURITY_HIT`, `BINARY_HIT` and `MODE_OR_RENAME` all empty → **skip
+2-1, 2-2 and 2-3 all three**; do the inline review instead (read the diff, assess naming, error
+handling, coverage). Record `Reviewers Skipped: trivial diff (all engines, LINE_DELTA ≤ 30)` in
+the consolidation table and go straight to Step 3. Otherwise launch all three sources as described
+below.
+
+**A zero line delta is not a trivial diff — it is an unmeasured one.** `--shortstat` counts no
+insertions or deletions for a binary edit, a file-mode flip or a pure rename, so a change that
+swaps an asset or sets an executable bit arrives here as `LINE_DELTA=0` and would clear a bare
+`≤ 30` test. The `1 ≤` floor plus the two probes above make that case fail closed and run the
+full panel; they are what keeps line delta usable as the primary term.
 
 **There is no file-count term, deliberately.** The gate this replaced also required
 `FILE_COUNT ≤ 3`, which is exactly what stopped it firing: this repo's changes are wide and
