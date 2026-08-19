@@ -66,7 +66,7 @@ List findings ordered by priority (P0 first). After all findings, add:
 - **Overall verdict**: \"LGTM\" if no P0/P1 issues, or \"Changes Requested\" with a 1-sentence explanation.
 - If no issues worth flagging exist, say so plainly — do not invent findings."
 
-# The orchestrator already enforces a 600s timeout via run_in_background.
+# The orchestrator already enforces a 1200s timeout via run_in_background.
 # Capture stdout and stderr separately so we can detect empty output and report
 # the failure reason (Windows: agy exits non-zero before producing output, which
 # set -euo pipefail would otherwise swallow silently).
@@ -78,7 +78,7 @@ AGY_EXIT=0
 NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --dangerously-skip-permissions \
   --add-dir "$REPO_ROOT" \
-  --print-timeout 9m 2>"$AGY_ERR" | tee "$AGY_OUT" || AGY_EXIT=$?
+  --print-timeout 18m 2>"$AGY_ERR" | tee "$AGY_OUT" || AGY_EXIT=$?
 
 if ! grep -q '[^[:space:]]' "$AGY_OUT"; then
   echo "agy returned empty output (exit: $AGY_EXIT) — review skipped" >&2
