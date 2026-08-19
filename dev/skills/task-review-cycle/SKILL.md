@@ -112,7 +112,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 600s per source. On a 600s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>600s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 600s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
+**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). After all complete (or time out), proceed to Step 3.
 
 #### 2-1: Claude Reviewer (`code-review`, fixed)
 
@@ -308,7 +308,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Preflight `has_errors: true` | Stop, report (suggest `gh auth login` or set token) |
 | Step 1 fails | Stop, report |
 | Review sub-agent fails | Log skill id, proceed with remaining |
-| Review source >600s | Skip that source, proceed with the rest; note "timeout (>600s)" |
+| Review source >1200s | Skip that source, proceed with the rest; note "timeout (>1200s)" |
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
