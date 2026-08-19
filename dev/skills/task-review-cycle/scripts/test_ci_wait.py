@@ -11,6 +11,12 @@ on either kind of pass (`success` and no-CI-configured), and is NOT incremented 
 or a ci-status error. The timing constants are env-overridable purely so the timeout and
 no-checks-grace branches are reachable here without editing the script.
 
+Also covered: the opening fast-poll window. `harness-check` finishes in 13-22s, so a single
+20s cadence discovers a pass up to a full interval late; the script polls at
+CI_WAIT_FAST_POLL_INTERVAL for the first CI_WAIT_FAST_POLL_SECS and then falls back. These
+cases count stub invocations rather than asserting on wall-clock gaps, so they do not flake
+on a loaded runner.
+
 ci-wait.sh resolves hub.sh relative to its own directory, so each case runs against a
 stub hub.sh in a throwaway git repo — no network, no gh.
 
@@ -49,6 +55,33 @@ def make_repo(tmp: Path, status: str) -> Path:
     stub.write_text(f'#!/usr/bin/env bash\necho \'{{"status": "{status}"}}\'\n', encoding="utf-8")
     stub.chmod(0o755)
     return repo
+
+
+def make_counting_repo(tmp: Path, name: str) -> Path:
+    """Like make_repo("pending"), but the stub records one line per invocation.
+
+    Counting calls is what makes the cadence observable without timing assertions: over a
+    fixed window, a tighter interval is simply more calls.
+    """
+    repo = tmp / name
+    scripts = repo / "scripts"
+    scripts.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    shutil.copy(SCRIPT, scripts / "ci-wait.sh")
+    stub = scripts / "hub.sh"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo x >> "$(dirname "${BASH_SOURCE[0]}")/../calls.log"\n'
+        "echo '{\"status\": \"pending\"}'\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    return repo
+
+
+def call_count(repo: Path) -> int:
+    log = repo / "calls.log"
+    return len(log.read_text(encoding="utf-8").splitlines()) if log.exists() else 0
 
 
 def run(repo: Path, pr: str = "7", timeout: int = 30, **env_overrides) -> dict:
@@ -98,6 +131,26 @@ def main() -> int:
         check("it stays tripped on further failures",
               fourth.get("reason") == "rework-cap" and fourth.get("failures") == 4,
               f"got {fourth}")
+
+        print("\n-- the opening window polls fast, then falls back --")
+        fast = make_counting_repo(tmp, "fast_window")
+        run(fast, CI_WAIT_TIMEOUT_SECS=3, CI_WAIT_POLL_INTERVAL=30,
+            CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=10)
+        check("a 1s opening cadence polls every second inside a 3s budget",
+              call_count(fast) >= 4, f"got {call_count(fast)} calls, expected >= 4")
+
+        slow = make_counting_repo(tmp, "slow_fallback")
+        run(slow, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=3,
+            CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=0)
+        # The status call precedes the deadline check, so a 3s sleep over a 2s budget still
+        # costs one more poll: t=0 and t=3. The fast cadence would have polled at t=0,1,2.
+        check("a zero-length opening window falls straight back to POLL_INTERVAL",
+              call_count(slow) == 2, f"got {call_count(slow)} calls, expected exactly 2")
+
+        clamped = make_counting_repo(tmp, "explicit_override")
+        run(clamped, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
+        check("an explicit POLL_INTERVAL below the 5s fast default is not slowed by it",
+              call_count(clamped) >= 3, f"got {call_count(clamped)} calls, expected >= 3")
 
         print("\n-- a pass clears the counter --")
         passing = make_repo(tmp, "success")

@@ -51,6 +51,16 @@ TIMEOUT_SECS="${CI_WAIT_TIMEOUT_SECS:-870}"
 POLL_INTERVAL="${CI_WAIT_POLL_INTERVAL:-20}"
 case "$TIMEOUT_SECS" in ''|*[!0-9]*) TIMEOUT_SECS=870 ;; esac
 case "$POLL_INTERVAL" in ''|*[!0-9]*) POLL_INTERVAL=20 ;; esac
+# Fast opening cadence: a short CI run finishes well inside one 20s poll, so the pass is
+# discovered up to a full interval after it actually landed. Poll tightly while a result is
+# plausibly imminent, then fall back to POLL_INTERVAL for the long tail.
+FAST_POLL_INTERVAL="${CI_WAIT_FAST_POLL_INTERVAL:-5}"
+FAST_POLL_SECS="${CI_WAIT_FAST_POLL_SECS:-60}"
+case "$FAST_POLL_INTERVAL" in ''|*[!0-9]*) FAST_POLL_INTERVAL=5 ;; esac
+case "$FAST_POLL_SECS" in ''|*[!0-9]*) FAST_POLL_SECS=60 ;; esac
+# An explicit POLL_INTERVAL below the fast default is a deliberate request for a tighter loop
+# (the tests rely on it) — never let the opening window slow it down.
+[ "$POLL_INTERVAL" -lt "$FAST_POLL_INTERVAL" ] && FAST_POLL_INTERVAL="$POLL_INTERVAL"
 # Some repos have no CI at all. Give checks this long to appear before
 # concluding "no CI configured" and passing.
 NO_CHECKS_GRACE_SECS="${CI_WAIT_NO_CHECKS_GRACE_SECS:-90}"
@@ -102,5 +112,9 @@ while true; do
     exit 0
   fi
 
-  sleep "$POLL_INTERVAL"
+  if [ $(( NOW - START )) -lt "$FAST_POLL_SECS" ]; then
+    sleep "$FAST_POLL_INTERVAL"
+  else
+    sleep "$POLL_INTERVAL"
+  fi
 done
