@@ -13,9 +13,13 @@ no-checks-grace branches are reachable here without editing the script.
 
 Also covered: the opening fast-poll window. `harness-check` finishes in 13-22s, so a single
 20s cadence discovers a pass up to a full interval late; the script polls at
-CI_WAIT_FAST_POLL_INTERVAL for the first CI_WAIT_FAST_POLL_SECS and then falls back. These
-cases count stub invocations rather than asserting on wall-clock gaps, so they do not flake
-on a loaded runner.
+CI_WAIT_FAST_POLL_INTERVAL for the first CI_WAIT_FAST_POLL_SECS and then falls back.
+
+These cases count stub invocations rather than asserting on wall-clock gaps, which removes
+flake from the *gap* between polls but not from the deadline itself: the status call precedes
+the deadline check, so per-iteration overhead (a forked hub.sh, two jq calls, two `date`
+calls) can trip the deadline one poll early. Each budget below is therefore set well above the
+minimum that satisfies its assertion, so several slow iterations cannot red the gate.
 
 ci-wait.sh resolves hub.sh relative to its own directory, so each case runs against a
 stub hub.sh in a throwaway git repo — no network, no gh.
@@ -134,23 +138,31 @@ def main() -> int:
 
         print("\n-- the opening window polls fast, then falls back --")
         fast = make_counting_repo(tmp, "fast_window")
-        run(fast, CI_WAIT_TIMEOUT_SECS=3, CI_WAIT_POLL_INTERVAL=30,
+        run(fast, CI_WAIT_TIMEOUT_SECS=6, CI_WAIT_POLL_INTERVAL=30,
             CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=10)
-        check("a 1s opening cadence polls every second inside a 3s budget",
+        check("a 1s opening cadence polls every second inside a 6s budget",
               call_count(fast) >= 4, f"got {call_count(fast)} calls, expected >= 4")
 
         slow = make_counting_repo(tmp, "slow_fallback")
         run(slow, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=3,
             CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=0)
         # The status call precedes the deadline check, so a 3s sleep over a 2s budget still
-        # costs one more poll: t=0 and t=3. The fast cadence would have polled at t=0,1,2.
+        # costs one more poll: t=0 and t=3. The fast cadence would have polled at t=0,1,2, so
+        # an upper bound alone discriminates — and it stays true if a slow first iteration
+        # burns the whole budget and the run ends at one call.
         check("a zero-length opening window falls straight back to POLL_INTERVAL",
-              call_count(slow) == 2, f"got {call_count(slow)} calls, expected exactly 2")
+              call_count(slow) <= 2, f"got {call_count(slow)} calls, expected <= 2")
 
         clamped = make_counting_repo(tmp, "explicit_override")
-        run(clamped, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
+        run(clamped, CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=1)
         check("an explicit POLL_INTERVAL below the 5s fast default is not slowed by it",
               call_count(clamped) >= 3, f"got {call_count(clamped)} calls, expected >= 3")
+
+        floored = make_counting_repo(tmp, "zero_interval")
+        run(floored, CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=0,
+            CI_WAIT_FAST_POLL_INTERVAL=0)
+        check("a zero fast interval is floored instead of busy-looping",
+              call_count(floored) <= 2, f"got {call_count(floored)} calls, expected <= 2")
 
         print("\n-- a pass clears the counter --")
         passing = make_repo(tmp, "success")
