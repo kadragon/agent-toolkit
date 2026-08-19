@@ -109,7 +109,9 @@ Present the consolidated list as a table with:
 After the findings table, add:
 - A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Refuted by contest round" section listing contestable findings (Step 3) the contest round rejected, with its one-line evidence — visible so the user can override a wrong refutation.
-- A "Reviewers Skipped" section listing any of the three sources that was not launched or did not return, with reason (e.g., "trivial diff", "claude CLI unavailable", "timeout (>1200s)").
+- A "Reviewers Skipped" section listing any of the three sources that was not launched or did not return, with reason (e.g., "trivial diff (all engines, LINE_DELTA ≤ 30)", "claude CLI unavailable",
+  "timeout (>1200s)"). The trivial-diff reason covers all three sources at once — the panel
+  short-circuit gates the whole panel, not one slot.
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 

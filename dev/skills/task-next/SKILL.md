@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.6
+version: 1.6.7
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
@@ -110,7 +110,34 @@ fenced code blocks. Read the script if you need the exact rule.
 |-------|--------|
 | 0 | Follow the stderr diagnosis above, then fall through to the full scan |
 | 1 | Announce the group and proceed directly to Step 3 |
-| 2–3 | On Claude Code use `AskUserQuestion` (single-select); on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option. User picks a number → proceed to Step 3. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. Non-interactive run: do **not** pick from this capped, document-ordered list — run the full scan below, then take its candidate `[1]` and announce it. |
+| 2–3 | On Claude Code use **one** `AskUserQuestion` carrying the batched gate below; on Codex print a plain numbered list. Always append **"더 많은 항목 보기"** as the last option of the pick question. User picks a group → proceed to Step 2.5, which consumes the answers already collected. User picks "더 많은 항목 보기" → run full scan below, then go to Step 2. Non-interactive run: do **not** pick from this capped, document-ordered list — run the full scan below, then take its candidate `[1]` and announce it. |
+
+**Batched pre-implementation gate — ask once, not three times.** A trivial pick otherwise stops
+the cycle three separate times (the pick here, then Step 2.5's batch nudge, then its lite-path
+offer), each a full round trip of idle wall clock. Before asking, judge each candidate's
+**apparent** triviality from its item text alone — tag is not `[FEAT]`, names ≤2 files, no new
+public API/schema — then issue a single `AskUserQuestion` with up to three questions:
+
+| # | Question | Emit when | Shape |
+|---|----------|-----------|-------|
+| Q1 | 처리할 그룹 | always | single-select; the candidates plus **"더 많은 항목 보기"** — the fast path's cap of 3 keeps this inside the 4-option limit |
+| Q2 | 함께 묶을 추가 항목 | ≥2 candidates look trivial | `multiSelect: true`; the trivial candidates. Selecting the Q1 group too is harmless — dedupe it |
+| Q3 | 라이트 패스 / 풀 사이클 | ≥1 candidate looks trivial | single-select, wording per Step 2.5's *Lite path offer* |
+
+Emit Q2/Q3 only under those conditions — a pick list with no trivial-looking candidate must not
+carry them, or the user is answering about a path that cannot apply.
+
+**Apparent triviality is a pre-filter, never the authority.** It is judged from item text, before
+any scoping; Step 2.5 re-judges the *selected* group properly. If the pick turns out non-trivial
+once scoped, discard the Q2/Q3 answers, say so in one line, and run the full cycle.
+
+**Discard the Q2/Q3 answers whenever the selection is re-made**, not only on that non-trivial
+outcome. Picking **"더 많은 항목 보기"** re-opens the choice, so the batch and lite-path answers
+now describe a task the user is no longer running — carrying them into Step 2.5 would merge a
+*different* item straight to `main` with no PR and no CI on the strength of an answer given about
+something else. Re-ask after any re-pick.
+
+Non-interactive run: ask nothing — the full-scan `[1]` default applies, no batching, full cycle.
 
 **Full scan (fast path found nothing, or `--all` batch mode):** Run the script in full-scan mode to build the complete candidate list:
 
@@ -150,14 +177,22 @@ Do NOT use `AskUserQuestion` in this step — a plain numbered list handles any 
 ## Step 2.5 — Size gate (batch nudge + lite path offer)
 
 Run after selecting a group, before Step 3. Evaluate whether the selected group is **trivial**:
-ALL must hold: tag is NOT `[FEAT]`, total in-scope files ≤2, no new public API/schema.
+ALL must hold: tag is NOT `[FEAT]`, total in-scope files ≤2, no new public API/schema. This is the
+authoritative judgement — Step 1's apparent-triviality pre-filter only decided which questions to
+ask.
 
-If **not trivial** OR **`--tree` is active** → skip this section entirely, proceed to Step 3 normally.
+If **not trivial** OR **`--tree` is active** → skip this section entirely, proceed to Step 3
+normally. Discard any Q2/Q3 answers Step 1 collected and say in one line that they no longer
+apply; do not silently drop a batch the user asked for.
 
-If **trivial** (and `--tree` is NOT active):
+If **trivial** (and `--tree` is NOT active): **the answers are usually already in hand.** When
+Step 1 emitted Q2/Q3, read them and do not ask again — the whole point of the batched gate is that
+this section costs zero further round trips. Ask only for a question Step 1 did not emit (the
+full-scan path, the Codex numbered-list path, or a condition that was not met at pick time).
 
-**Batch nudge** — scan for other trivial open groups (re-use the candidate list from Step 1;
-re-grep only if the list is no longer in context). If ≥1 other trivial groups exist, surface them:
+**Batch nudge** — Q2's answer, or, when Q2 was not emitted, scan for other trivial open groups
+(re-use the candidate list from Step 1; re-grep only if the list is no longer in context). If ≥1
+other trivial groups exist and no answer is in hand, surface them:
 
 ```
 선택한 태스크가 작습니다. 아래 항목들과 묶으면 PR·CI 오버헤드를 공유할 수 있습니다:
@@ -173,7 +208,8 @@ If the user selects ≥1 additional groups → treat the combined selection as a
 (`--all`)** run: skip A1–A3 (selection already done), proceed directly to **A4** with this
 confirmed unit list. End Step 2.5 here.
 
-**Lite path offer** — if the user declines the nudge (or no other trivial groups exist), offer:
+**Lite path offer** — Q3's answer, when Step 1 emitted it. Otherwise, if the user declines the
+nudge (or no other trivial groups exist), offer:
 
 ```
 [1] 라이트 패스 — 구현+QA 후 main에 직접 머지 (PR·CI 없음)
@@ -239,6 +275,12 @@ Check tag first, then file count:
   call `EnterPlanMode`, design the approach, call `ExitPlanMode` for user approval. If
   ToolSearch returns no results, present the plan as a numbered list and wait for explicit
   "proceed" before coding.
+  **Write the drafted Sprint Contract into the plan body**, in the shape the *Sprint Contract*
+  step below specifies (Tag / Scope / Acceptance criteria / Out of scope / Lint/test command).
+  One approval then covers approach *and* contract, and **Mark active** below follows with no
+  second round trip. Drafting it here costs nothing: the contract has to exist before implement
+  either way, and an acceptance criterion the user disagrees with is far cheaper to catch at
+  approval than after the code lands.
 - **Trivial** (tag is NOT `[FEAT]`/`[REFACTOR]` AND 1–2 files AND no new public API/schema):
   skip plan mode.
 - **Non-interactive run** (no live user reachable — see `dev:harness-init` →

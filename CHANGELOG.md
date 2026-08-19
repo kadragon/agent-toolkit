@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] preflight cached per branch, review panel short-circuits on line delta, human gates batched (dev v4.5.10) (2026-08-19)
 - [done] poll CI status every 5s for the first minute (dev v4.5.9) (2026-08-19)
 - [done] merge permission glob repointed at the task-review-cycle path (2026-08-17)
 - [done] CI enforces the invocation axis: coherence, call graph, notation (dev v4.5.7) (2026-08-17) → docs/invocation.md
