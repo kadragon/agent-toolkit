@@ -246,77 +246,17 @@ Step 2.5's outcome rides in the same report: failed-prediction edits appear as p
 
 Instruction-layer overlap rows, memory-promotion rows, and failed-prediction rows (Step 2.5) are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from each `overlap_state.py --check` run under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
 
-Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Set `HARNESS_PENDING=1` if the report had ≥1 non-Watch candidate row; omit or set to `0` if the report was empty or Watch-only. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
+Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Pass `--pending 1` if the report had ≥1 non-Watch candidate row, `--pending 0` if it was empty or Watch-only — an empty-report run **must** clear `lastCandidateMs`, or the nudge nags about candidates nobody produced. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
 
 ```bash
-# Choose the prefix: HARNESS_PENDING=1 if ≥1 non-Watch candidate was produced;
-# HARNESS_PENDING=0 (or omit the prefix entirely) if the report was empty or Watch-only.
-# Do NOT blindly copy HARNESS_PENDING=1 — an empty-report run must clear lastCandidateMs.
-HARNESS_PENDING=1 python3 - <<'PY'   # ← replace 1 with 0 for empty/Watch-only reports
-import glob, json, os, re, time
-config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-proj_root = os.path.join(config_dir, "projects")
-# Must land in the SAME dir Step 1's scanner reads for this cwd (see scan_transcripts.py
-# resolve_project_dir) — a raw, non-normcased substitution here can mint a case/underscore
-# sibling directory that then poisons that resolver's exact-match short-circuit on a future
-# run, silently hiding real transcript data under a different-cased sibling.
-def encode_project(path):
-    return re.sub(r"[/.:\\]", "-", os.path.normcase(os.path.abspath(path)))
-def loose_key(name):
-    return re.sub(r"[^a-z0-9]", "", name.lower())
-exact = os.path.join(proj_root, encode_project(os.getcwd()))
-state_dir = exact
-if os.path.isdir(proj_root) and len(glob.glob(os.path.join(exact, "*.jsonl"))) == 0:
-    target_key = loose_key(encode_project(os.getcwd()))
-    best, best_count = None, -1
-    for n in os.listdir(proj_root):
-        d = os.path.join(proj_root, n)
-        if os.path.isdir(d) and loose_key(n) == target_key:
-            count = len(glob.glob(os.path.join(d, "*.jsonl")))
-            if count > best_count:
-                best, best_count = d, count
-    if best is not None:
-        state_dir = best
-os.makedirs(state_dir, exist_ok=True)
-p = os.path.join(state_dir, ".harness-curator-state.json")
-now = int(time.time() * 1000)
-s = {}
-try:
-    with open(p) as f: s = json.load(f)
-except Exception: pass
-s["lastRunMs"] = now
-if os.environ.get("HARNESS_PENDING") == "1":
-    s["lastCandidateMs"] = now
-else:
-    s.pop("lastCandidateMs", None)
-with open(p, "w") as f: json.dump(s, f)
-print("harness-curate run recorded")
-
-# Mirror the same stamp into Codex's side (see scan_transcripts.py codex_state_dir) so its
-# incremental PROMPTS filter and the staleness nudge stay accurate too. Best-effort: Codex
-# may not be installed on this machine, and this scope may not have had Codex data at all —
-# either way, a failure here must never affect the Claude-side write above.
-try:
-    codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-    codex_state_dir = os.path.join(codex_home, "projects", encode_project(os.getcwd()))
-    os.makedirs(codex_state_dir, exist_ok=True)
-    cp = os.path.join(codex_state_dir, ".harness-curator-state.json")
-    cs = {}
-    try:
-        with open(cp) as f: cs = json.load(f)
-    except Exception: pass
-    cs["lastRunMs"] = now
-    if os.environ.get("HARNESS_PENDING") == "1":
-        cs["lastCandidateMs"] = now
-    else:
-        cs.pop("lastCandidateMs", None)
-    with open(cp, "w") as f: json.dump(cs, f)
-except Exception:
-    pass
-PY
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+RECORD="$SKILL_DIR/scripts/record_run.py"
+python3 "$RECORD" --pending 1                              # 0 for an empty / Watch-only report
+python3 "$RECORD" --pending 1 --project /abs/path/to/repo  # auditing a repo other than cwd
 ```
 
-This snippet only stamps the CURRENT project's Codex state (matching `os.getcwd()`, i.e. `current` scope) — `all`/`--project` runs still only update the cwd's own bookkeeping, same simplification the pre-existing Claude-side write already made (see the comment on Step 6's original design — this was never scope-complete, only cwd-complete).
+The script stamps the Claude-side state file and best-effort mirrors it to Codex, resolving both through the same helper the scanner and the nudge read from — so writer and readers cannot drift apart. Without `--project` it records the **cwd's** bookkeeping only: cwd-complete, never scope-complete, the same simplification the previous inline write made.
 
 ## Step 7 — Route to the creator (on confirmation)
 
@@ -360,4 +300,5 @@ When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that
 - **`references/trigger-router-template.md`** — UserPromptSubmit hook mapping prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)`. **Fallback only**, installed on a measured miss-rate ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)).
 - **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
 - **`scripts/overlap_state.py`** — Signal 7 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
+- **`scripts/record_run.py`** — Step 6 run bookkeeping: stamps `lastRunMs` and sets/clears `lastCandidateMs` (`--pending 1|0`) in `.harness-curator-state.json`, mirroring best-effort to Codex. Resolves the state dir through `overlap_state.state_path()` so this writer, the scanner, and the session-start nudge cannot drift apart; `--test` covers the pending semantics, key preservation, the drift case, and Codex-failure isolation.
 - **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.
