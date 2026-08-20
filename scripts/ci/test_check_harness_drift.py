@@ -657,6 +657,69 @@ def main() -> int:
         == [],
     )
 
+    # Review of this PR: five ways the arithmetic scan misread ordinary shell.
+    print("\nCapture-before-use — arithmetic scan boundaries (PR #242 review)")
+    for label, snippet in [
+        ("a regex alternation group", "grep -E '((FOO|BAR))' file"),
+        ("a sed capture group", "sed -E 's/((A)(B))/x/' f"),
+        ("a jq filter", "jq -r '.a[] | select((.B|not))' f"),
+    ]:
+        check(
+            f"{label} in quotes is not arithmetic",
+            mod.check_capture_before_use(f"```bash\n{snippet}\n```\n") == [],
+        )
+    check(
+        "a capture after the closing `))` on the same line still counts",
+        mod.check_capture_before_use(
+            "```bash\nX=$((\n1 + 2\n)); FOO=1\necho $FOO\n```\n"
+        )
+        == [],
+    )
+    check(
+        "`${#arr[@]}` does not cut the rest of the line as a comment",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nif (( ${#a[@]} > NOPE )); then :; fi\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a base prefix reads as a literal, and the rest of the line is still scanned",
+        len(mod.check_capture_before_use("```bash\necho $(( 16#FF + NOPE ))\n```\n")) == 1,
+    )
+    check(
+        "a trailing `#` comment is still stripped",
+        mod.check_capture_before_use("```bash\necho hi  # $NOPE mentioned\n```\n") == [],
+    )
+    for label, snippet in [
+        ("increment", "(( COUNT++ ))"),
+        ("compound assignment", "(( TOTAL += 1 ))"),
+    ]:
+        check(
+            f"arithmetic {label} on an uncaptured name reads it first",
+            len(mod.check_capture_before_use(f"```bash\n{snippet}\n```\n")) == 1,
+        )
+    check(
+        "an incremented name captured earlier in the block stays clean",
+        mod.check_capture_before_use("```bash\nCOUNT=0\n(( COUNT++ ))\necho $COUNT\n```\n")
+        == [],
+    )
+    check(
+        "a shell-provided name the doc captures itself is still graded across blocks",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nLINES=$(wc -l < f)\n```\n\np\n\n```bash\necho $LINES\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a shell-provided name read bare in arithmetic needs no capture",
+        mod.check_capture_before_use("```bash\nif (( SECONDS > 60 )); then :; fi\n```\n")
+        == [],
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

@@ -103,11 +103,12 @@ REFERENCE_GLOBS = [
 # All other skills are warn-only until brought into compliance separately.
 HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review", "task-review-cycle"}
 
-# Platform/shell-provided names. The second group is only ever read, never captured, and
-# turns up bare inside arithmetic (`(( SECONDS > 60 ))`) where the scan below now looks.
-ALLOWLIST_VARS = {
-    "HOME",
-    "PATH",
+# Seeded into every block's captured set: a doc never captures these itself.
+ALLOWLIST_VARS = {"HOME", "PATH"}
+# Shell-provided names, applied to arithmetic-derived reads only. They turn up bare inside
+# arithmetic (`(( SECONDS > 60 ))`) where nothing captures them, but a doc that assigns its
+# own `LINES`/`COLUMNS` must still be graded on the `$VAR` reads of it.
+SHELL_PROVIDED_VARS = {
     "SECONDS",
     "RANDOM",
     "LINENO",
@@ -129,18 +130,29 @@ CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
-# Arithmetic evaluation — `$(( ... ))` and `(( ... ))`. Inside it a variable is read with no
-# `$`, so VAR_USE_RE cannot see it: PR #240 shipped `$(( $(date +%s) - PANEL_START ))` reading
-# a variable captured only in an earlier fenced block, and this checker passed it.
-ARITH_RE = re.compile(r"\(\((.*?)\)\)")
-# The same span, allowed to cross newlines — a wrapped `$((\n ... \n))` is folded onto one
-# line before the scan so the line-oriented pass below can see inside it.
-ARITH_SPAN_RE = re.compile(r"\(\(.*?\)\)", re.DOTALL)
+# A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
+# `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
+COMMENT_RE = re.compile(r"(?:^|(?<=\s))#.*$")
+# Quoted regions. `((` inside them delimits nothing — `grep -E '((A|B))'` is a regex, not
+# arithmetic — so they are masked out before any arithmetic span is located.
+QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+# What may precede a bare `(( ... ))` for it to be arithmetic rather than nested subshells:
+# command position only.
+ARITH_CMD_POS_RE = re.compile(r"(?:[;&|(]|\b(?:for|if|while|until|then|do|elif|else|return|!))$")
+# Statement separators — a capture after one is still a capture (`)); COUNT=0`), which a
+# `^`-anchored match alone would miss and turn into a fabricated violation downstream.
+SEGMENT_RE = re.compile(r";|&&|\|\||&")
 # A bare name inside arithmetic. `$`/`{` exclude the `$VAR` and `${VAR}` forms VAR_USE_RE
 # already owns, so the two scans never double-report the same read.
-ARITH_VAR_RE = re.compile(r"(?<![$\w{])([A-Z_][A-Z0-9_]*)\b")
-# Arithmetic assigns as well as reads: `(( I=0; I<N; I++ ))` declares and drives `I` itself.
-ARITH_ASSIGN_RE = re.compile(r"\b([A-Z_][A-Z0-9_]*)\s*(?:\+\+|--|[-+*/%&|^]?=(?!=)|<<=|>>=)")
+# `#` joins the exclusions as a base prefix: the `FF` of `$(( 16#FF ))` is a literal digit
+# string, not a variable.
+ARITH_VAR_RE = re.compile(r"(?<![$\w{#])([A-Z_][A-Z0-9_]*)\b")
+# Arithmetic assigns as well as reads. A plain `=` is a pure capture (`(( I=0; I<N; I++ ))`
+# declares its own counter); `++`, `--` and `OP=` read the old value first, so they must not
+# silence the read — `(( COUNT++ ))` on an unset name is PR #240's bug in another spelling.
+ARITH_ASSIGN_RE = re.compile(
+    r"(?<![$\w])([A-Z_][A-Z0-9_]*)\s*(\+\+|--|(?:<<|>>|[-+*/%&|^])?=(?!=))"
+)
 # Command substitution nested in arithmetic — `$(( $(DATE +%s) + 1 ))`. Its contents are a
 # command line, not an arithmetic expression, so the bare-name scan must not read `DATE` as a
 # variable. Any `$VAR` inside it is still caught by VAR_USE_RE over the whole line.
@@ -269,28 +281,71 @@ def parse_frontmatter(text: str) -> tuple[str | None, str]:
     return name, " ".join(p for p in description_parts if p)
 
 
+def _mask_quoted(line: str) -> str:
+    """Blank out quoted regions, preserving offsets, so `((` inside them is not arithmetic."""
+    return QUOTED_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def _arith_opens(masked: str, start: int = 0):
+    """Yield the offset just past every real arithmetic `((` in `masked`."""
+    i = start
+    while True:
+        j = masked.find("((", i)
+        if j < 0:
+            return
+        i = j + 2
+        if j > 0 and masked[j - 1] == "$":
+            yield i
+            continue
+        before = masked[:j].rstrip()
+        if not before or ARITH_CMD_POS_RE.search(before):
+            yield i
+
+
 def _fold_multiline_arith(block: str) -> str:
     r"""Join a newline-spanning `(( ... ))` onto one line so the line scan can see inside it.
 
-    `((` and `))` also occur inside string literals, where they delimit nothing. Folding such
-    a pair swallows the real lines between them — a capture statement caught mid-line stops
-    matching `VAR_CAPTURE_RE`'s `^\s*` anchor and is re-read as an arithmetic assignment,
-    masking a later genuine violation. A span carrying a quote, or one that spans a real
-    capture, is therefore left alone: an unfolded span is only a missed read, never a
-    fabricated capture.
+    Quoted regions are masked first, so a `((` living in a string literal several lines above
+    a `))` in another one cannot fold the real statements between them.
     """
+    masked = "\n".join(_mask_quoted(line) for line in block.splitlines())
+    out = list(block)
+    i = 0
+    for open_end in _arith_opens(masked):
+        if open_end < i:
+            continue
+        close = masked.find("))", open_end)
+        if close < 0:
+            continue
+        i = close + 2
+        span = block[open_end:close]
+        if "\n" not in span or '"' in span or "'" in span:
+            continue
+        for idx in range(open_end, close):
+            if out[idx] == "\n":
+                out[idx] = " "
+    return "".join(out)
 
-    def fold(m: re.Match) -> str:
-        span = m.group(0)
-        if "\n" not in span:
-            return span
-        if '"' in span or "'" in span:
-            return span
-        if any(VAR_CAPTURE_RE.match(line) for line in span.splitlines()[1:]):
-            return span
-        return span.replace("\n", " ")
 
-    return ARITH_SPAN_RE.sub(fold, block)
+def _arith_reads(line: str) -> tuple[list[str], set[str], set[str]]:
+    """Return (reads, pure_captures, read_write) for the arithmetic spans on `line`."""
+    masked = _mask_quoted(line)
+    reads: list[str] = []
+    pure: set[str] = set()
+    read_write: set[str] = set()
+    i = 0
+    for open_end in _arith_opens(masked):
+        if open_end < i:
+            continue
+        close = masked.find("))", open_end)
+        if close < 0:
+            continue
+        i = close + 2
+        span = ARITH_CMDSUB_RE.sub(" ", line[open_end:close])
+        for name, op in ARITH_ASSIGN_RE.findall(span):
+            (pure if op == "=" else read_write).add(name)
+        reads += ARITH_VAR_RE.findall(span)
+    return reads, pure, read_write
 
 
 def check_capture_before_use(text: str) -> list[str]:
@@ -306,19 +361,18 @@ def check_capture_before_use(text: str) -> list[str]:
     earlier_blocks: dict[str, int] = {}
     for block_num, m in enumerate(FENCE_RE.finditer(text), start=1):
         captured = set(ALLOWLIST_VARS)
-        block_text = _fold_multiline_arith(m.group(2))
-        for line in block_text.splitlines():
-            # Ignore full-line and inline comments — commented-out $VAR is not a use.
-            line = line.split("#", 1)[0]
+        for line in _fold_multiline_arith(m.group(2)).splitlines():
+            line = COMMENT_RE.sub("", line)
             reads = [(var, f"${{{var}}}") for var in VAR_USE_RE.findall(line)]
-            for arith in ARITH_RE.findall(line):
-                arith = ARITH_CMDSUB_RE.sub(" ", arith)
-                # A name the expression assigns is captured by it, wherever in the span it
-                # sits — the loop header's `I=0` precedes the `I<N` the parser reaches first.
-                captured.update(ARITH_ASSIGN_RE.findall(arith))
-                reads += [
-                    (var, f"{var} (arithmetic)") for var in ARITH_VAR_RE.findall(arith)
-                ]
+            arith, pure, read_write = _arith_reads(line)
+            # A name the expression itself declares is captured by it, wherever in the span
+            # it sits — the loop header's `I=0` precedes the `I<N` the parser reaches first.
+            captured |= pure
+            reads += [
+                (var, f"{var} (arithmetic)")
+                for var in arith
+                if var not in pure and var not in SHELL_PROVIDED_VARS
+            ]
             for var, shown in reads:
                 if var in captured:
                     continue
@@ -332,10 +386,14 @@ def check_capture_before_use(text: str) -> list[str]:
                     f"block #{block_num}: {shown} used before capture{origin}"
                     f" — line: {line.strip()!r}"
                 )
-            cap = VAR_CAPTURE_RE.match(line)
-            if cap:
-                captured.add(cap.group(1))
-                earlier_blocks.setdefault(cap.group(1), block_num)
+            captured |= read_write
+            for segment in SEGMENT_RE.split(line):
+                cap = VAR_CAPTURE_RE.match(segment)
+                if cap:
+                    captured.add(cap.group(1))
+                    earlier_blocks.setdefault(cap.group(1), block_num)
+            for name in pure | read_write:
+                earlier_blocks.setdefault(name, block_num)
     return problems
 
 
