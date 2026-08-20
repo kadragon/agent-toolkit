@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.8
+version: 1.6.9
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
@@ -42,8 +42,8 @@ fi
 ```
 
 If `dirty` is non-empty and `current_branch` is not `main`/`master`, route directly to the "Work
-already in flight" edge case and inspect the matching feature branch, even when the default
-single-item path has no `tasks.md`. Include all captured dirty paths in the diagnosis: source edits
+already in flight" edge case (`references/edge-cases.md`) and inspect the matching feature
+branch, even when the default single-item path has no `tasks.md`. Include all captured dirty paths in the diagnosis: source edits
 are expected while resuming a feature-branch sprint. On `main`/`master`, route only when
 `task_contract_dirty` and `task_worktree` are both non-empty; this is the `--tree` exception, whose
 main checkout stays on `main` while the file-backed Sprint Contract (and optionally release
@@ -237,21 +237,11 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 git checkout -b "$BRANCH"
 ```
 
-**Roster check — before any agent spawn in this step or the ones below.** A role exists only if
-`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present. `dev:harness-init` creates
-**no** roles (its Step 4b), so an empty roster is the designed state of a freshly initialized repo,
-not a defect — never stop on it, and never create the role mid-task. Route around it per the
-fallbacks attached to each spawn point below, say in one line which fallback you took, and note that
-`dev:harness-curate` is what adds a role once the transcripts show the delegation recurring.
-
-```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
-```
-
-The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
-(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
-lists the role as an available agent type, treat it as present regardless of the probe.
+**Roster check — before any agent spawn in this step or the ones below.** A role that is absent is
+never a reason to stop, and never a reason to create the role mid-task: route around it and say in
+one line which fallback you took. The probe, the installed-plugin caveat and the per-role fallbacks
+are canonical in `dev:harness-init` → `references/harness-invariants.md` → *Absent-Role Fallbacks* —
+read it the first time a spawn in this run finds its role missing.
 
 **Result-handoff rule (applies to every agent this skill spawns).** Any agent launched with a
 `name` — and, as cheap insurance, any launched with `run_in_background: true` — must be told
@@ -264,9 +254,7 @@ and `references/batch.md` — including when the result is empty.
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
-writing the Sprint Contract. **`explorer` absent from the roster:** spawn the built-in `Explore`
-subagent with the same brief — it is the ad-hoc fan-out `dev:harness-init` points at for a repo
-with no roles.
+writing the Sprint Contract. **`explorer` absent from the roster:** see *Absent-Role Fallbacks*.
 
 **Plan mode gate (before workflows.md Step 2)**
 Check tag first, then file count:
@@ -328,14 +316,11 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Objective / Output format / Tools to use / Boundaries). List each item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
-- **`implementer` absent from the roster:** implement inline on the main thread. The Sprint
-  Contract, the in-scope path list and the lint/test command all still apply — only the spawn
-  brief is dropped. QA then follows the same rule it always does: whoever implemented does not
-  verify, so the main thread hands off to the verifier per the QA step below. This fallback
-  covers every implementer spawn this skill owns, including `--tree` mode and batch mode's
-  per-unit fan-out (`references/tree.md`, `references/batch.md`) — there the main thread works
-  the units itself, sequentially, one worktree at a time, since the parallelism came from the
-  fan-out that is no longer available.
+- **`implementer` absent from the roster:** see *Absent-Role Fallbacks* — implement inline on the
+  main thread. It covers every implementer spawn this skill owns, `--tree` mode and batch mode's
+  per-unit fan-out (`references/tree.md`, `references/batch.md`) included; there the main thread
+  works the units itself, sequentially, one worktree at a time, since the parallelism came from
+  the fan-out that is no longer available.
 - **Per-item checkpoint (≥2-item group, default mode):** work the `## Covers` items one at a time
   and run the Sprint Contract's lint/test command after each one, before starting the next — a
   failure in the first item must surface at that item, not be discovered at handoff. Applies to the
@@ -386,19 +371,10 @@ implementation is correct — the verifier grades the diff against the contract,
 conclusion is what it will confirm. Applies to every QA spawn this skill owns, the
 `general-purpose` fallback and batch mode's per-unit verifiers included.
 
-**`qa-verifier` absent from the roster:** spawn the built-in `general-purpose` subagent as the
-verifier instead. The brief keeps the same shape a role file would have carried — `docs/delegation.md`
-four-field format (Objective / Output format / Tools to use / Boundaries) plus effort tier — filled
-with the Sprint Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test
-command, and telling it to verify against those criteria rather than impressions and to change
-nothing. **Carry the standing-checks floor in the brief too** — with no role file there is no
-`## Checks (always run)` for the brief to point at, so the gates every contract inherits reach the
-verifier only if the brief states them. Take them from `harness-init` →
-`references/harness-invariants.md` → *Verifier Standing-Checks Floor*; do not reconstruct the list
-from memory. What must never be dropped is the independence, not the role name: the agent
-that implemented — the main thread included, when the implementer fallback above was taken — does
-not verify its own output. This fallback applies to every QA spawn this skill owns, batch mode's
-per-unit verifiers included.
+**`qa-verifier` absent from the roster:** see *Absent-Role Fallbacks* — spawn `general-purpose`
+with the same four-field brief, carrying the standing-checks floor because no role file states it.
+Independence is what must not be dropped, not the role name; the fallback applies to every QA spawn
+this skill owns, batch mode's per-unit verifiers included.
 
 If the verifier reports blocking issues:
 1. Surface findings to user.
@@ -575,82 +551,14 @@ Implements multiple units in parallel worktrees, then collapses them onto one in
 
 ## Edge cases
 
-**Work already in flight** — feature branch with uncommitted changes from a previous session.
-This is the routing target when the Prerequisites "Working tree gate" finds an in-flight branch
-rather than stray dirty files. Run 3 ordered, cheap checks to produce a specific diagnosis
-before asking for confirmation — this only automates the *diagnosis* text, not the resume
-action itself; always still ask yes/no.
+Five branches a normal run never reaches. Recognise them by name here; open
+`references/edge-cases.md` for the full handling before acting on one.
 
-1. **Commits already ahead of `main`?**
-   ```bash
-   commits=$(git log main..HEAD --oneline 2>/dev/null)
-   [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
-   ```
-   If `$commits` is non-empty, `task-review-cycle` Step 1 (commit) already ran. Diagnosis:
-   offer `task-review-cycle --from task-next --auto` directly — plus `--qa-pending` and the
-   restated Sprint Contract unless QA is *known* to have run (see **Whether QA is still owed**
-   below). Commits ahead of `main` no longer prove it did: on the default full-cycle path QA
-   happens inside the cycle at 2-4, after the Step 1 commit.
-
-2. **No commits ahead, but an active Sprint Contract?**
-
-   The working-tree gate already routes a dirty main checkout with a matching `.worktrees/` path
-   here. Diagnose "`--tree` run in flight in `<path>`" (read the matching path captured by the
-   gate) and route the user to inspect/resume that worktree, or abort it via `references/tree.md`'s
-   QA-failure cleanup block, instead of the diff-based verdict below.
-
-   ```bash
-   active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
-   ```
-   A zero here is not proof no sprint is running — a single-item backlog.md cycle keeps its
-   Sprint Contract inline and never writes `tasks.md` (see **Mark active** in Step 3), so this
-   check alone cannot see it. If `$active_block` is zero, fall through to check 3's generic
-   fallback rather than concluding no sprint is active. If `$active_block` is non-zero, check
-   what's already changed to distinguish stage. Include
-   untracked files (`git diff --stat` alone misses new files an implementer created but never
-   staged — e.g. a brand-new script):
-   ```bash
-   code_diff=$(git diff --stat -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
-   untracked=$(git ls-files --others --exclude-standard -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
-   bump_diff=$(git diff --stat -- '**/plugin.json' 2>/dev/null)
-   ```
-   - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
-     implementation yet. Diagnosis: resume at **Step 3 – Implement**.
-   - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
-     version bump yet. Diagnosis: resume at **Step 3 – version bump**, then Step 4's handoff. On
-     the default full-cycle path there is no QA stage left to resume here — it is owed to the
-     cycle's 2-4 slot; on the lite path, `--tree` and `--all`, resume at their QA step as before.
-   - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
-     **Step 4 – Handoff**.
-
-3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
-   back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
-   `task-review-cycle --from task-next --auto`?" — with `--qa-pending` and a restated contract
-   per **Whether QA is still owed** below, which this branch almost always triggers.
-
-**Whether QA is still owed.** A resumed run must decide this before handing off, and it is not
-inferable from commits: on the default full-cycle path QA lives in the cycle's 2-4 slot, *after*
-the Step 1 commit. Treat QA as owed unless this session has the verifier's own verdict in hand, or
-the run was a lite/`--tree`/`--all` path (all three verify before handing off). QA owed → hand off
-with `--qa-pending` **and** the Sprint Contract restated verbatim, or the cycle stops and asks for
-it. When the contract cannot be recovered — the usual case under check 3, where `tasks.md` may
-already be pruned — do not append the flag blind: reconstruct the contract with the user from the
-diff and the backlog item first, and say that is what you are doing.
-
-Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
-- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` — adding `--qa-pending` plus the restated contract when QA is owed — for
-  check 1 / the generic fallback).
-- **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
-  first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.
-
-**Deferred backlog item (≥2 candidates)** — item has `*(deferred: ...)*`. Surface the blocker
-and confirm it is resolved before proceeding. If unresolved, skip to the next candidate.
-If all candidates are deferred with unresolved blockers, report that and stop.
-(For the single-candidate case, see Step 2 table.)
-
-**Deferred item in a group** — if any item in a heading group is deferred and the blocker
-is unresolved, note it as a warning but continue with the non-deferred items in that group.
-If all items in the group are deferred, skip the group (see Step 2 deferred-items rule).
-
-**Review finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
-Record broader related items back to `backlog.md` via the out-of-scope path in task-review.
+- **Work already in flight** — a feature branch (or a `--tree` worktree) carrying uncommitted work
+  from a previous session. The Prerequisites working-tree gate routes here. Three ordered checks
+  produce a specific diagnosis; always still ask yes/no before resuming.
+- **Whether QA is still owed** — a resumed run must decide this before handing off. Commits ahead
+  of `main` do not prove QA ran.
+- **Deferred backlog item (≥2 candidates)** — surface the blocker, confirm it is resolved.
+- **Deferred item in a group** — warn and continue with the group's non-deferred items.
+- **Review finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.

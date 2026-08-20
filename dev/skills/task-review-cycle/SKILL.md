@@ -356,14 +356,10 @@ diff against the contract, and a supplied conclusion is what it will confirm.
 verifies its own output — including the main thread, when the caller implemented inline because
 `implementer` was absent from its roster.
 
-**`qa-verifier` absent from the roster** (`.claude/agents/qa-verifier.md` or
-`~/.claude/agents/qa-verifier.md`; a role supplied by an installed plugin counts as present even
-though no path check finds it): spawn the built-in `general-purpose` subagent instead, with the same
-four-field brief plus effort tier. **Carry the standing-checks floor in the brief too** — with no
-role file there is no `## Checks (always run)` for the brief to point at, so the gates every contract
-inherits reach the verifier only if the brief states them. Take them from `dev:harness-init` →
-`references/harness-invariants.md` → *Verifier Standing-Checks Floor*; do not reconstruct the list
-from memory.
+**`qa-verifier` absent from the roster:** spawn `general-purpose` instead, with the same four-field
+brief plus effort tier, carrying the standing-checks floor because no role file states it. The
+roster probe, the installed-plugin caveat and the full fallback are canonical in `dev:harness-init`
+→ `references/harness-invariants.md` → *Absent-Role Fallbacks*.
 
 Three rules separate this slot from the review sources, each contradicting a rule the panel already
 has — apply them as written rather than by analogy to 2-1/2-2/2-3:
