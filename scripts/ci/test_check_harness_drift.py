@@ -580,6 +580,200 @@ def main() -> int:
             == [],
         )
 
+    # Capture-before-use — PR #240's defect: `$(( $(date +%s) - PANEL_START ))` read a
+    # variable whose only capture lived in an earlier fenced block. Arithmetic reads carry
+    # no `$`, so the scan never saw the use and CI passed the block.
+    print("\nCapture-before-use — arithmetic reads and block boundaries (PR #240)")
+    cross_block = (
+        "```bash\nPANEL_START=$(date +%s)\n```\n\nprose\n\n"
+        "```bash\nELAPSED=$(( $(date +%s) - PANEL_START ))\n```\n"
+    )
+    cross = mod.check_capture_before_use(cross_block)
+    check(
+        "an arithmetic read captured only in an earlier block is flagged",
+        len(cross) == 1,
+        f"got {cross}",
+    )
+    check(
+        "the message names the capturing block and the shell boundary",
+        bool(cross) and "block #1" in cross[0] and "separate shell" in cross[0],
+        f"got {cross}",
+    )
+    check(
+        "an arithmetic read captured earlier in the same block is clean",
+        mod.check_capture_before_use(
+            "```bash\nHEAD_KEEP=10\nomitted=$((line_count - HEAD_KEEP))\n```\n"
+        )
+        == [],
+    )
+    check(
+        "shell-provided names are not reads to capture",
+        mod.check_capture_before_use("```bash\nif (( SECONDS > 60 )); then :; fi\n```\n")
+        == [],
+    )
+    check(
+        "a `$VAR` inside arithmetic is reported once, not twice",
+        len(mod.check_capture_before_use("```bash\necho $(( $NOPE + 1 ))\n```\n")) == 1,
+    )
+    # False positives the first draft of the arithmetic scan produced (QA, this sprint).
+    check(
+        "a C-style for-loop header declares its own counter",
+        mod.check_capture_before_use(
+            "```bash\nfor (( I=0; I<3; I++ )); do echo $I; done\n```\n"
+        )
+        == [],
+    )
+    check(
+        "an uppercase command inside `$(...)` nested in arithmetic is not a read",
+        mod.check_capture_before_use("```bash\necho $(( $(DATE +%s) + 1 ))\n```\n") == [],
+    )
+    check(
+        "arithmetic wrapped across lines is still scanned",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nY=$((\n  $(date +%s) - NOPE\n))\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "self-referential increment with no prior capture is still flagged",
+        len(mod.check_capture_before_use("```bash\nCOUNT=$(( COUNT + 1 ))\n```\n")) == 1,
+    )
+    # QA pass 2: `((`/`))` inside two separate string literals is not arithmetic. Folding
+    # that span swallowed the capture between them and masked the real violation after it.
+    stray_parens = (
+        '```bash\necho "note ((\nsomething"\nCAPTURED=$(date +%s)\n'
+        'echo "more))\ntext"\nUSE=$NOT_CAPTURED\n```\n'
+    )
+    check(
+        "a stray-paren span across string literals does not mask a later violation",
+        len(mod.check_capture_before_use(stray_parens)) == 1,
+        f"got {mod.check_capture_before_use(stray_parens)}",
+    )
+    check(
+        "a real capture between those strings still counts as a capture",
+        mod.check_capture_before_use(stray_parens.replace("$NOT_CAPTURED", "$CAPTURED"))
+        == [],
+    )
+
+    # Review of this PR: five ways the arithmetic scan misread ordinary shell.
+    print("\nCapture-before-use — arithmetic scan boundaries (PR #242 review)")
+    for label, snippet in [
+        ("a regex alternation group", "grep -E '((FOO|BAR))' file"),
+        ("a sed capture group", "sed -E 's/((A)(B))/x/' f"),
+        ("a jq filter", "jq -r '.a[] | select((.B|not))' f"),
+    ]:
+        check(
+            f"{label} in quotes is not arithmetic",
+            mod.check_capture_before_use(f"```bash\n{snippet}\n```\n") == [],
+        )
+    check(
+        "a capture after the closing `))` on the same line still counts",
+        mod.check_capture_before_use(
+            "```bash\nX=$((\n1 + 2\n)); FOO=1\necho $FOO\n```\n"
+        )
+        == [],
+    )
+    check(
+        "`${#arr[@]}` does not cut the rest of the line as a comment",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nif (( ${#a[@]} > NOPE )); then :; fi\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a base prefix reads as a literal, and the rest of the line is still scanned",
+        len(mod.check_capture_before_use("```bash\necho $(( 16#FF + NOPE ))\n```\n")) == 1,
+    )
+    check(
+        "a trailing `#` comment is still stripped",
+        mod.check_capture_before_use("```bash\necho hi  # $NOPE mentioned\n```\n") == [],
+    )
+    for label, snippet in [
+        ("increment", "(( COUNT++ ))"),
+        ("compound assignment", "(( TOTAL += 1 ))"),
+    ]:
+        check(
+            f"arithmetic {label} on an uncaptured name reads it first",
+            len(mod.check_capture_before_use(f"```bash\n{snippet}\n```\n")) == 1,
+        )
+    check(
+        "an incremented name captured earlier in the block stays clean",
+        mod.check_capture_before_use("```bash\nCOUNT=0\n(( COUNT++ ))\necho $COUNT\n```\n")
+        == [],
+    )
+    check(
+        "a shell-provided name the doc captures itself is still graded across blocks",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nLINES=$(wc -l < f)\n```\n\np\n\n```bash\necho $LINES\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a shell-provided name read bare in arithmetic needs no capture",
+        mod.check_capture_before_use("```bash\nif (( SECONDS > 60 )); then :; fi\n```\n")
+        == [],
+    )
+
+    # Second review pass on this PR: forms the scan skipped or misread.
+    print("\nCapture-before-use — quoting and evaluation order (PR #242 review, pass 2)")
+    check(
+        "double quotes still expand arithmetic, so the read is graded",
+        len(
+            mod.check_capture_before_use(
+                '```bash\necho "value $(( MISSING + 1 ))"\n```\n'
+            )
+        )
+        == 1,
+    )
+    check(
+        "the right-hand side of an arithmetic assignment is a read",
+        len(mod.check_capture_before_use("```bash\n(( COUNT = COUNT + 1 ))\n```\n")) == 1,
+    )
+    check(
+        "that same assignment is clean once the name is captured",
+        mod.check_capture_before_use("```bash\nCOUNT=0\n(( COUNT = COUNT + 1 ))\n```\n")
+        == [],
+    )
+    check(
+        "a `;` inside quotes does not fabricate a capture",
+        len(
+            mod.check_capture_before_use(
+                "```bash\necho 'literal; FOO=bar'\necho \"$FOO\"\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a capture after a real separator still counts",
+        mod.check_capture_before_use('```bash\n: ; FOO=bar\necho "$FOO"\n```\n') == [],
+    )
+    for label, snippet in [
+        ("negated", "! (( MISSING ))"),
+        ("grouped", "{ (( MISSING )); }"),
+        ("timed", "time (( MISSING ))"),
+    ]:
+        check(
+            f"a bare {label} arithmetic command is scanned",
+            len(mod.check_capture_before_use(f"```bash\n{snippet}\n```\n")) == 1,
+        )
+    check(
+        "a `#` comment opening right after a separator is stripped",
+        mod.check_capture_before_use("```bash\necho ok;# $NOPE\n```\n") == [],
+    )
+    check(
+        "a comment inside a wrapped expression does not swallow the next operand",
+        len(
+            mod.check_capture_before_use("```bash\nY=$((\n1 # note\n+ NOPE\n))\n```\n")
+        )
+        == 1,
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

@@ -7,8 +7,9 @@ Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     depend on hook-only plugin root variables to locate bundled files.
 
 (b) Capture-before-use — every `$VAR` / `${VAR}` (uppercase) referenced
-    inside a fenced ```bash/```sh code block must have a `VAR=` capture
-    earlier in the *same* block. Platform env vars (HOME, PATH) are allowlisted.
+    inside a fenced ```bash/```sh code block — including a bare name read inside
+    `$(( ... ))` — must have a `VAR=` capture earlier in the *same* block; each block
+    is a separate shell. Platform and shell-provided names are allowlisted.
 
 (c) Section references - every `§N` / `§ "Title"` pointer and every
     `<file>.md` → *Title* arrow pointer that names a bundled `*.md` on the same
@@ -102,7 +103,25 @@ REFERENCE_GLOBS = [
 # All other skills are warn-only until brought into compliance separately.
 HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review", "task-review-cycle"}
 
+# Seeded into every block's captured set: a doc never captures these itself.
 ALLOWLIST_VARS = {"HOME", "PATH"}
+# Shell-provided names, applied to arithmetic-derived reads only. They turn up bare inside
+# arithmetic (`(( SECONDS > 60 ))`) where nothing captures them, but a doc that assigns its
+# own `LINES`/`COLUMNS` must still be graded on the `$VAR` reads of it.
+SHELL_PROVIDED_VARS = {
+    "SECONDS",
+    "RANDOM",
+    "LINENO",
+    "EPOCHSECONDS",
+    "OPTIND",
+    "UID",
+    "EUID",
+    "PPID",
+    "BASHPID",
+    "SHLVL",
+    "COLUMNS",
+    "LINES",
+}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
 HOOKS_FILE = REPO_ROOT / "dev/hooks.json"
 
@@ -111,6 +130,35 @@ CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
+# A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
+# `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
+COMMENT_RE = re.compile(r"(?:^|(?<=[\s;&|(]))#.*$")
+# Quoted regions. `((` inside them delimits nothing — `grep -E '((A|B))'` is a regex, not
+# arithmetic — so they are masked out before any arithmetic span is located.
+QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+# What may precede a bare `(( ... ))` for it to be arithmetic rather than nested subshells:
+# command position only.
+ARITH_CMD_POS_RE = re.compile(r"(?:[;&|({!]|\b(?:for|if|while|until|then|do|elif|else|return|time))$")
+# An arithmetic expansion surviving inside a double-quoted region.
+DQUOTED_ARITH_RE = re.compile(r"\$\(\(.*?\)\)")
+# Statement separators — a capture after one is still a capture (`)); COUNT=0`), which a
+# `^`-anchored match alone would miss and turn into a fabricated violation downstream.
+SEGMENT_RE = re.compile(r";|&&|\|\||&")
+# A bare name inside arithmetic. `$`/`{` exclude the `$VAR` and `${VAR}` forms VAR_USE_RE
+# already owns, so the two scans never double-report the same read.
+# `#` joins the exclusions as a base prefix: the `FF` of `$(( 16#FF ))` is a literal digit
+# string, not a variable.
+ARITH_VAR_RE = re.compile(r"(?<![$\w{#])([A-Z_][A-Z0-9_]*)\b")
+# Arithmetic assigns as well as reads. A plain `=` is a pure capture (`(( I=0; I<N; I++ ))`
+# declares its own counter); `++`, `--` and `OP=` read the old value first, so they must not
+# silence the read — `(( COUNT++ ))` on an unset name is PR #240's bug in another spelling.
+ARITH_ASSIGN_RE = re.compile(
+    r"(?<![$\w])([A-Z_][A-Z0-9_]*)\s*(\+\+|--|(?:<<|>>|[-+*/%&|^])?=(?!=))"
+)
+# Command substitution nested in arithmetic — `$(( $(DATE +%s) + 1 ))`. Its contents are a
+# command line, not an arithmetic expression, so the bare-name scan must not read `DATE` as a
+# variable. Any `$VAR` inside it is still caught by VAR_USE_RE over the whole line.
+ARITH_CMDSUB_RE = re.compile(r"\$\([^()]*\)")
 
 # Section references. `§3e`, `§ "Title"`, `§'Title'` — a bare `§Some Words` with
 # neither number nor quotes is deliberately unmatched: those point at the global
@@ -235,23 +283,179 @@ def parse_frontmatter(text: str) -> tuple[str | None, str]:
     return name, " ".join(p for p in description_parts if p)
 
 
+def _mask_quoted(line: str) -> str:
+    """Blank out quoted regions, preserving offsets — for locating statement separators.
+
+    A `;` inside either quote form is literal text, not a separator.
+    """
+    return QUOTED_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def _mask_literal(line: str) -> str:
+    """Blank out what the shell takes literally, preserving offsets — for locating arithmetic.
+
+    Single quotes suppress expansion entirely. Double quotes do not: `echo "$(( N + 1 ))"`
+    evaluates, so an arithmetic expansion inside them stays visible while the surrounding
+    literal text is blanked.
+    """
+
+    def repl(m: re.Match) -> str:
+        span = m.group(0)
+        if span.startswith("'"):
+            return " " * len(span)
+        out = [" "] * len(span)
+        for arith in DQUOTED_ARITH_RE.finditer(span):
+            out[arith.start() : arith.end()] = span[arith.start() : arith.end()]
+        return "".join(out)
+
+    return QUOTED_RE.sub(repl, line)
+
+
+def _arith_opens(masked: str, start: int = 0):
+    """Yield the offset just past every real arithmetic `((` in `masked`."""
+    i = start
+    while True:
+        j = masked.find("((", i)
+        if j < 0:
+            return
+        i = j + 2
+        if j > 0 and masked[j - 1] == "$":
+            yield i
+            continue
+        before = masked[:j].rstrip()
+        if not before or ARITH_CMD_POS_RE.search(before):
+            yield i
+
+
+def _fold_multiline_arith(block: str) -> str:
+    r"""Join a newline-spanning `(( ... ))` onto one line so the line scan can see inside it.
+
+    Quoted regions are masked first, so a `((` living in a string literal several lines above
+    a `))` in another one cannot fold the real statements between them.
+    """
+    masked = "\n".join(_mask_quoted(line) for line in block.splitlines())
+    out = list(block)
+    i = 0
+    for open_end in _arith_opens(masked):
+        if open_end < i:
+            continue
+        close = masked.find("))", open_end)
+        if close < 0:
+            continue
+        i = close + 2
+        span = block[open_end:close]
+        if "\n" not in span or '"' in span or "'" in span:
+            continue
+        for idx in range(open_end, close):
+            if out[idx] == "\n":
+                out[idx] = " "
+    return "".join(out)
+
+
+def _segments(line: str) -> list[str]:
+    """Split `line` on statement separators that are not inside quotes."""
+    masked = _mask_quoted(line)
+    cuts = [0]
+    for sep in SEGMENT_RE.finditer(masked):
+        cuts.append(sep.end())
+    return [line[a:b] for a, b in zip(cuts, cuts[1:] + [len(line)])]
+
+
+def emit(reads, line, block_num, captured, earlier_blocks, problems) -> None:
+    """Record a violation for each read with no capture in scope."""
+    for var, shown in reads:
+        if var in captured:
+            continue
+        where = earlier_blocks.get(var)
+        origin = (
+            f" — captured in block #{where}, which is a separate shell"
+            if where is not None
+            else ""
+        )
+        problems.append(
+            f"block #{block_num}: {shown} used before capture{origin}"
+            f" — line: {line.strip()!r}"
+        )
+
+
+def _arith_reads(line: str) -> tuple[list[str], set[str]]:
+    """Return (bare reads, names the arithmetic captures) for the arithmetic spans on `line`.
+
+    Sub-expressions are walked in evaluation order, split on `;`: `(( I=0; I<3; I++ ))`
+    declares `I` before the condition reads it, so the loop header is self-contained. Within
+    one sub-expression only the assignment's left-hand side is a capture — the right-hand
+    side of `(( COUNT = COUNT + 1 ))` reads the old value, which is PR #240's bug again.
+    """
+    masked = _mask_literal(line)
+    reads: list[str] = []
+    captures: set[str] = set()
+    scanned_to = 0
+    for open_end in _arith_opens(masked):
+        if open_end < scanned_to:
+            continue
+        close = masked.find("))", open_end)
+        if close < 0:
+            continue
+        scanned_to = close + 2
+        span = ARITH_CMDSUB_RE.sub(" ", line[open_end:close])
+        declared: set[str] = set()
+        for sub in span.split(";"):
+            lhs_spans = []
+            assigned = set()
+            for assign in ARITH_ASSIGN_RE.finditer(sub):
+                assigned.add(assign.group(1))
+                if assign.group(2) == "=":
+                    lhs_spans.append(assign.span(1))
+            for use in ARITH_VAR_RE.finditer(sub):
+                if any(s <= use.start() < e for s, e in lhs_spans):
+                    continue
+                name = use.group(1)
+                if name in declared or name in SHELL_PROVIDED_VARS:
+                    continue
+                reads.append(name)
+            declared |= assigned
+            captures |= assigned
+    return reads, captures
+
+
 def check_capture_before_use(text: str) -> list[str]:
-    """Return list of capture-before-use violation messages (empty = clean)."""
+    """Return list of capture-before-use violation messages (empty = clean).
+
+    Each fenced block is a fresh shell — an agent runs it as its own invocation — so
+    captures never carry across a block boundary. `earlier_blocks` records where a name
+    was captured previously only to name that boundary in the message: a read whose sole
+    capture sits in an earlier block is still a violation, and the confusing case is the
+    one where the doc *looks* like it captured the value.
+    """
     problems = []
+    earlier_blocks: dict[str, int] = {}
     for block_num, m in enumerate(FENCE_RE.finditer(text), start=1):
         captured = set(ALLOWLIST_VARS)
-        block_lines = m.group(2).splitlines()
-        for line in block_lines:
-            # Ignore full-line and inline comments — commented-out $VAR is not a use.
-            line = line.split("#", 1)[0]
-            for var in VAR_USE_RE.findall(line):
-                if var not in captured:
-                    problems.append(
-                        f"block #{block_num}: ${{{var}}} used before capture — line: {line.strip()!r}"
-                    )
-            cap = VAR_CAPTURE_RE.match(line)
-            if cap:
-                captured.add(cap.group(1))
+        # Comments go first: stripping after the fold would let a `#` on one line swallow the
+        # operands that followed it on the next.
+        stripped = "\n".join(COMMENT_RE.sub("", l) for l in m.group(2).splitlines())
+        for line in _fold_multiline_arith(stripped).splitlines():
+            arith, arith_captures = _arith_reads(line)
+            reads = [(var, f"{var} (arithmetic)") for var in arith]
+            # The arithmetic is graded against the state before it ran; what it declares is
+            # only then in scope for the rest of the line (`for (( I=0; ... )); do echo $I`).
+            emit(reads, line, block_num, captured, earlier_blocks, problems)
+            captured |= arith_captures
+            emit(
+                [(var, f"${{{var}}}") for var in VAR_USE_RE.findall(line)],
+                line,
+                block_num,
+                captured,
+                earlier_blocks,
+                problems,
+            )
+            for segment in _segments(line):
+                cap = VAR_CAPTURE_RE.match(segment)
+                if cap:
+                    captured.add(cap.group(1))
+                    earlier_blocks.setdefault(cap.group(1), block_num)
+            for name in arith_captures:
+                earlier_blocks.setdefault(name, block_num)
     return problems
 
 

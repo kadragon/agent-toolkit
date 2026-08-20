@@ -33,10 +33,6 @@ conflict with.
 
 - [ ] **Trim `task-next`/`task-new` SKILL.md to references** — `task-next/SKILL.md` is 37KB and `task-review-cycle/SKILL.md` 30KB, re-prefilled on every turn of every cycle. The absent-role fallback prose is restated at each of the three spawn points in both skills, the roster-check block is duplicated across them, and `## Edge cases` is ~80 lines that a typical run never reaches. Move the rarely-hit branches into `references/` the way batch/tree mode already are, leaving the hot path in `SKILL.md`. No behavior change — this is a token cut.
 
-## Harness — capture-before-use across block boundaries
-
-- [ ] [harness] `check_harness_drift.py`'s capture-before-use scan is per-block, so it cannot see a `$var` read in one ```bash block that was captured in another — it passed the defective `PANEL_START` floor in `task-review-cycle` Step 2 (PR #240, caught by the review panel, not by CI). Extend the checker to track captures across the blocks of a single skill document and flag a read whose only capture lives in an earlier block, or state in `docs/conventions.md` that the linter does not own this half. Rule now written up under *Capture-Before-Use* in `docs/conventions.md`; the mechanical half is what is missing.
-
 ## Review Backlog
 
 ### PR #238 — [HARNESS] poll CI status every 5s for the first minute (2026-08-19)
