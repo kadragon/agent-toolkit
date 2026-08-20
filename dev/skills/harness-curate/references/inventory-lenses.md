@@ -63,8 +63,9 @@ Read these layers in full, then pair rules that govern the same behavior.
 A pair is a finding only when it is a **duplicate** (same rule, no scope or strictness delta), a
 **conflict** (incompatible instructions for the same situation), or **base-redundant** (a
 repo-side rule whose entire content is behavior the base instructions already impose every turn)
-— see `references/signal-taxonomy.md` §7 for the three subtypes, the non-findings list (starting
-with cross-tool reach, the main false positive) and the ownership-based routing. Every finding
+— see `references/signal-taxonomy.md` §7 for the three subtypes (plus the four within-layer
+diet subtypes), the non-findings list (starting with cross-tool reach, the main false positive)
+and the ownership-based routing. Every finding
 must carry both sides quoted verbatim with `file:line` — the base-instruction side excepted,
 where the verbatim quote carries a `[base instructions — {model id}, this session]` label
 instead. Unquotable pairs are dropped, not reported. Then filter the surviving pairs through the
