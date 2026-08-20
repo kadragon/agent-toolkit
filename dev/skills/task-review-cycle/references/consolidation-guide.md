@@ -110,11 +110,13 @@ After the findings table, add:
 - A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Refuted by contest round" section listing contestable findings (Step 3) the contest round rejected, with its one-line evidence — visible so the user can override a wrong refutation.
 - A "Reviewers Skipped" section listing any of the three sources that was not launched or did not return, with reason (e.g., "trivial diff (all engines, LINE_DELTA ≤ 30)", "claude CLI unavailable",
-  "timeout (>1200s)", "quorum reached without it (2 of 3 returned, ≥300s)"). The trivial-diff reason
+  "timeout (>1200s)", "quorum reached without it (2 usable reviews in, ≥300s)"). The trivial-diff reason
   covers all three sources at once — the panel short-circuit gates the whole panel, not one slot.
-  The quorum reason means the source was still running when the panel moved on (SKILL.md Step 2 →
-  *Quorum-and-go*); it is a distinct outcome from `timeout (>1200s)`, which means the source spent
-  its whole budget. Keep them apart: a quorum close says nothing about that engine's health.
+  The quorum reason means the source was still running and was stopped when the panel moved on
+  (SKILL.md Step 2 → *Quorum-and-go*); it is a distinct outcome from `timeout (>1200s)`, which
+  means the source spent its whole budget. Keep them apart: a quorum close says nothing about that
+  engine's health. A source that errored or exited `75` is neither — it never counted toward quorum,
+  and is recorded under its own reason.
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 

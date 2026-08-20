@@ -71,6 +71,15 @@ result=$(some_command)
 
 Every shell pattern in skill docs that references `$var` MUST show the `var=$(cmd)` capture step first. Failure mode: agents read the pattern, skip capture, reference unset variable.
 
+**Two fenced blocks are two shells.** An agent runs each ```bash block in a skill doc as a separate
+invocation, so nothing survives between them — a value captured in one block is unset in the next,
+and `$(( $(date +%s) - STAMP ))` silently reads `STAMP` as `0` rather than failing. This is why the
+skills re-derive `PREFLIGHT`/`BASE_BRANCH` in every block that uses them ("repeated here so this
+block is runnable standalone"). When a value genuinely cannot be re-derived — a launch timestamp,
+a run id — persist it to a file under `$(git rev-parse --git-dir)` and re-read it, rather than
+carrying a bare variable across the boundary. The linter's capture-before-use scan is per-block and
+does not model this: it passed a `task-review-cycle` block that read an unset cross-block variable.
+
 ### No heredoc inside an indented snippet
 
 A fenced block nested in a Markdown list item carries the list's indentation, and an indented terminator never closes `<<'EOF'` — the heredoc swallows the rest of the input, and Python bodies pick up a leading indent that is a top-level `IndentationError`. `<<-` does not save it: that strips tabs only, and stripping the body's indent is what breaks the Python. Inside a list item use `python3 -c '...'` (or move the fence to column 0). Top-level snippets may use heredocs freely — the terminator sits at column 0 there.

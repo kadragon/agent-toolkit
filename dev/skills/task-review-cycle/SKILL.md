@@ -118,45 +118,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each, and capture the launch timestamp in that same turn — the quorum rule below reads it:
-
-```bash
-PANEL_START=$(date +%s)   # captured at launch; the quorum floor below measures from here
-```
-
-Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). Proceed to Step 3 when the quorum rule below is satisfied — **not** necessarily when every source has returned.
-
-#### Quorum-and-go — proceed on 2 of 3, past an elapsed floor
-
-The panel's wall clock is `max()` of its sources, so one slow engine sets the whole cycle's latency
-no matter how fast the other two were. Stop waiting once **both** of these hold:
-
-1. **Quorum — 2 sources have returned.** Quorum counts *launched* sources, not slots: a source
-   skipped before launch (`agy_available=false`, `codex_available=false`, `claude CLI unavailable`)
-   never enters the count. With only 2 launched sources the quorum is both of them, and with 1 it is
-   that one — dropping a source there would halve the panel rather than trim its tail. A source that
-   returned an error, an empty array, or exit `75` counts as returned; it is done, not outstanding.
-2. **Elapsed floor — at least 300s since `PANEL_START`.**
-   ```bash
-   ELAPSED=$(( $(date +%s) - PANEL_START ))
-   [[ "$ELAPSED" -ge 300 ]] && echo "floor cleared"
-   ```
-   The floor is what keeps quorum from firing on two fast failures: an engine that errors out in
-   seconds counts as returned, so without the floor one quick pair of failures would drop the only
-   real reviewer. 300s sits well inside the 1200s per-source budget, so a closed source only ever
-   loses time it was already spending in the tail.
-
-When both hold, close the outstanding source for this cycle and go to Step 3. Record it exactly the
-way a timeout is recorded — `Reviewers Skipped: quorum reached without it (2 of 3 returned, ≥300s)`
-for that source in the consolidation table — so the table still states the panel's real breadth.
-**A closed source stays closed:** if its output arrives while Step 3 or later is running, do not fold
-it in and do not reopen consolidation, or the same diff yields a different action table run to run.
-That is a deferral, not a discard — record anything it found to `backlog.md` through the same
-out-of-scope path Step 3 already uses.
-
-Quorum never *extends* a wait. The 1200s per-source cap still applies on its own, and the panel
-short-circuit above still decides whether any source launches at all; quorum only ends the wait
-earlier.
+**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each, and stamp the launch in that same turn — the *Quorum-and-go* rule below reads that stamp. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). Proceed to Step 3 when the *Quorum-and-go* rule below is satisfied — **not** necessarily when every source has returned.
 
 #### Panel short-circuit — evaluate once, before launching anything
 
@@ -194,6 +156,65 @@ cap re-introduces the bug.
 **`SECURITY_HIT` is an absolute override** — a non-empty hit runs the whole panel no matter how
 small the diff, and separately raises the Claude slot's effort to `high` in 2-1. The two uses read
 the same capture; never re-derive the condition from a prose path list.
+
+#### Quorum-and-go — proceed on 2 usable reviews, past an elapsed floor
+
+Reached only when the panel short-circuit above did not fire. That gate decides whether the panel
+launches at all; this rule decides how long to wait once it has. The panel's wall clock is `max()`
+of its sources, so one slow engine sets the whole cycle's latency no matter how fast the others were.
+
+Stamp the launch **to a file**, in the same turn you launch 2-1, 2-2 and 2-3. A later turn is a
+fresh shell, so a plain `PANEL_START=$(date +%s)` variable would be unset by the time the floor
+reads it — the arithmetic would then treat it as `0` and the floor would pass on the first check:
+
+```bash
+PANEL_STAMP="$(git rev-parse --git-dir)/drc-panel-start"
+date +%s > "$PANEL_STAMP"
+```
+
+Stop waiting once **both** of these hold:
+
+1. **Quorum — 2 sources have returned a *usable* review.** Usable means the source actually
+   reviewed: a findings array (an empty `[]` counts — an engine that reviewed and found nothing
+   did review) or review text. A source that errored, exited `75` (Codex workspace lock — nothing
+   ran), or was never launched (`agy_available=false`, `codex_available=false`, `claude CLI
+   unavailable`) does **not** count toward quorum. Record it as skipped under its own rule and drop
+   it from the panel. **Counting a failure is the trap here:** two sources erroring in seconds would
+   otherwise satisfy quorum and close the one engine that is actually reviewing, shipping a cycle
+   with no review at all.
+2. **Elapsed floor — at least 300s since the stamp.**
+   ```bash
+   PANEL_STAMP="$(git rev-parse --git-dir)/drc-panel-start"
+   PANEL_START=$(cat "$PANEL_STAMP")
+   ELAPSED=$(( $(date +%s) - PANEL_START ))
+   [[ "$ELAPSED" -ge 300 ]] && echo "floor cleared"
+   ```
+   The floor keeps a fast pair from closing a slow third that was about to return something. 300s
+   sits well inside the 1200s per-source budget, so a closed source only ever loses time it was
+   already spending in the tail.
+
+**When quorum is unreachable, it never fires.** Fewer than 2 sources still able to return a usable
+review — because the rest failed, locked, or were never launched — means you wait out whoever is
+left under the 1200s cap, exactly as before this rule existed. If nothing usable arrives at all,
+take the "If all sources fail" rule below (inline review + note in consolidation).
+
+When both conditions hold, **stop the outstanding source before proceeding** — `TaskStop` with its
+task id (background Bash) or agent id (Agent slot). Closing without stopping is not free: Codex in
+particular holds a per-workspace lock that `codex-review.sh` releases only from its `EXIT`/`INT`/
+`TERM` trap, so a closed-but-still-running Codex keeps that lock and the *next* cycle's Codex slot
+exits `75` and is skipped. Trading this cycle's tail for the next cycle's panel breadth is not the
+bargain this rule is making.
+
+Then record the stopped source in the consolidation table the way a timeout is recorded —
+`Reviewers Skipped: quorum reached without it (2 usable reviews in, ≥300s)` — so the table still
+states the panel's real breadth. **A closed source stays closed:** should its output still arrive
+(the stop can race a result already in flight) while Step 3 or later is running, do not fold it in
+and do not reopen consolidation, or the same diff yields a different action table run to run.
+Record anything it found to `backlog.md` through the same out-of-scope path Step 3 already uses.
+
+Quorum never *extends* a wait. The 1200s per-source cap still applies on its own; quorum only ends
+a wait earlier.
+
 
 #### 2-1: Claude Reviewer (`code-review`, fixed)
 
@@ -387,7 +408,7 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Step 1 fails | Stop, report |
 | Review sub-agent fails | Log skill id, proceed with remaining |
 | Review source >1200s | Skip that source, proceed with the rest; note "timeout (>1200s)" |
-| Review source still running at quorum | Not a failure — close that source, proceed to Step 3; note "quorum reached without it (2 of 3 returned, ≥300s)". Distinct from a >1200s timeout; do not fold in its late output |
+| Review source still running at quorum | Not a failure — `TaskStop` that source (so Codex releases its workspace lock), proceed to Step 3; note "quorum reached without it (2 usable reviews in, ≥300s)". Distinct from a >1200s timeout; do not fold in output that still arrives |
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |
