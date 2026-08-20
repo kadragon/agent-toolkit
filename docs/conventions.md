@@ -77,8 +77,10 @@ and `$(( $(date +%s) - STAMP ))` silently reads `STAMP` as `0` rather than faili
 skills re-derive `PREFLIGHT`/`BASE_BRANCH` in every block that uses them ("repeated here so this
 block is runnable standalone"). When a value genuinely cannot be re-derived — a launch timestamp,
 a run id — persist it to a file under `$(git rev-parse --git-dir)` and re-read it, rather than
-carrying a bare variable across the boundary. The linter's capture-before-use scan is per-block and
-does not model this: it passed a `task-review-cycle` block that read an unset cross-block variable.
+carrying a bare variable across the boundary. The linter owns this half: `check_harness_drift.py`
+reads arithmetic contexts (`$(( ... ))`, `(( ... ))`) where a variable carries no `$`, and names the
+earlier block in the message when that is where the only capture lives. Before it did, a
+`task-review-cycle` block reading an unset cross-block variable passed CI (PR #240).
 
 ### No heredoc inside an indented snippet
 

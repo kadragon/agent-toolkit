@@ -7,8 +7,9 @@ Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     depend on hook-only plugin root variables to locate bundled files.
 
 (b) Capture-before-use — every `$VAR` / `${VAR}` (uppercase) referenced
-    inside a fenced ```bash/```sh code block must have a `VAR=` capture
-    earlier in the *same* block. Platform env vars (HOME, PATH) are allowlisted.
+    inside a fenced ```bash/```sh code block — including a bare name read inside
+    `$(( ... ))` — must have a `VAR=` capture earlier in the *same* block; each block
+    is a separate shell. Platform and shell-provided names are allowlisted.
 
 (c) Section references - every `§N` / `§ "Title"` pointer and every
     `<file>.md` → *Title* arrow pointer that names a bundled `*.md` on the same
@@ -102,7 +103,24 @@ REFERENCE_GLOBS = [
 # All other skills are warn-only until brought into compliance separately.
 HARD_FAIL_SKILLS = {"harness-init", "task-next", "hwpx", "task-review", "task-review-cycle"}
 
-ALLOWLIST_VARS = {"HOME", "PATH"}
+# Platform/shell-provided names. The second group is only ever read, never captured, and
+# turns up bare inside arithmetic (`(( SECONDS > 60 ))`) where the scan below now looks.
+ALLOWLIST_VARS = {
+    "HOME",
+    "PATH",
+    "SECONDS",
+    "RANDOM",
+    "LINENO",
+    "EPOCHSECONDS",
+    "OPTIND",
+    "UID",
+    "EUID",
+    "PPID",
+    "BASHPID",
+    "SHLVL",
+    "COLUMNS",
+    "LINES",
+}
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
 HOOKS_FILE = REPO_ROOT / "dev/hooks.json"
 
@@ -111,6 +129,22 @@ CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
+# Arithmetic evaluation — `$(( ... ))` and `(( ... ))`. Inside it a variable is read with no
+# `$`, so VAR_USE_RE cannot see it: PR #240 shipped `$(( $(date +%s) - PANEL_START ))` reading
+# a variable captured only in an earlier fenced block, and this checker passed it.
+ARITH_RE = re.compile(r"\(\((.*?)\)\)")
+# The same span, allowed to cross newlines — a wrapped `$((\n ... \n))` is folded onto one
+# line before the scan so the line-oriented pass below can see inside it.
+ARITH_SPAN_RE = re.compile(r"\(\(.*?\)\)", re.DOTALL)
+# A bare name inside arithmetic. `$`/`{` exclude the `$VAR` and `${VAR}` forms VAR_USE_RE
+# already owns, so the two scans never double-report the same read.
+ARITH_VAR_RE = re.compile(r"(?<![$\w{])([A-Z_][A-Z0-9_]*)\b")
+# Arithmetic assigns as well as reads: `(( I=0; I<N; I++ ))` declares and drives `I` itself.
+ARITH_ASSIGN_RE = re.compile(r"\b([A-Z_][A-Z0-9_]*)\s*(?:\+\+|--|[-+*/%&|^]?=(?!=)|<<=|>>=)")
+# Command substitution nested in arithmetic — `$(( $(DATE +%s) + 1 ))`. Its contents are a
+# command line, not an arithmetic expression, so the bare-name scan must not read `DATE` as a
+# variable. Any `$VAR` inside it is still caught by VAR_USE_RE over the whole line.
+ARITH_CMDSUB_RE = re.compile(r"\$\([^()]*\)")
 
 # Section references. `§3e`, `§ "Title"`, `§'Title'` — a bare `§Some Words` with
 # neither number nor quotes is deliberately unmatched: those point at the global
@@ -235,23 +269,73 @@ def parse_frontmatter(text: str) -> tuple[str | None, str]:
     return name, " ".join(p for p in description_parts if p)
 
 
+def _fold_multiline_arith(block: str) -> str:
+    r"""Join a newline-spanning `(( ... ))` onto one line so the line scan can see inside it.
+
+    `((` and `))` also occur inside string literals, where they delimit nothing. Folding such
+    a pair swallows the real lines between them — a capture statement caught mid-line stops
+    matching `VAR_CAPTURE_RE`'s `^\s*` anchor and is re-read as an arithmetic assignment,
+    masking a later genuine violation. A span carrying a quote, or one that spans a real
+    capture, is therefore left alone: an unfolded span is only a missed read, never a
+    fabricated capture.
+    """
+
+    def fold(m: re.Match) -> str:
+        span = m.group(0)
+        if "\n" not in span:
+            return span
+        if '"' in span or "'" in span:
+            return span
+        if any(VAR_CAPTURE_RE.match(line) for line in span.splitlines()[1:]):
+            return span
+        return span.replace("\n", " ")
+
+    return ARITH_SPAN_RE.sub(fold, block)
+
+
 def check_capture_before_use(text: str) -> list[str]:
-    """Return list of capture-before-use violation messages (empty = clean)."""
+    """Return list of capture-before-use violation messages (empty = clean).
+
+    Each fenced block is a fresh shell — an agent runs it as its own invocation — so
+    captures never carry across a block boundary. `earlier_blocks` records where a name
+    was captured previously only to name that boundary in the message: a read whose sole
+    capture sits in an earlier block is still a violation, and the confusing case is the
+    one where the doc *looks* like it captured the value.
+    """
     problems = []
+    earlier_blocks: dict[str, int] = {}
     for block_num, m in enumerate(FENCE_RE.finditer(text), start=1):
         captured = set(ALLOWLIST_VARS)
-        block_lines = m.group(2).splitlines()
-        for line in block_lines:
+        block_text = _fold_multiline_arith(m.group(2))
+        for line in block_text.splitlines():
             # Ignore full-line and inline comments — commented-out $VAR is not a use.
             line = line.split("#", 1)[0]
-            for var in VAR_USE_RE.findall(line):
-                if var not in captured:
-                    problems.append(
-                        f"block #{block_num}: ${{{var}}} used before capture — line: {line.strip()!r}"
-                    )
+            reads = [(var, f"${{{var}}}") for var in VAR_USE_RE.findall(line)]
+            for arith in ARITH_RE.findall(line):
+                arith = ARITH_CMDSUB_RE.sub(" ", arith)
+                # A name the expression assigns is captured by it, wherever in the span it
+                # sits — the loop header's `I=0` precedes the `I<N` the parser reaches first.
+                captured.update(ARITH_ASSIGN_RE.findall(arith))
+                reads += [
+                    (var, f"{var} (arithmetic)") for var in ARITH_VAR_RE.findall(arith)
+                ]
+            for var, shown in reads:
+                if var in captured:
+                    continue
+                where = earlier_blocks.get(var)
+                origin = (
+                    f" — captured in block #{where}, which is a separate shell"
+                    if where is not None
+                    else ""
+                )
+                problems.append(
+                    f"block #{block_num}: {shown} used before capture{origin}"
+                    f" — line: {line.strip()!r}"
+                )
             cap = VAR_CAPTURE_RE.match(line)
             if cap:
                 captured.add(cap.group(1))
+                earlier_blocks.setdefault(cap.group(1), block_num)
     return problems
 
 

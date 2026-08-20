@@ -580,6 +580,83 @@ def main() -> int:
             == [],
         )
 
+    # Capture-before-use — PR #240's defect: `$(( $(date +%s) - PANEL_START ))` read a
+    # variable whose only capture lived in an earlier fenced block. Arithmetic reads carry
+    # no `$`, so the scan never saw the use and CI passed the block.
+    print("\nCapture-before-use — arithmetic reads and block boundaries (PR #240)")
+    cross_block = (
+        "```bash\nPANEL_START=$(date +%s)\n```\n\nprose\n\n"
+        "```bash\nELAPSED=$(( $(date +%s) - PANEL_START ))\n```\n"
+    )
+    cross = mod.check_capture_before_use(cross_block)
+    check(
+        "an arithmetic read captured only in an earlier block is flagged",
+        len(cross) == 1,
+        f"got {cross}",
+    )
+    check(
+        "the message names the capturing block and the shell boundary",
+        bool(cross) and "block #1" in cross[0] and "separate shell" in cross[0],
+        f"got {cross}",
+    )
+    check(
+        "an arithmetic read captured earlier in the same block is clean",
+        mod.check_capture_before_use(
+            "```bash\nHEAD_KEEP=10\nomitted=$((line_count - HEAD_KEEP))\n```\n"
+        )
+        == [],
+    )
+    check(
+        "shell-provided names are not reads to capture",
+        mod.check_capture_before_use("```bash\nif (( SECONDS > 60 )); then :; fi\n```\n")
+        == [],
+    )
+    check(
+        "a `$VAR` inside arithmetic is reported once, not twice",
+        len(mod.check_capture_before_use("```bash\necho $(( $NOPE + 1 ))\n```\n")) == 1,
+    )
+    # False positives the first draft of the arithmetic scan produced (QA, this sprint).
+    check(
+        "a C-style for-loop header declares its own counter",
+        mod.check_capture_before_use(
+            "```bash\nfor (( I=0; I<3; I++ )); do echo $I; done\n```\n"
+        )
+        == [],
+    )
+    check(
+        "an uppercase command inside `$(...)` nested in arithmetic is not a read",
+        mod.check_capture_before_use("```bash\necho $(( $(DATE +%s) + 1 ))\n```\n") == [],
+    )
+    check(
+        "arithmetic wrapped across lines is still scanned",
+        len(
+            mod.check_capture_before_use(
+                "```bash\nY=$((\n  $(date +%s) - NOPE\n))\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "self-referential increment with no prior capture is still flagged",
+        len(mod.check_capture_before_use("```bash\nCOUNT=$(( COUNT + 1 ))\n```\n")) == 1,
+    )
+    # QA pass 2: `((`/`))` inside two separate string literals is not arithmetic. Folding
+    # that span swallowed the capture between them and masked the real violation after it.
+    stray_parens = (
+        '```bash\necho "note ((\nsomething"\nCAPTURED=$(date +%s)\n'
+        'echo "more))\ntext"\nUSE=$NOT_CAPTURED\n```\n'
+    )
+    check(
+        "a stray-paren span across string literals does not mask a later violation",
+        len(mod.check_capture_before_use(stray_parens)) == 1,
+        f"got {mod.check_capture_before_use(stray_parens)}",
+    )
+    check(
+        "a real capture between those strings still counts as a capture",
+        mod.check_capture_before_use(stray_parens.replace("$NOT_CAPTURED", "$CAPTURED"))
+        == [],
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:
