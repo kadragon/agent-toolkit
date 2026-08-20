@@ -129,10 +129,11 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")  # from Setup — repeated here so this block is runnable standalone
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")  # from Setup
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
-LINE_DELTA=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
-  | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1}END{print s+0}')
+DELTA_TERMS=$(git diff "${BASE_BRANCH}...HEAD" --shortstat \
+  | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | tr '\n' '+' | sed 's/+$//;s/^$/0/')
+LINE_DELTA=$(( DELTA_TERMS ))
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)
-BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | awk '$1 == "-" || $2 == "-"' | head -1 || true)
+BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | cut -f1,2 | grep -m1 -e '-' || true)
 MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
 ```
 

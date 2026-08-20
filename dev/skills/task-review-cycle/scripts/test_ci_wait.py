@@ -164,6 +164,23 @@ def main() -> int:
         check("a zero fast interval is floored instead of busy-looping",
               call_count(floored) <= 2, f"got {call_count(floored)} calls, expected <= 2")
 
+        # The slow path had the same hole for longer: the numeric guard accepts 0, so
+        # CI_WAIT_POLL_INTERVAL=0 turned the long tail into `sleep 0`. A zero-length opening
+        # window forces the fallback branch on the very first iteration, so this exercises
+        # POLL_INTERVAL alone — the fast interval never runs.
+        # Killed rather than waited out. The floor is hardcoded at 20s, so once it works the
+        # very first sleep outlasts any budget worth setting — letting the run finish would
+        # add 20s to every suite invocation to observe a single call. Pre-fix the same window
+        # is a `sleep 0` busy loop, and the call count over a fixed 4s discriminates the two
+        # without either side having to terminate.
+        slow_floored = make_counting_repo(tmp, "zero_slow_interval")
+        try:
+            run(slow_floored, timeout=4, CI_WAIT_POLL_INTERVAL=0, CI_WAIT_FAST_POLL_SECS=0)
+        except subprocess.TimeoutExpired:
+            pass
+        check("a zero POLL_INTERVAL is floored instead of busy-looping the long tail",
+              call_count(slow_floored) <= 3, f"got {call_count(slow_floored)} calls, expected <= 3")
+
         print("\n-- a pass clears the counter --")
         passing = make_repo(tmp, "success")
         strike_file(passing).write_text("2\n", encoding="utf-8")

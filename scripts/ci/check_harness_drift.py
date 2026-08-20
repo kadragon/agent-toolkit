@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harness ratchet checks for shipped plugin skills (dev/, prod/).
 
-Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
+Six independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
 (a) Plugin-root portability — shared skill instructions and references must not
     depend on hook-only plugin root variables to locate bundled files.
@@ -65,8 +65,17 @@ Five independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     propagates whatever cross-reference it already had wrong, so the attribution
     needs a mechanical owner check rather than a re-read of the source rule.
 
-Scope note: plugin-root portability, section-reference, bundled-script and
-bundled-with violations are unconditional errors.
+(f) Positional parameters — no positional in a code block or inline code span,
+    in any spelling (`$1`, `${1}`, `${10}`, `${1:-x}`, `${#1}`). Observed once (PR #238): a positional inside a fenced block
+    was substituted from the skill's own invocation arguments at load time, so
+    `awk '{s+=$1}'` arrived as `awk '{s+=task-review}'` under `--from task-review`
+    while the file on disk stayed correct — nothing in the repo showed it. The
+    substitution rule is uncharacterized, so the ban is wider than the one
+    confirmed case. See `docs/platform-specs.md` -> Positional Parameters in Skill
+    Code Blocks.
+
+Scope note: plugin-root portability, positional-parameter, section-reference,
+bundled-script and bundled-with violations are unconditional errors.
 Capture-before-use violations are HARD-FAIL only for HARD_FAIL_SKILLS (skills
 fixed in an earlier sprint). Other skills report WARN so pre-existing debt
 remains visible without blocking CI. Extend HARD_FAIL_SKILLS as each skill is
@@ -94,9 +103,14 @@ REPO_ROOT = Path(
 )
 
 SKILL_GLOBS = ["dev/skills/*/SKILL.md", "prod/skills/*/SKILL.md"]
+# `examples/` is scanned for the same reason `references/` is: `harness-init/SKILL.md` tells the
+# agent to copy blocks out of `examples/agents-md-example.md` verbatim, so it is loaded as skill
+# text like any reference and carries the same load-time hazards.
 REFERENCE_GLOBS = [
     "dev/skills/*/references/*.md",
     "prod/skills/*/references/*.md",
+    "dev/skills/*/examples/*.md",
+    "prod/skills/*/examples/*.md",
 ]
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
@@ -129,6 +143,13 @@ FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
+# Any `$` followed by a digit. The braced arm deliberately spans the whole expansion, so a
+# multi-digit index (`${10}`) and a modifier form (`${1:-x}`, `${1#foo}`) are caught too —
+# both are positional references, and a narrow `\$\{[0-9]\}` let them through. The bare arm
+# matches the leading index only, so `$10` reports as `$1`, which is how the shell reads it.
+# The optional `[#!]` covers `${#1}` (length of a positional) and `${!1}` (indirection);
+# `${#arr[@]}` is untouched because what follows the `#` there is not a digit.
+POSITIONAL_PARAM_RE = re.compile(r"\$\{[#!]?[0-9][^}]*\}|\$[0-9]")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
 # `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
@@ -472,6 +493,31 @@ def check_plugin_root_portability(text: str) -> list[str]:
         for token in FORBIDDEN_SKILL_ROOT_VARS
         if re.search(rf"(?<![A-Z0-9_]){re.escape(token)}(?![A-Z0-9_])", code_text)
     ]
+
+
+def check_positional_params(text: str) -> list[str]:
+    """Reject positional parameters from skill code blocks and inline code spans.
+
+    Observed once (PR #238): a positional inside a fenced block was substituted from the
+    skill's own invocation arguments as the skill text was loaded — `awk '{s+=$1}'` arrived
+    as `awk '{s+=task-review}'` under `--from task-review`, while the file on disk stayed
+    correct. The substitution rule is uncharacterized, so this is deliberately wider than
+    the one confirmed case: a block holding no positional cannot be corrupted by any variant
+    of the behavior. See `docs/platform-specs.md` → Positional Parameters in Skill Code
+    Blocks. Prose is exempt — describing the hazard must not fail CI.
+    """
+    code_lines = []
+    for m in CODE_FENCE_RE.finditer(text):
+        code_lines.extend(m.group(1).splitlines())
+    code_lines.extend(m.group(1) for m in INLINE_CODE_RE.finditer(text))
+    problems = []
+    for line in code_lines:
+        for token in POSITIONAL_PARAM_RE.findall(line):
+            problems.append(
+                f"positional parameter {token!r} in a code block is substituted from the "
+                f"skill's invocation args at load time — use a named variable: {line.strip()!r}"
+            )
+    return problems
 
 
 def check_bundled_script_refs(text: str, path: Path) -> list[str]:
@@ -912,20 +958,25 @@ def main() -> int:
         severity = "ERROR" if name in HARD_FAIL_SKILLS else "WARN"
 
         portability = check_plugin_root_portability(text)
+        positional = check_positional_params(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
         with_refs = check_bundled_with_refs(text, path)
 
-        if not portability and not capture and not section_refs and not script_refs and not with_refs:
+        if (not portability and not positional and not capture and not section_refs
+                and not script_refs and not with_refs):
             print(
-                f"OK   {rel} ({name}): plugin-root portability + capture-before-use "
-                "+ section refs + bundled scripts + bundled-with attributions clean"
+                f"OK   {rel} ({name}): plugin-root portability + positional params "
+                "+ capture-before-use + section refs + bundled scripts "
+                "+ bundled-with attributions clean"
             )
             continue
 
         for msg in portability:
             print(f"ERROR {rel} ({name}) [plugin-root-portability]: {msg}")
+        for msg in positional:
+            print(f"ERROR {rel} ({name}) [positional-param]: {msg}")
         for msg in capture:
             print(f"{severity} {rel} ({name}) [capture-before-use]: {msg}")
         for msg in section_refs:
@@ -935,7 +986,7 @@ def main() -> int:
         for msg in with_refs:
             print(f"ERROR {rel} ({name}) [bundled-with-ref]: {msg}")
 
-        if portability or section_refs or script_refs or with_refs:
+        if portability or positional or section_refs or script_refs or with_refs:
             hard_fail = True
         if severity == "ERROR" and capture:
             hard_fail = True
@@ -948,20 +999,25 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(REPO_ROOT)
         portability = check_plugin_root_portability(text)
+        positional = check_positional_params(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
         with_refs = check_bundled_with_refs(text, path)
 
-        if not portability and not capture and not section_refs and not script_refs and not with_refs:
+        if (not portability and not positional and not capture and not section_refs
+                and not script_refs and not with_refs):
             print(
-                f"OK   {rel} ({skill_name}): plugin-root portability + capture-before-use "
-                "+ section refs + bundled scripts + bundled-with attributions clean"
+                f"OK   {rel} ({skill_name}): plugin-root portability + positional params "
+                "+ capture-before-use + section refs + bundled scripts "
+                "+ bundled-with attributions clean"
             )
             continue
 
         for msg in portability:
             print(f"ERROR {rel} ({skill_name}) [plugin-root-portability]: {msg}")
+        for msg in positional:
+            print(f"ERROR {rel} ({skill_name}) [positional-param]: {msg}")
         for msg in capture:
             print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
         for msg in section_refs:
@@ -971,7 +1027,7 @@ def main() -> int:
         for msg in with_refs:
             print(f"ERROR {rel} ({skill_name}) [bundled-with-ref]: {msg}")
 
-        if portability or section_refs or script_refs or with_refs:
+        if portability or positional or section_refs or script_refs or with_refs:
             hard_fail = True
 
     print("----")

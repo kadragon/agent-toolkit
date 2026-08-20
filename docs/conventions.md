@@ -128,6 +128,18 @@ script — silently, and only on the large inputs the code was written to handle
 parameter expansion (`${VAR%%$'\n'*}`, `${VAR#*$'\n'}`) for string surgery; reserve pipes for
 readers that consume all input (`tail`, `wc`, `jq`) or read from a file rather than a pipe.
 
+### Rewriting a Shipped One-Liner: Two Traps
+
+Skill markdown bans positional parameters (`docs/platform-specs.md` → Positional Parameters in
+Skill Code Blocks), so shipped one-liners get rewritten. Both replacements that look obvious are
+wrong here:
+
+- **`awk '$NF'` is not a safe swap for `awk '$1'`.** The capture-before-use linter reads `$NF` as
+  an uppercase shell variable and hard-fails it as uncaptured. Drop awk entirely instead — sum a
+  column with `tr '\n' '+'` + `$(( ))`, select a field with `cut`.
+- **`grep -- '-pattern'` is not portable.** The POSIX end-of-options form is rejected by ugrep,
+  which is `grep` on at least one maintainer's machine. Use `grep -e '-pattern'`.
+
 ### Plugin Hook Root Variables
 
 - In `hooks.json` command fields, use `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}` for shared Claude/Codex hooks. This guarantee is limited to the plugin hook command environment.

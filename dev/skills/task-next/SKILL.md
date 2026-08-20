@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.9
+version: 1.6.10
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
@@ -242,8 +242,12 @@ only if `.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present; a
 never a reason to stop, and never a reason to create the role mid-task.
 
 ```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
+role=implementer  # the role to probe
+if [[ -f ".claude/agents/$role.md" || -f "$HOME/.claude/agents/$role.md" ]]; then
+  echo present
+else
+  echo absent
+fi
 ```
 
 A role can also arrive from an installed plugin, which no path check finds — if the runtime lists
