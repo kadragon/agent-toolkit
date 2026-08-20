@@ -95,7 +95,7 @@ The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) 
 
 ## 7. Instruction-layer overlap (base ↔ global ↔ repo/docs)
 
-**Detect:** from Step 2's overlap lens, not from any scan block. Read the layers **in full this session** — the platform's base instructions (already in context), the global `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md`, the repo's `CLAUDE.md` / `AGENTS.md` (plus any parent-directory `AGENTS.md`), `<repo root>/.claude/rules/*.md`, and the `docs/*.md` files the AGENTS.md Docs Index points to — then pair rules that govern the same behavior. Three subtypes:
+**Detect:** from Step 2's overlap lens, not from any scan block. Read the layers **in full this session** — the platform's base instructions (already in context), the global `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md`, the repo's `CLAUDE.md` / `AGENTS.md` (plus any parent-directory `AGENTS.md`), `<repo root>/.claude/rules/*.md`, and the `docs/*.md` files the AGENTS.md Docs Index points to — then pair rules that govern the same behavior. Three subtypes pair two layers, and four more (*Within-layer diet subtypes*, below) sit inside one:
 
 - **Duplicate** — two layers state the same rule with no scope or strictness delta. Cost isn't just tokens: the two copies drift, and after one is edited the other silently contradicts it (which becomes the next conflict).
 - **Conflict** — the layers give incompatible instructions for the same situation (global "never commit to `main` — branch first" vs. repo "commit fixes straight to `main`"). The agent resolves it by luck, differently each session.
@@ -120,7 +120,70 @@ The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) 
 - A `docs/*.md` finding routes exactly like its AGENTS.md counterpart — same subtypes, same single-tool gate. The only difference is that `docs/` is on-demand rather than always-loaded, so the token argument for trimming is weaker: a duplicated rule there costs drift risk, not context budget. Weigh accordingly and say so in the finding.
 - Conflict → surface both quoted lines side by side and ask which is authoritative. Precedence between layers is **not documented in this repo and is model judgment, not spec**: if you cannot establish the winning layer from a quotable source, write `[unknown — precedence not verifiable]` rather than asserting one (the Agent integrity principle). If the user keeps the local override, propose labeling it explicitly ("Overrides global: …") so the next agent doesn't re-derive it. Never resolve a conflict silently.
 
-**Cross-run suppression (required).** A static finding re-fires every run until a file changes, which would keep `lastCandidateMs` fresh forever and turn the staleness nudge into noise. So: filter candidate pairs through `scripts/overlap_state.py --check` before reporting, and after the user resolves a pair **or decides to keep it as-is**, record it with `--dismiss`. The key is a hash of both sides' values, each of which carries its source (file path, or the model-stamped base-instruction label) ahead of the quoted line — so dismissal suppresses that exact pair in that exact file, not the topic, and not the same sentence sitting in a second indexed file. Edit either line and the pair resurfaces. Report the `suppressed=` count so nothing drops silently.
+### Within-layer diet subtypes
+
+The three subtypes above pair *two* layers. These four are defects inside **one** layer: an
+instruction that costs more than it buys because it was written for a model that needed more
+telling. Same lens, same evidence bar, same suppression — the difference is that the "other
+side" of the pair is not another file but the observed behavior.
+
+> Adapted from a six-principle summary of how to write instructions for newer models —
+> hand rules over to judgment, design the interface instead of showing examples, disclose
+> progressively, state a rule once, let memory be written for you, hand over a rich artifact
+> rather than prose. Principles 4 and 5 are already covered here (duplicate above, Signal 6);
+> the four below are the rest. [source: user-supplied summary, 2026-08-20 — original author
+> unverified, so nothing here rests on its authority: each subtype stands on its own evidence
+> gate.]
+
+- **Over-prescription** (rule → judgment) — a rule stated absolutely (always / never / "in every
+  case", no escape clause) that the transcripts show being overridden, ignored, or worked around.
+  **Evidence: the quoted rule + ≥2 quoted pushbacks** from `HARNESS-FRICTION` or the owning
+  asset's `CORRECTION-SIGNALS`. Route: rewrite to name the goal and the failure mode and leave
+  the action to judgment — **not deletion**, and not a second rule about when the first applies.
+- **Example-bound** (example → interface) — an instruction whose examples got copied as the
+  answer where the case differed. **Evidence: ≥2 quoted corrections** showing output that
+  reproduced an example's incidental shape (its values, ordering, or length) rather than its
+  contract. Route: `skill-creator` modify — move the shape into the interface (a script flag, a
+  schema, a bundled template) and keep at most one example where the format *is* the contract.
+- **Front-loaded** (all-at-once → progressive disclosure) — content in an always-loaded body
+  (`SKILL.md`, `CLAUDE.md`, `AGENTS.md`) that only one branch of the flow ever consumes.
+  **Evidence: the section named, its byte count, and the specific route that consumes it** —
+  "this file is long" is not a finding, and neither is a section every run reads. Route: move it
+  to `references/<topic>.md`, leave behind only the rules a run must not violate, and cite the
+  reference by heading. Threshold 1 (static), because the measurement is objective.
+- **Prose-spec** (description → rich reference) — an instruction that *describes* an artifact's
+  shape in prose where a checked-in specimen would carry it (template file, fixture, schema,
+  a script with `--test`). **Evidence: ≥2 quoted defects in the produced artifact** — from
+  `VERIFIER-FAILURES` or `CORRECTION-SIGNALS` — despite the prose being present and correct.
+  Route: bundle the specimen, cut the prose to the judgment the specimen cannot carry.
+
+**Not a finding (all four):**
+- **No evidence.** "Reads verbose", "an older model needed this", "the model probably knows"
+  — none of these are findings. The trap is the same one base-redundant carries: the cheapest
+  claim to get wrong is that something is unnecessary. Unquotable → dropped, not `Watch:`.
+- **A rule with a live mechanical enforcer** (hook, lint, CI check, `--test`). Friction against a
+  gate that fires correctly is evidence the workflow routes into the gate (Signal 3/8), never
+  evidence the gate is over-prescribed. Verify the enforcer by reading it, not by assuming.
+- **Safety and irreversibility rules** — destructive operations, external communication,
+  credential handling, confirmation gates. These stay absolute under any amount of friction;
+  their cost is paid precisely on the rare turn where judgment would have gone wrong.
+- `harness:verbatim` blocks and the AGENTS.md blocks `harness-init` mandates — as above.
+- **The repo's own facts.** Detail that lives in `docs/` by design is progressive disclosure
+  already working, not front-loading.
+
+**Model-scoped, like base-redundant.** All four rest on what *this* model needs, so a finding is
+only as durable as the model that produced it. Stamp the model id into the pairs.json value the
+same way (SKILL.md Step 2), so a model change invalidates the dismissal and the pair resurfaces
+rather than staying settled on a judgment that no longer applies. This is the mechanism behind
+the global instruction layer's "post-model-upgrade guardrail re-exam" routing to this skill.
+
+**Route the edit, don't make it.** A body-to-reference move or a rule rewrite in a shipped skill
+goes to `skill-creator` with the usual brief; a repo `CLAUDE.md`/`AGENTS.md` line is surfaced for
+the user; `~/.claude/CLAUDE.md` is never auto-edited. Every landed edit gets a change record with
+a falsifiable `Predicted impact` (Step 7's validation gate), because "the model does better with
+less" is exactly the kind of claim Step 2.5 exists to falsify.
+
+**Cross-run suppression (required — all seven subtypes).** A static finding re-fires every run until a file changes, which would keep `lastCandidateMs` fresh forever and turn the staleness nudge into noise. So: filter candidate pairs through `scripts/overlap_state.py --check` before reporting, and after the user resolves a pair **or decides to keep it as-is**, record it with `--dismiss`. The key is a hash of both sides' values, each of which carries its source (file path, or the model-stamped base-instruction label) ahead of the quoted line — so dismissal suppresses that exact pair in that exact file, not the topic, and not the same sentence sitting in a second indexed file. Edit either line and the pair resurfaces. Report the `suppressed=` count so nothing drops silently.
 
 **Scope limit:** `current` / `--project` only — the lens needs a resolvable repo path, which `all` scope doesn't have (same limitation as the Codex fold-in). For cross-repo coverage, run `--project` per repo.
 
@@ -160,5 +223,7 @@ Cumulative lifetime history, like `CORRECTION-SIGNALS`. **Deliberately over-coll
 | Demote (unused skill or agent) | judgment — long history + ~0 use, **then adversarial check** |
 | Verifier-grounded failure | 2 same-cause (or 1 with systematic cause) — after the causal-status read; raw `VERIFIER-FAILURES` lines are not findings |
 | Instruction-layer overlap | 1 — static defect, but **only** with both sides quoted (`file:line`, or the labeled verbatim base-instruction quote); unquotable → dropped |
+| Over-prescription / example-bound / prose-spec (§7 diet) | 2 quoted occurrences — the rule or artifact plus the observed pushback/defect; unquotable → dropped |
+| Front-loaded (§7 diet) | 1 — static, but the finding must name the section, its size, and the single route that consumes it |
 
 Report 2× near-misses under a `Watch:` line rather than dropping them.
