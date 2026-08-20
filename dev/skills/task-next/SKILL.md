@@ -587,7 +587,10 @@ action itself; always still ask yes/no.
    [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
    ```
    If `$commits` is non-empty, `task-review-cycle` Step 1 (commit) already ran. Diagnosis:
-   offer `task-review-cycle --from task-next --auto` directly.
+   offer `task-review-cycle --from task-next --auto` directly — plus `--qa-pending` and the
+   restated Sprint Contract unless QA is *known* to have run (see **Whether QA is still owed**
+   below). Commits ahead of `main` no longer prove it did: on the default full-cycle path QA
+   happens inside the cycle at 2-4, after the Step 1 commit.
 
 2. **No commits ahead, but an active Sprint Contract?**
 
@@ -614,16 +617,28 @@ action itself; always still ask yes/no.
    - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
      implementation yet. Diagnosis: resume at **Step 3 – Implement**.
    - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
-     version bump yet. Diagnosis: resume at **Step 3 – QA**.
+     version bump yet. Diagnosis: resume at **Step 3 – version bump**, then Step 4's handoff. On
+     the default full-cycle path there is no QA stage left to resume here — it is owed to the
+     cycle's 2-4 slot; on the lite path, `--tree` and `--all`, resume at their QA step as before.
    - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
      **Step 4 – Handoff**.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
-   `task-review-cycle --from task-next --auto`?"
+   `task-review-cycle --from task-next --auto`?" — with `--qa-pending` and a restated contract
+   per **Whether QA is still owed** below, which this branch almost always triggers.
+
+**Whether QA is still owed.** A resumed run must decide this before handing off, and it is not
+inferable from commits: on the default full-cycle path QA lives in the cycle's 2-4 slot, *after*
+the Step 1 commit. Treat QA as owed unless this session has the verifier's own verdict in hand, or
+the run was a lite/`--tree`/`--all` path (all three verify before handing off). QA owed → hand off
+with `--qa-pending` **and** the Sprint Contract restated verbatim, or the cycle stops and asks for
+it. When the contract cannot be recovered — the usual case under check 3, where `tasks.md` may
+already be pruned — do not append the flag blind: reconstruct the contract with the user from the
+diff and the backlog item first, and say that is what you are doing.
 
 Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
-- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` for
+- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` — adding `--qa-pending` plus the restated contract when QA is owed — for
   check 1 / the generic fallback).
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.

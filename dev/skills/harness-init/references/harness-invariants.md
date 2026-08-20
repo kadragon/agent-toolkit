@@ -95,7 +95,8 @@ contract's Scope has to list them. A repo-root path is *not* exempt from gate 5:
 outside the contract's Scope still fails.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
-same commit. Cited by `dev:task-new` and `dev:task-next` at their `qa-verifier`-absent fallback.
+same commit. Cited by `dev:task-new`, `dev:task-next` and `dev:task-review-cycle` (its 2-4 slot) at their
+`qa-verifier`-absent fallback.
 
 ## Non-Interactive Gate Defaults
 

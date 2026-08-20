@@ -35,7 +35,7 @@ prompted, not mechanical — nothing in CI enforces it. It exists because this s
 - `--from <caller>` — required caller token, supplied by whichever skill invoked this one. See *Caller gate*.
 - `--no-hub` — no push, no PR, no CI, no merge. Commits locally, reviews from local diff.
 - `--auto` — skip user confirmation in Step 3. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
-- `--qa-pending` — the caller handed off straight after implement, so **contract QA is still owed**: Step 2 runs it as source 2-4 alongside the review panel instead of the caller running it as its own wave in front of this cycle. Passed today by `--from task-next` and `--from task-new` on their default full-cycle path only; their lite path, `--tree` and `--all` batch mode verify before handing off and do not pass it. A caller that passes it **must restate the Sprint Contract verbatim** (Tag / Scope / Acceptance criteria / Out of scope / Lint-test command) in the invocation — its pre-merge cleanup has already pruned `tasks.md`, so the restatement is the only copy 2-4's brief can be built from. Flag present with no contract restated → stop and ask the caller for it; do not invent criteria.
+- `--qa-pending` — the caller handed off straight after implement, so **contract QA is still owed**: Step 2 runs it as source 2-4 alongside the review panel instead of the caller running it as its own wave in front of this cycle. Passed today by `--from task-next` and `--from task-new` on their default full-cycle path only; their lite path, `--tree` and `--all` batch mode verify before handing off and do not pass it. A caller that passes it **must restate the Sprint Contract verbatim** (Tag / Scope / Acceptance criteria / Out of scope / Lint-test command) in the invocation — its pre-merge cleanup has already pruned `tasks.md`, so the restatement is the only copy 2-4's brief can be built from. Flag present with no contract restated → stop and ask the caller for it; do not invent criteria. **Version bump and pre-merge cleanup deliberately stay with the caller** instead of moving into this cycle's Step 5: pre-handoff is what lets the Step 1 commit carry a valid version bump, so CI's bump check passes from the first push. The restatement requirement is the price of that choice.
 
 ## Prerequisites
 
@@ -372,7 +372,9 @@ has — apply them as written rather than by analogy to 2-1/2-2/2-3:
    short-circuit never skips 2-4* above).
 2. **Not a quorum source.** It never counts toward quorum and is never stopped by it; Step 3 waits
    for it unconditionally (see *2-4 is outside this rule entirely* above).
-3. **A 1200s breach is a hard stop, not a skip.** A review source that breaches its budget is
+3. **Allow 1200s for 2-4 as well, and a breach is a hard stop, not a skip.** The Step 2 intro
+   grants its budget to the review sources; this rule grants 2-4 the same 1200s so the deadline it
+   can breach is defined. A review source that breaches its budget is
    recorded as skipped and the cycle proceeds on the rest. Contract QA breaching means the change
    was never verified against its contract — stop, report, and do not merge. Re-running the slot is
    the fix; recording it as skipped is not.

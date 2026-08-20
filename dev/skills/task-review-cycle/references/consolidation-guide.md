@@ -4,7 +4,9 @@ Detailed procedure for consolidating multi-reviewer feedback (Step 3 of task-rev
 
 ## Source Attribution
 
-Exactly three sources feed Step 3: the Claude reviewer (2-1) tags its findings `code-review` — the only Claude review skill this cycle invokes — Antigravity (2-2) uses `agy`, and Codex (2-3) uses `codex`.
+Three review sources feed Step 3: the Claude reviewer (2-1) tags its findings `code-review` — the only Claude review skill this cycle invokes — Antigravity (2-2) uses `agy`, and Codex (2-3) uses `codex`.
+
+Under `--qa-pending` a fourth source joins them: contract QA (2-4) tags its findings `contract-qa`. It is not a review engine and does not consolidate like one — its **blocking** findings are in-scope P0 by construction and bypass the confidence filter (§ *Confidence Filtering*), the Contest Round (§ 3) and the verifier gate, going straight into the action table. Its non-blocking observations are ordinary findings on the normal path. `--auto` never approves past a blocking `contract-qa` row.
 
 When consolidating, preserve the source tags in the table's **Source** column. If multiple reviewers flag the same issue, merge them into one row and list all sources (e.g., `code-review, codex`).
 
@@ -117,6 +119,9 @@ After the findings table, add:
   means the source spent its whole budget. Keep them apart: a quorum close says nothing about that
   engine's health. A source that errored or exited `75` is neither — it never counted toward quorum,
   and is recorded under its own reason.
+  **2-4 is never listed here.** Contract QA cannot be skipped, timed out past, or closed by quorum —
+  a failure or budget breach stops the cycle instead (SKILL.md Step 2 → *2-4: Contract QA*), so its
+  only representations are its findings in the action table and, on a hard stop, the stop report.
 
 **STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
 
