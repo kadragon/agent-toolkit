@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.6
+version: 1.2.7
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, verify, version bump, review. Already on the queue
@@ -156,7 +156,15 @@ shape, per `docs/eval-criteria.md`:
 - **If `implementer` fails or returns unusable output:** stop and report; do not proceed to QA.
 
 **QA (Step 4 — mandatory)**
-ALWAYS spawn `qa-verifier` as a separate agent.
+Always a separate agent — never the one that implemented.
+
+**Where it runs depends on the path.** On the **full cycle**, do not spawn `qa-verifier` here: hand
+off with `--qa-pending` (Step 4 below) and contract QA runs inside `task-review-cycle` as
+review-panel source 2-4, concurrently with the three review engines rather than as its own blocking
+wave in front of them. The rules below then belong to that slot, where `task-review-cycle` → *2-4:
+Contract QA* states them; do not also run QA here, or the diff is verified twice and the latency
+this buys is spent again. The **lite path** keeps QA here, before the merge — it opens no PR, so
+there is no panel to ride.
 
 **Brief it adversarially.** The objective is *find violations*, not *confirm compliance* — tell it
 to hunt for each way the change could fail a criterion and to record a pass only where it has
@@ -236,18 +244,25 @@ and narration — lives in the *CHANGELOG Entry Contract* in `harness-invariants
 
 ## Step 4 — Hand off
 
-Call the Skill tool with "dev:task-review-cycle" and `args: --from task-new --auto`. It commits (including the cleanup
-above), creates the PR, collects reviews, applies in-scope findings, records out-of-scope items to
-`backlog.md`, waits for CI, and merges.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from task-new --auto --qa-pending`. It
+commits (including the cleanup above), creates the PR, collects reviews **and runs contract QA as
+source 2-4**, applies in-scope findings, records out-of-scope items to `backlog.md`, waits for CI,
+and merges.
+
+`--qa-pending` says contract QA is still owed. **State the Sprint Contract verbatim in the handoff**
+— Tag / Scope / Acceptance criteria / Out of scope / Lint-test command. Pre-merge cleanup has
+already pruned `tasks.md`, so this restatement is the only copy 2-4's brief can be built from; hand
+off without it and the review cycle stops and asks.
 
 If `task-review` reports CI failure and the PR must be abandoned: close the PR and delete the
 feature branch — `main` retains its pre-cleanup state, no rollback needed.
 
 ## Lite path
 
-For a **trivial** request only. The lite path changes **only the handoff** — everything in Step 3
-(branch, Sprint Contract, implement, QA, version bump, cleanup) runs identically; only Step 4
-differs. Present the choice when entering Step 3 (before branching) so the user isn't surprised:
+For a **trivial** request only. The lite path changes the handoff and **where QA runs**: Step 3's
+branch, Sprint Contract, implement, version bump and cleanup are identical, and QA runs inside
+Step 3 here rather than being deferred to review-panel source 2-4 — this path opens no PR to carry
+it. Present the choice when entering Step 3 (before branching) so the user isn't surprised:
 
 ```
 [1] 라이트 패스 — 구현+QA 후 main에 직접 머지 (PR·CI 없음)
