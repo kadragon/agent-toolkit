@@ -95,8 +95,55 @@ contract's Scope has to list them. A repo-root path is *not* exempt from gate 5:
 outside the contract's Scope still fails.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
-same commit. Cited by `dev:task-new`, `dev:task-next` and `dev:task-review-cycle` (its 2-4 slot) at their
-`qa-verifier`-absent fallback.
+same commit. Cited by *Absent-Role Fallbacks* below, which is where `dev:task-new`,
+`dev:task-next` and `dev:task-review-cycle` (its 2-4 slot) reach it.
+
+## Absent-Role Fallbacks
+
+The cycle skills (`dev:task-new`, `dev:task-next`, `dev:task-review-cycle`) spawn `explorer`,
+`implementer` and `qa-verifier` by name. `harness-init` creates **no** agent roles (its Step 4b),
+so a role-less repo is the designed state of a freshly initialized harness, not a defect. This
+section is the canonical fallback for all three roles; the skills point here rather than restating
+it at each spawn point.
+
+**Roster check — before any agent spawn.** A role exists only if `.claude/agents/{role}.md` or
+`~/.claude/agents/{role}.md` is present. Never stop on an empty roster, and never create the role
+mid-task. Route around it per the per-role fallback below, say in one line which fallback you took,
+and note that `dev:harness-curate` is what adds a role once the transcripts show the delegation
+recurring.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin
+(`plugin.json` → `agents`, see `docs/platform-specs.md`), which no path check finds — if the runtime
+lists the role as an available agent type, treat it as present regardless of the probe.
+
+**`explorer` absent:** spawn the built-in `Explore` subagent with the same brief — it is the ad-hoc
+fan-out `dev:harness-init` points at for a repo with no roles.
+
+**`implementer` absent:** implement inline on the main thread. The Sprint Contract, the in-scope
+path list and the lint/test command all still apply — only the spawn brief is dropped. QA then
+follows the same rule it always does: whoever implemented does not verify, so the main thread hands
+off to the verifier per the calling skill's QA step. This covers every implementer spawn a cycle
+skill owns.
+
+**`qa-verifier` absent:** spawn the built-in `general-purpose` subagent as the verifier instead. The
+brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
+(Objective / Output format / Tools to use / Boundaries) plus effort tier — filled with the Sprint
+Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test command, and telling
+it to verify against those criteria rather than impressions and to change nothing. **Carry the
+standing-checks floor in the brief too** — with no role file there is no `## Checks (always run)`
+for the brief to point at, so the gates every contract inherits reach the verifier only if the brief
+states them. Take them from *Verifier Standing-Checks Floor* above; do not reconstruct the list from
+memory.
+
+**Independence is what must not be dropped, not the role name.** The agent that implemented never
+verifies its own output — including the main thread, when the implementer fallback above was taken.
+This holds for every QA spawn a cycle skill owns, batch mode's per-unit verifiers included. Fixes on
+a retry path go to `implementer`, or inline when that role is also absent.
 
 ## Non-Interactive Gate Defaults
 

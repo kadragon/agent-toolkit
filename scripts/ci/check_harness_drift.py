@@ -433,7 +433,7 @@ def check_capture_before_use(text: str) -> list[str]:
         captured = set(ALLOWLIST_VARS)
         # Comments go first: stripping after the fold would let a `#` on one line swallow the
         # operands that followed it on the next.
-        stripped = "\n".join(COMMENT_RE.sub("", l) for l in m.group(2).splitlines())
+        stripped = "\n".join(COMMENT_RE.sub("", ln) for ln in m.group(2).splitlines())
         for line in _fold_multiline_arith(stripped).splitlines():
             arith, arith_captures = _arith_reads(line)
             reads = [(var, f"{var} (arithmetic)") for var in arith]

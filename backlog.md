@@ -18,21 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — `task-*` cycle latency
-
-Source: latency measurement of 2026-08-19, recorded here so no run re-derives it. GitHub Actions
-`harness-check` completes in 13–22s across the last 25 runs, so **CI is not the bottleneck**. PR
-create→merge is ~3–17 min (median ~10 min), and that window is almost entirely
-`task-review-cycle` Step 2 (review panel) plus Step 3 (verifier + contest agents). One non-trivial
-cycle runs **four sequential agent waves** — implement → `qa-verifier` → 3-source panel →
-verifier/contest — and the panel's wall clock is `max()` of its three sources, not the sum. Recent
-merged PRs run 5–28 files and +8/-7 to +720/-20; median ≈9–13 files, ≈50–100 lines.
-
-Ordered so the isolated, low-risk items land before the Step 2 restructure they would otherwise
-conflict with.
-
-- [ ] **Trim `task-next`/`task-new` SKILL.md to references** — `task-next/SKILL.md` is 37KB and `task-review-cycle/SKILL.md` 30KB, re-prefilled on every turn of every cycle. The absent-role fallback prose is restated at each of the three spawn points in both skills, the roster-check block is duplicated across them, and `## Edge cases` is ~80 lines that a typical run never reaches. Move the rarely-hit branches into `references/` the way batch/tree mode already are, leaving the hot path in `SKILL.md`. No behavior change — this is a token cut.
-
 ## Review Backlog
 
 ### PR #238 — [HARNESS] poll CI status every 5s for the first minute (2026-08-19)
