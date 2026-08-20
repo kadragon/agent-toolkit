@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-curate body slimmed 41KB → 31KB: Step 6 run stamp scripted, Step 2 lens rationale moved to references (dev v4.5.15) (2026-08-20)
 - [done] positionals banned from skill code blocks, zero poll interval floored (dev v4.5.14) (2026-08-20) → docs/platform-specs.md
 - [done] absent-role fallbacks canonicalized, edge cases split out (dev v4.5.13) (2026-08-20) → dev/skills/harness-init/references/harness-invariants.md
 - [done] capture-before-use linter reads arithmetic and names the capturing block (2026-08-20) → docs/conventions.md
