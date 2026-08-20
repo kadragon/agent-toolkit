@@ -51,6 +51,11 @@ TIMEOUT_SECS="${CI_WAIT_TIMEOUT_SECS:-870}"
 POLL_INTERVAL="${CI_WAIT_POLL_INTERVAL:-20}"
 case "$TIMEOUT_SECS" in ''|*[!0-9]*) TIMEOUT_SECS=870 ;; esac
 case "$POLL_INTERVAL" in ''|*[!0-9]*) POLL_INTERVAL=20 ;; esac
+# The numeric guard above accepts 0, and `sleep 0` on the long tail would busy-loop against the
+# hub API for the whole timeout budget. Floor it before anything reads it.
+if [ "$POLL_INTERVAL" -lt 1 ]; then
+  POLL_INTERVAL=20
+fi
 # Fast opening cadence: a short CI run finishes well inside one 20s poll, so the pass is
 # discovered up to a full interval after it actually landed. Poll tightly while a result is
 # plausibly imminent, then fall back to POLL_INTERVAL for the long tail.
@@ -59,15 +64,14 @@ FAST_POLL_SECS="${CI_WAIT_FAST_POLL_SECS:-60}"
 case "$FAST_POLL_INTERVAL" in ''|*[!0-9]*) FAST_POLL_INTERVAL=5 ;; esac
 case "$FAST_POLL_SECS" in ''|*[!0-9]*) FAST_POLL_SECS=60 ;; esac
 # The numeric guard accepts 0, and `sleep 0` would turn the opening window into a busy loop
-# hammering the hub API for a full minute. Floor it. (An explicit CI_WAIT_POLL_INTERVAL=0 can
-# still busy-loop on the slow path — that hole predates this window; see backlog.md.)
+# hammering the hub API for a full minute. Floor it, the same way POLL_INTERVAL is floored above.
 if [ "$FAST_POLL_INTERVAL" -lt 1 ]; then
   FAST_POLL_INTERVAL=5
 fi
 # An explicit POLL_INTERVAL below the fast default is a deliberate request for a tighter loop
-# (the tests rely on it) — never let the opening window slow it down. Guarded by the same floor
-# so a 0 there cannot propagate in.
-if [ "$POLL_INTERVAL" -ge 1 ] && [ "$POLL_INTERVAL" -lt "$FAST_POLL_INTERVAL" ]; then
+# (the tests rely on it) — never let the opening window slow it down. POLL_INTERVAL is already
+# floored at 1 above, so a 0 cannot propagate in here.
+if [ "$POLL_INTERVAL" -lt "$FAST_POLL_INTERVAL" ]; then
   FAST_POLL_INTERVAL="$POLL_INTERVAL"
 fi
 # Some repos have no CI at all. Give checks this long to appear before

@@ -276,6 +276,34 @@ PY=$(command -v python3 || command -v python || true)
 
 Shipped precedents: `hooks/session-start/run.sh` and `skills/task-review-cycle/scripts/commit-and-push.sh`.
 
+## Positional Parameters in Skill Code Blocks
+
+**Rule: no `$0`–`$9` (or `${0}`–`${9}`) anywhere in a fenced code block or inline code span of a
+`SKILL.md` or a skill reference doc.** Use a named variable, a non-positional awk field
+(`$NF`), or a construct that needs no field reference at all.
+
+**Observed once** (2026-08-19, PR #238 session): a positional inside a fenced block was
+substituted from the skill's own invocation arguments as the skill text was loaded.
+`task-review-cycle` step 2-1 shipped
+
+```
+awk '{s+=$1}END{print s+0}'
+```
+
+and, when the skill was invoked as `task-review-cycle --from task-review`, the block arrived in
+context as `awk '{s+=task-review}'`. The file on disk was correct — the corruption happened at
+load, so nothing in the repo showed it and the failure surfaced only as a wrong runtime value.
+
+**The substitution rule is uncharacterized.** One observation is not a mapping: which argument
+lands in which index, whether `$0` and `${N}` are affected, and whether Codex behaves the same
+way are all unknown. The rule above is therefore defensive and deliberately wider than the single
+confirmed case — a block that contains no positional cannot be corrupted by any variant of the
+behavior.
+
+Enforced by `scripts/ci/check_harness_drift.py` (`[positional-param]`), which is a hard fail.
+Scripts under `{plugin}/skills/*/scripts/` are exempt and unscanned: those execute from disk and
+are never loaded as skill text.
+
 ## Executable Line Endings
 
 All shell and Python scripts shipped in plugins must use LF line endings. Bash hooks installed on Windows still run through bash, and CRLF causes parse errors such as `set: pipefail\r: invalid option name`.

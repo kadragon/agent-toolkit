@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 1.2.8
+version: 1.2.9
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, verify, version bump, review. Already on the queue
@@ -38,8 +38,12 @@ that is expected and rides into the feature branch.)
 reason to stop, and never a reason to create the role mid-task.
 
 ```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
+role=implementer  # the role to probe
+if [[ -f ".claude/agents/$role.md" || -f "$HOME/.claude/agents/$role.md" ]]; then
+  echo present
+else
+  echo absent
+fi
 ```
 
 A role can also arrive from an installed plugin, which no path check finds — if the runtime lists

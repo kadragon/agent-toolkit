@@ -113,8 +113,12 @@ and note that `dev:harness-curate` is what adds a role once the transcripts show
 recurring.
 
 ```bash
-role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
-role_exists implementer && echo present || echo absent
+role=implementer  # the role to probe
+if [[ -f ".claude/agents/$role.md" || -f "$HOME/.claude/agents/$role.md" ]]; then
+  echo present
+else
+  echo absent
+fi
 ```
 
 The probe covers repo- and user-level roles only. A role can also arrive from an installed plugin

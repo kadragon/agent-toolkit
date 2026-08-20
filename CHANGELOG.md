@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] positionals banned from skill code blocks, zero poll interval floored (dev v4.5.14) (2026-08-20) → docs/platform-specs.md
 - [done] absent-role fallbacks canonicalized, edge cases split out (dev v4.5.13) (2026-08-20) → dev/skills/harness-init/references/harness-invariants.md
 - [done] capture-before-use linter reads arithmetic and names the capturing block (2026-08-20) → docs/conventions.md
 - [done] contract QA runs as a review-panel source instead of its own wave (dev v4.5.12) (2026-08-20) → docs/workflows.md

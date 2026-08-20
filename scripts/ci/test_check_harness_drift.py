@@ -774,6 +774,46 @@ def main() -> int:
         == 1,
     )
 
+    print("\n-- positional parameters in code blocks --")
+    check(
+        "a positional in a fenced block is flagged",
+        len(mod.check_positional_params("```bash\nawk '{s+=$1}END{print s+0}'\n```\n")) == 1,
+    )
+    check(
+        "the braced form is flagged too",
+        len(mod.check_positional_params('```bash\necho "${2}"\n```\n')) == 1,
+    )
+    check(
+        "a positional in an inline code span is flagged",
+        len(mod.check_positional_params("Call it as `role_exists $1` first.\n")) == 1,
+    )
+    check(
+        "a positional in prose is exempt — the hazard has to be describable",
+        mod.check_positional_params("The $1 in that block was substituted at load time.\n") == [],
+    )
+    check(
+        "a named variable is not flagged",
+        mod.check_positional_params('```bash\nrole=implementer\necho "${role}/$HOME"\n```\n') == [],
+    )
+    check(
+        "a digit that is not a parameter expansion is not flagged",
+        mod.check_positional_params("```bash\ngrep -oE '[0-9]+' file | head -1\n```\n") == [],
+    )
+    check(
+        "every positional on a line is reported, not just the first",
+        len(mod.check_positional_params('```bash\ntest "$1" = "$2"\n```\n')) == 2,
+    )
+    check(
+        "the regression that motivated the ban is caught verbatim",
+        len(
+            mod.check_positional_params(
+                "```bash\nLINE_DELTA=$(git diff --shortstat "
+                "| awk '{s+=$1}END{print s+0}')\n```\n"
+            )
+        )
+        == 1,
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

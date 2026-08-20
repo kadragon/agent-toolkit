@@ -342,12 +342,29 @@ task_id=$(jq -r '.task.id // empty' <<<"$payload")
 
 # ADAPT: match tasks.md schema for this project.
 # Fail if any "- [ ]" remains under the matching task section.
-if awk -v id="$task_id" '
-    $0 ~ "^# " && $0 ~ id { in_section=1; next }
-    in_section && /^# / { in_section=0 }
-    in_section && /^- \[ \]/ { found=1 }
-    END { exit !found }
-' tasks.md; then
+# Plain bash rather than awk: matching whole lines in awk needs a positional field
+# reference, and a positional in a skill code block is unsafe to ship (see
+# docs/platform-specs.md, Positional Parameters in Skill Code Blocks). The loop is
+# also easier to ADAPT than an awk program.
+in_section=0
+unchecked=0
+while IFS= read -r line; do
+    case "$line" in
+        "# "*)
+            case "$line" in
+                *"$task_id"*) in_section=1 ;;
+                *)            in_section=0 ;;
+            esac
+            ;;
+        "- [ ]"*)
+            # `if`, not `&&`: under `set -e` a failing `[[ ]]` as the body's last command
+            # would abort the loop.
+            if [[ "$in_section" -eq 1 ]]; then unchecked=1; fi
+            ;;
+    esac
+done < tasks.md
+
+if [[ "$unchecked" -eq 1 ]]; then
     echo "TaskCompleted blocked: tasks.md still has unchecked acceptance criteria for $task_id" >&2
     exit 2
 fi
