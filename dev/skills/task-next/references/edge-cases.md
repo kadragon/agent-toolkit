@@ -4,7 +4,7 @@ Rarely-hit branches of `dev:task-next`, split out of `SKILL.md` so the hot path 
 this file when one of the cases named in `SKILL.md` → *Edge cases* fires.
 
 **Work already in flight** — feature branch with uncommitted changes from a previous session.
-This is the routing target when the Prerequisites "Working tree gate" finds an in-flight branch
+This is the routing target when `SKILL.md` → *Prerequisites* → "Working tree gate" finds an in-flight branch
 rather than stray dirty files. Run 3 ordered, cheap checks to produce a specific diagnosis
 before asking for confirmation — this only automates the *diagnosis* text, not the resume
 action itself; always still ask yes/no.
@@ -24,14 +24,15 @@ action itself; always still ask yes/no.
 
    The working-tree gate already routes a dirty main checkout with a matching `.worktrees/` path
    here. Diagnose "`--tree` run in flight in `<path>`" (read the matching path captured by the
-   gate) and route the user to inspect/resume that worktree, or abort it via `references/tree.md`'s
+   gate) and route the user to inspect/resume that worktree, or abort it via `tree.md`'s
    QA-failure cleanup block, instead of the diff-based verdict below.
 
    ```bash
    active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
    ```
    A zero here is not proof no sprint is running — a single-item backlog.md cycle keeps its
-   Sprint Contract inline and never writes `tasks.md` (see **Mark active** in Step 3), so this
+   Sprint Contract inline and never writes `tasks.md` (see `SKILL.md` → *Step 3 — Run the code
+   cycle* → **Mark active**), so this
    check alone cannot see it. If `$active_block` is zero, fall through to check 3's generic
    fallback rather than concluding no sprint is active. If `$active_block` is non-zero, check
    what's already changed to distinguish stage. Include
@@ -43,13 +44,14 @@ action itself; always still ask yes/no.
    bump_diff=$(git diff --stat -- '**/plugin.json' 2>/dev/null)
    ```
    - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
-     implementation yet. Diagnosis: resume at **Step 3 – Implement**.
+     implementation yet. Diagnosis: resume at `SKILL.md` → *Step 3* – Implement.
    - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
-     version bump yet. Diagnosis: resume at **Step 3 – version bump**, then Step 4's handoff. On
+     version bump yet. Diagnosis: resume at `SKILL.md` → *Step 3* – version bump, then its
+     *Step 4 — Hand off*. On
      the default full-cycle path there is no QA stage left to resume here — it is owed to the
      cycle's 2-4 slot; on the lite path, `--tree` and `--all`, resume at their QA step as before.
    - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
-     **Step 4 – Handoff**.
+     `SKILL.md` → *Step 4 — Hand off*.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
@@ -74,11 +76,12 @@ Present the diagnosis (or check 3's fallback to the generic offer) and ask for c
 **Deferred backlog item (≥2 candidates)** — item has `*(deferred: ...)*`. Surface the blocker
 and confirm it is resolved before proceeding. If unresolved, skip to the next candidate.
 If all candidates are deferred with unresolved blockers, report that and stop.
-(For the single-candidate case, see Step 2 table.)
+(For the single-candidate case, see `SKILL.md` → *Step 2 — Select* table.)
 
 **Deferred item in a group** — if any item in a heading group is deferred and the blocker
 is unresolved, note it as a warning but continue with the non-deferred items in that group.
-If all items in the group are deferred, skip the group (see Step 2 deferred-items rule).
+If all items in the group are deferred, skip the group (see `SKILL.md` → *Step 2 — Select*,
+deferred-items rule).
 
 **Review finding spans multiple PRs** — scope narrowly to the specific `file:line` ref.
 Record broader related items back to `backlog.md` via the out-of-scope path in task-review.

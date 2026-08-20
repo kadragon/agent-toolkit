@@ -33,11 +33,19 @@ the dirty files — do NOT proceed. Ask the user to commit, stash, or discard fi
 checked once, here. Later steps deliberately dirty `tasks.md`/`backlog.md` as part of the cycle;
 that is expected and rides into the feature branch.)
 
-**Roster check — before any agent spawn in any step below.** A role that is absent is never a
-reason to stop, and never a reason to create the role mid-task: route around it and say in one line
-which fallback you took. The probe, the installed-plugin caveat and the per-role fallbacks are
-canonical in `dev:harness-init` → `references/harness-invariants.md` → *Absent-Role Fallbacks* —
-read it the first time a spawn in this run finds its role missing.
+**Roster check — run before the first agent spawn in any step below.** A role exists only if
+`.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present; an absent role is never a
+reason to stop, and never a reason to create the role mid-task.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+A role can also arrive from an installed plugin, which no path check finds — if the runtime lists
+it as an available agent type, treat it as present regardless of the probe. Route around an absent
+role per `dev:harness-init` → `references/harness-invariants.md` → *Absent-Role Fallbacks*, and say
+in one line which fallback you took.
 
 ## Step 1 — Classify & size-gate
 
@@ -97,7 +105,8 @@ git checkout -b "$BRANCH"
 
 **Scope check (Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before writing
-the Sprint Contract. **`explorer` absent from the roster:** see *Absent-Role Fallbacks*.
+the Sprint Contract. **`explorer` absent from the roster:** see
+`references/harness-invariants.md` → *Absent-Role Fallbacks*.
 
 **Plan mode gate (before Step 2)**
 - **Non-trivial** (tag is `[FEAT]`/`[REFACTOR]`, OR ≥3 files, OR new public API/schema): use
@@ -134,8 +143,8 @@ shape, per `docs/eval-criteria.md`:
 - Otherwise: spawn `implementer` (brief per `docs/delegation.md` four-field format: Objective /
   Output format / Tools to use / Boundaries — include the Sprint Contract, absolute paths of all
   in-scope files, and the lint/test command). `implementer` must NOT verify its own output.
-- **`implementer` absent from the roster:** see *Absent-Role Fallbacks* — implement inline on the
-  main thread; QA below still goes to a separate agent.
+- **`implementer` absent from the roster:** see `references/harness-invariants.md` →
+  *Absent-Role Fallbacks* — implement inline; QA below still goes to a separate agent.
 - **Stuck-fix stop condition:** if the same fix is attempted 3+ times on one file without the
   lint/test command passing, stop and report instead of retrying.
 - **Destructive-command guard:** never run `git push --force`/`--force-with-lease`,
@@ -166,9 +175,11 @@ implementation defect and burns the one allowed retry. Spawn `implementer` on th
 findings, re-run `qa-verifier` **once** against the corrected contract. If still blocking after one
 retry: stop and report — do NOT hand off with unresolved blockers.
 
-**`qa-verifier` absent from the roster:** see *Absent-Role Fallbacks* — spawn `general-purpose`
-with the same four-field brief, carrying the standing-checks floor because no role file states it.
-Independence is what must not be dropped, not the role name.
+**`qa-verifier` absent from the roster:** see `harness-init` → `references/harness-invariants.md`
+→ *Absent-Role Fallbacks* — spawn `general-purpose` with the same four-field brief. **Carry the
+standing-checks floor in it**, taken from `references/harness-invariants.md` → *Verifier
+Standing-Checks Floor*; do not reconstruct that list from memory. Independence is what must not be
+dropped, not the role name.
 
 **Version bump (Step 5)**
 The judgment is *which* plugin and *which* bump level; the rewrite is scripted. Do this AFTER all

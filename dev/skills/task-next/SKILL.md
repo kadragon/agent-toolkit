@@ -237,11 +237,19 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 git checkout -b "$BRANCH"
 ```
 
-**Roster check — before any agent spawn in this step or the ones below.** A role that is absent is
-never a reason to stop, and never a reason to create the role mid-task: route around it and say in
-one line which fallback you took. The probe, the installed-plugin caveat and the per-role fallbacks
-are canonical in `dev:harness-init` → `references/harness-invariants.md` → *Absent-Role Fallbacks* —
-read it the first time a spawn in this run finds its role missing.
+**Roster check — run before the first agent spawn in this step or the ones below.** A role exists
+only if `.claude/agents/{role}.md` or `~/.claude/agents/{role}.md` is present; an absent role is
+never a reason to stop, and never a reason to create the role mid-task.
+
+```bash
+role_exists() { [[ -f ".claude/agents/$1.md" || -f "$HOME/.claude/agents/$1.md" ]]; }
+role_exists implementer && echo present || echo absent
+```
+
+A role can also arrive from an installed plugin, which no path check finds — if the runtime lists
+it as an available agent type, treat it as present regardless of the probe. Route around an absent
+role per `dev:harness-init` → `references/harness-invariants.md` → *Absent-Role Fallbacks*, and say
+in one line which fallback you took.
 
 **Result-handoff rule (applies to every agent this skill spawns).** Any agent launched with a
 `name` — and, as cheap insurance, any launched with `run_in_background: true` — must be told
@@ -254,7 +262,8 @@ and `references/batch.md` — including when the result is empty.
 
 **Scope check (workflows.md Step 1)**
 If the target area has >3 files AND was not explored this session → spawn `explorer` before
-writing the Sprint Contract. **`explorer` absent from the roster:** see *Absent-Role Fallbacks*.
+writing the Sprint Contract. **`explorer` absent from the roster:** see
+`references/harness-invariants.md` → *Absent-Role Fallbacks*.
 
 **Plan mode gate (before workflows.md Step 2)**
 Check tag first, then file count:
@@ -316,8 +325,8 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Objective / Output format / Tools to use / Boundaries). List each item's
   file:line in the brief so the implementer works all of them. `implementer` must NOT verify
   its own output.
-- **`implementer` absent from the roster:** see *Absent-Role Fallbacks* — implement inline on the
-  main thread. It covers every implementer spawn this skill owns, `--tree` mode and batch mode's
+- **`implementer` absent from the roster:** see `references/harness-invariants.md` →
+  *Absent-Role Fallbacks* — implement inline on the main thread. It covers every implementer spawn this skill owns, `--tree` mode and batch mode's
   per-unit fan-out (`references/tree.md`, `references/batch.md`) included; there the main thread
   works the units itself, sequentially, one worktree at a time, since the parallelism came from
   the fan-out that is no longer available.
@@ -371,10 +380,12 @@ implementation is correct — the verifier grades the diff against the contract,
 conclusion is what it will confirm. Applies to every QA spawn this skill owns, the
 `general-purpose` fallback and batch mode's per-unit verifiers included.
 
-**`qa-verifier` absent from the roster:** see *Absent-Role Fallbacks* — spawn `general-purpose`
-with the same four-field brief, carrying the standing-checks floor because no role file states it.
-Independence is what must not be dropped, not the role name; the fallback applies to every QA spawn
-this skill owns, batch mode's per-unit verifiers included.
+**`qa-verifier` absent from the roster:** see `harness-init` → `references/harness-invariants.md`
+→ *Absent-Role Fallbacks* — spawn `general-purpose` with the same four-field brief. **Carry the
+standing-checks floor in it**, taken from `references/harness-invariants.md` → *Verifier
+Standing-Checks Floor*; do not reconstruct that list from memory. Independence is what must not be
+dropped, not the role name; the fallback applies to every QA spawn this skill owns, batch mode's
+per-unit verifiers included.
 
 If the verifier reports blocking issues:
 1. Surface findings to user.
