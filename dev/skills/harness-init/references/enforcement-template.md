@@ -348,7 +348,10 @@ task_id=$(jq -r '.task.id // empty' <<<"$payload")
 # also easier to ADAPT than an awk program.
 in_section=0
 unchecked=0
-while IFS= read -r line; do
+# `|| [[ -n "$line" ]]`: read returns non-zero on a final line with no trailing
+# newline, and dropping that line would let the gate pass on the very criterion it
+# exists to catch.
+while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
         "# "*)
             case "$line" in
@@ -357,8 +360,6 @@ while IFS= read -r line; do
             esac
             ;;
         "- [ ]"*)
-            # `if`, not `&&`: under `set -e` a failing `[[ ]]` as the body's last command
-            # would abort the loop.
             if [[ "$in_section" -eq 1 ]]; then unchecked=1; fi
             ;;
     esac

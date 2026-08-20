@@ -278,9 +278,11 @@ Shipped precedents: `hooks/session-start/run.sh` and `skills/task-review-cycle/s
 
 ## Positional Parameters in Skill Code Blocks
 
-**Rule: no `$0`–`$9` (or `${0}`–`${9}`) anywhere in a fenced code block or inline code span of a
-`SKILL.md` or a skill reference doc.** Use a named variable, a non-positional awk field
-(`$NF`), or a construct that needs no field reference at all.
+**Rule: no positional parameter anywhere in a fenced code block or inline code span of a
+`SKILL.md` or a skill reference doc.** That covers every spelling, not just the bare one —
+`$1`, the braced `${1}`, a multi-digit index `${10}`, and any modifier form (`${1:-x}`,
+`${1#foo}`, `${#1}`, `${!1}`). Use a named variable or a construct that needs no field
+reference at all.
 
 **Observed once** (2026-08-19, PR #238 session): a positional inside a fenced block was
 substituted from the skill's own invocation arguments as the skill text was loaded.

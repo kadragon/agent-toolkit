@@ -784,6 +784,19 @@ def main() -> int:
         len(mod.check_positional_params('```bash\necho "${2}"\n```\n')) == 1,
     )
     check(
+        "a multi-digit braced index does not slip past the braced arm",
+        len(mod.check_positional_params('```bash\necho "${10}"\n```\n')) == 1,
+    )
+    for label, snippet in [
+        ("default", '```bash\necho "${1:-fallback}"\n```\n'),
+        ("prefix strip", '```bash\necho "${1#foo}"\n```\n'),
+        ("length", '```bash\necho "${#1}"\n```\n'),
+    ]:
+        check(
+            f"a braced positional with a {label} modifier is flagged",
+            len(mod.check_positional_params(snippet)) == 1,
+        )
+    check(
         "a positional in an inline code span is flagged",
         len(mod.check_positional_params("Call it as `role_exists $1` first.\n")) == 1,
     )

@@ -65,8 +65,8 @@ Six independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     propagates whatever cross-reference it already had wrong, so the attribution
     needs a mechanical owner check rather than a re-read of the source rule.
 
-(f) Positional parameters — no `$0`-`$9` / `${0}`-`${9}` in a code block or
-    inline code span. Observed once (PR #238): a positional inside a fenced block
+(f) Positional parameters — no positional in a code block or inline code span,
+    in any spelling (`$1`, `${1}`, `${10}`, `${1:-x}`, `${#1}`). Observed once (PR #238): a positional inside a fenced block
     was substituted from the skill's own invocation arguments at load time, so
     `awk '{s+=$1}'` arrived as `awk '{s+=task-review}'` under `--from task-review`
     while the file on disk stayed correct — nothing in the repo showed it. The
@@ -103,9 +103,14 @@ REPO_ROOT = Path(
 )
 
 SKILL_GLOBS = ["dev/skills/*/SKILL.md", "prod/skills/*/SKILL.md"]
+# `examples/` is scanned for the same reason `references/` is: `harness-init/SKILL.md` tells the
+# agent to copy blocks out of `examples/agents-md-example.md` verbatim, so it is loaded as skill
+# text like any reference and carries the same load-time hazards.
 REFERENCE_GLOBS = [
     "dev/skills/*/references/*.md",
     "prod/skills/*/references/*.md",
+    "dev/skills/*/examples/*.md",
+    "prod/skills/*/examples/*.md",
 ]
 
 # Skills fixed in the skill-review-findings sprint — violations here block CI.
@@ -138,9 +143,13 @@ FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
-# `$0`-`$9` and `${0}`-`${9}`. Matches the leading index only, so `$10` reports as `$1` —
-# which is what the shell would expand it as anyway.
-POSITIONAL_PARAM_RE = re.compile(r"\$\{[0-9]\}|\$[0-9]")
+# Any `$` followed by a digit. The braced arm deliberately spans the whole expansion, so a
+# multi-digit index (`${10}`) and a modifier form (`${1:-x}`, `${1#foo}`) are caught too —
+# both are positional references, and a narrow `\$\{[0-9]\}` let them through. The bare arm
+# matches the leading index only, so `$10` reports as `$1`, which is how the shell reads it.
+# The optional `[#!]` covers `${#1}` (length of a positional) and `${!1}` (indirection);
+# `${#arr[@]}` is untouched because what follows the `#` there is not a digit.
+POSITIONAL_PARAM_RE = re.compile(r"\$\{[#!]?[0-9][^}]*\}|\$[0-9]")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
 # `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
@@ -487,7 +496,7 @@ def check_plugin_root_portability(text: str) -> list[str]:
 
 
 def check_positional_params(text: str) -> list[str]:
-    """Reject `$0`-`$9` / `${0}`-`${9}` from skill code blocks and inline code spans.
+    """Reject positional parameters from skill code blocks and inline code spans.
 
     Observed once (PR #238): a positional inside a fenced block was substituted from the
     skill's own invocation arguments as the skill text was loaded — `awk '{s+=$1}'` arrived
