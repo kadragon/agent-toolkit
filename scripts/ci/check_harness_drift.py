@@ -132,13 +132,15 @@ VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
 # `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
-COMMENT_RE = re.compile(r"(?:^|(?<=\s))#.*$")
+COMMENT_RE = re.compile(r"(?:^|(?<=[\s;&|(]))#.*$")
 # Quoted regions. `((` inside them delimits nothing — `grep -E '((A|B))'` is a regex, not
 # arithmetic — so they are masked out before any arithmetic span is located.
 QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 # What may precede a bare `(( ... ))` for it to be arithmetic rather than nested subshells:
 # command position only.
-ARITH_CMD_POS_RE = re.compile(r"(?:[;&|(]|\b(?:for|if|while|until|then|do|elif|else|return|!))$")
+ARITH_CMD_POS_RE = re.compile(r"(?:[;&|({!]|\b(?:for|if|while|until|then|do|elif|else|return|time))$")
+# An arithmetic expansion surviving inside a double-quoted region.
+DQUOTED_ARITH_RE = re.compile(r"\$\(\(.*?\)\)")
 # Statement separators — a capture after one is still a capture (`)); COUNT=0`), which a
 # `^`-anchored match alone would miss and turn into a fabricated violation downstream.
 SEGMENT_RE = re.compile(r";|&&|\|\||&")
@@ -282,8 +284,31 @@ def parse_frontmatter(text: str) -> tuple[str | None, str]:
 
 
 def _mask_quoted(line: str) -> str:
-    """Blank out quoted regions, preserving offsets, so `((` inside them is not arithmetic."""
+    """Blank out quoted regions, preserving offsets — for locating statement separators.
+
+    A `;` inside either quote form is literal text, not a separator.
+    """
     return QUOTED_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def _mask_literal(line: str) -> str:
+    """Blank out what the shell takes literally, preserving offsets — for locating arithmetic.
+
+    Single quotes suppress expansion entirely. Double quotes do not: `echo "$(( N + 1 ))"`
+    evaluates, so an arithmetic expansion inside them stays visible while the surrounding
+    literal text is blanked.
+    """
+
+    def repl(m: re.Match) -> str:
+        span = m.group(0)
+        if span.startswith("'"):
+            return " " * len(span)
+        out = [" "] * len(span)
+        for arith in DQUOTED_ARITH_RE.finditer(span):
+            out[arith.start() : arith.end()] = span[arith.start() : arith.end()]
+        return "".join(out)
+
+    return QUOTED_RE.sub(repl, line)
 
 
 def _arith_opens(masked: str, start: int = 0):
@@ -327,25 +352,70 @@ def _fold_multiline_arith(block: str) -> str:
     return "".join(out)
 
 
-def _arith_reads(line: str) -> tuple[list[str], set[str], set[str]]:
-    """Return (reads, pure_captures, read_write) for the arithmetic spans on `line`."""
+def _segments(line: str) -> list[str]:
+    """Split `line` on statement separators that are not inside quotes."""
     masked = _mask_quoted(line)
+    cuts = [0]
+    for sep in SEGMENT_RE.finditer(masked):
+        cuts.append(sep.end())
+    return [line[a:b] for a, b in zip(cuts, cuts[1:] + [len(line)])]
+
+
+def emit(reads, line, block_num, captured, earlier_blocks, problems) -> None:
+    """Record a violation for each read with no capture in scope."""
+    for var, shown in reads:
+        if var in captured:
+            continue
+        where = earlier_blocks.get(var)
+        origin = (
+            f" — captured in block #{where}, which is a separate shell"
+            if where is not None
+            else ""
+        )
+        problems.append(
+            f"block #{block_num}: {shown} used before capture{origin}"
+            f" — line: {line.strip()!r}"
+        )
+
+
+def _arith_reads(line: str) -> tuple[list[str], set[str]]:
+    """Return (bare reads, names the arithmetic captures) for the arithmetic spans on `line`.
+
+    Sub-expressions are walked in evaluation order, split on `;`: `(( I=0; I<3; I++ ))`
+    declares `I` before the condition reads it, so the loop header is self-contained. Within
+    one sub-expression only the assignment's left-hand side is a capture — the right-hand
+    side of `(( COUNT = COUNT + 1 ))` reads the old value, which is PR #240's bug again.
+    """
+    masked = _mask_literal(line)
     reads: list[str] = []
-    pure: set[str] = set()
-    read_write: set[str] = set()
-    i = 0
+    captures: set[str] = set()
+    scanned_to = 0
     for open_end in _arith_opens(masked):
-        if open_end < i:
+        if open_end < scanned_to:
             continue
         close = masked.find("))", open_end)
         if close < 0:
             continue
-        i = close + 2
+        scanned_to = close + 2
         span = ARITH_CMDSUB_RE.sub(" ", line[open_end:close])
-        for name, op in ARITH_ASSIGN_RE.findall(span):
-            (pure if op == "=" else read_write).add(name)
-        reads += ARITH_VAR_RE.findall(span)
-    return reads, pure, read_write
+        declared: set[str] = set()
+        for sub in span.split(";"):
+            lhs_spans = []
+            assigned = set()
+            for assign in ARITH_ASSIGN_RE.finditer(sub):
+                assigned.add(assign.group(1))
+                if assign.group(2) == "=":
+                    lhs_spans.append(assign.span(1))
+            for use in ARITH_VAR_RE.finditer(sub):
+                if any(s <= use.start() < e for s, e in lhs_spans):
+                    continue
+                name = use.group(1)
+                if name in declared or name in SHELL_PROVIDED_VARS:
+                    continue
+                reads.append(name)
+            declared |= assigned
+            captures |= assigned
+    return reads, captures
 
 
 def check_capture_before_use(text: str) -> list[str]:
@@ -361,38 +431,30 @@ def check_capture_before_use(text: str) -> list[str]:
     earlier_blocks: dict[str, int] = {}
     for block_num, m in enumerate(FENCE_RE.finditer(text), start=1):
         captured = set(ALLOWLIST_VARS)
-        for line in _fold_multiline_arith(m.group(2)).splitlines():
-            line = COMMENT_RE.sub("", line)
-            reads = [(var, f"${{{var}}}") for var in VAR_USE_RE.findall(line)]
-            arith, pure, read_write = _arith_reads(line)
-            # A name the expression itself declares is captured by it, wherever in the span
-            # it sits — the loop header's `I=0` precedes the `I<N` the parser reaches first.
-            captured |= pure
-            reads += [
-                (var, f"{var} (arithmetic)")
-                for var in arith
-                if var not in pure and var not in SHELL_PROVIDED_VARS
-            ]
-            for var, shown in reads:
-                if var in captured:
-                    continue
-                where = earlier_blocks.get(var)
-                origin = (
-                    f" — captured in block #{where}, which is a separate shell"
-                    if where is not None
-                    else ""
-                )
-                problems.append(
-                    f"block #{block_num}: {shown} used before capture{origin}"
-                    f" — line: {line.strip()!r}"
-                )
-            captured |= read_write
-            for segment in SEGMENT_RE.split(line):
+        # Comments go first: stripping after the fold would let a `#` on one line swallow the
+        # operands that followed it on the next.
+        stripped = "\n".join(COMMENT_RE.sub("", l) for l in m.group(2).splitlines())
+        for line in _fold_multiline_arith(stripped).splitlines():
+            arith, arith_captures = _arith_reads(line)
+            reads = [(var, f"{var} (arithmetic)") for var in arith]
+            # The arithmetic is graded against the state before it ran; what it declares is
+            # only then in scope for the rest of the line (`for (( I=0; ... )); do echo $I`).
+            emit(reads, line, block_num, captured, earlier_blocks, problems)
+            captured |= arith_captures
+            emit(
+                [(var, f"${{{var}}}") for var in VAR_USE_RE.findall(line)],
+                line,
+                block_num,
+                captured,
+                earlier_blocks,
+                problems,
+            )
+            for segment in _segments(line):
                 cap = VAR_CAPTURE_RE.match(segment)
                 if cap:
                     captured.add(cap.group(1))
                     earlier_blocks.setdefault(cap.group(1), block_num)
-            for name in pure | read_write:
+            for name in arith_captures:
                 earlier_blocks.setdefault(name, block_num)
     return problems
 

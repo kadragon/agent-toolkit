@@ -720,6 +720,60 @@ def main() -> int:
         == [],
     )
 
+    # Second review pass on this PR: forms the scan skipped or misread.
+    print("\nCapture-before-use — quoting and evaluation order (PR #242 review, pass 2)")
+    check(
+        "double quotes still expand arithmetic, so the read is graded",
+        len(
+            mod.check_capture_before_use(
+                '```bash\necho "value $(( MISSING + 1 ))"\n```\n'
+            )
+        )
+        == 1,
+    )
+    check(
+        "the right-hand side of an arithmetic assignment is a read",
+        len(mod.check_capture_before_use("```bash\n(( COUNT = COUNT + 1 ))\n```\n")) == 1,
+    )
+    check(
+        "that same assignment is clean once the name is captured",
+        mod.check_capture_before_use("```bash\nCOUNT=0\n(( COUNT = COUNT + 1 ))\n```\n")
+        == [],
+    )
+    check(
+        "a `;` inside quotes does not fabricate a capture",
+        len(
+            mod.check_capture_before_use(
+                "```bash\necho 'literal; FOO=bar'\necho \"$FOO\"\n```\n"
+            )
+        )
+        == 1,
+    )
+    check(
+        "a capture after a real separator still counts",
+        mod.check_capture_before_use('```bash\n: ; FOO=bar\necho "$FOO"\n```\n') == [],
+    )
+    for label, snippet in [
+        ("negated", "! (( MISSING ))"),
+        ("grouped", "{ (( MISSING )); }"),
+        ("timed", "time (( MISSING ))"),
+    ]:
+        check(
+            f"a bare {label} arithmetic command is scanned",
+            len(mod.check_capture_before_use(f"```bash\n{snippet}\n```\n")) == 1,
+        )
+    check(
+        "a `#` comment opening right after a separator is stripped",
+        mod.check_capture_before_use("```bash\necho ok;# $NOPE\n```\n") == [],
+    )
+    check(
+        "a comment inside a wrapped expression does not swallow the next operand",
+        len(
+            mod.check_capture_before_use("```bash\nY=$((\n1 # note\n+ NOPE\n))\n```\n")
+        )
+        == 1,
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:
