@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] contract QA runs as a review-panel source instead of its own wave (dev v4.5.12) (2026-08-20) → docs/workflows.md
 - [done] review panel proceeds on a 2-of-3 quorum past a 300s floor (dev v4.5.11) (2026-08-20)
 - [done] preflight cached per branch, review panel short-circuits on line delta, human gates batched (dev v4.5.10) (2026-08-19)
 - [done] poll CI status every 5s for the first minute (dev v4.5.9) (2026-08-19)

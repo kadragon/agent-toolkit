@@ -35,6 +35,7 @@ prompted, not mechanical — nothing in CI enforces it. It exists because this s
 - `--from <caller>` — required caller token, supplied by whichever skill invoked this one. See *Caller gate*.
 - `--no-hub` — no push, no PR, no CI, no merge. Commits locally, reviews from local diff.
 - `--auto` — skip user confirmation in Step 3. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
+- `--qa-pending` — the caller handed off straight after implement, so **contract QA is still owed**: Step 2 runs it as source 2-4 alongside the review panel instead of the caller running it as its own wave in front of this cycle. Passed today by `--from task-next` and `--from task-new` on their default full-cycle path only; their lite path, `--tree` and `--all` batch mode verify before handing off and do not pass it. A caller that passes it **must restate the Sprint Contract verbatim** (Tag / Scope / Acceptance criteria / Out of scope / Lint-test command) in the invocation — its pre-merge cleanup has already pruned `tasks.md`, so the restatement is the only copy 2-4's brief can be built from. Flag present with no contract restated → stop and ask the caller for it; do not invent criteria. **Version bump and pre-merge cleanup deliberately stay with the caller** instead of moving into this cycle's Step 5: pre-handoff is what lets the Step 1 commit carry a valid version bump, so CI's bump check passes from the first push. The restatement requirement is the price of that choice.
 
 ## Prerequisites
 
@@ -118,7 +119,7 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-**All three sources (2-1, 2-2, 2-3) must be initiated in the same turn before waiting for any.** Use `run_in_background: true` for each, and stamp the launch in that same turn — the *Quorum-and-go* rule below reads that stamp. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). Proceed to Step 3 when the *Quorum-and-go* rule below is satisfied — **not** necessarily when every source has returned.
+**All three review sources (2-1, 2-2, 2-3) — plus 2-4 when `--qa-pending` is set — must be initiated in the same turn before waiting for any.** 2-4 is contract QA, not a review engine: it is exempt from the panel short-circuit, counts toward nothing in the quorum rule, and its own timeout is a hard stop rather than a skip. Its three exception rules are stated at 2-4 below; the paragraph you are reading and the two rules that follow govern the review sources only. Use `run_in_background: true` for each, and stamp the launch in that same turn — the *Quorum-and-go* rule below reads that stamp. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). Proceed to Step 3 when the *Quorum-and-go* rule below is satisfied — **not** necessarily when every source has returned.
 
 #### Panel short-circuit — evaluate once, before launching anything
 
@@ -140,6 +141,11 @@ MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode c
 handling, coverage). Record `Reviewers Skipped: trivial diff (all engines, LINE_DELTA ≤ 30)` in
 the consolidation table and go straight to Step 3. Otherwise launch all three sources as described
 below.
+
+**The short-circuit never skips 2-4.** It decides whether the *review panel* is worth its cost on a
+small diff; contract QA asks a different question — did the change meet its Sprint Contract — and a
+30-line diff can miss an acceptance criterion as easily as a 300-line one. Under `--qa-pending`,
+launch 2-4 even when this gate fires, and reach Step 3 with the inline review plus 2-4's verdict.
 
 **A zero line delta is not a trivial diff — it is an unmeasured one.** `--shortstat` counts no
 insertions or deletions for a binary edit, a file-mode flip or a pure rename, so a change that
@@ -214,6 +220,12 @@ Record anything it found to `backlog.md` through the same out-of-scope path Step
 
 Quorum never *extends* a wait. The 1200s per-source cap still applies on its own; quorum only ends
 a wait earlier.
+
+**2-4 is outside this rule entirely.** Contract QA never counts toward the 2-usable-review quorum,
+is never `TaskStop`-ed when quorum fires, and is always waited for before Step 3 — quorum ends the
+*panel's* tail, not the cycle's verification. Counting it would let a single returned review plus QA
+close the panel, shipping a diff one engine looked at; stopping it would ship a diff no one verified
+against the contract at all.
 
 
 #### 2-1: Claude Reviewer (`code-review`, fixed)
@@ -323,9 +335,67 @@ other cycle finishes.
 
 If all sources fail → inline review + note in consolidation.
 
+#### 2-4: Contract QA (`qa-verifier`, only under `--qa-pending`)
+
+Runs only when `--qa-pending` is set; without the flag the caller already verified before handing
+off and this slot does not exist. Launch it with `run_in_background: true` **in the same turn as
+2-1/2-2/2-3** — that concurrency is the whole point of the slot. Subject to the *Result-handoff
+rule* above: the brief must end with an instruction to return the verdict via
+`SendMessage(to: "main")`, including when nothing blocking was found.
+
+Spawn `qa-verifier`. The brief carries the caller's restated Sprint Contract — acceptance criteria
+verbatim — the in-scope paths, and the lint/test command, in `docs/delegation.md`'s four-field
+format (Objective / Output format / Tools to use / Boundaries).
+
+**Brief it adversarially.** The objective is *find violations*, not *confirm compliance*: tell it to
+hunt for each way the change could fail a criterion and to record a pass only where it has evidence.
+Do **not** pass your own reasoning about why the implementation is correct — the verifier grades the
+diff against the contract, and a supplied conclusion is what it will confirm.
+
+**Independence is what must not be dropped, not the role name.** The agent that implemented never
+verifies its own output — including the main thread, when the caller implemented inline because
+`implementer` was absent from its roster.
+
+**`qa-verifier` absent from the roster** (`.claude/agents/qa-verifier.md` or
+`~/.claude/agents/qa-verifier.md`; a role supplied by an installed plugin counts as present even
+though no path check finds it): spawn the built-in `general-purpose` subagent instead, with the same
+four-field brief plus effort tier. **Carry the standing-checks floor in the brief too** — with no
+role file there is no `## Checks (always run)` for the brief to point at, so the gates every contract
+inherits reach the verifier only if the brief states them. Take them from `dev:harness-init` →
+`references/harness-invariants.md` → *Verifier Standing-Checks Floor*; do not reconstruct the list
+from memory.
+
+Three rules separate this slot from the review sources, each contradicting a rule the panel already
+has — apply them as written rather than by analogy to 2-1/2-2/2-3:
+
+1. **Short-circuit-exempt.** A trivial diff skips the review engines; 2-4 launches anyway (see *The
+   short-circuit never skips 2-4* above).
+2. **Not a quorum source.** It never counts toward quorum and is never stopped by it; Step 3 waits
+   for it unconditionally (see *2-4 is outside this rule entirely* above).
+3. **Allow 1200s for 2-4 as well, and a breach is a hard stop, not a skip.** The Step 2 intro
+   grants its budget to the review sources; this rule grants 2-4 the same 1200s so the deadline it
+   can breach is defined. A review source that breaches its budget is
+   recorded as skipped and the cycle proceeds on the rest. Contract QA breaching means the change
+   was never verified against its contract — stop, report, and do not merge. Re-running the slot is
+   the fix; recording it as skipped is not.
+
 ### Step 3: Consolidate + Confirm
 
 Follow **`references/consolidation-guide.md`** for deduplication, the Contest Round (confidence 50–74 band), confidence filtering (< 50 drops to low-confidence list), scope classification, and backlog.md recording.
+
+**Contract QA (2-4) folds in as a fourth source, on its own terms.** Its blocking findings are
+in-scope P0 by construction and bypass the three gates the review sources pass through: no
+confidence filter, no Contest Round, no verifier gate — the verifier gate re-checks a finding at
+file:line against the contract, which is exactly what 2-4 already did, so running it again buys
+nothing and can refute a verified contract miss. Non-blocking observations from 2-4 are ordinary
+findings and take the normal path. `--auto` approves in-scope *review* findings without asking; it
+must **never** wave through a blocking contract finding — those are fixed in Step 4 or the cycle
+stops, with or without the flag.
+
+**Classify each blocking contract finding before fixing it.** A finding caused by an unclear,
+incomplete or wrong Sprint Contract is a *contract* defect: correct the contract and re-brief from
+it. Only a finding that survives a correct contract is an implementation defect. Sending a contract
+defect to the implementation path re-litigates it as one and burns the single retry Step 4 allows.
 
 **Verifier gate (P0/P1) and Contest Round (confidence 50–74) — spawn in parallel, not sequentially.** The two gates target disjoint findings (P0/P1 vs the 50–74 confidence band) and never compete for the same candidate, so launch both in the same turn with `run_in_background: true` and wait for both before proceeding. Both prompts are subject to the **result-handoff rule** from Step 2 — each must end with an explicit instruction to return its verdicts via `SendMessage(to: "main")`, including when the verdict list is empty.
 
@@ -342,6 +412,17 @@ Before proceeding:
 ### Step 4: Apply Improvements
 
 Apply accepted changes. Find test command: `package.json scripts.test`, `Makefile`, `pytest.ini`, `pyproject.toml`, `go.mod`, `Cargo.toml`. Run tests. On failure: revert via `git restore --staged <files> && git restore <files>`, report which suggestion failed, ask user to skip or retry.
+
+**If 2-4 reported blocking findings, re-verify once after applying the fixes.** Spawn `qa-verifier`
+(or the `general-purpose` fallback) a second time against the corrected contract, briefed the same
+way as in 2-4. Still blocking after that one retry → stop and report; do not proceed to Step 5 or
+merge. One retry, not a loop.
+
+**Re-check the version bump if these fixes changed the branch's file footprint.** Under
+`--qa-pending` the caller bumped before handing off, so a Step 4 fix that newly touches another
+plugin or another skill's `SKILL.md` leaves that bump stale — re-run `scripts/bump-version.sh` for
+the newly-touched target (or edit the `version:` frontmatter by hand) and stage it with Step 5.
+Nothing new touched → the caller's bump already covers this branch; do not bump twice.
 
 ### Step 4.5: Retrospect (pre-merge, signal-gated)
 
@@ -387,6 +468,11 @@ commit-guard applies here exactly as in Step 1 — a rejection exits 1 with no c
 ### Step 6: CI + Merge
 
 Follow **`references/ci-failure-handling.md`**. Summary:
+
+**Never merge with an unresolved contract-QA blocker.** A 2-4 finding still blocking after Step 4's
+one retry, or a 2-4 slot that breached its 1200s budget, ends the cycle here — green CI does not
+substitute for the contract check.
+
 1. `scripts/ci-wait.sh <PR_NUMBER>` — wait up to 15 min, check `passed` and `reason`.
 2. On failure with no `reason` (real CI failure): `scripts/ci-failure-logs.sh` → classify fix. Trivial → apply directly. Logic change → re-run Steps 2–3.
    On failure with `reason:"rework-cap"`: the script's own 3-strike counter tripped — hard stop, report `.failures` and ask the user. Do not count strikes yourself.
@@ -409,6 +495,9 @@ Follow **`references/ci-failure-handling.md`**. Summary:
 | Review sub-agent fails | Log skill id, proceed with remaining |
 | Review source >1200s | Skip that source, proceed with the rest; note "timeout (>1200s)" |
 | Review source still running at quorum | Not a failure — `TaskStop` that source (so Codex releases its workspace lock), proceed to Step 3; note "quorum reached without it (2 usable reviews in, ≥300s)". Distinct from a >1200s timeout; do not fold in output that still arrives |
+| 2-4 contract QA fails, or >1200s | Stop, report — never recorded as a skipped source. Contract QA is mandatory under `--qa-pending`; re-run the slot rather than proceeding unverified |
+| 2-4 still blocking after Step 4's one retry | Stop, report; no Step 5, no merge |
+| `--qa-pending` with no Sprint Contract restated | Stop, ask the caller for it — do not invent acceptance criteria |
 | No actionable suggestions | Skip Step 4; still run Step 4.5 + Step 6 (Step 5 only if edits exist) |
 | Push fails | Report, suggest manual resolution |
 | `--no-push` + clean tree (nothing to commit) | Fatal — `commit-and-push.sh` exits 1, "nothing to do" |

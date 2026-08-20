@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.7
+version: 1.6.8
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
@@ -362,10 +362,22 @@ merge them into a single vague criterion. Scope lists all in-scope files/areas.
   Do not proceed to qa-verifier.
 
 **QA (workflows.md Step 4)**
-This skill always spawns `qa-verifier` as a separate agent, and the implementing agent must not
-verify — a deliberate exception to the volume half of the repo's delegation gate, argued once in
-`docs/delegation.md` → *Role Routing*. The exception covers every QA spawn this skill owns,
-batch mode's per-unit verifiers included; every non-QA delegation still needs both conditions.
+QA is always a separate agent, and the implementing agent must not verify — a deliberate exception
+to the volume half of the repo's delegation gate, argued once in `docs/delegation.md` → *Role
+Routing*. The exception covers every QA spawn this skill owns, batch mode's per-unit verifiers
+included; every non-QA delegation still needs both conditions.
+
+**Where it runs depends on the path.** On the **default full-cycle path** — single-pick, not lite,
+not `--tree`, not `--all` — do **not** spawn `qa-verifier` here. Hand off with `--qa-pending` (Step 4
+below) and contract QA runs inside `task-review-cycle` as review-panel source 2-4, concurrently with
+the three review engines instead of as its own blocking wave in front of them. Everything below —
+the adversarial brief, the absent-role fallback, the blocking-issue retry — then belongs to that
+slot, and `task-review-cycle` → *2-4: Contract QA* states it; do not also run it here, or the diff
+is verified twice and the latency this buys is spent again.
+
+The **lite path**, **`--tree`** and **`--all`** batch mode keep QA here, before handoff or
+integration, exactly as written below: the lite path never opens a PR, so there is no panel to ride,
+and tree/batch verify per worktree before their units are collapsed onto one branch.
 
 **Brief the verifier adversarially.** The objective in the brief is *find violations*, not *confirm
 compliance*: tell it to hunt for each way the change could fail a criterion and to record a pass
@@ -502,9 +514,17 @@ Post-merge, verify `backlog.md` and `tasks.md` are clean — no `[x]`, `[>]`, or
 
 ## Step 4 — Hand off
 
-Call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto`.
+Call the Skill tool with "dev:task-review-cycle" and:
 
-`task-review-cycle --from task-next --auto` commits (including the cleanup changes above), creates PR, collects
+- **default full-cycle path** — `args: --from task-next --auto --qa-pending`. `--qa-pending` says
+  contract QA is still owed, so the review cycle runs it as source 2-4 alongside the panel. **State
+  the Sprint Contract verbatim in the handoff** — Tag / Scope / Acceptance criteria / Out of scope /
+  Lint-test command. Pre-merge cleanup has already pruned `tasks.md`, so this restatement is the
+  only copy 2-4's brief can be built from; hand off without it and the review cycle stops and asks.
+- **`--tree` and `--all`** — `args: --from task-next --auto`, no `--qa-pending`: those paths already
+  verified per worktree/unit before collapsing onto the branch.
+
+`task-review-cycle` commits (including the cleanup changes above), creates PR, collects
 reviews, applies in-scope findings, records out-of-scope items to `backlog.md`, waits CI, and merges.
 
 **If task-review reports CI failure and the PR must be abandoned:** close the PR and delete
@@ -519,7 +539,8 @@ implement, QA, then merge directly to `main` in the same session.
 
 Run Step 3 sub-steps normally (branch, Sprint Contract — file-backed only for a ≥2-item group,
 inline otherwise, per **Mark active** above — Implement, QA, version bump, pre-merge cleanup)
-with these overrides:
+with these overrides. **QA runs here**, before the merge — the deferral to review-panel source 2-4
+is a full-cycle-only move and there is no PR on this path to carry it.
 
 **Branch:** `git checkout -b <type>/<slug>` as normal — never commit directly to `main`.
 
@@ -546,11 +567,11 @@ Report on completion: "라이트 패스 완료 — main에 직접 병합 및 푸
 
 ## `--tree` mode (single task, worktree isolation)
 
-Runs single-pick through an isolated git worktree so the main checkout stays on `main` throughout implementation and QA. See `references/tree.md` for full detail.
+Runs single-pick through an isolated git worktree so the main checkout stays on `main` throughout implementation and QA. QA stays in the worktree, before handoff — no `--qa-pending`. See `references/tree.md` for full detail.
 
 ## Batch mode (`--all`)
 
-Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and one `task-review-cycle --from task-next --auto` run. See `references/batch.md` for full detail.
+Implements multiple units in parallel worktrees, then collapses them onto one integration branch for a single version bump, cleanup pass, and one `task-review-cycle --from task-next --auto` run. Each unit is QA'd in its own worktree before integration, so the run carries no `--qa-pending`. See `references/batch.md` for full detail.
 
 ## Edge cases
 
@@ -566,7 +587,10 @@ action itself; always still ask yes/no.
    [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
    ```
    If `$commits` is non-empty, `task-review-cycle` Step 1 (commit) already ran. Diagnosis:
-   offer `task-review-cycle --from task-next --auto` directly.
+   offer `task-review-cycle --from task-next --auto` directly — plus `--qa-pending` and the
+   restated Sprint Contract unless QA is *known* to have run (see **Whether QA is still owed**
+   below). Commits ahead of `main` no longer prove it did: on the default full-cycle path QA
+   happens inside the cycle at 2-4, after the Step 1 commit.
 
 2. **No commits ahead, but an active Sprint Contract?**
 
@@ -593,16 +617,28 @@ action itself; always still ask yes/no.
    - `$code_diff` and `$untracked` both empty, `$bump_diff` empty → Sprint Contract written, no
      implementation yet. Diagnosis: resume at **Step 3 – Implement**.
    - `$code_diff` or `$untracked` non-empty, `$bump_diff` empty → implementation in progress, no
-     version bump yet. Diagnosis: resume at **Step 3 – QA**.
+     version bump yet. Diagnosis: resume at **Step 3 – version bump**, then Step 4's handoff. On
+     the default full-cycle path there is no QA stage left to resume here — it is owed to the
+     cycle's 2-4 slot; on the lite path, `--tree` and `--all`, resume at their QA step as before.
    - `$bump_diff` non-empty → implementation and version bump both done. Diagnosis: resume at
      **Step 4 – Handoff**.
 
 3. **Neither of the above matched** → state is genuinely unclear from these cheap checks; fall
    back to the generic offer: "I see uncommitted changes on `<branch>`. Skip to
-   `task-review-cycle --from task-next --auto`?"
+   `task-review-cycle --from task-next --auto`?" — with `--qa-pending` and a restated contract
+   per **Whether QA is still owed** below, which this branch almost always triggers.
+
+**Whether QA is still owed.** A resumed run must decide this before handing off, and it is not
+inferable from commits: on the default full-cycle path QA lives in the cycle's 2-4 slot, *after*
+the Step 1 commit. Treat QA as owed unless this session has the verifier's own verdict in hand, or
+the run was a lite/`--tree`/`--all` path (all three verify before handing off). QA owed → hand off
+with `--qa-pending` **and** the Sprint Contract restated verbatim, or the cycle stops and asks for
+it. When the contract cannot be recovered — the usual case under check 3, where `tasks.md` may
+already be pruned — do not append the flag blind: reconstruct the contract with the user from the
+diff and the backlog item first, and say that is what you are doing.
 
 Present the diagnosis (or check 3's fallback to the generic offer) and ask for confirmation:
-- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` for
+- **Yes:** resume at the diagnosed step (or call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` — adding `--qa-pending` plus the restated contract when QA is owed — for
   check 1 / the generic fallback).
 - **No:** ask whether to (a) stash and start a fresh task, (b) commit the in-flight work
   first, or (c) cancel. Do not proceed until the tree is clean or the user redirects.

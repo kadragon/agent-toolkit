@@ -42,11 +42,15 @@ delegation bar is met — e.g. a backlog batch of independent items.
 Verify against the Sprint Contract. Run the tests/lint yourself. If you delegate verification,
 it must go to `qa-verifier` — never to the agent that implemented the change.
 
+A cycle that hands off with `--qa-pending` (Step 6) runs this verification *inside* the review
+cycle, as a panel source alongside the review engines, instead of as its own wave here. The
+independence rule is unchanged wherever it runs.
+
 **Step 5: Version bump**
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name>` (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*, which refuses a call that names no caller. Add `--auto` only if your caller genuinely runs unattended: it skips the Step 3 consolidation confirmation and merges without asking. Do NOT inline-manage the review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name>` (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*, which refuses a call that names no caller. Add `--auto` only if your caller genuinely runs unattended: it skips the Step 3 consolidation confirmation and merges without asking. Add `--qa-pending` when you hand off straight after implement without having run Step 4 — the review cycle then runs contract QA concurrently with the panel, and your invocation must restate the Sprint Contract verbatim for it to grade against. Do NOT inline-manage the review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
 
 ## `draft` — Documentation
 

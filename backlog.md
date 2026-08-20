@@ -31,8 +31,7 @@ merged PRs run 5–28 files and +8/-7 to +720/-20; median ≈9–13 files, ≈50
 Ordered so the isolated, low-risk items land before the Step 2 restructure they would otherwise
 conflict with.
 
-- [ ] **Run QA in parallel with the review panel** — `qa-verifier` is its own blocking wave in front of the panel in both `task-new` and `task-next` Step 3, so the panel cannot start until contract QA has finished. Commit and open the PR right after implement, then launch `qa-verifier` in the same turn as 2-1/2-2/2-3 and fold its contract findings into the Step 3 consolidation table as a fourth source. Version bump and pre-merge cleanup move into the Step 5 commit. Four waves become three. The independence rule is unchanged: whoever implemented still never verifies.
-- [ ] **Trim `task-next`/`task-new` SKILL.md to references** *(blocked by: qa-in-parallel)* — `task-next/SKILL.md` is 37KB and `task-review-cycle/SKILL.md` 30KB, re-prefilled on every turn of every cycle. The absent-role fallback prose is restated at each of the three spawn points in both skills, the roster-check block is duplicated across them, and `## Edge cases` is ~80 lines that a typical run never reaches. Move the rarely-hit branches into `references/` the way batch/tree mode already are, leaving the hot path in `SKILL.md`. No behavior change — this is a token cut.
+- [ ] **Trim `task-next`/`task-new` SKILL.md to references** — `task-next/SKILL.md` is 37KB and `task-review-cycle/SKILL.md` 30KB, re-prefilled on every turn of every cycle. The absent-role fallback prose is restated at each of the three spawn points in both skills, the roster-check block is duplicated across them, and `## Edge cases` is ~80 lines that a typical run never reaches. Move the rarely-hit branches into `references/` the way batch/tree mode already are, leaving the hot path in `SKILL.md`. No behavior change — this is a token cut.
 
 ## Harness — capture-before-use across block boundaries
 
