@@ -119,7 +119,14 @@ Extract `PR_NUMBER` and `PR_URL` from JSON (`jq -r '.pr_number'`, `jq -r '.pr_ur
 
 ### Step 2: Collect Reviews
 
-**All three review sources (2-1, 2-2, 2-3) — plus 2-4 when `--qa-pending` is set — must be initiated in the same turn before waiting for any.** 2-4 is contract QA, not a review engine: it is exempt from the panel short-circuit, counts toward nothing in the quorum rule, and its own timeout is a hard stop rather than a skip. Its three exception rules are stated at 2-4 below; the paragraph you are reading and the two rules that follow govern the review sources only. Use `run_in_background: true` for each, and stamp the launch in that same turn — the *Quorum-and-go* rule below reads that stamp. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation). Proceed to Step 3 when the *Quorum-and-go* rule below is satisfied — **not** necessarily when every source has returned.
+**All three review sources (2-1, 2-2, 2-3) — plus 2-4 when `--qa-pending` is set — must be initiated in the same turn before waiting for any.** 2-4 is contract QA, not a review engine: it is exempt from the panel short-circuit, and its own timeout is a hard stop rather than a skip. Its exception rules are stated at 2-4 below; the paragraph you are reading and the rule that follows govern the review sources only. Use `run_in_background: true` for each. Allow 1200s per source. On a 1200s breach for any one source, stop waiting on that source only — do not extend the budget or re-poll indefinitely. Treat its output as unavailable for this cycle: same handling as "Review sub-agent fails" (record "Reviewers Skipped: timeout (>1200s)" for that source in the consolidation table), and proceed with whichever sources did return. If all three sources breach 1200s, follow the existing "If all sources fail" rule below (inline review + note in consolidation).
+
+**Collect every review that can still arrive.** Step 3 begins only once each launched source has
+returned, failed, or breached its own 1200s cap — never earlier, and never because some other
+source already returned. A source that is still running is a review the panel is about to gain;
+closing it early trades the breadth this panel exists for against a few minutes of tail latency.
+Never `TaskStop` a review source to move on sooner. The panel's wall clock is `max()` of its
+sources, bounded by the 1200s per-source cap.
 
 #### Panel short-circuit — evaluate once, before launching anything
 
@@ -163,71 +170,6 @@ cap re-introduces the bug.
 **`SECURITY_HIT` is an absolute override** — a non-empty hit runs the whole panel no matter how
 small the diff, and separately raises the Claude slot's effort to `high` in 2-1. The two uses read
 the same capture; never re-derive the condition from a prose path list.
-
-#### Quorum-and-go — proceed on 2 usable reviews, past an elapsed floor
-
-Reached only when the panel short-circuit above did not fire. That gate decides whether the panel
-launches at all; this rule decides how long to wait once it has. The panel's wall clock is `max()`
-of its sources, so one slow engine sets the whole cycle's latency no matter how fast the others were.
-
-Stamp the launch **to a file**, in the same turn you launch 2-1, 2-2 and 2-3. A later turn is a
-fresh shell, so a plain `PANEL_START=$(date +%s)` variable would be unset by the time the floor
-reads it — the arithmetic would then treat it as `0` and the floor would pass on the first check:
-
-```bash
-PANEL_STAMP="$(git rev-parse --git-dir)/drc-panel-start"
-date +%s > "$PANEL_STAMP"
-```
-
-Stop waiting once **both** of these hold:
-
-1. **Quorum — 2 sources have returned a *usable* review.** Usable means the source actually
-   reviewed: a findings array (an empty `[]` counts — an engine that reviewed and found nothing
-   did review) or review text. A source that errored, exited `75` (Codex workspace lock — nothing
-   ran), or was never launched (`agy_available=false`, `codex_available=false`, `claude CLI
-   unavailable`) does **not** count toward quorum. Record it as skipped under its own rule and drop
-   it from the panel. **Counting a failure is the trap here:** two sources erroring in seconds would
-   otherwise satisfy quorum and close the one engine that is actually reviewing, shipping a cycle
-   with no review at all.
-2. **Elapsed floor — at least 300s since the stamp.**
-   ```bash
-   PANEL_STAMP="$(git rev-parse --git-dir)/drc-panel-start"
-   PANEL_START=$(cat "$PANEL_STAMP")
-   ELAPSED=$(( $(date +%s) - PANEL_START ))
-   [[ "$ELAPSED" -ge 300 ]] && echo "floor cleared"
-   ```
-   The floor keeps a fast pair from closing a slow third that was about to return something. 300s
-   sits well inside the 1200s per-source budget, so a closed source only ever loses time it was
-   already spending in the tail.
-
-**When quorum is unreachable, it never fires.** Fewer than 2 sources still able to return a usable
-review — because the rest failed, locked, or were never launched — means you wait out whoever is
-left under the 1200s cap, exactly as before this rule existed. If nothing usable arrives at all,
-take the "If all sources fail" rule below (inline review + note in consolidation).
-
-When both conditions hold, **stop the outstanding source before proceeding** — `TaskStop` with its
-task id (background Bash) or agent id (Agent slot). Closing without stopping is not free: Codex in
-particular holds a per-workspace lock that `codex-review.sh` releases only from its `EXIT`/`INT`/
-`TERM` trap, so a closed-but-still-running Codex keeps that lock and the *next* cycle's Codex slot
-exits `75` and is skipped. Trading this cycle's tail for the next cycle's panel breadth is not the
-bargain this rule is making.
-
-Then record the stopped source in the consolidation table the way a timeout is recorded —
-`Reviewers Skipped: quorum reached without it (2 usable reviews in, ≥300s)` — so the table still
-states the panel's real breadth. **A closed source stays closed:** should its output still arrive
-(the stop can race a result already in flight) while Step 3 or later is running, do not fold it in
-and do not reopen consolidation, or the same diff yields a different action table run to run.
-Record anything it found to `backlog.md` through the same out-of-scope path Step 3 already uses.
-
-Quorum never *extends* a wait. The 1200s per-source cap still applies on its own; quorum only ends
-a wait earlier.
-
-**2-4 is outside this rule entirely.** Contract QA never counts toward the 2-usable-review quorum,
-is never `TaskStop`-ed when quorum fires, and is always waited for before Step 3 — quorum ends the
-*panel's* tail, not the cycle's verification. Counting it would let a single returned review plus QA
-close the panel, shipping a diff one engine looked at; stopping it would ship a diff no one verified
-against the contract at all.
-
 
 #### 2-1: Claude Reviewer (`code-review`, fixed)
 
@@ -362,14 +304,12 @@ brief plus effort tier, carrying the standing-checks floor because no role file 
 roster probe, the installed-plugin caveat and the full fallback are canonical in `dev:harness-init`
 → `references/harness-invariants.md` → *Absent-Role Fallbacks*.
 
-Three rules separate this slot from the review sources, each contradicting a rule the panel already
+Two rules separate this slot from the review sources, each contradicting a rule the panel already
 has — apply them as written rather than by analogy to 2-1/2-2/2-3:
 
 1. **Short-circuit-exempt.** A trivial diff skips the review engines; 2-4 launches anyway (see *The
    short-circuit never skips 2-4* above).
-2. **Not a quorum source.** It never counts toward quorum and is never stopped by it; Step 3 waits
-   for it unconditionally (see *2-4 is outside this rule entirely* above).
-3. **Allow 1200s for 2-4 as well, and a breach is a hard stop, not a skip.** The Step 2 intro
+2. **Allow 1200s for 2-4 as well, and a breach is a hard stop, not a skip.** The Step 2 intro
    grants its budget to the review sources; this rule grants 2-4 the same 1200s so the deadline it
    can breach is defined. A review source that breaches its budget is
    recorded as skipped and the cycle proceeds on the rest. Contract QA breaching means the change
@@ -491,7 +431,6 @@ substitute for the contract check.
 | Step 1 fails | Stop, report |
 | Review sub-agent fails | Log skill id, proceed with remaining |
 | Review source >1200s | Skip that source, proceed with the rest; note "timeout (>1200s)" |
-| Review source still running at quorum | Not a failure — `TaskStop` that source (so Codex releases its workspace lock), proceed to Step 3; note "quorum reached without it (2 usable reviews in, ≥300s)". Distinct from a >1200s timeout; do not fold in output that still arrives |
 | 2-4 contract QA fails, or >1200s | Stop, report — never recorded as a skipped source. Contract QA is mandatory under `--qa-pending`; re-run the slot rather than proceeding unverified |
 | 2-4 still blocking after Step 4's one retry | Stop, report; no Step 5, no merge |
 | `--qa-pending` with no Sprint Contract restated | Stop, ask the caller for it — do not invent acceptance criteria |
