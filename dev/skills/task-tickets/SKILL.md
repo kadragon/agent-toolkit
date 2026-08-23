@@ -6,7 +6,7 @@ description: >-
   order. Confirms granularity with the user first. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.6
+version: 1.0.7
 ---
 
 # To Tickets
@@ -48,6 +48,32 @@ items from approved spec").
    open items at *execution* time — the two are independent checks, not restatements of each
    other). A title that needs "and" to describe it is a signal of the same problem — split it
    into two tickets rather than writing one ticket that does both.
+2a. **Wide mechanical refactors are the exception to vertical slicing.** A *wide refactor* is
+   one mechanical change — rename a skill, move a bundled script, retype a shared field —
+   whose blast radius fans across the repo, so a single edit breaks every call site at once
+   and no vertical slice lands green. Do not force it into a tracer bullet; sequence it
+   **expand–contract**, one ticket per stage:
+   1. **Expand** — add the new form beside the old, nothing breaks, nothing migrates.
+   2. **Migrate** — call sites in batches sized by blast radius (per plugin, per skill
+      directory), each batch its own ticket carrying `*(blocked by: <n>-expand-<slug>)*`.
+      Each batch stays green on its own because the old form still exists.
+   3. **Contract** — delete the old form once no caller remains, blocked by *every* migrate
+      batch.
+
+   The Step 2 five-file cap is judged **per batch**, not across the sequence, and a purely
+   mechanical batch may exceed it where every edit is the same substitution — the cap exists
+   to bound review surface, and identical edits do not accumulate review surface the way
+   distinct ones do. Split by subsystem anyway when a batch stops being reviewable at a
+   glance. If a migrate batch cannot stay green alone, the change is not expand–contract-able
+   in this repo: say so and keep it as one ticket rather than inventing a shared integration
+   branch — `task-next`/`task-review` merge each ticket through its own PR to `main`, and a
+   long-lived integration branch has no slot in that cycle.
+
+   **Version-bump note:** every stage ships under the same plugin, so each stage ticket bumps
+   the plugin itself (`docs/conventions.md` → *Plugin Version Bump Rules*). A rename of an
+   asset invoked **by name** is a major bump, and it lands on the **contract** ticket — the
+   stage that actually removes the old name — not on expand.
+
 3. **Order topologically.** Determine which tickets depend on others (e.g. a schema change
    before the feature that reads it). Sort the ticket list so a dependency's ticket always
    precedes its dependents.
