@@ -1,5 +1,9 @@
 # Backlog
 
+## Harness — lint invalid ordered-list markers in shipped markdown
+
+- [ ] [HARNESS] Fail `check_harness_drift.py` on a line matching `^\s*[0-9]+[a-z]\.\s` in any shipped `SKILL.md`/reference: `2a.`/`3a.` are not ordered-list markers, so they silently terminate the enclosing list and restart the numbering of every item after them. Caught twice by review in PR #249 after being authored twice in one branch; the correct form is an indented continuation block under the preceding item.
+
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
