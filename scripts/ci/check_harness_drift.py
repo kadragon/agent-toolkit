@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harness ratchet checks for shipped plugin skills (dev/, prod/).
 
-Six independent checks, run over every `{plugin}/skills/*/SKILL.md`:
+Seven independent checks, run over every `{plugin}/skills/*/SKILL.md`:
 
 (a) Plugin-root portability — shared skill instructions and references must not
     depend on hook-only plugin root variables to locate bundled files.
@@ -73,6 +73,14 @@ Six independent checks, run over every `{plugin}/skills/*/SKILL.md`:
     substitution rule is uncharacterized, so the ban is wider than the one
     confirmed case. See `docs/platform-specs.md` -> Positional Parameters in Skill
     Code Blocks.
+
+(g) Ordered-list markers — no line may start with a `<digit><letter>.` marker
+    (`2a.`, `3b.`). Markdown does not recognise it as an ordered-list item, so it
+    silently terminates the enclosing list and restarts the numbering of every
+    item below it. Authored twice in one branch and caught twice by human review
+    in PR #249; the correct form is an indented continuation block under the
+    preceding item. Fenced code blocks are exempt — a fence may legitimately show
+    such a line as sample text.
 
 Scope note: plugin-root portability, positional-parameter, section-reference,
 bundled-script and bundled-with violations are unconditional errors.
@@ -150,6 +158,9 @@ VAR_USE_RE = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)\}?")
 # The optional `[#!]` covers `${#1}` (length of a positional) and `${!1}` (indirection);
 # `${#arr[@]}` is untouched because what follows the `#` there is not a digit.
 POSITIONAL_PARAM_RE = re.compile(r"\$\{[#!]?[0-9][^}]*\}|\$[0-9]")
+# A `<digit><letter>.` line opener. Markdown reads it as a paragraph, not a list item,
+# so it ends the enclosing ordered list and restarts numbering below it (PR #249).
+ORDERED_LIST_MARKER_RE = re.compile(r"^\s*([0-9]+[a-z])\.\s")
 VAR_CAPTURE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
 # A `#` opens a shell comment only at a word boundary. `${#arr[@]}` and the base prefix in
 # `$(( 16#FF ))` are not comments, and cutting there blinded the arithmetic scan below.
@@ -516,6 +527,32 @@ def check_positional_params(text: str) -> list[str]:
             problems.append(
                 f"positional parameter {token!r} in a code block is substituted from the "
                 f"skill's invocation args at load time — use a named variable: {line.strip()!r}"
+            )
+    return problems
+
+
+def _blank_code_fences(text: str) -> str:
+    """Blank out fenced blocks, keeping the line count so line-level scans stay aligned."""
+    return CODE_FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
+def check_ordered_list_markers(text: str) -> list[str]:
+    """Reject `2a.`-style line openers outside fenced code blocks.
+
+    `2a.` is not an ordered-list marker. Markdown renders the line as a plain
+    paragraph, which closes the enclosing list and restarts the numbering of every
+    item after it — invisible in the source, wrong in the rendered skill text.
+    Authored twice in one branch and caught twice by human review in PR #249. The
+    correct form is an indented continuation block under the preceding item.
+    """
+    problems = []
+    for line in _blank_code_fences(text).splitlines():
+        m = ORDERED_LIST_MARKER_RE.match(line)
+        if m:
+            problems.append(
+                f"{m.group(1) + '.'!r} is not an ordered-list marker — it ends the enclosing "
+                f"list and restarts the numbering below it; use an indented continuation "
+                f"block under the preceding item: {line.strip()!r}"
             )
     return problems
 
@@ -959,17 +996,18 @@ def main() -> int:
 
         portability = check_plugin_root_portability(text)
         positional = check_positional_params(text)
+        ordered_lists = check_ordered_list_markers(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
         with_refs = check_bundled_with_refs(text, path)
 
-        if (not portability and not positional and not capture and not section_refs
-                and not script_refs and not with_refs):
+        if (not portability and not positional and not ordered_lists and not capture
+                and not section_refs and not script_refs and not with_refs):
             print(
                 f"OK   {rel} ({name}): plugin-root portability + positional params "
-                "+ capture-before-use + section refs + bundled scripts "
-                "+ bundled-with attributions clean"
+                "+ ordered-list markers + capture-before-use + section refs "
+                "+ bundled scripts + bundled-with attributions clean"
             )
             continue
 
@@ -977,6 +1015,8 @@ def main() -> int:
             print(f"ERROR {rel} ({name}) [plugin-root-portability]: {msg}")
         for msg in positional:
             print(f"ERROR {rel} ({name}) [positional-param]: {msg}")
+        for msg in ordered_lists:
+            print(f"ERROR {rel} ({name}) [ordered-list-marker]: {msg}")
         for msg in capture:
             print(f"{severity} {rel} ({name}) [capture-before-use]: {msg}")
         for msg in section_refs:
@@ -986,7 +1026,8 @@ def main() -> int:
         for msg in with_refs:
             print(f"ERROR {rel} ({name}) [bundled-with-ref]: {msg}")
 
-        if portability or positional or section_refs or script_refs or with_refs:
+        if (portability or positional or ordered_lists or section_refs
+                or script_refs or with_refs):
             hard_fail = True
         if severity == "ERROR" and capture:
             hard_fail = True
@@ -1000,17 +1041,18 @@ def main() -> int:
         rel = path.relative_to(REPO_ROOT)
         portability = check_plugin_root_portability(text)
         positional = check_positional_params(text)
+        ordered_lists = check_ordered_list_markers(text)
         capture = check_capture_before_use(text)
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
         with_refs = check_bundled_with_refs(text, path)
 
-        if (not portability and not positional and not capture and not section_refs
-                and not script_refs and not with_refs):
+        if (not portability and not positional and not ordered_lists and not capture
+                and not section_refs and not script_refs and not with_refs):
             print(
                 f"OK   {rel} ({skill_name}): plugin-root portability + positional params "
-                "+ capture-before-use + section refs + bundled scripts "
-                "+ bundled-with attributions clean"
+                "+ ordered-list markers + capture-before-use + section refs "
+                "+ bundled scripts + bundled-with attributions clean"
             )
             continue
 
@@ -1018,6 +1060,8 @@ def main() -> int:
             print(f"ERROR {rel} ({skill_name}) [plugin-root-portability]: {msg}")
         for msg in positional:
             print(f"ERROR {rel} ({skill_name}) [positional-param]: {msg}")
+        for msg in ordered_lists:
+            print(f"ERROR {rel} ({skill_name}) [ordered-list-marker]: {msg}")
         for msg in capture:
             print(f"WARN {rel} ({skill_name}) [capture-before-use]: {msg}")
         for msg in section_refs:
@@ -1027,7 +1071,8 @@ def main() -> int:
         for msg in with_refs:
             print(f"ERROR {rel} ({skill_name}) [bundled-with-ref]: {msg}")
 
-        if portability or positional or section_refs or script_refs or with_refs:
+        if (portability or positional or ordered_lists or section_refs
+                or script_refs or with_refs):
             hard_fail = True
 
     print("----")
