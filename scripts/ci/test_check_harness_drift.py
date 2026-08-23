@@ -827,6 +827,48 @@ def main() -> int:
         == 1,
     )
 
+    print("\nordered-list markers")
+    check(
+        "the PR #249 regression is caught verbatim",
+        len(mod.check_ordered_list_markers("1. first\n2. second\n2a. continuation\n")) == 1,
+    )
+    check(
+        "an indented `2a.` is caught too — indentation does not make it a marker",
+        len(mod.check_ordered_list_markers("1. first\n   2a. nested?\n")) == 1,
+    )
+    check(
+        "a multi-digit index is caught",
+        len(mod.check_ordered_list_markers("10b. tenth-b\n")) == 1,
+    )
+    check(
+        "every offending line is reported, not just the first",
+        len(mod.check_ordered_list_markers("2a. one\n3b. two\n")) == 2,
+    )
+    check(
+        "a real ordered-list marker is not flagged",
+        mod.check_ordered_list_markers("1. first\n2. second\n") == [],
+    )
+    check(
+        "the correct form — an indented continuation block — is not flagged",
+        mod.check_ordered_list_markers("2. second\n\n   continuation under item 2\n") == [],
+    )
+    check(
+        "an inline mention in prose is exempt — the hazard has to be describable",
+        mod.check_ordered_list_markers("Never write `2a.` mid-list.\n") == [],
+    )
+    check(
+        "a fenced code block is exempt",
+        mod.check_ordered_list_markers("```\n2a. sample output\n```\n") == [],
+    )
+    check(
+        "a marker after a fenced block is still caught — fence blanking keeps alignment",
+        len(mod.check_ordered_list_markers("```bash\necho hi\n```\n2a. after\n")) == 1,
+    )
+    check(
+        "a version-like `1.2.` opener is not flagged — the suffix must be a letter",
+        mod.check_ordered_list_markers("1.2. subsection\n") == [],
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

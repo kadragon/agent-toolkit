@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] drift linter fails on `2a.`-style ordered-list markers in shipped skill text (2026-08-23)
 - [done] spec gains a fog section; wide mechanical refactors sequence expand-contract (dev v4.5.20) (2026-08-23)
 - [done] review panel waits out every launched source; 2-of-3 quorum removed (dev v4.5.17) (2026-08-21)
 - [done] Signal 7 gains four within-layer instruction-diet subtypes, each evidence-gated and model-stamped (dev v4.5.16) (2026-08-20)
