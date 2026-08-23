@@ -6,7 +6,7 @@ description: >-
   order. Confirms granularity with the user first. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.5
+version: 1.0.6
 ---
 
 # To Tickets
@@ -33,7 +33,12 @@ items from approved spec").
 
 1. **Read the source.** If given a spec path, read `docs/design/{slug}.md` in full — User
    Stories and Implementation Decisions drive the slice boundaries. If given a conversation,
-   use the resolved scope directly.
+   use the resolved scope directly. **Never ticket `## Not yet specified`** — those lines are
+   fog, not slices: no ticket can be written from a question that is not yet sharp. Leave the
+   section in the spec, and say in the Step 4 draft which ticket is expected to clear it. When
+   a ticket lands and its answer sharpens a foggy line, that is a fresh `task-tickets` run on
+   the same spec — delete the graduated line from `## Not yet specified` in the same commit so
+   it lives only as its ticket.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
