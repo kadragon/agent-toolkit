@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] spec gains a fog section; wide mechanical refactors sequence expand-contract (dev v4.5.20) (2026-08-23)
 - [done] review panel waits out every launched source; 2-of-3 quorum removed (dev v4.5.17) (2026-08-21)
 - [done] Signal 7 gains four within-layer instruction-diet subtypes, each evidence-gated and model-stamped (dev v4.5.16) (2026-08-20)
 - [done] harness-curate body slimmed from 41KB to 31KB: Step 6 run stamp scripted, Step 2 lens rationale moved to references (dev v4.5.15) (2026-08-20)

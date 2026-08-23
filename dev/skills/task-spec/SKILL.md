@@ -7,7 +7,7 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.1.0
+version: 1.1.1
 ---
 
 # To Spec
@@ -74,12 +74,13 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    {anything else worth recording — open risks, follow-ups}
    ```
 
-3a. **Split what stays foggy.** An area is in scope but not yet answerable when you cannot
+   **Split what stays foggy.** An area is in scope but not yet answerable when you cannot
    state its question precisely *now* — not merely when you cannot answer it. Write those
    into `## Not yet specified`, one line each: the suspected question plus the area to
-   revisit. The test is sharpness, not certainty — a question you can phrase but not answer
-   belongs in `## Implementation Decisions` as an open decision (or goes back to
-   `dev:task-grill`), not here. Something ruled beyond the destination goes to
+   revisit. The test is sharpness, not certainty: a question you *can* phrase but cannot
+   answer is not fog and never gets parked — it goes back to `dev:task-grill` per Step 2, and
+   only its resolved answer reaches `## Implementation Decisions`, which holds decided things
+   and is read downstream as slice-bearing. Something ruled beyond the destination goes to
    `## Out of Scope`, which never graduates. Omit the section entirely when nothing is foggy;
    a spec that is foggier than it is decided is a signal the scope is too large for one
    spec, so say so instead of filling the section.
