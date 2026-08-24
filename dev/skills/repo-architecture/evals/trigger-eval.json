@@ -1,0 +1,8 @@
+[
+  {"query": "scan this repo for deepening opportunities and queue the best one", "should_trigger": true},
+  {"query": "which modules here are shallow enough that their complexity should collapse behind a smaller interface?", "should_trigger": true},
+
+  {"query": "diagnose why this endpoint throws intermittently", "should_trigger": false},
+  {"query": "pull the next queued item and run the full code cycle", "should_trigger": false},
+  {"query": "set up AGENTS.md and the docs index for this repo", "should_trigger": false}
+]

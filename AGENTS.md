@@ -14,6 +14,7 @@ Plugin marketplace (dev + prod) by kadragon. This repo IS the harness — skills
 | `docs/runbook.md` | For validate/test commands and troubleshooting |
 | `docs/platform-specs.md` | Before writing any skill/hook/agent — covers both Claude Code and Codex CLI spec differences |
 | `docs/invocation.md` | Before adding a new skill, or changing how an existing one is invoked or calls another |
+| `docs/writing-for-agents.md` | Before writing or revising a SKILL.md, a reference doc, or AGENTS.md itself |
 
 ## Golden Principles
 

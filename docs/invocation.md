@@ -199,7 +199,9 @@ are all model-invoked, which is the default, so they carry no fields and need no
 | `harness-init` | user | Writes repo-wide scaffolding (AGENTS.md, docs index). |
 | `harness-curate` | user | Cross-session mining; expensive, and prunes assets. |
 | `repo-dependabot` | user | Acts across every owned repo via `gh`. |
+| `repo-architecture` | user | Scans the whole repo and appends to the queue; the human picks the moment. |
 | `task-grill` | model | Pure interview discipline. |
+| `task-debug` | model | Reusable diagnosis discipline. |
 | `task-spec` | model | Writes one design doc; no destructive effect. |
 | `task-tickets` | model | Splits an approved spec. |
 | `harness-capture` | model | Retrospect discipline; called mid-review by design. |
