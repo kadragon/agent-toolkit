@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] debug loop and architecture scan skills added; writing-for-agents doc (dev v4.6.0) (2026-08-24) → docs/writing-for-agents.md
 - [done] drift linter fails on `2a.`-style ordered-list markers in shipped skill text (2026-08-23)
 - [done] spec gains a fog section; wide mechanical refactors sequence expand-contract (dev v4.5.20) (2026-08-23)
 - [done] review panel waits out every launched source; 2-of-3 quorum removed (dev v4.5.17) (2026-08-21)

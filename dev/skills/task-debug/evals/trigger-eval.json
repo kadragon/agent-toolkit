@@ -1,0 +1,10 @@
+[
+  {"query": "this endpoint throws intermittently and I have no idea why — diagnose it", "should_trigger": true},
+  {"query": "build a reproduction command for this crash before we theorize about the cause", "should_trigger": true},
+  {"query": "the import step got slow after last week's deploy, find the performance regression", "should_trigger": true},
+  {"query": "rank falsifiable hypotheses for why the output is corrupted, then instrument one variable at a time", "should_trigger": true},
+
+  {"query": "write a design doc for the new caching layer", "should_trigger": false},
+  {"query": "interview me about the open scope questions before we plan", "should_trigger": false},
+  {"query": "mine session transcripts and propose or prune harness assets", "should_trigger": false}
+]

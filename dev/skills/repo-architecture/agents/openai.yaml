@@ -1,0 +1,6 @@
+interface:
+  display_name: "Repo Architecture"
+  short_description: "Find deepening opportunities and queue them"
+  default_prompt: "Use $repo-architecture to scan this repo for shallow modules worth deepening and queue the best one."
+policy:
+  allow_implicit_invocation: false
