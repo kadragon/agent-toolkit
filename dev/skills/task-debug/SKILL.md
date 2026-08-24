@@ -160,12 +160,15 @@ Where a correct seam exists:
 4. Watch it pass.
 5. Re-run the Phase 1 loop against the original, un-minimised scenario.
 
-Two repo rules own the rest and are not restated here — read them:
+Two repo rules own the rest where the repo states them — read them there rather than recalling
+them, and fall back to the inline form when the file or section is absent:
 
 - `docs/conventions.md` → *Regression Test Rules* — the test must fail against the bug it
-  names; verify by removing the guard and watching it go red.
+  names. **No such file or section:** apply the rule directly — remove the guard the test
+  targets, re-run, confirm it goes red, restore.
 - `docs/eval-criteria.md` → *Sprint Contract* — a `[FIX]` contract must carry an acceptance
-  criterion naming this test.
+  criterion naming this test. **No such file:** name the test in the commit or PR body
+  instead, so the reproduction stays gradable.
 
 ## Phase 6 — Cleanup
 

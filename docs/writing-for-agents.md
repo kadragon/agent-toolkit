@@ -30,6 +30,13 @@ always-loaded pointer costs on every turn, so it is pruned harder than the body:
   twice.
 - **Cut identity the body already carries.**
 
+**A pointer that leaves this repo needs a fallback.** A skill shipped in `dev/` or `prod/` runs
+in repos that never had this one's `docs/`, and `harness-init` generates those files only
+conditionally — so `docs/conventions.md` → *Regression Test Rules*, read as "not restated here",
+becomes a dead end wherever the section does not exist. State the rule's one-line inline form
+beside the pointer, on the file-absent branch. Nothing in CI catches this: the pointer resolves
+here, which is the only place the checkers look.
+
 ## The two loads
 
 Every document and pointer spends one of two budgets:

@@ -95,12 +95,18 @@ Append the accepted candidate to `backlog.md` as a normal item — scope, the ac
 criterion in one line, and the vocabulary term for what gets deepened. Do **not** implement it
 here; this skill produces queued work, not commits.
 
+**No `backlog.md` in this repo:** do not create one. The queue is scaffolding, not a side
+effect of this scan — report the candidate in the conversation and send the user to
+`dev:harness-init`, which owns the file.
+
 If the candidate is large enough to span several sessions, call the Skill tool twice, for
 "dev:task-spec" and "dev:task-tickets", instead of writing one oversized item by hand.
 
 When a candidate is **rejected for a load-bearing reason** — a constraint that would make a
-future scan re-propose it — record that reason where the next reader will meet it: a line in
-`backlog.md`'s cut section, or a note in the owning `docs/` page. Skip ephemeral reasons ("not
-worth it right now") and self-evident ones.
+future scan re-propose it — record that reason where the next reader will meet it: a cut
+section in `backlog.md` if the repo keeps one, otherwise a note in the owning `docs/` page.
+Skip ephemeral reasons ("not worth it right now") and self-evident ones.
 
-Then tell the user to run `/task-next` when they want the queued item built.
+Then tell the user to run `task-next` themselves when they want the queued item built
+(`/task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no
+skill may call it.
