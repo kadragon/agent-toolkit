@@ -26,7 +26,7 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 ## Checks
 
 1. Trigger accuracy: draft the representative prompts a user would type, confirm this skill is the unambiguous best match for each, and confirm the `NOT for …` cases exclude neighboring skills — per `docs/eval-criteria.md` → *Trigger Accuracy* → **How to test**
-2. Correctness: read skill content against stated acceptance criteria
+2. Correctness: score the 1–5 table by reading skill content against stated acceptance criteria; report the ablation and variance results only from the skill's `evals/` fixture, and write `not observed` where it holds none — per `docs/eval-criteria.md` → *Correctness* → **How to test** → *Who runs which pass*. This role is read-only and does not run those passes
 3. Shell doc compliance: grep for `$var` without preceding capture in same block
 4. Context economy: check for inline reference dumps vs doc pointers
 

@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.1.4
+version: 2.1.5
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -46,16 +46,29 @@ specific named asset — route those to `harness-curate` / `skill-creator`.
      setup/infra gotcha or an approach correction.
    - **User correction** — the user redirected your approach, preference, or style.
 
-2. Apply the **§Harness ratchet write-back gate**. Capture a lesson **only** if it
-   is reusable **and** passed an objective check this session (test / exit-0 /
-   verifier) — a hunch that "felt right" does not qualify. Route by kind:
+2. Apply the **§Harness ratchet write-back gate**. Capture a lesson **only** if all
+   three hold:
 
-   | Kind | If durable → |
-   |------|--------------|
-   | Reusable workflow | → `skill-creator` (new or improved skill); one-off → pass |
-   | Setup/infra fix | → `docs/<topic>.md` in the owning repo |
-   | Approach correction / preference | → auto-memory (see **Writing to auto-memory**), or an instruction-file delta: `CLAUDE.md` (Claude Code) / `AGENTS.md` (Codex) |
-   | Workflow misunderstanding | → `skill-creator` improvement to the relevant skill |
+   - **Reusable** across sessions — a one-off of this task is noise.
+   - **Objectively checked** this session (test / exit-0 / verifier) — a hunch that
+     "felt right" does not qualify.
+   - **Not a no-op** — it changes behavior versus what the agent does by default.
+     An instruction the model already obeys pays load to say nothing. The test is
+     model-relative, so two people disagreeing about a no-op are disagreeing about
+     the default and settle it by running the delta, not by debate. A candidate
+     that fails this is dropped whole, not trimmed down to a shorter no-op.
+
+   Then route by kind — and let the destination's **load** set how high the bar
+   sits. Always-loaded text spends tokens and attention every turn whether or not
+   it fires; pointer-gated text spends only its pointer line, and that line's
+   wording is what decides whether the material is ever reached:
+
+   | Kind | If durable → | Load it pays |
+   |------|--------------|--------------|
+   | Reusable workflow | → `skill-creator` (new or improved skill); one-off → pass | Pointer-gated — the `description:` line is the whole standing cost |
+   | Setup/infra fix | → `docs/<topic>.md` in the owning repo | Pointer-gated — the docs-index row is the whole standing cost |
+   | Approach correction / preference | → auto-memory (see **Writing to auto-memory**), or an instruction-file delta: `CLAUDE.md` (Claude Code) / `AGENTS.md` (Codex) | Auto-memory: recall-gated. Instruction file: **every turn** — the highest bar in the table. Prefer memory unless the fact must be in context before anything asks for it |
+   | Workflow misunderstanding | → `skill-creator` improvement to the relevant skill | Pointer-gated |
 
    Whatever the route, the write proposal names in one line **the concrete
    failure this write-back prevents** ("without this: X happens again") — the
@@ -65,7 +78,35 @@ specific named asset — route those to `harness-curate` / `skill-creator`.
    instruction-file deltas it stays in the proposal/commit context.
 
 3. If nothing clears the gate, say so in one line and stop — **do not manufacture
-   a lesson**. A no-op is the correct outcome for most sessions.
+   a lesson**. Nothing to capture is the correct outcome for most sessions.
+
+## Writing the delta
+
+The gate decides *whether* and the table decides *where*; these rules decide *how
+the line reads* once it lands. The first binds every route. The second and third
+bind the **pointer-shaped** routes only — a `MEMORY.md` hook, a docs-index row, a
+skill `description:` — because both are about what makes material get reached; a
+memory body, a `docs/` page and an instruction-file line are already in hand when
+they are read.
+
+- **State the positive target** (every route). Steering by prohibition drags the
+  forbidden behavior into context and makes it more available: *don't think of an
+  elephant*. Write the behavior you want ("quote the rule verbatim"), not the one
+  you don't. A prohibition earns its place only as a hard guardrail that cannot be
+  phrased positively — and even then, pair it with the positive target.
+- **Front-load the leading word** (pointers). A pointer's first words do its
+  triggering work, and the strongest opener is a **leading word** — a compact
+  concept the model already thinks with, such as *tight*, *red*, *seam*, *fog*.
+  One such word beats a clause describing it, and repeating the same word across
+  the prompt, the doc and the code is what makes the agent link them.
+- **One trigger per branch** (pointers). A branch is a distinct case the material
+  handles. Synonyms that rename a single branch are one branch written twice,
+  paying load for no extra reach.
+
+**Portability.** The three rules above are self-contained and are the whole
+contract wherever this skill runs. One repo carries a longer treatment of the same
+levers — agent-toolkit's `docs/writing-for-agents.md` — so reach for it when that
+file is present, and rely on the rules alone when it is not.
 
 ## Cycle-tail mode (invoked from task-review Step 4.5)
 
@@ -90,7 +131,7 @@ for any *destructive* memory prune (deleting an entry) defer it to `backlog.md`
 rather than blocking, so the review cycle's `--auto` guarantee holds.
 
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,
-this is a no-op — say so in one line and let the merge proceed.
+there is no write-back — say so in one line and let the merge proceed.
 
 ## Writing to auto-memory
 
@@ -117,7 +158,8 @@ and before writing:
    records, and skip one-off fixes unlikely to recur — those are noise, not
    signal. (Same minimality bar `claude-md-improver` applies to CLAUDE.md.)
 4. **Show the write before applying.** State which file you'll create or edit and
-   quote the fact (a short diff/block), so the user can veto before it lands —
+   quote the fact (a short diff/block, phrased per **Writing the delta**), so the
+   user can veto before it lands —
    then write, and add/refresh the one-line `MEMORY.md` pointer in the same pass.
    Include the failure-this-prevents line (How-to-run step 2) in the memory
    body itself: it is what lets a later hygiene pass judge whether the memory
@@ -129,9 +171,10 @@ and before writing:
 
 ## Memory hygiene
 
-Auto-memory is a persistent store, and stores rot: facts go stale, the same
-lesson gets written twice under different names, and the `MEMORY.md` index drifts
-out of sync with the files it points at. Run this pass whenever you write a new
+Auto-memory is a persistent store, and stores collect **sediment** — stale layers
+that settle because adding feels safe and removing feels risky. Facts go stale, the
+same lesson gets written twice under different names, and the `MEMORY.md` index
+drifts out of sync with the files it points at. Run this pass whenever you write a new
 memory (on the neighbours you touched) or when the user asks to tidy memory (over
 the whole store). It mirrors `claude-md-improver`'s **audit → report → targeted
 diff → approval** flow — never bulk-delete silently.
@@ -147,6 +190,7 @@ diff → approval** flow — never bulk-delete silently.
    | **Redundant** | Two files cover the same fact — merge into the sharper one. |
    | **Index drift** | `MEMORY.md` pointer with no file, or a file with no pointer, or a hook that no longer matches its file's content. |
    | **Bloat** | Entry restates something the repo/docs/git already record, or was a one-off that never recurred. |
+   | **No-op** | Entry describes what the agent does by default anyway — true but inert. Same test as the write-back gate: does it change behavior versus the default? |
 
 3. **Report, then apply on approval.** Present the findings compactly — file,
    which red flag, proposed action (delete / merge / rewrite / fix index) — and
@@ -156,11 +200,12 @@ diff → approval** flow — never bulk-delete silently.
 4. **Leave the index consistent.** After any change, `MEMORY.md` must have exactly
    one line per surviving memory file and none for deleted ones.
 
-If the store is already clean, say so in one line — a no-op is fine here too.
+If the store is already clean, say so in one line — nothing to tidy is fine here too.
 
 **Boundary with `harness-curate`.** Deciding that a repo-scoped fact should move *out* of
 memory into the owning repo's `docs/` is `harness-curate`'s call, not this skill's — it needs
 cross-session evidence and the repo's own doc layout, which the warm path does not have. When
 curate routes such a promotion here, it has already written `docs/<topic>.md`; this skill
 executes the deletion and index repair under step 3's confirm-then-apply flow. Everything
-above — stale, wrong, redundant, index drift, bloat — stays this skill's, from either path.
+above — stale, wrong, redundant, index drift, bloat, no-op — stays this skill's, from either
+path.

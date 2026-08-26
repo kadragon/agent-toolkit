@@ -6,7 +6,9 @@ document that makes the agent take the same *process* every run, not one that pr
 prose.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills)
-`skills/productivity/writing-for-agents`. Scope split, so nothing here is restated elsewhere:
+`skills/productivity/writing-for-agents`. Scope split, so nothing here is restated elsewhere —
+except where a shipped skill needs a portable inline fallback, as `dev:harness-capture` → *Writing
+the delta* does for three of these levers:
 frontmatter syntax lives in `docs/platform-specs.md`, who may fire a skill in
 `docs/invocation.md`, how a finished skill is *graded* in `docs/eval-criteria.md`. This page is
 about the writing itself.

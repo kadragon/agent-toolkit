@@ -70,7 +70,7 @@ git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
 ### `check_skill_triggers.py` passes locally, then fails in CI
 
 **Symptom:** the local run prints `Ratchet: no */skills/*/SKILL.md changed vs origin/main — nothing to require`, but CI reports `skill 'X' changed on this branch but has no evals/trigger-eval.json`.
-**Cause:** the ratchet diffs **committed** state against `origin/main`. Run before committing, it sees no changed `SKILL.md` and reports a false green.
+**Cause:** the ratchet diffs **committed** state against the **local** `origin/main` ref. Two ways to get a false green: run it before committing (no changed `SKILL.md` yet), or run it in a clone whose `origin/main` was never fetched this session (the diff base is stale, so the change looks absent).
 **Fix:** re-run it after the commit and push (and after `git fetch origin main`). Any branch touching a skill's `SKILL.md` must leave that skill with an `evals/trigger-eval.json`.
 
 ### plugin.json version conflict after pulling remote changes
