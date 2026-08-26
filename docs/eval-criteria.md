@@ -4,6 +4,10 @@ Evaluation is a separate role from implementation (Generator-Evaluator separatio
 
 ## Skill Quality Criteria
 
+**Provenance of the weights.** 30/40/15/15 is an author's judgement call, set against this repo's
+own assets and never validated on an outside sample. Say so wherever the split decides something,
+and re-set it from observed misses rather than defending the numbers.
+
 ### 1. Trigger Accuracy (weight: 30%)
 
 Does the skill fire when it should, and not fire when it shouldn't?
@@ -33,7 +37,22 @@ Does the skill produce correct, complete output?
 | 2 | Correct on simple cases only; fails on realistic inputs |
 | 1 | Produces incorrect or incomplete output on basic inputs |
 
-**How to test:** Run skill on known input; compare output to acceptance criteria.
+**How to test:** One run answers only half the question. Run all three passes:
+
+- **Absolute** — run the skill on a known input; grade the output against the acceptance criteria.
+- **With/without** — run the same input with the skill withheld. The delta is what the skill
+  actually buys; output indistinguishable from the no-skill baseline scores 1 here however well it
+  reads. It is the per-skill form of the ablation that *Harness Component Assessment* (below)
+  runs one layer up, on harness components.
+- **Variance** — repeat the with-skill run 3+ times on the same input and compare the **process**
+  taken, not the prose produced. Spread across runs is the defect: a skill exists to make the agent
+  take the same route every time (`docs/writing-for-agents.md`). Where the runs diverge names the
+  step whose completion criterion is too loose.
+
+Record the baseline, the run count, and the observed spread beside the score — a score without
+them is an impression. The with/without and variance passes are adapted from
+[revfactory/harness](https://github.com/revfactory/harness) `README_KO.md`, which reports a quality
+delta and a variance reduction for its generated harnesses and labels both author self-measurement.
 
 ### 3. Shell Doc Compliance (weight: 15%)
 
