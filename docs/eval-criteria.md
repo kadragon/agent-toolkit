@@ -37,20 +37,31 @@ Does the skill produce correct, complete output?
 | 2 | Correct on simple cases only; fails on realistic inputs |
 | 1 | Produces incorrect or incomplete output on basic inputs |
 
-**How to test:** One run answers only half the question. Run all three passes:
+**How to test:** The 1–5 table above grades **absolute correctness only** — run the skill on a
+known input and grade the output against the acceptance criteria. Two further passes are recorded
+*beside* that score, never folded into it, because they answer different questions:
 
-- **Absolute** — run the skill on a known input; grade the output against the acceptance criteria.
-- **With/without** — run the same input with the skill withheld. The delta is what the skill
-  actually buys; output indistinguishable from the no-skill baseline scores 1 here however well it
-  reads. It is the per-skill form of the ablation that *Harness Component Assessment* (below)
-  runs one layer up, on harness components.
+- **With/without (ablation)** — run the same input with the skill withheld. The delta is what the
+  skill actually buys, recorded as its own verdict (`delta: none | small | large`). Output
+  indistinguishable from the no-skill baseline makes the skill a **retirement candidate** for
+  `dev:harness-curate` — not a low Correctness score, because that output was correct. It is the
+  per-skill form of the ablation that *Harness Component Assessment* (below) runs one layer up, on
+  harness components.
 - **Variance** — repeat the with-skill run 3+ times on the same input and compare the **process**
   taken, not the prose produced. Spread across runs is the defect: a skill exists to make the agent
-  take the same route every time (`docs/writing-for-agents.md`). Where the runs diverge names the
-  step whose completion criterion is too loose.
+  take the same process every run (`docs/writing-for-agents.md` → opening, "the goal is a document
+  that makes the agent take the same *process* every run"). Where the runs diverge names the step
+  whose completion criterion is too loose.
 
-Record the baseline, the run count, and the observed spread beside the score — a score without
-them is an impression. The with/without and variance passes are adapted from
+**Who runs which pass.** Both extra passes require invoking the skill, withholding it, and
+re-invoking it — which a read-only scorer cannot do. They belong to authoring time: the skill's
+author, or `skill-creator`'s eval runner, runs them and records the baseline, the run count and the
+observed spread in the skill's `evals/` fixture. `.claude/agents/skill-evaluator.md` scores the 1–5
+table, reports whatever ablation and variance results the fixture already holds, and writes
+`not observed` where it holds none — never a value it did not read (AGENTS.md → *Golden Principles*
+3). An unrecorded pass is `not observed`, not a pass.
+
+The with/without and variance passes are adapted from
 [revfactory/harness](https://github.com/revfactory/harness) `README_KO.md`, which reports a quality
 delta and a variance reduction for its generated harnesses and labels both author self-measurement.
 

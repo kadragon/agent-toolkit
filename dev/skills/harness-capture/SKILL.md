@@ -78,25 +78,30 @@ specific named asset — route those to `harness-curate` / `skill-creator`.
    instruction-file deltas it stays in the proposal/commit context.
 
 3. If nothing clears the gate, say so in one line and stop — **do not manufacture
-   a lesson**. A no-op is the correct outcome for most sessions.
+   a lesson**. Nothing to capture is the correct outcome for most sessions.
 
 ## Writing the delta
 
-The gate decides *whether* and the table decides *where*; these three rules decide
-*how the line reads* once it lands. They apply to every route — a memory body, a
-`MEMORY.md` hook, a `docs/` page, an instruction-file line, a skill description.
+The gate decides *whether* and the table decides *where*; these rules decide *how
+the line reads* once it lands. The first binds every route. The second and third
+bind the **pointer-shaped** routes only — a `MEMORY.md` hook, a docs-index row, a
+skill `description:` — because both are about what makes material get reached; a
+memory body, a `docs/` page and an instruction-file line are already in hand when
+they are read.
 
-- **State the positive target.** Steering by prohibition drags the forbidden
-  behavior into context and makes it more available: *don't think of an elephant*.
-  Write the behavior you want ("quote the rule verbatim"), not the one you don't. A
-  prohibition earns its place only as a hard guardrail that cannot be phrased
-  positively — and even then, pair it with the positive target.
-- **Front-load the trigger word.** A pointer's first words do its triggering work,
-  and the strongest trigger is a word the model already thinks with — *tight*,
-  *red*, *seam*, *stale*. One compact word beats a clause describing it.
-- **One trigger per branch.** A branch is a distinct case the material handles.
-  Synonyms that rename a single branch are one branch written twice, paying load
-  for no extra reach.
+- **State the positive target** (every route). Steering by prohibition drags the
+  forbidden behavior into context and makes it more available: *don't think of an
+  elephant*. Write the behavior you want ("quote the rule verbatim"), not the one
+  you don't. A prohibition earns its place only as a hard guardrail that cannot be
+  phrased positively — and even then, pair it with the positive target.
+- **Front-load the leading word** (pointers). A pointer's first words do its
+  triggering work, and the strongest opener is a **leading word** — a compact
+  concept the model already thinks with, such as *tight*, *red*, *seam*, *fog*.
+  One such word beats a clause describing it, and repeating the same word across
+  the prompt, the doc and the code is what makes the agent link them.
+- **One trigger per branch** (pointers). A branch is a distinct case the material
+  handles. Synonyms that rename a single branch are one branch written twice,
+  paying load for no extra reach.
 
 **Portability.** The three rules above are self-contained and are the whole
 contract wherever this skill runs. One repo carries a longer treatment of the same
@@ -126,7 +131,7 @@ for any *destructive* memory prune (deleting an entry) defer it to `backlog.md`
 rather than blocking, so the review cycle's `--auto` guarantee holds.
 
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,
-this is a no-op — say so in one line and let the merge proceed.
+there is no write-back — say so in one line and let the merge proceed.
 
 ## Writing to auto-memory
 
@@ -195,11 +200,12 @@ diff → approval** flow — never bulk-delete silently.
 4. **Leave the index consistent.** After any change, `MEMORY.md` must have exactly
    one line per surviving memory file and none for deleted ones.
 
-If the store is already clean, say so in one line — a no-op is fine here too.
+If the store is already clean, say so in one line — nothing to tidy is fine here too.
 
 **Boundary with `harness-curate`.** Deciding that a repo-scoped fact should move *out* of
 memory into the owning repo's `docs/` is `harness-curate`'s call, not this skill's — it needs
 cross-session evidence and the repo's own doc layout, which the warm path does not have. When
 curate routes such a promotion here, it has already written `docs/<topic>.md`; this skill
 executes the deletion and index repair under step 3's confirm-then-apply flow. Everything
-above — stale, wrong, redundant, index drift, bloat — stays this skill's, from either path.
+above — stale, wrong, redundant, index drift, bloat, no-op — stays this skill's, from either
+path.
