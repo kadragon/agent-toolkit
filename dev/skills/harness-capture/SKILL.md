@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.1.5
+version: 2.2.0
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -61,14 +61,30 @@ specific named asset — route those to `harness-curate` / `skill-creator`.
    Then route by kind — and let the destination's **load** set how high the bar
    sits. Always-loaded text spends tokens and attention every turn whether or not
    it fires; pointer-gated text spends only its pointer line, and that line's
-   wording is what decides whether the material is ever reached:
+   wording is what decides whether the material is ever reached; a check or a
+   review-time rule spends nothing until it runs. Read the table top-down and
+   take the first row that fits — the cheap destinations come first:
 
    | Kind | If durable → | Load it pays |
    |------|--------------|--------------|
+   | Repeatable mistake with a checkable shape | → a hook / lint / test in the owning repo | Execution-time — the cheapest standing cost here; it costs context only when it fires, and it fails loudly instead of hoping to be read |
+   | Coding standard / review rule | → the review-time asset (a `code-review` rule, the reviewer agent, `CODING_STANDARDS.md`) — not the implementation agent's instruction file | Review-time — paid once against a diff, not on every turn of implementation |
    | Reusable workflow | → `skill-creator` (new or improved skill); one-off → pass | Pointer-gated — the `description:` line is the whole standing cost |
    | Setup/infra fix | → `docs/<topic>.md` in the owning repo | Pointer-gated — the docs-index row is the whole standing cost |
    | Approach correction / preference | → auto-memory (see **Writing to auto-memory**), or an instruction-file delta: `CLAUDE.md` (Claude Code) / `AGENTS.md` (Codex) | Auto-memory: recall-gated. Instruction file: **every turn** — the highest bar in the table. Prefer memory unless the fact must be in context before anything asks for it |
    | Workflow misunderstanding | → `skill-creator` improvement to the relevant skill | Pointer-gated |
+
+   **Mechanism before sentence.** A rule expressible as a test, a lint, or a hook
+   goes there first — prose asking the agent to remember it is the fallback, not
+   the default. Ask the top row's question before any prose row: *can this be
+   checked?*
+
+   **Implementation pressure vs review pressure.** The implementation agent
+   carries the exploration, the writing, and the debugging; the reviewer receives
+   a diff and carries almost nothing. So a standard about how code should read
+   belongs on the review side, where there is context to spare — putting it in the
+   implementation agent's always-loaded instruction file taxes every turn of the
+   run that can least afford it.
 
    Whatever the route, the write proposal names in one line **the concrete
    failure this write-back prevents** ("without this: X happens again") — the
