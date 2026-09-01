@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] CI fails on invisible characters and hardcoded personal paths in shipped assets (dev v4.6.3) (2026-09-01)
 - [done] harness-capture routes checkable rules to hooks/lints and standards to review time (dev v4.6.2) (2026-08-28)
 - [done] harness-capture gate adds the no-op test, load-ranked routing, and delta-writing rules (dev v4.6.1) (2026-08-26) → docs/writing-for-agents.md
 - [done] debug loop and architecture scan skills added; writing-for-agents doc (dev v4.6.0) (2026-08-24) → docs/writing-for-agents.md

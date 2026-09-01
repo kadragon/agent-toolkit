@@ -89,7 +89,7 @@ prompt=$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null || true)
 #   .instruction              — directive injected on match
 #   .skip_if_prompt_matches   — optional regex; abort route if prompt also matches
 #
-# Fields are joined with ASCII Unit Separator (). Do NOT use TAB —
+# Fields are joined with ASCII Unit Separator (\x1f). Do NOT use TAB —
 # `IFS=$'\t' read` collapses consecutive tabs (whitespace IFS rule), which
 # eats empty `.skip_if_prompt_matches` values and shifts later columns left.
 US=$'\x1f'
