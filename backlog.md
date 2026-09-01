@@ -17,3 +17,40 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Review transport accounting (edge #7)** — cut on verified grounds: `task-review/SKILL.md` already distinguishes reviewed-empty from skipped and surfaces both — see its *Collect Reviews* 600s-breach rule, the three "Reviewers Skipped: …" labels, and the reviewer prompt's *"Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled"* — and both route to the same action. Re-file only with a recorded cycle where the two states led to *different* correct actions.
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
+
+## Harness — auto-memory write hygiene gate
+
+Source: ECC comparison (`scripts/lib/memory-vault-format.js`). `harness-capture` writes free text
+into the auto-memory store with no mechanical gate; the store is a persistent surface that later
+sessions load verbatim. Secret patterns, control/bidi characters, and size caps are all decidable,
+so this is a hook/script rule, not SKILL.md prose.
+
+- [ ] [FEAT] Add a bundled hygiene check to `harness-capture` that rejects an auto-memory write containing a known secret pattern (AWS/GitHub/Slack/npm/provider keys, private-key headers), control or bidirectional formatting characters, or a body over the size cap
+
+## Harness — auto-memory status lifecycle field
+
+Source: ECC comparison (`memory-vault-format.js` `status: active|superseded|rejected`). The current
+schema carries only `type`, so staleness is handled as prose in `harness-capture` ("sediment",
+L184-191) and depends on a model noticing. One frontmatter field makes supersession decidable and
+gives `harness-curate` a mechanical prune target.
+
+- [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
+
+## Harness — skill run telemetry
+
+Source: ECC comparison (`scripts/lib/skill-evolution/tracker.js`). Signal 3 ("Underperforming
+asset") currently infers underperformance from transcript reading; there is no per-skill outcome
+record. Complements — does not duplicate — the `Predicted impact`/`Verified` loop in
+`harness-evolution.md` §3, which is qualitative and per-edit rather than per-run.
+Not a parallel eval harness: this records outcomes, it does not grade skills (`harness-evolution.md`
+§2 keeps eval ownership with `skill-creator`).
+
+- [ ] [FEAT] Record each skill invocation to a bounded JSONL sink (`skill_id`, `skill_version`, `outcome` success/failure/partial, `user_feedback` accepted/corrected/rejected, `recorded_at`) with a retention cap and owner-only file mode
+
+## Harness — Signal 3 consumes run telemetry
+
+Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink from the
+previous ticket into the declining-asset judgment Signal 3 needs: a 7-day vs 30-day success-rate
+delta, with `insufficient-data` when either window is under its minimum run count.
+
+- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low *(blocked by: 4-skill-run-telemetry)*

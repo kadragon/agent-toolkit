@@ -213,6 +213,18 @@ jobs:
       - name: Run scripts/ci/check_skill_frontmatter.py
         run: python3 scripts/ci/check_skill_frontmatter.py
 
+  asset-hygiene:
+    name: Shipped-asset hygiene check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run scripts/ci/test_check_asset_hygiene.py
+        run: python3 scripts/ci/test_check_asset_hygiene.py
+
+      - name: Run scripts/ci/check_asset_hygiene.py
+        run: python3 scripts/ci/check_asset_hygiene.py
+
   skill-triggers:
     name: Skill trigger-fixture ranking check
     runs-on: ubuntu-latest
