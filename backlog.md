@@ -27,17 +27,6 @@ gives `harness-curate` a mechanical prune target.
 
 - [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
 
-## Harness — skill-run sink path can move and orphan history
-
-From PR #256 review (out of scope there). `record_skill_run.py` resolves its sink through
-`overlap_state.state_path()` -> `resolve_project_dir()`, which prefers the exactly-encoded
-project dir only while that dir holds transcripts and otherwise picks the loose-key sibling
-with the most `*.jsonl`. That ranking is data-dependent, so the sink can silently relocate and
-strand every earlier row; Signal 3's future reader would then report `insufficient-data` with
-no sign that history exists elsewhere.
-
-- [ ] [FIX] Pin the skill-run sink directory — persist the resolved dir in `.harness-curator-state.json` on first write and reuse it, or warn when the resolved dir differs from one that already holds sink data
-
 ## Harness — skill-run sink has no cross-process append lock
 
 From PR #256 review (out of scope there). `_trim` is a read-modify-replace: it snapshots the
@@ -71,6 +60,11 @@ offered to the user this session; the override was chosen.
 - [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule
 
 ## Review Backlog
+
+### PR #257 — skill-run sink pin follow-ups
+
+- [ ] [FIX] Serialize `.harness-curator-state.json` writes across `record_skill_run.py`, `record_run.py` and `overlap_state.py` — every writer is a read-modify-write with no lock, so a concurrent update can replace a stale snapshot over another writer's `lastRunMs` / `lastCandidateMs` / `dismissedOverlaps`; raised by Codex in PR #257 review, out of that Sprint Contract *(blocked by: skill-run-sink-cross-process-append-lock)*
+- [ ] [FEAT] Merge multiple skill-run sinks instead of naming them — when candidate dirs hold more than one `.skill-runs.jsonl`, PR #257 warns and reads only the chosen one; a dedupe-and-merge pass (records carry no identity, so the rule needs designing) would recover the rest for Signal 3
 
 ### PR #254 — memory-guard follow-ups
 
