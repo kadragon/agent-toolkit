@@ -37,6 +37,13 @@ codex plugin add prod@kadragon
 | `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
 | `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
 
+**`git add` a new file before you trust these checkers.** Every one of them walks
+`git ls-files`, so an untracked file is invisible to all of them: a new shipped asset passes
+the whole battery, then fails the same jobs in CI once it is committed. Stage new files first,
+or re-run the battery after the commit. Observed in PR #254, where a clean local
+`check_asset_hygiene.py` run became five `[personal-path]` errors the moment the file was
+tracked.
+
 `check_skill_frontmatter.py` needs PyYAML. macOS system `python3` is PEP 668
 externally-managed, so install it into a venv rather than globally:
 

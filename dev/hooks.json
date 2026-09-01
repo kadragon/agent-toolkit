@@ -12,6 +12,18 @@
             "statusMessage": "Checking commit guard..."
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/memory-guard/guard.py\"",
+            "commandWindows": "python \"$env:PLUGIN_ROOT/hooks/memory-guard/guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking memory hygiene..."
+          }
+        ]
       }
     ],
     "SessionStart": [
