@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.3.0
+version: 2.3.1
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -183,25 +183,36 @@ and before writing:
    schema change.
 
    The write itself is gated by the `memory-guard` hook — a secret pattern, a
-   control/bidi/zero-width character, or a body over 2000 characters is denied at
-   `Write`/`Edit` time, whatever route the write took. Pre-check the text you are
-   about to show, so you propose something that can actually land:
+   control/bidi/zero-width character, or a body over 2000 characters is denied when the
+   write goes through `Write` or `Edit`. Those are the tools to use: a shell redirect
+   (`printf … > …/memory/note.md`) is not gated, so writing a memory that way defeats the
+   check rather than passing it. Pre-check the text you are about to show, so you propose
+   something that can actually land:
+
+   Write the draft to a scratch file with the `Write` tool first — anywhere outside the
+   memory store, so this pre-check is not itself a gated write — then check that path:
 
    ```sh
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+   DRAFT="<absolute path of the scratch file you just wrote>"
    GUARD="$SKILL_DIR/../../hooks/memory-guard/guard.py"
    PY=$(command -v python3 || command -v python || true)
    if [ -r "$GUARD" ] && [ -n "$PY" ]; then
-     printf '%s\n' "<the memory body you are about to write>" | "$PY" "$GUARD" --check-file -
+     "$PY" "$GUARD" --check-file "$DRAFT"
    else
      echo "memory-guard unavailable — write, and let the hook judge" >&2
    fi
    ```
 
+   **The draft goes through a file, never through the command line.** Memory bodies are
+   free text you did not author character by character; interpolating one into a shell
+   command lets a body containing `$(...)` or backticks execute during the pre-check
+   itself. A file path carries no such hazard.
+
    Exit `0` is clean, `1` is a finding, `2` is a usage or read error — a `2` means the
-   pre-check did not run, not that the memory was rejected. The stdin form carries no path,
-   so it applies the size cap unconditionally: use it for a memory **body**, and pass
-   `--check-file <path>` when checking `MEMORY.md`, which the cap exempts by name.
+   pre-check did not run, not that the memory was rejected. Name the draft file after the
+   memory it will become: the size cap is exempt for `MEMORY.md` by filename, so a draft of
+   the index checked under another name reports a spurious over-cap finding.
 
    A denial is a **rewrite**, never a bypass: redact the credential, strip the
    invisible characters, or cut the body to one fact. There is no opt-out marker,
