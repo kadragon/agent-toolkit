@@ -53,8 +53,12 @@ offered to the user this session; the override was chosen.
 
 ### PR #257 — skill-run sink pin follow-ups
 
-- [ ] [FIX] Serialize `.harness-curator-state.json` writes across `record_skill_run.py`, `record_run.py` and `overlap_state.py` — every writer is a read-modify-write with no lock, so a concurrent update can replace a stale snapshot over another writer's `lastRunMs` / `lastCandidateMs` / `dismissedOverlaps`; raised by Codex in PR #257 review, out of that Sprint Contract *(blocked by: skill-run-sink-cross-process-append-lock)*
+- [ ] [FIX] Serialize `.harness-curator-state.json` writes across `record_skill_run.py`, `record_run.py` and `overlap_state.py` — every writer is a read-modify-write with no lock, so a concurrent update can replace a stale snapshot over another writer's `lastRunMs` / `lastCandidateMs` / `dismissedOverlaps`; raised by Codex in PR #257 review, out of that Sprint Contract
 - [ ] [FEAT] Merge multiple skill-run sinks instead of naming them — when candidate dirs hold more than one `.skill-runs.jsonl`, PR #257 warns and reads only the chosen one; a dedupe-and-merge pass (records carry no identity, so the rule needs designing) would recover the rest for Signal 3
+
+### PR #258 — skill-run sink lock follow-ups
+
+- [ ] [HARNESS] Have `task_nodes.py prune-backlog` warn when a pruned item is still named as somebody else's blocker — grep the surviving `*(blocked by: <slug>)*` markers for the deleted item's slug and print the orphaned lines. PR #258 deleted the sink-lock item and left the follow-up at `backlog.md:56` carrying its marker, which `backlog_candidates.py` filters, so that item would have been permanently unselectable; Codex caught it in review. `task-next`'s Blocked-analysis sync covers marking newly-blocked items and clearing markers whose blocker resolved, but the completing run has no prompt to check whether *it* was the blocker
 
 ### PR #254 — memory-guard follow-ups
 

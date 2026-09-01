@@ -80,6 +80,13 @@ SINK_FILE = ".skill-runs.jsonl"
 # Sidecar for the append+trim lock. Deliberately NOT `*.jsonl`, for the same reason the
 # sink is dot-prefixed: `scan_transcripts.py` must not count or parse it.
 LOCK_SUFFIX = ".lock"
+# The lock wait is bounded, and deliberately short. `harness-capture` calls this script as
+# "Best-effort — never block the merge" and wraps it in `|| true`, which catches a non-zero
+# exit but not a hang: an unbounded `LOCK_EX` behind a peer stalled inside `_trim` (a wedged
+# network mount, a stopped process) would hang the cycle tail on a write that is only
+# telemetry. On the deadline we proceed unlocked and warn — the pre-lock behaviour.
+LOCK_TIMEOUT_S = 2.0
+LOCK_POLL_S = 0.02
 # The chosen sink dir, recorded in that dir's own .harness-curator-state.json. Pinning is
 # what makes the sink location stable across runs; see resolve_sink_dir().
 SINK_DIR_KEY = "skillRunSinkDir"
@@ -254,8 +261,26 @@ def _chmod_600(path):
         pass  # best-effort: Windows approximates the POSIX bits
 
 
+def _try_lock(fd):
+    """One non-blocking acquisition attempt. False when another holder has it.
+
+    Non-blocking on BOTH platforms on purpose: `fcntl.LOCK_EX` waits forever while
+    `msvcrt.LK_LOCK` gives up after ~10s and raises, so the two blocking primitives sit at
+    opposite extremes and neither matches the caller's contract. One bounded retry loop
+    over the non-blocking forms makes the behaviour identical everywhere.
+    """
+    try:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except OSError:
+        return False
+    return True
+
+
 @contextlib.contextmanager
-def _sink_lock(path):
+def _sink_lock(path, timeout=None):
     """Hold one exclusive lock for the whole append+trim on `path`.
 
     `_trim` is a read-modify-replace: it snapshots the sink, then `os.replace`s over it,
@@ -268,19 +293,25 @@ def _sink_lock(path):
     inode out from under any waiter holding a lock on the old one, so a lock on the sink
     would stop excluding at exactly the moment it matters.
 
-    Best-effort by design. A platform with neither `fcntl` nor `msvcrt`, or a filesystem
-    that refuses the lock (a network mount), yields unlocked rather than costing the
-    caller its record — the pre-lock behaviour, no worse than before.
+    Best-effort by design, and bounded by `LOCK_TIMEOUT_S`. A platform with neither
+    `fcntl` nor `msvcrt`, a filesystem that refuses the lock (a network mount), or a peer
+    still holding it at the deadline all yield unlocked rather than costing the caller its
+    record — the pre-lock behaviour, no worse than before, and never a hang.
     """
+    if timeout is None:
+        timeout = LOCK_TIMEOUT_S
     lock_path = path + LOCK_SUFFIX
     fd = None
     try:
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
-        if fcntl is not None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        elif msvcrt is not None:
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        if fcntl is None and msvcrt is None:
+            raise OSError("no file-locking primitive on this platform")
+        deadline = time.monotonic() + timeout
+        while not _try_lock(fd):
+            if time.monotonic() >= deadline:
+                raise OSError(f"still held by another writer after {timeout:g}s")
+            time.sleep(LOCK_POLL_S)
     except OSError as e:
         if fd is not None:
             os.close(fd)
@@ -711,8 +742,35 @@ def run_tests():
             globals()["_trim"] = real_trim
         check("the sink lock is held across the trim",
               seen == [True] if seen[:1] != [None] else True)
-        check("the lock sidecar is not a *.jsonl transcript",
-              not (lpath + LOCK_SUFFIX).endswith(".jsonl"))
+        check("the lock sidecar exists and is invisible to the *.jsonl transcript glob",
+              os.path.exists(lpath + LOCK_SUFFIX)
+              and _glob.glob(os.path.join(os.path.dirname(lpath), "*.jsonl")) == [])
+
+        # A peer still holding the lock at the deadline costs the wait, not the cycle: the
+        # writer proceeds unlocked and warns. Guards the caller's "never block the merge"
+        # contract (dev/skills/harness-capture/SKILL.md, "Record the run").
+        if fcntl is not None or msvcrt is not None:
+            busy_proj = os.path.join(tmpdir, "busy")
+            os.makedirs(busy_proj)
+            record(busy_proj, "s", "1.0.0", "success", "accepted", now_ms=1)  # makes the sink
+            bpath = sink_path(busy_proj)
+            holder = os.open(bpath + LOCK_SUFFIX, os.O_WRONLY)
+            saved_timeout = LOCK_TIMEOUT_S
+            globals()["LOCK_TIMEOUT_S"] = 0.05
+            try:
+                check("the test holder actually owns the lock", _try_lock(holder))
+                errbuf = _io.StringIO()
+                started = time.monotonic()
+                with redirect_stderr(errbuf):
+                    record(busy_proj, "s", "1.0.0", "success", "accepted", now_ms=2)
+                waited = time.monotonic() - started
+            finally:
+                globals()["LOCK_TIMEOUT_S"] = saved_timeout
+                os.close(holder)
+            check("a contended lock does not block the writer", waited < 1.0)
+            check("a contended write still records the row", len(read_lines(bpath)) == 2)
+            check("a contended lock warns about the possible loss",
+                  "could not lock" in errbuf.getvalue())
 
         # A sink that cannot be locked still records the row: the lock is best-effort.
         nolock_proj = os.path.join(tmpdir, "nolock")
