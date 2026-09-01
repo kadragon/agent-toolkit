@@ -18,11 +18,17 @@ substitution here can mint a case/underscore sibling directory, which is the dri
 `record_run.py` documents.
 
 Usage:
-  python3 record_skill_run.py --skill-id ID --skill-version X.Y.Z \\
-      --outcome {success|failure|partial} \\
-      --user-feedback {accepted|corrected|rejected} \\
+  record_skill_run.py --skill-id ID [--skill-version X.Y.Z] \
+      --outcome {success|failure|partial} \
+      --user-feedback {accepted|corrected|rejected} \
       [--project PATH] [--max-records N]
-  python3 record_skill_run.py --test
+  record_skill_run.py --test
+
+`--skill-version` is optional: some skills ship no `version:` frontmatter (`dev:task-review`
+is one). Omitting it records the `unknown` sentinel — a caller must never invent a number to
+fill the field. Resolve the interpreter at the call site (`python3` or `python`); a bare
+`python3` is absent on many Windows installs, where a `|| true` call site would then drop
+every row while still reporting success.
 
 The file is created 0o600 and re-chmod'd after every trim, so the retention rewrite cannot
 silently widen the mode. On Windows the POSIX bits are only approximated; a chmod failure is
@@ -39,11 +45,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from overlap_state import state_path  # noqa: E402
 
-SINK_FILE = "skill-runs.jsonl"
+# Dot-prefixed on purpose. The sink shares a directory with Claude Code session
+# transcripts, and `scan_transcripts.py` counts and parses `*.jsonl` there — both to
+# rank sibling project dirs (`_jsonl_count`) and to read sessions (`scan_dir`). A
+# visible `skill-runs.jsonl` would be counted as a transcript, and glob() does not
+# match a leading dot, so the name is what keeps the two apart. `--test` asserts it.
+SINK_FILE = ".skill-runs.jsonl"
 MAX_RECORDS = 2000  # bounded: oldest records drop out, newest kept
 OUTCOMES = ("success", "failure", "partial")
 FEEDBACK = ("accepted", "corrected", "rejected")
 FIELDS = ("skill_id", "skill_version", "outcome", "user_feedback", "recorded_at")
+UNKNOWN_VERSION = "unknown"  # sentinel: some skills ship no `version:` frontmatter
 
 
 def sink_path(project):
@@ -67,10 +79,23 @@ def _append(path, record):
 
 
 def _trim(path, max_records):
-    """Keep the newest `max_records` lines. Atomic: a crash mid-trim cannot truncate the
-    sink. Unparseable lines are dropped here — appends never read the file."""
+    """Keep the newest `max_records` records. Atomic: a crash mid-trim cannot truncate
+    the sink.
+
+    Rewrites ONLY when the record count is over the cap. An earlier version also
+    rewrote whenever any line failed to parse, which turned one corrupt line into a
+    read-modify-replace on every subsequent append — widening the window in which a
+    concurrent append is read, then replaced away. Corrupt lines are still purged, but
+    now only on the runs that were going to rewrite anyway.
+
+    Returns (aged, corrupt): records dropped for age, and unparseable lines purged.
+    They are counted separately because "1 dropped" means something different in each
+    case, and only the first is the retention cap doing its job.
+    """
     with open(path, encoding="utf-8") as f:
         lines = [ln for ln in (ln.strip() for ln in f) if ln]
+    if len(lines) <= max_records:
+        return 0, 0
     kept = []
     for ln in lines:
         try:
@@ -78,9 +103,8 @@ def _trim(path, max_records):
         except ValueError:
             continue
         kept.append(ln)
-    if len(kept) <= max_records and len(kept) == len(lines):
-        return 0
-    dropped = len(lines) - min(len(kept), max_records)
+    corrupt = len(lines) - len(kept)
+    aged = max(0, len(kept) - max_records)
     kept = kept[-max_records:]
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
@@ -96,7 +120,7 @@ def _trim(path, max_records):
             pass
         raise
     _chmod_600(path)
-    return dropped
+    return aged, corrupt
 
 
 def record(project, skill_id, skill_version, outcome, user_feedback,
@@ -107,15 +131,15 @@ def record(project, skill_id, skill_version, outcome, user_feedback,
         raise ValueError(f"user_feedback must be one of {FEEDBACK}, got {user_feedback!r}")
     entry = {
         "skill_id": skill_id,
-        "skill_version": skill_version,
+        "skill_version": skill_version or UNKNOWN_VERSION,
         "outcome": outcome,
         "user_feedback": user_feedback,
         "recorded_at": int(time.time() * 1000) if now_ms is None else now_ms,
     }
     path = sink_path(project)
     _append(path, entry)
-    dropped = _trim(path, max_records)
-    return path, dropped
+    aged, corrupt = _trim(path, max_records)
+    return path, aged, corrupt
 
 
 def run_tests():
@@ -140,7 +164,7 @@ def run_tests():
         os.makedirs(proj)
 
         # append writes the full schema, beside the curator state file
-        path, _ = record(proj, "dev:task-next", "4.6.2", "success", "accepted", now_ms=1000)
+        path, _, _ = record(proj, "dev:task-next", "4.6.2", "success", "accepted", now_ms=1000)
         check("sink sits beside .harness-curator-state.json",
               os.path.dirname(path) == os.path.dirname(state_path(proj)))
         rows = [json.loads(ln) for ln in read_lines(path)]
@@ -153,6 +177,19 @@ def run_tests():
               and rows[0]["outcome"] == "success"
               and rows[0]["user_feedback"] == "accepted"
               and rows[0]["recorded_at"] == 1000)
+
+        # the sink must not look like a session transcript to scan_transcripts
+        import glob as _glob
+        check("sink is invisible to the *.jsonl transcript glob",
+              _glob.glob(os.path.join(os.path.dirname(path), "*.jsonl")) == [])
+
+        # a skill with no `version:` frontmatter records the sentinel, not a guess
+        sent_proj = os.path.join(tmpdir, "sentinel")
+        os.makedirs(sent_proj)
+        spath, _, _ = record(sent_proj, "dev:task-review", None, "success", "accepted",
+                             now_ms=1)
+        check("missing skill_version records the unknown sentinel",
+              json.loads(read_lines(spath)[0])["skill_version"] == UNKNOWN_VERSION)
 
         # append does not rewrite history
         record(proj, "dev:task-review", "1.0.0", "partial", "corrected", now_ms=2000)
@@ -186,13 +223,34 @@ def run_tests():
         # a corrupt pre-existing line does not abort the append
         corrupt_proj = os.path.join(tmpdir, "corrupt")
         os.makedirs(corrupt_proj)
-        cpath, _ = record(corrupt_proj, "s", "1.0.0", "success", "accepted", now_ms=1)
+        cpath, _, _ = record(corrupt_proj, "s", "1.0.0", "success", "accepted", now_ms=1)
         with open(cpath, "a", encoding="utf-8") as f:
             f.write("{not json\n")
-        record(corrupt_proj, "s", "1.0.0", "failure", "rejected", now_ms=2)
-        rows = [json.loads(ln) for ln in read_lines(cpath)]
+        _, aged, corrupt = record(corrupt_proj, "s", "1.0.0", "failure", "rejected",
+                                  now_ms=2)
+        rows = [json.loads(ln) for ln in read_lines(cpath) if not ln.startswith("{not")]
         check("corrupt line does not abort the append",
               [r["recorded_at"] for r in rows] == [1, 2])
+        check("under the cap, a corrupt line triggers no rewrite",
+              (aged, corrupt) == (0, 0) and any(ln.startswith("{not")
+                                                for ln in read_lines(cpath)))
+        # over the cap, the same corrupt line is purged and counted apart from aged.
+        # Assert on the FIRST trim that fires: later appends see an already-clean file.
+        first = None
+        for i in range(3, 8):
+            _, aged, corrupt = record(corrupt_proj, "s", "1.0.0", "success", "accepted",
+                                      max_records=3, now_ms=i)
+            if first is None and (aged or corrupt):
+                first = (aged, corrupt)
+        check("trim purges the corrupt line and counts it apart", first[1] == 1)
+        # 4 lines, 1 of them corrupt, cap 3 -> 3 valid records survive, none aged out.
+        # The old single `dropped` counter reported 1 here and called it a retention drop.
+        check("a corrupt-only purge reports aged=0", first[0] == 0)
+        check("aged is non-zero once records really age out",
+              record(corrupt_proj, "s", "1.0.0", "success", "accepted",
+                     max_records=3, now_ms=9)[1] == 1)
+        check("no corrupt line survives the trim",
+              all(isinstance(json.loads(ln), dict) for ln in read_lines(cpath)))
 
         # invalid values are rejected, and nothing is written
         bad_proj = os.path.join(tmpdir, "bad")
@@ -221,7 +279,9 @@ def run_tests():
 def main():
     ap = argparse.ArgumentParser(description="Record one skill run to the telemetry sink.")
     ap.add_argument("--skill-id", help="e.g. dev:task-next")
-    ap.add_argument("--skill-version", help="the skill's SKILL.md `version:` frontmatter")
+    ap.add_argument("--skill-version", default=None,
+                    help="the skill's SKILL.md `version:` frontmatter; omit when it "
+                         f"ships none and the row records {UNKNOWN_VERSION!r}")
     ap.add_argument("--outcome", choices=OUTCOMES)
     ap.add_argument("--user-feedback", choices=FEEDBACK)
     ap.add_argument("--max-records", type=int, default=MAX_RECORDS,
@@ -232,7 +292,7 @@ def main():
 
     if a.test:
         return run_tests()
-    missing = [f for f in ("skill_id", "skill_version", "outcome", "user_feedback")
+    missing = [f for f in ("skill_id", "outcome", "user_feedback")
                if getattr(a, f) is None]
     if missing:
         ap.error("required: " + ", ".join("--" + m.replace("_", "-") for m in missing))
@@ -240,11 +300,13 @@ def main():
         ap.error("--max-records must be >= 1")
 
     project = os.path.abspath(a.project or os.getcwd())
-    path, dropped = record(project, a.skill_id, a.skill_version, a.outcome,
-                           a.user_feedback, max_records=a.max_records)
+    path, aged, corrupt = record(project, a.skill_id, a.skill_version, a.outcome,
+                                 a.user_feedback, max_records=a.max_records)
     print(f"skill run recorded: {path}")
-    if dropped:
-        print(f"retention cap applied: {dropped} old record(s) dropped")
+    if aged:
+        print(f"retention cap applied: {aged} old record(s) dropped")
+    if corrupt:
+        print(f"purged {corrupt} unparseable line(s) during the trim")
     return 0
 
 

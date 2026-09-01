@@ -5,7 +5,7 @@ description: >-
   duplicate or conflicting rules, and promote repo-scoped facts stuck in the auto-memory
   store. Retrospecting the conversation you are in → harness-capture. Repo structure
   validation → harness-init.
-version: 1.6.11
+version: 1.6.12
 disable-model-invocation: true
 ---
 
@@ -222,4 +222,5 @@ When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that
 - **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
 - **`scripts/overlap_state.py`** — Signal 7 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
 - **`scripts/record_run.py`** — Step 6 run bookkeeping: stamps `lastRunMs` and sets/clears `lastCandidateMs` (`--pending 1|0`) in `.harness-curator-state.json`, mirroring best-effort to Codex. Resolves the state dir through `overlap_state.state_path()` so this writer, the scanner, and the session-start nudge cannot drift apart; `--test` covers the pending semantics, key preservation, the drift case, and Codex-failure isolation.
+- **`scripts/record_skill_run.py`** — appends one bounded JSONL row (`skill_id`, `skill_version`, `outcome`, `user_feedback`, `recorded_at`) to `.skill-runs.jsonl` beside `.harness-curator-state.json`, written from `harness-capture` cycle-tail, not from this skill. 2000-record cap, owner-only mode, and a dot-prefixed name so the scanner's `*.jsonl` transcript glob cannot mistake it for a session. `--test` covers the schema, the `unknown` version sentinel, the cap, corrupt-line tolerance, and value validation. Written today, read by nothing — Signal 3's consumer is a queued follow-up.
 - **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.
