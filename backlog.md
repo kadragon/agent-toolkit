@@ -27,24 +27,13 @@ gives `harness-curate` a mechanical prune target.
 
 - [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
 
-## Harness — skill run telemetry
-
-Source: ECC comparison (`scripts/lib/skill-evolution/tracker.js`). Signal 3 ("Underperforming
-asset") currently infers underperformance from transcript reading; there is no per-skill outcome
-record. Complements — does not duplicate — the `Predicted impact`/`Verified` loop in
-`harness-evolution.md` §3, which is qualitative and per-edit rather than per-run.
-Not a parallel eval harness: this records outcomes, it does not grade skills (`harness-evolution.md`
-§2 keeps eval ownership with `skill-creator`).
-
-- [ ] [FEAT] Record each skill invocation to a bounded JSONL sink (`skill_id`, `skill_version`, `outcome` success/failure/partial, `user_feedback` accepted/corrected/rejected, `recorded_at`) with a retention cap and owner-only file mode
-
 ## Harness — Signal 3 consumes run telemetry
 
 Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink from the
 previous ticket into the declining-asset judgment Signal 3 needs: a 7-day vs 30-day success-rate
 delta, with `insufficient-data` when either window is under its minimum run count.
 
-- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low *(blocked by: 4-skill-run-telemetry)*
+- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low
 
 ## Harness — task-tickets and task-next disagree on a dirty backlog.md
 

@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.3.1
+version: 2.4.0
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -148,6 +148,38 @@ rather than blocking, so the review cycle's `--auto` guarantee holds.
 
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,
 there is no write-back — say so in one line and let the merge proceed.
+
+### Record the run (not signal-gated)
+
+The write-back above is signal-gated; this is not. Every cycle-tail invocation
+records exactly one telemetry row for the skill that drove the cycle, so
+`harness-curate`'s underperforming-asset judgment can trend a rate instead of
+re-reading transcripts each run. A cycle with nothing to persist is itself the
+datum — skipping it biases the sink toward eventful runs.
+
+```sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+REC="$SKILL_DIR/../harness-curate/scripts/record_skill_run.py"
+python3 "$REC" --skill-id <skill> --skill-version <that SKILL.md's `version:`> \
+  --outcome <success|failure|partial> \
+  --user-feedback <accepted|corrected|rejected> || true
+```
+
+**Best-effort — never block the merge.** A missing script, an unwritable sink or
+any non-zero exit is reported in one line and dropped; it is telemetry, not a
+gate. That is why the `|| true` is there and why no `rc` check follows.
+
+Judge the two values from the cycle you just watched, not from impressions:
+
+| Value | `outcome` | `user_feedback` |
+|-------|-----------|-----------------|
+| best | `success` — acceptance criteria met, no QA retry | `accepted` — user changed nothing |
+| middle | `partial` — met after a QA retry, or a criterion deferred to `backlog.md` | `corrected` — user redirected scope or fixed output mid-cycle |
+| worst | `failure` — cycle abandoned | `rejected` — user discarded the result |
+
+`--skill-id` is the driving skill's invocation name (`dev:task-next`,
+`dev:task-review`), not this skill's. Read its `version:` from its own
+`SKILL.md` frontmatter — never recall it.
 
 ## Writing to auto-memory
 
