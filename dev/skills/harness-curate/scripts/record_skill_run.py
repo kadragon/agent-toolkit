@@ -17,6 +17,12 @@ The sink sits beside `.harness-curator-state.json` and resolves through
 substitution here can mint a case/underscore sibling directory, which is the drift
 `record_run.py` documents.
 
+That resolution is data-dependent, though — it ranks sibling project dirs by their
+`*.jsonl` count — so the directory is decided once and then PINNED in the state file
+(`skillRunSinkDir`). See `resolve_sink_dir()`: without the pin, a sibling gaining a
+transcript re-points the sink and strands every earlier row, and Signal 3 would report
+`insufficient-data` with no sign that the history exists elsewhere.
+
 Usage:
   record_skill_run.py --skill-id ID [--skill-version X.Y.Z] \
       --outcome {success|failure|partial} \
@@ -43,7 +49,14 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from overlap_state import state_path  # noqa: E402
+from overlap_state import (  # noqa: E402
+    STATE_FILE,
+    config_dir,
+    read_state,
+    state_path,
+    write_state,
+)
+from scan_transcripts import _loose_key, encode_project  # noqa: E402
 
 # Dot-prefixed on purpose. The sink shares a directory with Claude Code session
 # transcripts, and `scan_transcripts.py` counts and parses `*.jsonl` there — both to
@@ -51,6 +64,9 @@ from overlap_state import state_path  # noqa: E402
 # visible `skill-runs.jsonl` would be counted as a transcript, and glob() does not
 # match a leading dot, so the name is what keeps the two apart. `--test` asserts it.
 SINK_FILE = ".skill-runs.jsonl"
+# The chosen sink dir, recorded in that dir's own .harness-curator-state.json. Pinning is
+# what makes the sink location stable across runs; see resolve_sink_dir().
+SINK_DIR_KEY = "skillRunSinkDir"
 MAX_RECORDS = 2000  # bounded: oldest records drop out, newest kept
 OUTCOMES = ("success", "failure", "partial")
 FEEDBACK = ("accepted", "corrected", "rejected")
@@ -58,9 +74,81 @@ FIELDS = ("skill_id", "skill_version", "outcome", "user_feedback", "recorded_at"
 UNKNOWN_VERSION = "unknown"  # sentinel: some skills ship no `version:` frontmatter
 
 
+def _candidate_dirs(project):
+    """Every project dir `resolve_project_dir` could pick for `project`: the exact
+    encoding first, then loose-key siblings. Same membership rule as the resolver, so the
+    pin search covers exactly the set the resolution can wander across."""
+    root = os.path.join(config_dir(), "projects")
+    exact = os.path.join(root, encode_project(project))
+    dirs = [exact]
+    if os.path.isdir(root):
+        key = _loose_key(encode_project(project))
+        for name in sorted(os.listdir(root)):
+            d = os.path.join(root, name)
+            if os.path.isdir(d) and _loose_key(name) == key and d not in dirs:
+                dirs.append(d)
+    return dirs
+
+
+def _pinned_dir(dirs):
+    """The first `skillRunSinkDir` recorded across the candidate dirs' state files."""
+    for d in dirs:
+        pin = read_state(os.path.join(d, STATE_FILE)).get(SINK_DIR_KEY)
+        if isinstance(pin, str) and pin:
+            return pin
+    return None
+
+
+def resolve_sink_dir(project):
+    """Pick the directory the sink lives in, and say what was surprising about it.
+
+    `state_path()` -> `resolve_project_dir()` ranks sibling project dirs by their `*.jsonl`
+    count, which is data-dependent: a dir that stops holding transcripts, or a sibling that
+    gains one, silently re-points the sink and orphans every earlier row. So the directory
+    is decided once, in this order:
+
+      1. a `skillRunSinkDir` already recorded in any candidate dir's state file — the pin
+         wins even when today's ranking would resolve elsewhere, which is the whole point;
+      2. else a candidate dir that already holds sink data — adopt the history rather than
+         start a second sink beside it;
+      3. else whatever the resolver picks today, which is the genuine first write.
+
+    Returns (dir, warning); `warning` is None unless the choice diverged from today's
+    resolution, in which case it names both dirs so the divergence is visible, not silent.
+    """
+    resolved = os.path.dirname(state_path(project))
+    dirs = _candidate_dirs(project)
+
+    pin = _pinned_dir(dirs)
+    if pin:
+        if os.path.abspath(pin) != os.path.abspath(resolved):
+            return pin, (f"skill-run sink is pinned to {pin}; today's project-dir "
+                         f"resolution would have used {resolved}")
+        return pin, None
+
+    holding = [d for d in dirs if os.path.exists(os.path.join(d, SINK_FILE))]
+    if not holding or resolved in holding:
+        return resolved, None
+    chosen = max(holding, key=lambda d: os.path.getsize(os.path.join(d, SINK_FILE)))
+    return chosen, (f"existing skill-run history found in {chosen}; today's project-dir "
+                    f"resolution would have used {resolved} — appending to the existing "
+                    f"sink instead of orphaning it")
+
+
+def _pin_dir(directory):
+    """Record the chosen dir in its own state file. Read-modify-write, so `lastRunMs` and
+    `dismissedOverlaps` survive; a no-op once the pin already reads the same path."""
+    path = os.path.join(directory, STATE_FILE)
+    state = read_state(path)
+    if state.get(SINK_DIR_KEY) == directory:
+        return
+    state[SINK_DIR_KEY] = directory
+    write_state(path, state)
+
+
 def sink_path(project):
-    """Beside the curator state file, in whichever project dir overlap_state resolves."""
-    return os.path.join(os.path.dirname(state_path(project)), SINK_FILE)
+    """Beside the curator state file, in the pinned (or newly chosen) project dir."""
+    return os.path.join(resolve_sink_dir(project)[0], SINK_FILE)
 
 
 def _chmod_600(path):
@@ -136,8 +224,12 @@ def record(project, skill_id, skill_version, outcome, user_feedback,
         "user_feedback": user_feedback,
         "recorded_at": int(time.time() * 1000) if now_ms is None else now_ms,
     }
-    path = sink_path(project)
+    sink_dir, warning = resolve_sink_dir(project)
+    if warning:
+        print(f"warning: {warning}", file=sys.stderr)
+    path = os.path.join(sink_dir, SINK_FILE)
     _append(path, entry)
+    _pin_dir(sink_dir)  # after the append: _append created the dir
     aged, corrupt = _trim(path, max_records)
     return path, aged, corrupt
 
@@ -251,6 +343,74 @@ def run_tests():
                      max_records=3, now_ms=9)[1] == 1)
         check("no corrupt line survives the trim",
               all(isinstance(json.loads(ln), dict) for ln in read_lines(cpath)))
+
+        # --- sink dir pinning -------------------------------------------------
+        # The pin is written on the first record, into the sink dir's own state file.
+        pin_proj = os.path.join(tmpdir, "pinned")
+        os.makedirs(pin_proj)
+        ppath, _, _ = record(pin_proj, "s", "1.0.0", "success", "accepted", now_ms=1)
+        pin_dir = os.path.dirname(ppath)
+        pstate = os.path.join(pin_dir, STATE_FILE)
+        check("first write pins the sink dir in the state file",
+              read_state(pstate).get(SINK_DIR_KEY) == pin_dir)
+
+        # A sibling project dir gaining transcripts re-points resolve_project_dir(); the
+        # pin must keep the sink where the history already is.
+        root = os.path.join(config_dir(), "projects")
+        sibling = os.path.join(root, encode_project(pin_proj).replace("-", "_", 1))
+        os.makedirs(sibling)
+        for i in range(3):
+            open(os.path.join(sibling, f"s{i}.jsonl"), "w").close()
+        check("resolution really moved without the pin",
+              os.path.dirname(state_path(pin_proj)) == sibling)
+        check("pinned sink path ignores the moved resolution",
+              sink_path(pin_proj) == ppath)
+        import io as _io
+        from contextlib import redirect_stderr
+        errbuf = _io.StringIO()
+        with redirect_stderr(errbuf):
+            again, _, _ = record(pin_proj, "s", "1.0.0", "success", "accepted", now_ms=2)
+        check("second record appends to the pinned sink, not the sibling", again == ppath)
+        check("history is not orphaned", len(read_lines(ppath)) == 2)
+        check("the divergence is warned about, naming both dirs",
+              sibling in errbuf.getvalue() and pin_dir in errbuf.getvalue())
+        check("no sink was started in the sibling",
+              not os.path.exists(os.path.join(sibling, SINK_FILE)))
+
+        # Unpinned: a sibling already holding sink data is adopted, not orphaned.
+        adopt_proj = os.path.join(tmpdir, "adopt")
+        os.makedirs(adopt_proj)
+        adopt_exact = os.path.join(root, encode_project(adopt_proj))
+        os.makedirs(adopt_exact)
+        open(os.path.join(adopt_exact, "t.jsonl"), "w").close()  # makes exact win
+        adopt_sib = os.path.join(root, encode_project(adopt_proj).replace("-", "_", 1))
+        os.makedirs(adopt_sib)
+        with open(os.path.join(adopt_sib, SINK_FILE), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"skill_id": "old", "skill_version": "1.0.0",
+                                "outcome": "success", "user_feedback": "accepted",
+                                "recorded_at": 0}) + "\n")
+        check("resolution points away from the existing sink",
+              os.path.dirname(state_path(adopt_proj)) == adopt_exact)
+        errbuf = _io.StringIO()
+        with redirect_stderr(errbuf):
+            apath, _, _ = record(adopt_proj, "s", "1.0.0", "success", "accepted", now_ms=5)
+        check("an existing sibling sink is adopted", os.path.dirname(apath) == adopt_sib)
+        check("adopted sink keeps its earlier row",
+              [json.loads(ln)["recorded_at"] for ln in read_lines(apath)] == [0, 5])
+        check("adoption warns, naming both dirs",
+              adopt_sib in errbuf.getvalue() and adopt_exact in errbuf.getvalue())
+        check("adoption pins the dir it adopted",
+              read_state(os.path.join(adopt_sib, STATE_FILE)).get(SINK_DIR_KEY) == adopt_sib)
+
+        # The pin write must not clobber the state keys overlap_state owns.
+        keep_state = read_state(pstate)
+        keep_state["lastRunMs"] = 4242
+        write_state(pstate, keep_state)
+        with redirect_stderr(_io.StringIO()):  # the pin-divergence warning is expected here
+            record(pin_proj, "s", "1.0.0", "success", "accepted", now_ms=3)
+        check("pinning preserves unrelated state keys",
+              read_state(pstate).get("lastRunMs") == 4242
+              and read_state(pstate).get(SINK_DIR_KEY) == pin_dir)
 
         # invalid values are rejected, and nothing is written
         bad_proj = os.path.join(tmpdir, "bad")

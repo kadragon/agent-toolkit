@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Skill-run sink directory is pinned in curator state (dev v4.7.3) (2026-09-01)
 - [done] harness-capture cycle-tail records each run to a bounded skill telemetry sink (dev v4.7.2) (2026-09-01)
 - [done] memory-guard pre-check drops shell interpolation and states the Write/Edit-only scope (dev v4.7.1) (2026-09-01)
 - [done] memory-guard hook gates auto-memory writes on secrets, invisible characters and a size cap (dev v4.7.0) (2026-09-01)
