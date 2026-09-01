@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+"""memory-guard — hygiene gate for auto-memory writes.
+
+Claude Code's auto-memory store (`~/.claude/projects/<slug>/memory/*.md`) is loaded
+verbatim into every later session. A secret written there persists across sessions on a
+surface nobody re-reads; a bidirectional or zero-width character makes what a reviewer
+reads differ from what the model receives; an unbounded body turns a one-fact store into
+a context tax. All three are decidable, so they belong in a hook rather than in
+`harness-capture` prose that a model has to remember to follow.
+
+Two entry points, one policy:
+
+  * `main()` — the PreToolUse(Write|Edit) hook. Reads a hook payload on stdin and checks
+    the pending content before it lands.
+  * `--check-file <path>` — a direct CLI check, so `harness-capture` can pre-check a
+    memory file (or piped content, via `-`) at its "show the write before applying" step
+    and rewrite rather than get denied.
+
+Both share `_scan_secrets`, `_scan_chars`, and `_scan_size`, so policy lives in one place.
+
+Three checks:
+  1. Secret patterns — AWS access-key ids, GitHub tokens/PATs, Slack tokens, npm tokens,
+     Anthropic and generic `sk-` provider keys, and PEM private-key headers. Each family
+     carries a length floor so ordinary prose ("the sk- prefix") cannot trip it.
+  2. Control and bidirectional formatting characters — C0/C1/DEL, zero-width, bidi marks,
+     embeddings, isolates, and the invisible line separators. The table is carried
+     deliberately from `scripts/ci/check_asset_hygiene.py` `_forbidden_chars()`, including
+     its two carve-outs: CR is NOT checked (the repo's line-ending job owns CRLF) and
+     U+FE0F is allowed (legitimate emoji presentation modifier). It is duplicated rather
+     than imported because that file is repo CI tooling and is never installed onto the
+     machine where this hook runs.
+  3. Body size — `BODY_CHAR_CAP` characters, measured after stripping a leading `---`
+     frontmatter block. `MEMORY.md` is exempt from this check alone: it is the index, and
+     it grows one line per surviving memory by design.
+
+Known gap, deliberate: on `Edit` the payload carries `new_string`, a fragment rather than
+the resulting file, so checks 1 and 2 run on that fragment and check 3 is skipped.
+Reconstructing the post-edit size from a fragment is fragile, and the size cap is the one
+rule a `Write` of the same file would catch anyway.
+
+Design contract (HOOK PATH ONLY): never-raise, always exit 0 (allow) unless a check fires
+(exit 2). A firing check prints its reasons to stderr and exits 2. Everything else exits 0
+— non-memory paths, other tools, malformed payloads, unreadable input. `--check-file` is
+deliberately exempt from never-raise: a caller that asked for a verdict must not receive a
+silent pass because this file itself is broken.
+
+Run the regression suite: python3 guard.py --test
+"""
+
+import json
+import os
+import re
+import sys
+
+# Body characters, frontmatter excluded. The store's largest entry at the time this cap was
+# set was 1579 bytes including frontmatter, so this leaves ~1.6x headroom: enough for one
+# fact plus its Why/How-to-apply lines, not enough for a pasted transcript or log dump.
+BODY_CHAR_CAP = 2000
+
+
+def _forbidden_chars() -> dict[int, str]:
+    """Codepoint -> short reason. Mirrors scripts/ci/check_asset_hygiene.py."""
+    banned: dict[int, str] = {}
+
+    # C0 controls. TAB and LF are structure; CR belongs to the line-ending job.
+    for cp in range(0x00, 0x20):
+        if cp not in (0x09, 0x0A, 0x0D):
+            banned[cp] = "C0 control character"
+    banned[0x7F] = "DEL control character"
+
+    # C1 controls — never meaningful in UTF-8 source text.
+    for cp in range(0x80, 0xA0):
+        banned[cp] = "C1 control character"
+
+    # Bidirectional controls: the trojan-source reordering vector.
+    for cp in (0x200E, 0x200F, 0x061C):
+        banned[cp] = "bidirectional mark"
+    for cp in range(0x202A, 0x202F):
+        banned[cp] = "bidirectional embedding/override"
+    for cp in range(0x2066, 0x206A):
+        banned[cp] = "bidirectional isolate"
+
+    # Zero-width and invisible characters.
+    for cp in (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF):
+        banned[cp] = "zero-width/invisible character"
+
+    # Invisible line breaks. Python's own splitlines() treats them as newlines.
+    for cp in (0x2028, 0x2029):
+        banned[cp] = "line/paragraph separator"
+
+    return banned
+
+
+FORBIDDEN_CHARS = _forbidden_chars()
+
+# Each family carries a length floor so prose naming a prefix cannot trip the gate.
+SECRET_PATTERNS = (
+    ("AWS access key id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("GitHub fine-grained PAT", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b")),
+    ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("provider API key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    ("PEM private key header", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+)
+
+
+def _is_memory_file(path: str) -> bool:
+    """True for a markdown file inside a `memory/` directory under a `.claude` ancestor.
+
+    Matches `~/.claude/projects/<slug>/memory/foo.md` on both platforms without hardcoding
+    the project slug. Split on both separators: a Windows payload carries backslashes, and
+    a POSIX `pathlib` would read the whole thing as one filename.
+    """
+    if not path:
+        return False
+    parts = [p for p in re.split(r"[\\/]+", path) if p]
+    if not parts or not parts[-1].lower().endswith(".md"):
+        return False
+    try:
+        mem_idx = len(parts) - 1 - parts[::-1].index("memory")
+    except ValueError:
+        return False
+    return ".claude" in parts[:mem_idx]
+
+
+def _is_index_file(path: str) -> bool:
+    """True for the store's `MEMORY.md` index, which the size cap exempts."""
+    parts = [p for p in re.split(r"[\\/]+", path) if p]
+    return bool(parts) and parts[-1] == "MEMORY.md"
+
+
+def _scan_secrets(text: str) -> list[str]:
+    """Findings for known credential shapes. The matched value is never echoed back."""
+    return [f"{label} detected" for label, pat in SECRET_PATTERNS if pat.search(text)]
+
+
+def _scan_chars(text: str) -> list[str]:
+    """Findings for control, bidi, and invisible characters, one line per distinct kind."""
+    seen = set()
+    for ch in text:
+        reason = FORBIDDEN_CHARS.get(ord(ch))
+        if reason:
+            seen.add(f"{reason} U+{ord(ch):04X}")
+    return sorted(seen)
+
+
+def _body(text: str) -> str:
+    """Content after a leading `---` frontmatter block, or the whole text when there is none."""
+    if not text.startswith("---"):
+        return text
+    rest = text.split("\n", 1)
+    if len(rest) < 2:
+        return text
+    closing = re.search(r"^---[ \t]*$", rest[1], re.MULTILINE)
+    return rest[1][closing.end():].lstrip("\n") if closing else text
+
+
+def _scan_size(text: str) -> list[str]:
+    """Finding when the body exceeds the cap. Frontmatter does not count against it."""
+    n = len(_body(text))
+    if n > BODY_CHAR_CAP:
+        return [f"body is {n} characters, over the {BODY_CHAR_CAP}-character cap"]
+    return []
+
+
+def check(text: str, *, size: bool = True) -> list[str]:
+    """All findings for `text`. `size=False` for an Edit fragment — see the module docstring."""
+    findings = _scan_secrets(text) + _scan_chars(text)
+    if size:
+        findings += _scan_size(text)
+    return findings
+
+
+def main() -> int:
+    """PreToolUse hook path. Returns the exit code; never raises past the __main__ wrapper."""
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return 0
+    tool = data.get("tool_name")
+    if tool not in ("Write", "Edit"):
+        return 0
+    ti = data.get("tool_input", {}) or {}
+    path = ti.get("file_path") or ""
+    if not _is_memory_file(path):
+        return 0
+
+    if tool == "Write":
+        text = ti.get("content") or ""
+        size = not _is_index_file(path)
+    else:
+        text = ti.get("new_string") or ""
+        size = False
+    if not text:
+        return 0
+
+    findings = check(text, size=size)
+    if not findings:
+        return 0
+    print(f"memory-guard: blocked {tool} to {os.path.basename(path)}", file=sys.stderr)
+    for f in findings:
+        print(f"  - {f}", file=sys.stderr)
+    print(
+        "  Rewrite the memory so it passes — redact the credential, strip the invisible "
+        "characters, or cut the body. There is no bypass marker.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _cli_check_file(argv: list[str]) -> int:
+    """`--check-file <path|->`. Exit 1 on any finding, 2 on a usage or read error."""
+    try:
+        target = argv[argv.index("--check-file") + 1]
+    except (ValueError, IndexError):
+        print("usage: guard.py --check-file <path|->", file=sys.stderr)
+        return 2
+    try:
+        if target == "-":
+            text = sys.stdin.read()
+        else:
+            with open(target, encoding="utf-8", newline="") as fh:
+                text = fh.read()
+    except OSError as e:
+        print(f"guard.py: cannot read {target}: {e}", file=sys.stderr)
+        return 2
+
+    findings = check(text, size=not _is_index_file(target))
+    if not findings:
+        print(f"memory-guard: clean ({len(_body(text))} body characters)")
+        return 0
+    print(f"memory-guard: {len(findings)} finding(s) in {target}", file=sys.stderr)
+    for f in findings:
+        print(f"  - {f}", file=sys.stderr)
+    return 1
+
+
+def _test() -> None:
+    import io
+
+    fails = []
+
+    def ok(name, cond):
+        print(f"{'PASS' if cond else 'FAIL'}: {name}")
+        if not cond:
+            fails.append(name)
+
+    def hook(payload):
+        old, sys.stdin = sys.stdin, io.StringIO(json.dumps(payload))
+        try:
+            return main()
+        finally:
+            sys.stdin = old
+
+    mem = "/home/u/.claude/projects/slug/memory/note.md"
+    win = "C:\\Users\\me\\.claude\\projects\\slug\\memory\\note.md"
+
+    # --- path predicate ---
+    ok("posix memory path matches", _is_memory_file(mem))
+    ok("windows memory path matches", _is_memory_file(win))
+    ok("index file matches too", _is_memory_file("/home/u/.claude/x/memory/MEMORY.md"))
+    ok("memory dir without .claude ancestor does not match",
+       not _is_memory_file("/repo/memory/note.md"))
+    ok(".claude without memory dir does not match",
+       not _is_memory_file("/home/u/.claude/settings.md"))
+    ok("non-markdown in memory dir does not match",
+       not _is_memory_file("/home/u/.claude/x/memory/note.json"))
+    ok("a file literally named memory.md is not the directory",
+       not _is_memory_file("/home/u/.claude/memory.md"))
+    ok("empty path does not match", not _is_memory_file(""))
+    ok("MEMORY.md recognised as index", _is_index_file(mem.replace("note.md", "MEMORY.md")))
+    ok("ordinary memory not treated as index", not _is_index_file(mem))
+
+    # --- secret families. Fixtures are assembled at runtime so no complete token
+    # literal ever sits in this file for a scanner (or a reader) to mistake for real.
+    families = {
+        "AWS": "AKIA" + "Q" * 16,
+        "GitHub token": "ghp_" + "b" * 36,
+        "GitHub PAT": "github_pat_" + "c" * 30,
+        "Slack": "xoxb-" + "1" * 12,
+        "npm": "npm_" + "d" * 36,
+        "Anthropic": "sk-ant-" + "e" * 30,
+        "provider": "sk-" + "f" * 30,
+        "PEM": "-----BEGIN RSA PRIVATE KEY-----",
+    }
+    for label, fixture in families.items():
+        ok(f"secret detected: {label}", bool(_scan_secrets(f"note {fixture} here")))
+    ok("prose naming a prefix is not a secret",
+       not _scan_secrets("tokens start with ghp_ or sk-ant- prefixes"))
+    ok("short lookalike is not a secret", not _scan_secrets("sk-abc123"))
+    ok("clean prose has no secret finding", not _scan_secrets("plain memory body"))
+
+    # --- characters ---
+    ok("bidi override rejected", bool(_scan_chars("a\u202eb")))
+    ok("zero-width space rejected", bool(_scan_chars("a\u200bb")))
+    ok("C0 control rejected", bool(_scan_chars("a\x01b")))
+    ok("C1 control rejected", bool(_scan_chars("a\x85b")))
+    ok("DEL rejected", bool(_scan_chars("a\x7fb")))
+    ok("line separator rejected", bool(_scan_chars("a\u2028b")))
+    ok("CR is not this check's business", not _scan_chars("a\r\nb"))
+    ok("emoji variation selector allowed", not _scan_chars("check \u2705\ufe0f done"))
+    ok("tab and newline allowed", not _scan_chars("a\tb\nc"))
+    ok("korean body allowed", not _scan_chars("한글 본문은 통과한다"))
+    ok("one line per distinct kind", len(_scan_chars("\u202e\u202e\u200b")) == 2)
+
+    # --- size ---
+    fm = "---\nname: x\ndescription: y\n---\n\n"
+    ok("body at the cap passes", not _scan_size(fm + "z" * BODY_CHAR_CAP))
+    ok("body one over the cap fails", bool(_scan_size(fm + "z" * (BODY_CHAR_CAP + 1))))
+    ok("frontmatter does not count toward the cap",
+       not _scan_size("---\nk: " + "v" * 3000 + "\n---\n\n" + "z" * 10))
+    ok("body without frontmatter is measured whole",
+       bool(_scan_size("z" * (BODY_CHAR_CAP + 1))))
+    ok("unterminated frontmatter is measured whole",
+       bool(_scan_size("---\nname: x\n" + "z" * (BODY_CHAR_CAP + 1))))
+
+    # --- hook path ---
+    ok("clean write allowed",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem, "content": fm + "fine"}}) == 0)
+    ok("secret write blocked",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem, "content": fm + families["GitHub token"]}}) == 2)
+    ok("oversize write blocked",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem, "content": fm + "z" * (BODY_CHAR_CAP + 1)}}) == 2)
+    ok("windows path is gated too",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": win, "content": fm + families["AWS"]}}) == 2)
+    ok("oversize index write allowed (size cap exempt)",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem.replace("note.md", "MEMORY.md"),
+                            "content": "- x\n" * 900}}) == 0)
+    ok("secret in the index is still blocked",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem.replace("note.md", "MEMORY.md"),
+                            "content": families["Slack"]}}) == 2)
+    ok("edit fragment with a secret blocked",
+       hook({"tool_name": "Edit",
+             "tool_input": {"file_path": mem, "new_string": families["npm"]}}) == 2)
+    ok("oversize edit fragment allowed (size skipped on Edit)",
+       hook({"tool_name": "Edit",
+             "tool_input": {"file_path": mem, "new_string": "z" * (BODY_CHAR_CAP + 1)}}) == 0)
+    ok("write outside the store allowed",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": "/repo/notes.md",
+                            "content": families["GitHub token"]}}) == 0)
+    ok("other tools pass through",
+       hook({"tool_name": "Bash", "tool_input": {"command": families["AWS"]}}) == 0)
+    ok("missing file_path passes through",
+       hook({"tool_name": "Write", "tool_input": {"content": families["AWS"]}}) == 0)
+    ok("empty content passes through",
+       hook({"tool_name": "Write", "tool_input": {"file_path": mem, "content": ""}}) == 0)
+
+    old, sys.stdin = sys.stdin, io.StringIO("not json")
+    try:
+        ok("malformed payload fails open", main() == 0)
+    finally:
+        sys.stdin = old
+
+    # --- CLI path ---
+    ok("CLI without an argument is a usage error", _cli_check_file(["--check-file"]) == 2)
+    ok("CLI on a missing file is a read error",
+       _cli_check_file(["--check-file", "/nonexistent/definitely/x.md"]) == 2)
+    old, sys.stdin = sys.stdin, io.StringIO(fm + families["Anthropic"])
+    try:
+        ok("CLI on stdin reports a finding", _cli_check_file(["--check-file", "-"]) == 1)
+    finally:
+        sys.stdin = old
+    old, sys.stdin = sys.stdin, io.StringIO(fm + "clean body")
+    try:
+        ok("CLI on clean stdin exits 0", _cli_check_file(["--check-file", "-"]) == 0)
+    finally:
+        sys.stdin = old
+
+    print()
+    if fails:
+        print(f"{len(fails)} FAILED: {fails}")
+        sys.exit(1)
+    print("all passed")
+
+
+if __name__ == "__main__":
+    # Order matters: --check-file is dispatched first. Its argument is arbitrary caller
+    # text, so a membership test for "--test" would let a file named `--test` select the
+    # test suite and exit 0 — which the hook wrapper would read as ALLOW.
+    if "--check-file" in sys.argv:
+        # Direct CLI mode: no never-raise wrapper. A caller that asked for a verdict must
+        # not get a silent allow because this file is broken.
+        sys.exit(_cli_check_file(sys.argv[1:]))
+    elif "--test" in sys.argv:
+        _test()
+    else:
+        _code = 0
+        try:
+            _code = main()
+        except SystemExit as e:
+            _code = e.code if isinstance(e.code, int) else 0
+        except BaseException:
+            pass
+        sys.exit(_code)

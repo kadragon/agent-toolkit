@@ -18,15 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — auto-memory write hygiene gate
-
-Source: ECC comparison (`scripts/lib/memory-vault-format.js`). `harness-capture` writes free text
-into the auto-memory store with no mechanical gate; the store is a persistent surface that later
-sessions load verbatim. Secret patterns, control/bidi characters, and size caps are all decidable,
-so this is a hook/script rule, not SKILL.md prose.
-
-- [ ] [FEAT] Add a bundled hygiene check to `harness-capture` that rejects an auto-memory write containing a known secret pattern (AWS/GitHub/Slack/npm/provider keys, private-key headers), control or bidirectional formatting characters, or a body over the size cap
-
 ## Harness — auto-memory status lifecycle field
 
 Source: ECC comparison (`memory-vault-format.js` `status: active|superseded|rejected`). The current

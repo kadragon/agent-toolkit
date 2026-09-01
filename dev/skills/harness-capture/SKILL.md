@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.2.0
+version: 2.3.0
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -181,6 +181,23 @@ and before writing:
    body itself: it is what lets a later hygiene pass judge whether the memory
    earned its keep instead of guessing. Body line only — no frontmatter or
    schema change.
+
+   The write itself is gated by the `memory-guard` hook — a secret pattern, a
+   control/bidi/zero-width character, or a body over 2000 characters is denied at
+   `Write`/`Edit` time, whatever route the write took. Pre-check the text you are
+   about to show, so you propose something that can actually land:
+
+   ```sh
+   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+   GUARD="$SKILL_DIR/../../hooks/memory-guard/guard.py"
+   [[ -r "$GUARD" ]] || { echo "memory-guard not installed at $GUARD — write, and let the hook judge" >&2; }
+   printf '%s\n' "<the memory body you are about to write>" | python3 "$GUARD" --check-file -
+   ```
+
+   A denial is a **rewrite**, never a bypass: redact the credential, strip the
+   invisible characters, or cut the body to one fact. There is no opt-out marker,
+   and a memory that only fits by carrying a secret or a log dump had not earned
+   the entry under step 3 anyway.
 5. **Opportunistic hygiene.** While you're in the store, if you notice a stale or
    contradicted neighbour, flag it and run **Memory hygiene** on it rather than
    leaving rot next to the fresh entry.
@@ -225,3 +242,12 @@ curate routes such a promotion here, it has already written `docs/<topic>.md`; t
 executes the deletion and index repair under step 3's confirm-then-apply flow. Everything
 above — stale, wrong, redundant, index drift, bloat, no-op — stays this skill's, from either
 path.
+
+## Additional Resources
+
+- **`hooks/memory-guard/guard.py`** — the mechanical half of **Writing to auto-memory**:
+  a `PreToolUse(Write|Edit)` gate that blocks a memory write carrying a secret pattern,
+  a control/bidi/zero-width character, or an over-cap body, plus the `--check-file <path|->`
+  CLI this skill pre-checks with at step 4. Fails open on anything it cannot parse, so a
+  broken payload never blocks a session. `--test` covers each secret family, the character
+  table, the cap boundary, the path predicate, and the fail-open path.
