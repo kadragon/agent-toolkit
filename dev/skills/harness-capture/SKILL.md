@@ -190,9 +190,18 @@ and before writing:
    ```sh
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
    GUARD="$SKILL_DIR/../../hooks/memory-guard/guard.py"
-   [[ -r "$GUARD" ]] || { echo "memory-guard not installed at $GUARD — write, and let the hook judge" >&2; }
-   printf '%s\n' "<the memory body you are about to write>" | python3 "$GUARD" --check-file -
+   PY=$(command -v python3 || command -v python || true)
+   if [ -r "$GUARD" ] && [ -n "$PY" ]; then
+     printf '%s\n' "<the memory body you are about to write>" | "$PY" "$GUARD" --check-file -
+   else
+     echo "memory-guard unavailable — write, and let the hook judge" >&2
+   fi
    ```
+
+   Exit `0` is clean, `1` is a finding, `2` is a usage or read error — a `2` means the
+   pre-check did not run, not that the memory was rejected. The stdin form carries no path,
+   so it applies the size cap unconditionally: use it for a memory **body**, and pass
+   `--check-file <path>` when checking `MEMORY.md`, which the cap exempts by name.
 
    A denial is a **rewrite**, never a bypass: redact the credential, strip the
    invisible characters, or cut the body to one fact. There is no opt-out marker,

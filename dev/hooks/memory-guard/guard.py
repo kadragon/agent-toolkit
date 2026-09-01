@@ -98,10 +98,13 @@ SECRET_PATTERNS = (
     ("AWS access key id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("GitHub fine-grained PAT", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
-    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Slack token", re.compile(r"\b(?:xox[baprs]|xapp)-[A-Za-z0-9-]{10,}\b")),
     ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b")),
     ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
-    ("provider API key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    # The tail accepts `-` and `_`, not just alphanumerics: today's dominant OpenAI shapes
+    # (`sk-proj-…`, `sk-svcacct-…`) carry a second hyphen, and an alphanumeric-only tail
+    # breaks at it four characters in — well under the floor, so a real key went unmatched.
+    ("provider API key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("PEM private key header", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 )
 
@@ -153,8 +156,12 @@ def _body(text: str) -> str:
     rest = text.split("\n", 1)
     if len(rest) < 2:
         return text
-    closing = re.search(r"^---[ \t]*$", rest[1], re.MULTILINE)
-    return rest[1][closing.end():].lstrip("\n") if closing else text
+    # `\r?` is load-bearing: the CLI opens files with `newline=""`, so a CRLF memory file
+    # keeps its `\r` and a `[ \t]*$` terminator would never match — leaving the whole
+    # frontmatter counted against the body cap, and the two entry points disagreeing about
+    # the same memory on line endings alone.
+    closing = re.search(r"^---[ \t]*\r?$", rest[1], re.MULTILINE)
+    return rest[1][closing.end():].lstrip("\r\n") if closing else text
 
 
 def _scan_size(text: str) -> list[str]:
@@ -223,7 +230,7 @@ def _cli_check_file(argv: list[str]) -> int:
         else:
             with open(target, encoding="utf-8", newline="") as fh:
                 text = fh.read()
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         print(f"guard.py: cannot read {target}: {e}", file=sys.stderr)
         return 2
 
@@ -254,21 +261,21 @@ def _test() -> None:
         finally:
             sys.stdin = old
 
-    mem = "/home/u/.claude/projects/slug/memory/note.md"
+    mem = "/home/me/.claude/projects/slug/memory/note.md"
     win = "C:\\Users\\me\\.claude\\projects\\slug\\memory\\note.md"
 
     # --- path predicate ---
     ok("posix memory path matches", _is_memory_file(mem))
     ok("windows memory path matches", _is_memory_file(win))
-    ok("index file matches too", _is_memory_file("/home/u/.claude/x/memory/MEMORY.md"))
+    ok("index file matches too", _is_memory_file("/home/me/.claude/x/memory/MEMORY.md"))
     ok("memory dir without .claude ancestor does not match",
        not _is_memory_file("/repo/memory/note.md"))
     ok(".claude without memory dir does not match",
-       not _is_memory_file("/home/u/.claude/settings.md"))
+       not _is_memory_file("/home/me/.claude/settings.md"))
     ok("non-markdown in memory dir does not match",
-       not _is_memory_file("/home/u/.claude/x/memory/note.json"))
+       not _is_memory_file("/home/me/.claude/x/memory/note.json"))
     ok("a file literally named memory.md is not the directory",
-       not _is_memory_file("/home/u/.claude/memory.md"))
+       not _is_memory_file("/home/me/.claude/memory.md"))
     ok("empty path does not match", not _is_memory_file(""))
     ok("MEMORY.md recognised as index", _is_index_file(mem.replace("note.md", "MEMORY.md")))
     ok("ordinary memory not treated as index", not _is_index_file(mem))
@@ -280,6 +287,8 @@ def _test() -> None:
         "GitHub token": "ghp_" + "b" * 36,
         "GitHub PAT": "github_pat_" + "c" * 30,
         "Slack": "xoxb-" + "1" * 12,
+        "Slack app-level": "xapp-" + "2" * 12,
+        "OpenAI project": "sk-proj-" + "g" * 40,
         "npm": "npm_" + "d" * 36,
         "Anthropic": "sk-ant-" + "e" * 30,
         "provider": "sk-" + "f" * 30,
@@ -315,6 +324,14 @@ def _test() -> None:
        bool(_scan_size("z" * (BODY_CHAR_CAP + 1))))
     ok("unterminated frontmatter is measured whole",
        bool(_scan_size("---\nname: x\n" + "z" * (BODY_CHAR_CAP + 1))))
+    crlf_fm = "---\r\nname: x\r\ndescription: y\r\n---\r\n\r\n"
+    ok("CRLF frontmatter is stripped like LF", len(_body(crlf_fm + "z" * 10)) == 10)
+    ok("CRLF body under the cap passes", not _scan_size(crlf_fm + "z" * 10))
+    ok("CRLF body over the cap still fails",
+       bool(_scan_size(crlf_fm + "z" * (BODY_CHAR_CAP + 1))))
+    ok("a --- rule inside the body does not re-split it",
+       len(_body(fm + "text\n\n---\n\nmore")) == len("text\n\n---\n\nmore"))
+    ok("frontmatter-only file has an empty body", _body("---\nname: x\n---\n") == "")
 
     # --- hook path ---
     ok("clean write allowed",

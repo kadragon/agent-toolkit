@@ -58,3 +58,11 @@ proceed — and ask the user to commit, stash, or discard first."* So the docume
 offered to the user this session; the override was chosen.
 
 - [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule
+
+## Review Backlog
+
+### PR #254 — memory-guard follow-ups
+
+- [ ] [FEAT] Extend `memory-guard`'s secret families to GitLab (`glpat-`) and Google (`AIza…`) keys — raised in PR #254 review, deferred as out of the Sprint Contract's named families (AWS/GitHub/Slack/npm/provider/PEM)
+- [ ] [HARNESS] Make `memory-guard`'s `FORBIDDEN_CHARS` and `scripts/ci/check_asset_hygiene.py`'s `_forbidden_chars()` provably in sync — the tables are duplicated by design (one ships, one is CI tooling) but nothing detects a future divergence
+- [ ] [FIX] Narrow `memory-guard`'s generic `sk-` provider pattern so hyphenated prose (`sk-8ball-review-checklist-for-the-team…`) stops matching — widening the tail to `[A-Za-z0-9_-]` for `sk-proj-`/`sk-svcacct-` keys traded a false negative for this false positive; a denial costs a rewrite, so it is minor, not free
