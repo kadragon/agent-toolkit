@@ -54,3 +54,16 @@ previous ticket into the declining-asset judgment Signal 3 needs: a 7-day vs 30-
 delta, with `insufficient-data` when either window is under its minimum run count.
 
 - [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low *(blocked by: 4-skill-run-telemetry)*
+
+## Harness — task-tickets and task-next disagree on a dirty backlog.md
+
+Observed this session, PR #253. `task-tickets` step 7 states its `backlog.md` edit is deliberately
+uncommitted — *"This skill makes no commit of its own: the edit rides into whichever commit the
+caller's cycle makes next."* `task-next`'s Prerequisites working-tree gate then refuses to run:
+on `main`, with no `tasks.md` and no worktree, a dirty tree means *"list the dirty files — do NOT
+proceed — and ask the user to commit, stash, or discard first."* So the documented
+`task-tickets` → `task-next` sequence always stalls, and the only ways through are a
+`[PLAN]` commit-and-merge cycle for the tickets alone or an explicit gate override. Both were
+offered to the user this session; the override was chosen.
+
+- [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule

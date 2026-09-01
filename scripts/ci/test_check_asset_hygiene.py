@@ -198,6 +198,52 @@ def main() -> int:
         "the shipped tree writes elisions in exactly these two shapes",
     )
 
+    # Review finding: the regex's optional second word fired on any path followed by a
+    # space and a word, so a placeholder used in ordinary prose failed the gate with a
+    # message telling the author to use a placeholder. Drop the first-word fallback in
+    # check_personal_paths and these three go red.
+    check(
+        "a placeholder at the end of a path in prose is not a false positive",
+        mod.check_personal_paths("On macOS /Users/me is the home directory.\n") == [],
+    )
+    check(
+        "`/home/user notes` — placeholder plus a following word — is not flagged",
+        mod.check_personal_paths("/home/user notes\n") == [],
+    )
+    check(
+        "a real path followed by a word is still flagged, reported without the word",
+        mod.check_personal_paths("/Users/kdonguk runs this\n")
+        == [
+            "line 1: hardcoded personal path '/Users/kdonguk' — "
+            "use ~, $HOME or a placeholder segment instead"
+        ],
+        mod.check_personal_paths("/Users/kdonguk runs this\n"),
+    )
+
+    # Review finding: drive-letter forms were case-sensitive, so the lowercase spelling
+    # shell snippets actually use slipped through.
+    check(
+        "lowercase `c:\\users\\...` is caught",
+        len(mod.check_personal_paths("c:\\users\\knue\\dev\n")) == 1,
+    )
+    check(
+        "lowercase `/c/users/...` is caught",
+        len(mod.check_personal_paths("/c/users/knue/dev\n")) == 1,
+    )
+    check(
+        "bare lowercase `/users/123` stays unflagged — it is a REST path, not a home dir",
+        mod.check_personal_paths("GET /users/123/profile\n") == [],
+        "macOS always capitalises /Users; matching the lowercase form would fire on API docs",
+    )
+
+    # Review finding: the elision rule was "no letter or digit", which waved through every
+    # punctuation-only segment rather than just an ellipsis.
+    check(
+        "a punctuation-only segment that is not an ellipsis is still flagged",
+        len(mod.check_personal_paths("/Users/_/dev/x\n")) == 1
+        and len(mod.check_personal_paths("/Users/---/dev/x\n")) == 1,
+    )
+
     print("\nis_placeholder_segment")
 
     check(
@@ -209,23 +255,41 @@ def main() -> int:
         not mod.is_placeholder_segment("kdonguk"),
     )
     check(
-        "a segment with no letter or digit is a placeholder",
-        mod.is_placeholder_segment("...") and mod.is_placeholder_segment("__"),
+        "an ellipsis is a placeholder; other punctuation-only segments are not",
+        mod.is_placeholder_segment("...")
+        and mod.is_placeholder_segment(".")
+        and not mod.is_placeholder_segment("__")
+        and not mod.is_placeholder_segment("---"),
     )
 
     print("\ncorpus collection")
 
+    files = mod.find_asset_files()
     check(
-        "__pycache__ is skipped",
-        not any("__pycache__" in p.as_posix() for p in mod.find_asset_files()),
+        "untracked artefacts are excluded — the corpus is what git tracks",
+        not any("__pycache__" in p.as_posix() for p in files),
     )
     check(
         "the corpus is non-empty and confined to the shipped roots",
-        len(mod.find_asset_files()) > 0
-        and all(
-            p.relative_to(mod.REPO_ROOT).parts[0] in mod.CORPUS_ROOTS
-            for p in mod.find_asset_files()
-        ),
+        len(files) > 0
+        and all(p.relative_to(mod.REPO_ROOT).parts[0] in mod.CORPUS_ROOTS for p in files),
+    )
+
+    print("\nempty_corpus_errors — a gate that scans nothing must not report green")
+
+    check(
+        "the real corpus covers every declared root",
+        mod.empty_corpus_errors(files) == [],
+    )
+    check(
+        "a root contributing no files is an error, named",
+        len(mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"])) == 1
+        and "prod" in mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"])[0],
+        mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"]),
+    )
+    check(
+        "an entirely empty corpus errors once per declared root",
+        len(mod.empty_corpus_errors([])) == len(mod.CORPUS_ROOTS),
     )
 
     print("\n----")

@@ -31,6 +31,7 @@ codex plugin add prod@kadragon
 | `bash dev/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
 | `python3 scripts/ci/check_harness_drift.py` | Over shipped skills: plugin-root portability, capture-before-use, `§`/`Signal N`/`<file>.md` → *Section* refs, `$SKILL_DIR/scripts/*` refs, and `(bundled with <plugin>:<skill>)` attributions |
+| `python3 scripts/ci/check_asset_hygiene.py` | Over every tracked file in `dev/`/`prod/`: invisible/control characters, Cyrillic homoglyphs in Latin tokens, hardcoded personal paths |
 | `python3 scripts/ci/check_skill_frontmatter.py` | Skill/agent/command frontmatter parses as YAML, required keys present (needs PyYAML) |
 | `python3 scripts/ci/check_skill_triggers.py` | Deterministic trigger-fixture ranking: each skill's `evals/trigger-eval.json` queries rank the owning skill's `description:` correctly by TF-IDF/cosine (needs PyYAML) |
 | `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
