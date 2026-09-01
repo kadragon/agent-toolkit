@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.3.1
+version: 2.3.2
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -146,8 +146,55 @@ review and CI are the safety net. Write the light memory/doc delta directly, and
 for any *destructive* memory prune (deleting an entry) defer it to `backlog.md`
 rather than blocking, so the review cycle's `--auto` guarantee holds.
 
+### Record the run — first, before the signal gate
+
+**This step runs on every cycle-tail invocation, including the no-signal one**,
+which is why it sits above the gate rather than after it: the paragraph below is
+terminal for the no-signal branch, so a record step placed after it is a record
+step the quiet cycles never reach. One telemetry row per cycle lets
+`harness-curate`'s underperforming-asset judgment trend a rate instead of
+re-reading transcripts each run, and a cycle with nothing to persist is itself
+the datum — dropping it biases the sink toward eventful runs.
+
+```sh
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+REC="$SKILL_DIR/../harness-curate/scripts/record_skill_run.py"
+PY=$(command -v python3 || command -v python || true)
+[ -n "$PY" ] && "$PY" "$REC" --skill-id <skill>   --skill-version <that SKILL.md's `version:`, or omit if it has none>   --outcome <success|failure|partial>   --user-feedback <accepted|corrected|rejected> || true
+```
+
+Resolve the interpreter — do not spell `python3`. Windows installs routinely
+ship `python` with no `python3` shim, and there the bare name plus `|| true`
+drops every row while the run still reports success (`docs/platform-specs.md`
+states the rule; the same two-line resolve is what `hooks/session-start/run.sh`
+and `task-review-cycle/scripts/commit-and-push.sh` already do).
+
+**Best-effort — never block the merge.** A missing script, an unwritable sink or
+any non-zero exit is reported in one line and dropped; it is telemetry, not a
+gate. That is why the `|| true` is there and why no `rc` check follows.
+
+Judge the two values from the cycle you just watched, not from impressions:
+
+| Value | `outcome` | `user_feedback` |
+|-------|-----------|-----------------|
+| best | `success` — acceptance criteria met, no QA retry | `accepted` — user changed nothing |
+| middle | `partial` — met after a QA retry, a criterion deferred to `backlog.md`, or CI red on the final attempt | `corrected` — user redirected scope or fixed output mid-cycle |
+| worst | `failure` — the cycle ended without merging: PR abandoned, or a contract-QA blocker still standing | `rejected` — user discarded the result |
+
+`failure` is reachable only where the cycle tail still runs on an abandoned
+cycle, which today's call site does not. Until an abandon path calls this skill,
+the sink is a partial-recall sample — its future reader must not take a missing
+`failure` row as evidence of none.
+
+`--skill-id` is the driving skill's invocation name (`dev:task-next`,
+`dev:task-review`), not this skill's. Read its `version:` from its own
+`SKILL.md` frontmatter — never recall it. Some skills ship no `version:` field
+(`dev:task-review` is one): omit the flag there and the row records the
+`unknown` sentinel. Never invent a number to fill it.
+
 Signal-gated: if the cycle surfaced no correction, gotcha, or reusable workflow,
-there is no write-back — say so in one line and let the merge proceed.
+there is no write-back — say so in one line and let the merge proceed. The run
+was already recorded above.
 
 ## Writing to auto-memory
 

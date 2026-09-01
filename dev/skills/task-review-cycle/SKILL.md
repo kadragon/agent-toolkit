@@ -361,13 +361,15 @@ plugin or another skill's `SKILL.md` leaves that bump stale — re-run `scripts/
 the newly-touched target (or edit the `version:` frontmatter by hand) and stage it with Step 5.
 Nothing new touched → the caller's bump already covers this branch; do not bump twice.
 
-### Step 4.5: Retrospect (pre-merge, signal-gated)
+### Step 4.5: Retrospect (pre-merge)
 
-Reflect on this cycle **before committing**, so any durable lesson lands *inside this PR* instead of becoming a stray change on `main` after merge. This is the only in-cycle retrospect point — cheap, skippable, and a no-op for most cycles.
+Reflect on this cycle **before committing**, so any durable lesson lands *inside this PR* instead of becoming a stray change on `main` after merge. This is the only in-cycle retrospect point — cheap, and a no-op write-back for most cycles.
 
-Quick self-check: did this cycle surface a **user correction**, a **recurring gotcha / setup fix**, or a **reusable workflow**? If none, skip and go to Step 5 — silence is the normal outcome, not a failure.
+**Call the Skill tool with "dev:harness-capture" on every cycle — do not pre-screen for a signal here.** The skill's cycle-tail mode opens by recording one telemetry row (its *Record the run* step), and only then applies its own signal gate to the write-back, answering the no-signal case in one line. Deciding "no signal, skip the call" at this step is what silently drops the quiet cycles from the telemetry sink and biases it toward eventful runs — the exact skew the row exists to measure.
 
-If a signal exists, call the Skill tool with "dev:harness-capture" and route its write-back **by weight** so the PR stays scoped:
+Quick self-check for your own framing before you call it: did this cycle surface a **user correction**, a **recurring gotcha / setup fix**, or a **reusable workflow**? None is the normal outcome, not a failure — it changes what `harness-capture` writes back, never whether it is invoked.
+
+Route its write-back **by weight** so the PR stays scoped:
 
 | Lesson | Write-back |
 |--------|-----------|

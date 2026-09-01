@@ -79,6 +79,20 @@ duplication repeats one meaning in two places; scattering fragments one meaning 
 and unique. Attention thins across the excess. The cure is the ladder: disclose reference behind
 pointers, and split by branch or sequence so each path carries only what it needs.
 
+**Reachability is decided outside the step.** A step's own text cannot make it run. Two
+things outrank it, and both bit at once in PR #256, where a block headed *not signal-gated*
+recorded nothing on exactly the cycles it existed to record:
+
+- **Position within the file.** A terminal instruction — "say so in one line and let the merge
+  proceed" — ends the branch that reads it. Anything after it is unreachable for that branch,
+  whatever its heading claims. An unconditional step goes *above* every terminal one.
+- **The caller's own gate.** A caller that pre-screens ("if a signal exists, invoke X") decides
+  reachability for the whole callee. Writing "runs every time" inside X does not reopen the
+  call; the gate has to move or go.
+
+So when a step must run unconditionally, verify it from the *entry point* inward — trace the
+caller's branches to it — and never from the step's own wording outward.
+
 ## Completion criteria
 
 Every step ends on a **completion criterion** — the condition that tells the agent the work is

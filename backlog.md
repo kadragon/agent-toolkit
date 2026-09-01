@@ -27,24 +27,35 @@ gives `harness-curate` a mechanical prune target.
 
 - [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
 
-## Harness — skill run telemetry
+## Harness — skill-run sink path can move and orphan history
 
-Source: ECC comparison (`scripts/lib/skill-evolution/tracker.js`). Signal 3 ("Underperforming
-asset") currently infers underperformance from transcript reading; there is no per-skill outcome
-record. Complements — does not duplicate — the `Predicted impact`/`Verified` loop in
-`harness-evolution.md` §3, which is qualitative and per-edit rather than per-run.
-Not a parallel eval harness: this records outcomes, it does not grade skills (`harness-evolution.md`
-§2 keeps eval ownership with `skill-creator`).
+From PR #256 review (out of scope there). `record_skill_run.py` resolves its sink through
+`overlap_state.state_path()` -> `resolve_project_dir()`, which prefers the exactly-encoded
+project dir only while that dir holds transcripts and otherwise picks the loose-key sibling
+with the most `*.jsonl`. That ranking is data-dependent, so the sink can silently relocate and
+strand every earlier row; Signal 3's future reader would then report `insufficient-data` with
+no sign that history exists elsewhere.
 
-- [ ] [FEAT] Record each skill invocation to a bounded JSONL sink (`skill_id`, `skill_version`, `outcome` success/failure/partial, `user_feedback` accepted/corrected/rejected, `recorded_at`) with a retention cap and owner-only file mode
+- [ ] [FIX] Pin the skill-run sink directory — persist the resolved dir in `.harness-curator-state.json` on first write and reuse it, or warn when the resolved dir differs from one that already holds sink data
+
+## Harness — skill-run sink has no cross-process append lock
+
+From PR #256 review (out of scope there). `_trim` is a read-modify-replace: it snapshots the
+sink, then `os.replace`s over it, so an append landing in that window is lost. PR #256 narrowed
+the window to over-cap runs only (a corrupt line no longer forces a rewrite on every append),
+but concurrent agents in one repo — which the global CLAUDE.md explicitly anticipates — share
+one sink and can still drop a row.
+
+- [ ] [FIX] Serialize append+trim on the skill-run sink with a per-sink lock (`msvcrt.locking` / `fcntl.flock`) or a merge-safe rewrite that re-reads lines appended after the snapshot
 
 ## Harness — Signal 3 consumes run telemetry
 
-Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink from the
-previous ticket into the declining-asset judgment Signal 3 needs: a 7-day vs 30-day success-rate
-delta, with `insufficient-data` when either window is under its minimum run count.
+Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink written by
+`dev/skills/harness-curate/scripts/record_skill_run.py` into the declining-asset judgment
+Signal 3 needs: a 7-day vs 30-day success-rate delta, with `insufficient-data` when either
+window is under its minimum run count.
 
-- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low *(blocked by: 4-skill-run-telemetry)*
+- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low
 
 ## Harness — task-tickets and task-next disagree on a dirty backlog.md
 
