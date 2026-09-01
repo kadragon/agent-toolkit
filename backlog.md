@@ -27,16 +27,6 @@ gives `harness-curate` a mechanical prune target.
 
 - [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
 
-## Harness — skill-run sink has no cross-process append lock
-
-From PR #256 review (out of scope there). `_trim` is a read-modify-replace: it snapshots the
-sink, then `os.replace`s over it, so an append landing in that window is lost. PR #256 narrowed
-the window to over-cap runs only (a corrupt line no longer forces a rewrite on every append),
-but concurrent agents in one repo — which the global CLAUDE.md explicitly anticipates — share
-one sink and can still drop a row.
-
-- [ ] [FIX] Serialize append+trim on the skill-run sink with a per-sink lock (`msvcrt.locking` / `fcntl.flock`) or a merge-safe rewrite that re-reads lines appended after the snapshot
-
 ## Harness — Signal 3 consumes run telemetry
 
 Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink written by

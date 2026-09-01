@@ -39,14 +39,27 @@ every row while still reporting success.
 The file is created 0o600 and re-chmod'd after every trim, so the retention rewrite cannot
 silently widen the mode. On Windows the POSIX bits are only approximated; a chmod failure is
 swallowed rather than costing the write.
+
+Append and trim run under one exclusive sidecar lock (`_sink_lock`), because the trim is a
+read-modify-replace and concurrent agents in one repo share a single sink.
 """
 
 import argparse
+import contextlib
 import json
 import os
 import sys
 import tempfile
 import time
+
+try:  # POSIX
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+try:  # Windows
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from overlap_state import (  # noqa: E402
@@ -64,6 +77,9 @@ from scan_transcripts import _loose_key, encode_project  # noqa: E402
 # visible `skill-runs.jsonl` would be counted as a transcript, and glob() does not
 # match a leading dot, so the name is what keeps the two apart. `--test` asserts it.
 SINK_FILE = ".skill-runs.jsonl"
+# Sidecar for the append+trim lock. Deliberately NOT `*.jsonl`, for the same reason the
+# sink is dot-prefixed: `scan_transcripts.py` must not count or parse it.
+LOCK_SUFFIX = ".lock"
 # The chosen sink dir, recorded in that dir's own .harness-curator-state.json. Pinning is
 # what makes the sink location stable across runs; see resolve_sink_dir().
 SINK_DIR_KEY = "skillRunSinkDir"
@@ -238,6 +254,52 @@ def _chmod_600(path):
         pass  # best-effort: Windows approximates the POSIX bits
 
 
+@contextlib.contextmanager
+def _sink_lock(path):
+    """Hold one exclusive lock for the whole append+trim on `path`.
+
+    `_trim` is a read-modify-replace: it snapshots the sink, then `os.replace`s over it,
+    so an append landing inside that window is written to a file that is about to be
+    swapped away. Concurrent agents in one repo — which the global instructions
+    explicitly anticipate — share one sink, so the row is simply lost. Serializing the
+    two closes the window.
+
+    The lock lives in a sidecar file, never the sink itself: `os.replace` swaps the
+    inode out from under any waiter holding a lock on the old one, so a lock on the sink
+    would stop excluding at exactly the moment it matters.
+
+    Best-effort by design. A platform with neither `fcntl` nor `msvcrt`, or a filesystem
+    that refuses the lock (a network mount), yields unlocked rather than costing the
+    caller its record — the pre-lock behaviour, no worse than before.
+    """
+    lock_path = path + LOCK_SUFFIX
+    fd = None
+    try:
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        elif msvcrt is not None:
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+    except OSError as e:
+        if fd is not None:
+            os.close(fd)
+            fd = None
+        print(f"warning: could not lock the skill-run sink ({e}); "
+              "a concurrent append may be lost", file=sys.stderr)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            if fcntl is None and msvcrt is not None:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass  # closing the fd releases it anyway
+            os.close(fd)  # releases the flock too
+
+
 def _append(path, record):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -308,14 +370,15 @@ def record(project, skill_id, skill_version, outcome, user_feedback,
     if warning:
         print(f"warning: {warning}", file=sys.stderr)
     path = os.path.join(sink_dir, SINK_FILE)
-    _append(path, entry)
-    try:
-        _pin_dir(sink_dir, project, warn_key)  # after the append: _append created the dir
-    except OSError as e:
-        # Best-effort bookkeeping. Raising here would skip the trim below on a row that is
-        # already written, so the sink would grow past the cap for as long as this fails.
-        print(f"warning: could not record the sink pin ({e})", file=sys.stderr)
-    aged, corrupt = _trim(path, max_records)
+    with _sink_lock(path):
+        _append(path, entry)
+        try:
+            _pin_dir(sink_dir, project, warn_key)  # after the append: _append made the dir
+        except OSError as e:
+            # Best-effort bookkeeping. Raising here would skip the trim below on a row that
+            # is already written, so the sink would grow past the cap while this fails.
+            print(f"warning: could not record the sink pin ({e})", file=sys.stderr)
+        aged, corrupt = _trim(path, max_records)
     return path, aged, corrupt
 
 
@@ -607,6 +670,69 @@ def run_tests():
         check("a failing pin write is reported, not raised", "could not record" in errbuf.getvalue())
         check("the retention trim still runs when pinning fails",
               len(read_lines(fpath)) == 2 and aged == 1)
+
+        # The append+trim window is serialized: a second writer cannot slip a record in
+        # between the snapshot and the os.replace. flock/msvcrt locks are per open file
+        # description, so a fresh fd in this same process contends exactly like another
+        # process would.
+        def _lock_taken(sink):
+            lock_path = sink + LOCK_SUFFIX
+            if not os.path.exists(lock_path):
+                return False
+            fd = os.open(lock_path, os.O_WRONLY)
+            try:
+                if fcntl is not None:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                elif msvcrt is not None:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    return None  # no lock primitive on this platform
+                return False
+            except OSError:
+                return True
+            finally:
+                os.close(fd)
+
+        lock_proj = os.path.join(tmpdir, "locked")
+        os.makedirs(lock_proj)
+        seen = []
+        real_trim = _trim
+
+        def probing_trim(sink, cap):
+            seen.append(_lock_taken(sink))
+            return real_trim(sink, cap)
+
+        globals()["_trim"] = probing_trim
+        try:
+            lpath, _, _ = record(lock_proj, "s", "1.0.0", "success", "accepted", now_ms=1)
+        finally:
+            globals()["_trim"] = real_trim
+        check("the sink lock is held across the trim",
+              seen == [True] if seen[:1] != [None] else True)
+        check("the lock sidecar is not a *.jsonl transcript",
+              not (lpath + LOCK_SUFFIX).endswith(".jsonl"))
+
+        # A sink that cannot be locked still records the row: the lock is best-effort.
+        nolock_proj = os.path.join(tmpdir, "nolock")
+        os.makedirs(nolock_proj)
+        saved_open = os.open
+
+        def refuse_lock_file(fpath, *a, **kw):
+            if str(fpath).endswith(LOCK_SUFFIX):
+                raise OSError("no lock here")
+            return saved_open(fpath, *a, **kw)
+
+        os.open = refuse_lock_file
+        try:
+            errbuf = _io.StringIO()
+            with redirect_stderr(errbuf):
+                npath, _, _ = record(nolock_proj, "s", "1.0.0", "success", "accepted", now_ms=1)
+        finally:
+            os.open = saved_open
+        check("an unlockable sink still records the row", len(read_lines(npath)) == 1)
+        check("the failed lock is warned about", "could not lock" in errbuf.getvalue())
 
         # invalid values are rejected, and nothing is written
         bad_proj = os.path.join(tmpdir, "bad")
