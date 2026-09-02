@@ -18,17 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — version bumps overstate a bundled-script addition
-
-Observed in PR #260. `docs/conventions.md` → *Plugin Version Bump Rules* assigns minor only to a
-skill, agent, command or hook **added**, and patch to "any shipped asset modified". Adding a
-bundled script to an existing skill is neither row's named case, and both the orchestrator and the
-contract verifier read it as minor — shipping `dev` `4.7.5 → 4.8.0` where the table says
-`4.7.6`. The version is released and monotonic, so it stands; the table is what needs the missing
-row before the next script lands.
-
-- [ ] [DOCS] Give the version-bump table an explicit row for a bundled script/reference added to an existing skill (patch), so the "asset modified" default is not inferred from the absence of a row
-
 ## Harness — task-tickets and task-next disagree on a dirty backlog.md
 
 Observed this session, PR #253. `task-tickets` step 7 states its `backlog.md` edit is deliberately

@@ -5,6 +5,9 @@
 # Semver rules — full table: docs/conventions.md → Plugin Version Bump Rules.
 #   add skill/agent/command/hook → minor
 #   modify any shipped asset     → patch
+#   add a bundled file to an existing skill (scripts/references/examples/evals) → patch
+#     (reachable only through the skill that already shipped, so the consumer gained a
+#     changed skill, not a new asset)
 #   remove/rename a hook         → patch (a hook has no invocable name)
 #   remove/rename skill/agent/command → major (breaks a by-name call)
 set -euo pipefail
