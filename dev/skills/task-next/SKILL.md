@@ -38,8 +38,14 @@ if [[ -n "$dirty" ]]; then
   current_branch=$(git branch --show-current)
   task_contract_dirty=$(git status --porcelain -- tasks.md)
   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
-  non_queue_dirty=$(git status --porcelain -- ':(exclude)backlog.md')
-  queue_delta=$(git diff --stat -- backlog.md)
+  # `top` anchors the exclusion at the repo root. Without it the pathspec is resolved
+  # against cwd, so a run from any subdirectory excludes `<subdir>/backlog.md` while the
+  # real one still shows up — and the carve-out below never fires.
+  non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md')
+  # Against HEAD, not the index: a `git add`ed backlog.md is invisible to a bare
+  # `git diff --stat`, which would announce an empty delta on the very path the gate is
+  # about to carry.
+  queue_delta=$(git diff --stat HEAD -- backlog.md)
 fi
 ```
 
@@ -54,7 +60,9 @@ bookkeeping or the ignore rule) is intentionally dirty.
 **`backlog.md` alone is not a stray file — proceed.** On `main`/`master`, when `non_queue_dirty`
 is empty (every dirty path is `backlog.md`), run the cycle: announce that the edit is being
 carried, quote `queue_delta`, and let it ride into this cycle's first commit alongside the code.
-This is the `task-tickets` hand-off, whose step 7 deliberately leaves its `backlog.md` edit
+`queue_delta` is empty when `backlog.md` is untracked — `git diff` has nothing to compare
+against — so name the file and its line count from the file itself in that case rather than
+announcing nothing. This is the `task-tickets` hand-off, whose step 7 deliberately leaves its `backlog.md` edit
 uncommitted — *"the edit rides into whichever commit the caller's cycle makes next"* — and points
 the user straight here. Refusing it made the documented `task-tickets` → `task-next` sequence stall
 every time, with no way through but a `[PLAN]` commit-and-merge cycle for the tickets alone or an

@@ -42,8 +42,11 @@ items from approved spec").
    the edit rides into whichever commit the caller's cycle makes next. `task-next`'s working-tree
    gate carves the matching exception — a tree whose only dirty path is `backlog.md` proceeds and
    announces what it carries — so the hand-off in step 7 does not stall on the edit this step
-   leaves behind. That gate is the one authority for what a dirty tree means; do not add a commit
-   here to work around it.
+   leaves behind. That gate — `task-next`'s specifically — is the authority for what a
+   dirty tree means on the path this skill hands off to; do not add a commit here to work
+   around it. `task-new` carries its own gate with no such exception, so a leftover
+   `backlog.md` edit still stops a `task-new` run; that asymmetry is queued in `backlog.md`,
+   not something to fix by committing here.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
