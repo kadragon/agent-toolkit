@@ -176,16 +176,17 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 | Skill, agent, or command added | minor: `x.Y.z → x.(Y+1).0` |
 | Hook added (new bundle or new registration) | minor: `x.Y.z → x.(Y+1).0` |
 | Any shipped asset modified | patch: `x.y.Z → x.y.(Z+1)` |
-| Bundled script or reference added to an existing skill | patch: `x.y.Z → x.y.(Z+1)` |
+| Bundled file added to an existing skill (`scripts/`, `references/`, `examples/`, `evals/`) | patch: `x.y.Z → x.y.(Z+1)` |
 | Hook removed or renamed | patch: `x.y.Z → x.y.(Z+1)` |
 | Skill, agent, or command removed or renamed | major: `X.y.z → (X+1).0.0` |
 
-**Why a new bundled script is a patch, not a minor.** Minor is for a new asset a consumer can
+**Why a new bundled file is a patch, not a minor.** Minor is for a new asset a consumer can
 *reach*: a skill, agent, command or hook, each of which adds a name to invoke or a trigger that
-fires on its own. A script or reference bundled into an existing skill adds neither — it is
-reachable only through the skill that already shipped, so what the consumer gained is a changed
-skill, which is the "any shipped asset modified" row. Stated as its own row because the absence of
-one is what makes this look like an addition: PR #260 added `harness-curate`'s
+fires on its own. A file bundled into an existing skill adds neither, whether it is a script, a
+reference, an example or an eval fixture: it is reachable only through the skill that already
+shipped, so what the consumer gained is a changed skill — the "any shipped asset modified" row.
+Stated as its own row because the absence of one is what makes this look like an addition:
+PR #260 added `harness-curate`'s
 `skill_run_health.py` and shipped `4.7.5 → 4.8.0`, minor, where this table says `4.7.6`. Both the
 orchestrator and the contract verifier read the missing row as license to infer.
 
