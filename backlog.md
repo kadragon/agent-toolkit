@@ -18,15 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — Signal 3 consumes run telemetry
-
-Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink written by
-`dev/skills/harness-curate/scripts/record_skill_run.py` into the declining-asset judgment
-Signal 3 needs: a 7-day vs 30-day success-rate delta, with `insufficient-data` when either
-window is under its minimum run count.
-
-- [ ] [FEAT] Have `harness-curate` Step 3 read the run telemetry sink and mark a skill `declining` on a 7d-vs-30d success-rate drop past threshold, reporting `insufficient-data` rather than a verdict when run counts are too low
-
 ## Harness — task-tickets and task-next disagree on a dirty backlog.md
 
 Observed this session, PR #253. `task-tickets` step 7 states its `backlog.md` edit is deliberately
