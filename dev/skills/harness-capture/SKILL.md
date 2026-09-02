@@ -230,8 +230,8 @@ plus the `status` field below, and before writing:
    schema change.
 
    The write itself is gated by the `memory-guard` hook — a secret pattern, a
-   control/bidi/zero-width character, a body over 2000 characters, or a `status:` outside
-   `active|superseded|rejected` is denied when the
+   control/bidi/zero-width character, a body over 2000 characters, or a `status:` that is
+   outside `active|superseded|rejected` or not nested under `metadata:` is denied when the
    write goes through `Write` or `Edit`. Those are the tools to use: a shell redirect
    (`printf … > …/memory/note.md`) is not gated, so writing a memory that way defeats the
    check rather than passing it. Pre-check the text you are about to show, so you propose
@@ -291,10 +291,16 @@ Two rules keep it honest:
 - **An absent `status` reads as `active`.** Existing entries need no migration, and a memory
   written without this skill in context is not broken by the field's absence. Add `status:
   active` when you touch such a file anyway; never run a backfill pass for its own sake.
-- **The value is gated mechanically.** `hooks/memory-guard/guard.py` denies a `Write`/`Edit`
-  carrying a `status:` outside those three values, because a typo is silent rot — a prune
-  filter reading `superseded` simply never matches `superceded`. An absent field is not a
-  finding; the pre-check in step 4 covers this along with the other checks.
+- **The field is gated mechanically.** `hooks/memory-guard/guard.py` denies a `Write`/`Edit`
+  carrying a `status:` outside those three values, and — on a whole file — one that sits at
+  the top level instead of under `metadata:`. Both are silent rot: a prune filter reading
+  `metadata.status == "superseded"` matches neither `superceded` nor a misplaced key. An
+  absent field is not a finding.
+- **Let the gate see the finished file.** An `Edit` that replaces the value alone carries no
+  `status:` line in its payload, so the hook has nothing to grade — the gap is documented in
+  `guard.py`'s own known-gap note, not a bug to route around. The `--check-file` pre-check in
+  step 4 reads the complete file and is what actually covers a status change; run it on the
+  draft as written, exactly as you would for the other three checks.
 
 Why the field exists: staleness used to be judgment-only, so nothing downstream could act
 on it. `superseded`/`rejected` is a decidable prune target — **Memory hygiene** below reaches
@@ -360,8 +366,9 @@ path.
 
 - **`hooks/memory-guard/guard.py`** — the mechanical half of **Writing to auto-memory**:
   a `PreToolUse(Write|Edit)` gate that blocks a memory write carrying a secret pattern,
-  a control/bidi/zero-width character, an over-cap body, or an out-of-vocabulary
-  `status:` value, plus the `--check-file <path|->`
+  a control/bidi/zero-width character, an over-cap body, or a `status:` that is
+  out-of-vocabulary or misplaced, plus the `--check-file <path|->`
   CLI this skill pre-checks with at step 4. Fails open on anything it cannot parse, so a
   broken payload never blocks a session. `--test` covers each secret family, the character
-  table, the cap boundary, the status vocabulary, the path predicate, and the fail-open path.
+  table, the cap boundary, the status vocabulary and placement, the path predicate, and the
+  fail-open path.

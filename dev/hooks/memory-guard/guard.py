@@ -16,7 +16,8 @@ Two entry points, one policy:
     memory file (or piped content, via `-`) at its "show the write before applying" step
     and rewrite rather than get denied.
 
-Both share `_scan_secrets`, `_scan_chars`, and `_scan_size`, so policy lives in one place.
+Both share `_scan_secrets`, `_scan_chars`, `_scan_size`, and `_scan_status`, so policy lives
+in one place.
 
 Four checks:
   1. Secret patterns — AWS access-key ids, GitHub tokens/PATs, Slack tokens, npm tokens,
@@ -32,20 +33,28 @@ Four checks:
   3. Body size — `BODY_CHAR_CAP` characters, measured after stripping a leading `---`
      frontmatter block. `MEMORY.md` is exempt from this check alone: it is the index, and
      it grows one line per surviving memory by design.
-  4. Lifecycle status — a `status:` key in the frontmatter must carry one of `STATUS_VALUES`.
-     That field is what makes supersession decidable for `harness-capture`'s Memory hygiene
-     pass and `harness-curate`'s prune lens, and a typo there is silent rot: a filter reading
-     `status == "superseded"` simply never matches. **An absent `status` is not a finding** —
-     it reads as `active`, so existing memories need no migration and a memory written
-     without `harness-capture` in context is never blocked.
+  4. Lifecycle status — a `status:` key in the frontmatter must carry one of `STATUS_VALUES`,
+     nested under `metadata:` where every consumer reads it. That field is what makes
+     supersession decidable for `harness-capture`'s Memory hygiene pass and
+     `harness-curate`'s prune lens, and both a typo and a misplaced key are silent rot: a
+     filter reading `metadata.status == "superseded"` matches neither `superceded` nor a
+     top-level `status:`. **An absent `status` is not a finding** — it reads as `active`, so
+     existing memories need no migration and a memory written without `harness-capture` in
+     context is never blocked.
 
 Known gap, deliberate: on `Edit` the payload carries `new_string`, a fragment rather than
 the resulting file, so checks 1, 2 and 4 run on that fragment and check 3 is skipped.
 Reconstructing the post-edit size from a fragment is fragile, and the size cap is the one
-rule a `Write` of the same file would catch anyway. Check 4 survives on a fragment because
-flipping a status IS the typical edit; with no frontmatter delimiters to anchor to it scans
-any line that is a bare `status: <value>` YAML key, which a prose mention (backticked, or
-carrying a list marker or trailing words) does not match.
+rule a `Write` of the same file would catch anyway.
+
+What check 4 reaches on a fragment is narrower than on a file, and the difference matters:
+a fragment carrying the whole `status: <value>` line is graded on its value (a prose mention
+— backticked, or carrying a list marker or trailing words — is not a match), but an `Edit`
+that replaces the scalar alone (`old_string: active`, `new_string: superseded`) carries no
+`status:` anchor and is not graded at all, and placement is never graded on a fragment
+because there is no frontmatter to locate the key in. The `Write` path and
+`--check-file` see the finished file and are the reliable gate; `harness-capture` runs the
+latter at its show-the-write step for exactly that reason.
 
 Design contract (HOOK PATH ONLY): never-raise, always exit 0 (allow) unless a check fires
 (exit 2). A firing check prints its reasons to stderr and exits 2. Everything else exits 0
@@ -72,11 +81,19 @@ BODY_CHAR_CAP = 2000
 # the tuple doubles as the message the guard prints.
 STATUS_VALUES = ("active", "superseded", "rejected")
 
-# A bare `status: <value>` YAML key on its own line, with an optional trailing `# comment`.
-# Deliberately strict: a body line mentioning `status: foo` inside prose, backticks, or a list
-# item carries other characters on the line and does not match.
+# A bare `status: <value>` YAML block-mapping key on its own line, capturing its indent so a
+# misplaced top-level key can be told from one nested under `metadata:`. Deliberately strict:
+# a body line mentioning `status: foo` inside prose, backticks, or a list item carries other
+# characters on the line and does not match. A trailing `#` opens a comment only when
+# whitespace precedes it — the YAML rule — so `status: active#typo` is read as the value
+# `active#typo` and rejected rather than silently accepted as `active`.
+#
+# Supported syntax is block mapping, one key per line. A YAML flow mapping
+# (`metadata: {type: project, status: pending}`) is not inspected: parsing YAML properly
+# would mean a dependency this hook deliberately does not have, and the store's own writer
+# emits block mappings. Write memory frontmatter that way and the gate holds.
 STATUS_LINE = re.compile(
-    r"^[ \t]*status:[ \t]*(?P<v>[^#\r\n]*?)[ \t]*(?:#[^\r\n]*)?\r?$",
+    r"^(?P<indent>[ \t]*)status:[ \t]*(?P<v>[^\r\n]*?)(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$",
     re.MULTILINE,
 )
 
@@ -196,10 +213,11 @@ def _scan_size(text: str) -> list[str]:
 
 
 def _frontmatter(text: str) -> str | None:
-    """The leading `---` block's inner text, or None when there is no closed frontmatter.
+    r"""The leading `---` block's inner text, or None when there is no closed frontmatter.
 
     Shares `_body`'s delimiter rules, `\r?` included, so the two never disagree about where
-    a CRLF memory file's frontmatter ends.
+    a CRLF memory file's frontmatter ends. The docstring is raw: an unescaped escape
+    sequence in a plain string would embed a real control character in what `help()` shows.
     """
     if not text.startswith("---"):
         return None
@@ -210,24 +228,49 @@ def _frontmatter(text: str) -> str | None:
     return rest[1][:closing.start()] if closing else None
 
 
+def _safe_value(value: str) -> str:
+    """A rendering of `value` safe to print. Carries `_scan_secrets`'s never-echo policy.
+
+    A rejected status value is whatever the file held, and the hook prints its findings to
+    stderr, where they land in logs. Echoing a credential pasted where the value belongs is
+    the one thing `_scan_secrets` is careful never to do, so only a short, plainly-not-a-secret
+    token is shown back; anything else is named, not quoted.
+    """
+    return value if re.fullmatch(r"[A-Za-z0-9_.-]{1,24}", value) else "(redacted)"
+
+
 def _scan_status(text: str) -> list[str]:
-    """Findings for a `status:` key whose value is outside `STATUS_VALUES`.
+    """Findings for a `status:` key that is misplaced, or whose value is outside `STATUS_VALUES`.
 
     Scans the frontmatter of a full memory file; on an Edit fragment (no closed frontmatter)
     it scans the fragment itself — see the module docstring's known-gap note. An absent
     `status` is silent: the field is optional and reads as `active`.
+
+    Placement is graded only on a full file. The schema nests `status` under `metadata:`
+    beside `type`, and every consumer reads `metadata.status`, so a top-level key would be
+    admitted by a value-only check and then be invisible to the prune lens — the judgment it
+    carried silently lost. A fragment has no frontmatter to locate the key in, so it is
+    graded on its value alone.
     """
     region = _frontmatter(text)
+    is_full_file = region is not None
     if region is None:
         region = text
     allowed = ", ".join(STATUS_VALUES)
     findings = []
     for m in STATUS_LINE.finditer(region):
-        value = m.group("v").strip().strip("\"'")
+        if is_full_file and not m.group("indent"):
+            findings.append(
+                "status key sits at the top level of the frontmatter — nest it under "
+                "`metadata:`, where every consumer reads it"
+            )
+        # Strip twice around the quotes: `"  active  "` is padding inside a quoted scalar,
+        # not a different value, and rejecting it would block a legitimate memory.
+        value = m.group("v").strip().strip("\"'").strip()
         if value in STATUS_VALUES:
             continue
         if value:
-            findings.append(f"status value '{value}' is not one of {allowed}")
+            findings.append(f"status value '{_safe_value(value)}' is not one of {allowed}")
         else:
             findings.append(f"status key is empty — expected one of {allowed}")
     return list(dict.fromkeys(findings))
@@ -421,6 +464,26 @@ def _test() -> None:
     ok("unterminated frontmatter still checks the status",
        bool(_scan_status("---\nmetadata:\n  status: pending\n")))
     ok("MEMORY.md index lines carry no status", not _scan_status("- [T](f.md) — hook\n"))
+    ok("top-level status is flagged as misplaced on a full file",
+       any("top level" in f for f in _scan_status(
+           "---\nname: x\nstatus: superseded\n---\n\nbody")))
+    ok("nested status is not flagged as misplaced",
+       not _scan_status(st("  type: project\n  status: superseded\n")))
+    ok("a misplaced key with a bad value reports both",
+       len(_scan_status("---\nstatus: pending\n---\n\nbody")) == 2)
+    ok("placement is not graded on an edit fragment",
+       not _scan_status("status: superseded\n"))
+    ok("a # without leading whitespace stays part of the value",
+       bool(_scan_status(st("  status: active#typo\n"))))
+    ok("quoted value with inner padding is accepted",
+       not _scan_status(st('  status: "  active  "\n')))
+    ok("an invalid value is never echoed verbatim",
+       all(families["GitHub token"] not in f
+           for f in _scan_status(st(f'  status: {families["GitHub token"]}\n'))))
+    ok("a short ordinary typo is still quoted back for the author",
+       any("superceded" in f for f in _scan_status(st("  status: superceded\n"))))
+    ok("_frontmatter docstring carries no literal control character",
+       "\r" not in (_frontmatter.__doc__ or ""))
 
     # --- hook path ---
     ok("clean write allowed",
