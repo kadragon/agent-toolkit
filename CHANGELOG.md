@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] declining threshold decided on exact rationals, not binary floats (dev v4.8.1) (2026-09-02)
 - [done] Signal 3 trends skill-run telemetry into a declining verdict (dev v4.8.0) (2026-09-02)
 - [done] auto-memory status lifecycle field (dev v4.7.5) (2026-09-02)
 - [done] skill-run sink serializes append and trim under one lock (dev v4.7.4) (2026-09-01)

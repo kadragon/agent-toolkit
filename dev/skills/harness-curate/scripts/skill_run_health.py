@@ -44,6 +44,7 @@ import json
 import os
 import sys
 import time
+from fractions import Fraction
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from record_skill_run import (  # noqa: E402
@@ -171,7 +172,13 @@ def judge(rows, now_ms, window_days=WINDOW_DAYS, baseline_days=BASELINE_DAYS,
         else:
             delta = rec["recent_rate"] - rec["baseline_rate"]
             rec["delta"] = delta
-            if -delta >= threshold:
+            # Decide on exact rationals, report the float. Both rates and the threshold are
+            # binary floats, and at the nominal boundary the subtraction lands just under:
+            # 2/5 against 6/10 is -0.19999999999999996, so a decline of exactly the
+            # threshold read `ok`. Fraction(str(...)) recovers the decimal the operator
+            # actually typed, so the boundary is inclusive as the docs state.
+            drop = (Fraction(b_ok, b_runs) - Fraction(r_ok, r_runs))
+            if drop >= Fraction(str(threshold)):
                 rec["verdict"] = DECLINING
                 rec["reason"] = (f"{window_days}d rate is {-delta:.2f} below the "
                                  f"{baseline_days}d rate (threshold {threshold:.2f})")
@@ -305,6 +312,20 @@ def run_tests():
             + [row("edge2", 2, "success") for _ in range(10)])
     check("a tail one under min_recent is insufficient-data",
           judge(rows, now)[0]["verdict"] == INSUFFICIENT)
+
+    # a drop of exactly the threshold is a decline: decided on rationals, because
+    # 0.4 - 0.6 is -0.19999999999999996 in binary floating point
+    rows = ([row("edge3", 20, "success") for _ in range(4)]
+            + [row("edge3", 20, "failure") for _ in range(1)]
+            + [row("edge3", 2, "success") for _ in range(2)]
+            + [row("edge3", 2, "failure") for _ in range(3)])
+    got = judge(rows, now)[0]
+    check("a drop of exactly the threshold is declining",
+          got["verdict"] == DECLINING and got["recent_successes"] == 2
+          and got["recent_runs"] == 5 and got["baseline_successes"] == 6
+          and got["baseline_runs"] == 10)
+    check("a drop just under the threshold is ok",
+          judge(rows, now, threshold=0.21)[0]["verdict"] == OK)
 
     # per-skill isolation and report ordering
     rows = ([row("z-ok", d, "success") for d in range(1, 15)]
