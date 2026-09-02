@@ -208,9 +208,9 @@ How the reviewer is launched depends on the runtime driving this cycle (`NATIVE_
   SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment' | head -1 || true)  # from 2-1
   EFFORT=""; [[ -n "$SECURITY_HIT" ]] && EFFORT="high"  # from 2-1
   bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" \
-    || echo '[]'
+    || echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh exited non-zero"}'
   ```
-  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt, including the `EFFORT` argument), so Step 3 consolidates both identically.
+  `claude-review.sh` emits the same findings-JSON array as the Agent path (it embeds the same reviewer prompt, including the `EFFORT` argument), so Step 3 consolidates both identically — **including the sentinel**: the fallback above emits `inner-run-unavailable`, not `[]`, because a companion that failed to run is a dead slot and `[]` would consolidate as a clean Claude review. Keep the script's own unparseable-output fallback spelling the same object; the two halves of this slot must not disagree about what an unread run reports.
 
 Reviewer prompt (Agent path):
 ```
@@ -231,10 +231,12 @@ Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this PR.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
-Do not end silently: when finished, deliver the JSON array to the orchestrator with
-SendMessage(to: "main"). Do not assume the final report is returned on its own —
-skip this and the whole review is lost after the work is already done.
-Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled.
+Do not end silently: when finished, deliver the JSON to the orchestrator with
+SendMessage(to: "main") — the findings array, or the sentinel object from step 4 when the run
+never produced one. Do not assume the final report is returned on its own — skip this and the
+whole review is lost after the work is already done.
+A run that finished and found nothing sends `[]`, so the slot is recorded as reviewed rather
+than stalled. A run you could not read sends the sentinel, never `[]`.
 ```
 
 **Reading the slot's result.** The inner `code-review` run's findings are the result; the wrapper's

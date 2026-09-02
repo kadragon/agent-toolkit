@@ -38,6 +38,7 @@ Review changes on the current branch against ${BASE_BRANCH}.
 3. Return findings as a JSON array and NOTHING else — no prose, no code fence:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
+   The array IS the \`${SLOT_ID}\` run's findings — every one of them, as it reported them. Do not filter, re-rank, re-judge, merge, summarize or drop a finding. \`[]\` means the reviewer ran and found nothing; it never means you could not read its output.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this branch's diff.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
@@ -73,8 +74,9 @@ emit_if_array() { jq -e 'type == "array"' <<<"$1" >/dev/null 2>&1 && { printf '%
 # Prefer the clean case: the whole result is the array. If not — a headless
 # session can wrap the array in prose (e.g. a repo Stop hook injects a nudge the
 # model answers before re-emitting JSON) — recover the outermost [...] block and
-# revalidate. Only if BOTH fail do we surface the raw text and return [], so a
-# parse miss reads as a diagnosable warning rather than a silent "0 findings".
+# revalidate. Only if BOTH fail do we surface the raw text and report the slot as
+# unavailable: an unread run is a dead slot, and `[]` would consolidate as a clean
+# Claude review — the failure mode SKILL.md Step 2-1's sentinel rule exists to stop.
 if emit_if_array "$RESULT"; then
   exit 0
 fi
@@ -83,4 +85,4 @@ if [ -n "$EXTRACTED" ] && emit_if_array "$EXTRACTED"; then
   exit 0
 fi
 printf 'WARN: claude review did not return a parseable JSON array:\n%s\n' "$RESULT" >&2
-echo '[]'
+echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh could not parse a findings array from the run output"}'
