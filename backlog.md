@@ -18,19 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — task-tickets and task-next disagree on a dirty backlog.md
-
-Observed this session, PR #253. `task-tickets` step 7 states its `backlog.md` edit is deliberately
-uncommitted — *"This skill makes no commit of its own: the edit rides into whichever commit the
-caller's cycle makes next."* `task-next`'s Prerequisites working-tree gate then refuses to run:
-on `main`, with no `tasks.md` and no worktree, a dirty tree means *"list the dirty files — do NOT
-proceed — and ask the user to commit, stash, or discard first."* So the documented
-`task-tickets` → `task-next` sequence always stalls, and the only ways through are a
-`[PLAN]` commit-and-merge cycle for the tickets alone or an explicit gate override. Both were
-offered to the user this session; the override was chosen.
-
-- [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule
-
 ## Review Backlog
 
 ### PR #257 — skill-run sink pin follow-ups

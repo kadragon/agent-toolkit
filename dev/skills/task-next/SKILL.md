@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 1.6.10
+version: 1.7.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, verify, version bump, review. Flags: --all (parallel batch),
@@ -38,6 +38,8 @@ if [[ -n "$dirty" ]]; then
   current_branch=$(git branch --show-current)
   task_contract_dirty=$(git status --porcelain -- tasks.md)
   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
+  non_queue_dirty=$(git status --porcelain -- ':(exclude)backlog.md')
+  queue_delta=$(git diff --stat -- backlog.md)
 fi
 ```
 
@@ -47,9 +49,22 @@ branch, even when the default single-item path has no `tasks.md`. Include all ca
 are expected while resuming a feature-branch sprint. On `main`/`master`, route only when
 `task_contract_dirty` and `task_worktree` are both non-empty; this is the `--tree` exception, whose
 main checkout stays on `main` while the file-backed Sprint Contract (and optionally release
-bookkeeping or the ignore rule) is intentionally dirty. If `dirty` is non-empty and none of those
-conditions match, list the dirty files — do NOT proceed — and ask the user to commit, stash, or
-discard first.
+bookkeeping or the ignore rule) is intentionally dirty.
+
+**`backlog.md` alone is not a stray file — proceed.** On `main`/`master`, when `non_queue_dirty`
+is empty (every dirty path is `backlog.md`), run the cycle: announce that the edit is being
+carried, quote `queue_delta`, and let it ride into this cycle's first commit alongside the code.
+This is the `task-tickets` hand-off, whose step 7 deliberately leaves its `backlog.md` edit
+uncommitted — *"the edit rides into whichever commit the caller's cycle makes next"* — and points
+the user straight here. Refusing it made the documented `task-tickets` → `task-next` sequence stall
+every time, with no way through but a `[PLAN]` commit-and-merge cycle for the tickets alone or an
+explicit override. The rule has one authority: this gate decides what a dirty tree means, and
+`task-tickets` keeps its no-commit rule. Announcing is the whole safeguard — a `backlog.md` edit
+from somewhere else rides into an unrelated PR otherwise, so name the file and its line delta
+rather than proceeding silently, the same disclosure the *Blocked-analysis sync* below requires.
+
+If `dirty` is non-empty and none of those conditions match, list the dirty files — do NOT
+proceed — and ask the user to commit, stash, or discard first.
 
 `tasks.md` is optional in default mode: it holds the Sprint Contract and nothing else, so it is
 present only when `## Covers` is needed — a pre-existing `status: open` h1 block, or a backlog.md
