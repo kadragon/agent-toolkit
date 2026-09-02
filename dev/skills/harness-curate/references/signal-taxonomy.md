@@ -37,6 +37,12 @@ Skills and agents are analyzed symmetrically: `SKILLS-ACTIVE`/`AGENTS-USED` driv
 
 **Caution:** a single correction may be a one-off. Require **≥2** corrections against the same skill/agent, or one with an obvious systematic cause, before routing.
 
+**Second detect — run telemetry (skills only).** Corrections are anecdotes; they cannot say a skill *got worse*. `scripts/skill_run_health.py` (SKILL.md Step 3) trends the skill-run sink instead: per `skill_id`, a 7-day success rate against a 30-day rate that contains it. A **`declining`** verdict — the recent rate at least 20 percentage points below the baseline, both windows over their minimum run counts — is a finding on its own, no correction required, because it is already a trend rather than an instance. Success is `outcome == "success"`; `partial` and `failure` are both non-success.
+
+**Route (telemetry path):** same `skill-creator` modify target, but the brief must carry **both window rates with their run counts** (`7d=2/6 (0.33)`, `30d=28/34 (0.82)`) plus the `user_feedback` mix the script prints alongside them. The rates say a skill degraded; they do not say how, so pair them with whatever `CORRECTION-SIGNALS` text exists for the same skill — and when there is none, say so in the brief rather than inventing a failure mode.
+
+**Caution (telemetry path):** **`insufficient-data` is never a finding and never evidence of health.** It means the windows hold too few runs to judge — a young sink, or a skill that barely ran — so the skill is unmeasured, not passing. Do not report it as `ok`, and do not park it under `Watch:`: a near-miss is a measured result close to the line, which is exactly what this is not. Two more limits: the sink is per project (`current` / `--project` scope only, no Codex side exists), and it records skills, so there is no agent variant of this path.
+
 ## 4. Promote / demote
 
 **Promote (skill/agent → hook):** A repeated action that is fully **deterministic** (same trigger → same action, no judgment) is better as a hook than a skill the model must remember to invoke. Route to `update-config` (settings.json hook) or `hookify`.
@@ -235,6 +241,7 @@ Cumulative lifetime history, like `CORRECTION-SIGNALS`. **Deliberately over-coll
 | New-asset candidate | 3 |
 | Triggering miss (skill or agent) | 2 |
 | Underperforming asset (skill or agent) | 2 (or 1 with systematic cause) |
+| Underperforming asset (telemetry) | 1 `declining` verdict — it is a trend, not an instance — but only above **both** minimum run counts (default: 3 in the 7d window, 10 in the 30d); `insufficient-data` is never a finding and never a `Watch:` row |
 | Harness friction (over-protection) | 2 (or 1 with systematic cause) |
 | Domain knowledge candidate (from `PROMPTS`) | 2 (lower than Signal 1 — atomic facts never form large clusters) |
 | Domain knowledge candidate (from the memory store) | 1 — static defect; the frequency bar was cleared when the memory was written, but the verbatim quote is still mandatory |
