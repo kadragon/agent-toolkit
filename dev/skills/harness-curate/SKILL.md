@@ -99,13 +99,16 @@ Read `references/signal-taxonomy.md` for detection rules and the delegate brief 
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 HEALTH="$SKILL_DIR/scripts/skill_run_health.py"
 [[ -r "$HEALTH" ]] || { echo "Bundled script missing or unreadable: $HEALTH" >&2; exit 1; }
-python3 "$HEALTH"                            # current project (cwd)
-python3 "$HEALTH" --project "/abs/path"      # the repo being audited
+PY=$(command -v python3 || command -v python || true)
+[[ -n "$PY" ]] || { echo "No python interpreter on PATH" >&2; exit 1; }
+# Run ONE of these two — the second when auditing a repo other than cwd:
+#   "$PY" "$HEALTH" --project "/abs/path"
+"$PY" "$HEALTH"
 rc=$?
 [[ $rc -eq 0 ]] || { echo "skill_run_health.py exited $rc — see its stderr above" >&2; exit 1; }
 ```
 
-One row per skill: `<skill_id>  <verdict>  7d=<ok>/<runs>  30d=<ok>/<runs>  delta=<±rate>`. Only **`declining`** is a Signal 3 finding, and its route brief must quote both window rates with their run counts — a rewrite delegation argued from a bare verdict gives the creator nothing to aim at. **`insufficient-data` is never a finding and never evidence of health**: it means the windows hold too few runs to judge, so a skill carrying it is unmeasured, not passing. Do not report it as an `ok` row, and do not fold it into a `Watch:` line — there is nothing to watch yet. An absent sink exits 0 with a stderr note; a repo whose cycle tails have not run has no telemetry, which is the normal young-repo state.
+One row per skill: `<skill_id>  <verdict>  7d=<ok>/<runs> (<rate>)  30d=<ok>/<runs> (<rate>)  delta=<±rate>`, with a `— <reason>` tail on every verdict that is not `ok` and an `fb=` tail whenever the recent window carries `corrected`/`rejected` feedback. Only **`declining`** is a Signal 3 finding, and its route brief must quote both window rates with their run counts — a rewrite delegation argued from a bare verdict gives the creator nothing to aim at. **`insufficient-data` is never a finding and never evidence of health**: it means the windows hold too few runs to judge — including a skill whose whole history sits inside the 7d window, which has no past to compare against and would otherwise read as measured health — so a skill carrying it is unmeasured, not passing. Do not report it as an `ok` row, and do not fold it into a `Watch:` line — there is nothing to watch yet. An absent sink exits 0 with a stderr note; a repo whose cycle tails have not run has no telemetry, which is the normal young-repo state.
 
 **Agent roles are created here, not at init.** `dev:harness-init` deliberately ships an empty `.claude/agents/` roster and no orchestrator skill (its Steps 4b/4c) — before a repo has working history there is no evidence about which delegations recur, so any roster is a guess. That makes this skill the only path by which a repo acquires its first role: a **triggering miss** where work was repeatedly done inline that a missing agent should have owned, or a **new-asset candidate** whose recurring shape is a delegation. Route those to `plugin-dev:agent-creator` (new) or `plugin-dev:agent-development` (fix), and remember the corollary — an empty roster in a young repo is the designed state, never a finding.
 

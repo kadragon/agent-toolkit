@@ -22,7 +22,9 @@ reported alongside as context for the delegate brief, never folded into the rate
 The baseline window CONTAINS the recent one (last 30 days vs last 7, not 30-to-7 vs
 last 7). The overlap damps the delta, which is deliberate: a non-overlapping baseline
 swings hard on a handful of rows, and a false `declining` costs a real skill-rewrite
-delegation.
+delegation. The cost of that choice is that a skill whose whole history sits inside the
+recent window compares against itself, so the baseline must additionally hold
+`min_recent` runs OLDER than the recent window before either verdict is allowed.
 
 The sink is located through `record_skill_run.resolve_sink_dir()`, never by re-deriving
 the encoded project dir — the pin it honours is the only thing keeping reader and writer
@@ -146,13 +148,26 @@ def judge(rows, now_ms, window_days=WINDOW_DAYS, baseline_days=BASELINE_DAYS,
             "reason": "",
             "recent_feedback": r_fb,
             "baseline_feedback": b_fb,
-            "versions": sorted({r.get("skill_version") or UNKNOWN_VERSION
-                                for r in baseline}),
+            # str(): the sink is a file, and a hand-edited or foreign row can carry a
+            # numeric version. Sorting str against int raises, which would cost the whole
+            # report over a field nothing judges.
+            "versions": sorted({str(r["skill_version"]) if r.get("skill_version")
+                                else UNKNOWN_VERSION for r in baseline}),
         }
+        # The tail is the baseline minus the recent window. Without it there is nothing to
+        # compare against: the two windows hold the same rows, the delta is structurally
+        # 0.00, and a skill failing 11 of 12 recent runs would read `ok` — the measured-and-
+        # fine verdict — because it is too young to have a past. That is the mislabel
+        # `insufficient-data` exists to prevent, so the tail carries the same run floor as
+        # the recent window.
+        tail_runs = b_runs - r_runs
         if r_runs < min_recent or b_runs < min_baseline:
             rec["reason"] = (f"needs >={min_recent} runs in {window_days}d "
                              f"(has {r_runs}) and >={min_baseline} in {baseline_days}d "
                              f"(has {b_runs})")
+        elif tail_runs < min_recent:
+            rec["reason"] = (f"needs >={min_recent} runs older than {window_days}d to "
+                             f"compare against (has {tail_runs})")
         else:
             delta = rec["recent_rate"] - rec["baseline_rate"]
             rec["delta"] = delta
@@ -180,6 +195,12 @@ def format_rows(records, window_days, baseline_days):
                  f"{baseline_days}d={_rate(r['baseline_successes'], r['baseline_runs'])}"]
         if r["delta"] is not None:
             parts.append(f"delta={r['delta']:+.2f}")
+        # The route brief is required to quote the feedback mix (signal-taxonomy Section 3),
+        # so the default output has to carry it — not only `--json`.
+        fb = ",".join(f"{k}:{v}" for k, v in sorted(r["recent_feedback"].items())
+                      if v and k != "accepted")
+        if fb:
+            parts.append(f"fb={fb}")
         if r["reason"]:
             parts.append(f"— {r['reason']}")
         lines.append("  ".join(parts))
@@ -265,6 +286,26 @@ def run_tests():
     check("raising min-baseline forces insufficient-data",
           judge(rows, now, min_baseline=999)[0]["verdict"] == INSUFFICIENT)
 
+    # a skill whose whole history sits inside the recent window has nothing to compare
+    # against: the windows are identical, so the delta is structurally 0.00
+    rows = [row("young", 5, "failure") for _ in range(11)] + [row("young", 5, "success")]
+    got = judge(rows, now)[0]
+    check("an all-recent skill is insufficient-data, not ok",
+          got["verdict"] == INSUFFICIENT)
+    check("the all-recent reason names the missing tail",
+          "older than 7d" in got["reason"] and "has 0" in got["reason"])
+    check("an all-recent skill still reports its rates",
+          got["recent_runs"] == 12 and got["baseline_runs"] == 12)
+
+    # a tail at exactly the floor is judgeable
+    rows = ([row("edge", 20, "success") for _ in range(3)]
+            + [row("edge", 2, "success") for _ in range(9)])
+    check("a tail at exactly min_recent is judged", judge(rows, now)[0]["verdict"] == OK)
+    rows = ([row("edge2", 20, "success") for _ in range(2)]
+            + [row("edge2", 2, "success") for _ in range(10)])
+    check("a tail one under min_recent is insufficient-data",
+          judge(rows, now)[0]["verdict"] == INSUFFICIENT)
+
     # per-skill isolation and report ordering
     rows = ([row("z-ok", d, "success") for d in range(1, 15)]
             + [row("a-bad", 20, "success") for _ in range(20)]
@@ -342,6 +383,10 @@ def main():
         ap.error("--baseline-days must be >= --window-days >= 1")
     if not 0 < a.threshold <= 1:
         ap.error("--threshold must be in (0, 1]")
+    if a.min_recent < 1 or a.min_baseline < 1:
+        # A zero or negative floor does not "disable the gate" — it lets a skill with no
+        # rows in a window reach the delta arithmetic with no rate to subtract.
+        ap.error("--min-recent and --min-baseline must be >= 1")
 
     project = os.path.abspath(a.project or os.getcwd())
     sink_dir, warning, _ = resolve_sink_dir(project)
