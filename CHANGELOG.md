@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] auto-memory status lifecycle field (dev v4.7.5) (2026-09-02)
 - [done] skill-run sink serializes append and trim under one lock (dev v4.7.4) (2026-09-01)
 - [done] Skill-run sink directory is pinned in curator state (dev v4.7.3) (2026-09-01)
 - [done] harness-capture cycle-tail records each run to a bounded skill telemetry sink (dev v4.7.2) (2026-09-01)

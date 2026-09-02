@@ -148,22 +148,41 @@ the resolver's pick returns a clean "no candidates" over a store that exists, wh
 indistinguishable from a real no-op. If both paths exist and disagree, report it rather than
 merging them: one of them belongs to another project.
 
-Read `MEMORY.md` and every memory file in that directory. A memory is a **promotion candidate**
+Read `MEMORY.md` and every memory file in that directory. The read produces **two** outputs
+from two frontmatter fields — check `metadata.status` first, because it settles the file:
+
+- `metadata.status` is `superseded` or `rejected` → **prune candidate**, routed to
+  `dev:harness-capture` Memory hygiene for the deletion and index repair. Nothing further to
+  judge; the lifecycle value already carries capture's judgment. An absent `status` reads as
+  `active` and is never a finding. Detection rules and the evidence requirement:
+  `references/signal-taxonomy.md` §6 → *Second output of the same lens*.
+- otherwise, `metadata.type` decides promotion, below.
+
+A memory is a **promotion candidate**
 only when its frontmatter `metadata.type` is `project` or `reference` **and** its content is
 scoped to this one repo. `user` and `feedback` memories are cross-repo by definition — promoting
 them into a single repo's `docs/` would silently drop them everywhere else, so they stay. Full
 detection rules, non-findings, and the `already-promoted` subtype:
 `references/signal-taxonomy.md` §6.
 
-**Evidence requirement (hard, same as the overlap lens):** every candidate quotes the memory body
-verbatim with `file:line` and names a concrete target `docs/<topic>.md`. Cannot quote it → drop
-it entirely, not even `Watch:`. Before proposing, confirm the fact is not already in `AGENTS.md`
-/ `CLAUDE.md` / an existing `docs/*.md`.
+**Evidence requirement (hard, same as the overlap lens) — promotion candidates:** every promotion
+candidate quotes the memory body verbatim with `file:line` and names a concrete target
+`docs/<topic>.md`. Cannot quote it → drop it entirely, not even `Watch:`. Before proposing,
+confirm the fact is not already in `AGENTS.md` / `CLAUDE.md` / an existing `docs/*.md`.
 
-Filter candidates through the same `overlap_state.py` suppression so a declined promotion does
-not re-fire every run. The script is unchanged and its two keys are **positional** (see the
-overlap snippet above): for this lens `"global"` is the memory side, `"repo"` is the proposed
-docs target.
+**A prune candidate is held to its own evidence rule, not this one.** It has no `docs/` target by
+construction, so requiring one here would drop every prune candidate and make the output a no-op.
+It quotes the `status:` line verbatim with `file:line` and names the entry's `MEMORY.md` index
+line, so the deletion's index repair has its target (`references/signal-taxonomy.md` §6 →
+*Second output of the same lens*).
+
+Filter both outputs through the same `overlap_state.py` suppression so a declined promotion —
+or a `rejected` memory the user consciously keeps — does not re-fire every run. The two use
+different `"repo"` values (`docs/<topic>.md (proposed)` vs `prune (harness-capture)`), so a
+dismissal of one never suppresses the other for the same file. The script is unchanged and its
+two keys are **positional** (see the overlap snippet above): for this lens `"global"` is always
+the memory side, and `"repo"` is the proposed docs target for a promotion, `prune
+(harness-capture)` for a prune.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -171,9 +190,12 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 OSTATE="$SKILL_DIR/scripts/overlap_state.py"
 TARGET_REPO="<the same repo the MEMDIRS snippet audited — or the two sides disagree>"
 REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
-# pairs.json for this lens — one entry per promotion candidate:
-#   [{"global": "memory/<file>.md: <verbatim body line>",
-#     "repo":   "docs/<topic>.md (proposed)"}, ...]
+# pairs.json for this lens — one entry per candidate, either output. The two `repo` shapes are
+# what keeps a dismissed prune from suppressing the promotion for the same file:
+#   promotion: {"global": "memory/<file>.md: <verbatim body line>",
+#               "repo":   "docs/<topic>.md (proposed)"}
+#   prune:     {"global": "memory/<file>.md: status: superseded",
+#               "repo":   "prune (harness-capture)"}
 python3 "$OSTATE" --check --project "$REPO_ROOT" < pairs.json
 ```
 

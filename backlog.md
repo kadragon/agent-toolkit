@@ -18,15 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — auto-memory status lifecycle field
-
-Source: ECC comparison (`memory-vault-format.js` `status: active|superseded|rejected`). The current
-schema carries only `type`, so staleness is handled as prose in `harness-capture` ("sediment",
-L184-191) and depends on a model noticing. One frontmatter field makes supersession decidable and
-gives `harness-curate` a mechanical prune target.
-
-- [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
-
 ## Harness — Signal 3 consumes run telemetry
 
 Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink written by
@@ -50,6 +41,22 @@ offered to the user this session; the override was chosen.
 - [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule
 
 ## Review Backlog
+
+### PR #259 — auto-memory status field follow-ups
+
+- [ ] [FEAT] Have `task-review-cycle` 2-1 reconcile the wrapper agent's summary against the
+  `code-review` run inside it before consolidating — in PR #259 the wrapper reported `[]` while its
+  own inner run produced 4 findings that an independent verifier then confirmed, so trusting the
+  summary alone would have merged every one of them; the slot needs to treat the inner findings as
+  the result and the summary as a report about it
+- [ ] [DOCS] State per-skill `version:` semver sizing in `docs/conventions.md` — the Plugin Version
+  Bump Rules table covers `plugin.json` manifests only, so a skill's own frontmatter bump level is
+  decided ad hoc each time (PR #259 used minor for new documented behavior); raised by the contract
+  verifier, out of that Sprint Contract
+- [ ] [FIX] Gate a `status:` written as a YAML flow mapping in `memory-guard`
+  (`metadata: {type: project, status: pending}`) — the line-oriented `STATUS_LINE` cannot see it, so
+  an invalid value in that syntax is admitted; needs either a real frontmatter parse or a check that
+  rejects flow mappings in memory frontmatter outright; raised by Codex in PR #259 review
 
 ### PR #257 — skill-run sink pin follow-ups
 

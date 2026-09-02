@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   pre-merge retrospect in task-review. Cross-session mining → harness-curate.
-version: 2.3.2
+version: 2.4.0
 ---
 
 # Capture Learnings — on-demand session retrospective
@@ -209,7 +209,7 @@ When step 2 routes a lesson to auto-memory, don't just append a fresh file — a
 memory store that accumulates near-duplicates decays the same way a bloated
 CLAUDE.md does: the signal drowns. Follow the schema in the **# Memory** section
 of your instructions (frontmatter, one fact per file, `MEMORY.md` index line),
-and before writing:
+plus the `status` field below, and before writing:
 
 1. **Read the index first.** Open `MEMORY.md` and scan the one-line hooks for an
    entry that already covers this fact — or an adjacent one it belongs with.
@@ -230,7 +230,8 @@ and before writing:
    schema change.
 
    The write itself is gated by the `memory-guard` hook — a secret pattern, a
-   control/bidi/zero-width character, or a body over 2000 characters is denied when the
+   control/bidi/zero-width character, a body over 2000 characters, or a `status:` that is
+   outside `active|superseded|rejected` or not nested under `metadata:` is denied when the
    write goes through `Write` or `Edit`. Those are the tools to use: a shell redirect
    (`printf … > …/memory/note.md`) is not gated, so writing a memory that way defeats the
    check rather than passing it. Pre-check the text you are about to show, so you propose
@@ -269,6 +270,43 @@ and before writing:
    contradicted neighbour, flag it and run **Memory hygiene** on it rather than
    leaving rot next to the fresh entry.
 
+### The `status` field
+
+Memory frontmatter carries a lifecycle field alongside `metadata.type`:
+
+```yaml
+metadata:
+  type: user | feedback | project | reference
+  status: active | superseded | rejected
+```
+
+| Value | Means | Who writes it |
+|-------|-------|---------------|
+| `active` | The fact still holds. Write this on every new memory. | This skill, at write time |
+| `superseded` | A later memory replaced this one; kept only until the prune is confirmed. | **Memory hygiene**, when it merges or replaces an entry |
+| `rejected` | The user vetoed it, or the session disproved it. Kept so the same lesson is not re-learned from scratch. | **Memory hygiene**, on a Wrong finding |
+
+Two rules keep it honest:
+
+- **An absent `status` reads as `active`.** Existing entries need no migration, and a memory
+  written without this skill in context is not broken by the field's absence. Add `status:
+  active` when you touch such a file anyway; never run a backfill pass for its own sake.
+- **The field is gated mechanically.** `hooks/memory-guard/guard.py` denies a `Write`/`Edit`
+  carrying a `status:` outside those three values, and — on a whole file — one that sits at
+  the top level instead of under `metadata:`. Both are silent rot: a prune filter reading
+  `metadata.status == "superseded"` matches neither `superceded` nor a misplaced key. An
+  absent field is not a finding.
+- **Let the gate see the finished file.** An `Edit` that replaces the value alone carries no
+  `status:` line in its payload, so the hook has nothing to grade — the gap is documented in
+  `guard.py`'s own known-gap note, not a bug to route around. The `--check-file` pre-check in
+  step 4 reads the complete file and is what actually covers a status change; run it on the
+  draft as written, exactly as you would for the other three checks.
+
+Why the field exists: staleness used to be judgment-only, so nothing downstream could act
+on it. `superseded`/`rejected` is a decidable prune target — **Memory hygiene** below reaches
+for it first, and `harness-curate`'s memory lens surfaces non-active entries as prune
+candidates without re-reading every body.
+
 ## Memory hygiene
 
 Auto-memory is a persistent store, and stores collect **sediment** — stale layers
@@ -281,6 +319,9 @@ diff → approval** flow — never bulk-delete silently.
 
 1. **Inventory.** List the memory directory and read `MEMORY.md`. For a full
    tidy, read each memory file; for the opportunistic case, just the neighbours.
+   **Read `metadata.status` first:** anything already `superseded` or `rejected` is a prune
+   candidate a previous pass (or `harness-curate`) already judged — it needs confirmation and
+   deletion, not a fresh read-through of its body.
 2. **Flag against these red flags** (borrowed from `claude-md-improver`):
 
    | Red flag | What to check |
@@ -293,12 +334,23 @@ diff → approval** flow — never bulk-delete silently.
    | **No-op** | Entry describes what the agent does by default anyway — true but inert. Same test as the write-back gate: does it change behavior versus the default? |
 
 3. **Report, then apply on approval.** Present the findings compactly — file,
-   which red flag, proposed action (delete / merge / rewrite / fix index) — and
+   which red flag, proposed action (delete / flip status / merge / rewrite / fix index) — and
    show the concrete edit for each. Apply only what the user approves. Deleting a
    memory is cheap to redo but the user may know it's still load-bearing, so
    confirm rather than assume.
+
+   **Flip the status as part of the action, not instead of it.** A red flag maps to a value:
+   Redundant (the loser of a merge) and a rewrite that supersedes an entry → `superseded`;
+   Wrong → `rejected`. Stale, Bloat and No-op are ordinary deletions — they were never
+   *replaced* by anything, so inventing a lifecycle value for them would make the field mean
+   "flagged" rather than "superseded/vetoed". Where the user confirms the deletion in the same
+   pass, delete and skip the flip; the value earns its keep when a prune is **deferred** (a
+   risky delete, per the destructive-prune rule above), because it carries that judgment into
+   the next session instead of losing it.
 4. **Leave the index consistent.** After any change, `MEMORY.md` must have exactly
-   one line per surviving memory file and none for deleted ones.
+   one line per surviving memory file and none for deleted ones. A `superseded`/`rejected`
+   file that still exists is a surviving file: it keeps its index line — the status lives in
+   the file's frontmatter, and the index format does not change.
 
 If the store is already clean, say so in one line — nothing to tidy is fine here too.
 
@@ -314,7 +366,9 @@ path.
 
 - **`hooks/memory-guard/guard.py`** — the mechanical half of **Writing to auto-memory**:
   a `PreToolUse(Write|Edit)` gate that blocks a memory write carrying a secret pattern,
-  a control/bidi/zero-width character, or an over-cap body, plus the `--check-file <path|->`
+  a control/bidi/zero-width character, an over-cap body, or a `status:` that is
+  out-of-vocabulary or misplaced, plus the `--check-file <path|->`
   CLI this skill pre-checks with at step 4. Fails open on anything it cannot parse, so a
   broken payload never blocks a session. `--test` covers each secret family, the character
-  table, the cap boundary, the path predicate, and the fail-open path.
+  table, the cap boundary, the status vocabulary and placement, the path predicate, and the
+  fail-open path.
