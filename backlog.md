@@ -18,18 +18,16 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — task-tickets and task-next disagree on a dirty backlog.md
+## Harness — task-new's working-tree gate has no backlog.md carve-out
 
-Observed this session, PR #253. `task-tickets` step 7 states its `backlog.md` edit is deliberately
-uncommitted — *"This skill makes no commit of its own: the edit rides into whichever commit the
-caller's cycle makes next."* `task-next`'s Prerequisites working-tree gate then refuses to run:
-on `main`, with no `tasks.md` and no worktree, a dirty tree means *"list the dirty files — do NOT
-proceed — and ask the user to commit, stash, or discard first."* So the documented
-`task-tickets` → `task-next` sequence always stalls, and the only ways through are a
-`[PLAN]` commit-and-merge cycle for the tickets alone or an explicit gate override. Both were
-offered to the user this session; the override was chosen.
+Raised in PR #264 review by both `code-review` and the contract verifier, out of that Sprint
+Contract. `task-next`'s gate now carries a `backlog.md`-only dirty tree into the cycle; `task-new`
+(`dev/skills/task-new/SKILL.md`) still refuses on any dirty path. A user who runs `task-tickets`
+and then brings a *new* free-text request routes to `task-new`, hits the unchanged gate, and is
+told to commit or stash the very edit `task-tickets` was told to leave behind — the same stall
+PR #264 removed from the other path.
 
-- [ ] [HARNESS] Reconcile the `task-tickets` hand-off with `task-next`'s working-tree gate — either carve a `backlog.md`-only exception into the gate (as `--tree` already carves one for `tasks.md`) or drop `task-tickets`' no-commit rule, whichever keeps one authority for the rule
+- [ ] [HARNESS] Decide whether `task-new`'s gate takes the same `backlog.md`-only exception as `task-next`'s, or whether its refusal is correct because a new free-text request has no reason to carry someone else's queue edit — then make the two gates state the same rule, whichever way it goes
 
 ## Review Backlog
 

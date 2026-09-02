@@ -6,7 +6,7 @@ description: >-
   order. Confirms granularity with the user first. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.8
+version: 1.0.9
 ---
 
 # To Tickets
@@ -39,7 +39,14 @@ items from approved spec").
    a ticket lands and its answer sharpens a foggy line, that is a fresh `task-tickets` run on
    the same spec — delete the graduated line from `## Not yet specified` in the same edit that
    writes its ticket, so it lives only as the ticket. This skill makes no commit of its own:
-   the edit rides into whichever commit the caller's cycle makes next.
+   the edit rides into whichever commit the caller's cycle makes next. `task-next`'s working-tree
+   gate carves the matching exception — a tree whose only dirty path is `backlog.md` proceeds and
+   announces what it carries — so the hand-off in step 7 does not stall on the edit this step
+   leaves behind. That gate — `task-next`'s specifically — is the authority for what a
+   dirty tree means on the path this skill hands off to; do not add a commit here to work
+   around it. `task-new` carries its own gate with no such exception, so a leftover
+   `backlog.md` edit still stops a `task-new` run; that asymmetry is queued in `backlog.md`,
+   not something to fix by committing here.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the

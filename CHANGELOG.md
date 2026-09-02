@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] working-tree gate carries a backlog.md-only edit into the cycle (dev v4.8.3) (2026-09-03)
 - [done] review slot treats its inner code-review findings as the result (dev v4.8.2) (2026-09-02)
 - [done] version-bump table states the row for a bundled script added to an existing skill (2026-09-02) → docs/conventions.md
 - [done] declining threshold decided on exact rationals, not binary floats (dev v4.8.1) (2026-09-02)
