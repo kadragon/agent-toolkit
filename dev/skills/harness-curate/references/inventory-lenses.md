@@ -148,7 +148,17 @@ the resolver's pick returns a clean "no candidates" over a store that exists, wh
 indistinguishable from a real no-op. If both paths exist and disagree, report it rather than
 merging them: one of them belongs to another project.
 
-Read `MEMORY.md` and every memory file in that directory. A memory is a **promotion candidate**
+Read `MEMORY.md` and every memory file in that directory. The read produces **two** outputs
+from two frontmatter fields — check `metadata.status` first, because it settles the file:
+
+- `metadata.status` is `superseded` or `rejected` → **prune candidate**, routed to
+  `dev:harness-capture` Memory hygiene for the deletion and index repair. Nothing further to
+  judge; the lifecycle value already carries capture's judgment. An absent `status` reads as
+  `active` and is never a finding. Detection rules and the evidence requirement:
+  `references/signal-taxonomy.md` §6 → *Second output of the same lens*.
+- otherwise, `metadata.type` decides promotion, below.
+
+A memory is a **promotion candidate**
 only when its frontmatter `metadata.type` is `project` or `reference` **and** its content is
 scoped to this one repo. `user` and `feedback` memories are cross-repo by definition — promoting
 them into a single repo's `docs/` would silently drop them everywhere else, so they stay. Full
@@ -160,8 +170,10 @@ verbatim with `file:line` and names a concrete target `docs/<topic>.md`. Cannot 
 it entirely, not even `Watch:`. Before proposing, confirm the fact is not already in `AGENTS.md`
 / `CLAUDE.md` / an existing `docs/*.md`.
 
-Filter candidates through the same `overlap_state.py` suppression so a declined promotion does
-not re-fire every run. The script is unchanged and its two keys are **positional** (see the
+Filter both outputs through the same `overlap_state.py` suppression so a declined promotion —
+or a `rejected` memory the user consciously keeps — does not re-fire every run. The two use
+different `"repo"` values (`docs/<topic>.md (proposed)` vs `prune (harness-capture)`), so a
+dismissal of one never suppresses the other for the same file. The script is unchanged and its two keys are **positional** (see the
 overlap snippet above): for this lens `"global"` is the memory side, `"repo"` is the proposed
 docs target.
 

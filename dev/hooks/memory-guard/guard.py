@@ -18,7 +18,7 @@ Two entry points, one policy:
 
 Both share `_scan_secrets`, `_scan_chars`, and `_scan_size`, so policy lives in one place.
 
-Three checks:
+Four checks:
   1. Secret patterns — AWS access-key ids, GitHub tokens/PATs, Slack tokens, npm tokens,
      Anthropic and generic `sk-` provider keys, and PEM private-key headers. Each family
      carries a length floor so ordinary prose ("the sk- prefix") cannot trip it.
@@ -32,11 +32,20 @@ Three checks:
   3. Body size — `BODY_CHAR_CAP` characters, measured after stripping a leading `---`
      frontmatter block. `MEMORY.md` is exempt from this check alone: it is the index, and
      it grows one line per surviving memory by design.
+  4. Lifecycle status — a `status:` key in the frontmatter must carry one of `STATUS_VALUES`.
+     That field is what makes supersession decidable for `harness-capture`'s Memory hygiene
+     pass and `harness-curate`'s prune lens, and a typo there is silent rot: a filter reading
+     `status == "superseded"` simply never matches. **An absent `status` is not a finding** —
+     it reads as `active`, so existing memories need no migration and a memory written
+     without `harness-capture` in context is never blocked.
 
 Known gap, deliberate: on `Edit` the payload carries `new_string`, a fragment rather than
-the resulting file, so checks 1 and 2 run on that fragment and check 3 is skipped.
+the resulting file, so checks 1, 2 and 4 run on that fragment and check 3 is skipped.
 Reconstructing the post-edit size from a fragment is fragile, and the size cap is the one
-rule a `Write` of the same file would catch anyway.
+rule a `Write` of the same file would catch anyway. Check 4 survives on a fragment because
+flipping a status IS the typical edit; with no frontmatter delimiters to anchor to it scans
+any line that is a bare `status: <value>` YAML key, which a prose mention (backticked, or
+carrying a list marker or trailing words) does not match.
 
 Design contract (HOOK PATH ONLY): never-raise, always exit 0 (allow) unless a check fires
 (exit 2). A firing check prints its reasons to stderr and exits 2. Everything else exits 0
@@ -56,6 +65,20 @@ import sys
 # set was 1579 bytes including frontmatter, so this leaves ~1.6x headroom: enough for one
 # fact plus its Why/How-to-apply lines, not enough for a pasted transcript or log dump.
 BODY_CHAR_CAP = 2000
+
+# Auto-memory lifecycle. `active` is the default an absent field reads as; `superseded` marks
+# an entry a later memory replaced; `rejected` marks one the user vetoed or the session
+# disproved, kept so the same lesson is not re-learned. Ordered as written, not alphabetically:
+# the tuple doubles as the message the guard prints.
+STATUS_VALUES = ("active", "superseded", "rejected")
+
+# A bare `status: <value>` YAML key on its own line, with an optional trailing `# comment`.
+# Deliberately strict: a body line mentioning `status: foo` inside prose, backticks, or a list
+# item carries other characters on the line and does not match.
+STATUS_LINE = re.compile(
+    r"^[ \t]*status:[ \t]*(?P<v>[^#\r\n]*?)[ \t]*(?:#[^\r\n]*)?\r?$",
+    re.MULTILINE,
+)
 
 
 def _forbidden_chars() -> dict[int, str]:
@@ -172,9 +195,47 @@ def _scan_size(text: str) -> list[str]:
     return []
 
 
+def _frontmatter(text: str) -> str | None:
+    """The leading `---` block's inner text, or None when there is no closed frontmatter.
+
+    Shares `_body`'s delimiter rules, `\r?` included, so the two never disagree about where
+    a CRLF memory file's frontmatter ends.
+    """
+    if not text.startswith("---"):
+        return None
+    rest = text.split("\n", 1)
+    if len(rest) < 2:
+        return None
+    closing = re.search(r"^---[ \t]*\r?$", rest[1], re.MULTILINE)
+    return rest[1][:closing.start()] if closing else None
+
+
+def _scan_status(text: str) -> list[str]:
+    """Findings for a `status:` key whose value is outside `STATUS_VALUES`.
+
+    Scans the frontmatter of a full memory file; on an Edit fragment (no closed frontmatter)
+    it scans the fragment itself — see the module docstring's known-gap note. An absent
+    `status` is silent: the field is optional and reads as `active`.
+    """
+    region = _frontmatter(text)
+    if region is None:
+        region = text
+    allowed = ", ".join(STATUS_VALUES)
+    findings = []
+    for m in STATUS_LINE.finditer(region):
+        value = m.group("v").strip().strip("\"'")
+        if value in STATUS_VALUES:
+            continue
+        if value:
+            findings.append(f"status value '{value}' is not one of {allowed}")
+        else:
+            findings.append(f"status key is empty — expected one of {allowed}")
+    return list(dict.fromkeys(findings))
+
+
 def check(text: str, *, size: bool = True) -> list[str]:
     """All findings for `text`. `size=False` for an Edit fragment — see the module docstring."""
-    findings = _scan_secrets(text) + _scan_chars(text)
+    findings = _scan_secrets(text) + _scan_chars(text) + _scan_status(text)
     if size:
         findings += _scan_size(text)
     return findings
@@ -211,7 +272,7 @@ def main() -> int:
         print(f"  - {f}", file=sys.stderr)
     print(
         "  Rewrite the memory so it passes — redact the credential, strip the invisible "
-        "characters, or cut the body. There is no bypass marker.",
+        "characters, cut the body, or correct the status value. There is no bypass marker.",
         file=sys.stderr,
     )
     return 2
@@ -333,6 +394,34 @@ def _test() -> None:
        len(_body(fm + "text\n\n---\n\nmore")) == len("text\n\n---\n\nmore"))
     ok("frontmatter-only file has an empty body", _body("---\nname: x\n---\n") == "")
 
+    # --- lifecycle status ---
+    def st(fm_lines, body="body text"):
+        return f"---\nname: x\nmetadata:\n{fm_lines}---\n\n{body}"
+
+    for value in STATUS_VALUES:
+        ok(f"status '{value}' allowed", not _scan_status(st(f"  type: project\n  status: {value}\n")))
+    ok("absent status is not a finding", not _scan_status(st("  type: project\n")))
+    ok("unknown status value rejected",
+       bool(_scan_status(st("  type: project\n  status: pending\n"))))
+    ok("empty status value rejected", bool(_scan_status(st("  type: project\n  status:\n"))))
+    ok("quoted status value allowed",
+       not _scan_status(st('  type: project\n  status: "superseded"\n')))
+    ok("trailing comment does not break the value",
+       not _scan_status(st("  type: project\n  status: rejected  # user vetoed\n")))
+    ok("status in the body is ignored on a full file",
+       not _scan_status(st("  type: project\n", body="status: pending")))
+    ok("a prose mention is not a YAML key",
+       not _scan_status(st("  type: project\n", body="- `status: pending` is invalid")))
+    ok("bad value reported once, not per occurrence",
+       len(_scan_status(st("  status: pending\n  status: pending\n"))) == 1)
+    ok("CRLF frontmatter status is read",
+       bool(_scan_status("---\r\nmetadata:\r\n  status: pending\r\n---\r\n\r\nbody")))
+    ok("edit fragment status is checked", bool(_scan_status("  status: pending\n")))
+    ok("clean edit fragment passes", not _scan_status("  status: superseded\n"))
+    ok("unterminated frontmatter still checks the status",
+       bool(_scan_status("---\nmetadata:\n  status: pending\n")))
+    ok("MEMORY.md index lines carry no status", not _scan_status("- [T](f.md) — hook\n"))
+
     # --- hook path ---
     ok("clean write allowed",
        hook({"tool_name": "Write",
@@ -360,6 +449,20 @@ def _test() -> None:
     ok("oversize edit fragment allowed (size skipped on Edit)",
        hook({"tool_name": "Edit",
              "tool_input": {"file_path": mem, "new_string": "z" * (BODY_CHAR_CAP + 1)}}) == 0)
+    ok("bad status write blocked",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem,
+                            "content": st("  type: project\n  status: pending\n")}}) == 2)
+    ok("good status write allowed",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem,
+                            "content": st("  type: project\n  status: active\n")}}) == 0)
+    ok("statusless write allowed",
+       hook({"tool_name": "Write",
+             "tool_input": {"file_path": mem, "content": st("  type: project\n")}}) == 0)
+    ok("bad status edit fragment blocked",
+       hook({"tool_name": "Edit",
+             "tool_input": {"file_path": mem, "new_string": "  status: stale\n"}}) == 2)
     ok("write outside the store allowed",
        hook({"tool_name": "Write",
              "tool_input": {"file_path": "/repo/notes.md",

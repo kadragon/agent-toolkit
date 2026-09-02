@@ -93,6 +93,24 @@ The auto-memory store (`<config>/projects/<encoded>/memory/*.md` + `MEMORY.md`) 
 
 **Scope limit:** `current` / `--project` only — `all` scope cannot resolve the repo to promote *into* (same limitation as §7 and the Codex fold-in).
 
+### Second output of the same lens: non-active prune candidates
+
+The memory lens reads two frontmatter fields, not one. `metadata.type` decides promotion, above; `metadata.status` decides pruning, here. They are separate outputs of one directory read — a memory is a promotion candidate **or** a prune candidate, never both, because a superseded fact has nothing worth moving into `docs/`.
+
+**Detect:** frontmatter `metadata.status` is `superseded` or `rejected`. That is the whole test — no repo-scope judgment and no `metadata.type` filter, because the lifecycle field is the judgment: `harness-capture`'s Memory hygiene already decided the entry was replaced (`superseded`) or vetoed/disproved (`rejected`) and deferred the destructive prune rather than making it (`dev:harness-capture` → *Memory hygiene* step 3). This lens is what carries that deferral into the next run instead of losing it.
+
+**An absent `status` is `active`, never a finding.** The field is optional by design, so most of the store carries no `status` at all; treating its absence as a flag would turn the entire store into prune candidates on the first run after this field shipped.
+
+**Evidence requirement (hard):** quote the `status:` line verbatim with `file:line`, and name the memory's `MEMORY.md` index line so the deletion's index repair has its target. Unquotable → dropped, not `Watch:` — same Agent-integrity reasoning as the promotion output.
+
+**Route:** **call the Skill tool with "dev:harness-capture" (Memory hygiene)** for the deletion and index repair. Identical ownership split to the promotion route and for the same reason: destructive memory prunes belong to capture, which confirms with the user before deleting. This skill never deletes a memory file, and it never flips a `status` either — writing the field is capture's job, reading it is this one's.
+
+**Freq:** static, like the promotion output — `n/a (static)`, one occurrence is the finding.
+
+**Cross-run suppression (required):** the same `scripts/overlap_state.py` flow, positional keys mapped `"global"` = the memory side (`memory/<file>.md: status: superseded`), `"repo"` = `prune (harness-capture)`. A user who consciously keeps a `rejected` memory — kept deliberately so the lesson is not re-learned — must not be asked again every run.
+
+**Scope limit:** `current` / `--project` only, same as the promotion output: the lens resolves one project's store.
+
 ## 7. Instruction-layer overlap (base ↔ global ↔ repo/docs)
 
 **Detect:** from Step 2's overlap lens, not from any scan block. Read the layers **in full this session** — the platform's base instructions (already in context), the global `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md`, the repo's `CLAUDE.md` / `AGENTS.md` (plus any parent-directory `AGENTS.md`), `<repo root>/.claude/rules/*.md`, and the `docs/*.md` files the AGENTS.md Docs Index points to — then pair rules that govern the same behavior. Three subtypes pair two layers, and four more (*Within-layer diet subtypes*, below) sit inside one:

@@ -18,15 +18,6 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
-## Harness — auto-memory status lifecycle field
-
-Source: ECC comparison (`memory-vault-format.js` `status: active|superseded|rejected`). The current
-schema carries only `type`, so staleness is handled as prose in `harness-capture` ("sediment",
-L184-191) and depends on a model noticing. One frontmatter field makes supersession decidable and
-gives `harness-curate` a mechanical prune target.
-
-- [ ] [FEAT] Add a `status: active|superseded|rejected` frontmatter field to the auto-memory schema, write it from `harness-capture`, and have `harness-curate` surface non-active entries as prune candidates
-
 ## Harness — Signal 3 consumes run telemetry
 
 Source: ECC comparison (`scripts/lib/skill-evolution/health.js`). Turns the raw sink written by
