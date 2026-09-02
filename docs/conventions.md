@@ -196,6 +196,29 @@ call breaks. A hook has no invocable name: removing it changes ambient behavior,
 interface, so nothing a consumer wrote stops resolving. PR #181 retired the `failure-log` and
 `delegation-log` bundles under this rule and shipped `4.0.21 → 4.0.22`.
 
+### Skill `version:` Bump Rules
+
+A skill's own `version:` frontmatter is a **separate** semver line from the plugin manifest, sized
+by what changed *in that skill*. The two move together but not at the same level: a wording fix to
+one skill is a patch on both, while a new step in one skill is a minor on the skill and still only
+a patch on the manifest, which sees a modified asset.
+
+| Change to the skill | `version:` bump |
+|---------------------|-----------------|
+| New documented behavior — a new step, gate, mode, or bundled file | minor: `x.Y.z → x.(Y+1).0` |
+| Wording, fix, or clarification that does not change what the skill does | patch: `x.y.Z → x.y.(Z+1)` |
+| A step, argument, or invocation name removed or renamed | major: `X.y.z → (X+1).0.0` |
+
+`bash scripts/bump-version.sh <plugin> <level> --skill <name> <level>` applies both in one run. It
+takes **one** `--skill` per run and bumps the plugin every run, so a change touching two skills
+needs the second skill's frontmatter edited by hand — re-running would bump the plugin twice for
+one change.
+
+**A skill that ships no `version:` frontmatter stays that way.** `dev:task-review-cycle` is one:
+it is an internal primitive with no standalone entry point, and nothing reads a version off it.
+Do not add the key to satisfy this table — an absent version is a valid state, and
+`record_skill_run.py` records the `unknown` sentinel for exactly this case.
+
 Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 
 Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):

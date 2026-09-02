@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] review slot treats its inner code-review findings as the result (dev v4.8.2) (2026-09-02)
 - [done] version-bump table states the row for a bundled script added to an existing skill (2026-09-02) → docs/conventions.md
 - [done] declining threshold decided on exact rationals, not binary floats (dev v4.8.1) (2026-09-02)
 - [done] Signal 3 trends skill-run telemetry into a declining verdict (dev v4.8.0) (2026-09-02)

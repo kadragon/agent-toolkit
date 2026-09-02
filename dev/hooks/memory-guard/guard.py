@@ -52,7 +52,13 @@ a fragment carrying the whole `status: <value>` line is graded on its value (a p
 — backticked, or carrying a list marker or trailing words — is not a match), but an `Edit`
 that replaces the scalar alone (`old_string: active`, `new_string: superseded`) carries no
 `status:` anchor and is not graded at all, and placement is never graded on a fragment
-because there is no frontmatter to locate the key in. The `Write` path and
+because there is no frontmatter to locate the key in. The brace refusal skips a fragment
+for the same reason — it carries no frontmatter whose structure could be judged — so an
+`Edit` introducing `metadata: {status: pending}` is admitted where a `Write` of the same
+file is refused. It keys on whether the text OPENS a `---` block (`_structure_region`), not
+on whether that block closes, and it looks past a BOM, blank lines or indentation before the
+fence: a file missing its closing fence or carrying leading noise is still a file, and each
+shape read as a fragment and skipped every structure check. The `Write` path and
 `--check-file` see the finished file and are the reliable gate; `harness-capture` runs the
 latter at its show-the-write step for exactly that reason.
 
@@ -88,14 +94,20 @@ STATUS_VALUES = ("active", "superseded", "rejected")
 # whitespace precedes it — the YAML rule — so `status: active#typo` is read as the value
 # `active#typo` and rejected rather than silently accepted as `active`.
 #
-# Supported syntax is block mapping, one key per line. A YAML flow mapping
-# (`metadata: {type: project, status: pending}`) is not inspected: parsing YAML properly
-# would mean a dependency this hook deliberately does not have, and the store's own writer
-# emits block mappings. Write memory frontmatter that way and the gate holds.
+# Supported syntax is block mapping, one key per line — which is also why this pattern
+# cannot see a flow mapping (`metadata: {type: project, status: pending}`): the key and its
+# value share a line with everything else in the braces. Parsing YAML properly would mean a
+# dependency this hook deliberately does not have, so rather than admit that syntax
+# unchecked, `_brace_lines` refuses any unquoted brace in the frontmatter and the author
+# writes block mappings, which the store's own writer emits anyway.
 STATUS_LINE = re.compile(
     r"^(?P<indent>[ \t]*)status:[ \t]*(?P<v>[^\r\n]*?)(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$",
     re.MULTILINE,
 )
+
+# A block scalar header: `key: |`, `key: >`, with any chomping/indent indicator and an
+# optional comment. Everything indented under one is literal text, not structure.
+BLOCK_SCALAR = re.compile(r"^(?P<indent>[ \t]*)[^:\r\n]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#[^\r\n]*)?$")
 
 
 def _forbidden_chars() -> dict[int, str]:
@@ -239,8 +251,118 @@ def _safe_value(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z0-9_.-]{1,24}", value) else "(redacted)"
 
 
+def _key_column(line: str) -> int:
+    """Column where the line's key starts, counting `- ` sequence markers as indentation.
+
+    A block scalar's content is what is indented past its KEY, not past the start of the
+    line. For a sequence item (`- description: |`) those differ: the line's leading
+    whitespace is 0 while the key sits at column 2, so measuring the line would treat the
+    item's own sibling keys as literal text — and a `metadata: {status: pending}` beside
+    such a scalar was admitted that way.
+    """
+    i = 0
+    while i < len(line):
+        if line[i] in " \t":
+            i += 1
+        elif line[i] == "-" and i + 1 < len(line) and line[i + 1] in " \t":
+            i += 2
+        else:
+            break
+    return i
+
+
+def _brace_lines(region: str) -> list[int]:
+    """1-based line numbers WITHIN `region` holding a `{` that is YAML structure, not text.
+
+    Numbers are region-relative; the caller shifts them past the opening `---` so the
+    finding names the line the author sees in the file.
+
+    The rule is inverted on purpose, and the inversion is the point. An earlier version
+    asked "does a flow mapping open at a key?", which meant enumerating the spellings that
+    can open one — and every round of review found another the enumeration missed: the
+    brace on a continuation line, a quoted key, an anchor before the brace, the explicit-key
+    form, a mapping nested in a flow sequence, a block-sequence item (`- {status: x}`), a
+    space before the colon. Each is ordinary YAML that `yaml.safe_load` parses and
+    `STATUS_LINE` cannot see, so each admitted an invalid `status` silently. Chasing them
+    one at a time is unbounded; asking instead "is there a brace here at all" is not.
+
+    So a `{` anywhere in the frontmatter is refused unless it is plainly text: inside a
+    quoted scalar, or indented under a block scalar (`description: |`). Those two carve-outs
+    are what keeps a memory able to *describe* this syntax — including this hook's own
+    documentation — while nothing can use it. The cost is that an unquoted prose brace
+    (`description: use {name} here`) is refused too; the fix is to quote the value, which
+    the finding says.
+
+    Comments are not scanned: a `#` outside quotes ends the line, so a brace in a trailing
+    comment is not structure either.
+    """
+    hits, block_indent = [], None
+    for lineno, raw in enumerate(region.splitlines(), start=1):
+        line = raw.rstrip("\r")
+        if not line.strip():
+            continue
+        indent = _key_column(line)
+        if block_indent is not None:
+            if indent > block_indent:
+                continue  # literal text under a block scalar
+            block_indent = None
+        if BLOCK_SCALAR.match(line):
+            block_indent = indent
+            continue
+        quote = None
+        prev = ""
+        for ch in line:
+            if quote:
+                # Inside a scalar. YAML escapes with a backslash only in double quotes; a
+                # single-quoted scalar escapes its delimiter by doubling it, which this loop
+                # handles naturally — the second quote re-opens a scalar that ends at the
+                # next one, and a brace between them stays quoted either way.
+                if ch == quote and not (quote == '"' and prev == "\\"):
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "#" and prev in (" ", "\t", ""):
+                break  # a comment: the rest of the line is not structure
+            elif ch == "{":
+                hits.append(lineno)
+                break
+            prev = ch
+    return hits
+
+
+# Whatever can sit before a frontmatter fence without being content: a BOM, blank lines,
+# indentation. `_frontmatter`/`_body` test `startswith("---")` at byte 0, so any of these
+# made a real file read as an Edit fragment and skipped every structure check.
+LEADING_NOISE = "\ufeff \t\r\n"
+
+
+def _structure_region(text: str) -> str | None:
+    """The frontmatter to judge structure in, or None when the text opens none.
+
+    Deliberately more lenient than `_frontmatter()` in one direction and stricter in
+    another. More lenient: it tolerates a BOM or blank lines before the fence, and an
+    absent closing fence — a `Write` of a file shaped either way is still a file, and
+    gating on `_frontmatter()`'s exact `startswith("---")` + closed-block test let both
+    through carrying a braced `status:`. Stricter: it returns None for text that opens no
+    fence at all, which is how an `Edit` fragment and a `MEMORY.md` index stay exempt.
+
+    `_frontmatter()` itself is left alone on purpose: `_body()` shares its delimiter rules,
+    and loosening them would move the body-size cap's measurement as a side effect.
+    """
+    lead = len(text) - len(text.lstrip(LEADING_NOISE))
+    rest = text[lead:]
+    if not rest.startswith("---"):
+        return None
+    after = rest.split("\n", 1)
+    if len(after) < 2:
+        return ""
+    closing = re.search(r"^---[ \t]*\r?$", after[1], re.MULTILINE)
+    return after[1][:closing.start()] if closing else after[1]
+
+
 def _scan_status(text: str) -> list[str]:
-    """Findings for a `status:` key that is misplaced, or whose value is outside `STATUS_VALUES`.
+    """Findings for a `status:` key that is misplaced, whose value is outside `STATUS_VALUES`,
+    or that a YAML flow mapping would hide from both checks.
 
     Scans the frontmatter of a full memory file; on an Edit fragment (no closed frontmatter)
     it scans the fragment itself — see the module docstring's known-gap note. An absent
@@ -258,6 +380,21 @@ def _scan_status(text: str) -> list[str]:
         region = text
     allowed = ", ".join(STATUS_VALUES)
     findings = []
+    structure_region = _structure_region(text)
+    if structure_region is not None:
+        # Before grading any value: braces can carry `status:` where STATUS_LINE cannot see
+        # it, so that syntax would be admitted silently. The refusal is what keeps the value
+        # check total, so it runs whenever the text opens frontmatter — a file whose closing
+        # `---` is missing included. Only an Edit fragment, which opens none, is exempt:
+        # there is no frontmatter in it whose structure could be judged.
+        for lineno in _brace_lines(structure_region):
+            # +1 for the opening `---`, which `_frontmatter` strips: the number in the
+            # finding has to be the one the author counts to in the file.
+            findings.append(
+                f"frontmatter line {lineno + 1} carries an unquoted `{{` — memory frontmatter is "
+                "block mappings, one key per line, because a `status:` inside braces is never "
+                "checked. If the brace is prose, quote the value or use a `|` block scalar"
+            )
     for m in STATUS_LINE.finditer(region):
         if is_full_file and not m.group("indent"):
             findings.append(
@@ -464,6 +601,67 @@ def _test() -> None:
     ok("unterminated frontmatter still checks the status",
        bool(_scan_status("---\nmetadata:\n  status: pending\n")))
     ok("MEMORY.md index lines carry no status", not _scan_status("- [T](f.md) — hook\n"))
+    # --- braces in frontmatter: refused outright, quoted and block scalars excepted ---
+    # Each `True` case is real YAML that `yaml.safe_load` parses as a mapping carrying
+    # `status`, and that `STATUS_LINE` cannot see. The list is what two review rounds found
+    # by enumerating spellings — the reason the rule is now "is there a brace" instead.
+    for label, fmb in (
+        ("same line", "metadata: {type: project, status: pending}\n"),
+        ("continuation line", "metadata:\n  {type: project, status: pending}\n"),
+        ("quoted key", '"metadata": {status: pending}\n'),
+        ("anchor before the brace", "metadata: &m {status: pending}\n"),
+        ("a tag before the brace", "metadata: !!map {status: pending}\n"),
+        ("explicit-key form", "? metadata\n: {status: pending}\n"),
+        ("nesting in a flow sequence", "metadata: [{status: pending}]\n"),
+        ("a block-sequence item", "things:\n  - {status: pending}\n"),
+        ("a space before the colon", "metadata : {status: pending}\n"),
+        ("a tab-indented continuation", "metadata:\n\t{status: pending}\n"),
+        ("a multi-line flow mapping", "metadata: {\n  status: pending }\n"),
+    ):
+        ok(f"a brace via {label} is refused",
+           any("unquoted" in f
+               for f in _scan_status(f"---\nname: x\n{fmb}---\n\nbody")))
+    ok("the finding names the line and the way out",
+       any("line 3" in f and "block scalar" in f
+           for f in _scan_status("---\nname: x\nmetadata: {status: pending}\n---\n\nbody")))
+    ok("block mapping still passes",
+       not _scan_status(st("  type: project\n  status: active\n")))
+    ok("a plain flow sequence carries no brace",
+       not _scan_status("---\nname: x\ntags: [a, b]\nmetadata:\n  status: active\n---\n\nbody"))
+    ok("a double-quoted scalar holding braces is text",
+       not _scan_status('---\ndescription: "{not structure}"\n---\n\nbody'))
+    ok("a single-quoted scalar holding braces is text",
+       not _scan_status("---\ndescription: '{x}'\n---\n\nbody"))
+    ok("a block scalar may quote the syntax it warns about",
+       not _scan_status("---\ndescription: |\n  metadata: {status: pending} example\n---\n\nbody"))
+    ok("a brace in a trailing comment is not structure",
+       not _scan_status(st("  status: active  # use {name}\n")))
+    ok("a brace in the body is not frontmatter structure",
+       not _scan_status(st("  type: project\n", body="metadata: {status: pending}")))
+    ok("an unterminated frontmatter file is a file, not a fragment",
+       any("unquoted" in f for f in
+           _scan_status("---\nname: x\nmetadata: {status: pending}\n\nbody, no fence")))
+    ok("a sequence item's sibling key is not swallowed by its block scalar",
+       any("unquoted" in f for f in _scan_status(
+           "---\nitems:\n- description: |\n    text\n  metadata: {status: pending}\n---\n\nbody")))
+    ok("a sequence item's block scalar still holds literal text",
+       not _scan_status(
+           "---\nitems:\n- description: |\n    metadata: {status: pending} example\n---\n\nbody"))
+    ok("a MEMORY.md index line is not frontmatter", not _scan_status("- [T](f.md) — {hook}\n"))
+    # A fence is still a fence with a BOM, a blank line or indentation in front of it.
+    # Each of these read as an Edit fragment before `_structure_region`, skipping every
+    # structure check on a file that a frontmatter reader parses normally.
+    for label, lead in (("a blank line", "\n"), ("spaces", "   "), ("a BOM", "\ufeff")):
+        ok(f"{label} before the fence does not disable the check",
+           any("unquoted" in f for f in _scan_status(
+               f"{lead}---\nname: x\nmetadata: {{status: pending}}\n---\n\nbody")))
+    ok("a brace in the body is still not structure",
+       not _scan_status("---\nname: x\n---\n\nmetadata: {status: pending}"))
+    ok("an unquoted prose brace is refused, and says how to fix it",
+       any("quote the value" in f
+           for f in _scan_status("---\ndescription: use {name} here\n---\n\nbody")))
+    ok("an edit fragment is not graded on structure",
+       not _scan_status("metadata: {type: project, status: active}\n"))
     ok("top-level status is flagged as misplaced on a full file",
        any("top level" in f for f in _scan_status(
            "---\nname: x\nstatus: superseded\n---\n\nbody")))
