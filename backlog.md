@@ -33,22 +33,6 @@ offered to the user this session; the override was chosen.
 
 ## Review Backlog
 
-### PR #259 — auto-memory status field follow-ups
-
-- [ ] [FEAT] Have `task-review-cycle` 2-1 reconcile the wrapper agent's summary against the
-  `code-review` run inside it before consolidating — in PR #259 the wrapper reported `[]` while its
-  own inner run produced 4 findings that an independent verifier then confirmed, so trusting the
-  summary alone would have merged every one of them; the slot needs to treat the inner findings as
-  the result and the summary as a report about it
-- [ ] [DOCS] State per-skill `version:` semver sizing in `docs/conventions.md` — the Plugin Version
-  Bump Rules table covers `plugin.json` manifests only, so a skill's own frontmatter bump level is
-  decided ad hoc each time (PR #259 used minor for new documented behavior); raised by the contract
-  verifier, out of that Sprint Contract
-- [ ] [FIX] Gate a `status:` written as a YAML flow mapping in `memory-guard`
-  (`metadata: {type: project, status: pending}`) — the line-oriented `STATUS_LINE` cannot see it, so
-  an invalid value in that syntax is admitted; needs either a real frontmatter parse or a check that
-  rejects flow mappings in memory frontmatter outright; raised by Codex in PR #259 review
-
 ### PR #257 — skill-run sink pin follow-ups
 
 - [ ] [FIX] Serialize `.harness-curator-state.json` writes across `record_skill_run.py`, `record_run.py` and `overlap_state.py` — every writer is a read-modify-write with no lock, so a concurrent update can replace a stale snapshot over another writer's `lastRunMs` / `lastCandidateMs` / `dismissedOverlaps`; raised by Codex in PR #257 review, out of that Sprint Contract

@@ -220,6 +220,14 @@ Review changes on branch ${FEATURE_BRANCH} against ${BASE_BRANCH}.
 3. Return findings as JSON array:
    [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"code-review"}]
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
+   The array IS the `code-review` run's findings — every one of them, as it reported them. You are
+   the delivery path, not a second reviewer: do not filter, re-rank, re-judge, merge, summarize or
+   drop a finding because you disagree with it. If the run produced N findings, the array holds N.
+4. WAIT for that run before sending anything. Do not send an interim or provisional array; one
+   message, after the run returns. `[]` has exactly one meaning — the reviewer ran and found
+   nothing. If the run never returned, errored, or you cannot read its output, send
+   {"code_review_slot":"inner-run-unavailable","detail":"<what happened>"} INSTEAD of `[]`.
+   Reporting `[]` for a run you never saw is the one failure this slot cannot detect.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this PR.
 Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
@@ -228,6 +236,23 @@ SendMessage(to: "main"). Do not assume the final report is returned on its own �
 skip this and the whole review is lost after the work is already done.
 Send the array even when it is empty ([]) so the slot is recorded as reviewed, not stalled.
 ```
+
+**Reading the slot's result.** The inner `code-review` run's findings are the result; the wrapper's
+prose around them is a report *about* it, and the two have disagreed in practice — in PR #259 the
+wrapper reported `[]` while its own inner run had produced 4 findings an independent verifier then
+confirmed, and in PR #260 it sent an interim array before its run returned, then a corrected one.
+Three rules follow, and the first is the one that failure needed:
+
+- **A `{"code_review_slot":"inner-run-unavailable"}` sentinel is a dead slot, not a clean review.**
+  Record `Reviewers Skipped: code-review inner run unavailable (<detail>)` and consolidate on the
+  remaining sources — never as an empty review, which would read as evidence the diff is clean.
+- **An empty array counts as a real review only when nothing is still outstanding** — no sentinel,
+  and no message from the agent saying its run had not returned yet. When the wrapper's prose and
+  its array disagree about whether findings exist, the prose is the signal that the array is
+  premature: treat the slot as still running, up to its 1200s cap.
+- **A later, corrected array from the same agent supersedes the earlier one.** Consolidate the
+  correction, not the first message; if Step 3 already ran, re-consolidate rather than merging on
+  the superseded set.
 
 **Result-handoff rule (applies to every agent this skill spawns).** Any agent launched with a
 `name` — and, as cheap insurance, any launched with `run_in_background: true` — must be told

@@ -52,7 +52,10 @@ a fragment carrying the whole `status: <value>` line is graded on its value (a p
 — backticked, or carrying a list marker or trailing words — is not a match), but an `Edit`
 that replaces the scalar alone (`old_string: active`, `new_string: superseded`) carries no
 `status:` anchor and is not graded at all, and placement is never graded on a fragment
-because there is no frontmatter to locate the key in. The `Write` path and
+because there is no frontmatter to locate the key in. The flow-mapping rejection is
+file-path only for the same reason — a fragment carries no delimited frontmatter whose
+structure could be judged — so an `Edit` introducing `metadata: {status: pending}` is
+admitted where a `Write` of the same file is refused. The `Write` path and
 `--check-file` see the finished file and are the reliable gate; `harness-capture` runs the
 latter at its show-the-write step for exactly that reason.
 
@@ -88,12 +91,23 @@ STATUS_VALUES = ("active", "superseded", "rejected")
 # whitespace precedes it — the YAML rule — so `status: active#typo` is read as the value
 # `active#typo` and rejected rather than silently accepted as `active`.
 #
-# Supported syntax is block mapping, one key per line. A YAML flow mapping
-# (`metadata: {type: project, status: pending}`) is not inspected: parsing YAML properly
-# would mean a dependency this hook deliberately does not have, and the store's own writer
-# emits block mappings. Write memory frontmatter that way and the gate holds.
+# Supported syntax is block mapping, one key per line — which is also why the pattern below
+# cannot see a flow mapping (`metadata: {type: project, status: pending}`): the key and its
+# value share a line with everything else in the braces. Parsing YAML properly would mean a
+# dependency this hook deliberately does not have, so rather than admit that syntax
+# unchecked, `FLOW_MAPPING` rejects it outright and the author writes block mappings, which
+# the store's own writer emits anyway.
 STATUS_LINE = re.compile(
     r"^(?P<indent>[ \t]*)status:[ \t]*(?P<v>[^\r\n]*?)(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$",
+    re.MULTILINE,
+)
+
+# A frontmatter key whose value OPENS a flow mapping. Anchored on `{` as the value's first
+# character on purpose: a description that merely contains a brace (`use {name} here`) is
+# prose, not YAML structure, and blocking it would reject a legitimate memory. A flow
+# SEQUENCE (`[a, b]`) is left alone too — no key can hide inside it, so it defeats no check.
+FLOW_MAPPING = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>[A-Za-z0-9_.-]+):[ \t]*\{",
     re.MULTILINE,
 )
 
@@ -240,7 +254,8 @@ def _safe_value(value: str) -> str:
 
 
 def _scan_status(text: str) -> list[str]:
-    """Findings for a `status:` key that is misplaced, or whose value is outside `STATUS_VALUES`.
+    """Findings for a `status:` key that is misplaced, whose value is outside `STATUS_VALUES`,
+    or that a YAML flow mapping would hide from both checks.
 
     Scans the frontmatter of a full memory file; on an Edit fragment (no closed frontmatter)
     it scans the fragment itself — see the module docstring's known-gap note. An absent
@@ -258,6 +273,17 @@ def _scan_status(text: str) -> list[str]:
         region = text
     allowed = ", ".join(STATUS_VALUES)
     findings = []
+    if is_full_file:
+        # Before grading any value: a flow mapping can carry `status:` where STATUS_LINE
+        # cannot see it, so an invalid value in that syntax would be admitted silently. The
+        # rejection is what keeps the value check total, so it runs on the file path, where
+        # the frontmatter is delimited. A fragment has no frontmatter to judge structure in.
+        for m in FLOW_MAPPING.finditer(region):
+            findings.append(
+                f"frontmatter key '{_safe_value(m.group('key'))}' opens a YAML flow mapping "
+                "— write block mappings, one key per line, or a `status:` inside the braces "
+                "is never checked"
+            )
     for m in STATUS_LINE.finditer(region):
         if is_full_file and not m.group("indent"):
             findings.append(
@@ -464,6 +490,24 @@ def _test() -> None:
     ok("unterminated frontmatter still checks the status",
        bool(_scan_status("---\nmetadata:\n  status: pending\n")))
     ok("MEMORY.md index lines carry no status", not _scan_status("- [T](f.md) — hook\n"))
+    # --- flow mappings: rejected outright, since a status inside them is unreadable ---
+    flow = "---\nname: x\nmetadata: {type: project, status: pending}\n---\n\nbody"
+    ok("flow-mapping frontmatter is rejected",
+       any("flow mapping" in f for f in _scan_status(flow)))
+    ok("the rejection names the offending key",
+       any("'metadata'" in f for f in _scan_status(flow)))
+    ok("a valid flow mapping is rejected too — the syntax is what is unreadable",
+       bool(_scan_status("---\nmetadata: {type: project, status: active}\n---\n\nbody")))
+    ok("block mapping still passes",
+       not _scan_status(st("  type: project\n  status: active\n")))
+    ok("a flow sequence is not a flow mapping",
+       not _scan_status("---\nname: x\ntags: [a, b]\nmetadata:\n  status: active\n---\n\nbody"))
+    ok("a brace inside prose is not a flow mapping",
+       not _scan_status("---\ndescription: use {name} as the placeholder\n---\n\nbody"))
+    ok("a brace in the body is not frontmatter structure",
+       not _scan_status(st("  type: project\n", body="metadata: {status: pending}")))
+    ok("an edit fragment is not graded on structure",
+       not _scan_status("metadata: {type: project, status: active}\n"))
     ok("top-level status is flagged as misplaced on a full file",
        any("top level" in f for f in _scan_status(
            "---\nname: x\nstatus: superseded\n---\n\nbody")))
