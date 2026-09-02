@@ -5,7 +5,7 @@ description: >-
   duplicate or conflicting rules, and promote repo-scoped facts stuck in the auto-memory
   store. Retrospecting the conversation you are in → harness-capture. Repo structure
   validation → harness-init.
-version: 1.8.0
+version: 1.8.1
 disable-model-invocation: true
 ---
 
