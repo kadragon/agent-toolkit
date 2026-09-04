@@ -49,7 +49,7 @@ single-item inline contract: every `--tree` run writes a backlog group's Sprint 
 carried onto `$BRANCH` by the collapse `git checkout` below the same way the version bump is (see
 **Version bump** further down), so a second invocation sees the run as in flight.
 
-**Implement (workflows.md Step 3):** spawn `implementer` agent. Brief must include the **absolute
+**Implement (`cycle.md` → *Implement*):** spawn `implementer` agent. Brief must include the **absolute
 worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
 to the main checkout on every call; a standalone `cd` has no persistent effect):
 
@@ -63,19 +63,17 @@ to the main checkout on every call; a standalone `cd` has no persistent effect):
 > If the same fix is attempted 3+ times on the same file without the lint/test command
 > passing, stop and report to the user instead of continuing to retry.
 > When you finish (or get stuck), deliver your result via SendMessage(to: 'main') — do not end
-> silently, even if the result is empty or the run failed. See SKILL.md's Result-handoff rule."
+> silently, even if the result is empty or the run failed — a silent finish loses the result."
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
 
-**QA (workflows.md Step 4):** spawn `qa-verifier` pointed at the worktree path, verifying
+**QA:** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
 must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
 worktree; the same destructive-command guard applies — QA must not run
-`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Same retry policy as Step 3
-(one fix-and-re-verify cycle). Same result-handoff instruction too: tell it to deliver its
-verdict via SendMessage(to: 'main'), including an empty/no-blocking-findings verdict — see
-SKILL.md's Result-handoff rule.
+`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. One fix-and-re-verify retry. Same result-handoff instruction too: tell it to deliver its
+verdict via SendMessage(to: 'main'), including an empty/no-blocking-findings verdict.
 
 **If QA fails after one retry:** clean up and stop.
 ```bash
@@ -112,7 +110,7 @@ fi
 ```
 Report the failure; main checkout remains on `main`.
 
-**Version bump (workflows.md Step 5):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
+**Version bump (`cycle.md` → *Version bump*):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
 
 **Collapse after QA passes:**
 

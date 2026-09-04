@@ -22,7 +22,7 @@ minimizes (but does not guarantee) conflicts when units merge into the integrati
 
 A unit is **batch-eligible** only if ALL hold:
 - Trivial: tag is NOT `[FEAT]`/`[REFACTOR]`, total in-scope files ≤2 (across the heading group), no new public API/schema. Non-trivial units need interactive plan-mode approval
-  (single-pick Step 3) that cannot run N-way in parallel.
+  (`cycle.md` → *Plan gate*) that cannot run N-way in parallel.
 - In-scope files do **not** include any convergence-owned shared file (`plugin.json` manifests,
   `backlog.md`, `tasks.md`, `CHANGELOG.md`). Those are edited only in A6; a unit whose actual
   task is to edit them would collide with convergence — run it solo.
@@ -76,13 +76,13 @@ these explicit CWD instructions (agents spawn in the main checkout CWD, not the 
 > If the same fix is attempted 3+ times on the same file without the lint/test command
 > passing, stop and report to the user instead of continuing to retry.
 > When you finish (or get stuck), deliver your result via SendMessage(to: 'main') — do not end
-> silently, even if the run failed. See SKILL.md's Result-handoff rule."
+> silently, even if the run failed — a silent finish loses the result."
 
 Then the brief continues:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
    or `CHANGELOG.md` — all cleanup edits happen once in A6.
-2. **Return** the Sprint Contract text (Scope / Acceptance criteria / Out of scope / Lint-test
-   command per `docs/eval-criteria.md`; one acceptance checkbox per bundled item) as part of the
+2. **Return** the Sprint Contract text (Tag / Scope / Acceptance criteria / Out of scope / Lint-test
+   command per `cycle.md` → *Sprint Contract*; one acceptance checkbox per bundled item) as part of the
    agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
 3. **Commit the code to `wt/<slug>`** (e.g. `[WIP] <unit>`), leaving a clean tree. Return the
    worktree path, branch, the Sprint Contract, and a change summary — via SendMessage(to: 'main')
@@ -101,7 +101,7 @@ begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths 
 worktree; the same destructive-command guard applies — QA must not run
 `git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Same result-handoff
 instruction too: tell each QA agent to deliver its verdict via SendMessage(to: 'main'),
-including an empty/no-blocking-findings verdict — see SKILL.md's Result-handoff rule. Fan out
+including an empty/no-blocking-findings verdict. Fan out
 all QA agents in one message.
 
 For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
@@ -131,7 +131,7 @@ any worktree.
 4. **Version bump — once.** `bash scripts/bump-version.sh <plugin> <major|minor|patch>` per touched
    plugin, a single time for the whole batch (it keeps both manifests in sync). Bump level per that
    script's header / `docs/conventions.md`; hand-edit only where the script is absent.
-5. **Pre-merge cleanup — once.** Same subcommands as single-pick (SKILL.md → *Pre-merge cleanup*),
+5. **Pre-merge cleanup — once.** Same subcommands as single-pick (`cycle.md` → *Cleanup*),
    run once over the whole batch's collected targets:
    ```bash
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -148,7 +148,7 @@ any worktree.
    the cap is refused at write time by the repo's `scripts/ci/check_changelog_entries.py`. What no
    script can decide — the ban on explanatory clauses — lives in the *CHANGELOG Entry Contract* in
    `harness-invariants.md`; read it rather than reconstructing the limits.
-   - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick Step 3 (SKILL.md → Pre-merge cleanup → *Blocked-analysis sync*), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
+   - **Blocked-analysis sync**: apply the same bidirectional sync as single-pick (`cycle.md` → *Cleanup*, blocked-marker sync), scoped to items the A1 full scan inspected this batch — mark newly-found blocked items, clear markers whose blocker landed in this same batch. Disclose in the PR body; skip silently if nothing synced.
 
    Leave all edits uncommitted — `task-review-cycle` Step 1 commits them.
 6. **Hand off — once.** Call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto`. Running from the

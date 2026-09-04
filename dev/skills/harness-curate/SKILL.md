@@ -1,33 +1,26 @@
 ---
 name: harness-curate
 description: >-
-  Mine session transcripts to propose or prune harness assets, audit instruction layers for
-  duplicate or conflicting rules, and promote repo-scoped facts stuck in the auto-memory
-  store. Retrospecting the conversation you are in → harness-capture. Repo structure
-  validation → harness-init.
-version: 1.8.1
+  Mine session transcripts to propose new harness assets, fix triggering misses, prune unused
+  skills/agents/hooks, and disable plugins that never fire in a repo. Retrospecting the
+  conversation you are in → harness-capture. Repo structure validation → harness-init.
+version: 2.0.0
 disable-model-invocation: true
 ---
 
 # Harness Curator — analyze transcripts, manage skills/agents/hooks
 
-Sessions reset, so "what I keep doing" lives in the transcripts, not memory. This skill mines `~/.claude/projects/<project>/*.jsonl` (full conversation, not just prompts), classifies what it finds — plus the instruction files themselves — into eight signals, and **routes each to the matching creator/optimizer**. It is thin glue: it analyzes and decides, then delegates. **Never reimplement a generator** — call `skill-creator`, `plugin-dev:agent-creator`, `hookify`, or `update-config`.
+Sessions reset, so "what I keep doing" lives in the transcripts. This skill mines
+`~/.claude/projects/<project>/*.jsonl` (and Codex sessions), classifies what it finds into five
+signals, and **routes each to the matching creator** — `skill-creator`,
+`plugin-dev:agent-creator`, `hookify`, `update-config`. It never reimplements a generator.
 
-Before executing a bundled file, resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn. Use that concrete directory; do not infer it from a plugin-root environment variable.
+Resolve `SKILL_DIR` as the absolute parent directory of the `SKILL.md` loaded this turn.
 
-Replaces the old `/dev:task-audit` command, which mined only `history.jsonl` prompts (good for new-asset candidates, blind to triggering misses and underperforming skills).
+**Scope:** `current` (default, the project at cwd) · `all` (every project — cross-project
+recurrence drives Step 4) · `--project <abs path>`.
 
-## When to use which scope
-
-- **current** (default) — analyze the project at cwd. Use for "audit this project's harness".
-- **all** — every project. Use for "what should I build across all my work" and to detect cross-project recurrence (drives the scope decision in Step 4).
-- **--project `<abs path>`** — one named project.
-
-**Instruction-overlap-only run.** "글로벌 지침이랑 레포 지침 충돌 정리해줘" / "시스템 프롬프트랑 중복되는 레포 지침 정리해줘" / "check my global vs repo instructions" / "does my repo restate what the model is already told" asks for Signal 7 alone. Path: Step 2's third file-lens → Step 3 (Instruction-layer overlap row) → Step 7 routing. **Skip Steps 1, 2.5, 4, 5, and the entire Step 6 state write** — `lastRunMs` may only be stamped by a run that actually consumed Step 1's scan; stamping it here would permanently suppress `PROMPTS` nobody analyzed. Dismissals recorded in Step 7 are still written: they touch `dismissedOverlaps` only, never the run stamps.
-
-## Step 1 — Scan (bounded, deterministic)
-
-Run the scanner with the scope tokens passed as real arguments (not a single combined string). It caps output and prints every dropped count (no silent truncation):
+## Step 1 — Scan
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -35,211 +28,129 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 SCAN="$SKILL_DIR/scripts/scan_transcripts.py"
 python3 "$SCAN"                              # current project (cwd)
 python3 "$SCAN" all                          # every project
-python3 "$SCAN" --project "/abs/path"        # one named project — quote paths with spaces
-python3 "$SCAN" --full                       # force full historical PROMPTS window (see below)
+python3 "$SCAN" --project "/abs/path"        # one named project
+python3 "$SCAN" --full                       # re-review the whole PROMPTS history
 ```
 
-Output sections per project: `SKILLS-ACTIVE` (skill → sessions-used), `AGENTS-USED` (subagent_type → sessions-invoked), `CORRECTION-SIGNALS` and `AGENT-CORRECTION-SIGNALS` (skill/agent active then user pushed back), `HARNESS-FRICTION` (user complaining about a recurring imposed behavior — a hook/rule over-firing), `VERIFIER-FAILURES` (machine verdicts — CI/test failures, qa-verifier rejections, hook denials; Signal 8), `PROMPTS` (cluster these). The scanner does extraction only; clustering and judgment are yours.
+Sections per project: `SKILLS-ACTIVE` (skill → sessions used), `AGENTS-USED`,
+`CORRECTION-SIGNALS` / `AGENT-CORRECTION-SIGNALS` (asset active, then the user pushed back),
+`HARNESS-FRICTION` (a hook or rule the user keeps fighting), `VERIFIER-FAILURES` (CI / test /
+hook denials — machine verdicts), `PROMPTS` (cluster these). `CODEX-*` blocks carry the same
+sections for Codex sessions — cluster prompts together, keep usage counts separate per platform
+(`current`/`--project` only; `all` cannot map Codex cwd back to a project).
 
-The scanner also folds in **Codex CLI sessions** (`~/.codex/sessions/`) for the same project, appended as a `CODEX-SOURCED` block with `CODEX-`-prefixed sections (`CODEX-SKILLS-ACTIVE`, `CODEX-AGENTS-USED`, `CODEX-CORRECTION-SIGNALS`, `CODEX-AGENT-CORRECTION-SIGNALS`, `CODEX-HARNESS-FRICTION`, `CODEX-PROMPTS`) — kept separate rather than merged because the two platforms' signals aren't directly comparable (see `references/transcript-format.md` for why). There is **no `CODEX-VERIFIER-FAILURES`** — Codex tool failures live in `function_call_output` records the scanner does not parse (documented gap), so zero Signal 8 on a Codex-heavy project is not evidence of health. Cluster `PROMPTS` and `CODEX-PROMPTS` together by intent; treat `SKILLS-ACTIVE`/`AGENTS-USED` and their `CODEX-` counterparts as separate demote-candidate evidence per platform. **Codex matching only happens for `current`/`--project` scope** — `all` scope can't reverse Claude's encoded project-directory names back into a real path to match Codex's `session_meta.cwd` against, so it skips Codex entirely (this is documented, not a bug — for cross-project Codex coverage, run `--project` per path).
+Usage and correction sections are cumulative; `PROMPTS` is new-since-last-run (`lastRunMs`
+from the project's `.harness-curator-state.json`, stamped in Step 6) unless `--full`. Large
+output (`all`, thousands of prompts) → delegate the reading to `Explore` and analyze the returned
+summaries; record shapes are in `references/transcript-format.md`.
 
-`SKILLS-ACTIVE` / `AGENTS-USED` / `CORRECTION-SIGNALS` / `HARNESS-FRICTION` are always cumulative (full lifetime history) — a demote candidate must be "~0 across all history," not "~0 since last run." Only `PROMPTS` defaults to **new-since-last-run** (using this project's own `.harness-curator-state.json` `lastRunMs`, written in Step 6) — otherwise re-running the scan re-shows the same latest-250-prompt window every time and the model re-clusters work it already reported. The header prints `new_since_last_run=` / `already_analyzed_suppressed=` so this is never silent; pass `--full` to re-review the entire history (first-ever run on a project, or a deliberate comprehensive re-audit, already behaves like `--full` since there's no prior `lastRunMs`).
+## Step 2 — Inventory
 
-If the scan volume is large (`all` scope, or thousands of prompts), do NOT read it all inline — delegate the per-project reading to `Explore` or an `Agent` and analyze the returned summaries. See `references/transcript-format.md` for the record shapes and grep patterns.
+Glob what exists so candidates do not duplicate it: `~/.claude/plugins/**/skills/*/SKILL.md`,
+`~/.claude/plugins/**/agents/*.md`, `~/.claude/plugins/**/commands/*.md`,
+`~/.claude/skills/*/SKILL.md`, `./.claude/skills/*/SKILL.md`, `./.claude/agents/*.md`, and the
+rules in `~/.claude/CLAUDE.md` plus the project's `CLAUDE.md` / `AGENTS.md`. Cross-reference
+against `SKILLS-ACTIVE` / `AGENTS-USED`.
 
-## Step 2 — Inventory existing assets
+Two file lenses on the inventory:
 
-Before proposing anything, know what already exists, or candidates will duplicate it. Glob:
-- `~/.claude/plugins/**/skills/*/SKILL.md`, `~/.claude/plugins/**/agents/*.md`, `~/.claude/plugins/**/commands/*.md`
-- `~/.claude/skills/*/SKILL.md`, `~/.claude/commands/*.md`
-- Project-local: `./.claude/skills/*/SKILL.md`, `./.claude/agents/*.md`
-- Rules in `~/.claude/CLAUDE.md` and the project's `CLAUDE.md` / `AGENTS.md`
+- **Unparseable** — a `SKILL.md` or agent `.md` whose frontmatter lacks `name` or `description`
+  never loads. Route to a frontmatter fix, not the description optimizer.
+- **Stale** — last committed 60+ days ago, judged from the asset's *own* repo:
 
-The `SKILLS-ACTIVE` and `AGENTS-USED` blocks already name which skills fired and which agents were invoked — cross-reference both against this inventory to find skills/agents that exist but rarely/never load.
+  ```bash
+  assets=("path/to/skill/SKILL.md" "path/to/agent.md")   # from the glob above
+  for asset in "${assets[@]}"; do
+    repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel 2>/dev/null)
+    [ -n "$repo_root" ] || { echo "non-git: $asset"; continue; }
+    last_commit=$(git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset")
+    [ -n "$last_commit" ] || { echo "untracked: $asset"; continue; }
+    echo "$last_commit  $asset"   # flag when 60+ days old
+  done
+  ```
 
-Four supplementary file-lenses complement the transcript firing data (a skill can fire yet be stale code, exist yet never parse, or be contradicted by a rule one layer up — and a repo fact can sit in auto-memory where no other tool can read it, or be marked superseded with nothing acting on it). Each lens's runnable snippet and the hazards behind it live in `references/inventory-lenses.md` — read the lens you are about to run; the rules restated below are the ones a run must not violate.
+  Stale but firing → refresh candidate. Never fires → Signal 4.
 
-- **Stale code** — asset last committed 60+ days ago, judged per asset from *its own* repo (never `git log` from the current project); new/untracked and non-git assets skip the age check. Snippet: `references/inventory-lenses.md` → *Stale code*.
-- **Unparseable** — `SKILL.md` / agent `.md` whose frontmatter lacks `name` or `description`: it silently never loads, so the triggering miss has a structural cause. Fix the frontmatter, don't route it to the description optimizer.
-- **Instruction-layer overlap** — pair rules governing the same behavior across base instructions → global `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` → repo `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` → the `docs/*.md` the AGENTS.md Docs Index points to. Bound the walk at `git rev-parse --show-toplevel` — never into `$HOME` or `/`. Both sides must be quoted verbatim with `file:line` or the pair is dropped, not reported; the base-instruction side carries a `[base instructions — {model id}, this session]` label instead, since it has no file. Filter survivors through `overlap_state.py --check --project "$REPO_ROOT"` (`--project` required — the script defaults to cwd), report only `NEW` rows, and carry the printed `suppressed=` count into the report. `current` / `--project` scope only. Subtypes and non-findings: `references/signal-taxonomy.md` §7 — which also covers four **within-layer diet** defects judged by the same bar (a rule the transcripts show over-prescribing, examples copied as answers, always-loaded content only one route reads, prose standing in for a bundled specimen). Read set, snippet, and pairs.json key shape: `references/inventory-lenses.md` → *Instruction-layer overlap*.
-- **Memory-store promotion** — audit the per-project auto-memory store (`<config>/projects/<encoded>/memory/`), whose facts no Codex-side or `AGENTS.md`-reading tool can see. A memory is a candidate only when `metadata.type` is `project` or `reference` **and** the fact is scoped to this one repo — `user` / `feedback` are cross-repo and stay put. Resolve the store from `TARGET_REPO`, never cwd, checking the exact encoded path before the resolver's fuzzy pick. Same hard evidence rule (quote the memory with `file:line`, name a concrete `docs/<topic>.md`, else drop) and same `overlap_state.py` suppression as the overlap lens. The same read has a second output: a memory whose `metadata.status` is `superseded` or `rejected` is a **prune candidate** routed to `dev:harness-capture` Memory hygiene — an absent `status` reads as `active` and is never a finding. Detection rules: `references/signal-taxonomy.md` §6. Snippets and the resolution hazards: `references/inventory-lenses.md` → *Memory-store promotion*.
+## Step 3 — Classify into five signals
 
-Feed all four into Step 3: stale-but-firing → review for refresh; never-fires (≈0 in `SKILLS-ACTIVE`) → delete candidate (adversarial check required — see Step 7); unparseable → fix frontmatter; overlap → Signal 7; memory promotion → Signal 6; non-active memory → Signal 6's prune route. This is the asset-portfolio health check moved out of `harness-init` maintenance D, which now keeps repo file-state only.
+Detection rules and the delegate brief per signal: `references/signal-taxonomy.md`.
 
-## Step 2.5 — Prediction re-audit (current / --project scope only)
+| Signal | Detected from | Route |
+|--------|---------------|-------|
+| **1. New-asset candidate** | a prompt shape recurring ≥3 times that no inventory asset covers | `skill-creator` / `plugin-dev:agent-creator` / `update-config` (hook) |
+| **2. Triggering miss** | prompts in an existing asset's domain while it is absent or low in `SKILLS-ACTIVE` / `AGENTS-USED` (≥2) | skill → `skill-creator` description optimizer; agent → `plugin-dev:agent-development` |
+| **3. Underperforming or over-firing asset** | `CORRECTION-SIGNALS`, `HARNESS-FRICTION`, or ≥2 same-cause `VERIFIER-FAILURES` on one asset | skill → `skill-creator` modify; agent → `plugin-dev:agent-development`; hook → loosen via `hookify` / `update-config`; a `CLAUDE.md`/`AGENTS.md` line → surface it, the user edits |
+| **4. Unused asset** | ~0 across lifetime in `SKILLS-ACTIVE` / `AGENTS-USED` | delete, after the adversarial check in Step 7 |
+| **5. Domain knowledge candidate** | a fact or constraint restated in ≥2 sessions, not a workflow | `docs/<topic>.md` in the owning repo; `AGENTS.md` gets the index row only |
 
-Past harness edits carry falsifiable predictions (`dev:harness-init` → `references/harness-evolution.md` §3 — the loop contract's change record; the file ships with harness-init, not this skill). This step is what falsifies them, using the scan output Step 1 just produced.
+Ignore one-offs. A deterministic repeat (the same mechanical step every session) promotes to a
+hook rather than a skill. **Permission-prompt tuning is out of scope** — never touch the
+`permissions` block. Agent roles are created here, not at init: a triggering miss where work an
+absent role should own is repeatedly done inline is the evidence; when a role lands, the repo's
+`docs/delegation.md` gains its routing row then, with no model pinned.
 
-1. Resolve the target repo root — `REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)` with `TARGET_REPO` = the `--project` path, or cwd on `current` scope (the same two-line resolution Step 2's overlap lens and Step 7 use; the log lives at the repo root, so a run started in a subdirectory must not read `<cwd>/docs/`) — and read `<REPO_ROOT>/docs/harness-log.md`. **Absent file = no pending rows — skip this step silently, it is not an error** (a repo with zero loop-originated edits is the normal case). `all` scope skips too: no resolvable repo path (same limitation as Signal 7 and the Codex fold-in).
-2. Load change-history rows whose `Verified` is `pending`, `unverified` (first — they landed without a check), or a bare `failed` with no resolution note — a failure the operator has not yet acted on must keep re-surfacing, not vanish after one declined report.
-3. Judge each `Predicted impact` **only against evidence datable after the row's `Date`** — new-since-last-run `PROMPTS`, `VERIFIER-FAILURES` samples from sessions after the edit, or a direct read/command run now. Step 1's cumulative blocks (`SKILLS-ACTIVE`, `CORRECTION-SIGNALS`, … — lifetime aggregates by design) cannot be dated and so can neither hold nor fail a row on their own; when the prediction's window has not elapsed or no post-edit evidence is in view, leave the row untouched.
-4. **Held** → stamp the row in place: replace `pending`/`unverified` with the date + one-line evidence (this is loop bookkeeping, the log is its state file — no separate confirmation needed for the stamp itself).
-5. **Failed** (the predicted change observably did not happen, or the mistake recurred — post-edit evidence only, per 3) → write `failed` and surface the edit as a **prune/rework candidate** row in the Step 6 report. Any resulting delete goes through the Step 7 adversarial check like every other demote. When the operator resolves it, append the outcome to the cell (`failed — reworked YYYY-MM-DD` / `failed — accepted YYYY-MM-DD`) so step 2 stops reloading it; a bare `failed` means still open.
+## Step 4 — Decide asset scope
 
-**Skip on an instruction-overlap-only run** — this step consumes Step 1's scan, which that path never runs (see "When to use which scope").
-
-## Step 3 — Classify into eight signals
-
-Read `references/signal-taxonomy.md` for detection rules and the delegate brief per signal. Summary:
-
-| Signal | Detected from | Route to |
-|--------|---------------|----------|
-| **New-asset candidate** | recurring prompt shape (≥3), no inventory asset covers it | promote/demote rule → `agent-creator` / `skill-creator` / `update-config` |
-| **Triggering miss** | prompts in an existing skill's domain, skill absent/low in `SKILLS-ACTIVE`; or work done inline that a fitting agent absent from `AGENTS-USED` should own | skill → `skill-creator` description optimizer; agent → `plugin-dev:agent-development` |
-| **Underperforming asset** | skill in `CORRECTION-SIGNALS` / agent in `AGENT-CORRECTION-SIGNALS` (loaded/invoked, then user corrected); **or** a `declining` verdict from `scripts/skill_run_health.py` — the trended input below | skill → `skill-creator` modify; agent → `plugin-dev:agent-development` modify |
-| **Harness friction** | `HARNESS-FRICTION` — user repeatedly complains about an imposed behavior (hook/rule over-firing; **permission-prompt friction is out of scope**) | loosen/narrow the hook → `update-config`; bloated rule → surface CLAUDE.md/AGENTS.md line for user edit |
-| **Promote / demote** | deterministic repeat → **hook**; skill ~0 in `SKILLS-ACTIVE` or agent ~0 in `AGENTS-USED` → **delete** (adversarial check first, Step 7) | `update-config` / `hookify` / manual removal |
-| **Domain knowledge candidate** | two inputs: recurring fact/constraint from PROMPTS (≥2 sessions, not a workflow), **and** Step 2's memory-store lens (a `project`/`reference` memory holding a repo-scoped fact) | write to `docs/<topic>.md`; AGENTS.md/CLAUDE.md get index pointer only, not raw fact. Memory-sourced: also route the memory file's deletion to `harness-capture` (Step 7) |
-| **Verifier-grounded failure** | `VERIFIER-FAILURES` — ci-fail / qa-reject / hook-deny machine verdicts; ≥2 same-cause after the causal-status read (`references/signal-taxonomy.md` §8; over-collects — read before routing) | same creators as Signals 3/5, evidence = quoted verifier verdicts; verifiers themselves are read-only |
-| **Instruction-layer overlap** | Step 2's overlap lens — a rule duplicated in, contradicted between, or already imposed by a higher layer: base instructions → global `~/.claude/CLAUDE.md` → repo `CLAUDE.md`/`AGENTS.md`/`.claude/rules/` → indexed `docs/*.md`; plus the four within-layer diet subtypes, each gated on quoted transcript evidence and stamped with the model id | duplicate / base-redundant → **report by default** (the repo copy is a rule's only reach on non-Claude tools); propose deletion only for the non-owning layer, and only in a verified single-tool repo; conflict → surface both quoted lines, ask which is authoritative; diet subtypes → route the rewrite/move to `skill-creator`, or surface the repo line. Repo edits only on confirmation; **never auto-edit the global file, and never edit base instructions (not editable)** |
-
-**Signal 3's trended input — run telemetry.** `CORRECTION-SIGNALS` is anecdotal: it says a skill produced a wrong result, never that the skill *got worse*. The skill-run sink `harness-capture` writes at each cycle tail carries that trend. Read it here (`current` / `--project` scope only — the sink is per project):
-
-```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-HEALTH="$SKILL_DIR/scripts/skill_run_health.py"
-[[ -r "$HEALTH" ]] || { echo "Bundled script missing or unreadable: $HEALTH" >&2; exit 1; }
-PY=$(command -v python3 || command -v python || true)
-[[ -n "$PY" ]] || { echo "No python interpreter on PATH" >&2; exit 1; }
-# Run ONE of these two — the second when auditing a repo other than cwd:
-#   "$PY" "$HEALTH" --project "/abs/path"
-"$PY" "$HEALTH"
-rc=$?
-[[ $rc -eq 0 ]] || { echo "skill_run_health.py exited $rc — see its stderr above" >&2; exit 1; }
-```
-
-One row per skill: `<skill_id>  <verdict>  7d=<ok>/<runs> (<rate>)  30d=<ok>/<runs> (<rate>)  delta=<±rate>`, with a `— <reason>` tail on every verdict that is not `ok` and an `fb=` tail whenever the recent window carries `corrected`/`rejected` feedback. Only **`declining`** is a Signal 3 finding, and its route brief must quote both window rates with their run counts — a rewrite delegation argued from a bare verdict gives the creator nothing to aim at. **`insufficient-data` is never a finding and never evidence of health**: it means the windows hold too few runs to judge — including a skill whose whole history sits inside the 7d window, which has no past to compare against and would otherwise read as measured health — so a skill carrying it is unmeasured, not passing. Do not report it as an `ok` row, and do not fold it into a `Watch:` line — there is nothing to watch yet. An absent sink exits 0 with a stderr note; a repo whose cycle tails have not run has no telemetry, which is the normal young-repo state.
-
-**Agent roles are created here, not at init.** `dev:harness-init` deliberately ships an empty `.claude/agents/` roster and no orchestrator skill (its Steps 4b/4c) — before a repo has working history there is no evidence about which delegations recur, so any roster is a guess. That makes this skill the only path by which a repo acquires its first role: a **triggering miss** where work was repeatedly done inline that a missing agent should have owned, or a **new-asset candidate** whose recurring shape is a delegation. Route those to `plugin-dev:agent-creator` (new) or `plugin-dev:agent-development` (fix), and remember the corollary — an empty roster in a young repo is the designed state, never a finding.
-
-Two follow-ups when a role is actually created: the repo's `docs/delegation.md` routing table gains its row **only then** (init leaves it header-only), and an orchestrator becomes worth proposing once ≥1 role exists *and* the same multi-step domain workflow recurs in the transcripts — that one routes to `skill-creator`. Do not pin a model on a role you create; spawns inherit the session model and the caller overrides per spawn.
-
-Ignore one-offs. A cluster needs ≥3 occurrences (CLAUDE.md subagent-factory rule) to be a new-asset candidate; triggering-miss, underperform, harness-friction, and verifier-grounded failure need ≥2. Instruction-layer overlap needs 1 — it's a static defect, not a frequency pattern — but only with both sides quoted. A memory-sourced Signal 6 candidate also needs 1: a memory is by construction a fact someone already judged durable, so the frequency bar was cleared when it was written — the quoting requirement still holds. A non-active memory prune needs 1 for the same reason, one step further along: the `superseded`/`rejected` value *is* a judgment `harness-capture` already made. Before any **delete**, run the adversarial check (Step 7).
-
-## Step 4 — Decide asset scope (per candidate)
-
-For each **new-asset** candidate, decide where it lives:
-- Pattern seen in **one project only** → project-local `./.claude/skills/` (or `./.claude/agents/`).
-- Pattern recurs **across multiple projects** (visible only in `all` scope) → recommend a **global plugin** asset (`dev/` or `prod/`), flagged ⚠ cross-project.
-
-Never silently create a project-local asset for a cross-project pattern — it won't fire where the pattern actually lives. Surface the scope with its evidence and let the user confirm per candidate.
+Seen in one project → project-local `./.claude/skills/` or `./.claude/agents/`. Recurs across
+projects (`all` scope) → recommend a plugin asset (`dev/` or `prod/`), flagged ⚠ cross-project.
+Never silently create a project-local asset for a cross-project pattern.
 
 ## Step 5 — Repo-fit plugin disable
 
-Identify globally-enabled plugins that don't belong in this repo and disable them at project scope.
-
-### Precondition: enabled-only candidates
-
-Only plugins currently `true` in the global `enabledPlugins` dict are candidates. Because they're already enabled in user scope their key exists there — so a project-scope `false` override takes effect. Plugins already `false` or absent in global settings are skipped (a project `false` on a globally-`false` plugin has no visible effect and indicates a logic error).
-
-### Combined signal — both required
-
-**1. Primary (empirical):** The plugin's skills/agents fired ~0× in this repo's `SKILLS-ACTIVE` / `AGENTS-USED` output from Step 1. Split `plugin:skill` on the first `:` to get the bare plugin name; for bare (unprefixed) `AGENTS-USED` keys that carry no plugin prefix, handle gracefully (check name match or skip).
-
-**2. Corroborating:** Repo characteristics (languages, frameworks, file patterns) confirm the plugin is irrelevant to this codebase.
-
-**Characteristics-alone disabling is FORBIDDEN.** Heuristic guessing from language/framework without empirical usage evidence must never trigger a disable.
-
-### Per-plugin confirm gate
-
-Present the candidate list (plugin key + evidence summary) and ask the user to confirm each individually. Do not disable any plugin silently or in bulk. Only write confirmed entries.
-
-### Write: call the helper script
-
-After per-plugin confirmation, call the helper once with all confirmed bare plugin names:
+Candidates: plugins `true` in the global `enabledPlugins` whose skills and agents fired ~0× in
+this repo (`SKILLS-ACTIVE` / `AGENTS-USED`, bare plugin name = the part before the first `:`)
+**and** whose domain the repo's stack visibly lacks. Usage evidence is required — never disable
+on repo characteristics alone. Confirm each plugin individually, then:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 DISABLE="$SKILL_DIR/scripts/disable_plugins.py"
-python3 "$DISABLE" dev frontend-design   # example — use confirmed names
-# auditing a repo other than cwd (`all` / `--project` scope)? name it explicitly:
-python3 "$DISABLE" --project=/abs/path/to/repo dev
+python3 "$DISABLE" <confirmed bare plugin names>          # cwd
+python3 "$DISABLE" --project=/abs/path/to/repo <names>    # another repo
 ```
 
-The script resolves each bare name to its `plugin@market` key in the global `enabledPlugins` (scanning **all** matching marketplaces so a stale `false` key never masks the enabled one), then atomically writes `false` entries into the target project's `.claude/settings.json` (defaults to `<cwd>`, or `--project=PATH`):
-- Reads global settings from `$CLAUDE_CONFIG_DIR/settings.json` (fallback `~/.claude/settings.json`).
-- Writes only to the **project** `.claude/settings.json` — never the global file.
-- Preserves all existing keys and sections; creates `enabledPlugins` if absent.
-- Guarantees are checked by `scripts/disable_plugins.py --test` — disable-only behavior and write correctness; the test does not inject a mid-write crash, so it does not itself prove atomicity under failure. See Additional Resources.
+Writes `false` entries into the *project* `.claude/settings.json` only, atomically, resolving
+each name to its `plugin@market` key. Tell the user the effect shows after `/plugin` reload or a
+restart.
 
-### Post-write note
+## Step 6 — Report and record
 
-Print to the user: _"Project-scope disable written. Effect is visible after `/plugin` reload or session restart. Merge behavior between project and global settings may be environment-dependent."_
-
-## Step 6 — Report
-
-Output one ranked table, candidates only:
-
-```
-| Signal | Cluster / Asset | Freq | Evidence | → Route | Scope | Why |
-|--------|-----------------|------|----------|---------|-------|-----|
-```
-
-Then a `Watch:` line for near-misses (2×) so nothing is silently dropped.
-
-Step 2.5's outcome rides in the same report: failed-prediction edits appear as prune/rework candidate rows (route → Step 7, adversarial check before delete), and a one-line `Re-audit:` footer states how many predictions were stamped / left pending / failed — so the log's state is visible even when nothing failed.
-
-Instruction-layer overlap rows, memory-promotion and memory-prune rows, and failed-prediction rows (Step 2.5) are static defects, not clusters: write `Freq` as `n/a (static)` — a bare `1` reads as "below the 2× Watch threshold" to anyone scanning the table. Append the `suppressed=` count from each `overlap_state.py --check` run under the `Watch:` line so previously-dismissed pairs are accounted for rather than invisible.
-
-Record the run and candidate state so the staleness nudge stays accurate. **Skip this entire write on an instruction-overlap-only run** (see "When to use which scope") — Step 1's scan never ran, so stamping `lastRunMs` would suppress prompts nobody analyzed. Pass `--pending 1` if the report had ≥1 non-Watch candidate row, `--pending 0` if it was empty or Watch-only — an empty-report run **must** clear `lastCandidateMs`, or the nudge nags about candidates nobody produced. The nudge emits a distinct "pending candidates" message when `lastCandidateMs` is stale (self-corrects on next run even if user acted without re-running):
+One ranked table, candidates only — `| Signal | Cluster / Asset | Freq | Evidence | → Route |
+Scope | Why |` — then a `Watch:` line for near-misses (2×). Then stamp the run so the next scan's
+`PROMPTS` window starts here:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 RECORD="$SKILL_DIR/scripts/record_run.py"
-python3 "$RECORD" --pending 1                              # 0 for an empty / Watch-only report
-python3 "$RECORD" --pending 1 --project /abs/path/to/repo  # auditing a repo other than cwd
+python3 "$RECORD"                               # cwd
+python3 "$RECORD" --project /abs/path/to/repo   # another repo
 ```
-
-The script stamps the Claude-side state file and best-effort mirrors it to Codex, resolving both through the same helper the scanner and the nudge read from — so writer and readers cannot drift apart. Without `--project` it records the **cwd's** bookkeeping only: cwd-complete, never scope-complete, the same simplification the previous inline write made.
 
 ## Step 7 — Route to the creator (on confirmation)
 
-Ask whether to act on the **top** candidate now. Do not auto-create. On yes, invoke the matching skill with a brief (goal · constraint · exit criterion).
+Ask whether to act on the **top** candidate now. Never auto-create. On yes, invoke the matching
+skill with a brief — goal · constraint · **the objective check that accepts the edit** (a
+`skill-creator` eval pass, a re-run of the missed trigger, a fixture event piped through the
+hook). Failing the check means revert, not retry-until-green. No check available → the edit may
+land on confirmation, disclosed as unverified.
 
-**Validation gate — the exit criterion is an objective check, not plausibility.** Every routed brief names its acceptance check up front, from the loop contract's per-route table: `dev:harness-init` → `references/harness-evolution.md` §2 — read the table there, do not restate it. The check passing is what makes the edit land; **failing it means revert, not retry-until-green**. When no verifier exists for an edit, it may still land on user confirmation, but its change record is written `unverified` and it is first in line at the next re-audit (Step 2.5). Record every landed edit per the contract's §3 schema — `Predicted impact` + `Verified` columns in **the edited repo's** `docs/harness-log.md` (the `--project` path, or cwd on `current` scope, same resolution as `TARGET_REPO` above; no resolvable repo path → surface the record for the user instead of writing).
-- New skill / upgrade existing skill / fix triggering → `skill-creator:skill-creator` (it owns create, modify, and description-optimization/eval — do not build a parallel eval harness).
-- New agent → `plugin-dev:agent-creator`. Fix an agent's triggering description or instructions (triggering-miss / underperform) → `plugin-dev:agent-development`.
-- New deterministic hook, or loosen an over-firing hook (harness-friction) → `hookify` or `update-config`. **Never touch the `permissions` block** — tool-approval tuning is not this skill's job (see `references/signal-taxonomy.md` §5). For a CLAUDE.md/AGENTS.md rule the user keeps overriding, surface the exact line and let the user decide — never auto-edit global instructions.
-- Instruction-layer overlap → show the quoted pair (`file:line` both sides, or the `[base instructions — {model id}, this session]` label on the base side) and the ownership call. A repo-side edit (deleting a duplicate from `CLAUDE.md`/`AGENTS.md`/`.claude/rules/`/`docs/`, trimming a base-redundant line, or labeling a deliberate override) is applied only on confirmation; a global-side edit is never applied — surface the line and let the user change `~/.claude/CLAUDE.md` themselves. Base instructions are not editable at all — the only actionable side of a base-redundant pair is the repo one. Once the user has resolved a pair **or decided to keep it as-is**, record the dismissal so it stops re-firing:
-
-  ```bash
-  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-  OSTATE="$SKILL_DIR/scripts/overlap_state.py"
-  TARGET_REPO="<the --project path, or cwd on `current` scope>"
-  REPO_ROOT=$(git -C "$TARGET_REPO" rev-parse --show-toplevel)
-  # Reuse (or rewrite) the same pairs.json the Step 2 check used (key shape:
-  # `references/inventory-lenses.md` → *Instruction-layer overlap*) — dismiss only decided pairs.
-  # Same --project as the Step 2 --check, or the dismissal lands under the wrong project
-  # and the pair re-fires next run.
-  python3 "$OSTATE" --dismiss --project "$REPO_ROOT" < pairs.json
-  ```
-- Memory → `docs/` promotion (memory-sourced Signal 6) → show the memory quoted with `file:line` and the proposed `docs/<topic>.md`. On confirmation, write the fact to `docs/<topic>.md` and add the one-line pointer to the AGENTS.md Docs Index — the fact itself never goes into AGENTS.md/CLAUDE.md. Then **call the Skill tool with "dev:harness-capture" (Memory hygiene) to delete the promoted memory file and repair the `MEMORY.md` index**: capture owns destructive memory prunes, and this skill does not reimplement an owner's job any more than it reimplements `skill-creator`. An `already-promoted` candidate skips the docs write and goes straight to that deletion route. Record the decision — promoted *or* consciously kept — with `--dismiss` using the same pairs.json shape as the Step 2 check (`references/inventory-lenses.md` → *Memory-store promotion*), or it re-fires next run.
-- Non-active memory prune (same lens, `metadata.status` is `superseded`/`rejected`) → show the `status:` line quoted with `file:line` and the entry's `MEMORY.md` index line, then **call the Skill tool with "dev:harness-capture" (Memory hygiene)** for the deletion and index repair. No docs write and no `status` edit here: capture writes the field and owns the destructive prune; this skill only reads it. Record the decision — pruned *or* consciously kept — with `--dismiss`, `"repo"` = `prune (harness-capture)` so it does not collide with a promotion dismissal for the same file.
-- Delete an unused asset → **adversarial check first**: spawn one independent reviewer (`Explore` / `general-purpose`) to argue why removing it is unsafe (guards a rare-but-critical path, fires only via slash-command/hook/sidechain the scanner can't see, or backstops a not-yet-recurred failure). If the reviewer surfaces a real reason, downgrade to `Watch:`. Otherwise confirm, remove the file, and bump the owning plugin version. Self-judgment ≠ verification (CLAUDE.md).
-
-When the asset lands in a `dev/` or `prod/` plugin, remind the user to bump that plugin's `.claude-plugin/plugin.json` version (project CLAUDE.md rule).
+- **Delete an unused asset** — adversarial check first: spawn one independent reviewer
+  (`Explore` / `general-purpose`) to argue why removal is unsafe (a rare critical path, a
+  slash-command or hook route the scanner cannot see, a backstop for a failure not yet recurred).
+  A real reason → downgrade to `Watch:`. Otherwise confirm, remove, and remind the user to bump the
+  owning plugin's version.
+- **Domain knowledge** — write `docs/<topic>.md` and one `AGENTS.md` Docs Index row; the fact
+  itself never goes into `AGENTS.md`/`CLAUDE.md`. A repo-scoped fact that lives in auto-memory
+  moves the same way, then the memory file is deleted through the Skill tool with
+  "dev:harness-capture" (Memory hygiene), which owns destructive memory prunes.
+- **A global `~/.claude/CLAUDE.md` line** is never edited here — surface it, the user decides.
 
 ## Additional Resources
 
-- **`references/signal-taxonomy.md`** — detection rules, thresholds, and per-signal delegate brief.
-- **`references/inventory-lenses.md`** — Step 2's four file-lenses: the runnable snippet for each, the overlap read set and pairs.json key shape, and the memory-store resolution hazards.
-- **`references/transcript-format.md`** — `*.jsonl` record shapes (`attributionSkill`, tool_use, corrections), grep patterns, project-path encoding.
-
-**Delegation-asset templates.** These moved here from `harness-init` when init stopped creating agents: they describe how to build a delegation surface, and this skill is the only path that decides one is warranted. Read the relevant one when a signal routes to `plugin-dev:agent-creator` or `skill-creator` — they are the brief material for that handoff, not something this skill executes itself.
-
-- **`references/teammate-role-template.md`** — role-file schema (frontmatter, four spine sections), description anti-patterns, per-role starting templates, the `spine-exempt` escape hatch.
-- **`references/delegation-template.md`** — pattern selection, Spawn Prompt Contract, effort tiers, routing-table structure and objective-trigger design, data-transfer protocols, model-inheritance rule.
-- **`references/orchestrator-template.md`** — 3-mode orchestrator templates (team/sub-agent/hybrid), scratchpad convention, `docs/harness-log.md` pointer block, directive-description rule, skill frontmatter reference.
-- **`references/coordination-patterns.md`** — multi-agent coordination shapes to pick between before writing an orchestrator.
-- **`references/agent-teams-onboarding.md`** — Agent Teams prerequisites and environment check; needed only for a team-mode orchestrator (3–5× token cost).
-- **`references/competing-hypotheses-playbook.md`** — adversarial root-cause investigation; maps to the `debate` workflow.
-- **`references/trigger-router-template.md`** — UserPromptSubmit hook mapping prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)`. **Fallback only**, installed on a measured miss-rate ([Scott Spence 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)).
-- **`scripts/scan_transcripts.py`** — bounded scanner (run in Step 1).
-- **`scripts/overlap_state.py`** — Signal 7 cross-run suppression: `--check` classifies candidate pairs NEW/DISMISSED (Step 2), `--dismiss` records a resolved-or-kept pair (Step 7), `--list` prints stored keys. Keyed by a hash of both quoted lines, stored as `dismissedOverlaps` in the same `.harness-curator-state.json`; `--test` covers key normalization, the cap, and preservation of `lastRunMs`.
-- **`scripts/record_run.py`** — Step 6 run bookkeeping: stamps `lastRunMs` and sets/clears `lastCandidateMs` (`--pending 1|0`) in `.harness-curator-state.json`, mirroring best-effort to Codex. Resolves the state dir through `overlap_state.state_path()` so this writer, the scanner, and the session-start nudge cannot drift apart; `--test` covers the pending semantics, key preservation, the drift case, and Codex-failure isolation.
-- **`scripts/record_skill_run.py`** — appends one bounded JSONL row (`skill_id`, `skill_version`, `outcome`, `user_feedback`, `recorded_at`) to `.skill-runs.jsonl` beside `.harness-curator-state.json`, written from `harness-capture` cycle-tail, not from this skill. 2000-record cap, owner-only mode, and a dot-prefixed name so the scanner's `*.jsonl` transcript glob cannot mistake it for a session. The sink dir is pinned in `.harness-curator-state.json` (`skillRunSinkDir`, scoped by `skillRunSinkProject`) on the first write and reused after that, because `resolve_project_dir()` ranks sibling project dirs by `*.jsonl` count and would otherwise re-point the sink and orphan the earlier rows; an unpinned run adopts a sibling that already holds this project's sink data. The project scope matters: `_loose_key` collapses `-` and `_`, so two different repos are each other's candidates and an unscoped pin would let one claim the other's telemetry. A pin is honoured only while it names an existing dir under the projects root. Append and trim are serialized by one exclusive lock held on a `.skill-runs.jsonl.lock` sidecar beside the sink — the trim is a read-modify-replace, and `os.replace` would swap a lock taken on the sink itself out from under any waiter. The wait is bounded (2s) and best-effort: an unlockable or still-contended sink warns and writes anyway, because the cycle tail that calls this must never block. Divergences and any sink left unread are warned about on stderr, naming the dirs, once per situation rather than every run. `--test` covers the schema, the `unknown` version sentinel, the cap, corrupt-line tolerance, value validation, the pin/adopt paths, cross-repo isolation, pin-write failure not costing the trim, and the lock being held across the trim, bounded under contention, and invisible to the transcript glob. Read by `skill_run_health.py` (below), which is Signal 3's trended input.
-- **`scripts/skill_run_health.py`** — the read half of that sink, and Signal 3's trended input (run in Step 3). Groups the rows by `skill_id` and compares a 7-day success rate against a 30-day one that **contains** it, emitting `declining` (a finding), `ok`, or `insufficient-data` — the last meaning the windows hold too few runs to judge, never that the skill is healthy. Success is `outcome == "success"`; `partial` and `failure` are both non-success, and `user_feedback` rides along as brief material rather than moving the rate. Thresholds (`--threshold`, `--min-recent`, `--min-baseline`, `--window-days`, `--baseline-days`) are flags; `--json` emits the same records for a delegated read. Locates the sink through `record_skill_run.resolve_sink_dir()` so reader and writer cannot land on different files, and exits 0 on an absent or empty sink — a curate run must not break on a repo with no telemetry yet. `--test` covers the three verdicts, the window boundaries, per-skill isolation, report ordering, corrupt-line tolerance, the `unknown` version sentinel, and every threshold override.
-- **`scripts/disable_plugins.py`** — resolves bare plugin names to `plugin@market` keys and atomically writes project-scope disable entries (run in Step 5). `--test` flag exercises all guarantees.
+- **`references/signal-taxonomy.md`** — detection rules, thresholds, and delegate brief per signal.
+- **`references/transcript-format.md`** — `*.jsonl` record shapes, grep patterns, project-path encoding.
+- **`scripts/scan_transcripts.py`** — bounded scanner (Step 1); prints every dropped count.
+- **`scripts/record_run.py`** — stamps `lastRunMs` in `.harness-curator-state.json` (Step 6), mirrored best-effort to Codex; `--test`.
+- **`scripts/disable_plugins.py`** — project-scope plugin disable (Step 5); `--test`.

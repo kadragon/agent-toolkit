@@ -1,8 +1,9 @@
 ---
 name: task-review
 description: >-
-  Post-dev review cycle for this branch — commit, collect reviews, apply findings, retrospect,
-  wait for CI, merge. Flags: --no-hub (local only), --auto (skip confirmation).
+  Post-dev review cycle for this branch — commit, review, apply findings, merge (lite or PR+CI
+  by diff size). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
+  (force the merge path), --panel (add agy + Codex).
 disable-model-invocation: true
 ---
 
@@ -10,13 +11,14 @@ disable-model-invocation: true
 
 ## Arguments
 
-- `--no-hub` — no push, no PR, no CI, no merge. Commits locally, reviews from local diff.
-- `--auto` — skip the consolidation confirmation gate. Apply all in-scope findings automatically. Verifier and contest-round verdicts still apply (refuted = not applied).
-- `--qa-pending` — contract QA is still owed, so the cycle runs it as review-panel source 2-4. Pass it when resuming a `task-next`/`task-new` cycle that handed off after implement without verifying, and restate the Sprint Contract verbatim in the same invocation — without the contract the cycle stops and asks. Omit it when QA already ran, or the diff is verified twice.
+- `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
+- `--auto` — skip the consolidation confirmation; apply every in-scope finding.
+- `--pr` / `--lite` — force the PR+CI path or the direct-merge path. Default routes by diff size.
+- `--panel` — add the agy and Codex engines. Auto on a security hit or a 300+ line diff.
+
+Restate the Sprint Contract in the same invocation when the implementation was not yet verified
+against it; the reviewer grades it.
 
 Call the Skill tool with "dev:task-review-cycle", passing `--from task-review` **plus** this
-invocation's `args` unchanged — e.g. `--from task-review --auto`. That token is the caller
-argument the primitive checks; a call without it is not a wrapper call. Forward it on every
-path, including a bare `/task-review` with no other flags.
-
-The whole workflow — Setup, Steps 0–6, error handling, script reference — lives in `dev:task-review-cycle`.
+invocation's `args` unchanged — e.g. `--from task-review --auto`. Forward it on every path,
+including a bare `/task-review`. The whole workflow lives in `dev:task-review-cycle`.

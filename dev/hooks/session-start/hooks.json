@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart dispatcher for harness maintenance and harness-curate staleness nudges. Maintenance is daily-debounced; each component fails independently and never blocks startup.",
+  "description": "SessionStart dispatcher for daily-debounced harness maintenance (CLAUDE.md pointer sync, .agents/skills symlink, AGENTS.md size). Best-effort; never blocks startup. Canonical registration lives in the plugin's top-level hooks.json; this file documents the bundle.",
   "hooks": {
     "SessionStart": [
       {

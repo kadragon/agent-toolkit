@@ -99,13 +99,6 @@ Fight entropy. Run between features or on a schedule.
 
 State the question → research/prototype → report options and tradeoffs → **do not commit**. If approved, flows into `plan` or `code`.
 
-## `debate` — Competing Hypotheses (optional, on-demand)
-
-Adversarial multi-agent root-cause investigation. Use ONLY when a first-pass single-agent diagnosis failed on a high-stakes bug. Requires Agent Teams. Full procedure in `dev:harness-curate` → `references/competing-hypotheses-playbook.md`.
-
-Not a default workflow. Most projects invoke it <1×/month.
-
----
 
 ## Permitted Side-Effects
 

@@ -1,169 +1,43 @@
 # Review Consolidation Guide
 
-Detailed procedure for consolidating multi-reviewer feedback (Step 3 of task-review-cycle).
+Step 3 of `task-review-cycle`. Sources tag their findings: `code-review` (the reviewer's
+`code-review` run), `contract` (the reviewer's Sprint Contract grading), and under `--panel`
+`agy` and `codex`.
 
-## Source Attribution
+## Procedure
 
-Three review sources feed Step 3: the Claude reviewer (2-1) tags its findings `code-review` — the only Claude review skill this cycle invokes — Antigravity (2-2) uses `agy`, and Codex (2-3) uses `codex`.
+1. **Deduplicate.** Merge identical issues from several sources into one row listing all sources.
+2. **Re-read the diff** for each finding. Drop it when the flagged line was not changed by this
+   branch, the concern does not apply to the actual pattern, or there is no concrete path to harm.
+3. **Drop low confidence and excluded categories.** Confidence < 50 goes to a collapsed
+   "Low confidence (not actioned)" note, not the table. Also drop: purely theoretical risk
+   (DoS, timing), style a linter owns, missing rate limiting / audit logs / monitoring,
+   third-party vulnerabilities, test-file nits unless the test is wrong, doc gaps in untouched
+   files.
+4. **Conflicts** between sources: prefer the project convention (`AGENTS.md` / `CLAUDE.md`), else
+   the more conservative option; note the disagreement.
+5. **Scope.** In-scope = introduced or made worse by this branch and fixable without widening its
+   purpose. Everything else is out-of-scope; when in doubt, out.
+6. **Gate.** Every in-scope finding is applied before merge, P0 first. A `contract` finding is
+   in-scope P0 by construction and bypasses the confidence filter and `--auto`.
 
-Under `--qa-pending` a fourth source joins them: contract QA (2-4) tags its findings `contract-qa`. It is not a review engine and does not consolidate like one — its **blocking** findings are in-scope P0 by construction and bypass the confidence filter (§ *Confidence Filtering*), the Contest Round (§ 3) and the verifier gate, going straight into the action table. Its non-blocking observations are ordinary findings on the normal path. `--auto` never approves past a blocking `contract-qa` row.
+## Present
 
-When consolidating, preserve the source tags in the table's **Source** column. If multiple reviewers flag the same issue, merge them into one row and list all sources (e.g., `code-review, codex`).
+Table: Priority · Title · Source · Scope (In/Out) · Gate (Apply/Skip) · Recommendation. Then a
+"Reviewers Skipped" line for any source that did not run or return (reason: sentinel, timeout,
+`codex review already running`, `claude CLI unavailable`).
 
-## Consolidation Procedure
+Without `--auto`: stop and wait for the user. With `--auto`: apply all in-scope.
 
-All reviewers use the same P0-P3 priority scheme, making deduplication straightforward.
+## Recording out-of-scope findings
 
-### 1. Deduplicate
-
-Merge identical issues flagged by multiple reviewers into a single entry, listing all sources (e.g., `code-review, codex`).
-
-### 2. Re-verify Against the Diff
-
-This is the step where the orchestrator earns its keep. The delegated reviewers never cross-check each other — a pattern match in one reviewer can be surfaced as a finding without any confirming signal from the others.
-
-Verification has two tiers:
-
-- **P0/P1 candidates → independent verifier agent.** Self-checking your own consolidation absorbs the reviewers' bias; an agent with fresh context and Read/Grep access re-checks each candidate at its file:line, confirms it was introduced by this branch, and returns `confirmed | refuted | uncertain` verdicts with evidence. (Procedure and prompt are in SKILL.md Step 3 — the verifier gate.) Refuted findings go to a "Refuted by verifier" section in the output, not the action table.
-- **P2/P3 candidates → inline re-read.** Re-read the actual diff lines referenced by each merged finding yourself and verify the issue is real in *this* code. A separate agent for nits is not worth the cost.
-
-Drop a finding if:
-- The flagged line was not actually changed by this PR (pre-existing; landed here by file name only)
-- The reviewer's concern doesn't apply to the specific pattern in the code (e.g., flagged "no error handling" on a function that explicitly returns an error value)
-- The concern is theoretical and has no concrete path to harm given the actual call context
-
-Keep findings that survive direct inspection. A finding with a concrete file:line in the diff and a clear mechanism is worth surfacing. A plausible-sounding pattern match without a traceable path is not.
-
-### 3. Contest Round
-
-A bounded, single extra round for borderline-confidence findings — not an iterative convergence loop. An unbounded "iterate until findings stabilize" mechanism was considered and explicitly rejected (cost/latency); this step runs at most once per PR.
-
-**Contestable findings** — a finding enters the contest round if its `confidence` is in the 50–74 band. Below 50 stays auto-dropped in Step 4 — no meaningful signal worth contesting.
-
-(An earlier draft of this trigger also fired on "disputed" findings — flagged by one source but supposedly covered by another. Dropped: no reviewer in this pipeline reports which files it examined, only which files it flagged — see SKILL.md Step 2-1's findings-only JSON contract and the free-form prose agy/Codex emit. Without coverage data, "disputed" could only be evaluated by guessing, which this repo's own agent-integrity rule forbids. The confidence-band trigger alone uses only data the reviewers actually emit.)
-
-Findings already resolved by the P0/P1 verifier gate (Section 2 of this guide) do NOT enter the contest round — the two gates target disjoint severities (P0/P1 vs the 50–74 confidence band) and never compete for the same finding, so they can run in parallel (see SKILL.md Step 3).
-
-**Mechanic — one batched agent call, no loop:**
-- Collect ALL contestable findings from the PR into a single list. If the list is empty, skip the round entirely — do not spawn an agent for zero work.
-- Otherwise spawn exactly one fresh sub-agent for the whole batch (not one agent per finding), using the same `run_in_background: true` pattern as the P0/P1 verifier gate and, like it, no pinned model — inherit the session's model (SKILL.md Step 3).
-- Prompt: give the agent the diff and the full list of contestable findings; ask it to argue for or against each, independent of the original reviewer's framing ("is this a real issue introduced by this diff — yes/no — with file:line evidence"). Fresh eyes, same principle as the P0/P1 verifier.
-- This is a single round. It does not iterate until findings stabilize — do not re-run it, and do not spawn a second contest round even if the agent's verdicts seem uncertain.
-
-**Outcome routing:**
-- `confirmed` → promote into the normal action table alongside other findings, tagged in the Verdict column (e.g. `contest-confirmed`) so the user can see it was upgraded via the contest round.
-- `refuted` → route to a "Refuted by contest round" section in the Step 10 output (mirrors "Refuted by verifier"), visible so the user can override — never silently dropped.
-
-### 4. Drop Low-Confidence and Excluded Findings
-
-Reviewers emit a `confidence` score (0–100) per finding. Findings in the 50–74 band were already routed through the Contest Round (Step 3) — confirmed ones are already in the action table, refuted ones are already in the "Refuted by contest round" section. What's left here is confidence below 50: drop these from the action table — list them in a collapsed "Low confidence (not actioned)" note instead, so the signal isn't silently lost. Also drop findings a reviewer itself hedged as speculative or unconfirmed regardless of score. The reviewer's own hedging is a signal — if it isn't confident, the consolidator shouldn't absorb the uncertainty into the output.
-
-Also drop findings in these excluded categories — surfacing them adds noise without actionable value:
-
-- **Purely theoretical risk** — DoS, timing attacks, resource exhaustion with no practical exploit path in this context
-- **Style owned by a linter** — formatting, naming conventions, import order if a linter config already covers them
-- **Missing rate limiting, audit logs, or monitoring** — absence of defence-in-depth features is a product decision, not a code defect
-- **Third-party library vulnerabilities** — out of scope for a PR review; handle via Dependabot or a separate audit
-- **Issues in test files** unless the test itself is wrong (e.g., a test that asserts nothing)
-- **Documentation gaps in files this PR didn't touch**
-
-These categories exist because every reviewer has a tendency to surface low-confidence, catch-all patterns. Dropping them at consolidation keeps the output focused on what the engineer can and should act on now.
-
-### 5. Resolve Conflicts
-
-When reviewers disagree, prefer the suggestion aligned with project conventions (CLAUDE.md / AGENTS.md). If conventions are silent, prefer the more conservative option and note the disagreement.
-
-### 6. Categorize
-
-Categorize each remaining suggestion: bug fix, performance, readability, style, architecture.
-
-### 7. Discard Convention Conflicts
-
-Remove suggestions that conflict with project conventions.
-
-### 8. Scope Classification
-
-For each remaining suggestion, determine whether it falls within the current PR's scope:
-
-- **In-scope:** Issue was **introduced or made significantly worse** by this PR AND is fixable without expanding the PR's stated purpose.
-- **Out-of-scope:** Issue is pre-existing in code this PR didn't touch, OR requires architectural change beyond this PR's purpose, OR is in an unchanged file.
-
-When in doubt between in-scope and out-of-scope, prefer out-of-scope — keeping PRs focused reduces review churn.
-
-### 9. Apply / Skip Gate
-
-All in-scope findings are applied before merge, regardless of severity. Sort by severity so critical items are addressed first:
-
-- **P0 / P1 (correctness bugs, concrete security risk, broken tests)** — must be resolved before merge. These are findings with a clear, demonstrable path to breakage or exploit.
-- **P2 / P3 (readability, style, minor improvements, low-confidence concerns)** — apply inline along with P0/P1. The reviewer already reviewed this PR's files — fixing while context is live is cheaper than deferring.
-
-### 10. Present to User
-
-Present the consolidated list as a table with:
-- Priority (P0-P3) — rows sorted by severity (P0 first) so critical items are visible at the top
-- Title
-- Source attribution (`code-review` / `agy` / `codex`)
-- Verdict column: `confirmed` / `uncertain` for P0/P1 candidates (from the verifier gate); `contest-confirmed` for any severity upgraded via the Contest Round
-- Scope column (In / Out)
-- Gate column (Apply / Skip) — Apply = in-scope (all severities); Skip = out-of-scope
-- Recommendation (apply / skip with reason)
-
-After the findings table, add:
-- A "Refuted by verifier" section listing P0/P1 candidates the verifier rejected, with its one-line evidence — visible so the user can override a wrong refutation.
-- A "Refuted by contest round" section listing contestable findings (Step 3) the contest round rejected, with its one-line evidence — visible so the user can override a wrong refutation.
-- A "Reviewers Skipped" section listing any of the three sources that was not launched or did not return, with reason (e.g., "trivial diff (all engines, LINE_DELTA ≤ 30)", "claude CLI unavailable",
-  "timeout (>1200s)"). The trivial-diff reason
-  covers all three sources at once — the panel short-circuit gates the whole panel, not one slot.
-  `timeout (>1200s)` means the source spent its whole budget without returning; it is the only
-  reason a *launched* source appears here, because the panel waits out every source that can still
-  return (SKILL.md Step 2 → *Collect every review that can still arrive*). A source that errored or
-  exited `75` is neither — it is recorded under its own reason.
-  **2-4 is never listed here.** Contract QA cannot be skipped or timed out past —
-  a failure or budget breach stops the cycle instead (SKILL.md Step 2 → *2-4: Contract QA*), so its
-  only representations are its findings in the action table and, on a hard stop, the stop report.
-
-**STOP and ask the user for confirmation.** (Skip this step if `--auto` is active and proceed directly to applying all in-scope changes.) The user may approve all, reject some, change scope classifications, or request modifications.
-
-## Recording Backlog Items in backlog.md
-
-After user confirmation, route to `backlog.md`: all out-of-scope findings only.
-
-**Never `tasks.md`.** That file is the current Sprint Contract and is deleted whole at sprint
-close — findings written there are destroyed by the next cleanup pass, and `prune-tasks` refuses
-to run against a `tasks.md` carrying them. `backlog.md` is the only persistent queue.
-
-1. Read the existing `backlog.md` in the project root. It is a harness prerequisite, so it should
-   exist; if it genuinely does not, create it with a `# Backlog` heading.
-2. Append items under a `## Review Backlog` section. Classify each item using harness tags based on its nature.
-
-### Format When a PR Exists
+Append to `backlog.md` (never `tasks.md`) under `## Review Backlog`, one `### PR #N — <title>
+(<date>)` group per cycle (`### <branch> — <commit summary> (<date>)` on the lite or `--no-hub`
+path):
 
 ```markdown
-## Review Backlog
-
-### PR #<PR_NUMBER> — <PR title> (<date>)
-
-- [ ] [debt] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
-- [ ] [doc] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
+- [ ] [debt] <summary> (source: <tag>) — <file:line>
 ```
 
-### Format When `--no-hub` (No PR)
-
-```markdown
-## Review Backlog
-
-### <FEATURE_BRANCH> — <commit summary> (<date>)
-
-- [ ] [debt] <suggestion summary> (source: <skill-id>) — <file:line if applicable>
-```
-
-### Tag Guide
-
-| Tag | Use for |
-|-----|---------|
-| `[debt]` | Code quality, refactoring |
-| `[doc]` | Documentation gaps |
-| `[constraint]` | Missing tests or architectural rules |
-| `[harness]` | Tooling or CI improvements |
-
-Each backlog suggestion becomes a `- [ ]` item for tracking in a future cycle. If a `## Review Backlog` section already exists, append the new PR's items — do not overwrite previous entries.
+Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing test or rule ·
+`[harness]` tooling/CI. Append to an existing section; never overwrite earlier groups.

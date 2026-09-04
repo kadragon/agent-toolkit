@@ -54,12 +54,10 @@ a short inline `TODO:` comment rather than inventing guidance.
 Every subagent/teammate spawn MUST carry all four fields:
 **Objective**, **Output format**, **Tools to use**, **Boundaries**.
 
-Enforced by:
-- `dev:harness-curate` → `references/delegation-template.md` → "Spawn Prompt Contract" (documents it)
-- `dev:harness-curate` → `references/teammate-role-template.md` (each role's body restates it)
-- `references/enforcement-template.md` → `task-created-contract.sh` (blocks at `TaskCreated`)
-
-When this contract changes, update all three places plus any existing `.claude/hooks/task-created-contract.sh` in target repos.
+Stated in `docs/delegation.md` → *Spawn Prompt Contract* (this marketplace) and enforced
+mechanically where a repo installs `references/enforcement-template.md` → `task-created-contract.sh`.
+When this contract changes, update both plus any existing `.claude/hooks/task-created-contract.sh`
+in target repos.
 
 ## Verifier Standing-Checks Floor
 
@@ -95,16 +93,16 @@ contract's Scope has to list them. A repo-root path is *not* exempt from gate 5:
 outside the contract's Scope still fails.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
-same commit. Cited by *Absent-Role Fallbacks* below, which is where `dev:task-new`,
-`dev:task-next` and `dev:task-review-cycle` (its 2-4 slot) reach it.
+same commit. Cited by *Absent-Role Fallbacks* below, which `dev:task-next`'s `--tree` and `--all`
+modes reach for their per-worktree verifiers.
 
 ## Absent-Role Fallbacks
 
-The cycle skills (`dev:task-new`, `dev:task-next`, `dev:task-review-cycle`) spawn `explorer`,
-`implementer` and `qa-verifier` by name. `harness-init` creates **no** agent roles (its Step 4b),
-so a role-less repo is the designed state of a freshly initialized harness, not a defect. This
-section is the canonical fallback for all three roles; the skills point here rather than restating
-it at each spawn point.
+The cycle skills (`dev:task-new`, `dev:task-next`) may spawn `explorer`, `implementer` and —
+in `--tree` / `--all` mode — `qa-verifier` by name. `harness-init` creates **no** agent roles (its
+Step 4b), so a role-less repo is the designed state of a freshly initialized harness, not a defect.
+This section is the canonical fallback for all three roles. On the default path the review cycle's
+single reviewer is the independent check, so no verifier role is spawned at all.
 
 **Roster check — before any agent spawn.** A role exists only if `.claude/agents/{role}.md` or
 `~/.claude/agents/{role}.md` is present. Never stop on an empty roster, and never create the role
@@ -129,10 +127,9 @@ lists the role as an available agent type, treat it as present regardless of the
 fan-out `dev:harness-init` points at for a repo with no roles.
 
 **`implementer` absent:** implement inline on the main thread. The Sprint Contract, the in-scope
-path list and the lint/test command all still apply — only the spawn brief is dropped. QA then
-follows the same rule it always does: whoever implemented does not verify, so the main thread hands
-off to the verifier per the calling skill's QA step. This covers every implementer spawn a cycle
-skill owns.
+path list and the lint/test command all still apply — only the spawn brief is dropped. Whoever
+implemented does not verify: on the default path the review cycle's reviewer grades the diff; in
+`--tree` / `--all` the per-worktree verifier does.
 
 **`qa-verifier` absent:** spawn the built-in `general-purpose` subagent as the verifier instead. The
 brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
@@ -146,8 +143,7 @@ memory.
 
 **Independence is what must not be dropped, not the role name.** The agent that implemented never
 verifies its own output — including the main thread, when the implementer fallback above was taken.
-This holds for every QA spawn a cycle skill owns, batch mode's per-unit verifiers included. Fixes on
-a retry path go to `implementer`, or inline when that role is also absent.
+Fixes on a retry path go to `implementer`, or inline when that role is also absent.
 
 ## Non-Interactive Gate Defaults
 
@@ -155,9 +151,8 @@ The `task-*` gates listed below block on a live user. Unattended runs need a sta
 instead of hanging. A run is unattended when any holds: the skill executes inside a
 subagent/teammate; the turn was fired by `/loop` or a cron/scheduled routine rather than a user
 message; the skill's own invocation carried a non-interactive flag (`--yes`). `task-review-cycle --auto`
-is **not** such a flag — it skips that skill's own Step 3 confirmation and is passed
-unconditionally at handoff by `task-next` and `task-new`, including on fully interactive runs.
-Ambiguity resolves to **interactive** — ask, do not assume.
+is **not** such a flag — it skips that skill's confirmation gate and is passed unconditionally at
+handoff by `task-next` and `task-new`. Ambiguity resolves to **interactive** — ask, do not assume.
 
 **Announcement (mandatory).** Every applied default is announced in one line where it is taken
 (user-facing surface: `무인 실행 — <gate>: <default> 적용`) and repeated in the run's final report /
@@ -169,21 +164,17 @@ return value / PR body. A silently applied default violates this contract.
 |------|---------|-----------|
 | `task-grill` interview | Adopt every question's stated `Recommended:` answer, mark each as an assumption in the four-field summary, and list still-open questions in the handoff | Rule 4 already prescribes this for a non-answering user; the recommendation exists to be the default |
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
-| `task-next` Step 2.5 batch nudge | Decline — no batching | Batching is an overhead optimization, never required for correctness |
-| `task-next` Step 2.5 lite-path offer | Full cycle (`task-review-cycle --auto`) | PR + CI is the reviewable path; unattended direct-to-`main` merge is the riskier branch |
-| `task-next` Step 3 plan-mode approval | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Same gate, same argument as the `task-new` row below — the two must not diverge |
+| Code-cycle plan-mode approval (`task-next` and `task-new`, `cycle.md` → *Plan gate*) | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Review still happens in the review cycle; blocking would make unattended runs useless for anything non-trivial |
 | `task-next --all` A3 unit selection | Take every unit the full scan returned, subject to the A4 cost gate below | The `--all` invocation already asked for all of them; re-prompting adds nothing |
-| `task-new` Step 3 plan-mode approval | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Review still happens at the PR; blocking would make unattended `task-new` useless for anything non-trivial |
-| `task-new` lite-path offer | Full cycle | Identical gate to `task-next` Step 2.5's; same rationale |
 
 **Never auto-default (abort and report instead):** the working-tree gate, the destructive-command
-guard, unresolved blocking QA findings after the one allowed retry, the version-bump level when
-the repo states no release policy, `task-next`'s large-group guard (>8 open items), batch mode's
-A4 cost gate (>6 units), and `task-review`'s CI stops (`reason:"rework-cap"`, `reason:"timeout"`).
+guard, an open contract finding after the reviewer's one retry, the version-bump level when the
+repo states no release policy, `task-next`'s large-group guard (>8 open items), batch mode's A4
+cost gate (>6 units), and the review cycle's CI stops (`reason:"rework-cap"`, `reason:"timeout"`).
 These protect against irreversible or unreviewable outcomes; there is no safe default.
 
-Cited by `dev:task-grill`, `dev:task-next`, `dev:task-new`. When this list changes, update all
-three `SKILL.md` pointers in the same commit.
+Cited by `dev:task-grill` and `task-next/references/cycle.md`. When this list changes, update
+both pointers in the same commit.
 
 ## Sweep Trigger Policy
 
@@ -257,7 +248,7 @@ in a plugin repo it may be a skill's `references/*.md`). No link when no doc hol
 
 | Material | Destination |
 |----------|-------------|
-| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (the write-back `task-review` Step 4.5 already performs via `harness-capture`), then link it from the changelog line |
+| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (the write-back the review cycle performs via `harness-capture`), then link it from the changelog line |
 | Narrative of what was changed and how | **dropped** — `git log` and the PR body already hold it verbatim |
 
 Never create a changelog-detail file. Moving the bloat to a second file that nobody reads is
