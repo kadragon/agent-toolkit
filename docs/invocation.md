@@ -93,8 +93,8 @@ The usual fix when automation must survive the ban is to extract the callable ha
 model-invoked skill and leave the human entry point as a thin wrapper over it. That is what
 `docs/design/invocation-axis.md` → *2. `task-review` split* did: `task-review-cycle` now holds
 the callable workflow, and `task-review` forwards to it. When a call is repointed at an extracted
-half, carry the caller's flags across — all seven skill-to-skill hand-offs (`task-new` ×2,
-`task-next` ×3, batch, tree) pass `args: --auto`, and dropping it would stall an unattended cycle at
+half, carry the caller's flags across — every skill-to-skill hand-off (`task-new`, `task-next`,
+batch, tree) passes `args: --auto`, and dropping it would stall an unattended cycle at
 the confirmation gate. The `task-review` wrapper is the exception by design: it forwards the human's
 own flags verbatim, so a bare `/task-review` passes no `--auto` and the confirmation gate is what the
 human came for. The extracted half also
@@ -124,8 +124,8 @@ Call the Skill tool twice, for "dev:task-spec" and "dev:task-tickets".
 "Call it with X and Y" reads as a single call taking both, which is not a thing the tool does.
 
 This rule governs **operative** instructions only. A read-only pointer at another skill's
-reference file — the `dev:harness-curate → references/delegation-template.md` form used in
-about eighteen places today — invokes nothing and stays as it is. It is also the only form
+reference file — the `dev:harness-init → references/harness-invariants.md` form — invokes
+nothing and stays as it is. It is also the only form
 available when the owning skill is user-invoked, since the invariant forbids calling it.
 
 ## What is not an invocation
@@ -133,9 +133,6 @@ available when the owning skill is user-invoked, since the invariant forbids cal
 Prose that names skills as **labels** — for a human to pick from, or as a string a hook emits
 — invokes nothing, and keeps `/name` or `Skill(name)` spelling as plain text. Known sites:
 
-- `dev/skills/harness-curate/references/trigger-router-template.md`
-- `dev/skills/harness-curate/references/orchestrator-template.md`
-- `dev/skills/harness-init/SKILL.md` — trigger-router section
 - `dev/skills/harness-init/examples/agents-md-example.md`
 
 Three further sites survive the *Notation* migration for a different reason — they mention a
@@ -151,10 +148,9 @@ create a call where none belongs:
 - `dev/skills/harness-init/references/design-rationale.md` — an availability note ("`task-grill`
   is available when the conflicts need real interviewing"), not a step.
 
-These three carry markers. The four router-prose sites above need none: the checker's regex is
+These three carry markers. The router-prose site above needs none: the checker's regex is
 namespace-anchored, so the `Use Skill(X)` form is outside the rule by construction rather than
-by exemption — which is why the marked set is these three plus the one namespaced example in
-`trigger-router-template.md`, not seven.
+by exemption.
 
 **The markers now exist.** `scripts/ci/check_skill_frontmatter.py` enforces the notation rule,
 and each exempt site carries its own marker where the text is — never a path allowlist inside the
@@ -176,10 +172,9 @@ unindented line directly under the key it covers, and covers *only that key* —
 marker can share without leaking into the value the loader reads, but a block-wide exemption
 would let one justified marker launder an unrelated violation under the next key. An
 *indented* `#` line is not a marker at all — YAML folds it into the scalar above, so it
-would leak into the description and exempt itself. Only four
-sites need one today: the
-checker's regex is namespace-anchored, so the router-prose `Use Skill(X)` form is outside the
-rule by construction rather than by exemption.
+would leak into the description and exempt itself. Only the
+three marked sites need one today: the checker's regex is namespace-anchored, so the router-prose
+`Use Skill(X)` form is outside the rule by construction rather than by exemption.
 
 `docs/design/*.md` are historical records of decisions as they were made. They are out of
 scope for every rule on this page — do not rewrite their notation.

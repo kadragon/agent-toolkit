@@ -186,9 +186,8 @@ fires on its own. A file bundled into an existing skill adds neither, whether it
 reference, an example or an eval fixture: it is reachable only through the skill that already
 shipped, so what the consumer gained is a changed skill — the "any shipped asset modified" row.
 Stated as its own row because the absence of one is what makes this look like an addition:
-PR #260 added `harness-curate`'s
-`skill_run_health.py` and shipped `4.7.5 → 4.8.0`, minor, where this table says `4.7.6`. Both the
-orchestrator and the contract verifier read the missing row as license to infer.
+PR #260 added a bundled script to `harness-curate` and shipped `4.7.5 → 4.8.0`, minor, where this
+table says `4.7.6`.
 
 **Why hook removal is a patch, not a major.** Major is reserved for removing or renaming
 something invoked **by name** — a skill, agent, or command a user or another asset calls. That
@@ -216,8 +215,7 @@ one change.
 
 **A skill that ships no `version:` frontmatter stays that way.** `dev:task-review-cycle` is one:
 it is an internal primitive with no standalone entry point, and nothing reads a version off it.
-Do not add the key to satisfy this table — an absent version is a valid state, and
-`record_skill_run.py` records the `unknown` sentinel for exactly this case.
+Do not add the key to satisfy this table — an absent version is a valid state.
 
 Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 

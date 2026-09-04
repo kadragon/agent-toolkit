@@ -272,7 +272,7 @@ if $has_orchestrator || $has_agents; then
     if $has_router && [[ -f ".claude/trigger-routes.json" ]]; then
         pass "Auto-delegation router installed (Step 7b fallback)"
     else
-        info "No UserPromptSubmit trigger router — expected default. Step 7b relies on directive skill/agent descriptions; add the router only if a delegation measurably misfires (dev:harness-curate references/trigger-router-template.md)."
+        info "No UserPromptSubmit trigger router — expected default. Step 7b relies on directive skill/agent descriptions; add the router only if a delegation measurably misfires."
     fi
 fi
 
@@ -358,12 +358,10 @@ if [[ -f "AGENTS.md" ]]; then
 fi
 
 # ── 11. Agent role spine (Step 4b template resync) ─────────
-# Nothing re-runs the role-template spine when dev:harness-curate's teammate-role-template.md
-# changes, so generated role files drift as that template improves. This is the
+# Role files carry a spine (harness-invariants.md → File Layout Invariants). This is the
 # resync report — it never edits a role file.
 #
-# Scope is deliberately narrow. Per teammate-role-template.md → "Common spine vs
-# repo-specific additions", only two layers are template-owned: frontmatter-field
+# Scope is deliberately narrow. Only two layers are template-owned: frontmatter-field
 # presence and presence of the four spine sections. NOT checked, by design:
 #   - section contents (test commands, path globs, thresholds — repo-owned)
 #   - sections a repo adds (## Checks (always run) etc. — intended specialization)
@@ -432,7 +430,7 @@ if $has_agents; then
         fi
 
         if [[ -n "$role_missing" ]]; then
-            warn "$role_file missing:$role_missing — resync against dev:harness-curate references/teammate-role-template.md → Required Body Sections"
+            warn "$role_file missing:$role_missing — resync against harness-invariants.md → File Layout Invariants"
         elif $fm_exempt; then
             pass "$role_file — frontmatter fields present; spine sections waived by spine-exempt: true"
         else

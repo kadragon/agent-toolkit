@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness diet: one reviewer, size-routed merge path, shared code cycle, five-signal curate (dev v4.9.0) (2026-09-04)
 - [done] working-tree gate carries a backlog.md-only edit into the cycle (dev v4.8.3) (2026-09-03)
 - [done] review slot treats its inner code-review findings as the result (dev v4.8.2) (2026-09-02)
 - [done] version-bump table states the row for a bundled script added to an existing skill (2026-09-02) → docs/conventions.md
@@ -91,8 +92,8 @@
 - [done] repo ruff config + _strip_html_comments EOF line-count fix (dev v4.0.19, prod v3.0.3) (2026-07-30)
 - [done] harness-init resolves docs language before writing any artifact (dev v4.0.15) (2026-07-29)
 - [done] task-next fenced-block stripping + task-audit-nudge Codex config_dir (dev v4.0.14) (2026-07-29)
-- [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29) → dev/skills/harness-curate/references/teammate-role-template.md
-- [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29) → dev/skills/harness-curate/references/teammate-role-template.md
+- [done] validate-harness.sh §11: agent role spine resync check (dev v4.0.13) (2026-07-29)
+- [done] PR #169 follow-ups: role fit-descriptions + agy exit fix (dev v4.0.12) (2026-07-29)
 - [done] CHANGELOG entry contract + named-agent result handoff (dev v4.0.10) (2026-07-27) → docs/conventions.md
 - [done] task-review: capture only Codex's final review (dev v4.0.9) (2026-07-27)
 - [done] task-next: ignore HTML-commented markup in backlog candidate scan (dev v4.0.7) (2026-07-27)

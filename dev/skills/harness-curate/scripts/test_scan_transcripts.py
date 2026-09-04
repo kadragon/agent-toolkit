@@ -263,7 +263,7 @@ def _user_tool_result(tool_use_id, content, is_error=False):
 
 
 def test_scan_dir_collects_verifier_failures():
-    """VERIFIER-FAILURES (Signal 8): a failing CI command, a qa-verifier rejection,
+    """VERIFIER-FAILURES (Signal 3): a failing CI command, a qa-verifier rejection,
     and a hook denial are each collected with the right kind label."""
     with tempfile.TemporaryDirectory() as tdir:
         _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
@@ -458,7 +458,7 @@ SUITES = [
         test_scan_codex_files_skips_malformed_lines_without_raising,
     ),
     (
-        "scan_dir: collects verifier failures (Signal 8)",
+        "scan_dir: collects verifier failures (Signal 3)",
         test_scan_dir_collects_verifier_failures,
     ),
     (

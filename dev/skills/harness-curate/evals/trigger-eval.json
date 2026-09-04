@@ -1,8 +1,8 @@
 [
   {"query": "mine session transcripts across my projects and propose or prune harness assets", "should_trigger": true},
-  {"query": "audit my instruction layers for duplicate or conflicting rules", "should_trigger": true},
-  {"query": "check the auto-memory store and promote repo-scoped facts into the owning repo's docs", "should_trigger": true},
   {"query": "which of my skills and hooks are unused? prune them based on transcript evidence", "should_trigger": true},
+  {"query": "which skills keep missing their trigger in this repo — mine the transcripts and fix the descriptions", "should_trigger": true},
+  {"query": "disable the plugins that never fire in this repo", "should_trigger": true},
 
   {"query": "set up AGENTS.md and the docs index for this new repo", "should_trigger": false},
   {"query": "retrospect this conversation and record what we learned", "should_trigger": false},

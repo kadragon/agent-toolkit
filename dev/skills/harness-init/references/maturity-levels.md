@@ -62,7 +62,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 - [ ] Drift detection on push — AGENTS.md checked for size and stale cross-references
 - [ ] Scratchpad convention documented in `docs/runbook.md` (if multi-agent)
 - [ ] Orchestrator skill exists (if multi-agent project)
-- [ ] Harness evolution loop contract in place: editable surface → validation gate → predicted-impact change history (see `references/harness-evolution.md`)
+- [ ] Harness edits route through `dev:harness-curate` with a named acceptance check per edit — never a hand edit of the verifiers (`validate-harness.sh`, CI, hook guards) to make a change pass
 
 **CI / Hook Parity Principle:** Local git hooks must check only a *subset* of what CI validates. If hooks match CI exactly, contributors can bypass CI by disabling hooks. CI is authoritative; hooks are fast-feedback.
 

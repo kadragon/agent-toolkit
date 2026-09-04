@@ -76,7 +76,7 @@ Omit the section if there's nothing external.
 **Boundaries:** {what NOT to touch — modules, files, workflows}
 
 This section mirrors the **Spawn Prompt Contract** from
-`dev:harness-curate` → `references/delegation-template.md` → "Spawn Prompt Contract". A handoff IS a
+`references/harness-invariants.md` → "Spawn Prompt Contract". A handoff IS a
 deferred spawn prompt.
 
 ## Decision Log (optional)

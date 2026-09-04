@@ -55,8 +55,8 @@ It does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.
 
 **Two bounds, so the gate doesn't become noise:**
 
-- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts. Reuse the non-findings list in `dev:harness-curate` → `references/signal-taxonomy.md` §7 rather than re-deriving one.
-- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to `dev:harness-curate`'s Signal 7 — Audit mode points there instead of re-implementing that sweep.
+- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts.
+- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to a `dev:harness-curate` run — Audit mode points there instead of re-implementing that sweep.
 
 ## Docs language (Step 1)
 

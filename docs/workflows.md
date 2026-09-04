@@ -1,6 +1,6 @@
 # Workflows
 
-Six workflows. Pick the primary one per cycle. See `docs/delegation.md` for how to brief a sub-agent once you have decided to delegate.
+Six workflows. Pick the primary one per cycle. The `code` cycle's step-by-step procedure ships with `dev:task-next` (`references/cycle.md`); this page states the contract. See `docs/delegation.md` for how to brief a sub-agent once you have decided to delegate.
 
 ## `plan` — Spec Generation
 
@@ -39,18 +39,15 @@ Implement directly. Delegate to `implementer` (with spec + conventions) only whe
 delegation bar is met — e.g. a backlog batch of independent items.
 
 **Step 4: QA**
-Verify against the Sprint Contract. Run the tests/lint yourself. If you delegate verification,
-it must go to `qa-verifier` — never to the agent that implemented the change.
-
-A cycle that hands off with `--qa-pending` (Step 6) runs this verification *inside* the review
-cycle, as a panel source alongside the review engines, instead of as its own wave here. The
-independence rule is unchanged wherever it runs.
+Run the Sprint Contract's lint/test command yourself. Independent verification happens in the
+review cycle (Step 6): its single reviewer grades the diff against the contract, so the agent that
+implemented never certifies its own work. `--tree` / `--all` verify per worktree with `qa-verifier`.
 
 **Step 5: Version bump**
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name>` (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*, which refuses a call that names no caller. Add `--auto` only if your caller genuinely runs unattended: it skips the Step 3 consolidation confirmation and merges without asking. Add `--qa-pending` when you hand off straight after implement without having run Step 4 — the review cycle then runs contract QA concurrently with the panel, and your invocation must restate the Sprint Contract verbatim for it to grade against. Do NOT inline-manage the review cycle. Its Step 4.5 runs a signal-gated retrospect (`dev:harness-capture`) just before merge, so any durable lesson (memory, or a light `docs/`/`AGENTS.md` delta) rides into this PR instead of stranding on `main`.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by diff size (direct merge under 100 lines, PR + CI otherwise), applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced, so a durable lesson rides into the same commit.
 
 ## `draft` — Documentation
 

@@ -19,11 +19,11 @@ Transcripts also carry machine verdicts the user never typed:
   - failing CI/test Bash commands (tool_result error on a ci-wait/pytest/validate run)
   - qa-verifier rejections (Agent tool_result matching rejection phrasing)
   - hook denials (PreToolUse/permission blocks echoed as tool_result errors)
-These feed the VERIFIER-FAILURES block — Signal 8 (verifier-grounded failure,
+These feed the VERIFIER-FAILURES block — Signal 3 (verifier-grounded failure,
 signal-taxonomy.md §8): the harness improving on machine evidence instead of waiting
 for the user to complain. Best-effort extraction (transcript-format.md: error
 encodings vary) that over-collects by design; the model reads samples and judges
-causal status before routing. Codex-side Signal 8 mining is a DOCUMENTED GAP —
+causal status before routing. Codex-side Signal 3 mining is a DOCUMENTED GAP —
 Codex tool failures live in function_call_output records that are not yet parsed;
 Claude transcripts only for now (deferred, see docs/design/harness-self-improvement-loop.md).
 
@@ -113,7 +113,7 @@ FRICTION_RE = re.compile(
 )
 FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
 
-# ---- Signal 8: verifier-grounded failures (machine verdicts, not user pushback) ----
+# ---- Signal 3: verifier-grounded failures (machine verdicts, not user pushback) ----
 # A Bash tool_use whose command matches CI_COMMAND_RE and whose tool_result errored is
 # a ci-fail; a qa-verifier Agent tool_result matching QA_REJECT_RE is a qa-reject; any
 # errored tool_result matching HOOK_DENY_RE is a hook-deny. All three deliberately
@@ -162,7 +162,7 @@ def encode_project(path):
     `/tmp/foo.bar` and `/tmp/foo-bar` both encode to `-tmp-foo-bar` because Claude collapses them
     too. De-colliding (e.g. appending a path hash) would make every lookup miss its real
     directory — trading a rare theoretical clash for guaranteed total failure. The verbatim twin
-    in session-start/task-audit-nudge.py carries the same note; keep them consistent.
+    in record_run.py relies on the same rule; keep them consistent.
     """
     path = os.path.normcase(os.path.abspath(path))
     return re.sub(r"[/.:\\]", "-", path)
@@ -507,7 +507,7 @@ def scan_dir(tdir, label):
     corrections = []                                # (skill_active, text)
     agent_corrections = []                          # (agent_active, text)
     frictions = []                                  # (text) — harness over-protection complaints
-    verifier_failures = []                          # (kind, detail) — Signal 8 machine verdicts
+    verifier_failures = []                          # (kind, detail) — Signal 3 machine verdicts
     skill_sessions = collections.defaultdict(set)   # skill -> {session files}
     agent_sessions = collections.defaultdict(set)   # subagent_type -> {session files}
     sessions = 0
@@ -592,7 +592,7 @@ def scan_dir(tdir, label):
                     if isinstance(content, list):
                         # tool_result blocks echoed as the user role — never prompt
                         # text (text_of returns ""), but they carry the machine
-                        # verdicts VERIFIER-FAILURES mines (Signal 8).
+                        # verdicts VERIFIER-FAILURES mines (Signal 3).
                         for b in content:
                             if not (isinstance(b, dict) and b.get("type") == "tool_result"):
                                 continue
@@ -728,7 +728,7 @@ def emit(summary):
         show = vf[:VERIFIER_CAP]
         vdropped = len(vf) - len(show)
         print("\nVERIFIER-FAILURES (machine verdicts — ci-fail / qa-reject / hook-deny;"
-              " ≥2 same-cause cluster = Signal 8 candidate. Over-collects: a task-caused"
+              " ≥2 same-cause cluster = Signal 3 candidate. Over-collects: a task-caused"
               " CI failure matches too — read and judge causal status before routing):"
               + (f"  [dropped {vdropped}]" if vdropped else ""))
         for kind, txt in show:

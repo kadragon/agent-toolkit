@@ -34,15 +34,12 @@ No row below is a gate. When the threshold above is met, match the job to the ro
 `qa-verifier` never runs on its own output — whoever implemented must not be the one who verifies.
 That constraint holds whenever a verifier runs; it does not by itself mandate spawning one.
 
-**Why `task-next` always spawns one anyway.** That skill overrides the volume half of the gate
-(10+ files · 3+ units · context flood) for its QA spawns — **every** one it owns, including the
-per-unit verifier each successful unit gets in `--all` batch mode. The same override covers
-`task-review-cycle`'s 2-4 contract-QA slot, which is where the default full-cycle path's QA spawn
-moved; nothing else. What the
-spawn buys is **independence** — a verifier that did not write the code — which is a correctness
-property, not a volume one, so a volume gate cannot measure it: a 1-file fix needs an independent
-check as much as a 20-file one. Every non-QA delegation in that skill still requires both
-conditions.
+**Why the review cycle always spawns one reviewer.** `task-review-cycle` overrides the volume
+half of the gate for exactly one spawn: its reviewer, which runs `code-review` and grades the
+Sprint Contract. What that spawn buys is **independence** — a check by an agent that did not write
+the code — which is a correctness property, not a volume one: a 1-file fix needs it as much as a
+20-file one. `task-next --tree` / `--all` keep a per-worktree `qa-verifier` for the same reason.
+Every other delegation still requires both conditions.
 
 ## Background Routing (non-blocking)
 
