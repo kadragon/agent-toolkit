@@ -1,0 +1,69 @@
+# Late Review-Source Reclaim
+
+A panel source that breaches its 1200s wait is recorded as skipped and the cycle proceeds — but
+the process does not stop, and its findings can still be real. This is the step that collects
+them before the merge closes the window.
+
+## Why the breach is structural, not a tail
+
+`agy-review.sh` caps itself (`--print-timeout 15m`) so it fails reportably under the
+orchestrator's wait. `codex-review.sh` has no internal deadline: its only bound is the caller's
+1200s `run_in_background` wait, which stops the *cycle* listening but never stops the *run*. So a
+late codex return is the expected shape, not an anomaly — three consecutive cycles (PR #260, #263,
+#264) breached, and #260's late output named two real defects that had to land in a follow-up PR
+after the merge. Do not "fix" this by killing the run at a deadline: that discards exactly the
+findings this step exists to recover.
+
+## Where a late result lands
+
+`codex-review.sh` persists every finished run under `CODEX_REVIEW_RESULT_DIR`, defaulting to
+`$(git rev-parse --absolute-git-dir)/codex-review` — inside the git dir, so per-worktree, never
+tracked. Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`.
+
+| File | Meaning |
+|------|---------|
+| `<key>.pending` | the run has not finished; carries `pid=` (this bash process — probe with `kill -0`, never `tasklist`) |
+| `<key>.review.txt` | the full, untruncated review text (stdout may have been head/tail truncated) |
+| `<key>.meta` | written last, so its presence means the review file beside it is complete |
+
+`.meta` fields: `pid`, `started_at`, `mode`, `base`, `head_sha`, `status`, `exit_code`,
+`finished_at`, `elapsed_seconds`, `review_file`. `status` is `ok` (a review was produced),
+`failed` (the companion exited non-zero) or `empty` (it ran but produced no extractable review).
+
+`timings.log` in the same directory gets one line per run —
+`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<key>`. It is the
+evidence for any future argument about the cap: elapsed alone cannot separate "the companion is
+reliably slower than 1200s" from "that diff was unusual", so diff size is recorded beside it.
+Change the cap against this log, not against a single cycle's impression.
+
+## Pre-merge reclaim
+
+Run this **immediately before the merge command**, for every source recorded as
+`Reviewers Skipped` this cycle. On the hub path that means *after* `ci-wait.sh` returns green —
+the CI wait is free runway for a slow companion, so reclaiming earlier throws it away.
+
+```bash
+RESULT_DIR="${CODEX_REVIEW_RESULT_DIR:-$(git rev-parse --absolute-git-dir)/codex-review}"
+KEY=$(git rev-parse --abbrev-ref HEAD | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g')
+cat "$RESULT_DIR/$KEY.meta" 2>/dev/null || cat "$RESULT_DIR/$KEY.pending" 2>/dev/null || echo "no result"
+```
+
+| State | Action |
+|-------|--------|
+| `.meta` with `status=ok` and a non-empty `review_file` | Read the review file. Put its findings through `references/consolidation-guide.md` and Step 4 apply, exactly as an in-time source. A resulting change commits via `commit-and-push.sh`; on the hub path that re-enters CI — wait for it green again, and say in the report that the reclaim cost an extra CI round. |
+| `.pending` only, `pid` alive under `kill -0` | The source is still running. Merge, and report the `.meta` path the user can read when it lands. |
+| `.pending` only, `pid` dead | The run died without a result. Nothing to reclaim; the `Reviewers Skipped` line stands. |
+| `.meta` with `status=failed` or `empty`, or no files at all | Nothing to reclaim; the `Reviewers Skipped` line stands. |
+
+`head_sha` in the meta is the commit the late review actually read. When it does not match the
+branch's current HEAD — a fix round landed after the source was launched — the findings may
+already be closed; re-read the diff before applying, per the consolidation guide's step 2.
+
+## Post-merge arrival
+
+A result that surfaces after the merge is **reported, never auto-filed**. Name the `.meta` and
+`.review.txt` paths and the branch they reviewed, and let the user route it.
+
+Do not append it to `## Review Backlog` automatically. The branch is merged, so the findings are
+unverified against current `main`, and PR #263 is the recorded case where every late finding had
+already been closed by the fix round — auto-filing would have queued two dead items.

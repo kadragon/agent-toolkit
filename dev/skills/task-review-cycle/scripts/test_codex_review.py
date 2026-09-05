@@ -634,6 +634,148 @@ def case_malformed_state_is_survivable(tmp: Path, _live: int):
     check("script still reached the companion launch", "companion" in proc.stderr.lower(), proc.stderr)
 
 
+# --- durable result sidecar --------------------------------------------------
+#
+# Why these exist: the caller waits a bounded 1200s for this script, but nothing stops the run when
+# that wait expires — measured across PR #260, #263 and #264, every codex run breached it, and
+# #260's late output carried two real defects that had to land in a follow-up PR after the merge.
+# The sidecar is what makes a late result reclaimable at all, so its ordering guarantees (meta last,
+# pending carries a probe-able pid) are load-bearing and tested here rather than assumed.
+
+
+def make_review_repo(tmp: Path, name: str, branch: str = "feat/x") -> Path:
+    """A git repo with a real commit and a named branch — the sidecar keys on the branch name."""
+    repo = make_repo(tmp, name)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                    "--allow-empty", "-m", "[TEST] base"], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "-qb", branch], cwd=repo, check=True)
+    return repo
+
+
+def run_with_sidecar(repo: Path, tmp: Path, companion: Path, result_dir: Path, **env):
+    return run(repo, tmp, companion=bash_path(companion),
+               CODEX_REVIEW_RESULT_DIR=bash_path(result_dir), **env)
+
+
+def ok_companion(tmp: Path, name: str, text: str) -> Path:
+    script = tmp / f"{name}.mjs"
+    script.write_text(
+        f"process.stdout.write(JSON.stringify({{codex: {{status: 0, stdout: {json.dumps(text)}}}}}));\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+def meta_fields(path: Path) -> dict:
+    return dict(
+        line.split("=", 1)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+
+
+def case_sidecar_written_on_success(tmp: Path, _live: int):
+    print("\nsidecar on a successful review")
+    repo = make_review_repo(tmp, "wssidecar")
+    results = tmp / "results-ok"
+    proc = run_with_sidecar(repo, tmp, ok_companion(tmp, "comp-ok", "P1 boom\nfile.py:3\n"), results)
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    meta = results / "feat-x.meta"
+    review = results / "feat-x.review.txt"
+    check("meta written", meta.exists(), str(sorted(p.name for p in results.iterdir())))
+    check("review text written", review.exists() and "P1 boom" in review.read_text(encoding="utf-8"))
+    check("pending removed", not (results / "feat-x.pending").exists())
+    fields = meta_fields(meta) if meta.exists() else {}
+    check("status=ok", fields.get("status") == "ok", str(fields))
+    check("exit_code=0", fields.get("exit_code") == "0", str(fields))
+    check("elapsed_seconds numeric", fields.get("elapsed_seconds", "").isdigit(), str(fields))
+    check("review_file points at the review", fields.get("review_file", "").endswith("feat-x.review.txt"), str(fields))
+    check("base recorded", fields.get("base") == "main", str(fields))
+    log = (results / "timings.log")
+    check("timings line appended", log.exists() and "status=ok" in log.read_text(encoding="utf-8"),
+          log.read_text(encoding="utf-8") if log.exists() else "no log")
+
+
+def case_pending_visible_while_running(tmp: Path, _live: int):
+    """`.pending` must exist *before* the companion runs, or a reclaim cannot tell running from dead."""
+    print("\npending marker during the run")
+    repo = make_review_repo(tmp, "wspending")
+    results = tmp / "results-pending"
+    results.mkdir()
+    # The stub reports what it saw on disk at companion time, so the assertion is about ordering,
+    # not about a file that merely exists by the end of the run.
+    script = tmp / "comp-pending.mjs"
+    script.write_text(
+        "import fs from 'node:fs';\n"
+        f"const pending = {json.dumps(str(results / 'feat-x.pending'))};\n"
+        "const seen = fs.existsSync(pending) ? fs.readFileSync(pending, 'utf8') : 'ABSENT';\n"
+        "process.stdout.write(JSON.stringify({codex: {status: 0, stdout: 'saw:' + seen}}));\n",
+        encoding="utf-8",
+    )
+    proc = run_with_sidecar(repo, tmp, script, results)
+    review = (results / "feat-x.review.txt").read_text(encoding="utf-8") if (results / "feat-x.review.txt").exists() else ""
+    check("pending existed during the run", "ABSENT" not in review and "saw:" in review, review[:200] or proc.stderr)
+    check("pending carried the owning pid", "pid=" in review, review[:200])
+    check("pending gone after the run", not (results / "feat-x.pending").exists())
+
+
+def case_sidecar_records_failure(tmp: Path, _live: int):
+    print("\nsidecar on a failed review")
+    repo = make_review_repo(tmp, "wsfail")
+    results = tmp / "results-fail"
+    script = tmp / "comp-fail.mjs"
+    script.write_text("process.stdout.write('boom');\nprocess.exit(4);\n", encoding="utf-8")
+    proc = run_with_sidecar(repo, tmp, script, results)
+    check("exit propagated", proc.returncode == 4, f"rc={proc.returncode}")
+    fields = meta_fields(results / "feat-x.meta") if (results / "feat-x.meta").exists() else {}
+    check("status=failed", fields.get("status") == "failed", str(fields))
+    check("exit_code recorded", fields.get("exit_code") == "4", str(fields))
+    check("no review file claimed", fields.get("review_file") == "", str(fields))
+    check("no stale pending", not (results / "feat-x.pending").exists())
+
+
+def case_sidecar_holds_untruncated_text(tmp: Path, _live: int):
+    """stdout is head+tail truncated past the cap; the sidecar is the copy that stays whole."""
+    print("\noversized review")
+    repo = make_review_repo(tmp, "wsbig")
+    results = tmp / "results-big"
+    body = "x" * 300 + "\nMIDDLE-MARKER\n" + "y" * 300
+    proc = run_with_sidecar(repo, tmp, ok_companion(tmp, "comp-big", body), results,
+                            CODEX_REVIEW_MAX_BYTES=200)
+    check("stdout truncated", "truncated by codex-review.sh" in proc.stdout, proc.stdout[:200])
+    full = (results / "feat-x.review.txt").read_text(encoding="utf-8")
+    check("sidecar holds the whole text", "MIDDLE-MARKER" in full and len(full) > 600, str(len(full)))
+    check("truncation notice names the sidecar", "feat-x.review.txt" in proc.stdout + proc.stderr,
+          proc.stderr[-300:])
+
+
+def case_sidecar_clears_previous_run(tmp: Path, _live: int):
+    """A previous run's result on the same branch must not read as this run's."""
+    print("\nstale sidecar from an earlier run")
+    repo = make_review_repo(tmp, "wsstale")
+    results = tmp / "results-stale"
+    results.mkdir()
+    (results / "feat-x.meta").write_text("status=ok\nreview_file=old\n", encoding="utf-8")
+    (results / "feat-x.review.txt").write_text("STALE REVIEW", encoding="utf-8")
+    script = tmp / "comp-stale.mjs"
+    script.write_text("process.stdout.write('boom');\nprocess.exit(4);\n", encoding="utf-8")
+    run_with_sidecar(repo, tmp, script, results)
+    fields = meta_fields(results / "feat-x.meta")
+    check("stale ok status replaced", fields.get("status") == "failed", str(fields))
+    check("stale review text removed", not (results / "feat-x.review.txt").exists())
+
+
+def case_unwritable_result_dir_is_not_fatal(tmp: Path, _live: int):
+    print("\nunusable result dir")
+    repo = make_review_repo(tmp, "wsnodir")
+    blocker = tmp / "not-a-dir"
+    blocker.write_text("", encoding="utf-8")
+    proc = run_with_sidecar(repo, tmp, ok_companion(tmp, "comp-nodir", "P2 fine\n"), blocker / "sub")
+    check("review still emitted", "P2 fine" in proc.stdout, proc.stdout[:200])
+    check("exit 0", proc.returncode == 0, f"rc={proc.returncode}")
+    check("warned about the missing sidecar", "will not be persisted" in proc.stderr, proc.stderr[-300:])
+
+
 def main():
     if not shutil.which("jq"):
         print("jq is required for these tests", file=sys.stderr)
@@ -659,6 +801,12 @@ def main():
             case_unparseable_payload_retries_then_fails,
             case_lock,
             case_malformed_state_is_survivable,
+            case_sidecar_written_on_success,
+            case_pending_visible_while_running,
+            case_sidecar_records_failure,
+            case_sidecar_holds_untruncated_text,
+            case_sidecar_clears_previous_run,
+            case_unwritable_result_dir_is_not_fatal,
         ):
             case(tmp, shell.pid)
     failed = _results.count(False)

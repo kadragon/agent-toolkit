@@ -27,6 +27,13 @@ DIAG_TAIL_LINES=40
 # its whole reasoning trace on one physical line, so a line-only tail can still emit ~150 KB.
 DIAG_TAIL_BYTES=2000
 
+# Seconds the orchestrator waits for this script (task-review-cycle SKILL.md, Step 2). Nothing
+# here kills a run that passes it — a late review still carries real findings, and the sidecar
+# below is what makes it recoverable. Crossing the cap is *recorded* so the cap can eventually be
+# re-decided on measurements instead of anecdote.
+CAP_SECS="${CODEX_REVIEW_CAP_SECS:-1200}"
+START_EPOCH=$(date +%s 2>/dev/null || printf '0')
+
 # One private directory per run holds the captured transcript and every diagnostic sidecar.
 # `mktemp -d` is 0700, so the payloads — which carry repo content and reasoning traces — are
 # never left world-readable in a shared /tmp the way plain redirection under umask 022 would.
@@ -420,6 +427,140 @@ emit_blob_tail() {
   printf '\n' >&2
 }
 
+# --- durable result sidecar --------------------------------------------------
+#
+# The caller runs this script as a background task with a bounded wait. When the wait is over the
+# *cycle* stops listening, but the process keeps going — so without this, a review that lands late
+# exists only on a stream nobody reads any more, and the run dir it could have been read from is
+# already `rm -rf`'d. Every finished run therefore leaves its result on disk, where the cycle's
+# pre-merge reclaim (`references/late-source-reclaim.md`) can pick it up.
+#
+# Three plain-text files per branch, no JSON: nothing here should depend on jq being present, and
+# review text needs no escaping when it is the whole of its own file.
+#   <key>.pending     written before the companion launches; carries the owning pid
+#   <key>.review.txt  the full, untruncated review — this script's stdout may be truncated
+#   <key>.meta        written last, and therefore the marker that the other two are complete
+RESULT_DIR=""
+RESULT_KEY=""
+PENDING_FILE=""
+REVIEW_FILE=""
+META_FILE=""
+HEAD_SHA=""
+
+# Same character class as workspace_slug: a branch name carries `/` and may carry worse.
+sanitize_key() {
+  printf '%s' "$1" | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//'
+}
+
+# Never fatal, in every direction: a review that cannot be persisted is still a review worth
+# emitting, so every failure here warns, clears RESULT_DIR, and returns 0. An empty RESULT_DIR is
+# the single flag the rest of the sidecar checks.
+init_result_dir() {
+  local dir branch
+  HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+  if [ -n "${CODEX_REVIEW_RESULT_DIR:-}" ]; then
+    dir="$CODEX_REVIEW_RESULT_DIR"
+  else
+    # --absolute-git-dir, not --show-toplevel/.git: in a linked worktree the git dir is
+    # `.git/worktrees/<name>`, which is exactly the per-worktree isolation we want, and it is
+    # never a tracked path so no .gitignore question arises.
+    dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || {
+      printf 'WARN: not a git repository — this review will not be persisted for a late reclaim\n' >&2
+      return 0
+    }
+    dir="$dir/codex-review"
+  fi
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    printf 'WARN: cannot create the result dir %s — this review will not be persisted for a late reclaim\n' "$dir" >&2
+    return 0
+  fi
+  # mkdir -p succeeds on an existing read-only directory, so writability is probed, not assumed.
+  if ! : >"$dir/.probe.$$" 2>/dev/null; then
+    printf 'WARN: result dir %s is not writable — this review will not be persisted for a late reclaim\n' "$dir" >&2
+    return 0
+  fi
+  rm -f "$dir/.probe.$$" 2>/dev/null || true
+
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'detached')
+  RESULT_KEY=$(sanitize_key "${branch:-detached}")
+  [ -n "$RESULT_KEY" ] || RESULT_KEY="detached"
+  RESULT_DIR="$dir"
+  PENDING_FILE="$RESULT_DIR/$RESULT_KEY.pending"
+  REVIEW_FILE="$RESULT_DIR/$RESULT_KEY.review.txt"
+  META_FILE="$RESULT_DIR/$RESULT_KEY.meta"
+  # Clear this key's previous trio first: a stale `.meta` from the last run on this branch would
+  # otherwise read as *this* run's result to a reclaim that arrives before this one finishes.
+  rm -f "$PENDING_FILE" "$REVIEW_FILE" "$META_FILE" 2>/dev/null || true
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'started_at=%s\n' "$START_EPOCH"
+    printf 'mode=%s\n' "$CODEX_MODE"
+    printf 'base=%s\n' "$BASE_BRANCH"
+    printf 'head_sha=%s\n' "$HEAD_SHA"
+  } >"$PENDING_FILE" 2>/dev/null || {
+    printf 'WARN: could not write %s — this review will not be persisted for a late reclaim\n' "$PENDING_FILE" >&2
+    RESULT_DIR=""
+  }
+  return 0
+}
+
+# One line per finished run, appended and never rotated by this script. Elapsed alone cannot answer
+# "is the companion reliably slower than the cap, or is this diff unusual?" — diff size is the
+# other half, so both are recorded together and the next cap decision has data behind it.
+append_timing() {
+  local status="$1" elapsed="$2" shortstat ins del files lines ts
+  [ -n "$RESULT_DIR" ] || return 0
+  shortstat=$(git diff --shortstat "$BASE_BRANCH"...HEAD 2>/dev/null || printf '')
+  files=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} file' | grep -o '[0-9]\{1,\}' || true)
+  ins=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} insertion' | grep -o '[0-9]\{1,\}' || true)
+  del=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} deletion' | grep -o '[0-9]\{1,\}' || true)
+  lines=$(( ${ins:-0} + ${del:-0} ))
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')
+  printf '%s elapsed=%ss mode=%s status=%s files=%s lines=%s branch=%s\n' \
+    "$ts" "$elapsed" "$CODEX_MODE" "$status" "${files:-0}" "$lines" "$RESULT_KEY" \
+    >>"$RESULT_DIR/timings.log" 2>/dev/null || true
+  return 0
+}
+
+# Finish the sidecar: review text first, meta second, pending removed last. That order is the
+# atomicity — a reader that sees `.meta` is guaranteed the review file beside it is whole, and a
+# reader that sees only `.pending` knows the run has not finished (probe its pid with `kill -0`;
+# it is this bash process, so on MINGW it is an MSYS pid tasklist cannot see).
+publish_result() {
+  local status="$1" exit_code="$2" text="${3-}" now elapsed tmp
+  [ -n "$RESULT_DIR" ] || return 0
+  now=$(date +%s 2>/dev/null || printf '0')
+  elapsed=$((now - START_EPOCH))
+  tmp="$RUN_DIR/sidecar.tmp"
+  if [ -n "$text" ]; then
+    if ! { printf '%s\n' "$text" >"$tmp" 2>/dev/null && mv -f "$tmp" "$REVIEW_FILE" 2>/dev/null; }; then
+      printf 'WARN: could not persist the review text to %s\n' "$REVIEW_FILE" >&2
+      REVIEW_FILE=""
+    fi
+  else
+    REVIEW_FILE=""
+  fi
+  if {
+    cat "$PENDING_FILE" 2>/dev/null || true
+    printf 'status=%s\n' "$status"
+    printf 'exit_code=%s\n' "$exit_code"
+    printf 'finished_at=%s\n' "$now"
+    printf 'elapsed_seconds=%s\n' "$elapsed"
+    printf 'review_file=%s\n' "$REVIEW_FILE"
+  } >"$tmp" 2>/dev/null && mv -f "$tmp" "$META_FILE" 2>/dev/null; then
+    :
+  else
+    printf 'WARN: could not write the result meta %s\n' "$META_FILE" >&2
+  fi
+  rm -f "$PENDING_FILE" 2>/dev/null || true
+  append_timing "$status" "$elapsed"
+  if [ "$elapsed" -gt "$CAP_SECS" ]; then
+    printf 'WARN: codex review took %ss, past the %ss orchestrator wait — the result is preserved at %s for the pre-merge reclaim\n' \
+      "$elapsed" "$CAP_SECS" "$META_FILE" >&2
+  fi
+  return 0
+}
+
 emit_review() {
   local text="$1"
   local size
@@ -428,9 +569,15 @@ emit_review() {
     printf '%s\n' "$text"
     return
   fi
+  # publish_result already wrote the whole text there, and unlike the run dir it outlives this
+  # process — which is the copy a reader following the truncation notice actually needs.
   local full="$RUN_DIR/review.txt"
-  KEEP_RUN_DIR=1
-  printf '%s\n' "$text" >"$full"
+  if [ -n "$REVIEW_FILE" ] && [ -f "$REVIEW_FILE" ]; then
+    full="$REVIEW_FILE"
+  else
+    KEEP_RUN_DIR=1
+    printf '%s\n' "$text" >"$full"
+  fi
   printf 'WARN: review text is %s bytes (> %s); emitting head+tail. Full text: %s\n' \
     "$size" "$MAX_REVIEW_BYTES" "$full" >&2
   head -c $((MAX_REVIEW_BYTES / 2)) "$full"
@@ -449,6 +596,9 @@ case "$CODEX_MODE" in
     # load-mutate-write — so a background codex job completing mid-prune can still interleave. The
     # PID check is what keeps each individual removal safe; the lock only narrows the window.
     acquire_workspace_lock || exit "$EX_LOCKED"
+    # After the lock, never before: a run that exits 75 never started, and writing the sidecar
+    # first would clobber the holder's in-flight `.pending` with a result that is not its own.
+    init_result_dir
     prune_stale_codex_state
     # --json disables the companion's live reasoning stream (stderr) and the reasoning section
     # appended to the rendered text. stdout becomes a single JSON object whose .codex.stdout
@@ -468,6 +618,7 @@ case "$CODEX_MODE" in
         [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
         # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
         [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
+        publish_result "failed" "$codex_status"
         exit "$codex_status"
       fi
       # Extract `.codex.stdout` and nothing else. jq is the workflow-wide requirement
@@ -538,25 +689,31 @@ case "$CODEX_MODE" in
       # Point at the log only when it holds something; emit_log_tail is what pins the run dir.
       [ -s "$LOG_FILE" ] && emit_log_tail "$LOG_FILE" "companion stderr"
 
+      publish_result "empty" 1
       exit 1
     done
+    publish_result "ok" 0 "$TEXT"
     emit_review "$TEXT"
     ;;
   cli)
     # `codex review` prints the final review on stdout and streams the entire session
     # transcript on stderr. Redirect stderr to the log so only the review reaches the caller.
     codex_status=0
+    init_result_dir
     TEXT=$(codex review --base "$BASE_BRANCH" 2>"$LOG_FILE") || codex_status=$?
     if [ "$codex_status" -ne 0 ]; then
       printf 'WARN: codex review exited %s\n' "$codex_status" >&2
       emit_log_tail "$LOG_FILE" "codex CLI transcript"
+      publish_result "failed" "$codex_status"
       exit "$codex_status"
     fi
     if [ -z "$TEXT" ]; then
       printf 'ERROR: codex review produced no review text on stdout\n' >&2
       emit_log_tail "$LOG_FILE" "codex CLI transcript"
+      publish_result "empty" 1
       exit 1
     fi
+    publish_result "ok" 0 "$TEXT"
     emit_review "$TEXT"
     ;;
   *)
