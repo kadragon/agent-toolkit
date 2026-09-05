@@ -62,8 +62,8 @@ to the main checkout on every call; a standalone `cd` has no persistent effect):
 > or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
 > If the same fix is attempted 3+ times on the same file without the lint/test command
 > passing, stop and report to the user instead of continuing to retry.
-> When you finish (or get stuck), deliver your result via SendMessage(to: 'main') — do not end
-> silently, even if the result is empty or the run failed — a silent finish loses the result."
+> When you finish (or get stuck), put your full result in your final response — never finish
+> silently, even when the result is empty or the run failed; a silent finish loses the result."
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
@@ -72,8 +72,9 @@ The agent works entirely inside the worktree — it must NOT touch `plugin.json`
 against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
 must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
 worktree; the same destructive-command guard applies — QA must not run
-`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. One fix-and-re-verify retry. Same result-handoff instruction too: tell it to deliver its
-verdict via SendMessage(to: 'main'), including an empty/no-blocking-findings verdict.
+`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. One fix-and-re-verify retry. Same
+result-handoff instruction too: tell it to put its verdict in its final response, including an
+empty/no-blocking-findings verdict (`docs/delegation.md` → *Result handoff*).
 
 **If QA fails after one retry:** clean up and stop.
 ```bash
