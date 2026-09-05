@@ -85,8 +85,7 @@ Then the brief continues:
    command per `cycle.md` → *Sprint Contract*; one acceptance checkbox per bundled item) as part of the
    agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
 3. **Commit the code to `wt/<slug>`** (e.g. `[WIP] <unit>`), leaving a clean tree. Return the
-   worktree path, branch, the Sprint Contract, and a change summary — in its final response, per
-   the instruction above.
+   worktree path, branch, the Sprint Contract, and a change summary in its final response.
 
 The agent must NOT verify its own output. If an agent fails or returns unusable output, drop
 that unit: `git worktree remove --force .worktrees/<slug>` and `git branch -D wt/<slug>`, then
@@ -101,8 +100,8 @@ begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths 
 worktree; the same destructive-command guard applies — QA must not run
 `git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Same result-handoff
 instruction too: tell each QA agent to put its verdict in its final response, including an
-empty/no-blocking-findings verdict (`docs/delegation.md` → *Result handoff*). Fan out all QA
-agents in one message.
+empty/no-blocking-findings verdict (`docs/delegation.md`). Fan out all QA agents in one
+message.
 
 For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
 unit (all retries in one message — they are independent; do not serialize). Still blocking after

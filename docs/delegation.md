@@ -93,9 +93,9 @@ The orchestrator determines its scratchpad path once (from its own system prompt
 ## Result handoff
 
 A role-file agent (`.claude/agents/*.md`) runs under its `tools:` allowlist, and none of those
-lists grants `SendMessage`. It reports through its **final output**, which reaches the orchestrator
-as the task notification — brief it to put the full result in its final response and never finish
-silently, even when the result is empty or the run failed. Brief `SendMessage(to: "main")` only to a
-spawn that actually has the tool: a bare `Agent` with no `subagent_type` (the review cycle's
-reviewer) or a named teammate. Never brief a tool the role's `tools:` line does not grant — the
-instruction is inert and reads as a live requirement.
+lists grants `SendMessage` — as a subagent or as a named teammate. It reports through its **final
+output**, which reaches the orchestrator as the Agent tool result (the completion notification for
+a background spawn) — brief it to put the full result in its final response and never finish
+silently, even when the result is empty or the run failed. Brief `SendMessage(to: "main")` only to
+a spawn whose tools actually include it: a bare `Agent` with no `subagent_type` (the review cycle's
+reviewer); never to a role-file agent.

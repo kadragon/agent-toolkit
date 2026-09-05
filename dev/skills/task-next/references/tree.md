@@ -74,7 +74,7 @@ must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute p
 worktree; the same destructive-command guard applies — QA must not run
 `git reset --hard`/`push --force`/`clean -f`/`branch -D` either. One fix-and-re-verify retry. Same
 result-handoff instruction too: tell it to put its verdict in its final response, including an
-empty/no-blocking-findings verdict (`docs/delegation.md` → *Result handoff*).
+empty/no-blocking-findings verdict (`docs/delegation.md`).
 
 **If QA fails after one retry:** clean up and stop.
 ```bash
