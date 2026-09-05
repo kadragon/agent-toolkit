@@ -167,7 +167,7 @@ elif [ "$codex_status" -ne 0 ]; then
 fi
 ```
 
-Wait for every launched source before Step 3.
+Wait for every launched source before Step 3. A breached codex source leaves its result on disk — `references/late-source-reclaim.md` reclaims it before merge; no other source persists one.
 
 ## Step 3: Consolidate and confirm
 
@@ -208,7 +208,7 @@ Skip when Step 4 changed nothing. `--no-hub`: report and end here.
 
 ## Step 6: Merge
 
-**Lite path** — merge locally, push `main`:
+**Lite path** — reclaim a skipped codex source (`references/late-source-reclaim.md`), then merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -223,7 +223,7 @@ continue on the hub path from Step 1's PR block. Report: "라이트 패스 완�
 푸시됨. PR·CI 없음."
 
 **Hub path** — follow `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>`
-(15 min; `reason:"rework-cap"` and `reason:"timeout"` stop and ask), then:
+(15 min; `reason:"rework-cap"` and `reason:"timeout"` stop and ask), then reclaim a skipped codex source after CI green (`references/late-source-reclaim.md`), then:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -238,8 +238,8 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel or >1200s | Inline review, note it in the report |
-| Panel source fails, exits 75, or >1200s | Record `Reviewers Skipped: <reason>`, proceed |
+| Reviewer sentinel or >1200s | Inline review, note it in the report (this slot persists nothing) |
+| Panel source fails, exits 75, or >1200s | Record `Reviewers Skipped: <reason>`, proceed; codex breach or failure → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` | Stop, ask the user |
 | Merge fails (`merge_ok: false`) | Report; never force-delete |

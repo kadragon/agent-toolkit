@@ -18,7 +18,26 @@ Re-filing requires evidence of the specific kind each item failed on, not a rest
 - **Semantic same-fix detector (edge #8, C2)** — failed Decidable. Re-file only with a deterministic predicate (an exact rule over files/exit codes) that does not require judging whether two attempts are "the same fix".
 - **Edges #9, #11, #12** — scored 1.5/3, 0.5/3, 1/3 individually. #9 (assert `tasks.md` has a `status: active` block) was only ever viable as ~3 lines riding inside the edge #6 hook; with #6 cut it has no carrier and does not stand alone at 1.5/3. All three need a recorded failure that escaped the session.
 
+## Harness — spawn briefs require a SendMessage the role files do not grant
+
+`task-review-cycle`'s *Result-handoff rule* requires every spawned agent to report via
+`SendMessage(to: "main")`, and every QA brief this session carried that instruction. But
+`.claude/agents/qa-verifier.md` declares `tools: Read, Grep, Glob, Bash` — no `SendMessage` — and
+so do `explorer`, `implementer` and `skill-evaluator`. Two verifiers this session said so in their
+own words ("No `SendMessage` tool is exposed to me in this session — only Read/Bash") and fell back
+to their final report, which the task notification delivered anyway.
+
+So the instruction is inert for every role in `.claude/agents/`: it neither helps (the result
+arrives regardless) nor fails loudly (nothing checks). It reads as a live requirement while being
+unenforceable, which is the shape a rule should not have.
+
+- [ ] [HARNESS] Reconcile the *Result-handoff rule* with the role roster — either add `SendMessage` to the `tools:` of the roles the review cycle spawns, or scope the rule to spawns that actually have the tool (a bare `Agent` with no `subagent_type` does) and say plainly that a role-file agent reports through its final output
+
 ## Review Backlog
+
+### PR #266 — review sidecar follow-ups
+
+- [ ] [FIX] Make `ci-wait.sh` distinguish "this PR has no CI configured" from "checks have not registered yet" — recorded in PR #266: called immediately after a push, it returned `{"passed": true, "reason": "no CI checks found"}` while GitHub Actions run 33941974204 was starting for that exact commit, and 14 checks then ran. A merge driven by that answer would have merged before CI existed. Needs a grace window (poll for a check set to appear before concluding none exists) or a distinct non-passing reason the caller must resolve
 
 ### PR #258 — skill-run sink lock follow-ups
 
