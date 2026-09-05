@@ -52,7 +52,8 @@ says to write `tasks.md` (it does so only when a `## Covers` deletion list is ne
 Inline by default. Delegate to `implementer` only past the global gate — 10+ files or 3+
 independent units (`docs/delegation.md`) — with a brief carrying the contract, absolute paths of
 every in-scope file, and the lint/test command; the implementer never verifies its own output,
-and reports back via `SendMessage(to: "main")` when launched in the background. Rules either way:
+and reports through its final output, the only channel a role-file agent has
+(`docs/delegation.md`); brief it never to finish silently. Rules either way:
 
 - **Per-item checkpoint** — for a multi-item group, run the lint/test command after each item
   before starting the next. Do not commit per item.

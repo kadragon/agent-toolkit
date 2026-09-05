@@ -75,8 +75,8 @@ these explicit CWD instructions (agents spawn in the main checkout CWD, not the 
 > or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
 > If the same fix is attempted 3+ times on the same file without the lint/test command
 > passing, stop and report to the user instead of continuing to retry.
-> When you finish (or get stuck), deliver your result via SendMessage(to: 'main') — do not end
-> silently, even if the run failed — a silent finish loses the result."
+> When you finish (or get stuck), put your full result in your final response — never finish
+> silently, even when the result is empty or the run failed; a silent finish loses the result."
 
 Then the brief continues:
 1. Implement the unit's **code only**. Do NOT touch `backlog.md`, `tasks.md`, `plugin.json`,
@@ -85,8 +85,7 @@ Then the brief continues:
    command per `cycle.md` → *Sprint Contract*; one acceptance checkbox per bundled item) as part of the
    agent's output — it is NOT written to `tasks.md` here. A5 reads it from this return value.
 3. **Commit the code to `wt/<slug>`** (e.g. `[WIP] <unit>`), leaving a clean tree. Return the
-   worktree path, branch, the Sprint Contract, and a change summary — via SendMessage(to: 'main')
-   per the instruction above, not just as a final response.
+   worktree path, branch, the Sprint Contract, and a change summary in its final response.
 
 The agent must NOT verify its own output. If an agent fails or returns unusable output, drop
 that unit: `git worktree remove --force .worktrees/<slug>` and `git branch -D wt/<slug>`, then
@@ -100,9 +99,9 @@ unit returned in A4. Include the same CWD instructions in each brief: every Bash
 begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
 worktree; the same destructive-command guard applies — QA must not run
 `git reset --hard`/`push --force`/`clean -f`/`branch -D` either. Same result-handoff
-instruction too: tell each QA agent to deliver its verdict via SendMessage(to: 'main'),
-including an empty/no-blocking-findings verdict. Fan out
-all QA agents in one message.
+instruction too: tell each QA agent to put its verdict in its final response, including an
+empty/no-blocking-findings verdict (`docs/delegation.md`). Fan out all QA agents in one
+message.
 
 For any unit with blocking findings, fan out **one** implementer→qa-verifier retry per blocking
 unit (all retries in one message — they are independent; do not serialize). Still blocking after

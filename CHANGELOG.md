@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] spawn briefs stop asking role-file agents for SendMessage; result-handoff rule owned by delegation doc (dev v4.9.2) (2026-09-05) → docs/delegation.md
 - [done] late review source persists its result for a pre-merge reclaim (dev v4.9.1) (2026-09-05)
 - [done] harness diet: one reviewer, size-routed merge path, shared code cycle, five-signal curate (dev v4.9.0) (2026-09-04)
 - [done] working-tree gate carries a backlog.md-only edit into the cycle (dev v4.8.3) (2026-09-03)
