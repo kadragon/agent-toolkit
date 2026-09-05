@@ -646,8 +646,13 @@ def case_malformed_state_is_survivable(tmp: Path, _live: int):
 def make_review_repo(tmp: Path, name: str, branch: str = "feat/x") -> Path:
     """A git repo with a real commit and a named branch — the sidecar keys on the branch name."""
     repo = make_repo(tmp, name)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
-                    "--allow-empty", "-m", "[TEST] base"], cwd=repo, check=True)
+    # Neutralizers passed per-command, per docs/conventions.md → Throwaway Git Fixtures Need the
+    # Ambient Config Neutralized. `--no-verify` alone is not enough: it skips hooks but not
+    # signing, so a global `commit.gpgsign=true` aborts the commit before any assertion runs.
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                    "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                    "commit", "--no-verify", "-q", "--allow-empty", "-m", "[TEST] base"],
+                   cwd=repo, check=True)
     subprocess.run(["git", "checkout", "-qb", branch], cwd=repo, check=True)
     return repo
 
@@ -691,9 +696,16 @@ def case_sidecar_written_on_success(tmp: Path, _live: int):
     check("elapsed_seconds numeric", fields.get("elapsed_seconds", "").isdigit(), str(fields))
     check("review_file points at the review", fields.get("review_file", "").endswith("feat-x.review.txt"), str(fields))
     check("base recorded", fields.get("base") == "main", str(fields))
+    check("raw branch recorded beside the lossy key", fields.get("branch") == "feat/x", str(fields))
     log = (results / "timings.log")
     check("timings line appended", log.exists() and "status=ok" in log.read_text(encoding="utf-8"),
           log.read_text(encoding="utf-8") if log.exists() else "no log")
+    # The run dir is 0700 because the payload carries repo content; this store outlives it and
+    # holds the same text, so an ambient umask must not leave it readable to other users.
+    if os.name != "nt":
+        check("result dir is 0700", (results.stat().st_mode & 0o077) == 0, oct(results.stat().st_mode))
+        modes = {f.name: f.stat().st_mode & 0o077 for f in (meta, review, log) if f.exists()}
+        check("result files are 0600", set(modes.values()) == {0}, str({k: oct(v) for k, v in modes.items()}))
 
 
 def case_pending_visible_while_running(tmp: Path, _live: int):
@@ -765,6 +777,30 @@ def case_sidecar_clears_previous_run(tmp: Path, _live: int):
     check("stale review text removed", not (results / "feat-x.review.txt").exists())
 
 
+def case_non_git_dir_is_not_fatal(tmp: Path, _live: int):
+    """The other half of "no usable result dir": no git repo at all, so no default path to derive."""
+    print("\nnon-git working directory")
+    outside = tmp / "not-a-repo"
+    (outside / "scripts").mkdir(parents=True)
+    shutil.copy(SCRIPT, outside / "scripts" / "codex-review.sh")
+    companion = ok_companion(tmp, "comp-nogit", "P3 still reviewed\n")
+    env = dict(os.environ)
+    env.update({
+        "CODEX_REVIEW_STATE_ROOTS": bash_path(tmp / "state"),
+        "CODEX_REVIEW_LOCK_ROOT": bash_path(tmp / "locks"),
+        "CODEX_REVIEW_TEMP_ROOTS": bash_path(tmp),
+        "CODEX_REVIEW_PLATFORM": "posix",
+    })
+    env.pop("CODEX_REVIEW_RESULT_DIR", None)
+    proc = subprocess.run(
+        ["bash", str(outside / "scripts" / "codex-review.sh"), "plugin", "main", bash_path(companion)],
+        cwd=outside, capture_output=True, text=True, env=env, timeout=60,
+    )
+    check("exit 0", proc.returncode == 0, f"rc={proc.returncode} {proc.stderr[-300:]}")
+    check("review still emitted", "P3 still reviewed" in proc.stdout, proc.stdout[:200])
+    check("warned it is not a git repository", "not a git repository" in proc.stderr, proc.stderr[-300:])
+
+
 def case_unwritable_result_dir_is_not_fatal(tmp: Path, _live: int):
     print("\nunusable result dir")
     repo = make_review_repo(tmp, "wsnodir")
@@ -807,6 +843,7 @@ def main():
             case_sidecar_holds_untruncated_text,
             case_sidecar_clears_previous_run,
             case_unwritable_result_dir_is_not_fatal,
+            case_non_git_dir_is_not_fatal,
         ):
             case(tmp, shell.pid)
     failed = _results.count(False)

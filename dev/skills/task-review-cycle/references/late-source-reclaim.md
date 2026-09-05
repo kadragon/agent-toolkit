@@ -4,6 +4,11 @@ A panel source that breaches its 1200s wait is recorded as skipped and the cycle
 the process does not stop, and its findings can still be real. This is the step that collects
 them before the merge closes the window.
 
+**Only `codex-review.sh` persists a result, so only the codex panel source is reclaimable.** The
+reviewer slot, `claude-review.sh` and `agy-review.sh` write no sidecar, and a codex run that
+exits 75 (another cycle holds the workspace lock) never started one either. For those, a breach
+means the inline fallback stands — there is nothing on disk to come back for.
+
 ## Why the breach is structural, not a tail
 
 `agy-review.sh` caps itself (`--print-timeout 15m`) so it fails reportably under the
@@ -18,7 +23,8 @@ findings this step exists to recover.
 
 `codex-review.sh` persists every finished run under `CODEX_REVIEW_RESULT_DIR`, defaulting to
 `$(git rev-parse --absolute-git-dir)/codex-review` — inside the git dir, so per-worktree, never
-tracked. Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`.
+tracked. Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`, then leading
+and trailing `-` stripped.
 
 | File | Meaning |
 |------|---------|
@@ -26,25 +32,35 @@ tracked. Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`.
 | `<key>.review.txt` | the full, untruncated review text (stdout may have been head/tail truncated) |
 | `<key>.meta` | written last, so its presence means the review file beside it is complete |
 
-`.meta` fields: `pid`, `started_at`, `mode`, `base`, `head_sha`, `status`, `exit_code`,
+`.meta` fields: `pid`, `started_at`, `mode`, `branch`, `base`, `head_sha`, `status`, `exit_code`,
 `finished_at`, `elapsed_seconds`, `review_file`. `status` is `ok` (a review was produced),
 `failed` (the companion exited non-zero) or `empty` (it ran but produced no extractable review).
 
+The key is lossy — `feat/x-2` and `feat-x-2` sanitize to the same name — and a file can also be
+left from an earlier cycle on this branch. So before using a result, check that its `branch`
+matches the current branch and that `started_at` is later than this cycle's launch. A `.meta`
+that fails either check belongs to a different run: leave it alone.
+
 `timings.log` in the same directory gets one line per run —
-`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<key>`. It is the
+`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<raw branch>`. It is the
 evidence for any future argument about the cap: elapsed alone cannot separate "the companion is
 reliably slower than 1200s" from "that diff was unusual", so diff size is recorded beside it.
 Change the cap against this log, not against a single cycle's impression.
 
 ## Pre-merge reclaim
 
-Run this **immediately before the merge command**, for every source recorded as
-`Reviewers Skipped` this cycle. On the hub path that means *after* `ci-wait.sh` returns green —
-the CI wait is free runway for a slow companion, so reclaiming earlier throws it away.
+Run this **immediately before the merge command**, when the codex panel source was recorded as
+`Reviewers Skipped` for a breach or a failure this cycle. On the hub path that means *after*
+`ci-wait.sh` returns green — the CI wait is free runway for a slow companion, so reclaiming
+earlier throws it away.
+
+The key derivation must match `sanitize_key` exactly, trailing-hyphen strip included, or a branch
+like `fix-` looks up `fix-.meta` while the script wrote `fix.meta`:
 
 ```bash
 RESULT_DIR="${CODEX_REVIEW_RESULT_DIR:-$(git rev-parse --absolute-git-dir)/codex-review}"
-KEY=$(git rev-parse --abbrev-ref HEAD | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g')
+KEY=$(git rev-parse --abbrev-ref HEAD \
+  | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//')
 cat "$RESULT_DIR/$KEY.meta" 2>/dev/null || cat "$RESULT_DIR/$KEY.pending" 2>/dev/null || echo "no result"
 ```
 
@@ -54,6 +70,7 @@ cat "$RESULT_DIR/$KEY.meta" 2>/dev/null || cat "$RESULT_DIR/$KEY.pending" 2>/dev
 | `.pending` only, `pid` alive under `kill -0` | The source is still running. Merge, and report the `.meta` path the user can read when it lands. |
 | `.pending` only, `pid` dead | The run died without a result. Nothing to reclaim; the `Reviewers Skipped` line stands. |
 | `.meta` with `status=failed` or `empty`, or no files at all | Nothing to reclaim; the `Reviewers Skipped` line stands. |
+| `.review.txt` and `.pending` but no `.meta` | The meta write failed after the review landed. Read the review file directly and treat it as `status=ok`. |
 
 `head_sha` in the meta is the commit the late review actually read. When it does not match the
 branch's current HEAD — a fix round landed after the source was launched — the findings may

@@ -442,6 +442,7 @@ emit_blob_tail() {
 #   <key>.meta        written last, and therefore the marker that the other two are complete
 RESULT_DIR=""
 RESULT_KEY=""
+RESULT_BRANCH=""
 PENDING_FILE=""
 REVIEW_FILE=""
 META_FILE=""
@@ -474,6 +475,10 @@ init_result_dir() {
     printf 'WARN: cannot create the result dir %s — this review will not be persisted for a late reclaim\n' "$dir" >&2
     return 0
   fi
+  # The run dir is 0700 by mktemp because the payload carries repo content and reasoning traces
+  # (see its comment above). This store holds the same text and outlives the run, so it gets the
+  # same treatment — an ambient umask 022 would otherwise leave the whole review world-readable.
+  chmod 700 "$dir" 2>/dev/null || true
   # mkdir -p succeeds on an existing read-only directory, so writability is probed, not assumed.
   if ! : >"$dir/.probe.$$" 2>/dev/null; then
     printf 'WARN: result dir %s is not writable — this review will not be persisted for a late reclaim\n' "$dir" >&2
@@ -482,7 +487,11 @@ init_result_dir() {
   rm -f "$dir/.probe.$$" 2>/dev/null || true
 
   branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'detached')
-  RESULT_KEY=$(sanitize_key "${branch:-detached}")
+  RESULT_BRANCH="${branch:-detached}"
+  # The key is lossy — `feat/x-2` and `feat-x-2` sanitize to the same name — so the raw branch and
+  # the head sha are recorded in the file itself, and the reclaim is told to check them before
+  # treating a result as its own.
+  RESULT_KEY=$(sanitize_key "$RESULT_BRANCH")
   [ -n "$RESULT_KEY" ] || RESULT_KEY="detached"
   RESULT_DIR="$dir"
   PENDING_FILE="$RESULT_DIR/$RESULT_KEY.pending"
@@ -491,13 +500,18 @@ init_result_dir() {
   # Clear this key's previous trio first: a stale `.meta` from the last run on this branch would
   # otherwise read as *this* run's result to a reclaim that arrives before this one finishes.
   rm -f "$PENDING_FILE" "$REVIEW_FILE" "$META_FILE" 2>/dev/null || true
-  {
-    printf 'pid=%s\n' "$$"
-    printf 'started_at=%s\n' "$START_EPOCH"
-    printf 'mode=%s\n' "$CODEX_MODE"
-    printf 'base=%s\n' "$BASE_BRANCH"
-    printf 'head_sha=%s\n' "$HEAD_SHA"
-  } >"$PENDING_FILE" 2>/dev/null || {
+  # `umask 077` inside the subshell, not a chmod afterwards: the file must never exist at 0644,
+  # not even for the instant between creating it and fixing its mode.
+  ( umask 077
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'started_at=%s\n' "$START_EPOCH"
+      printf 'mode=%s\n' "$CODEX_MODE"
+      printf 'branch=%s\n' "$RESULT_BRANCH"
+      printf 'base=%s\n' "$BASE_BRANCH"
+      printf 'head_sha=%s\n' "$HEAD_SHA"
+    } >"$PENDING_FILE" 2>/dev/null
+  ) || {
     printf 'WARN: could not write %s — this review will not be persisted for a late reclaim\n' "$PENDING_FILE" >&2
     RESULT_DIR=""
   }
@@ -510,15 +524,20 @@ init_result_dir() {
 append_timing() {
   local status="$1" elapsed="$2" shortstat ins del files lines ts
   [ -n "$RESULT_DIR" ] || return 0
-  shortstat=$(git diff --shortstat "$BASE_BRANCH"...HEAD 2>/dev/null || printf '')
+  # ...HEAD_SHA, not ...HEAD: this run routinely outlives its wait while the cycle commits fixes on
+  # the same branch, and pairing this run's elapsed time with a diff it never saw would poison the
+  # one measurement the cap decision rests on.
+  shortstat=$(git diff --shortstat "$BASE_BRANCH"..."$HEAD_SHA" 2>/dev/null || printf '')
   files=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} file' | grep -o '[0-9]\{1,\}' || true)
   ins=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} insertion' | grep -o '[0-9]\{1,\}' || true)
   del=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} deletion' | grep -o '[0-9]\{1,\}' || true)
   lines=$(( ${ins:-0} + ${del:-0} ))
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')
-  printf '%s elapsed=%ss mode=%s status=%s files=%s lines=%s branch=%s\n' \
-    "$ts" "$elapsed" "$CODEX_MODE" "$status" "${files:-0}" "$lines" "$RESULT_KEY" \
-    >>"$RESULT_DIR/timings.log" 2>/dev/null || true
+  ( umask 077
+    printf '%s elapsed=%ss mode=%s status=%s files=%s lines=%s branch=%s\n' \
+      "$ts" "$elapsed" "$CODEX_MODE" "$status" "${files:-0}" "$lines" "$RESULT_BRANCH" \
+      >>"$RESULT_DIR/timings.log" 2>/dev/null
+  ) || true
   return 0
 }
 
@@ -527,32 +546,44 @@ append_timing() {
 # reader that sees only `.pending` knows the run has not finished (probe its pid with `kill -0`;
 # it is this bash process, so on MINGW it is an MSYS pid tasklist cannot see).
 publish_result() {
-  local status="$1" exit_code="$2" text="${3-}" now elapsed tmp
+  local status="$1" exit_code="$2" text="${3-}" now elapsed tmp meta_ok=""
   [ -n "$RESULT_DIR" ] || return 0
   now=$(date +%s 2>/dev/null || printf '0')
   elapsed=$((now - START_EPOCH))
-  tmp="$RUN_DIR/sidecar.tmp"
+  # Staged inside RESULT_DIR, never in RUN_DIR: the run dir is a `mktemp -d` under $TMPDIR, so a
+  # `mv` out of it into the git dir usually crosses a filesystem, and a cross-device `mv` is
+  # copy+unlink — the destination grows in place and a concurrent reclaim can read half a `.meta`.
+  # A same-directory rename is what actually makes "meta written last" mean "the result is whole".
+  tmp="$RESULT_DIR/.$RESULT_KEY.tmp.$$"
   if [ -n "$text" ]; then
-    if ! { printf '%s\n' "$text" >"$tmp" 2>/dev/null && mv -f "$tmp" "$REVIEW_FILE" 2>/dev/null; }; then
+    if ! { ( umask 077; printf '%s\n' "$text" >"$tmp" 2>/dev/null ) &&
+      mv -f "$tmp" "$REVIEW_FILE" 2>/dev/null; }; then
       printf 'WARN: could not persist the review text to %s\n' "$REVIEW_FILE" >&2
+      rm -f "$tmp" 2>/dev/null || true
       REVIEW_FILE=""
     fi
   else
     REVIEW_FILE=""
   fi
-  if {
-    cat "$PENDING_FILE" 2>/dev/null || true
-    printf 'status=%s\n' "$status"
-    printf 'exit_code=%s\n' "$exit_code"
-    printf 'finished_at=%s\n' "$now"
-    printf 'elapsed_seconds=%s\n' "$elapsed"
-    printf 'review_file=%s\n' "$REVIEW_FILE"
-  } >"$tmp" 2>/dev/null && mv -f "$tmp" "$META_FILE" 2>/dev/null; then
-    :
+  if { ( umask 077
+    {
+      cat "$PENDING_FILE" 2>/dev/null || true
+      printf 'status=%s\n' "$status"
+      printf 'exit_code=%s\n' "$exit_code"
+      printf 'finished_at=%s\n' "$now"
+      printf 'elapsed_seconds=%s\n' "$elapsed"
+      printf 'review_file=%s\n' "$REVIEW_FILE"
+    } >"$tmp" 2>/dev/null
+  ) && mv -f "$tmp" "$META_FILE" 2>/dev/null; }; then
+    meta_ok=1
   else
     printf 'WARN: could not write the result meta %s\n' "$META_FILE" >&2
+    rm -f "$tmp" 2>/dev/null || true
   fi
-  rm -f "$PENDING_FILE" 2>/dev/null || true
+  # Only a landed meta retires the pending marker. Removing it after a failed meta write would
+  # leave a review file with nothing pointing at it — a state the reclaim reads as "nothing to
+  # reclaim", silently dropping a review that did finish.
+  [ -n "$meta_ok" ] && { rm -f "$PENDING_FILE" 2>/dev/null || true; }
   append_timing "$status" "$elapsed"
   if [ "$elapsed" -gt "$CAP_SECS" ]; then
     printf 'WARN: codex review took %ss, past the %ss orchestrator wait — the result is preserved at %s for the pre-merge reclaim\n' \
@@ -699,6 +730,10 @@ case "$CODEX_MODE" in
     # `codex review` prints the final review on stdout and streams the entire session
     # transcript on stderr. Redirect stderr to the log so only the review reaches the caller.
     codex_status=0
+    # Locked like plugin mode, and for a second reason on top of the shared broker: the sidecar is
+    # named by branch alone and each run clears that trio before starting, so two overlapping runs
+    # on one branch would erase each other's pending and publish a meta mixing both.
+    acquire_workspace_lock || exit "$EX_LOCKED"
     init_result_dir
     TEXT=$(codex review --base "$BASE_BRANCH" 2>"$LOG_FILE") || codex_status=$?
     if [ "$codex_status" -ne 0 ]; then
