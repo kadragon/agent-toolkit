@@ -21,8 +21,8 @@ auto-selection, which carries no token.
 - `--auto` — skip the Step 3 confirmation; apply every in-scope finding.
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
 - `--lite` / `--pr` — request a merge path; required CI and risk gates still apply.
-- `--panel` — add agy and Codex engines when independent perspectives address a concrete risk.
-  Step 1's `SCRIPT_HIT` floor turns it on and forces hub regardless.
+- `--panel` — add agy and Codex engines when a concrete risk needs independent perspectives; a panel run
+  routes hub, since the codex reclaim needs `ci-wait.sh` runway. Step 1's `SCRIPT_HIT` floor turns it on.
 
 **Sprint Contract.** Recover the caller's archived original if not restated (Tag / Scope /
 Acceptance criteria / Out of scope / Lint-test command). It is branch-keyed under the common Git
@@ -66,9 +66,9 @@ On the base branch: derive a short slug from the diff, then `git checkout -b <ty
 ## Step 1: Commit, route, PR
 
 Derive `COMMIT_MESSAGE` from `git diff --stat HEAD` and `git log --oneline -5`; the `[TYPE]` prefix
-is mandatory (commit-guard runs inside the script and rejects otherwise). Capture it — and every
-free text composed for a block below, the Step 2 contract included — with a **quoted** heredoc
-delimiter, never an interpolated assignment (`docs/conventions.md` → *Capturing free text*). A
+is mandatory (commit-guard runs inside the script and rejects otherwise). Capture it — and the Step 2
+contract, the other free text composed here — with a **quoted** heredoc delimiter, never an
+interpolated assignment (`docs/conventions.md`). A
 clean resumed branch reuses its commit; if its diff against the base is empty and no review
 remains, report no work and stop before this block.
 
@@ -178,7 +178,7 @@ In this order, because everything before the last step changes the tree the chec
 1. Apply approved findings with focused checks. On failure revert that file (`git restore
    --staged <file> && git restore <file>`), report which failed, ask. A fixed `contract` finding
    → re-run the reviewer once; still failing → stop, never merge.
-2. A fix that newly touched another plugin or skill `SKILL.md` → re-run `scripts/bump-version.sh`.
+2. A fix that newly touched another plugin or skill `SKILL.md` → re-run `scripts/bump-version.sh` for it.
 3. **Retrospect (signal-gated).** Only if this cycle surfaced a user correction, a recurring
    gotcha, or a reusable workflow: call the Skill tool with "dev:harness-capture" now, so a light
    memory or `docs/` delta rides into this commit (heavy → `backlog.md`). No signal → skip.
