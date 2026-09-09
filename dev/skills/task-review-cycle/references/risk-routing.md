@@ -22,7 +22,14 @@ SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod)/.*\.(sh|py|ps1|cjs)$' 
 |-------------------|-------|
 | `SECURITY_HIT`, `BINARY_HIT`, or `MODE_OR_RENAME` | **hub** with required CI; `--lite` cannot bypass, and judgment cannot route it lite |
 | `SECURITY_HIT` | also `EFFORT="high"` in Step 2 |
-| `SCRIPT_HIT` | `--panel` is on; the path stays whatever the judgment table below chooses |
+| `SCRIPT_HIT` | **hub** with required CI, and `--panel` is on; `--lite` cannot bypass either |
+
+The floor forces hub for the same reason it turns the panel on. `late-source-reclaim.md`'s
+pre-merge reclaim needs runway, and the only free runway is `ci-wait.sh`, which lite skips: a
+lite panel run reaches the reclaim with the codex source still `.pending` every time, so its
+findings land strictly post-merge, where they are reported and never applied. The argument is about
+the panel, not the extension: an explicit `--panel` on a diff whose captures are all empty routes
+hub for the same reason.
 
 A shipped script is where the non-Claude engines earn their slot — quoting, shell expansion and
 interpreter-shim defects a prose reviewer has no reason to look for (PR #267). Matching on
@@ -36,7 +43,7 @@ it chooses neither a route nor a reviewer count alone.
 | Condition | Path/review |
 |-----------|-------------|
 | Required remote checks, or uncertain risk | **hub** with required CI |
-| Low-risk, readily verified change, every floor capture empty, and repo policy permits bypassing remote CI | **lite** eligible, regardless of prose length |
+| Low-risk, readily verified change, every floor capture empty, no panel source running, and repo policy permits bypassing remote CI | **lite** eligible, regardless of prose length |
 | Execution/deletion rules or scripts with material behavioral risk | **hub**; add panel when distinct engines can investigate that risk |
 | Large but mechanical/documentary diff | Judge review surface; size alone adds no panel |
 

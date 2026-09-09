@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] SCRIPT_HIT floor forces hub; commit messages captured via quoted heredoc (dev v4.9.11) (2026-09-09) → docs/conventions.md
 - [done] Evidence-driven task cycles (dev v4.9.10) (2026-09-09) → docs/workflows.md
 - [done] review slot shells out under a Bash timeout; cycle no longer waits on the panel (dev v4.9.9) (2026-09-08)
 - [done] task-review-cycle closes every review slot once its result is in hand (dev v4.9.8) (2026-09-08)
