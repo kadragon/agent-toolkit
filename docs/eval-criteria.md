@@ -1,6 +1,9 @@
 # Evaluation Criteria
 
-Evaluation is a separate role from implementation (Generator-Evaluator separation). The agent that implemented must not verify its own work.
+Implementers run focused checks; independent review separately grades requirements and
+code quality and never replaces required checks. That split is owned by `dev:task-next` →
+`references/cycle.md` → *Implement*, and the evidence/reuse rules by the same file's
+*Validation evidence*; this document grades against them rather than restating them.
 
 ## Skill Quality Criteria
 
@@ -87,6 +90,14 @@ Does the skill protect context window (progressive disclosure, delegate bulk)?
 | 3 | Minor verbosity; core guidance concise |
 | 1 | Large inline reference dumps; would crowd actual work context |
 
+### Workflow behavior evaluation
+
+For task-cycle changes, exercise `dev/skills/task-next/evals/workflow-cases.json` in isolated
+fixtures with an independent evaluator. Score observable next action, preserved state, approval
+count, and required-check handling. `test_cycle_state.py` mechanically covers Git discovery and
+contract durability; it does not prove a model chooses the right stage. Report model-case results
+separately from trigger ranking and unit tests; timing/token savings require measured runs.
+
 ## Sprint Contract (Pre-Implementation Agreement)
 
 Before any implementation cycle, agree on "done":
@@ -103,7 +114,8 @@ Before any implementation cycle, agree on "done":
 **Lint/test command:** {command to run to verify}
 ```
 
-Both generator and verifier must agree before coding starts. Evaluator grades against this contract, not vague impressions.
+Reuse approved criteria before coding; no separate evaluator approval is required. The evaluator
+grades against this contract. Approval rules live in the shared code cycle.
 
 **Standing checks are inherited, not restated.** Every contract inherits the floor in
 `.claude/agents/qa-verifier.md` → `## Checks (always run)`. Do not copy those gates into acceptance

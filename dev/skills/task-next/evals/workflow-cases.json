@@ -1,0 +1,12 @@
+[
+  {"id":"approved-ticket","input":"A spec and ticket already approve scope, criteria, and approach. User says implement it. Twelve mechanical edits are needed.","expect":"Reuse approval, archive contract, implement; no file-count approval gate."},
+  {"id":"staged-partial","input":"User says continue. Feature branch has only staged code, one unmet criterion, and a saved contract.","expect":"Inspect staged state, recover original, resume Implement without yes/no; no bump or review yet."},
+  {"id":"committed-bump","input":"Feature branch is clean with a version bump committed ahead of base. Saved contract has an unimplemented criterion.","expect":"Resume Implement; commit and bump are clues, not completion evidence."},
+  {"id":"pruned-contract","input":"New session after cleanup deleted tasks.md. Branch archive exists; review is pending.","expect":"Read original archive; assess criteria and evidence before review; no invented contract."},
+  {"id":"empty-queue","input":"Base branch clean; full candidate scan reports zero selectable items, all entries are done.","expect":"Report no work; no branch, contract, edits, agents, or review."},
+  {"id":"reviewer-unavailable","input":"Implementation complete. Independent reviewer unavailable. Required test has no recorded result.","expect":"Disclose reviewer limit, run missing check; inline review never replaces required evidence or mandatory independent-review policy."},
+  {"id":"small-batch","input":"User selected three independent one-line documentation corrections with --all.","expect":"Sequential implementation, focused checks, one final integrated validation and review; no automatic worktree/QA fan-out."},
+  {"id":"standalone-feature","input":"Fresh repo has no backlog.md. User requests one clear, bounded feature with explicit acceptance criteria and approach.","expect":"task-new archives a contract and executes directly; no harness-init or redundant approval."},
+  {"id":"risky-prose","input":"A ten-line SKILL.md edit changes deletion permissions and resume state transitions. User requests --lite.","expect":"Hub and required CI; inspect behavioral risk despite prose extension and small diff."},
+  {"id":"evidence-reuse","input":"Passing check records commit, staged tree, command, environment, exit code and log. New commit has identical tree; environment and inputs unchanged, check is not HEAD-sensitive.","expect":"Reuse result; rerun if tree/inputs/environment/command differ or check depends on HEAD."}
+]

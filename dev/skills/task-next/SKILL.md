@@ -1,9 +1,9 @@
 ---
 name: task-next
-version: 2.0.1
+version: 2.1.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
-  Sprint Contract, implement, version bump, review. Flags: --all (parallel batch),
+  Sprint Contract, implement, version bump, review. Flags: --all (batch execution),
   --tree (worktree isolation). New work you just described → task-new.
 disable-model-invocation: true
 ---
@@ -26,8 +26,8 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ```bash
 dirty=$(git status --porcelain)
+current_branch=$(git branch --show-current)   # every row below reads it, dirty or clean
 if [[ -n "$dirty" ]]; then
-  current_branch=$(git branch --show-current)
   task_contract_dirty=$(git status --porcelain -- tasks.md)
   task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
   non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md')   # top: anchor at repo root
@@ -37,7 +37,8 @@ fi
 
 | State | Action |
 |-------|--------|
-| clean | proceed |
+| clean on base branch | proceed |
+| feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on `main`/`master` | *Work already in flight* (`references/edge-cases.md`) |
 | on `main`, `task_contract_dirty` and `task_worktree` both non-empty | same edge case — a `--tree` run is in flight |
 | on `main`, `non_queue_dirty` empty | `backlog.md` alone is not stray (the `task-tickets` hand-off leaves it uncommitted): announce that it is being carried, quote `queue_delta` (or the file's line count when untracked), proceed |
@@ -91,7 +92,7 @@ Follow `references/cycle.md` end to end with these overrides:
 - `backlog.md` group with ≥2 in-scope items → write `tasks.md`: `# <heading verbatim>`,
   `status: active`, the contract, and `## Covers` listing each item line **verbatim** (the
   deletion list). Leave the items `- [ ]` in `backlog.md` until cleanup.
-- exactly 1 item → no file; author the contract inline and carry the item's verbatim line to
+- exactly 1 item → no `tasks.md`; archive the contract per `cycle.md` and carry the item's verbatim line to
   `prune-backlog` yourself. `--tree` writes `tasks.md` even for one item.
 
 **Cleanup** runs `prune-tasks` only when a sprint block exists, and `prune-backlog` over the
@@ -101,14 +102,15 @@ Follow `references/cycle.md` end to end with these overrides:
 ## Step 4 — Hand off
 
 Per `references/cycle.md` → *Hand off*: `args: --from task-next --auto`, Sprint Contract restated
-verbatim. `--tree` and `--all` hand off the same way after their own per-worktree verification.
+verbatim, with saved archive and validation evidence. `--tree` and parallel batches also verify
+the integrated candidate after worktree checks.
 
 ## Edge cases
 
 Recognise by name; open `references/edge-cases.md` before acting.
 
-- **Work already in flight** — a feature branch or `--tree` worktree carrying uncommitted work.
-  Three ordered checks produce a diagnosis; always still ask yes/no before resuming.
+- **Work already in flight** — a feature branch or `--tree` worktree, including clean committed
+  work. Recover the contract, then choose the earliest unmet obligation.
 - **Deferred backlog item (≥2 candidates)** — surface the blocker, confirm it is resolved.
 - **Deferred item in a group** — warn and continue with the group's other items.
 - **Review finding spans multiple PRs** — scope to the specific `file:line`.

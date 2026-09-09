@@ -187,6 +187,11 @@ jobs:
         with:
           python-version-file: .python-version
 
+      # Owns the branch-keyed contract/evidence archive both cycles resume from, and pins
+      # review-cycle Step 1's clean-tree branch against skipping commit-guard on a resume.
+      - name: Run dev/skills/task-next/scripts/test_cycle_state.py
+        run: python3 dev/skills/task-next/scripts/test_cycle_state.py
+
       # Both task-next and task-new invoke this one copy; a break here breaks both cycles.
       - name: Run dev/skills/task-next/scripts/task_nodes.py --test
         run: python3 dev/skills/task-next/scripts/task_nodes.py --test

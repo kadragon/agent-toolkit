@@ -17,8 +17,9 @@
 # Usage: claude-review.sh <base_branch> [effort] [sprint_contract]
 #   The review skill is fixed to "code-review" — SKILL.md Step 2 pins the Claude
 #   slot to exactly one skill, so there is no slot argument. The optional effort
-#   arg mirrors that step's escalation: the caller passes "high" when its
-#   SECURITY_HIT capture is non-empty, and nothing otherwise. The optional third
+#   arg mirrors that step's escalation: the caller passes "high" when Step 1's
+#   SECURITY_HIT floor capture is non-empty or the behavioral risk is material,
+#   and nothing otherwise. The optional third
 #   arg is the Sprint Contract; when non-empty the run also grades the diff
 #   against it, which keeps that grading independent of the agent that wrote the
 #   code. Grading is read-only judgment only — running the contract's lint/test

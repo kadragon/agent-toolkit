@@ -3,9 +3,14 @@
 #
 # Usage:
 #   commit-and-push.sh --message <text> [--files "f1 f2 ..."] [--no-push] [--pr] [--base <branch>]
+#   commit-and-push.sh --verify-head
 #
 # Flags:
-#   --message <text>   Commit message (required)
+#   --message <text>   Commit message (required, except with --verify-head)
+#   --verify-head      Commit nothing; run commit-guard against the existing HEAD
+#                      and report. For a clean resumed branch, where there is no
+#                      new commit to guard but HEAD is still about to be pushed
+#                      or merged.
 #   --files <list>     Space-separated file paths to stage (default: auto-detect via changed-files.sh)
 #   --no-push          Commit locally only; skip push and PR creation
 #   --pr               Create a PR after pushing
@@ -14,7 +19,9 @@
 # Output: JSON to stdout
 #   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped}
 #   committed=false means the tree was clean and HEAD was pushed/PR'd as-is
-#   (re-run against an already-committed branch).
+#   (re-run against an already-committed branch). That path still runs
+#   commit-guard against HEAD's own subject, so a branch committed outside this
+#   harness cannot reach a PR or main unchecked.
 #   guard_skipped=true means commit-guard could not be run (missing guard.py or
 #   no python3) and the commit went through UNCHECKED — see the guard section below.
 #
@@ -39,6 +46,7 @@ MESSAGE=""
 FILES=""
 NO_PUSH=false
 CREATE_PR=false
+VERIFY_HEAD=false
 BASE_BRANCH="main"
 
 while [[ $# -gt 0 ]]; do
@@ -47,14 +55,72 @@ while [[ $# -gt 0 ]]; do
     --files)   FILES="$2";   shift 2 ;;
     --no-push) NO_PUSH=true; shift ;;
     --pr)      CREATE_PR=true; shift ;;
+    --verify-head) VERIFY_HEAD=true; shift ;;
     --base)    BASE_BRANCH="$2"; shift 2 ;;
     *) echo "ERROR: Unknown flag: $1" >&2; exit 1 ;;
   esac
 done
 
-if [ -z "$MESSAGE" ]; then
+if [ -z "$MESSAGE" ] && [ "$VERIFY_HEAD" != "true" ]; then
   echo "ERROR: --message is required" >&2
   exit 1
+fi
+
+# --- commit-guard ---
+# The PreToolUse(Bash) hook cannot see commits made here: the agent's Bash command
+# is `bash <this script> ...`, so guard.py's _is_git_commit() finds no git+commit
+# token pair and passes. Both shipped guards (protected branch, [TYPE] message)
+# were therefore inert on this — the repo's primary — commit path. Call the same
+# policy directly instead, via guard.py's --precommit-check CLI mode.
+#
+# Fail-open on a missing guard (partial install, moved path) or no interpreter,
+# but NEVER silently: a guard that vanished is the same invisible gap this call
+# exists to close, so it warns on stderr and surfaces guard_skipped=true in JSON.
+# Sets GUARD_SKIPPED; exits 1 on a rejection. $1 is the message to judge, $2 the
+# noun for the warning ("committing" / "publishing HEAD").
+GUARD_SKIPPED=false
+run_commit_guard() {
+  guard_message="$1"
+  guard_action="$2"
+  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
+  # Resolve the interpreter rather than hardcoding python3. Windows installs
+  # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
+  # `commandWindows: python ...` for exactly that reason, and
+  # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
+  # here would leave every task-review-cycle commit unguarded on those installs
+  # while reporting a clean run.
+  PY=$(command -v python3 || command -v python || true)
+  if [ ! -f "$GUARD" ]; then
+    echo "WARNING: commit-guard not found at $GUARD — $guard_action UNCHECKED" >&2
+    GUARD_SKIPPED=true
+    return 0
+  fi
+  if [ -z "$PY" ]; then
+    echo "WARNING: no python3/python interpreter — commit-guard skipped, $guard_action UNCHECKED" >&2
+    GUARD_SKIPPED=true
+    return 0
+  fi
+  # Exit 2 = guard rejection; exit 1 = we called it wrong. Both must stop the
+  # commit, but only the former is the caller's message/branch to fix.
+  GUARD_RC=0
+  GUARD_OUT=$("$PY" "$GUARD" --precommit-check --message "$guard_message" --cwd "$PWD" 2>&1) || GUARD_RC=$?
+  if [ "$GUARD_RC" -ne 0 ]; then
+    jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT" '{error: $e}' >&2
+    exit 1
+  fi
+}
+
+# --- Verify-head only: guard the existing HEAD, commit and publish nothing ---
+# A clean resumed branch has no new commit to guard, but its HEAD is still about
+# to be pushed or merged, and it may have been committed outside this harness
+# (by hand, or by a tool whose PreToolUse hook cannot see it). Without this the
+# resume path is the one route by which an unchecked commit reaches a PR or main.
+if [ "$VERIFY_HEAD" = "true" ]; then
+  run_commit_guard "$(git log -1 --format=%s)" "publishing HEAD"
+  jq -n --arg hash "$(git rev-parse HEAD)" --argjson guard_skipped "$GUARD_SKIPPED" \
+    '{commit_hash: $hash, committed: false, resumed: true, pushed: false,
+      pr_number: null, pr_url: null, guard_skipped: $guard_skipped}'
+  exit 0
 fi
 
 # --- Resolve file list ---
@@ -68,46 +134,8 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
-GUARD_SKIPPED=false
 if [ -n "$FILES" ]; then
-  # --- commit-guard ---
-  # Runs BEFORE `git add`: the guard reads only the branch and the message, so it
-  # has no dependency on staged state, and rejecting first leaves the index exactly
-  # as the caller left it.
-  #
-  # The PreToolUse(Bash) hook cannot see this commit: the agent's Bash command is
-  # `bash <this script> ...`, so guard.py's _is_git_commit() finds no git+commit
-  # token pair and passes. Both shipped guards (protected branch, [TYPE] message)
-  # were therefore inert on this — the repo's primary — commit path. Call the same
-  # policy directly instead, via guard.py's --precommit-check CLI mode.
-  #
-  # Fail-open on a missing guard (partial install, moved path) or no interpreter,
-  # but NEVER silently: a guard that vanished is the same invisible gap this call
-  # exists to close, so it warns on stderr and surfaces guard_skipped=true in JSON.
-  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
-  # Resolve the interpreter rather than hardcoding python3. Windows installs
-  # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
-  # `commandWindows: python ...` for exactly that reason, and
-  # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
-  # here would leave every task-review-cycle commit unguarded on those installs while
-  # reporting a clean run.
-  PY=$(command -v python3 || command -v python || true)
-  if [ ! -f "$GUARD" ]; then
-    echo "WARNING: commit-guard not found at $GUARD — committing UNCHECKED" >&2
-    GUARD_SKIPPED=true
-  elif [ -z "$PY" ]; then
-    echo "WARNING: no python3/python interpreter — commit-guard skipped, committing UNCHECKED" >&2
-    GUARD_SKIPPED=true
-  else
-    # Exit 2 = guard rejection; exit 1 = we called it wrong. Both must stop the
-    # commit, but only the former is the caller's message/branch to fix.
-    GUARD_RC=0
-    GUARD_OUT=$("$PY" "$GUARD" --precommit-check --message "$MESSAGE" --cwd "$PWD" 2>&1) || GUARD_RC=$?
-    if [ "$GUARD_RC" -ne 0 ]; then
-      jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT" '{error: $e}' >&2
-      exit 1
-    fi
-  fi
+  run_commit_guard "$MESSAGE" "committing"
   # `git add` treats a pathspec matching neither the worktree nor the index as
   # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in
   # the same call stay unstaged too. task-next's pre-merge cleanup deletes
@@ -160,6 +188,10 @@ if [ -n "$FILES" ]; then
 elif [ "$NO_PUSH" = "true" ]; then
   echo '{"error": "No changed files detected — nothing to commit"}' >&2
   exit 1
+else
+  # Clean tree on a push/PR run: nothing is committed here, but this call still
+  # publishes HEAD, which may have been committed outside this harness.
+  run_commit_guard "$(git log -1 --format=%s)" "publishing HEAD"
 fi
 COMMIT_HASH=$(git rev-parse HEAD)
 

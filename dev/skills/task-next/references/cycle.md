@@ -24,12 +24,16 @@ such role exists) only when the survey means reading 10+ files or would flood th
 
 ## Plan gate
 
-**Non-trivial** — tag is `[FEAT]` or `[REFACTOR]`, or 3+ files, or a new public API/schema:
-load plan mode (`ToolSearch` `select:EnterPlanMode,ExitPlanMode`), call `EnterPlanMode`, design
-the approach, **write the drafted Sprint Contract into the plan body**, call `ExitPlanMode`. One
-approval covers approach and contract. No plan-mode tools → present the plan as a numbered list
-and wait for "proceed". **Trivial** — skip. **Unattended run** (subagent, `/loop`, cron) — skip
-plan mode, record the plan in the transcript and the PR body, announce, proceed.
+This is the approval authority for intake, tickets, implementation, and resume. Carry forward
+approved scope, acceptance criteria, and approach, citing the spec/ticket or explicit user
+instruction in the contract. File count and `[FEAT]`/`[REFACTOR]` tags do not trigger approval.
+
+Ask only for a material decision still open: changed scope, a new public API/schema decision,
+architecture tradeoff, or an unauthorized irreversible effect. Present that delta and a
+recommended choice; approval covers it once. Routine implementation choices within approved
+constraints proceed. A same-session explicit "continue" already authorizes resume of that scope.
+Unattended runs proceed within approved constraints; unresolved material decisions are reported
+as blocked, never silently approved.
 
 ## Sprint Contract
 
@@ -44,27 +48,46 @@ plan mode, record the plan in the transcript and the PR body, announce, proceed.
 
 The Tag is what the reviewer grades a `[FIX]` reproduction criterion against — write it in. A
 `[FIX]` contract names the test that fails before and passes after. A multi-item group gets one
-checkbox per item. The contract is authored inline in the conversation unless the calling skill
-says to write `tasks.md` (it does so only when a `## Covers` deletion list is needed).
+checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
+approval source and exact selected backlog lines. `tasks.md` remains the optional queue-facing
+copy when the caller needs a `## Covers` deletion list.
+
+```bash
+CYCLE_DIR="<absolute directory of this cycle.md>"
+STATE="$CYCLE_DIR/../scripts/cycle_state.py"
+[[ -r "$STATE" ]] || { echo "Bundled state helper unavailable: $STATE" >&2; exit 1; }
+python3 "$STATE" save <<'SPRINT_CONTRACT'
+<approved contract verbatim, approval source, and selected backlog lines>
+SPRINT_CONTRACT
+```
+
+The helper prints the archive path under the common Git directory, keyed by branch; it survives
+new sessions and worktree removal. Preserve it through review and merge, including failed or
+abandoned runs. A different existing contract stops the write: inspect it first, and use
+`save --replace` only for an approved scope revision or a confirmed new cycle on a reused branch.
+For `--tree`, save from the implementation worktree; for parallel batches, save the aggregate
+contract on the integration branch before convergence cleanup.
 
 ## Implement
 
 Inline by default. Delegate to `implementer` only past the global gate — 10+ files or 3+
 independent units (`docs/delegation.md`) — with a brief carrying the contract, absolute paths of
-every in-scope file, and the lint/test command; the implementer never verifies its own output,
-and reports through its final output, the only channel a role-file agent has
+every in-scope file, and the lint/test command; the implementer runs related checks and
+reports through its final output, the only channel a role-file agent has
 (`docs/delegation.md`); brief it never to finish silently. Rules either way:
 
-- **Per-item checkpoint** — for a multi-item group, run the lint/test command after each item
-  before starting the next. Do not commit per item.
+- **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
+  Reserve full required checks for the completed integration, not every item. Do not commit per item.
 - **Stuck-fix stop** — the same fix attempted 3+ times on one file without the command passing →
   stop and report.
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset
   --hard`, `git clean -f`/`-fd`, or `git branch -D` while implementing. Stop and ask instead.
 - An implementer that fails or returns unusable output → stop and report.
 
-Verification is not run here: the review cycle's reviewer grades the diff against the contract
-(hand-off below). `--tree` and `--all` verify per worktree before collapsing, per their references.
+Before leaving implementation, account for every acceptance criterion with a concrete result;
+unmet or unknown criteria keep the cycle here. Independent review grades requirements and code
+quality separately; it does not replace the implementer's feedback loop or required checks.
+After version bump and cleanup, follow *Validation evidence* before hand-off.
 
 ## Version bump
 
@@ -82,6 +105,9 @@ manifests by hand; no `plugin.json` → skip; neither script nor conventions doc
 for the level (never default it, even unattended).
 
 ## Cleanup
+
+Confirm the branch archive can be read with `cycle_state.py inspect` before pruning any contract
+or backlog line. Cleanup changes are provisional until review and merge succeed.
 
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
@@ -116,13 +142,40 @@ verified is blocked and carries no marker → append `*(blocked by: <slug>)*` or
 it. Match on the slug by judgment, never on a numeric prefix; failing to find a match is not
 evidence the blocker landed. Disclose synced markers in the PR body.
 
+## Validation evidence
+
+Run the full contract commands and inherited mandatory checks once on the completed candidate,
+after version bump and cleanup. Before running, stage only the reviewed in-scope files; require
+no unstaged or relevant untracked inputs. Capture the tree before and after checks; changed inputs
+invalidate the result. A nonzero exit, absent result, or unaccounted input blocks hand-off.
+
+Record the run beside the archived contract, so a later session can judge reuse without guessing
+a filename or format. The helper stamps `HEAD` and `git write-tree` itself:
+
+```bash
+CYCLE_DIR="<absolute directory of this cycle.md>"
+STATE="$CYCLE_DIR/../scripts/cycle_state.py"
+[[ -r "$STATE" ]] || { echo "Bundled state helper unavailable: $STATE" >&2; exit 1; }
+python3 "$STATE" evidence --command "<exact command>" --exit <code> \
+  [--log "<result/log location>"] [--env "<tool versions relevant to reproducibility>"]
+```
+
+`inspect` returns that record as `evidence` and compares the recorded tree with the current index
+as `tree_matches_current`; `false` or a null `evidence` means rerun.
+
+A later commit with the same tree (`git rev-parse HEAD^{tree}`) may reuse passing evidence if the
+command, environment, and external inputs remain equivalent. HEAD-sensitive checks (version/trigger
+ratchets, ancestry checks) must run against the new commit. Unknown equivalence means rerun.
+Review fixes invalidate affected evidence: run focused checks while fixing, then full required
+checks on the final changed candidate. Additional reviewers never substitute for checks or CI.
+
 ## Hand off
 
 **Do not commit.** Call the Skill tool with "dev:task-review-cycle" and
 `args: --from <task-next|task-new> --auto`, and **restate the Sprint Contract verbatim** in the
-invocation — cleanup has already pruned `tasks.md`, so this is the reviewer's only copy. The
-review cycle commits, reviews the diff against the contract, routes by diff size (direct merge
-under 100 lines, PR + CI otherwise), applies findings, records out-of-scope items to
+invocation, with the archive path and validation evidence. If the hand-off loses context, recover
+the saved original rather than infer it from the diff. The review cycle commits, reviews the diff
+against the contract, routes by risk and required CI, applies findings, records out-of-scope items to
 `backlog.md`, and merges.
 
 If the cycle reports CI failure and the PR is abandoned: close the PR and delete the branch —

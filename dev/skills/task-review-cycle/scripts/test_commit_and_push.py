@@ -325,6 +325,81 @@ def case_guard_skipped_false_normally(tmp):
     print("OK: guard_skipped is false when the guard actually ran")
 
 
+def run_verify_head(repo):
+    """Invoke the --verify-head resume path; return (proc, parsed_json)."""
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--verify-head"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    payload = None
+    if proc.stdout.strip():
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            payload = None
+    return proc, payload
+
+
+def case_verify_head_accepts_a_guarded_commit(tmp):
+    """A clean resumed branch whose HEAD is well-formed reports the resume sentinel."""
+    repo = make_repo(tmp)
+    proc, payload = run_verify_head(repo)
+    if proc.returncode != 0:
+        fail("verify-head on a good HEAD", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    if not payload or payload.get("resumed") is not True or payload.get("committed") is not False:
+        fail("verify-head on a good HEAD", f"expected the resume sentinel, got {proc.stdout!r}")
+    if payload.get("guard_skipped") is not False:
+        fail("verify-head on a good HEAD", f"expected guard_skipped=false, got {payload!r}")
+    if git(repo, "status", "--porcelain").stdout.strip():
+        fail("verify-head on a good HEAD", "the working tree was modified")
+    print("OK: --verify-head reports the resume sentinel without committing")
+
+
+def case_verify_head_rejects_an_unguarded_head(tmp):
+    """The gap this closes: HEAD committed outside the harness, then pushed/merged.
+
+    Step 1 of the review cycle skips commit-and-push.sh entirely on a clean tree,
+    so before --verify-head existed nothing ever judged such a HEAD -- the hub path
+    pushed it as-is and the lite path merged it onto main.
+    """
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("committed by hand\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "quick fix, no type prefix")
+
+    proc, _ = run_verify_head(repo)
+    if proc.returncode == 0:
+        fail("verify-head on an unguarded HEAD", "expected a non-zero exit, got 0")
+    if "commit blocked by commit-guard" not in proc.stderr:
+        fail("verify-head on an unguarded HEAD",
+             f"expected the guard's reason, got {proc.stderr.strip()!r}")
+    print("OK: --verify-head refuses a HEAD that commit-guard would have blocked")
+
+
+def case_verify_head_missing_guard_fails_open(tmp):
+    """A missing guard must fail open here too -- loudly, with guard_skipped=true."""
+    repo = make_repo(tmp)
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated.mkdir(parents=True)
+    copied = isolated / "commit-and-push.sh"
+    shutil.copy(SCRIPT, copied)
+    proc = subprocess.run(
+        ["bash", str(copied), "--verify-head"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("verify-head with no guard", f"expected fail-open, got exit {proc.returncode}")
+    payload = json.loads(proc.stdout)
+    if payload.get("guard_skipped") is not True:
+        fail("verify-head with no guard", f"expected guard_skipped=true, got {proc.stdout!r}")
+    if "UNCHECKED" not in proc.stderr:
+        fail("verify-head with no guard", f"expected a stderr warning, got {proc.stderr.strip()!r}")
+    print("OK: --verify-head fails open on a missing guard with guard_skipped=true")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -345,6 +420,9 @@ def main():
         case_guard_reject_leaves_index_clean(tmp)
         case_guard_python_fallback(tmp)
         case_guard_skipped_false_normally(tmp)
+        case_verify_head_accepts_a_guarded_commit(tmp)
+        case_verify_head_rejects_an_unguarded_head(tmp)
+        case_verify_head_missing_guard_fails_open(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

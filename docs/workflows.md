@@ -16,8 +16,8 @@ Steps 1-2 are automated by `dev:task-spec` (synthesizes conversation + `dev:task
 output into `docs/design/{slug}.md`; does not interview the user). Step 3 is automated by
 `dev:task-tickets` (breaks an approved spec into vertical-slice `backlog.md` items in
 dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev:task-new`
-routes ad-hoc, non-trivial free-text requests through this same
-task-grill → task-spec → task-tickets chain automatically, then runs the resulting work through `code`.
+routes multi-session or architecturally significant requests through this chain. Clear bounded
+requests go directly to a contract; unresolved material decisions go through `task-grill`.
 
 ## `code` — Implementation
 
@@ -33,22 +33,25 @@ the global gate — 10+ files to read, or output that would flood main context.
 
 **Step 2: Sprint Contract**
 Before writing, define "done" in concrete, testable terms. Template in `docs/eval-criteria.md`.
+Approval reuse and durable contract ownership live in `dev:task-next` → `references/cycle.md`;
+intake, tickets, and resume follow that same authority.
 
 **Step 3: Implement**
 Implement directly. Delegate to `implementer` (with spec + conventions) only when the global
 delegation bar is met — e.g. a backlog batch of independent items.
 
 **Step 4: QA**
-Run the Sprint Contract's lint/test command yourself. Independent verification happens in the
-review cycle (Step 6): its single reviewer — a headless `claude -p` shell-out, not a subagent —
-grades the diff against the contract, so the agent that implemented never certifies its own work.
-Grading is read-only there; running the command stays here, which is why this step exists. `--tree` / `--all` verify per worktree with `qa-verifier`.
+Implementers run focused checks; independent review separately grades requirements and
+code quality and never replaces required checks; full required checks run on
+the completed candidate after version bump and cleanup. Both rules are owned by `dev:task-next` →
+`references/cycle.md`, under *Implement* and *Validation evidence*. Sequential `--all` shares one
+final review; parallel units also get worktree QA.
 
 **Step 5: Version bump**
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by diff size (direct merge under 100 lines, PR + CI otherwise), applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced, so a durable lesson rides into the same commit.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by risk and required CI, applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced, so a durable lesson rides into the same commit.
 
 ## `draft` — Documentation
 
@@ -79,7 +82,7 @@ State the question → research/prototype → report options and tradeoffs → d
 
 ## Handoff Files
 
-To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent/switching teammates, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). This does NOT survive a new CLI session — for genuine multi-day continuity there is currently no supported mechanism; say so explicitly rather than implying otherwise.
+To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent/switching teammates, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). Scratchpad handoffs do not survive a new CLI session. The code cycle separately archives its approved Sprint Contract under the common Git directory via `cycle_state.py`; recover that contract and its validation evidence for cross-session resume.
 
 Schema from `references/handoff-template.md`.
 

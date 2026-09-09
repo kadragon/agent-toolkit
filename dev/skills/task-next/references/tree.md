@@ -49,7 +49,11 @@ single-item inline contract: every `--tree` run writes a backlog group's Sprint 
 carried onto `$BRANCH` by the collapse `git checkout` below the same way the version bump is (see
 **Version bump** further down), so a second invocation sees the run as in flight.
 
-**Implement (`cycle.md` → *Implement*):** spawn `implementer` agent. Brief must include the **absolute
+**Implement (`cycle.md` → *Implement*):** archive the approved contract per `cycle.md` →
+*Sprint Contract*, prefixing that command with `cd ".worktrees/$SLUG" &&` — the Bash tool's CWD
+resets to the main checkout on every call, and the archive is keyed by the branch of the checkout
+it runs in, so an un-prefixed save keys this cycle's contract to the base branch (`cycle_state.py`
+refuses that outright). Then spawn `implementer` agent. The implementer runs focused checks. Brief must include the **absolute
 worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
 to the main checkout on every call; a standalone `cd` has no persistent effect):
 
@@ -76,40 +80,30 @@ worktree; the same destructive-command guard applies — QA must not run
 result-handoff instruction too: tell it to put its verdict in its final response, including an
 empty/no-blocking-findings verdict (`docs/delegation.md`).
 
-**If QA fails after one retry:** clean up and stop.
+**If QA fails after one retry:** stop and preserve the worktree, branch, contract archive, and
+main-checkout tracking/ignore state. Report unmet criteria. Destructive abandonment requires
+explicit user authorization; a failed check does not authorize deletion.
+
+Preserved state blocks the Branch step of every later `--tree` run ("stale task-next tree cleanup
+state exists"), which is deliberate — that run must not start on top of this one. Resuming is the
+default: collapse the worktree as below once QA passes. Only when the user explicitly authorizes
+abandoning the run, undo the main-checkout ignore edit and clear the state files, in this order:
+
 ```bash
-SLUG=<slug>            # same slug used in the Branch step above
-BRANCH=<type>/<slug>   # same branch used in the Branch step above
-git worktree remove --force ".worktrees/$SLUG"
-git branch -D "$BRANCH"
-# Mark active (above) may have written tasks.md in the main checkout, uncommitted — clean it up
-# too, or an abandoned run leaves a phantom `status: active` sprint behind.
-dirty=$(git status --porcelain -- tasks.md)
-if [[ -n "$dirty" ]]; then
-  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-  NODES="$SKILL_DIR/scripts/task_nodes.py"
-  [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
-  if [[ -f tasks.md ]]; then
-    python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>" || {
-      echo "Refusing to remove unexpected tasks.md content; inspect it manually." >&2
-    }
-  fi
-  if ! git cat-file -e HEAD:tasks.md 2>/dev/null; then
-    git rm --cached --ignore-unmatch -- tasks.md >/dev/null 2>&1 || true
-  fi
-fi
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
 TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
-if [[ -f "$TREE_STATE_PATH" ]]; then
-  if grep -Fxq restore "$TREE_STATE_PATH"; then
-    cp -- "$TREE_SNAPSHOT_PATH" .gitignore
-  elif grep -Fxq remove "$TREE_STATE_PATH"; then
-    rm -f -- .gitignore
-  fi
-  rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH"
+TREE_STATE=$(cat "$TREE_STATE_PATH" 2>/dev/null || true)
+if [[ "$TREE_STATE" == restore && -e "$TREE_SNAPSHOT_PATH" ]]; then
+  cp -- "$TREE_SNAPSHOT_PATH" .gitignore   # the snapshot taken before `.worktrees/` was appended
+elif [[ "$TREE_STATE" == remove ]]; then
+  rm -f -- .gitignore                       # there was no .gitignore before this run
 fi
+rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH"
 ```
-Report the failure; main checkout remains on `main`.
+
+Then drop the `status: active` block this run wrote to `tasks.md` (it covers work that never
+landed), and remove the worktree and branch only with that same explicit authorization. Leave the
+contract archive: `cycle_state.py retire` belongs after a merge, not after an abandonment.
 
 **Version bump (`cycle.md` → *Version bump*):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
 
@@ -128,4 +122,5 @@ rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now be
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on
-`$BRANCH`, then hand off: call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` (Step 4).
+`$BRANCH`, then `cycle.md` → *Validation evidence* on the complete candidate. The common Git
+archive survives worktree removal. Carry it and the evidence when handing off: call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` (Step 4).
