@@ -22,7 +22,12 @@ SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod)/.*\.(sh|py|ps1|cjs)$' 
 |-------------------|-------|
 | `SECURITY_HIT`, `BINARY_HIT`, or `MODE_OR_RENAME` | **hub** with required CI; `--lite` cannot bypass, and judgment cannot route it lite |
 | `SECURITY_HIT` | also `EFFORT="high"` in Step 2 |
-| `SCRIPT_HIT` | `--panel` is on; the path stays whatever the judgment table below chooses |
+| `SCRIPT_HIT` | **hub** with required CI, and `--panel` is on; `--lite` cannot bypass either |
+
+The floor forces hub for the same reason it turns the panel on. `late-source-reclaim.md`'s
+pre-merge reclaim needs runway, and the only free runway is `ci-wait.sh`, which lite skips: a
+lite panel run reaches the reclaim with the codex source still `.pending` every time, so its
+findings land strictly post-merge, where they are reported and never applied.
 
 A shipped script is where the non-Claude engines earn their slot — quoting, shell expansion and
 interpreter-shim defects a prose reviewer has no reason to look for (PR #267). Matching on
