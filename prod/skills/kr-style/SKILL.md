@@ -4,9 +4,9 @@ description: >-
   Rewrite Korean prose that reads like a translation into Korean that reads like
   it was written in Korean — drops the English syntax, inflection, and
   preposition transfers, then verifies with a script that exits 0. Use before
-  handing the user a long Korean document, report, README, commit-adjacent doc,
-  or any Korean output over a few paragraphs. NOT for typo/spacing correction,
-  NOT for translating between languages, NOT for changing what the text claims.
+  handing the user any Korean prose longer than a few paragraphs. NOT for
+  typo/spacing correction, NOT for rendering one language into another, NOT for
+  changing what the text claims.
 version: 1.0.0
 allowed-tools: Bash Read Edit Write Grep
 ---

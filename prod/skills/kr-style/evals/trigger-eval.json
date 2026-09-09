@@ -1,0 +1,51 @@
+[
+  {
+    "query": "this Korean prose reads like a translation — rewrite it so it reads like Korean",
+    "should_trigger": true
+  },
+  {
+    "query": "check my Korean report for translationese before I hand it over",
+    "should_trigger": true
+  },
+  {
+    "query": "the Korean README sounds like translated English, clean up the style",
+    "should_trigger": true
+  },
+  {
+    "query": "audit this Korean document for passive overuse and awkward particles",
+    "should_trigger": true
+  },
+  {
+    "query": "번역투 없애고 자연스러운 한국어로 다듬어줘",
+    "should_trigger": true
+  },
+  {
+    "query": "이 한국어 문서 AI가 쓴 티 나는데 문체만 손봐줘",
+    "should_trigger": true
+  },
+  {
+    "query": "translate this English specification into Korean",
+    "should_trigger": false,
+    "waived": "lexical proxy false positive, measured on this branch: kr-style ranks 1st at 0.2461. The query's discriminating tokens are `Korean` and `English`, and kr-style's description is the only English-classed one in the corpus carrying both — it carries them inside its own `NOT for rendering one language into another` clause, which the token proxy cannot read as a negation. The defense against auto-selection is that clause, read semantically. A real non-trigger case — kept for skill-creator's model-judged runner."
+  },
+  {
+    "query": "generate a formal HWPX report file with a signature table",
+    "should_trigger": false
+  },
+  {
+    "query": "run a persona debate on our subscription pricing",
+    "should_trigger": false
+  },
+  {
+    "query": "break this approved spec into backlog tickets in dependency order",
+    "should_trigger": false
+  },
+  {
+    "query": "이 파이썬 스크립트 리팩터링해줘",
+    "should_trigger": false
+  },
+  {
+    "query": "맞춤법이랑 띄어쓰기 오류만 잡아줘",
+    "should_trigger": false
+  }
+]
