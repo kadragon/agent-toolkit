@@ -3,7 +3,9 @@
 Handoff files enable **clean context resets** between sessions or sub-agents,
 preserving continuity without preserving context rot.
 
-This works only within a single Claude Code session (scratchpad-backed). There is currently no supported mechanism for genuine multi-day/cross-session resume — don't imply otherwise.
+This scratchpad handoff is session-local. For task-cycle resume across sessions, recover the
+approved contract archive and validation evidence per `dev:task-next` → `references/cycle.md`;
+that archive is separate from this ephemeral handoff.
 
 ## When to Write One
 

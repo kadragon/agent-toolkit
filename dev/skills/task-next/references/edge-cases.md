@@ -2,49 +2,51 @@
 
 Rarely-hit branches of `dev:task-next`, split out of `SKILL.md` so the hot path stays small.
 
-**Work already in flight** — a feature branch (or a `--tree` worktree) with uncommitted work from
-a previous session. Run three cheap ordered checks to produce a diagnosis; this automates the
-diagnosis text only — always still ask yes/no before resuming.
+**Work already in flight** — inspect a feature branch or `--tree` worktree before selecting new
+queue work, even when the checkout is clean. Commits and changed files locate candidate work;
+neither proves implementation, versioning, validation, or review complete.
 
-1. **Commits already ahead of `main`?**
-   ```bash
-   commits=$(git log main..HEAD --oneline 2>/dev/null)
-   [[ -n "$commits" ]] && echo "commits exist — task-review-cycle Step 1 already ran"
-   ```
-   Non-empty → the review cycle already committed. Offer to re-enter it: call the Skill tool with
-   "dev:task-review-cycle" and `args: --from task-next --auto`, restating the Sprint Contract
-   (see *Recovering the contract* below).
+```bash
+EDGE_DIR="<absolute directory of this edge-cases.md>"   # task-new reaches this file without loading task-next's SKILL.md
+STATE="$EDGE_DIR/../scripts/cycle_state.py"
+[[ -r "$STATE" ]] || { echo "Bundled state helper unavailable: $STATE" >&2; exit 1; }
+python3 "$STATE" inspect
+```
 
-2. **No commits ahead, but an active Sprint Contract?** The working-tree gate already routes a
-   dirty main checkout with a matching `.worktrees/` path here — diagnose "`--tree` run in flight
-   in `<path>`" and route the user to inspect or resume that worktree, or abort it via `tree.md`'s
-   QA-failure cleanup block.
+Run in the candidate checkout. The probe includes staged, unstaged, and untracked changes and
+the branch's saved contract; it deliberately returns no resume stage. For `--tree`, inspect the
+matching worktree listed by `git worktree list`, not main's unrelated dirty state.
 
-   ```bash
-   active_block=$(grep -c "^status: active" tasks.md 2>/dev/null)
-   ```
-   Zero is not proof no sprint is running — a single-item cycle keeps its contract inline. Fall
-   through to check 3 in that case. Non-zero → stage by what has changed, untracked files
-   included:
-   ```bash
-   code_diff=$(git diff --stat -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
-   untracked=$(git ls-files --others --exclude-standard -- . ':!tasks.md' ':!backlog.md' ':!CHANGELOG.md' ':!**/plugin.json' 2>/dev/null)
-   bump_diff=$(git diff --stat -- '**/plugin.json' 2>/dev/null)
-   ```
-   - all empty → contract written, no implementation: resume at `cycle.md` → *Implement*.
-   - `code_diff`/`untracked` non-empty, `bump_diff` empty → resume at `cycle.md` → *Version bump*.
-   - `bump_diff` non-empty → resume at `cycle.md` → *Hand off*.
+**Recovering the contract.** Read the saved original and evidence beside it first, then an active
+`tasks.md` block or an explicitly approved contract still in the conversation. Legacy run with no
+copy → reconstruct with the user from the backlog/spec and diff, marking reconstruction explicitly.
+A missing contract is unknown scope, not permission to review only the diff or declare completion.
 
-3. **Neither matched** → generic offer: "I see uncommitted changes on `<branch>`. Hand off to the
-   review cycle?" with the contract restated per below.
+**Nothing in flight.** `contract` null, `changes` empty, and no commits ahead of the base means
+this branch owns no cycle — a branch created ahead of the work, or one whose cycle already merged
+and was retired. Say so and return to the caller's normal selection path; do not ask for a
+contract for work that does not exist, and do not report blocked.
 
-**Recovering the contract.** The review cycle grades the diff against the Sprint Contract, and a
-resumed run may find `tasks.md` already pruned. Restate it verbatim when this session still has
-it; otherwise reconstruct it with the user from the diff and the backlog item, and say so — never
-hand off a contract you invented.
+**Choose the earliest unmet obligation** (only once one of the three shows work):
 
-On **yes**: resume at the diagnosed step. On **no**: ask whether to (a) stash and start fresh,
-(b) commit the in-flight work first, or (c) cancel.
+| Evidence | Resume at |
+|----------|-----------|
+| Scope/approach requires a new material decision | `cycle.md` → *Plan gate* |
+| Any acceptance criterion unmet or unknown | `cycle.md` → *Implement* |
+| All implementation criteria supported; required version change incomplete | `cycle.md` → *Version bump* |
+| Implementation/version complete; cleanup incomplete | `cycle.md` → *Cleanup* |
+| Required check missing, failed, stale, or bound to different inputs | `cycle.md` → *Validation evidence* |
+| All above complete; review/CI/merge pending | `cycle.md` → *Hand off* |
+
+Read the current branch/PR state before resuming a review; a commit ahead is not proof Step 1 ran.
+If merge is already confirmed complete, report completion rather than rerun cleanup or bump again.
+Use `cycle.md` → *Plan gate* for approval: an explicit same-session continuation of known scope
+proceeds without another yes/no; ambiguous ownership or scope needs one focused question. An
+archived contract is evidence of *prior* approved scope, not of approval to resume it now — a
+cross-session or unattended run that cannot ask that question stops and reports blocked rather
+than resuming a branch another session or worktree may still own. This is the working-tree gate's
+never-auto-default rule, and it outranks the Plan gate's unattended clause. On a declined resume,
+preserve work and ask which action the user wants; do not infer authorization to discard it.
 
 **Deferred backlog item (≥2 candidates)** — surface the blocker and confirm it is resolved; if
 not, skip to the next candidate. All deferred → report and stop.

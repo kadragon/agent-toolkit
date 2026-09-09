@@ -42,7 +42,7 @@ a headless `claude -p` (`scripts/claude-review.sh`) in the foreground, because t
 enforces a timeout while the `Agent` tool does not, and an agent's completion notification can be
 lost (upstream claude-code #49150, #58637, #68117) — which stalled cycles on reviews that had
 already finished. A headless process also carries no session context, so independence is stronger
-there, not weaker. `task-next --tree` / `--all` keep a per-worktree `qa-verifier` for the same
+there, not weaker. `task-next --tree` and parallel `--all` units keep a per-worktree `qa-verifier` for the same
 correctness reason. Every other delegation still requires both conditions.
 
 ## Background Routing (non-blocking)

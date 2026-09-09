@@ -2,8 +2,8 @@
 name: task-review
 description: >-
   Post-dev review cycle for this branch — commit, review, apply findings, merge (lite or PR+CI
-  by diff size). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
-  (force the merge path), --panel (add agy + Codex).
+  by risk and required checks). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
+  (request the merge path), --panel (add agy + Codex).
 disable-model-invocation: true
 ---
 
@@ -13,9 +13,9 @@ disable-model-invocation: true
 
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
 - `--auto` — skip the consolidation confirmation; apply every in-scope finding.
-- `--pr` / `--lite` — force the PR+CI path or the direct-merge path. Default routes by diff size.
-- `--panel` — add the agy and Codex engines. Auto on a security hit, a 300+ line diff, or a diff
-  that adds or changes a shipped script under `dev/`/`prod/`.
+- `--pr` / `--lite` — request PR+CI or direct merge; risk and mandatory CI gates still apply.
+- `--panel` — add agy and Codex engines. Automatic selection follows the concrete risk
+  assessment in `dev:task-review-cycle`, not line count.
 
 Restate the Sprint Contract in the same invocation when the implementation was not yet verified
 against it; the reviewer grades it.

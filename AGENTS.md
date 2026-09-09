@@ -8,9 +8,9 @@ Plugin marketplace (dev + prod) by kadragon. This repo IS the harness — skills
 |------|--------------|
 | `docs/architecture.md` | Before adding new skill/agent/hook or modifying plugin structure |
 | `docs/conventions.md` | Before writing shell or Python scripts, commit messages, or bumping versions |
-| `docs/workflows.md` | When starting any implementation cycle |
+| `docs/workflows.md` | When starting implementation; shared approval, recovery, and validation authority |
 | `docs/delegation.md` | When you have decided to delegate — brief format, effort tier, handoff protocol |
-| `docs/eval-criteria.md` | When evaluating skill quality |
+| `docs/eval-criteria.md` | When evaluating skill quality or task-cycle behavior |
 | `docs/runbook.md` | For validate/test commands and troubleshooting |
 | `docs/platform-specs.md` | Before writing any skill/hook/agent — covers both Claude Code and Codex CLI spec differences |
 | `docs/invocation.md` | Before adding a new skill, or changing how an existing one is invoked or calls another |

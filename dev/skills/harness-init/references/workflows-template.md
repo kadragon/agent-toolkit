@@ -43,8 +43,10 @@ If the sprint will spawn ≥2 parallel subagents OR use Agent Teams, the lead MU
 
 Skip this step for single-agent work.
 
-**Step 2: Sprint Contract (negotiation with evaluator)**
-Before writing code, define what "done" looks like in concrete, testable terms. If the project uses a separate evaluator agent, the generator proposes scope and the evaluator confirms the criteria are testable. If no separate evaluator, write the contract yourself — the discipline of writing testable criteria before coding is what matters.
+**Step 2: Sprint Contract**
+Before writing code, define done in concrete, testable terms and preserve already approved scope,
+criteria, and approach. Independent grading later uses that contract; a separate evaluator
+approval is not a prerequisite to implementation.
 
 See `docs/eval-criteria.md` → "Sprint Contract" for the template.
 
@@ -54,10 +56,15 @@ Adapt testing approach to the project:
 - **Legacy systems:** Read existing patterns → Implement following patterns → Cross-verify consistency
 
 **Step 3: Implement**
-For changes spanning ≤2 files, the orchestrator may implement directly. For larger changes, delegate to Implementation agent with spec + conventions + reference files.
+Implement inline by default, running focused tests for fast feedback. Delegate only when the
+platform delegation rules authorize it and independent work justifies the coordination cost.
 
 **Step 4: Post-implementation QA (mandatory — delegated only if a QA role exists)**
-Verify against the Sprint Contract criteria, not vague impressions. If a QA/verification role exists, delegate to it — and the agent that implemented must NOT be the one to verify. If no such role exists yet, run the verification inline against the same written criteria; what is non-negotiable is that the check happens against the contract, not that a second agent runs it.
+Run full required checks on the completed candidate. Independent QA grades requirements and
+code quality; it does not replace implementer checks. For task-cycle runs, approval, contract
+persistence, and check reuse are owned by `dev:task-next` → `references/cycle.md`. Without that
+skill, preserve the approved contract through completion and reuse checks only for proven
+equivalent inputs, commands, and environment; disclose unavailable independent evaluation.
 
 **Step 5: Feature-complete evaluation (mandatory — same rule)**
 When the feature is done, grade it against the done-when criteria and `docs/eval-criteria.md`. Delegate to an evaluator role if one exists. Generator-Evaluator separation is the goal wherever a separate evaluator is available; where it is not, the written criteria are what keep the self-grade honest.

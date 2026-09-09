@@ -3,10 +3,10 @@ name: task-tickets
 description: >-
   Break an approved `docs/design/{slug}.md` spec into vertical-slice
   `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
-  order. Confirms granularity with the user first. NOT for authoring the design
+  order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.0.9
+version: 1.1.0
 ---
 
 # To Tickets
@@ -44,18 +44,13 @@ items from approved spec").
    announces what it carries — so the hand-off in step 7 does not stall on the edit this step
    leaves behind. That gate — `task-next`'s specifically — is the authority for what a
    dirty tree means on the path this skill hands off to; do not add a commit here to work
-   around it. `task-new` carries its own gate with no such exception, so a leftover
-   `backlog.md` edit still stops a `task-new` run; that asymmetry is queued in `backlog.md`,
-   not something to fix by committing here.
+   around it. `task-new` also carries a backlog-only edit through its working-tree gate.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
-   UI"). Prefer end-to-end slices even if narrow in surface area. Concrete cap: roughly 5
-   files, confined to one subsystem — a slice that needs more is two tickets, not one (this
-   caps files at authoring time; `task-next`'s Step 2 "large-group guard" separately caps
-   open items at *execution* time — the two are independent checks, not restatements of each
-   other). A title that needs "and" to describe it is a signal of the same problem — split it
-   into two tickets rather than writing one ticket that does both.
+   UI"). Prefer an independently verifiable and mergeable result. File count is a review-cost
+   signal, not a cap. Split when outcomes can land independently or the review surface no longer
+   fits one contract; retain coupled mechanical changes when splitting would break validation.
    **Wide mechanical refactors are the exception to vertical slicing.** A *wide refactor* is
    one mechanical change — move a bundled script, retype a shared field, change a marker
    format every skill writes — whose blast radius fans across the repo, so a single edit breaks every call site at once
@@ -68,10 +63,8 @@ items from approved spec").
    3. **Contract** — delete the old form once no caller remains, blocked by *every* migrate
       batch.
 
-   The Step 2 five-file cap is judged **per batch**, not across the sequence, and a purely
-   mechanical batch may exceed it where every edit is the same substitution — the cap exists
-   to bound review surface, and identical edits do not accumulate review surface the way
-   distinct ones do. Split by subsystem anyway when a batch stops being reviewable at a
+   Judge review surface **per batch**, not across the sequence; identical substitutions
+   do not accumulate review cost the way distinct changes do. Split by subsystem anyway when a batch stops being reviewable at a
    glance. If a migrate batch cannot stay green alone, the change is not expand–contract-able
    in this repo: say so and keep it as one ticket rather than inventing a shared integration
    branch — `task-next`/`task-review` merge each ticket through its own PR to `main`, and a
@@ -93,9 +86,10 @@ items from approved spec").
 3. **Order topologically.** Determine which tickets depend on others (e.g. a schema change
    before the feature that reads it). Sort the ticket list so a dependency's ticket always
    precedes its dependents.
-4. **Draft numbered ticket titles + one-line scope each**, and **confirm with the user**
-   before writing anything: granularity (is this too coarse/fine?) and blocking order (does
-   the dependency chain look right?). Do not write to `backlog.md` until the user confirms.
+4. **Draft numbered ticket titles + scope, acceptance criteria, approach, and dependencies.**
+   Cite the approved source in each ticket. Apply `../task-next/references/cycle.md` → *Plan gate*:
+   reuse approved granularity/order; ask only about new slicing decisions or changed scope before
+   writing. Create `backlog.md` if this authorized ticket-writing path needs it.
 5. **Write to `backlog.md`.** Give each confirmed ticket its **own** new `## ` heading — never
    append a task-tickets-generated ticket into an existing heading that already owns other open
    items, and never put two new tickets under one shared heading. `task-next` treats a
@@ -132,4 +126,4 @@ items from approved spec").
 - Do not write production code from this skill.
 - Do not build a ticket-graph/map file — the `blocked by` marker on the item line is the only
   dependency mechanism.
-- Do not write to `backlog.md` before the user confirms granularity and order.
+- Write only within approved scope and slicing decisions; approval rules live in the shared cycle.

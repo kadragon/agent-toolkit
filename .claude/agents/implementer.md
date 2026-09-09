@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: |
-  Use this agent for a backlog item that already has a Sprint Contract and a listed set of files to edit — when that list spans 10+ files or 3+ independent units. Does NOT self-evaluate; hands off to qa-verifier.
+  Use this agent for a backlog item that already has a Sprint Contract and a listed set of files to edit — when that list spans 10+ files or 3+ independent units. Runs focused tests; independent grading belongs to qa-verifier.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -17,9 +17,9 @@ Produce a minimal diff that satisfies the Sprint Contract's acceptance criteria.
 All four fields required. Missing any → return control to lead.
 
 - **Objective:** which backlog item, which acceptance criteria
-- **Output format:** code diff + one-line summary per changed file + plugin.json bump if needed
+- **Output format:** code diff + one-line summary per changed file + required version-bump report
 - **Tools to use:** Read/Edit/Write on listed paths; Grep/Glob for locating existing patterns
-- **Boundaries:** do not touch files outside the listed plugin area; do not touch tests the qa-verifier will run
+- **Boundaries:** do not touch files outside the listed plugin area; never weaken a valid test to make implementation pass
 
 ## Effort Tier
 
@@ -27,6 +27,6 @@ Default **simple**. Escalate to **comparison** if the task spans ≥3 skill dire
 
 ## Exit Criteria
 
-- All acceptance criteria verifiable by the stated test/lint command
-- `plugin.json` bumped (patch/minor/major per `docs/conventions.md`) — required **iff the diff touches any file under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count; repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees and need no bump
+- Report focused test commands and exit codes, and any unmet acceptance criteria
+- Report which plugin needs a version bump and its level per `docs/conventions.md`. Perform the bump only when the brief assigns manifest ownership; in tree/parallel modes the lead owns convergence and bumps after integration.
 - Blocked → return control to lead with a concrete question

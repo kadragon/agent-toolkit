@@ -127,9 +127,10 @@ lists the role as an available agent type, treat it as present regardless of the
 fan-out `dev:harness-init` points at for a repo with no roles.
 
 **`implementer` absent:** implement inline on the main thread. The Sprint Contract, the in-scope
-path list and the lint/test command all still apply — only the spawn brief is dropped. Whoever
-implemented does not verify: on the default path the review cycle's reviewer grades the diff; in
-`--tree` / `--all` the per-worktree verifier does.
+path list and the lint/test command all still apply — only the spawn brief is dropped.
+Implementers run focused checks; independent review separately grades requirements and
+code quality and never replaces required checks. For task cycles,
+`task-next/references/cycle.md` owns that split and the validation-evidence and reuse rules.
 
 **`qa-verifier` absent:** spawn the built-in `general-purpose` subagent as the verifier instead. The
 brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
@@ -141,8 +142,8 @@ for the brief to point at, so the gates every contract inherits reach the verifi
 states them. Take them from *Verifier Standing-Checks Floor* above; do not reconstruct the list from
 memory.
 
-**Independence is what must not be dropped, not the role name.** The agent that implemented never
-verifies its own output — including the main thread, when the implementer fallback above was taken.
+**Independent grading is separate from implementer testing.** Preserve independence whenever
+a verifier is required; disclose an unavailable verifier per the calling workflow.
 Fixes on a retry path go to `implementer`, or inline when that role is also absent.
 
 ## Non-Interactive Gate Defaults
@@ -164,17 +165,18 @@ return value / PR body. A silently applied default violates this contract.
 |------|---------|-----------|
 | `task-grill` interview | Adopt every question's stated `Recommended:` answer, mark each as an assumption in the four-field summary, and list still-open questions in the handoff | Rule 4 already prescribes this for a non-answering user; the recommendation exists to be the default |
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
-| Code-cycle plan-mode approval (`task-next` and `task-new`, `cycle.md` → *Plan gate*) | Skip `EnterPlanMode`/`ExitPlanMode`; record the plan in the transcript and the PR body, then proceed | Review still happens in the review cycle; blocking would make unattended runs useless for anything non-trivial |
-| `task-next --all` A3 unit selection | Take every unit the full scan returned, subject to the A4 cost gate below | The `--all` invocation already asked for all of them; re-prompting adds nothing |
+| Code-cycle approval (`task-next` and `task-new`) | Apply `task-next/references/cycle.md` → *Plan gate* | Approved constraints carry forward; unresolved material decisions are not auto-approved |
+| `task-next --all` selection | Take ready units within approved scope; execution mode per `task-next/references/batch.md` | Batch selection does not authorize parallel-agent cost |
 
 **Never auto-default (abort and report instead):** the working-tree gate, the destructive-command
 guard, an open contract finding after the reviewer's one retry, the version-bump level when the
-repo states no release policy, `task-next`'s large-group guard (>8 open items), batch mode's A4
-cost gate (>6 units), and the review cycle's CI stops (`reason:"rework-cap"`, `reason:"timeout"`).
+repo states no release policy, `task-next`'s large-group guard (>8 open items), and the review cycle's CI stops (`reason:"rework-cap"`, `reason:"timeout"`).
 These protect against irreversible or unreviewable outcomes; there is no safe default.
+Unapproved parallel cost prevents parallel execution; the sequential fallback in
+`task-next/references/batch.md` remains available within approved scope.
 
-Cited by `dev:task-grill` and `task-next/references/cycle.md`. When this list changes, update
-both pointers in the same commit.
+Task-specific approval and execution rules are owned by the linked cycle and batch references;
+this table supplies unattended defaults without granting new scope.
 
 ## Sweep Trigger Policy
 
