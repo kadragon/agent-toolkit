@@ -21,3 +21,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #254 — memory-guard follow-ups
 
 - [ ] [FEAT] Gate shell-based memory writes in `memory-guard` — the hook matches `Write|Edit` only, so `printf ... > ~/.claude/projects/<slug>/memory/note.md` writes ungated; `commit-guard`'s PreToolUse(Bash) static command analysis is the precedent to follow *(deferred: no shell-path memory write has been observed; the other four PR #254 follow-ups shipped without it in PR for 4.9.6 — revisit against a recorded case)*
+
+### Salvaged from `plan/security-hit-pattern` (branch deleted 2026-09-18)
+
+- [ ] [HARNESS] `SECURITY_HIT` misses security-relevant hook files — the pattern in `dev/skills/task-review-cycle/references/risk-routing.md:15` (`auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment|\.github/workflows`) does not match `dev/hooks/commit-guard/guard.py` or `dev/hooks/memory-guard/guard.py`, so a change to a guard hook never raises `EFFORT="high"` and never forces the hub route. Add `hooks/.*guard` (and consider `dev/hooks/` generally) to the pattern. Originally filed 2026-07-04 against the old `dev-tools/hooks/commit-guard/` path; paths rewritten here. The companion item on the commit-guard `;`/newline false-block is already resolved by the in-chain branch attribution in `guard.py:751-787`.
