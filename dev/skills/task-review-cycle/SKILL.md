@@ -21,8 +21,8 @@ auto-selection, which carries no token.
 - `--auto` — skip the Step 3 confirmation; apply every in-scope finding.
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
 - `--lite` / `--pr` — request a merge path; required CI and risk gates still apply.
-- `--panel` — add agy and Codex engines when a concrete risk needs independent perspectives; a panel run
-  routes hub, since the codex reclaim needs `ci-wait.sh` runway. Step 1's `SCRIPT_HIT` floor turns it on.
+- `--panel` — force the agy + Codex panel, and with it hub (`--no-hub` still wins): the codex reclaim
+  needs `ci-wait.sh` runway. The panel runs by default on every hub and `--no-hub` route, never lite.
 
 **Sprint Contract.** Recover the caller's archived original if not restated (Tag / Scope /
 Acceptance criteria / Out of scope / Lint-test command). It is branch-keyed under the common Git
@@ -93,10 +93,10 @@ unchecked. Non-zero exit → HEAD is rejected; `guard_skipped: true` → report 
 
 **Route by risk** — `references/risk-routing.md`, evaluated on every run including explicit path
 flags. Its floor block is mandatory: all four captures force hub with required CI — neither
-`--lite` nor a judgment call may route one lite — and `SCRIPT_HIT` also turns `--panel` on, because
-the codex reclaim's only free runway is `ci-wait.sh`, which lite skips. Judgment escalates, never
-below. `--no-hub` stays local-only and stops before merge; report required remote checks as
-pending. Announce chosen path, rationale, mandatory checks, and any panel reason in one line.
+`--lite` nor a judgment call may route one lite. The panel follows the path: on for hub and
+`--no-hub`, off for lite, since the codex reclaim's only free runway is `ci-wait.sh`. Judgment
+escalates, never below. `--no-hub` stays local-only and stops before merge; report required remote
+checks as pending. Announce chosen path, rationale, mandatory checks, and panel on/off in one line.
 
 Hub path — push and open the PR before any review:
 
@@ -118,7 +118,7 @@ Idempotent: the local commit above is reused. `pr_number` null but `pr_url` not 
 
 ## Step 2: Review
 
-**One reviewer, always — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
+**One Claude reviewer, always — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (Step 1 floor) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
 absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
@@ -155,8 +155,8 @@ the one path where independence fails — the author grades their own code. Disc
 checks stay the only mechanical guard, and inline review cannot satisfy a policy that requires an
 independent reviewer.
 
-**`--panel`** — launch those sources per `references/review-sources.md` in the turn *before* the
-reviewer call, so they run while it holds the foreground. **Never wait on them.**
+**Panel** (every non-lite route) — launch agy + Codex per `references/review-sources.md` in the
+turn *before* the reviewer call, so they run while it holds the foreground. **Never wait on them.**
 
 **Never stop one either** — the codex sidecar `references/late-source-reclaim.md` reclaims before
 the merge is what makes not-waiting safe, and #248 removed the quorum rule because it *killed* a
@@ -201,11 +201,12 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip when Step 4 changed nothing. `--no-hub`: report and end here.
+Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a late codex source
+(`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 
-**Lite path** — reclaim a skipped codex source (`references/late-source-reclaim.md`), then merge locally and push `main`:
+**Lite path** — no panel source ran, so nothing to reclaim; merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -216,7 +217,7 @@ git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
 Push rejected (branch protection) → `git reset --hard origin/<base>`, `git checkout <feature>`,
-continue on the hub path from Step 1's PR block. Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
+continue on the hub path from Step 1's PR block; launch the panel before `ci-wait.sh`. Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 
 **Retire the archive on either path**, only after the merge is confirmed — one left behind
 resurrects this cycle's contract for the next branch deriving the same name: `python3

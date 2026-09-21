@@ -1,8 +1,8 @@
 # Review Consolidation Guide
 
 Step 3 of `task-review-cycle`. Sources tag their findings: `code-review` (the reviewer's
-`code-review` run), `contract` (the reviewer's Sprint Contract grading), and under `--panel`
-`agy` and `codex`.
+`code-review` run), `contract` (the reviewer's Sprint Contract grading), and on every non-lite
+route the panel's `agy` and `codex`.
 
 ## Procedure
 

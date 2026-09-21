@@ -6,8 +6,9 @@ engine-dependent branch left to document.
 
 ## Panel source launch
 
-Launch the `--panel` sources in the turn **before** the reviewer call, `run_in_background: true`,
-so they run while the reviewer holds the foreground for up to its 600s.
+Launch the panel sources (every non-lite route, per `risk-routing.md` → *Panel*) in the turn
+**before** the reviewer call, `run_in_background: true`, so they run while the reviewer holds the
+foreground for up to its 600s.
 
 **The cycle never waits on them.** When the reviewer's array is in hand, whichever sources have
 reported are consolidated and each one that has not is recorded as
