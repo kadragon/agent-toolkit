@@ -48,4 +48,6 @@ judged lite runs the single reviewer only. The reason is runway: `late-source-re
 pre-merge reclaim waits out `ci-wait.sh`, which lite skips, so a lite panel run reaches the
 reclaim with the codex source still `.pending` every time, and its findings land post-merge,
 reported and never applied. An explicit `--panel` therefore forces hub, even on a diff whose
-captures are all empty. An engine that preflight reports unavailable is skipped, not waited for.
+captures are all empty — except under `--no-hub`, which always wins and stays local. `--no-hub`
+has no merge, so it runs the codex reclaim once at its stop point instead. An engine that
+preflight reports unavailable is skipped, not waited for.

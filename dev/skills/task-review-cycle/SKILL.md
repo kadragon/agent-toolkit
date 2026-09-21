@@ -21,8 +21,8 @@ auto-selection, which carries no token.
 - `--auto` — skip the Step 3 confirmation; apply every in-scope finding.
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
 - `--lite` / `--pr` — request a merge path; required CI and risk gates still apply.
-- `--panel` — force the agy + Codex panel, and with it hub: the codex reclaim needs `ci-wait.sh`
-  runway. The panel already runs by default on every hub and `--no-hub` route; lite runs without it.
+- `--panel` — force the agy + Codex panel, and with it hub (`--no-hub` still wins): the codex reclaim
+  needs `ci-wait.sh` runway. The panel runs by default on every hub and `--no-hub` route, never lite.
 
 **Sprint Contract.** Recover the caller's archived original if not restated (Tag / Scope /
 Acceptance criteria / Out of scope / Lint-test command). It is branch-keyed under the common Git
@@ -201,7 +201,7 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip when Step 4 changed nothing. `--no-hub`: report and end here.
+Skip when Step 4 changed nothing. `--no-hub`: reclaim a late codex source (`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 
