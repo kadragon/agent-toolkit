@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] review panel (agy + Codex) runs by default on every non-lite route (dev v4.9.13) (2026-09-21)
 - [done] kr-style: Korean translationese audit and rewrite loop (prod v3.1.0) (2026-09-09)
 - [done] SCRIPT_HIT floor forces hub; commit messages captured via quoted heredoc (dev v4.9.11) (2026-09-09) → docs/conventions.md
 - [done] Evidence-driven task cycles (dev v4.9.10) (2026-09-09) → docs/workflows.md
