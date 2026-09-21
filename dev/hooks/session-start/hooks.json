@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart dispatcher for daily-debounced harness maintenance (CLAUDE.md pointer sync, .agents/skills symlink, AGENTS.md size). Best-effort; never blocks startup. Canonical registration lives in the plugin's top-level hooks.json; this file documents the bundle.",
+  "description": "SessionStart dispatcher: global CLAUDE.md sync from a canonical URL (opt-in via CLAUDE_MD_SYNC_URL), then daily-debounced harness maintenance (CLAUDE.md pointer sync, .agents/skills symlink, AGENTS.md size). Best-effort; never blocks startup. Canonical registration lives in the plugin's top-level hooks.json; this file documents the bundle.",
   "hooks": {
     "SessionStart": [
       {
