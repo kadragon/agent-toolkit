@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #277 — review panel on by default for non-lite routes (2026-09-21)
+
+- [ ] [constraint] Step 1's hub PR block calls `commit-and-push.sh --pr` without `--files`, so a dirty tree is auto-staged: PR #277 swept unrelated `.gitignore`/`.ignore` edits into a pushed commit (reverted in-branch). Pass the Step 1 file list, or make `--pr` reuse the existing commit when HEAD already holds the change (source: cycle) — dev/skills/task-review-cycle/SKILL.md:104
+
 ### PR #272 — review slot shell-out follow-ups
 
 - [ ] [HARNESS] Re-fit `agy-review.sh`'s `--print-timeout` to the reviewer's runway — the Claude slot now holds the foreground for at most 600s and the cycle no longer waits past it, so agy's 15m self-cap means it will almost never report in time; decide the new cap against `timings.log` per `late-source-reclaim.md`, not against one cycle *(deferred: `timings.log` is written only by `codex-review.sh`, so it carries zero agy rows — and agy persists no sidecar, so the cap governs only how long an unreadable run continues, not whether its findings land; revisit when agy timing is recorded)*

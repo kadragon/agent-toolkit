@@ -201,11 +201,12 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip when Step 4 changed nothing. `--no-hub`: reclaim a late codex source (`references/late-source-reclaim.md`), report, end.
+Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a late codex source
+(`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 
-**Lite path** — reclaim a skipped codex source (`references/late-source-reclaim.md`), then merge locally and push `main`:
+**Lite path** — no panel source ran, so nothing to reclaim; merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -216,7 +217,7 @@ git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
 Push rejected (branch protection) → `git reset --hard origin/<base>`, `git checkout <feature>`,
-continue on the hub path from Step 1's PR block. Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
+continue on the hub path from Step 1's PR block; launch the panel before `ci-wait.sh`. Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
 
 **Retire the archive on either path**, only after the merge is confirmed — one left behind
 resurrects this cycle's contract for the next branch deriving the same name: `python3
