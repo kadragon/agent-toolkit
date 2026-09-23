@@ -158,7 +158,7 @@ independent reviewer.
 **Panel** (every non-lite route) — launch agy + Codex per `references/review-sources.md` in the
 turn *before* the reviewer call, so they run while it holds the foreground. **Never wait on them.**
 
-**Never stop one either** — the codex sidecar `references/late-source-reclaim.md` reclaims before
+**Never stop one either** — the panel sidecar `references/late-source-reclaim.md` reclaims before
 the merge is what makes not-waiting safe, and #248 removed the quorum rule because it *killed* a
 source still working. Never bound a wait with a `sleep`: it outlives the cycle (nine orphaned once).
 
@@ -201,7 +201,7 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a late codex source
+Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a late panel source
 (`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
@@ -224,7 +224,7 @@ resurrects this cycle's contract for the next branch deriving the same name: `py
 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
 **Hub path** — follow `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>`
-(15 min), then reclaim a skipped codex source after CI green
+(15 min), then reclaim a skipped panel source after CI green
 (`references/late-source-reclaim.md`), then:
 
 ```bash

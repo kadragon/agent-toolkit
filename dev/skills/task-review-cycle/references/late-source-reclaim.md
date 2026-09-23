@@ -4,10 +4,10 @@ A panel source that has not reported by the time the reviewer returns is recorde
 the cycle proceeds — but the process does not stop, and its findings can still be real. This is
 the step that collects them before the merge closes the window.
 
-**Only `codex-review.sh` persists a result, so only the codex panel source is reclaimable.** The
-reviewer slot (`claude-review.sh`) and `agy-review.sh` write no sidecar, and a codex run that
-exits 75 (another cycle holds the workspace lock) never started one either. For those, a source
-that never reported leaves nothing on disk to come back for — the inline fallback stands.
+**Both panel sources persist a result: `codex-review.sh` and `agy-review.sh`.** The reviewer slot
+(`claude-review.sh`) writes no sidecar, and a codex run that exits 75 (another cycle holds the
+workspace lock) never started one either. For those, a source that never reported leaves nothing
+on disk to come back for — the inline fallback stands.
 
 ## Why a late return is structural, not a tail
 
@@ -16,15 +16,22 @@ that never reported leaves nothing on disk to come back for — the inline fallb
 as soon as the reviewer's array is in hand, which stops the *cycle* listening but never stops the
 *run*. So a late codex return is the expected shape, not an anomaly — three consecutive cycles
 (PR #260, #263, #264) returned late, and #260's late output named two real defects that had to
-land in a follow-up PR after the merge. Do not "fix" this by killing the run at a deadline: that
-discards exactly the findings this step exists to recover.
+land in a follow-up PR after the merge. agy returns late too: a measured run on agy 1.2.9 took
+4m12s for a 4-file diff. Do not "fix" this by killing the run at a deadline: that discards
+exactly the findings this step exists to recover.
 
 ## Where a late result lands
 
-`codex-review.sh` persists every finished run under `CODEX_REVIEW_RESULT_DIR`, defaulting to
-`$(git rev-parse --absolute-git-dir)/codex-review` — inside the git dir, so per-worktree, never
-tracked. Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`, then leading
-and trailing `-` stripped.
+Each source persists every finished run in its own directory inside the git dir — per-worktree,
+never tracked:
+
+| Source | Directory (override) |
+|--------|----------------------|
+| codex | `$(git rev-parse --absolute-git-dir)/codex-review` (`CODEX_REVIEW_RESULT_DIR`) |
+| agy | `$(git rev-parse --absolute-git-dir)/agy-review` (`AGY_REVIEW_RESULT_DIR`) |
+
+Key is the branch name with non-`[A-Za-z0-9._-]` runs collapsed to `-`, then leading and
+trailing `-` stripped. Both sources use the same three files:
 
 | File | Meaning |
 |------|---------|
@@ -35,13 +42,15 @@ and trailing `-` stripped.
 `.meta` fields: `pid`, `started_at`, `mode`, `branch`, `base`, `head_sha`, `status`, `exit_code`,
 `finished_at`, `elapsed_seconds`, `review_file`. `status` is `ok` (a review was produced),
 `failed` (the companion exited non-zero) or `empty` (it ran but produced no extractable review).
+agy's `.meta` has the same fields except `mode`; `failed` there means agy exited non-zero after
+partial output.
 
 The key is lossy — `feat/x-2` and `feat-x-2` sanitize to the same name — and a file can also be
 left from an earlier cycle on this branch. So before using a result, check that its `branch`
 matches the current branch and that `started_at` is later than this cycle's launch. A `.meta`
 that fails either check belongs to a different run: leave it alone.
 
-`timings.log` in the same directory gets one line per run —
+`timings.log` in the codex directory (codex only) gets one line per run —
 `<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<raw branch>`. It is the
 evidence for any future argument about how much runway the companion needs: elapsed alone cannot
 separate "the companion is reliably slower than the cycle" from "that diff was unusual", so diff
@@ -49,19 +58,23 @@ size is recorded beside it. Argue from this log, not from a single cycle's impre
 
 ## Pre-merge reclaim
 
-Run this **immediately before the merge command**, when the codex panel source was recorded as
+Run this **immediately before the merge command**, for each panel source (codex, agy) recorded as
 `Reviewers Skipped` this cycle — still running, or failed. On the hub path that means *after*
-`ci-wait.sh` returns green — the CI wait is free runway for a slow companion, so reclaiming
+`ci-wait.sh` returns green — the CI wait is free runway for a slow source, so reclaiming
 earlier throws it away.
 
 The key derivation must match `sanitize_key` exactly, trailing-hyphen strip included, or a branch
 like `fix-` looks up `fix-.meta` while the script wrote `fix.meta`:
 
 ```bash
-RESULT_DIR="${CODEX_REVIEW_RESULT_DIR:-$(git rev-parse --absolute-git-dir)/codex-review}"
+GIT_DIR_ABS=$(git rev-parse --absolute-git-dir)
 KEY=$(git rev-parse --abbrev-ref HEAD \
   | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//')
-cat "$RESULT_DIR/$KEY.meta" 2>/dev/null || cat "$RESULT_DIR/$KEY.pending" 2>/dev/null || echo "no result"
+for RESULT_DIR in "${CODEX_REVIEW_RESULT_DIR:-$GIT_DIR_ABS/codex-review}" \
+                  "${AGY_REVIEW_RESULT_DIR:-$GIT_DIR_ABS/agy-review}"; do
+  echo "== $RESULT_DIR"
+  cat "$RESULT_DIR/$KEY.meta" 2>/dev/null || cat "$RESULT_DIR/$KEY.pending" 2>/dev/null || echo "no result"
+done
 ```
 
 | State | Action |

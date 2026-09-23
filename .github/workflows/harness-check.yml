@@ -180,6 +180,10 @@ jobs:
       - name: Run dev/skills/task-review-cycle/scripts/test_claude_review.py
         run: python3 dev/skills/task-review-cycle/scripts/test_claude_review.py
 
+      # Pins the read-only prompt scope and the late-reclaim sidecar (pending → review + meta).
+      - name: Run dev/skills/task-review-cycle/scripts/test_agy_review.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_agy_review.py
+
   task-nodes-test:
     name: task_nodes.py regression test
     runs-on: ubuntu-latest
