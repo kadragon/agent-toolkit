@@ -89,8 +89,12 @@ if [ "$MERGE_OK" = "true" ]; then
   git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
 
   # squash/rebase merges change commit hash so -d sees "not fully merged"; -D is safe here
-  # because we already confirmed merge_ok above
-  if git branch -D "$FEATURE_BRANCH" >/dev/null 2>&1; then
+  # because we already confirmed merge_ok above.
+  # `gh pr merge --delete-branch` (hub.sh) may have deleted it already — that is success, not a
+  # cleanup failure, so check before deleting rather than reading -D's failure as a warning.
+  if ! git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}"; then
+    CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' already deleted by the merge"
+  elif git branch -D "$FEATURE_BRANCH" >/dev/null 2>&1; then
     CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' deleted"
   else
     CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}' (may be current branch)"
