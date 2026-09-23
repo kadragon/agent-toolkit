@@ -208,6 +208,37 @@ class RecoveryTest(unittest.TestCase):
         self.assertLess(notes.index("tried A"), notes.index("next: check C"))
         self.state("note", text=" \n", ok=False)
 
+    def test_replace_drops_the_previous_cycles_notes(self):
+        self.state("save", text=contract("first"))
+        self.state("note", text="old cycle: tried A")
+        self.state("save", "--replace", text=contract("second"))
+        self.assertIsNone(self.state("inspect")["notes"])
+
+    def test_identical_legacy_contract_resaves_without_checks(self):
+        # An archive written before criteria needed a check must still re-save idempotently.
+        legacy = "**Acceptance criteria:**\n- [ ] works\n"
+        slot = Path(self.state("inspect")["contract_path"])
+        slot.parent.mkdir(parents=True)
+        slot.write_text(legacy)
+        self.state("save", text=legacy)
+
+    def test_other_bullets_and_stray_arrows_do_not_pass(self):
+        star = contract().replace("- [ ]", "* [ ]").replace(" → `pytest -k example`", "")
+        self.assertIn("names no check", self.state("save", text=star, ok=False))
+        inline = "**Acceptance criteria:**\n- [ ] maps a->b\n"
+        self.assertIn("names no check", self.state("save", text=inline, ok=False))
+
+    def test_heading_spelling_variants_are_recognised(self):
+        for heading in ("**Acceptance criteria**:", "**Acceptance criteria**", "## Acceptance criteria:"):
+            with self.subTest(heading=heading):
+                bare = f"{heading}\n- [ ] works\n"
+                self.assertIn("names no check", self.state("save", text=bare, ok=False))
+
+    def test_wrapped_criterion_check_on_continuation_line(self):
+        wrapped = ("**Acceptance criteria:**\n- [ ] a long criterion that wraps\n"
+                   "  onto a second line → `pytest -k wrap`\n**Out of scope:** none\n")
+        self.state("save", text=wrapped)
+
 
 if __name__ == "__main__":
     unittest.main()

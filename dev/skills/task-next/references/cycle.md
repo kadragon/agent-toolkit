@@ -81,10 +81,19 @@ reports through its final output, the only channel a role-file agent has
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
 - **Stuck-fix stop** — the same fix attempted twice on one file without the command passing →
-  record what was tried, why it failed, and the next hypothesis
-  (`printf '%s\n' "<note>" | python3 "$STATE" note`), then stop and report. Recommend resuming in
-  a fresh session (`/clear`): accumulated failed attempts degrade the context, and `inspect`
-  hands the notes to the next run. An unknown cause routes to `dev:task-debug`.
+  record what was tried, why it failed, and the next hypothesis (block below; `--tree` prefixes
+  `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
+  session (`/clear`): accumulated failed attempts degrade the context, and `inspect` hands the
+  notes to the next run. A delegated implementer only reports its attempts; the parent records
+  that report as the note. An unknown cause routes to `dev:task-debug`.
+
+  ```bash
+  CYCLE_DIR="<absolute directory of this cycle.md>"
+  STATE="$CYCLE_DIR/../scripts/cycle_state.py"
+  python3 "$STATE" note <<'STUCK_NOTE'
+  <what was tried, why it failed, next hypothesis>
+  STUCK_NOTE
+  ```
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset
   --hard`, `git clean -f`/`-fd`, or `git branch -D` while implementing. Stop and ask instead.
 - An implementer that fails or returns unusable output → stop and report.

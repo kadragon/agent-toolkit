@@ -46,7 +46,8 @@ First match wins, so read the rows in order and check the last one against the r
   "dev:task-spec" and then "dev:task-tickets"; then **stop** — no cycle runs this invocation.
   Implementation starts in a fresh session that holds the written spec, not the interview that
   produced it: tell the user to `/clear` and run `/dev:task-next`, which picks the first ready
-  ticket. The uncommitted `backlog.md` is carried by `task-next`'s working tree gate.
+  ticket (in Codex, the `task-next` skill-picker entry in a new session). The uncommitted
+  `backlog.md` and `docs/design/` spec are carried by `task-next`'s working tree gate.
 - **Clear, bounded, and single-session-sized** → build the Sprint Contract from the request (or
   the grill output), go to Step 3.
 

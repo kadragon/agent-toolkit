@@ -71,6 +71,7 @@ to the main checkout on every call; a standalone `cd` has no persistent effect):
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
+A stuck report → the parent records it as a `note` from the worktree (`cycle.md` → *Stuck-fix stop*).
 
 **QA:** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command

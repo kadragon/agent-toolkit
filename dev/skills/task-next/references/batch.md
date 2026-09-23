@@ -53,7 +53,8 @@ paths. Agents may edit only their owned files, never the main checkout or conver
 No force push, hard reset, force clean, or force branch deletion. The same fix attempted twice
 on one file without the checks passing → stop and report what was tried and why it failed; the `Agent` tool has no timeout, so this cap
 is the only bound on a looping unit. A stuck agent reports the failure in its final output, never
-finishing silently; it cannot ask the user directly.
+finishing silently; it cannot ask the user directly. The integration session records that
+report as a `note` on the unit's branch (`cycle.md` → *Stuck-fix stop*) so a fresh run sees it.
 
 Each implementer archives its unit contract in the worktree, implements and runs focused checks,
 then commits only unit changes on its own branch. Return branch, worktree, contract/archive path,

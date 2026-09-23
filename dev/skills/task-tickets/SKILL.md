@@ -6,7 +6,7 @@ description: >-
   order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.1.0
+version: 1.1.1
 ---
 
 # To Tickets
@@ -40,8 +40,8 @@ items from approved spec").
    the same spec — delete the graduated line from `## Not yet specified` in the same edit that
    writes its ticket, so it lives only as the ticket. This skill makes no commit of its own:
    the edit rides into whichever commit the caller's cycle makes next. `task-next`'s working-tree
-   gate carves the matching exception — a tree whose only dirty path is `backlog.md` proceeds and
-   announces what it carries — so the hand-off in step 7 does not stall on the edit this step
+   gate carves the matching exception — a tree whose only dirty paths are `backlog.md` and `docs/design/`
+   proceeds and announces what it carries — so the hand-off in step 7 does not stall on the edit this step
    leaves behind. That gate — `task-next`'s specifically — is the authority for what a
    dirty tree means on the path this skill hands off to; do not add a commit here to work
    around it. `task-new` also carries a backlog-only edit through its working-tree gate.

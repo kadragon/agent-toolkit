@@ -30,11 +30,13 @@ from pathlib import Path
 
 BASE_BRANCHES = ("main", "master")
 CRITERIA_HEADING = "**Acceptance criteria:**"
-CHECKBOX = re.compile(r"^\s*- \[[ xX]\]\s*(.*)$")
+CHECKBOX = re.compile(r"^\s*[-*+] \[[ xX]\]\s*(.*)$")
 FIELD = re.compile(r"^\*\*[^*]+:\*\*")
 # The inline template form, or the `## Acceptance criteria` heading a tasks.md sprint block uses.
-CRITERIA_START = re.compile(r"^(?:\*\*Acceptance criteria:\*\*|#{1,6}\s+Acceptance criteria\s*$)", re.I)
-ARROW = re.compile(r"(?:→|->)\s*\S")
+CRITERIA_START = re.compile(
+    r"^(?:\*\*Acceptance criteria(?::\*\*|\*\*:?)|#{1,6}\s+Acceptance criteria:?\s*$)", re.I)
+# The check is a separate segment: whitespace before the arrow, so `a->b` in prose is not one.
+ARROW = re.compile(r"\s(?:→|->)\s*\S")
 
 
 def check_criteria(text):
@@ -51,6 +53,8 @@ def check_criteria(text):
             match = CHECKBOX.match(line)
             if match:
                 items.append(match.group(1))
+            elif items and line[:1].isspace() and line.strip():
+                items[-1] += " " + line.strip()   # a wrapped criterion's continuation line
         if not items:
             raise ValueError(f"{CRITERIA_HEADING} section at line {start + 1} lists no criteria")
         for item in items:
@@ -106,9 +110,13 @@ def main():
             text = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
             if not text.strip():
                 raise ValueError("Empty contract refused")
-            check_criteria(text)
-            if path.exists() and path.read_text(encoding="utf-8") != text and not args.replace:
-                raise ValueError("Saved contract differs; inspect before an approved --replace")
+            saved = path.read_text(encoding="utf-8") if path.exists() else None
+            if saved != text:   # re-saving the archived text is a no-op, even from before checks
+                check_criteria(text)
+            if saved is not None and saved != text:
+                if not args.replace:
+                    raise ValueError("Saved contract differs; inspect before an approved --replace")
+                notes_path.unlink(missing_ok=True)   # the old cycle's notes do not bind the new one
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(".tmp")
             temporary.write_text(text, encoding="utf-8")

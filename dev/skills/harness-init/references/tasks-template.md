@@ -72,9 +72,9 @@ status: active
 
 ## Acceptance Criteria
 
-- [ ] {concrete, testable criterion 1}
-- [ ] {concrete, testable criterion 2}
-- [ ] {concrete, testable criterion 3}
+- [ ] {concrete criterion 1} → {test, command, or observation that proves it}
+- [ ] {concrete criterion 2} → {test, command, or observation that proves it}
+- [ ] {concrete criterion 3} → {test, command, or observation that proves it}
 
 ## Evaluator Feedback
 
