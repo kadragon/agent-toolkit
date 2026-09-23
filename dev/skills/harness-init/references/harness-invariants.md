@@ -134,7 +134,8 @@ code quality and never replaces required checks. For task cycles,
 
 **`qa-verifier` absent:** spawn the built-in `general-purpose` subagent as the verifier instead. The
 brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
-(Objective / Output format / Tools to use / Boundaries) plus effort tier — filled with the Sprint
+(Objective / Output format / Tools to use / Boundaries) plus effort tier and its stop rule (at the
+tool-call cap, return the table with ungraded criteria marked `unverified`) — filled with the Sprint
 Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test command, and telling
 it to verify against those criteria rather than impressions and to change nothing. **Carry the
 standing-checks floor in the brief too** — with no role file there is no `## Checks (always run)`
