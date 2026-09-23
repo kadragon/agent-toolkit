@@ -108,8 +108,8 @@ Before any implementation cycle, agree on "done":
 **Tag:** {[FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]}
 **Scope:** {specific files or skills to modify}
 **Acceptance criteria:**
-- [ ] {criterion 1 — concrete and testable}
-- [ ] {criterion 2}
+- [ ] {criterion 1 — concrete} → {test, command, or observation that proves it}
+- [ ] {criterion 2} → {check}
 **Out of scope:** {explicit exclusions}
 **Lint/test command:** {command to run to verify}
 ```

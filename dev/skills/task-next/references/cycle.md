@@ -41,14 +41,16 @@ as blocked, never silently approved.
 **Tag:** [FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]
 **Scope:** files or areas this change touches
 **Acceptance criteria:**
-- [ ] one concrete, testable criterion per item
+- [ ] one concrete criterion per item → the test, command, or observation that proves it
 **Out of scope:** explicit exclusions
 **Lint/test command:** the command that must exit 0
 ```
 
-The Tag is what the reviewer grades a `[FIX]` reproduction criterion against — write it in. A
-`[FIX]` contract names the test that fails before and passes after. A multi-item group gets one
-checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
+The Tag is what the reviewer grades a `[FIX]` reproduction criterion against — write it in.
+`cycle_state.py save` refuses a criterion with no `→ <check>`. When the check is a test and test
+infrastructure exists, write it first and watch it fail before implementing — for `[FEAT]` as
+well as `[FIX]`, whose contract names the test that fails before and passes after. A multi-item
+group gets one checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
 approval source and exact selected backlog lines. `tasks.md` remains the optional queue-facing
 copy when the caller needs a `## Covers` deletion list.
 
@@ -78,8 +80,20 @@ reports through its final output, the only channel a role-file agent has
 
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
-- **Stuck-fix stop** — the same fix attempted 3+ times on one file without the command passing →
-  stop and report.
+- **Stuck-fix stop** — the same fix attempted twice on one file without the command passing →
+  record what was tried, why it failed, and the next hypothesis (block below; `--tree` prefixes
+  `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
+  session (`/clear`): accumulated failed attempts degrade the context, and `inspect` hands the
+  notes to the next run. A delegated implementer only reports its attempts; the parent records
+  that report as the note. An unknown cause routes to `dev:task-debug`.
+
+  ```bash
+  CYCLE_DIR="<absolute directory of this cycle.md>"
+  STATE="$CYCLE_DIR/../scripts/cycle_state.py"
+  python3 "$STATE" note <<'STUCK_NOTE'
+  <what was tried, why it failed, next hypothesis>
+  STUCK_NOTE
+  ```
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset
   --hard`, `git clean -f`/`-fd`, or `git branch -D` while implementing. Stop and ask instead.
 - An implementer that fails or returns unusable output → stop and report.
