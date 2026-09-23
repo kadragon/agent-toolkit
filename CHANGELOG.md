@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] reference-review skill; curate drops machine prompts; verifier tool-call budget (dev v4.10.0) (2026-09-23) → docs/delegation.md
 - [done] agy review is read-only and leaves a sidecar the pre-merge reclaim collects (dev v4.9.19) (2026-09-23)
 - [done] task-grill version corrected to minor for its new step and bundled reference (dev v4.9.18) (2026-09-23)
 - [done] CI fails a new skill references/ or scripts/ file without a minor skill version bump (2026-09-23)

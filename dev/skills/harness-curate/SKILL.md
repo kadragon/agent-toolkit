@@ -4,7 +4,7 @@ description: >-
   Mine session transcripts to propose new harness assets, fix triggering misses, prune unused
   skills/agents/hooks, and disable plugins that never fire in a repo. Retrospecting the
   conversation you are in → harness-capture. Repo structure validation → harness-init.
-version: 2.2.0
+version: 2.2.1
 disable-model-invocation: true
 ---
 

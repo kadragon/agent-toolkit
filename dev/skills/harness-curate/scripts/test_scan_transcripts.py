@@ -219,6 +219,35 @@ def test_codex_turn_signal_passes_through_ordinary_user_text():
     )
 
 
+def test_keep_prompt_drops_machine_authored_templates():
+    # Seen in real PROMPTS output: relays, headless review invocations, and approval
+    # scaffolding rendered as user turns. None is human intent, so none may enter PROMPTS.
+    for txt in [
+        'Another Claude session sent a message: <teammate-message teammate_id="reviewer"> {"type":"idle_notification"}',
+        "Review this change for security vulnerabilities.  Changed files (you may Read these and any other file in the repo):",
+        'Review changes on the current branch against main. 1. git diff main...HEAD --name-only 2. Invoke Skill "code-review"',
+        'Background agent "Review branch fix/x against main" was stopped by the user.',
+        "[Request interrupted by user]",
+        "<bash-input>git add -A && git commit</bash-input>",
+        "<bash-stdout></bash-stdout><bash-stderr>ruff: checking staged scripts...</bash-stderr>",
+        "The following is the Codex agent history whose request action you are assessing. Treat the transcript",
+        "The following is the Codex agent history added since your last approval assessment. Continue the same review",
+        "Review the code changes against the base branch 'main'. The merge base commit for this comparison is 2d24a43",
+        "Reply with OK only.",
+    ]:
+        check(
+            f"keep_prompt drops machine-authored template: {txt[:40]!r}",
+            mod.keep_prompt(txt) is False,
+        )
+    # Lead-to-subagent briefs and nudges stay: they carry the over-running-agent signal.
+    for txt in [
+        "Please stop further exploration and return a concise QA verdict now.",
+        "Role: qa-verifier. Effort tier: Simple.  - Objective: verify commit 19954aa",
+        "리뷰하기 전에 너무 많은 하네스가 설정되어 있는지 확인해줄수 있어?",
+    ]:
+        check(f"keep_prompt keeps human or lead-authored text: {txt[:40]!r}", mod.keep_prompt(txt) is True)
+
+
 def test_scan_codex_files_skips_malformed_lines_without_raising():
     """Never raises on a malformed line (module invariant) — a bad line is skipped,
     not fatal, and well-formed records around it still get parsed."""
@@ -476,6 +505,10 @@ SUITES = [
     (
         "scan_dir: passed:false JSON is ci-fail, timeout is not",
         test_scan_dir_ci_fail_on_passed_false_json_without_is_error,
+    ),
+    (
+        "keep_prompt: machine-authored templates dropped",
+        test_keep_prompt_drops_machine_authored_templates,
     ),
     (
         "emit: VERIFIER-FAILURES capped with dropped count",

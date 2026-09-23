@@ -82,6 +82,11 @@ Embed in every spawn prompt:
 | Comparison | Weighing options, multi-file review, cross-module check | 10–15 | sonnet |
 | Complex | Root cause unknown, architectural decision | 15+ | opus |
 
+The tool-call count is a budget, not a guideline. Brief the stop rule with the tier: at the cap,
+stop and return what was gathered, with every unfinished item marked `unverified` and why — never
+keep going until the lead has to message "stop and report". Transcripts showed that nudge six
+times in Codex cycles whose briefs named a tier but no stop rule.
+
 ## Data Transfer Protocols
 
 | Strategy | Mechanism | Use when |
