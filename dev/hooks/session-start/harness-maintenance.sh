@@ -58,8 +58,9 @@ size_out=$(bash "$SCRIPTS/check-context-size.sh" 2>&1) || true
 
 # G) harness-curate due check (>14d since last run AND >=10 new sessions)
 CURATE_RECORD="${PLUGIN_ROOT}/skills/harness-curate/scripts/record_run.py"
-if [[ -f "$CURATE_RECORD" ]]; then
-  due_out=$(python3 "$CURATE_RECORD" --check-due 2>/dev/null) || true
+PY=$(command -v python3 || command -v python || true)
+if [[ -n "$PY" ]] && [[ -f "$CURATE_RECORD" ]]; then
+  due_out=$("$PY" "$CURATE_RECORD" --check-due 2>/dev/null) || true
   [[ -n "$due_out" ]] && WARNINGS+="[harness:G] $due_out\n"
 fi
 
