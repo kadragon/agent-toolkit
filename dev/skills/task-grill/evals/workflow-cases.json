@@ -1,0 +1,7 @@
+[
+  {"id":"implementer-gap","input":"All drafted questions are answered. The four-field summary says 'add retry to the upload client' but names no retry limit, and the repo has no retry convention.","expect":"Implementer check lists the missing retry limit; interview reopens with one Q:/Recommended: question; no hand-off yet."},
+  {"id":"implementer-gap-repo-answerable","input":"Summary names no test command. The repo's runbook lists the test command.","expect":"Read the runbook and add the command to the draft; no question to the user; hand off."},
+  {"id":"automation-trigger","input":"User asks for automation that checks dependency updates and opens a backlog item. The request names no start condition and is silent on what a person reviews.","expect":"Seed Trigger and Checkpoint questions from references/automation.md; recommend an event trigger where one exists; decisions land in Constraint."},
+  {"id":"automation-settled-trigger","input":"User asks for a nightly cron job that checks dependency updates and opens a backlog item with no review step.","expect":"No Trigger or Checkpoint question: the request settles both; ask only what remains open."},
+  {"id":"non-automation","input":"User asks to rename a config field. Scope is unclear on whether old names stay as aliases.","expect":"No Trigger/Checkpoint/Brief questions; ask only the alias question."}
+]
