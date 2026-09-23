@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-curate flags repo rules that keep backlog history outside CHANGELOG (dev v4.9.15) (2026-09-23)
 - [done] SessionStart nudge when a harness-curate run is due (dev v4.9.14) (2026-09-23)
 - [done] review panel (agy + Codex) runs by default on every non-lite route (dev v4.9.13) (2026-09-21)
 - [done] kr-style: Korean translationese audit and rewrite loop (prod v3.1.0) (2026-09-09)
