@@ -4,7 +4,7 @@ description: >-
   Mine session transcripts to propose new harness assets, fix triggering misses, prune unused
   skills/agents/hooks, and disable plugins that never fire in a repo. Retrospecting the
   conversation you are in → harness-capture. Repo structure validation → harness-init.
-version: 2.0.0
+version: 2.1.0
 disable-model-invocation: true
 ---
 
@@ -152,5 +152,5 @@ land on confirmation, disclosed as unverified.
 - **`references/signal-taxonomy.md`** — detection rules, thresholds, and delegate brief per signal.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes, grep patterns, project-path encoding.
 - **`scripts/scan_transcripts.py`** — bounded scanner (Step 1); prints every dropped count.
-- **`scripts/record_run.py`** — stamps `lastRunMs` in `.harness-curator-state.json` (Step 6), mirrored best-effort to Codex; `--test`.
+- **`scripts/record_run.py`** — stamps `lastRunMs` in `.harness-curator-state.json` (Step 6), mirrored best-effort to Codex; `--check-due` is the read side the SessionStart maintenance hook calls (>14d AND >=10 new sessions); `--test`.
 - **`scripts/disable_plugins.py`** — project-scope plugin disable (Step 5); `--test`.

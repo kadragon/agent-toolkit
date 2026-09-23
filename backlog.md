@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #278 — SessionStart nudge when a harness-curate run is due (2026-09-23)
+
+- [ ] [debt] `record_run.py --check-due` counts only Claude transcripts, so a Codex-only repo never gets the curate nudge; count the project's date-partitioned Codex sessions too (`scan_transcripts.py` already locates them) (source: codex) — dev/skills/harness-curate/scripts/record_run.py:127
+
 ### PR #277 — review panel on by default for non-lite routes (2026-09-21)
 
 - [ ] [constraint] Step 1's hub PR block calls `commit-and-push.sh --pr` without `--files`, so a dirty tree is auto-staged: PR #277 swept unrelated `.gitignore`/`.ignore` edits into a pushed commit (reverted in-branch). Pass the Step 1 file list, or make `--pr` reuse the existing commit when HEAD already holds the change (source: cycle) — dev/skills/task-review-cycle/SKILL.md:104

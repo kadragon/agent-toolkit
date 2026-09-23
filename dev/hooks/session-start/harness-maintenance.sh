@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# SessionStart hook: harness maintenance (B, E, F steps only)
+# SessionStart hook: harness maintenance (B, E, F, G steps only)
 #
 # B) sync-claude-md.sh  — ensure CLAUDE.md = "@AGENTS.md"
 # E) symlink-guard.sh   — ensure .agents/skills symlink
 # F) check-context-size.sh — warn if AGENTS.md/CLAUDE.md > 200 lines
+# G) record_run.py --check-due — nudge when a harness-curate run is due
 #
 # C (reconcile-harness.py) is intentionally excluded — it mutates backlog.md
 # and should only run on explicit "harness sync" request via harness-init skill.
@@ -54,6 +55,14 @@ symlink_code=$?
 # F) Context size check
 size_out=$(bash "$SCRIPTS/check-context-size.sh" 2>&1) || true
 [[ -n "$size_out" ]] && WARNINGS+="[harness:F] $size_out\n"
+
+# G) harness-curate due check (>14d since last run AND >=10 new sessions)
+CURATE_RECORD="${PLUGIN_ROOT}/skills/harness-curate/scripts/record_run.py"
+PY=$(command -v python3 || command -v python || true)
+if [[ -n "$PY" ]] && [[ -f "$CURATE_RECORD" ]]; then
+  due_out=$("$PY" "$CURATE_RECORD" --check-due 2>/dev/null) || true
+  [[ -n "$due_out" ]] && WARNINGS+="[harness:G] $due_out\n"
+fi
 
 # Write debounce stamp
 mkdir -p ".agents"
