@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-grill version corrected to minor for its new step and bundled reference (dev v4.9.18) (2026-09-23)
 - [done] CI fails a new skill references/ or scripts/ file without a minor skill version bump (2026-09-23)
 - [done] task-grill ends on an implementer check and asks trigger/checkpoint questions for automations (dev v4.9.17) (2026-09-23)
 - [done] merge cleanup no longer warns when the merge already deleted the branch (dev v4.9.16) (2026-09-23)

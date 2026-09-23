@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.1.3
+version: 1.2.0
 ---
 
 # Grill
