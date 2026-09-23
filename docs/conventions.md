@@ -244,6 +244,12 @@ one change.
 it is an internal primitive with no standalone entry point, and nothing reads a version off it.
 Do not add the key to satisfy this table — an absent version is a valid state.
 
+**CI enforces the bundled-file row.** `scripts/ci/check_skill_version_bump.py` fails a branch
+that adds a file under a skill's `references/` or `scripts/` while that skill's `version:` rose
+by less than a minor step. Renames, `scripts/**/test_*` files, and `evals/`/`agents/`/`examples/`
+files are not counted. When the new file only moves existing `SKILL.md` content, a patch is
+correct: add the trailer `Skill-Bump-Exempt: <skill> — <reason>` to a commit on the branch.
+
 Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
 
 Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):
