@@ -12,7 +12,9 @@ without creating a branch or contract.
 
 Render a numbered list with tag, scope, and blockers. Accept comma lists, inclusive ranges, or
 `all`; report out-of-range indices. Empty/unparseable input → re-prompt once, then stop.
-Non-interactive `--all`: select ready units within already approved scope and announce them.
+Non-interactive `--all`: select ready units within already approved scope and announce them,
+at most **5 units per run** — an unattended loop has no one to notice runaway cost. The rest
+stay queued; list them in the final report for the next run.
 
 ### A2 — Decide execution mode
 
@@ -33,8 +35,7 @@ Explain the expected benefit and ownership before fan-out. Small tasks remain se
 
 Shared convergence files (`plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md`) are
 owned by the integration session. A unit whose actual scope edits one of them runs sequentially.
-More than six parallel units → confirm the implementer + QA cost explicitly; unattended runs
-use sequential execution instead. Remaining steps apply only to the parallel path.
+More than six parallel units → confirm the implementer + QA cost explicitly. Remaining steps apply only to the parallel path.
 
 ### A3 — Parallel implementation
 
@@ -49,8 +50,8 @@ gets its approved unit contract, absolute worktree path, owned files, and releva
 Follow `docs/delegation.md` when present; otherwise include objective, output format, tools, and
 boundaries in each brief. Every shell call must set its worktree CWD; file tools use absolute
 paths. Agents may edit only their owned files, never the main checkout or convergence files.
-No force push, hard reset, force clean, or force branch deletion. The same fix attempted 3+
-times on one file without the checks passing → stop; the `Agent` tool has no timeout, so this cap
+No force push, hard reset, force clean, or force branch deletion. The same fix attempted twice
+on one file without the checks passing → stop and report what was tried and why it failed; the `Agent` tool has no timeout, so this cap
 is the only bound on a looping unit. A stuck agent reports the failure in its final output, never
 finishing silently; it cannot ask the user directly.
 

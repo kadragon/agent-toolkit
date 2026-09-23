@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 2.1.0
+version: 2.2.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review. Already on the queue
@@ -43,13 +43,14 @@ First match wins, so read the rows in order and check the last one against the r
   Skill tool with "dev:task-grill"; continue only when it reports the open questions resolved,
   then re-route on the rows below.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
-  "dev:task-spec" and then "dev:task-tickets"; then pick the first ready ticket (topologically
-  first, no unresolved `*(blocked by: …)*`) and run Step 3 on that one ticket. The rest stay in
-  `backlog.md` for `task-next`.
+  "dev:task-spec" and then "dev:task-tickets"; then **stop** — no cycle runs this invocation.
+  Implementation starts in a fresh session that holds the written spec, not the interview that
+  produced it: tell the user to `/clear` and run `/dev:task-next`, which picks the first ready
+  ticket. The uncommitted `backlog.md` is carried by `task-next`'s working tree gate.
 - **Clear, bounded, and single-session-sized** → build the Sprint Contract from the request (or
   the grill output), go to Step 3.
 
-Exactly one cycle runs per invocation. Several unrelated requests → handle the first, tell the
+At most one cycle runs per invocation. Several unrelated requests → handle the first, tell the
 user to re-invoke (or queue them for `task-next --all`).
 
 ## Step 3 — Run the cycle
@@ -59,10 +60,9 @@ directory) with these overrides:
 
 - **Branch** — no stdin; pass `--tag <TYPE>` from Step 1, or omit it when untagged and accept the
   `fix/` fallback.
-- **Sprint Contract** — archive on every path per the shared cycle. Only a `task-tickets` ticket
-  also writes `tasks.md` with `status: active` and a `## Covers` line holding the ticket's `- [ ]`
-  item verbatim, the deletion target for cleanup.
-- **Cleanup** — `prune-tasks` and `prune-backlog` only on the ticket path; update `CHANGELOG.md`
+- **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
+  queue line to delete.
+- **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
   when the repo maintains one. Do not scaffold a harness to finish standalone work.
 
 ## Step 4 — Hand off

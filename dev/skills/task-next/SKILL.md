@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.1.0
+version: 2.2.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review. Flags: --all (batch execution),

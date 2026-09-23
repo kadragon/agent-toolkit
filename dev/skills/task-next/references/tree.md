@@ -64,8 +64,8 @@ to the main checkout on every call; a standalone `cd` has no persistent effect):
 > Do NOT read or edit any file in the main checkout.
 > Never run `git push --force`/`--force-with-lease`, `git reset --hard`, `git clean -f`/`-fd`,
 > or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
-> If the same fix is attempted 3+ times on the same file without the lint/test command
-> passing, stop and report to the user instead of continuing to retry.
+> If the same fix is attempted twice on the same file without the lint/test command
+> passing, stop and report what you tried and why it failed instead of continuing to retry.
 > When you finish (or get stuck), put your full result in your final response — never finish
 > silently, even when the result is empty or the run failed; a silent finish loses the result."
 

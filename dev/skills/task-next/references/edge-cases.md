@@ -17,7 +17,8 @@ Run in the candidate checkout. The probe includes staged, unstaged, and untracke
 the branch's saved contract; it deliberately returns no resume stage. For `--tree`, inspect the
 matching worktree listed by `git worktree list`, not main's unrelated dirty state.
 
-**Recovering the contract.** Read the saved original and evidence beside it first, then an active
+**Recovering the contract.** Read the saved original, evidence, and `notes` beside it first —
+notes list approaches a stuck run already tried; do not repeat them — then an active
 `tasks.md` block or an explicitly approved contract still in the conversation. Legacy run with no
 copy → reconstruct with the user from the backlog/spec and diff, marking reconstruction explicitly.
 A missing contract is unknown scope, not permission to review only the diff or declare completion.
