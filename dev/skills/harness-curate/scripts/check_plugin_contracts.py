@@ -20,7 +20,8 @@ Usage:
 
 Scanned: `backlog.md`, `AGENTS.md`, `CLAUDE.md`, and `docs/*.md` (top level only — `docs/design/`
 holds past specs, not live rules). Fenced code blocks and HTML comments are masked, so a template
-sample is not a rule.
+sample is not a rule. The masking is imported from `task-next/scripts/backlog_candidates.py` (same
+`dev` plugin, always co-installed) so both scripts agree on what markup is.
 
 Exit: 0 no conflict · 1 conflict reported on stdout · 2 usage error. Read-only; writes nothing.
 Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures live in a tempdir.
@@ -33,28 +34,26 @@ import sys
 import tempfile
 from pathlib import Path
 
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
-_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
+from backlog_candidates import _strip_fenced_blocks, _strip_html_comments  # noqa: E402
+
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _DONE_RE = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 # A doc line that states a keep-`[x]`-as-history rule. Both halves must sit on one line.
 _KEEP_RULE_RE = re.compile(r"\[x\].*\bhistory\b|\bhistory\b.*\[x\]", re.IGNORECASE)
+# A line that forbids keeping them states the plugin contract, not a conflict with it.
+_NEGATION_RE = re.compile(r"\b(?:do not|don't|never|no longer|must not)\b", re.IGNORECASE)
 _PRUNE_RE = re.compile(r"prune-backlog")
 MAX_SHOWN = 10
 
 
 def masked_lines(text: str) -> list[str]:
     """Source lines with HTML comments and fenced blocks blanked; line count preserved."""
-    text = _COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
-    out: list[str] = []
-    fenced = False
-    for line in text.splitlines():
-        if _FENCE_RE.match(line):
-            fenced = not fenced
-            out.append("")
-            continue
-        out.append("" if fenced else line)
-    return out
+    return _strip_fenced_blocks(_strip_html_comments(text)).splitlines()
+
+
+def is_keep_rule(line: str) -> bool:
+    return bool(_KEEP_RULE_RE.search(line)) and not _NEGATION_RE.search(line)
 
 
 def done_items(text: str) -> list[tuple[int, str, str]]:
@@ -78,12 +77,12 @@ def rule_docs(root: Path) -> list[Path]:
     return [p for p in docs if p.is_file()]
 
 
-def grep_docs(root: Path, pattern: re.Pattern[str]) -> list[str]:
+def grep_docs(root: Path, match) -> list[str]:
     hits = []
     for path in rule_docs(root):
         text = path.read_text(encoding="utf-8", errors="replace")
         for n, line in enumerate(masked_lines(text), start=1):
-            if pattern.search(line):
+            if match(line):
                 hits.append(f"{path.relative_to(root).as_posix()}:{n}: {line.strip()}")
     return hits
 
@@ -92,12 +91,12 @@ def check_backlog_history(root: Path) -> list[str]:
     """Report lines for the backlog-history contract; empty when the repo conforms."""
     backlog = root / "backlog.md"
     items = done_items(backlog.read_text(encoding="utf-8", errors="replace")) if backlog.is_file() else []
-    rules = grep_docs(root, _KEEP_RULE_RE)
+    rules = grep_docs(root, is_keep_rule)
     if not items and not rules:
         return []
     out = [
-        "CONFLICT backlog-history: the plugin deletes closed backlog items (`prune-backlog`) and "
-        "records the closure in CHANGELOG.md; this repo keeps them in backlog.md.",
+        "CONFLICT backlog-history: the plugin deletes a closed item's `- [ ]` line (`prune-backlog`) "
+        "and records the closure in CHANGELOG.md; this repo keeps closed items in backlog.md as `[x]`.",
     ]
     if items:
         headings = sorted({h for _, h, _ in items})
@@ -108,7 +107,7 @@ def check_backlog_history(root: Path) -> list[str]:
     if rules:
         out.append("  Repo rule(s) that keep `[x]` as history:")
         out.extend(f"    {hit}" for hit in rules)
-    related = [h for h in grep_docs(root, _PRUNE_RE) if h not in rules]
+    related = [h for h in grep_docs(root, _PRUNE_RE.search) if h not in rules]
     if related:
         out.append("  Repo doc lines naming `prune-backlog` (workarounds or gates to re-check):")
         out.extend(f"    {hit}" for hit in related)
@@ -213,6 +212,12 @@ def run_tests() -> int:
         "docs/design/old.md": "keep [x] as history\n",
     }))
     _assert(code == 0, "a doc naming `prune-backlog` alone, or a rule under docs/design/, is not a conflict")
+
+    code, _ = run(_repo({"AGENTS.md": "- Done items: do not keep `[x]` lines as history.\n"}))
+    _assert(code == 0, "a rule that forbids `[x]` history states the contract → no conflict")
+
+    code, _ = run(_repo({"backlog.md": "## Now\n\n````md\n```\n- [x] template only\n```\n````\n"}))
+    _assert(code == 0, "a shorter fence inside a longer one does not close it")
 
     print(f"\n{PASS_COUNT} passed, {FAIL_COUNT} failed")
     return 0 if FAIL_COUNT == 0 else 1
