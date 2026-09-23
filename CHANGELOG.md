@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] merge cleanup no longer warns when the merge already deleted the branch (dev v4.9.16) (2026-09-23)
 - [done] harness-curate flags repo rules that keep backlog history outside CHANGELOG (dev v4.9.15) (2026-09-23)
 - [done] SessionStart nudge when a harness-curate run is due (dev v4.9.14) (2026-09-23)
 - [done] review panel (agy + Codex) runs by default on every non-lite route (dev v4.9.13) (2026-09-21)

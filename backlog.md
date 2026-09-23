@@ -13,6 +13,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #280 — merge cleanup false branch warning (2026-09-23)
+
+- [ ] [debt] `git branch -D` runs before `git worktree remove`, so a worktree_path holding the feature branch always leaves the branch behind with a WARNING (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:97
+- [ ] [debt] Unguarded `git checkout "$BASE_BRANCH"` under `set -e` can exit after a successful remote merge without printing the result JSON (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:87
+- [ ] [harness] Local branch cleanup has two owners: `hub.sh merge` (`gh --delete-branch`) and merge-and-cleanup.sh; the Forgejo path deletes remote only — make one owner (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:307
+
 ### PR #278 — SessionStart nudge when a harness-curate run is due (2026-09-23)
 
 - [ ] [debt] `record_run.py --check-due` counts only Claude transcripts, so a Codex-only repo never gets the curate nudge; count the project's date-partitioned Codex sessions too (`scan_transcripts.py` already locates them) (source: codex) — dev/skills/harness-curate/scripts/record_run.py:127

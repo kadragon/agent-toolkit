@@ -162,6 +162,9 @@ jobs:
       - name: Run dev/skills/task-review-cycle/scripts/test_ci_wait.py
         run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 
+      - name: Run dev/skills/task-review-cycle/scripts/test_merge_and_cleanup.py
+        run: python3 dev/skills/task-review-cycle/scripts/test_merge_and_cleanup.py
+
       # Cache hits are asserted by counting hub.sh calls, so this needs no network and no gh.
       - name: Run dev/skills/task-review-cycle/scripts/test_preflight.py
         run: python3 dev/skills/task-review-cycle/scripts/test_preflight.py
