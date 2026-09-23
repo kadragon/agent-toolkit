@@ -436,6 +436,24 @@ def resolve_project_dir(path, proj_root):
     return best if best is not None else exact
 
 
+# Machine-authored turns rendered as user prompts on either platform: teammate relays,
+# headless review/security-review invocations, background-agent notices, `!` shell echo,
+# and Codex approval-reviewer scaffolding. Found in real PROMPTS output (2026-09-23 run),
+# where they were over half the window. Lead-to-subagent briefs are NOT listed — the
+# lead's "stop and return a verdict" nudges are the over-running-agent signal.
+_TEMPLATE_PROMPT_RE = re.compile(
+    r"^(Another Claude session sent a message:"
+    r"|Review this change for security vulnerabilities\."
+    r"|Review changes on the current branch against main\."
+    r"|Background agent \".*\" was stopped by the user\."
+    r"|\[Request interrupted by user"
+    r"|<bash-(input|stdout|stderr)>"
+    r"|The following is the Codex agent history"
+    r"|Review the code changes against the base branch"
+    r"|Reply with OK only\.)"
+)
+
+
 def keep_prompt(d):
     d = (d or "").strip()
     if not d:
@@ -445,6 +463,8 @@ def keep_prompt(d):
     # harness-injected blocks rendered into the user turn (not real prompts)
     if re.match(r"<(command-message|command-name|task-notification|local-command|"
                 r"system-reminder|user-prompt-submit-hook)", d):
+        return False
+    if _TEMPLATE_PROMPT_RE.match(d):
         return False
     low = d.lower()
     if low in NOISE:
