@@ -18,7 +18,7 @@ whole at sprint close (`references/tasks-template.md` → *Invariant*).
 |-------|---------|--------|
 | `[ ]` | Queued — nothing active | Human |
 | `[>]` | Legacy/manual active marker for the current `tasks.md` sprint | Human or a prior workflow (current `task-next` leaves selected items `[ ]` until verbatim pre-merge deletion). `reconcile-harness.py` reverts a leftover `[>]` back to `[ ]` — on `status: failed`, and on any orphan sweep (`tasks.md` absent) — it never deletes the line |
-| `[x]` | Done — kept as history or pruned | Human (no automated writer — `reconcile-harness.py` only closes the `tasks.md` sprint block; backlog line deletion is owned by `task_nodes.py prune-backlog`) |
+| `[x]` | Done — transient; `prune-backlog` deletes the line at cleanup, and the `CHANGELOG.md` entry is the closure record. Do not keep `[x]` lines as history | Human (no automated writer — `reconcile-harness.py` only closes the `tasks.md` sprint block; backlog line deletion is owned by `task_nodes.py prune-backlog`) |
 
 Exactly **one** `[>]` at a time is normal for single-item sprints. Zero `[>]`
 means the repo is idle. Multiple `[>]` is valid when `tasks.md` has a `## Covers`

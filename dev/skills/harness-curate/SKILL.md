@@ -4,7 +4,7 @@ description: >-
   Mine session transcripts to propose new harness assets, fix triggering misses, prune unused
   skills/agents/hooks, and disable plugins that never fire in a repo. Retrospecting the
   conversation you are in → harness-capture. Repo structure validation → harness-init.
-version: 2.1.0
+version: 2.2.0
 disable-model-invocation: true
 ---
 
@@ -52,7 +52,7 @@ Glob what exists so candidates do not duplicate it: `~/.claude/plugins/**/skills
 rules in `~/.claude/CLAUDE.md` plus the project's `CLAUDE.md` / `AGENTS.md`. Cross-reference
 against `SKILLS-ACTIVE` / `AGENTS-USED`.
 
-Two file lenses on the inventory:
+Three lenses on the inventory:
 
 - **Unparseable** — a `SKILL.md` or agent `.md` whose frontmatter lacks `name` or `description`
   never loads. Route to a frontmatter fix, not the description optimizer.
@@ -70,6 +70,18 @@ Two file lenses on the inventory:
   ```
 
   Stale but firing → refresh candidate. Never fires → Signal 4.
+
+- **Contract drift** — a repo rule that contradicts a shipped plugin contract, so the agent undoes
+  a bundled script by hand every cycle. Checked mechanically, read-only:
+
+  ```bash
+  SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+  [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+  python3 "$SKILL_DIR/scripts/check_plugin_contracts.py" [--project /abs/path]   # exit 1 = conflict
+  ```
+
+  Each `CONFLICT` goes in the Step 6 table as its own row, route "repo rule fix". The plugin
+  contract wins; the repo rule changes (Step 7).
 
 ## Step 3 — Classify into five signals
 
@@ -145,6 +157,10 @@ land on confirmation, disclosed as unverified.
   itself never goes into `AGENTS.md`/`CLAUDE.md`. A repo-scoped fact that lives in auto-memory
   moves the same way, then the memory file is deleted through the Skill tool with
   "dev:harness-capture" (Memory hygiene), which owns destructive memory prunes.
+- **Contract drift** — edit the repo rules and gates the check lists, per its proposed fix. Show
+  the diff and confirm before any deletion of existing lines (for example `[x]` backlog history).
+  The accepting check: `check_plugin_contracts.py` exits 0 on the repo, and the repo's own
+  validation still passes. Retire a repo gate only when it exists solely for the conflicting rule.
 - **A global `~/.claude/CLAUDE.md` line** is never edited here — surface it, the user decides.
 
 ## Additional Resources
@@ -153,4 +169,5 @@ land on confirmation, disclosed as unverified.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes, grep patterns, project-path encoding.
 - **`scripts/scan_transcripts.py`** — bounded scanner (Step 1); prints every dropped count.
 - **`scripts/record_run.py`** — stamps `lastRunMs` in `.harness-curator-state.json` (Step 6), mirrored best-effort to Codex; `--check-due` is the read side the SessionStart maintenance hook calls (>14d AND >=10 new sessions); `--test`.
+- **`scripts/check_plugin_contracts.py`** — repo rules that contradict a plugin contract (Step 2 contract drift); read-only; `--test`.
 - **`scripts/disable_plugins.py`** — project-scope plugin disable (Step 5); `--test`.

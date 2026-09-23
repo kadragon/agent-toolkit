@@ -126,7 +126,9 @@ python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
   --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
 ```
 
-A heading is dropped only where this cycle emptied it. `changelog` validates the line against the
+A heading is dropped only where this cycle emptied it. Never re-add a pruned line as `[x]`: the
+`CHANGELOG.md` entry is the closure record. A repo rule that demands `[x]` history is contract
+drift for `harness-curate`. `changelog` validates the line against the
 repo's `scripts/ci/check_changelog_entries.py` (one line, ≤160 chars, at most one `→` link, no
 explanatory clauses).
 
