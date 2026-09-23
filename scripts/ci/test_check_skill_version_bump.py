@@ -7,9 +7,11 @@ Load-bearing cases:
 
 * a new `references/` or `scripts/` file with only a patch bump fails and names the skill;
 * a minor or major bump passes;
-* renames, `scripts/test_*` files, and `evals/`/`agents/` files are not counted;
-* a `Skill-Bump-Exempt: <skill> — <reason>` trailer exempts that skill only, and an empty
-  reason exempts nothing;
+* same-skill renames, `scripts/` test support, and `evals/`/`agents/`/`examples/` files are not
+  counted, while `references/test_*` files and moves from another skill are;
+* a `---` inside a frontmatter value does not hide `version:`;
+* a `Skill-Bump-Exempt: <skill> — <reason>` trailer (`-` separator and `<plugin>:<name>` key
+  also accepted) exempts that skill only, and an empty reason exempts nothing;
 * a new skill, or one with no `version:` key at base, is skipped;
 * an unresolvable diff base skips locally and FAILS under `require_diff_base`.
 
@@ -177,6 +179,49 @@ def test_exempt_trailer():
     check("trailer with empty reason does not exempt", not ok, report)
 
 
+def test_review_regressions():
+    report, ok = run(base_skill(), {"dev/skills/grill/references/test_strategy.md": REF_TEXT})
+    check("references/test_* still counts", not ok, report)
+
+    report, ok = run(
+        base_skill(),
+        {
+            "dev/skills/grill/scripts/fixtures/case.json": "{}\n",
+            "dev/skills/grill/scripts/testdata/in.txt": "x\n",
+            "dev/skills/grill/examples/demo.md": REF_TEXT,
+        },
+    )
+    check("scripts fixtures/testdata and examples/ are not counted", ok, report)
+
+    base = base_skill()
+    base["dev/skills/other/SKILL.md"] = skill_md("other", "1.0.0")
+    base["dev/skills/other/references/shared.md"] = REF_TEXT
+    report, ok = run(
+        base,
+        {
+            "dev/skills/other/references/shared.md": None,
+            "dev/skills/grill/references/shared.md": REF_TEXT,
+        },
+    )
+    check("move from another skill counts as new", not ok, report)
+
+    base = {"dev/skills/grill/SKILL.md": "---\nname: grill\ndescription: a --- b\nversion: 1.1.2\n---\n\n# grill\n"}
+    report, ok = run(base, {"dev/skills/grill/references/a.md": REF_TEXT})
+    check("`---` inside a frontmatter value does not hide the version", not ok, report)
+
+
+def test_trailer_forms():
+    head = {"dev/skills/grill/references/a.md": REF_TEXT}
+    report, ok = run(base_skill(), head, "x\n\nSkill-Bump-Exempt: grill - moved out of SKILL.md\n")
+    check("`-` separator exempts a matching skill", ok, report)
+
+    report, ok = run(base_skill(), head, "x\n\nSkill-Bump-Exempt: dev:grill — moved\n")
+    check("`<plugin>:<name>` key exempts that plugin's skill", ok, report)
+
+    report, ok = run(base_skill(), head, "x\n\nSkill-Bump-Exempt: prod:grill — moved\n")
+    check("another plugin's key does not exempt", not ok, report)
+
+
 def test_skipped_skills():
     report, ok = run(
         {"README.md": "x\n"},
@@ -213,6 +258,8 @@ def main():
     test_minor_or_major_passes()
     test_uncounted_files_pass()
     test_exempt_trailer()
+    test_review_regressions()
+    test_trailer_forms()
     test_skipped_skills()
     test_unresolvable_base()
 

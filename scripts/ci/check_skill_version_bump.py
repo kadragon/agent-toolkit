@@ -9,19 +9,22 @@ rule mechanical for the part a diff can see.
 
 A branch that **adds** a file under `{dev,prod}/skills/<name>/references/` or `scripts/`
 must raise that skill's `version:` by at least a minor step over the merge-base with
-`origin/main`. Not counted: renames (`git diff -M` reports them as `R`, not `A`), test
-files (`scripts/**/test_*`), and `evals/`, `agents/`, `examples/` files — fixtures and
-metadata add no documented behavior.
+`origin/main`. Not counted: a rename inside the same skill (a move; a rename from another
+skill or from outside any skill still counts), test support under `scripts/`
+(`scripts/**/test_*`, `scripts/**/fixtures/`, `scripts/**/testdata/`). CI checks no other
+bundled directory (`evals/`, `agents/`, `examples/`, `templates/`, `assets/`); the rule
+still applies to those, by review.
 
 Skipped with a NOTE: a new skill (no `SKILL.md` at base) and a skill whose base
 `SKILL.md` has no `version:` key.
 
 Escape hatch: moving existing content out of `SKILL.md` into a new file changes no
 behavior, so a patch is correct. Record that on any commit of the branch with a trailer
-line `Skill-Bump-Exempt: <skill> — <reason>` (`-` also accepted as the separator). The
-reason must be non-empty; the report echoes it.
+line `Skill-Bump-Exempt: <skill> — <reason>` (`-` also accepted as the separator). `<skill>`
+is the bare name (any plugin) or `<plugin>:<name>` (that plugin only). The reason must be
+non-empty; the report echoes it.
 
-The diff base is `origin/main`, resolved as `check_skill_triggers.py` resolves it. An
+The diff base is the merge-base of `origin/main` and `HEAD`. An
 unresolvable base skips locally with a NOTE, and fails under `GITHUB_ACTIONS=true`,
 where the job's `fetch-depth: 0` must supply it.
 
@@ -42,18 +45,22 @@ CI_ENV_VAR = "GITHUB_ACTIONS"
 
 # group(1): skill dir, group(2): path inside the skill
 BUNDLED_RE = re.compile(r"^((?:dev|prod)/skills/[^/]+)/((?:references|scripts)/.+)$")
-TEST_FILE_RE = re.compile(r"(?:^|/)test_[^/]*$")
+# Test code and its data under scripts/ only; a references/test_*.md is guidance and counts.
+TEST_SUPPORT_RE = re.compile(r"^scripts/(?:.+/)?(?:test_[^/]*|(?:fixtures|testdata)/.+)$")
+FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)^---[ \t]*\r?$", re.DOTALL | re.MULTILINE)
 VERSION_RE = re.compile(r"^version:\s*[\"']?(\d+)\.(\d+)\.(\d+)", re.MULTILINE)
 TRAILER_RE = re.compile(r"^Skill-Bump-Exempt:[ \t]*(\S+)[ \t]+(?:—|-{1,2})[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
 
 
 def _git(root: Path, *args: str) -> str:
+    # stderr is captured, not shown: callers that expect a failure catch it quietly, and
+    # main() prints it for the rest.
     return subprocess.check_output(
         ["git", "-c", "core.quotePath=false", *args],
         text=True,
         cwd=root,
         encoding="utf-8",
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
 
 
@@ -65,12 +72,20 @@ def resolve_base(root: Path) -> str | None:
 
 
 def added_bundled_files(root: Path, base: str) -> dict[str, list[str]]:
-    """Map skill dir -> counted files this branch added (renames excluded)."""
-    out = _git(root, "diff", "--name-only", "-M", "--diff-filter=A", f"{base}...HEAD")
+    """Map skill dir -> counted files this branch added.
+
+    A rename within the same skill is a move and is not counted. A rename whose source is
+    outside that skill (another skill, or `docs/`) still gives the skill a new file.
+    """
+    out = _git(root, "diff", "--name-status", "-M", "--diff-filter=AR", f"{base}...HEAD")
     added: dict[str, list[str]] = {}
-    for rel in out.splitlines():
-        match = BUNDLED_RE.match(rel.strip())
-        if not match or TEST_FILE_RE.search(match.group(2)):
+    for line in out.splitlines():
+        parts = line.split("\t")
+        status, dest = parts[0], parts[-1].strip()
+        match = BUNDLED_RE.match(dest)
+        if not match or TEST_SUPPORT_RE.match(match.group(2)):
+            continue
+        if status.startswith("R") and parts[1].startswith(match.group(1) + "/"):
             continue
         added.setdefault(match.group(1), []).append(match.group(2))
     return added
@@ -82,14 +97,20 @@ def skill_version(root: Path, rev: str, skill_dir: str) -> tuple[bool, tuple[int
         text = _git(root, "show", f"{rev}:{skill_dir}/SKILL.md")
     except subprocess.CalledProcessError:
         return False, None
-    frontmatter = text.split("---", 2)[1] if text.startswith("---") and text.count("---") >= 2 else ""
-    match = VERSION_RE.search(frontmatter)
+    block = FRONTMATTER_RE.match(text)
+    match = VERSION_RE.search(block.group(1)) if block else None
     return True, (tuple(int(part) for part in match.groups()) if match else None)  # type: ignore[return-value]
 
 
 def exemptions(root: Path, base: str) -> dict[str, str]:
+    """Map trailer key -> reason. A key is `<name>` (any plugin) or `<plugin>:<name>`."""
     messages = _git(root, "log", "--format=%B", f"{base}..HEAD")
     return {m.group(1): m.group(2) for m in TRAILER_RE.finditer(messages)}
+
+
+def exemption_for(exempt: dict[str, str], skill_dir: str) -> str | None:
+    plugin, _, name = skill_dir.split("/", 2)
+    return exempt.get(f"{plugin}:{name}") or exempt.get(name)
 
 
 def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[str], bool]:
@@ -122,8 +143,8 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
         new_s = ".".join(map(str, new)) if new else "missing"
         if new and (new[0] > old[0] or (new[0] == old[0] and new[1] > old[1])):
             lines.append(f"OK: {skill_dir} {old_s} -> {new_s} (minor or higher) for {files}.")
-        elif name in exempt:
-            lines.append(f"EXEMPT: {skill_dir} {old_s} -> {new_s} — {exempt[name]}")
+        elif why := exemption_for(exempt, skill_dir):
+            lines.append(f"EXEMPT: {skill_dir} {old_s} -> {new_s} — {why}")
         else:
             ok = False
             lines.append(
@@ -136,8 +157,12 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
 
 
 def main() -> int:
-    root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
-    lines, ok = build_report(root, require_diff_base=os.environ.get(CI_ENV_VAR) == "true")
+    try:
+        root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
+        lines, ok = build_report(root, require_diff_base=os.environ.get(CI_ENV_VAR) == "true")
+    except subprocess.CalledProcessError as exc:
+        print(f"ERROR: `{' '.join(exc.cmd)}` failed: {(exc.stderr or '').strip()}")
+        return 1
     print("\n".join(lines))
     print("OK: skill version bumps match new bundled files." if ok else "FAIL: skill version bump check.")
     return 0 if ok else 1
