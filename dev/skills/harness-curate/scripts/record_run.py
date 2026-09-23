@@ -10,7 +10,14 @@ directory that the scanner's exact-match short-circuit then never reads).
 
 Usage:
   python3 record_run.py [--project PATH]
+  python3 record_run.py --check-due [--project PATH]
   python3 record_run.py --test
+
+`--check-due` is the read side, called by the SessionStart maintenance hook (itself
+debounced to once a day). It prints one nudge line when the last run is older than
+DUE_DAYS AND at least DUE_SESSIONS transcripts are newer than it; otherwise nothing.
+Both conditions, not either: a dormant repo has nothing new to mine, and a busy week
+right after a run is not yet worth a second pass. Always exits 0.
 
 Claude-side state is authoritative. The Codex mirror is best-effort: Codex may not be
 installed, and its failure must never cost the Claude-side write.
@@ -31,6 +38,9 @@ from scan_transcripts import (  # noqa: E402
 )
 
 STATE_FILE = ".harness-curator-state.json"
+DAY_MS = 86_400_000
+DUE_DAYS = 14
+DUE_SESSIONS = 10
 
 
 def config_dir():
@@ -87,6 +97,42 @@ def record(project, now_ms=None):
     except Exception:
         codex_path = None  # best-effort; the Claude-side write already landed
     return claude_path, codex_path
+
+
+def new_sessions(state_dir, since_ms):
+    """Transcripts in the resolved project dir modified after `since_ms`."""
+    try:
+        names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
+    except OSError:
+        return 0
+    count = 0
+    for n in names:
+        try:
+            if os.path.getmtime(os.path.join(state_dir, n)) * 1000 > since_ms:
+                count += 1
+        except OSError:
+            pass
+    return count
+
+
+def due_message(project, now_ms=None):
+    """Return the nudge line, or None when a curate run is not due."""
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    path = state_path(project)
+    last = read_state(path).get("lastRunMs") or 0
+    if not isinstance(last, (int, float)):
+        last = 0
+    if last and now_ms - last <= DUE_DAYS * DAY_MS:
+        return None
+    sessions = new_sessions(os.path.dirname(path), last)
+    if sessions < DUE_SESSIONS:
+        return None
+    age = f"{int((now_ms - last) // DAY_MS)}d ago" if last else "never"
+    return (
+        f"HARNESS-CURATE DUE: last run {age}, {sessions} sessions since. "
+        "At the start of your next reply, suggest in one sentence that the user run "
+        "`/dev:harness-curate`, then continue their task."
+    )
 
 
 def run_tests():
@@ -151,6 +197,44 @@ def run_tests():
 
         with open(cp2, encoding="utf-8") as f:
             check("state file parses as JSON", isinstance(json.load(f), dict))
+
+        # --check-due: both conditions must hold
+        due_repo = os.path.join(tmpdir, "due")
+        os.makedirs(due_repo)
+        due_dir = os.path.join(cfg, "projects", encode_project(due_repo))
+        os.makedirs(due_dir)
+        now = int(time.time() * 1000)
+
+        def sessions(n, mtime=None):
+            for f in os.listdir(due_dir):
+                if f.endswith(".jsonl"):
+                    os.unlink(os.path.join(due_dir, f))
+            for i in range(n):
+                fp = os.path.join(due_dir, f"s{i}.jsonl")
+                with open(fp, "w") as f:
+                    f.write("{}\n")
+                if mtime is not None:
+                    os.utime(fp, (mtime, mtime))
+
+        def last_run(ms):
+            write_state(os.path.join(due_dir, STATE_FILE), {"lastRunMs": ms})
+
+        old = now - (DUE_DAYS + 1) * DAY_MS
+        sessions(DUE_SESSIONS)
+        last_run(old)
+        msg = due_message(due_repo, now)
+        check("due: stale + enough sessions fires", msg and "/dev:harness-curate" in msg)
+        last_run(0)
+        check("due: never run + enough sessions fires",
+              "never" in (due_message(due_repo, now) or ""))
+        last_run(now - DAY_MS)
+        check("due: recent run does not fire", due_message(due_repo, now) is None)
+        sessions(DUE_SESSIONS - 1)
+        last_run(old)
+        check("due: stale but few sessions does not fire", due_message(due_repo, now) is None)
+        sessions(DUE_SESSIONS, mtime=(old - DAY_MS) / 1000)
+        check("due: sessions older than last run do not count",
+              due_message(due_repo, now) is None)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -167,6 +251,8 @@ def run_tests():
 def main():
     ap = argparse.ArgumentParser(description="Record a harness-curate run (Step 6).")
     ap.add_argument("--project", default=None, help="repo path (default: cwd)")
+    ap.add_argument("--check-due", action="store_true",
+                    help="print a nudge line when a run is due; never writes state")
     ap.add_argument("--test", action="store_true", help="run self-tests")
     a = ap.parse_args()
 
@@ -174,6 +260,15 @@ def main():
         return run_tests()
 
     project = os.path.abspath(a.project or os.getcwd())
+    if a.check_due:
+        try:
+            msg = due_message(project)
+        except Exception:
+            msg = None  # a reminder must never block session start
+        if msg:
+            print(msg)
+        return 0
+
     claude_path, codex_path = record(project)
     print(f"harness-curate run recorded: {claude_path}")
     if codex_path is None:
