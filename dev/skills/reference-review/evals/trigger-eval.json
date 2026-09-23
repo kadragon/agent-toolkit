@@ -1,0 +1,9 @@
+[
+  {"query": "compare our skills against the mattpocock/skills repo and tell me what to adopt", "should_trigger": true},
+  {"query": "benchmark this harness against revfactory/harness and find where we over-built", "should_trigger": true},
+  {"query": "review our task cycle skills against an external reference repo for improvements", "should_trigger": true},
+
+  {"query": "mine my session transcripts for recurring prompts and unused skills", "should_trigger": false},
+  {"query": "retrospect on this conversation and save the lesson", "should_trigger": false},
+  {"query": "review the current diff before we merge the PR", "should_trigger": false}
+]
