@@ -280,6 +280,22 @@ jobs:
       - name: Run scripts/ci/check_skill_triggers.py
         run: python3 scripts/ci/check_skill_triggers.py
 
+  skill-version-bump:
+    name: Skill version bump for new bundled files
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so the check's merge-base with origin/main resolves
+      # (same reason the version-bump job below fetches full history).
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Run scripts/ci/test_check_skill_version_bump.py
+        run: python3 scripts/ci/test_check_skill_version_bump.py
+
+      - name: Run scripts/ci/check_skill_version_bump.py
+        run: python3 scripts/ci/check_skill_version_bump.py
+
   version-bump:
     name: Plugin version bump check
     runs-on: ubuntu-latest

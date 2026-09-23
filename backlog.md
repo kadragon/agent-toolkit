@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #282 — skill version bump check for new bundled files (2026-09-23)
+
+- [ ] [debt] Fixture-repo helpers (`_git` with hooks disabled, base commit + `origin/main` update-ref) are duplicated across CI test files; move them to one shared module under scripts/ci/ (source: code-review) — scripts/ci/test_check_skill_version_bump.py:52
+
 ### PR #280 — merge cleanup false branch warning (2026-09-23)
 
 - [ ] [debt] `git branch -D` runs before `git worktree remove`, so a worktree_path holding the feature branch always leaves the branch behind with a WARNING (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:97
