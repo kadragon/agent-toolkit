@@ -79,13 +79,13 @@ look it up instead of asking.
 6. **Implementer check.** Read the draft as an implementer who has only this block. List the
    questions that implementer would ask before building. Look up each one the repo answers
    (Rule 3) and fold the fact into the draft. Each remaining question is still open: go back
-   to step 2 with it. In a non-interactive run, apply Rule 4's non-interactive branch to it once
-   and do not repeat this check.
+   to step 2 with it (in a non-interactive run, Rule 4's non-interactive branch). Run this check
+   once per interview. After those questions are resolved, go to step 7 without a second check.
 7. Hand the summary back to the caller (or continue inline if invoked standalone). This summary
    is the only output; there is no file to write.
 
 ## Exit
 
-Stop and hand off when the step 6 list is empty: an implementer could build from the summary
-without asking a question. Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
+Stop and hand off when the step 6 questions are resolved: an implementer could build from the
+summary without asking a question. Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
 mode (over-interviewing trivial decisions).
