@@ -14,7 +14,7 @@ foreground for up to its 600s.
 reported are consolidated and each one that has not is recorded as
 `Reviewers Skipped: still running`; Step 3 begins there. A source that failed or exited 75 is
 recorded with that reason instead. Nothing here is ever stopped — see SKILL.md Step 2 and
-`late-source-reclaim.md`, which is what makes not waiting safe for codex.
+`late-source-reclaim.md`, which is what makes not waiting safe for codex and agy.
 
 Launch agy and codex as **two separate background tasks**, one block each. A single task id
 cannot serve both: stopping it to close a breached agy would kill the codex child mid-run, and
@@ -50,6 +50,6 @@ elif [ "$codex_status" -ne 0 ]; then
 fi
 ```
 
-`codex_status` 75 is the workspace lock held by another cycle: skipped, not failed. Only
-`codex-review.sh` persists a result; a run still going when the cycle moves on is reclaimed before
-merge per `late-source-reclaim.md`.
+`codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
+`codex-review.sh` and `agy-review.sh` both persist a result; a run still going when the cycle
+moves on is reclaimed before merge per `late-source-reclaim.md`.

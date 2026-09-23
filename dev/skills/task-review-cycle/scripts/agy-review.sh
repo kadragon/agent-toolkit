@@ -34,6 +34,10 @@ Use your shell tool to compare the current branch (${CURRENT_BRANCH}) against ${
 
 If \`${BASE_BRANCH}...HEAD\` fails (e.g., detached HEAD or missing merge-base), fall back to \`git -C ${REPO_ROOT} diff ${BASE_BRANCH}\`.
 
+## Scope: read-only review
+
+This is a static review. Use only git commands and file reads. Do NOT run tests, builds, linters, validation scripts, or any command in the background — CI and other reviewers already cover execution, and waiting on those runs delays this review past the point anyone reads it. Do not modify any file.
+
 ## What to flag
 
 Only flag issues introduced by this change — not pre-existing problems. Each finding must be:
@@ -77,6 +81,57 @@ AGY_OUT=$(mktemp)
 AGY_ERR=$(mktemp)
 trap 'rm -f "$AGY_OUT" "$AGY_ERR"' EXIT
 
+# --- durable result sidecar --------------------------------------------------
+#
+# The cycle does not wait for this script (references/review-sources.md): once the reviewer
+# returns, a still-running agy is recorded as skipped and its stdout is never read. So every
+# finished run also leaves its result on disk, in the same three-file layout codex-review.sh
+# uses, for the pre-merge reclaim (references/late-source-reclaim.md).
+#   <key>.pending     written before agy launches; carries this bash pid
+#   <key>.review.txt  the review text
+#   <key>.meta        written last, and therefore the marker that the review file is complete
+# Never fatal: a review that cannot be persisted is still emitted on stdout.
+START_EPOCH=$(date +%s 2>/dev/null || printf '0')
+HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+RESULT_DIR="${AGY_REVIEW_RESULT_DIR:-$(git rev-parse --absolute-git-dir 2>/dev/null || true)/agy-review}"
+RESULT_KEY=$(printf '%s' "$CURRENT_BRANCH" \
+  | sed -e 's/[^a-zA-Z0-9._-][^a-zA-Z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//')
+[ -n "$RESULT_KEY" ] || RESULT_KEY="detached"
+PENDING_FILE="$RESULT_DIR/$RESULT_KEY.pending"
+REVIEW_FILE="$RESULT_DIR/$RESULT_KEY.review.txt"
+META_FILE="$RESULT_DIR/$RESULT_KEY.meta"
+if mkdir -p "$RESULT_DIR" 2>/dev/null && chmod 700 "$RESULT_DIR" 2>/dev/null; then
+  # Clear the previous trio first: a stale `.meta` would read as this run's result.
+  rm -f "$PENDING_FILE" "$REVIEW_FILE" "$META_FILE" 2>/dev/null || true
+  ( umask 077
+    printf 'pid=%s\nstarted_at=%s\nbranch=%s\nbase=%s\nhead_sha=%s\n' \
+      "$$" "$START_EPOCH" "$CURRENT_BRANCH" "$BASE_BRANCH" "$HEAD_SHA" >"$PENDING_FILE"
+  ) 2>/dev/null || RESULT_DIR=""
+else
+  RESULT_DIR=""
+fi
+[ -n "$RESULT_DIR" ] || echo "WARN: agy result dir unavailable — this review will not be persisted for a late reclaim" >&2
+
+# Review file first, meta second, pending removed last — a reader that sees `.meta` is
+# guaranteed the review file beside it is whole.
+publish_result() {
+  local status="$1" review_file="" now
+  [ -n "$RESULT_DIR" ] || return 0
+  now=$(date +%s 2>/dev/null || printf '0')
+  if [ "$status" = "ok" ] && ( umask 077; cp "$AGY_OUT" "$REVIEW_FILE.tmp.$$" ) 2>/dev/null &&
+    mv -f "$REVIEW_FILE.tmp.$$" "$REVIEW_FILE" 2>/dev/null; then
+    review_file="$REVIEW_FILE"
+  fi
+  ( umask 077
+    { cat "$PENDING_FILE"
+      printf 'status=%s\nexit_code=%s\nfinished_at=%s\nelapsed_seconds=%s\nreview_file=%s\n' \
+        "$status" "$AGY_EXIT" "$now" "$((now - START_EPOCH))" "$review_file"
+    } >"$META_FILE.tmp.$$" && mv -f "$META_FILE.tmp.$$" "$META_FILE"
+  ) 2>/dev/null && rm -f "$PENDING_FILE" 2>/dev/null ||
+    echo "WARN: could not persist the agy result to $META_FILE" >&2
+  return 0
+}
+
 AGY_EXIT=0
 NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --dangerously-skip-permissions \
@@ -84,6 +139,7 @@ NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --print-timeout 15m 2>"$AGY_ERR" | tee "$AGY_OUT" || AGY_EXIT=$?
 
 if ! grep -q '[^[:space:]]' "$AGY_OUT"; then
+  publish_result empty
   echo "agy returned empty output (exit: $AGY_EXIT) — review skipped" >&2
   if [ -s "$AGY_ERR" ]; then
     echo "agy stderr:" >&2
@@ -95,6 +151,7 @@ fi
 # agy wrote output but exited non-zero — output is likely truncated; treat as failure
 # rather than silently using partial review content.
 if [ "$AGY_EXIT" -ne 0 ]; then
+  publish_result failed
   echo "agy exited $AGY_EXIT with partial output — review skipped" >&2
   if [ -s "$AGY_ERR" ]; then
     echo "agy stderr:" >&2
@@ -102,6 +159,8 @@ if [ "$AGY_EXIT" -ne 0 ]; then
   fi
   exit 1
 fi
+
+publish_result ok
 
 # Forward any agy stderr (warnings, auth notices, rate-limit messages) even on success.
 # Must not be the script's last command as a bare `[ ... ] && ...` list: when stderr is
