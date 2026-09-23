@@ -68,6 +68,10 @@ else
   MERGE_METHOD="squash"
 fi
 
+# Recorded before the merge so cleanup can tell "the merge deleted it" from "it never existed".
+LOCAL_EXISTED=false
+git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}" && LOCAL_EXISTED=true
+
 # --- Merge PR (hub.sh routes to gh or the Forgejo/Gitea REST API) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
@@ -93,11 +97,15 @@ if [ "$MERGE_OK" = "true" ]; then
   # `gh pr merge --delete-branch` (hub.sh) may have deleted it already — that is success, not a
   # cleanup failure, so check before deleting rather than reading -D's failure as a warning.
   if ! git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}"; then
-    CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' already deleted by the merge"
-  elif git branch -D "$FEATURE_BRANCH" >/dev/null 2>&1; then
+    if [ "$LOCAL_EXISTED" = "true" ]; then
+      CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' already deleted by the merge"
+    else
+      CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' not found before the merge — check the branch name"
+    fi
+  elif DELETE_ERR=$(git branch -D "$FEATURE_BRANCH" 2>&1 >/dev/null); then
     CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' deleted"
   else
-    CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}' (may be current branch)"
+    CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}': ${DELETE_ERR}"
   fi
 
   # Worktree cleanup if path provided

@@ -4,8 +4,8 @@
 `hub.sh merge` runs `gh pr merge --delete-branch`, which already deletes the local feature
 branch when gh can switch off it. The script's own `git branch -D` then failed and reported
 "WARNING: Could not delete local branch", so a clean merge (PR #279) read as a cleanup failure.
-These cases pin the three outcomes: already deleted by the merge, deleted by the script, and a
-real failure that must still warn.
+These cases pin four outcomes: already deleted by the merge, deleted by the script, a branch
+that never existed, and a real failure -- the last two must still warn.
 
 The real hub.sh is replaced by a stub next to a copy of the script, so no network is touched.
 
@@ -16,6 +16,7 @@ Exits 0 on success, 1 on the first failure.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -59,14 +60,19 @@ def make_script_dir(tmp):
     return d
 
 
-def run(repo, script_dir, delete_local):
+def run(case, repo, script_dir, delete_local, branch=FEATURE):
     env = {**os.environ, "DELETE_LOCAL": "1" if delete_local else "0",
-           "FEATURE_BRANCH_UNDER_TEST": FEATURE}
+           "FEATURE_BRANCH_UNDER_TEST": branch}
     proc = subprocess.run(
-        ["bash", str(script_dir / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}'],
+        ["bash", str(script_dir / "merge-and-cleanup.sh"), "1", "main", branch, '{"squash":true}'],
         cwd=repo, env=env, check=False, capture_output=True, text=True,
     )
-    return proc, json.loads(proc.stdout)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        fail(case, f"script exit {proc.returncode}, stderr: {proc.stderr.strip()!r}")
+    out = json.loads(proc.stdout)
+    if out["merge_ok"] is not True:
+        fail(case, f"stub merge should report merge_ok true, got {out!r}")
+    return out
 
 
 def branch_exists(repo):
@@ -82,16 +88,16 @@ def fail(case, detail):
 
 def case_already_deleted_by_merge(tmp):
     repo, d = make_repo(tmp), make_script_dir(tmp)
-    _, out = run(repo, d, delete_local=True)
+    out = run("already_deleted_by_merge", repo, d, delete_local=True)
     msg = out["cleanup_message"]
-    if "WARNING" in msg or "already deleted" not in msg:
+    if "WARNING" in msg or "already deleted" not in msg or branch_exists(repo):
         fail("already_deleted_by_merge", f"expected an 'already deleted' note, got {msg!r}")
     print("ok already_deleted_by_merge")
 
 
 def case_deleted_by_script(tmp):
     repo, d = make_repo(tmp), make_script_dir(tmp)
-    _, out = run(repo, d, delete_local=False)
+    out = run("deleted_by_script", repo, d, delete_local=False)
     msg = out["cleanup_message"]
     if msg != f"Local branch '{FEATURE}' deleted" or branch_exists(repo):
         fail("deleted_by_script", f"got {msg!r}, branch exists={branch_exists(repo)}")
@@ -104,11 +110,28 @@ def case_real_failure_still_warns(tmp):
     git(repo, "checkout", "-q", "main")
     other = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(other), FEATURE)
-    _, out = run(repo, d, delete_local=False)
+    out = run("real_failure_still_warns", repo, d, delete_local=False)
     msg = out["cleanup_message"]
     if not msg.startswith("WARNING") or not branch_exists(repo):
         fail("real_failure_still_warns", f"got {msg!r}")
+    git(repo, "worktree", "remove", "--force", str(other))
     print("ok real_failure_still_warns")
+
+
+def case_unknown_branch_warns(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    # A mistyped name never existed locally; its absence after the merge is not a success.
+    out = run("unknown_branch_warns", repo, d, delete_local=False, branch="feat/typo")
+    msg = out["cleanup_message"]
+    if not msg.startswith("WARNING") or "not found" not in msg:
+        fail("unknown_branch_warns", f"got {msg!r}")
+    print("ok unknown_branch_warns")
+
+
+def _force_remove(func, path, _exc):
+    # git writes read-only object files; Windows refuses to delete them until they are writable.
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 
 def main():
@@ -117,8 +140,9 @@ def main():
         case_already_deleted_by_merge(tmp)
         case_deleted_by_script(tmp)
         case_real_failure_still_warns(tmp)
+        case_unknown_branch_warns(tmp)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")
     return 0
 
