@@ -33,15 +33,16 @@ SCAN="$SKILL_DIR/scripts/scan_transcripts.py"
 python3 "$SCAN"                              # current project (cwd)
 python3 "$SCAN" all                          # every project
 python3 "$SCAN" --project "/abs/path"        # one named project
-python3 "$SCAN" --session <id-prefix>        # one transcript (filename prefix)
+python3 "$SCAN" --session <id-prefix>        # one transcript (filename prefix; ambiguous → exit 2)
+python3 "$SCAN" --since YYYY-MM-DD           # only records on/after a date (upgrade pass)
 python3 "$SCAN" --full                       # re-review the whole PROMPTS history
 ```
 
 Sections per project: `SKILLS-ACTIVE` (skill → sessions used), `AGENTS-USED`,
 `CORRECTION-SIGNALS` / `AGENT-CORRECTION-SIGNALS` (asset active, then the user pushed back),
 `HARNESS-FRICTION` (a hook or rule the user keeps fighting), `VERIFIER-FAILURES` (CI / test /
-hook denials — machine verdicts), `TOOL-COST` (oversized tool results; search churn before the
-first edit), `PROMPTS` (cluster these). `CODEX-*` blocks carry the same sections for Codex
+hook denials — machine verdicts), `TOOL-COST` (oversized tool results and search churn before
+the first edit, one row per call shape or target with its session count), `PROMPTS` (cluster these). `CODEX-*` blocks carry the same sections for Codex
 sessions — cluster prompts together, keep usage counts separate per platform
 (`current`/`--project` only; `all` cannot map Codex cwd back to a project).
 
@@ -159,8 +160,8 @@ files (`~/.claude/CLAUDE.md`, the project's `CLAUDE.md` / `AGENTS.md`, every in-
 2. **Settle a disputed line by running it**, not by debate: re-run one prompt the line was
    written for with and without it (a `skill-creator` eval pair, or two fresh sessions). No
    behavior difference → no-op.
-3. **Guardrails:** run the Step 1 scan for this item. A hook or check whose failure mode the
-   transcripts show zero times since the upgrade is a `Watch:` row, never a deletion on this evidence alone — a quiet guardrail may be
+3. **Guardrails:** scan twice — `--since <upgrade date>` and the lifetime default — and compare
+   `VERIFIER-FAILURES`. A hook or check whose failure mode the `--since` window shows zero times is a `Watch:` row, never a deletion on this evidence alone — a quiet guardrail may be
    the reason the failure is absent. Delete only through the Signal 4 adversarial check.
 
 Done when: every in-scope sentence is marked keep, delete, or disputed (with its run result),
@@ -172,8 +173,9 @@ seventh signal; its routes are Signal 3's.
 One ranked table, candidates only — `| Signal | Cluster / Asset | Freq | Evidence | → Route |
 Scope | Why |` — then a `Watch:` line for near-misses (2×). Every row's Evidence quotes a
 specific session moment or file line; a candidate that cannot point at one is generic advice
-and is dropped. Then stamp the run so the next scan's `PROMPTS` window starts here (skip the
-stamp after a `--session` run — it did not read the window):
+and is dropped. Then stamp the run so the next scan's `PROMPTS` window starts here — only after
+Steps 1–5 read that window; an `upgrade`, `--session`, or `--since` run skips the stamp, or the
+next regular run would treat prompts it never clustered as already analyzed:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -183,7 +185,7 @@ python3 "$RECORD"                               # cwd
 python3 "$RECORD" --project /abs/path/to/repo   # another repo
 ```
 
-Done when: the table is shown and `record_run.py` exited 0 (or was skipped for `--session`).
+Done when: the table is shown and `record_run.py` exited 0, or was skipped for one of those modes.
 
 ## Step 7 — Route to the creator (on confirmation)
 

@@ -33,7 +33,10 @@ mattpocock/skills@d81f3a1:skills/engineering/retro/SKILL.md):
                 TOOL_OVERSIZE_CHARS — an expensive call for what it returned
   - search-churn : SEARCH_CHURN_MIN+ read/search calls before a session's first edit —
                 the agent took long to find where to work (a navigation-pointer candidate).
-                A session that never edits is analysis, not churn, and is skipped.
+                A session that never edits is analysis, not churn, and is skipped. A Bash
+                write (sed -i, a redirect, tee) counts as the first edit.
+  Both are aggregated per call shape / first-edit target with the distinct sessions
+  they appear in, ranked by session count — the Signal 6 threshold reads off the row.
 Heuristic and over-collecting, like VERIFIER-FAILURES: the model reads and judges.
 
 Scope (mirrors the old command):
@@ -42,6 +45,8 @@ Scope (mirrors the old command):
   --project <path>   one named project (absolute path, pre-encoding)
   --session <id>     only the transcript whose filename starts with <id> (combines with
                      the current/--project scope; ignores the last-run PROMPTS window)
+  --since YYYY-MM-DD only records on or after that date, in every section (the upgrade
+                     pass's "since the model change" window); ignores the last-run window
   --full             also re-include prompts already covered by a prior run (see below)
 
 Caps are enforced and dropped counts printed — never silently truncate.
@@ -169,6 +174,13 @@ PERSISTED_RE = re.compile(r"Output too large \(([\d.]+\s*[KMG]?B)\)")
 SEARCH_TOOLS = {"Read", "Grep", "Glob"}
 SEARCH_BASH_RE = re.compile(r"^\s*(?:cd \S+\s*&&\s*)?(grep|rg|find|ls|cat|head|tail|sed -n|wc)\b")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+# A Bash command that writes a file ends the hunt as surely as an Edit call: in-place
+# sed/perl, tee, a python open(..., "w"), or a > / >> redirect to anything but /dev/*.
+BASH_EDIT_RE = re.compile(
+    r"\bsed\s+-i|\bperl\s+-\w*i|\btee\s|open\([^)]*['\"][wa]['\"]|\.write_text\("
+    r"|(?<![0-9&>])>>?\s*(?!&)(?!/dev/)[\w./~\"'-]")
+TOOL_COST_SHOW_SESSIONS = 3   # session ids printed per aggregated TOOL-COST row
+SIZE_RE = re.compile(r"([\d.]+)\s*([KMG]?)B")
 TOOL_INPUT_KEYS = ("command", "file_path", "pattern", "url", "query", "prompt")
 
 
@@ -180,6 +192,59 @@ def _tool_label(name, inp):
         if isinstance(v, str) and v:
             return f"{name}: {v.replace(chr(10), ' ')[:120]}"
     return str(name)
+
+
+def _size_units(text):
+    """'34KB' -> 34000.0 — only to pick the largest of several sizes for one row."""
+    m = SIZE_RE.match(text or "")
+    if not m:
+        return 0.0
+    return float(m.group(1)) * {"": 1, "K": 1e3, "M": 1e6, "G": 1e9}[m.group(2)]
+
+
+def _session_id(fp):
+    """Transcript id shown in TOOL-COST rows — the filename stem, 12 chars, which is
+    also a valid --session prefix."""
+    return os.path.splitext(os.path.basename(fp))[0][:12]
+
+
+def session_matches(files, session):
+    """Transcript files whose basename starts with `session` — the --session filter.
+    main() refuses more than one match rather than silently aggregating."""
+    return [f for f in files if os.path.basename(f).startswith(session)]
+
+
+_ROLLOUT_ID_RE = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
+
+
+def codex_rollout_id(fp):
+    """The session uuid at the end of a Codex rollout filename ('' if none). --session
+    prefix-matches this, never the date digits ahead of it."""
+    m = _ROLLOUT_ID_RE.search(os.path.basename(fp))
+    return m.group(1) if m else ""
+
+
+def _rank_tool_cost(oversized, churn):
+    """Aggregate per call shape / churn target into rows ranked by distinct-session
+    count (the Signal 6 threshold), then by cost — so the cap keeps the recurring rows,
+    not whichever files sort first."""
+    rows = []
+    for label, d in oversized.items():
+        ids = sorted(d["sessions"])
+        rows.append((len(ids), d["max"], "oversized",
+                     f"{len(ids)} session{'s' if len(ids) != 1 else ''} · {label} · max "
+                     f"{d['max_text']} · {','.join(ids[:TOOL_COST_SHOW_SESSIONS])}"
+                     + (",…" if len(ids) > TOOL_COST_SHOW_SESSIONS else "")))
+    for target, hits in churn.items():
+        ids = sorted({sid for sid, _ in hits})
+        counts = ",".join(str(c) for _, c in sorted(hits))
+        rows.append((len(ids), max(c for _, c in hits), "search-churn",
+                     f"{len(ids)} session{'s' if len(ids) != 1 else ''} · → {target} · "
+                     f"{counts} read/search calls before first edit · "
+                     f"{','.join(ids[:TOOL_COST_SHOW_SESSIONS])}"
+                     + (",…" if len(ids) > TOOL_COST_SHOW_SESSIONS else "")))
+    rows.sort(key=lambda r: (-r[0], -r[1], r[3]))
+    return [(kind, detail) for _, _, kind, detail in rows]
 
 
 def encode_project(path):
@@ -432,7 +497,7 @@ def build_codex_summary(real_path, full, session=None):
     root = codex_home()
     files = find_codex_session_files(root, real_path)
     if session:
-        files = [f for f in files if session in os.path.basename(f)]
+        files = [f for f in files if codex_rollout_id(f).startswith(session)]
     if not files:
         return None
     summary = scan_codex_files(files)
@@ -542,9 +607,10 @@ def _tool_result_text(block):
     return ""
 
 
-def scan_dir(tdir, label, session=None):
+def scan_dir(tdir, label, session=None, since_ms=0):
     """Scan one transcript dir. Return a summary dict, or None if it has no .jsonl
-    (or, with `session`, no .jsonl whose basename starts with that id).
+    (or, with `session`, no .jsonl whose basename starts with that id). `since_ms`
+    drops every record older than that instant (the --since window).
 
     Scans every session file — SKILLS-ACTIVE / AGENTS-USED / CORRECTION-SIGNALS /
     HARNESS-FRICTION all need cumulative lifetime counts (a demote candidate is
@@ -556,7 +622,7 @@ def scan_dir(tdir, label, session=None):
     """
     files = sorted(glob.glob(os.path.join(tdir, "*.jsonl")))
     if session:
-        files = [f for f in files if os.path.basename(f).startswith(session)]
+        files = session_matches(files, session)
     if not files:
         return None
 
@@ -565,7 +631,8 @@ def scan_dir(tdir, label, session=None):
     agent_corrections = []                          # (agent_active, text)
     frictions = []                                  # (text) — harness over-protection complaints
     verifier_failures = []                          # (kind, detail) — Signal 3 machine verdicts
-    tool_cost = []                                  # (kind, detail) — oversized / search-churn
+    oversized = {}                                  # label -> {sessions, max, max_text}
+    churn = collections.defaultdict(list)           # first-edit target -> [(session, count)]
     skill_sessions = collections.defaultdict(set)   # skill -> {session files}
     agent_sessions = collections.defaultdict(set)   # subagent_type -> {session files}
     sessions = 0
@@ -575,7 +642,7 @@ def scan_dir(tdir, label, session=None):
         last_agents = set()              # subagent_types invoked since the last user turn
         frictions_seen = set()           # deduplicate friction phrases within a session
         pending_tools = {}               # tool_use id -> (kind, meta) awaiting its tool_result
-        tool_labels = {}                 # tool_use id -> "Name: input" for TOOL-COST
+        tool_labels = {}                 # tool_use id -> "Name: input", or None for a spill re-read
         searches_before_edit = 0         # read/search calls until the first edit
         edited = False
         try:
@@ -592,6 +659,8 @@ def scan_dir(tdir, label, session=None):
                 if r.get("isMeta") or r.get("isSidechain"):
                     continue
                 typ, ts = r.get("type"), r.get("timestamp", 0)
+                if since_ms and _iso_to_ms(ts) < since_ms:
+                    continue
 
                 if typ == "assistant":
                     a = r.get("attributionSkill")
@@ -609,20 +678,27 @@ def scan_dir(tdir, label, session=None):
                                 continue
                             name = b.get("name")
                             inp = b.get("input") or {}
+                            cmd_in = inp.get("command") or "" if isinstance(inp, dict) else ""
                             if b.get("id"):
-                                tool_labels[b["id"]] = _tool_label(name, inp)
+                                # re-reading a spilled /tool-results/ file is the cost the
+                                # spilling call already reported — decided on the FULL
+                                # input here, since the display label is truncated
+                                spill = "/tool-results/" in (
+                                    (inp.get("file_path") or "") + cmd_in
+                                    if isinstance(inp, dict) else "")
+                                tool_labels[b["id"]] = None if spill else _tool_label(name, inp)
                             if not edited:
-                                if name in EDIT_TOOLS:
+                                bash_edit = name == "Bash" and BASH_EDIT_RE.search(cmd_in)
+                                if name in EDIT_TOOLS or bash_edit:
                                     edited = True
                                     if searches_before_edit >= SEARCH_CHURN_MIN:
-                                        tool_cost.append((
-                                            "search-churn",
-                                            f"{os.path.splitext(os.path.basename(fp))[0][:12]} "
-                                            f"{searches_before_edit} read/search calls"
-                                            " before first edit"))
+                                        target = (inp.get("file_path") or inp.get("notebook_path")
+                                                  if not bash_edit else None) \
+                                            or _tool_label(name, inp)
+                                        churn[target].append((_session_id(fp),
+                                                              searches_before_edit))
                                 elif name in SEARCH_TOOLS or (
-                                        name == "Bash" and SEARCH_BASH_RE.search(
-                                            inp.get("command") or "")):
+                                        name == "Bash" and SEARCH_BASH_RE.search(cmd_in)):
                                     searches_before_edit += 1
                             if name in ("Agent", "Task"):
                                 st = (b.get("input") or {}).get("subagent_type")
@@ -676,12 +752,14 @@ def scan_dir(tdir, label, session=None):
                             raw = _tool_result_text(b)
                             label_ = tool_labels.pop(b.get("tool_use_id"), None)
                             pm = PERSISTED_RE.search(raw[:2000])
-                            # re-reading a spilled /tool-results/ file is the same cost
-                            # the spilling call already reported — skip the double count
-                            if (label_ and "/tool-results/" not in label_
-                                    and (pm or len(raw) > TOOL_OVERSIZE_CHARS)):
-                                size = pm.group(1) if pm else f"{len(raw) // 1000}K chars"
-                                tool_cost.append(("oversized", f"{label_}  ({size})"))
+                            if label_ and (pm or len(raw) > TOOL_OVERSIZE_CHARS):
+                                size = (pm.group(1).replace(" ", "") if pm
+                                        else f"{len(raw) // 1000}KB")
+                                d = oversized.setdefault(
+                                    label_, {"sessions": set(), "max": 0.0, "max_text": size})
+                                d["sessions"].add(_session_id(fp))
+                                if _size_units(size) > d["max"]:
+                                    d["max"], d["max_text"] = _size_units(size), size
                             rtxt = raw.replace("\n", " ").strip()
                             is_err = bool(b.get("is_error")) or rec_err
                             kind_meta = pending_tools.pop(b.get("tool_use_id"), None)
@@ -735,7 +813,7 @@ def scan_dir(tdir, label, session=None):
         "agent_corrections": agent_corrections,
         "frictions": frictions,
         "verifier_failures": verifier_failures,
-        "tool_cost": tool_cost,
+        "tool_cost": _rank_tool_cost(oversized, churn),
     }
 
 
@@ -825,10 +903,10 @@ def emit(summary):
     if tc:
         show = tc[:TOOL_COST_CAP]
         tdropped = len(tc) - len(show)
-        print("\nTOOL-COST (oversized = a call that returned far more than it was worth;"
-              " search-churn = long hunt before the first edit, a navigation-pointer"
-              " candidate; ≥2 sessions on the same target = signal. Heuristic — read"
-              " before routing):"
+        print("\nTOOL-COST (aggregated per call shape / churn target, ranked by sessions;"
+              " oversized = a call that returned far more than it was worth; search-churn ="
+              " long hunt before the first edit, a navigation-pointer candidate; ≥2 sessions"
+              " = signal. Heuristic — read before routing):"
               + (f"  [dropped {tdropped}]" if tdropped else ""))
         for kind, txt in show:
             print(f"  [{kind}] {txt}")
@@ -921,6 +999,14 @@ def emit_codex(codex):
 def main():
     args = sys.argv[1:]    # caller passes scope tokens directly; quote paths with spaces
     full = "--full" in args   # force full historical PROMPTS window, ignoring last-run state
+    since_ms = 0
+    if "--since" in args:
+        i = args.index("--since")
+        since_ms = _iso_to_ms(args[i + 1] + "T00:00:00.000Z") if i + 1 < len(args) else 0
+        if not since_ms:
+            print("--since requires a date, YYYY-MM-DD")
+            sys.exit(2)
+        full = True           # a dated window replaces the last-run PROMPTS window
     session = None
     if "--session" in args:
         i = args.index("--session")
@@ -960,7 +1046,15 @@ def main():
         scope, dirs = "current", [(resolve_project_dir(cwd, proj_root), cwd, cwd)]
 
     def build(d, label, real_path):
-        s = scan_dir(d, label, session=session)
+        if session:
+            hits = session_matches(sorted(glob.glob(os.path.join(d, "*.jsonl"))), session)
+            if len(hits) > 1:
+                print(f"--session {session} is ambiguous — {len(hits)} transcripts match;"
+                      " pass a longer prefix:")
+                for h in hits[:20]:
+                    print("  " + os.path.basename(h))
+                sys.exit(2)
+        s = scan_dir(d, label, session=session, since_ms=since_ms)
         if s is not None:
             s["last_run_ms"] = 0 if full else read_last_run_ms(d)
         if real_path is not None:

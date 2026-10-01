@@ -59,12 +59,19 @@ denials (`VERIFIER-FAILURES` `hook-deny`), and a hook that never denies may be p
 or preventing the failure outright. Zero denials puts a hook on `Watch:`, never on this list,
 unless the event it matches no longer exists.
 
-Last commit date, from the asset's *own* repo:
+**Age decides between delete and watch.** An asset first committed under 60 days ago has not
+had the chance to fire — ≈0 makes it `Watch:`, not unused. Untouched for 60+ days *and* ≈0 is
+the strong delete case the adversarial check then tests. Both dates, from the asset's *own*
+repo:
 
 ```bash
 asset="path/to/skill/SKILL.md"
 repo_root=$(git -C "$(dirname "$asset")" rev-parse --show-toplevel 2>/dev/null)
-[ -n "$repo_root" ] && git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset"
+if [ -n "$repo_root" ]; then
+  first=$(git -C "$repo_root" log --follow --format='%ci' -- "$asset" | tail -1)
+  last=$(git -C "$repo_root" log --follow -1 --format='%ci' -- "$asset")
+  echo "first=$first  last=$last  $asset"
+fi
 ```
 
 **Adversarial check (mandatory before any delete):** one independent reviewer argues for keeping
@@ -91,8 +98,9 @@ through `harness-capture` Memory hygiene. Acceptance: the doc exists and the ind
 
 ## 6. Tool cost
 
-**Detect:** in `TOOL-COST`, the same oversized call shape (same command, same file, same API)
-or search churn toward the same target in **≥2** sessions. Read the session's prompts before
+**Detect:** a `TOOL-COST` row reading `2 sessions` or more — rows are already aggregated per
+oversized call shape (same command, same file, same API) or per first-edit churn target, with
+the session ids to quote. Read the session's prompts before
 counting churn — a broad exploratory task earns a long hunt; a narrow task that still hunted is
 the finding.
 
