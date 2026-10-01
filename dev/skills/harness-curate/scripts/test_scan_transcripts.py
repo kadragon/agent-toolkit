@@ -420,6 +420,108 @@ def test_emit_caps_verifier_failures_and_prints_dropped():
     )
 
 
+def test_scan_dir_collects_tool_cost_oversized():
+    """TOOL-COST oversized: a persisted-output marker or a raw result past
+    TOOL_OVERSIZE_CHARS is collected with the tool name and its input; a small
+    result is not."""
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            _assistant_tool_use([{"type": "tool_use", "name": "Bash", "id": "t1",
+                                  "input": {"command": "gh api repos/x/y/contents/a"}}]),
+            _user_tool_result("t1", "<persisted-output>\nOutput too large (34KB). Full"
+                                    " output saved to: /tmp/x.txt\n"),
+            _assistant_tool_use([{"type": "tool_use", "name": "Read", "id": "t2",
+                                  "input": {"file_path": "/repo/big.py"}}]),
+            _user_tool_result("t2", "x" * (mod.TOOL_OVERSIZE_CHARS + 1)),
+            _assistant_tool_use([{"type": "tool_use", "name": "Read", "id": "t3",
+                                  "input": {"file_path": "/repo/small.py"}}]),
+            _user_tool_result("t3", "short"),
+            _assistant_tool_use([{"type": "tool_use", "name": "Read", "id": "t4",
+                                  "input": {"file_path": "/p/s1/tool-results/b7.txt"}}]),
+            _user_tool_result("t4", "y" * (mod.TOOL_OVERSIZE_CHARS + 1)),
+        ])
+        summary = mod.scan_dir(tdir, "fixture")
+        tc = summary["tool_cost"]
+        details = [d for k, d in tc if k == "oversized"]
+        check("oversized collects the persisted-output Bash call",
+              any("Bash" in d and "gh api" in d and "34KB" in d for d in details),
+              f"got {tc!r}")
+        check("oversized collects a raw result past the char threshold",
+              any("Read" in d and "big.py" in d for d in details), f"got {tc!r}")
+        check("a small result is not oversized",
+              not any("small.py" in d for d in details), f"got {tc!r}")
+        check("re-reading a spilled tool-results file is not double-counted",
+              not any("tool-results" in d for d in details), f"got {tc!r}")
+
+
+def test_scan_dir_tool_cost_search_churn():
+    """TOOL-COST search-churn: SEARCH_CHURN_MIN+ read/search calls before the first
+    edit is flagged; fewer is not; a session that never edits is not (pure analysis
+    is not churn); searches after the first edit do not count."""
+    n = mod.SEARCH_CHURN_MIN
+
+    def searches(prefix, count):
+        recs = []
+        for i in range(count):
+            tool = ("Grep", {"pattern": "x"}) if i % 2 else ("Bash", {"command": "grep -rn x ."})
+            recs.append(_assistant_tool_use([{"type": "tool_use", "name": tool[0],
+                                              "id": f"{prefix}{i}", "input": tool[1]}]))
+        return recs
+
+    edit = _assistant_tool_use([{"type": "tool_use", "name": "Edit", "id": "e1",
+                                 "input": {"file_path": "/repo/a.py"}}])
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "churn.jsonl"), searches("a", n) + [edit])
+        _write_jsonl(os.path.join(tdir, "quick.jsonl"), searches("b", n - 1) + [edit])
+        _write_jsonl(os.path.join(tdir, "noedit.jsonl"), searches("c", n + 5))
+        _write_jsonl(os.path.join(tdir, "late.jsonl"), [edit] + searches("d", n + 5))
+        tc = mod.scan_dir(tdir, "fixture")["tool_cost"]
+        churn = [d for k, d in tc if k == "search-churn"]
+        check("search-churn flags the session at the threshold",
+              any(d.startswith("churn ") and f"{n} " in d for d in churn), f"got {tc!r}")
+        for name in ("quick", "noedit", "late"):
+            check(f"search-churn skips {name}",
+                  not any(d.startswith(name + " ") for d in churn), f"got {tc!r}")
+
+
+def test_scan_dir_session_filter():
+    """--session: scan_dir reads only the transcript whose basename starts with the id,
+    and returns None when nothing matches."""
+    with tempfile.TemporaryDirectory() as tdir:
+        user = {"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
+                "message": {"content": "refactor the parser module please"}}
+        other = dict(user, message={"content": "write the release notes for v2"})
+        _write_jsonl(os.path.join(tdir, "abc123-uuid.jsonl"), [user])
+        _write_jsonl(os.path.join(tdir, "zzz999-uuid.jsonl"), [other])
+        s = mod.scan_dir(tdir, "fixture", session="abc123")
+        check("session filter scans only the matching file",
+              s is not None and s["sessions"] == 1
+              and [t for _, t in s["prompts"]] == ["refactor the parser module please"],
+              f"got {s!r}")
+        check("session filter with no match returns None",
+              mod.scan_dir(tdir, "fixture", session="nope") is None)
+
+
+def test_emit_prints_tool_cost_with_dropped():
+    """emit() prints TOOL-COST capped at TOOL_COST_CAP with the dropped count."""
+    import contextlib
+    import io
+    summary = {"label": "fixture", "sessions": 1, "prompts": [], "skill_sessions": {},
+               "agent_sessions": {}, "corrections": [], "agent_corrections": [],
+               "frictions": [], "verifier_failures": [],
+               "tool_cost": [("oversized", f"Bash: cmd {i} (40KB)")
+                             for i in range(mod.TOOL_COST_CAP + 2)]}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mod.emit(summary)
+    out = buf.getvalue()
+    lines = [ln for ln in out.splitlines() if ln.startswith("  [oversized]")]
+    check("emit prints TOOL-COST with dropped count",
+          "TOOL-COST" in out and "[dropped 2]" in out, f"got: {out[:400]!r}")
+    check("emit caps TOOL-COST at TOOL_COST_CAP", len(lines) == mod.TOOL_COST_CAP,
+          f"got {len(lines)}")
+
+
 def test_scan_dir_hook_deny_outranks_pending_ci_kind():
     """A hook-blocked CI command is a denial, not a CI failure — hook-deny wins."""
     with tempfile.TemporaryDirectory() as tdir:
@@ -513,6 +615,22 @@ SUITES = [
     (
         "emit: VERIFIER-FAILURES capped with dropped count",
         test_emit_caps_verifier_failures_and_prints_dropped,
+    ),
+    (
+        "scan_dir: TOOL-COST oversized results",
+        test_scan_dir_collects_tool_cost_oversized,
+    ),
+    (
+        "scan_dir: TOOL-COST search churn before first edit",
+        test_scan_dir_tool_cost_search_churn,
+    ),
+    (
+        "scan_dir: --session filter",
+        test_scan_dir_session_filter,
+    ),
+    (
+        "emit: TOOL-COST capped with dropped count",
+        test_emit_prints_tool_cost_with_dropped,
     ),
 ]
 

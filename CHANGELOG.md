@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-curate: upgrade no-op pass, check-vs-review classify, unwired checks, TOOL-COST, --session (dev v4.10.2) (2026-10-01)
 - [done] criterion checks, stuck notes, spec/implement session split, unattended batch cap (dev v4.10.1) (2026-09-23) → docs/workflows.md
 - [done] reference-review skill; curate drops machine prompts; verifier tool-call budget (dev v4.10.0) (2026-09-23) → docs/delegation.md
 - [done] agy review is read-only and leaves a sidecar the pre-merge reclaim collects (dev v4.9.19) (2026-09-23)
