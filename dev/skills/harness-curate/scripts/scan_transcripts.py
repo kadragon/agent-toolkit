@@ -134,10 +134,12 @@ FRICTION_MAXLEN = 120    # complaints run a little longer than bare corrections
 
 # ---- Signal 3: verifier-grounded failures (machine verdicts, not user pushback) ----
 # A Bash tool_use whose command matches CI_COMMAND_RE and whose tool_result errored is
-# a ci-fail; a qa-verifier Agent tool_result matching QA_REJECT_RE is a qa-reject; any
-# errored tool_result matching HOOK_DENY_RE is a hook-deny. All three deliberately
-# over-collect (a task-caused CI failure matches too) — the model reads samples and
-# judges terminal verifier-level cause before routing (signal-taxonomy.md §8).
+# a ci-fail; a qa-verifier Agent tool_result matching QA_REJECT_RE is a qa-reject; an
+# errored tool_result in one of the hook-deny shapes (_is_hook_deny) is a hook-deny.
+# ci-fail and qa-reject deliberately over-collect (a task-caused CI failure matches
+# too) — the model reads samples and judges cause before routing (signal-taxonomy.md
+# §8). hook-deny is precise on purpose: the scanner sees a hook ONLY through its
+# denials, so a mislabelled row inflates a hook's apparent activity.
 CI_COMMAND_RE = re.compile(
     r"ci-wait|validate-harness|pytest|unittest|--test\b|npm (run )?test|make test|"
     r"cargo test|go test|ruff\b|\btest_\w+\.py\b",
@@ -153,13 +155,28 @@ QA_REJECT_RE = re.compile(
     r"|불합격|반려|실패|블로킹",
     re.IGNORECASE,
 )
-# Anchored: Claude Code prefixes a real denial with "<Event>:<Tool> hook error:" (all 10
-# real denials in the 2026-10-01 survey). Unanchored, any errored Bash output that merely
-# printed settings.json or grepped transcripts for "commit-guard" matched (8 of 18 rows).
+# Hook-deny shapes (2026-10-01 survey: 10 real denials, all "<Event>:<Tool> hook
+# error:"). Unanchored, any errored Bash output that merely printed settings.json or
+# grepped transcripts for "commit-guard" matched (8 of 18 rows), so the text form is
+# anchored — tolerating the <tool_use_error> / "Error: " wrappers Claude Code puts on
+# other tool errors. The record-level toolDenialKind="permission-rule" marker backs it
+# up when the text is wrapped some other way; alone it is not enough, because tool
+# refusals ("Refusing to write …: symbolic link") carry it too. Permission-rule,
+# auto-mode, and user-rejected denials are NOT hooks and stay out — permission tuning
+# is out of scope (SKILL.md Step 3).
 HOOK_DENY_RE = re.compile(
-    r"^(?:[A-Za-z]+:\S+ )?hook (?:error|blocked|denied)\b|^PermissionDenial",
-    re.IGNORECASE,
-)
+    r"^(?:<tool_use_error>\s*|Error:\s*)?[A-Za-z]+:\S+ hook error:", re.IGNORECASE)
+HOOK_ERROR_MARK = " hook error:"
+# commit-and-push.sh runs guard.py --precommit-check and reports a rejection as jq JSON
+# {"error": "commit blocked by commit-guard: …"} — the same guard firing, no hook prefix.
+# The JSON key form keeps the script's own source text (--arg e "…") from matching.
+GUARD_SCRIPT_DENY_RE = re.compile(r'"error"\s*:\s*"commit blocked by commit-guard:')
+
+
+def _is_hook_deny(rtxt, denial_kind):
+    return bool(HOOK_DENY_RE.search(rtxt)
+                or (denial_kind == "permission-rule" and HOOK_ERROR_MARK in rtxt)
+                or GUARD_SCRIPT_DENY_RE.search(rtxt))
 VERIFIER_DETAIL_MAXLEN = 160
 
 # Async agent verdicts never land in the spawning Agent tool_use's tool_result — that
@@ -768,7 +785,7 @@ def scan_dir(tdir, label, session=None, since_ms=0):
                             kind_meta = pending_tools.pop(b.get("tool_use_id"), None)
                             # hook-deny outranks the pending kind: a hook-blocked CI
                             # command is a denial, not a CI failure.
-                            if is_err and HOOK_DENY_RE.search(rtxt):
+                            if is_err and _is_hook_deny(rtxt, r.get("toolDenialKind")):
                                 verifier_failures.append(
                                     ("hook-deny", rtxt[:VERIFIER_DETAIL_MAXLEN]))
                             elif kind_meta is not None:

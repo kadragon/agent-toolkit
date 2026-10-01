@@ -614,6 +614,39 @@ def test_scan_dir_hook_deny_requires_hook_prefix():
               f"got {vf!r}")
 
 
+def test_scan_dir_hook_deny_shapes():
+    """hook-deny is recognised by any of three shapes and nothing else:
+    a wrapped prefix (<tool_use_error> / 'Error: '), the record-level
+    toolDenialKind=permission-rule marker on hook-error text, and the
+    commit-and-push.sh JSON rejection from guard.py --precommit-check. A
+    permission-rule refusal that is not a hook, an auto-mode block, and a user
+    rejection stay out — permission tuning is out of scope."""
+    def rec(tid, text, kind=None):
+        r = _user_tool_result(tid, text, is_error=True)
+        if kind:
+            r["toolDenialKind"] = kind
+        return r
+    with tempfile.TemporaryDirectory() as tdir:
+        _write_jsonl(os.path.join(tdir, "s1.jsonl"), [
+            rec("a", "<tool_use_error>PreToolUse:Bash hook error: [g.py]: guard: blocked — A</tool_use_error>"),
+            rec("b", "Error: PreToolUse:Write hook error: [g.py]: memory-guard: blocked — B"),
+            rec("c", "Hook output follows. PreToolUse:Edit hook error: [g.py]: guard: blocked — C",
+                kind="permission-rule"),
+            rec("d", 'Exit code 1 {   "error": "commit blocked by commit-guard: commit-guard:'
+                     ' blocked — message does not match required format D" }'),
+            rec("e", "Refusing to write /x/CLAUDE.md: it is a symbolic link.", kind="permission-rule"),
+            rec("f", "Permission for this action was denied by the Claude Code auto mode classifier.",
+                kind="automode-blocked"),
+            rec("g", "The user doesn't want to proceed with this tool use.", kind="user-rejected"),
+            rec("h", 'Exit code 1 jq -n --arg e "commit blocked by commit-guard: $GUARD_OUT"'),
+        ])
+        vf = mod.scan_dir(tdir, "fixture")["verifier_failures"]
+        marks = {m for _, d in vf for m in ("— A", "— B", "— C", "format D") if m in d}
+        check("hook-deny: wrapped, structural, and script-path shapes; nothing else",
+              len(vf) == 4 and all(k == "hook-deny" for k, _ in vf)
+              and marks == {"— A", "— B", "— C", "format D"}, f"got {vf!r}")
+
+
 def test_scan_dir_hook_deny_outranks_pending_ci_kind():
     """A hook-blocked CI command is a denial, not a CI failure — hook-deny wins."""
     with tempfile.TemporaryDirectory() as tdir:
@@ -727,6 +760,10 @@ SUITES = [
     (
         "scan_dir: hook-deny requires the hook-error prefix",
         test_scan_dir_hook_deny_requires_hook_prefix,
+    ),
+    (
+        "scan_dir: hook-deny wrapped / structural / script-path shapes",
+        test_scan_dir_hook_deny_shapes,
     ),
     (
         "scan_dir: --since window",
