@@ -158,5 +158,6 @@ then, pair it with the positive target.
   default (*be thorough*, when the agent is already thorough-ish) is a no-op, and the fix is a
   stronger word, not a different technique.
 
-This is the same bar `AGENTS.md` → *Maintenance* applies to itself, and the one
-`dev:harness-curate` applies when it proposes retiring an asset.
+This is the same bar `AGENTS.md` → *Maintenance* applies to itself, the one
+`dev:harness-curate` applies when it proposes retiring an asset, and the whole of its
+`upgrade` pass after a model change.
