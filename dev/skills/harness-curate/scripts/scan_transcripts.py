@@ -153,8 +153,11 @@ QA_REJECT_RE = re.compile(
     r"|불합격|반려|실패|블로킹",
     re.IGNORECASE,
 )
+# Anchored: Claude Code prefixes a real denial with "<Event>:<Tool> hook error:" (all 10
+# real denials in the 2026-10-01 survey). Unanchored, any errored Bash output that merely
+# printed settings.json or grepped transcripts for "commit-guard" matched (8 of 18 rows).
 HOOK_DENY_RE = re.compile(
-    r"hook (error|blocked|denied)|PreToolUse|PermissionDenial|commit-guard|blocked —",
+    r"^(?:[A-Za-z]+:\S+ )?hook (?:error|blocked|denied)\b|^PermissionDenial",
     re.IGNORECASE,
 )
 VERIFIER_DETAIL_MAXLEN = 160
