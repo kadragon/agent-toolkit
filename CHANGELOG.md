@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] gongmun-draft and report-draft skills: 공문 회신 drafting and 개조식 report authoring (prod v3.2.0) (2026-10-02)
 - [done] harness-curate hook-deny counts real hook and commit-guard denials, not mid-text mentions (dev v4.10.3) (2026-10-01)
 - [done] harness-curate: upgrade no-op pass, check-vs-review classify, unwired checks, TOOL-COST, --session (dev v4.10.2) (2026-10-01)
 - [done] criterion checks, stuck notes, spec/implement session split, unattended batch cap (dev v4.10.1) (2026-09-23) → docs/workflows.md

@@ -1,0 +1,26 @@
+[
+  {
+    "query": "이 질의 공문에 대한 회신 공문 초안 작성해줘",
+    "should_trigger": true
+  },
+  {
+    "query": "업체 요청 메일에 뭐라고 답해야 해? 메일 초안 써줘",
+    "should_trigger": true
+  },
+  {
+    "query": "일정 변경 안내 공문 써줘",
+    "should_trigger": true
+  },
+  {
+    "query": "협조 요청 공문 기안 초안 만들어줘",
+    "should_trigger": true
+  },
+  {
+    "query": "사업 추진 계획 보고서 개조식으로 작성해줘",
+    "should_trigger": false
+  },
+  {
+    "query": "이 문단 번역투 없애고 자연스러운 한국어로 다듬어줘",
+    "should_trigger": false
+  }
+]
