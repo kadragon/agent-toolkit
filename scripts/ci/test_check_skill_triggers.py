@@ -18,9 +18,8 @@ Two load-bearing groups:
 
 Fixture repos are staged with `git add` (never committed), so `git ls-files` sees
 them without tripping the repo's commit-message hook. The ratchet needs real commits
-and an `origin/main` ref, so those cases use `make_repo_with_base` instead; it commits
-with `--no-verify` and a neutralized `core.hooksPath` so a global hooks directory
-cannot reach into the throwaway repo.
+and an `origin/main` ref, so those cases use `make_repo_with_base` from `_fixture_repo.py`,
+which keeps global hooks and signing out of the throwaway repo.
 
 Run: python3 scripts/ci/test_check_skill_triggers.py
 """
@@ -31,6 +30,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from _fixture_repo import make_repo_with_base
 
 SCRIPT = Path(__file__).parent / "check_skill_triggers.py"
 spec = importlib.util.spec_from_file_location("check_skill_triggers", SCRIPT)
@@ -67,53 +68,6 @@ def make_repo(tmp: Path, files: dict) -> Path:
         else:
             path.write_text(content, encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    return root
-
-
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.hooksPath=/dev/null",
-            # `--no-verify` does NOT cover signing: with a global
-            # `commit.gpgsign=true` these fixture commits would fail before any
-            # ratchet assertion runs.
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=test",
-            "-c",
-            "user.email=test@example.invalid",
-            *args,
-        ],
-        cwd=root,
-        check=True,
-    )
-
-
-def make_repo_with_base(tmp: Path, base_files: dict, head_files: dict) -> Path:
-    """Build a repo with a real `origin/main` base commit and a HEAD commit on top.
-
-    `base_files` is committed and pointed at by `refs/remotes/origin/main`; then
-    `head_files` is applied (a `None` value deletes the path) and committed, so
-    `git diff origin/main...HEAD` reports exactly the intended change set.
-    """
-    root = tmp
-    _git(root, "init", "-q")
-    for rel, content in base_files.items():
-        write(root, rel, content)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-verify", "-m", "base")
-    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
-
-    for rel, content in head_files.items():
-        if content is None:
-            (root / rel).unlink()
-        else:
-            write(root, rel, content)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-verify", "-m", "head")
     return root
 
 

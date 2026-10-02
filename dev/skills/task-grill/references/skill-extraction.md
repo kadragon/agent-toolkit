@@ -21,8 +21,10 @@ the repo leave unsettled. Anchor questions on the most recent real instance of t
 | **Exceptions** | When does this job go differently or stop? | Cases surfaced in Steps; ask once for any others. |
 | **Toolbox** | What do you rebuild by hand each time (script, template, reference list, past good example)? | Existing scripts/templates in the repo to reuse; else "none yet". |
 
-Record Purpose in `Outcome:`, Done/verification in `Success:`, Decision rules and Exceptions in
-`Constraint:`. Append Triggers, Inputs, Steps, and Toolbox as a `Skill slots:` block after the
-four fields — the caller writing the SKILL.md needs them verbatim. List all four there, including
-repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
+Record Purpose in `Outcome:`. Append the other seven slots as a `Skill slots:` block after the
+four fields — the caller writing the SKILL.md needs them verbatim. Done/verification, Decision
+rules and Exceptions describe how the future skill checks and branches at runtime, so they go
+there too, not in `Success:`/`Constraint:`: those two stay the building PR's own criteria
+(e.g. "SKILL.md encodes every Done/verification item as a checkable step"). List all seven,
+including repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
 unanswered in a non-interactive run goes to the handoff as unresolved (Rule 4), never as "N/A".

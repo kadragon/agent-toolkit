@@ -304,7 +304,17 @@ case "$SUBCOMMAND" in
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     if [ "$HUB_TYPE" = "github" ]; then
       MERGE_OK=true
-      MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "--${STRATEGY}" --delete-branch 2>&1) || MERGE_OK=false
+      MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "--${STRATEGY}" 2>&1) || MERGE_OK=false
+      # Remote head only, matching the Forgejo branch below: gh's --delete-branch also deletes
+      # the local branch, and local cleanup belongs to merge-and-cleanup.sh alone. Best-effort —
+      # the repo's auto-delete setting may already have removed it, and a fork head is not ours.
+      if [ "$MERGE_OK" = "true" ]; then
+        HEAD_INFO=$(gh pr view "$PR_NUMBER" --json headRefName,isCrossRepository 2>/dev/null || echo '{}')
+        HEAD_REF=$(jq -r 'if .isCrossRepository then "" else (.headRefName // "") end' <<<"$HEAD_INFO")
+        if [ -n "$HEAD_REF" ]; then
+          gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/${HEAD_REF}" >/dev/null 2>&1 || true
+        fi
+      fi
       jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, merge_output: $out}'
     else
       require_forgejo_token

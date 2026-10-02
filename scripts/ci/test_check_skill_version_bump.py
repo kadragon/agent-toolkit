@@ -15,8 +15,8 @@ Load-bearing cases:
 * a new skill, or one with no `version:` key at base, is skipped;
 * an unresolvable diff base skips locally and FAILS under `require_diff_base`.
 
-Every case builds a throwaway repo with a real `origin/main` ref. Commits use
-`--no-verify` and a neutralized `core.hooksPath`, so no global hook reaches the fixture.
+Every case builds a throwaway repo with a real `origin/main` ref via `_fixture_repo.py`,
+which keeps global hooks and signing out of the fixture.
 
 Run: python3 scripts/ci/test_check_skill_version_bump.py
 """
@@ -24,10 +24,11 @@ Run: python3 scripts/ci/test_check_skill_version_bump.py
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from _fixture_repo import git, make_repo_with_base
 
 SCRIPT = Path(__file__).resolve().parent / "check_skill_version_bump.py"
 spec = importlib.util.spec_from_file_location("check_skill_version_bump", SCRIPT)
@@ -51,43 +52,6 @@ def write(root: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=test",
-            "-c",
-            "user.email=test@example.invalid",
-            *args,
-        ],
-        cwd=root,
-        check=True,
-    )
-
-
-def make_repo(tmp: Path, base_files: dict, head_files: dict, message: str = "head") -> Path:
-    """Commit `base_files` as `origin/main`, then apply `head_files` (None deletes) on top."""
-    _git(tmp, "init", "-q")
-    for rel, content in base_files.items():
-        write(tmp, rel, content)
-    _git(tmp, "add", "-A")
-    _git(tmp, "commit", "-q", "--no-verify", "-m", "base")
-    _git(tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
-    for rel, content in head_files.items():
-        if content is None:
-            (tmp / rel).unlink()
-        else:
-            write(tmp, rel, content)
-    _git(tmp, "add", "-A")
-    _git(tmp, "commit", "-q", "--no-verify", "-m", message)
-    return tmp
-
-
 def skill_md(name: str, version: str | None) -> str:
     version_line = f"version: {version}\n" if version else ""
     return f"---\nname: {name}\ndescription: test skill\n{version_line}---\n\n# {name}\n"
@@ -98,7 +62,7 @@ REF_TEXT = "# Reference\n\nSome guidance that is long enough to be detected as a
 
 def run(base: dict, head: dict, message: str = "head", **kwargs) -> tuple[str, bool]:
     with tempfile.TemporaryDirectory() as tmp:
-        root = make_repo(Path(tmp), base, head, message)
+        root = make_repo_with_base(Path(tmp), base, head, message)
         lines, ok = mod.build_report(root, **kwargs)
     return "\n".join(lines), ok
 
@@ -243,10 +207,10 @@ def test_skipped_skills():
 def test_unresolvable_base():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        _git(root, "init", "-q")
+        git(root, "init", "-q")
         write(root, "README.md", "x\n")
-        _git(root, "add", "-A")
-        _git(root, "commit", "-q", "--no-verify", "-m", "only")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "--no-verify", "-m", "only")
         lines, ok = mod.build_report(root)
         check("missing origin/main skips locally", ok, "\n".join(lines))
         lines, ok = mod.build_report(root, require_diff_base=True)
