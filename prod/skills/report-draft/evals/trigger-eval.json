@@ -1,0 +1,26 @@
+[
+  {
+    "query": "사업 계획(안) 보고서 초안 작성해줘",
+    "should_trigger": true
+  },
+  {
+    "query": "회의 결과 보고서 개조식으로 정리해줘",
+    "should_trigger": true
+  },
+  {
+    "query": "이 hwpx 보고서 점검하고 현황 및 문제점 고쳐줘",
+    "should_trigger": true
+  },
+  {
+    "query": "검토 결과 보고 1쪽 보고서 만들어줘",
+    "should_trigger": true
+  },
+  {
+    "query": "받은 질의 공문에 회신 공문 초안 써줘",
+    "should_trigger": false
+  },
+  {
+    "query": "이 한국어 문서 AI가 쓴 티 나는데 문체만 손봐줘",
+    "should_trigger": false
+  }
+]
