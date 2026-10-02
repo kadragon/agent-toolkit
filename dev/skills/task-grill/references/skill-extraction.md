@@ -25,7 +25,7 @@ Record Purpose in `Outcome:`. Append the other seven slots as a `Skill slots:` b
 four fields — the caller writing the SKILL.md needs them verbatim. Done/verification, Decision
 rules and Exceptions describe how the future skill checks and branches at runtime, so they go
 there too, not in `Success:`/`Constraint:`: those two stay the building PR's own criteria.
-`Success:` names each Done/verification item as one such criterion ("SKILL.md checks <item>"),
-so no item is lost before a caller reads `Skill slots:`. List all seven,
-including repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
+`Success:` names each Done/verification item, Decision rule and Exception as one such
+criterion ("SKILL.md checks/handles <item>"), so none is lost before a caller reads
+`Skill slots:`. List all seven, including repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
 unanswered in a non-interactive run goes to the handoff as unresolved (Rule 4), never as "N/A".

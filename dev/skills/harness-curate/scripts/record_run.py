@@ -102,32 +102,29 @@ def record(project, now_ms=None):
     return claude_path, codex_path
 
 
-def new_sessions(state_dir, since_ms):
-    """Transcripts in the resolved project dir modified after `since_ms`."""
-    try:
-        names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
-    except OSError:
-        return 0
+def count_newer(paths, since_ms):
     count = 0
-    for n in names:
-        try:
-            if os.path.getmtime(os.path.join(state_dir, n)) * 1000 > since_ms:
-                count += 1
-        except OSError:
-            pass
-    return count
-
-
-def new_codex_sessions(project, since_ms):
-    """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
-    count = 0
-    for fp in find_codex_session_files(codex_home(), project):
+    for fp in paths:
         try:
             if os.path.getmtime(fp) * 1000 > since_ms:
                 count += 1
         except OSError:
             pass
     return count
+
+
+def new_sessions(state_dir, since_ms):
+    """Transcripts in the resolved project dir modified after `since_ms`."""
+    try:
+        names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
+    except OSError:
+        return 0
+    return count_newer((os.path.join(state_dir, n) for n in names), since_ms)
+
+
+def new_codex_sessions(project, since_ms):
+    """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
+    return count_newer(find_codex_session_files(codex_home(), project), since_ms)
 
 
 def last_run_ms(path):
@@ -152,7 +149,7 @@ def due_message(project, now_ms=None):
     return (
         f"HARNESS-CURATE DUE: last run {age}, {sessions} sessions since. "
         "At the start of your next reply, suggest in one sentence that the user run "
-        "`/dev:harness-curate`, then continue their task."
+        "`/dev:harness-curate` (Claude Code) or `$harness-curate` (Codex), then continue their task."
     )
 
 
