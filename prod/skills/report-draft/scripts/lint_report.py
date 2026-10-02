@@ -37,7 +37,7 @@ HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 ROMAN = re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]$")
 NUMBERED = re.compile(r"^\s*\d{1,2}\.\s+\S")
 REMEDY = re.compile(r"필요가 있음|필요함|필요성|해야 함|하여야 함|강화할|개선할|도입할|추진할|마련할|방안|시급")
-POLITE = re.compile(r"(습니다|합니다|됩니다|입니다)\.?\s*$")
+POLITE = re.compile(r"(습니다|합니다|됩니다|입니다|드립니다)\.?\s*$")
 BAD_DATE = [
     (re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b"), "ISO date"),
     (re.compile(r"\b\d{4}\.\d{1,2}\.(\d{1,2}\.)?"), "date without spaces"),
@@ -57,7 +57,7 @@ PLACEHOLDER = re.compile(r"○○|△△|\[확인 필요\]")
 ITEM_MAX = 80
 BULLET = re.compile(r"^\s*(□|○|◦|-|※|\*+)\s*")
 BOLD_PAIR = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
-UNCLOSED_BOLD = re.compile(r"(?<!^)\*\*(?=[^\s,.)·])")
+UNCLOSED_BOLD = re.compile(r"\*\*(?=[^\s,.)·])")
 
 
 def paragraphs_from_hwpx(path):
@@ -108,7 +108,8 @@ def lint(lines, allow_numbered=False):
             box, label, has_circle = s, "", False
         elif s.startswith(("○", "◦")):  # ◦ = ○ in 본부 배포 서식
             has_circle = True
-            label = s if len(BULLET.sub("", s)) <= LABEL_MAX else ""
+            nxt = next((n.strip() for n in lines[i:] if n.strip()), "")
+            label = s if len(BULLET.sub("", s)) <= LABEL_MAX and nxt.startswith("-") else ""
         elif s.startswith("- ") and not has_circle:
             res.append(("WARN", "R2", i, "`-` without a `○` parent — add the ○ level or promote to ○", s))
 
@@ -121,7 +122,8 @@ def lint(lines, allow_numbered=False):
         if m:
             res.append(("FAIL", "R3", i, "remedy in 현황/문제점 — keep facts only (%s)" % m.group(0), s))
 
-        if POLITE.search(s):
+        plain = s.replace("**", "")
+        if POLITE.search(plain):
             res.append(("FAIL", "R4", i, "polite ending — use 개조식 (~함/~음/~임)", s))
 
         for pat, name in BAD_DATE:
@@ -146,7 +148,7 @@ def lint(lines, allow_numbered=False):
         if BAD_TIME.search(s):
             res.append(("FAIL", "R8", i, "time — write 24-hour `HH:MM`", s))
 
-        if RHETORIC.search(s):
+        if RHETORIC.search(plain):
             res.append(("FAIL", "R9", i, "rhetoric (?, !, ~것이다) — state the fact", s))
 
         body = BULLET.sub("", s)
@@ -162,7 +164,7 @@ def lint(lines, allow_numbered=False):
             res.append(("WARN", "R12", i, "unfilled `%s`" % m.group(0), s))
 
         # footnote marks (`Team**,` / `** 설명`) stay; an opening `**word` with no close is a broken bold
-        if UNCLOSED_BOLD.search(BULLET.sub("", BOLD_PAIR.sub("", s))):
+        if UNCLOSED_BOLD.search(BOLD_PAIR.sub("", s)):
             res.append(("FAIL", "R13", i, "unpaired `**` bold marker", s))
     return res
 
@@ -226,6 +228,14 @@ def selftest():
     assert lint(["붙임  1. 참석자 명단 1부.", " ○ 지원하였습니다."]) == []
     # a one-line roman chapter heading still scopes R3
     assert "R3" in {r[1] for r in lint(["Ⅱ. 현황 및 문제점", " ○ 회수 기준을 강화할 필요가 있음"])}
+    # ending checks see through bold markers
+    assert "R4" in {r[1] for r in lint([" ○ **지원하였습니다.**"])}
+    assert "R9" in {r[1] for r in lint([" ○ **지원할 것이다.**"])}
+    assert "R4" in {r[1] for r in lint([" ○ 협조를 요청드립니다."])}
+    # an unclosed bold opening the item body is still unpaired
+    assert "R13" in {r[1] for r in lint([" ○ **총 예산 확보"])}
+    # a short sentence under 향후 is body text, not a label
+    assert "R6" in {r[1] for r in lint(["□ 향후 추진 계획", " ○ 실적을 예산에 반영"])}
     # line numbers count blank lines in a text draft
     import os
     import tempfile
