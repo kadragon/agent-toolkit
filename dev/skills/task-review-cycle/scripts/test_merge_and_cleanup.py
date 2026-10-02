@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regression tests for merge-and-cleanup.sh -- local branch cleanup reporting.
+"""Regression tests for merge-and-cleanup.sh -- local branch and worktree cleanup.
 
-`hub.sh merge` runs `gh pr merge --delete-branch`, which already deletes the local feature
-branch when gh can switch off it. The script's own `git branch -D` then failed and reported
-"WARNING: Could not delete local branch", so a clean merge (PR #279) read as a cleanup failure.
-These cases pin four outcomes: already deleted by the merge, deleted by the script, a branch
-that never existed, and a real failure -- the last two must still warn.
+The script is the single owner of local cleanup: `hub.sh merge` merges and deletes the
+remote head only, on both GitHub and Forgejo. These cases pin the outcomes: deleted by
+the script, a branch that never existed, a real failure (both must warn), a worktree
+holding the feature branch (removed first, so the branch delete succeeds), and a base
+checkout that fails after the remote merge (JSON still printed, cleanup skipped).
 
 The real hub.sh is replaced by a stub next to a copy of the script, so no network is touched.
 
@@ -23,14 +23,11 @@ import tempfile
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "merge-and-cleanup.sh"
+HUB = Path(__file__).resolve().parent / "hub.sh"
 FEATURE = "feat/x"
 
-# Stub hub.sh: report a successful merge; with DELETE_LOCAL=1, delete the local branch the way
-# `gh pr merge --delete-branch` does (switch to base, then delete).
+# Stub hub.sh: report a successful merge and leave every local ref alone, as the real one does.
 HUB_STUB = """#!/usr/bin/env bash
-if [ "${DELETE_LOCAL:-0}" = "1" ]; then
-  git checkout -q main && git branch -D -q "$FEATURE_BRANCH_UNDER_TEST"
-fi
 echo '{"merge_ok": true, "merge_output": "stub"}'
 """
 
@@ -60,13 +57,11 @@ def make_script_dir(tmp):
     return d
 
 
-def run(case, repo, script_dir, delete_local, branch=FEATURE):
-    env = {**os.environ, "DELETE_LOCAL": "1" if delete_local else "0",
-           "FEATURE_BRANCH_UNDER_TEST": branch}
-    proc = subprocess.run(
-        ["bash", str(script_dir / "merge-and-cleanup.sh"), "1", "main", branch, '{"squash":true}'],
-        cwd=repo, env=env, check=False, capture_output=True, text=True,
-    )
+def run(case, repo, script_dir, branch=FEATURE, base="main", worktree=None):
+    args = ["bash", str(script_dir / "merge-and-cleanup.sh"), "1", base, branch, '{"squash":true}']
+    if worktree:
+        args.append(str(worktree))
+    proc = subprocess.run(args, cwd=repo, check=False, capture_output=True, text=True)
     if proc.returncode != 0 or not proc.stdout.strip():
         fail(case, f"script exit {proc.returncode}, stderr: {proc.stderr.strip()!r}")
     out = json.loads(proc.stdout)
@@ -86,18 +81,18 @@ def fail(case, detail):
     sys.exit(1)
 
 
-def case_already_deleted_by_merge(tmp):
-    repo, d = make_repo(tmp), make_script_dir(tmp)
-    out = run("already_deleted_by_merge", repo, d, delete_local=True)
-    msg = out["cleanup_message"]
-    if "WARNING" in msg or "already deleted" not in msg or branch_exists(repo):
-        fail("already_deleted_by_merge", f"expected an 'already deleted' note, got {msg!r}")
-    print("ok already_deleted_by_merge")
+def case_hub_never_deletes_local(_tmp):
+    # Two owners raced for the local branch (PR #280): gh's --delete-branch deleted it on GitHub,
+    # the Forgejo path never did. Local cleanup now has one owner -- this script.
+    code = [ln for ln in HUB.read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
+    if any("--delete-branch" in ln for ln in code):
+        fail("hub_never_deletes_local", "hub.sh still passes --delete-branch to gh pr merge")
+    print("ok hub_never_deletes_local")
 
 
 def case_deleted_by_script(tmp):
     repo, d = make_repo(tmp), make_script_dir(tmp)
-    out = run("deleted_by_script", repo, d, delete_local=False)
+    out = run("deleted_by_script", repo, d)
     msg = out["cleanup_message"]
     if msg != f"Local branch '{FEATURE}' deleted" or branch_exists(repo):
         fail("deleted_by_script", f"got {msg!r}, branch exists={branch_exists(repo)}")
@@ -110,7 +105,7 @@ def case_real_failure_still_warns(tmp):
     git(repo, "checkout", "-q", "main")
     other = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(other), FEATURE)
-    out = run("real_failure_still_warns", repo, d, delete_local=False)
+    out = run("real_failure_still_warns", repo, d)
     msg = out["cleanup_message"]
     if not msg.startswith("WARNING") or not branch_exists(repo):
         fail("real_failure_still_warns", f"got {msg!r}")
@@ -121,11 +116,35 @@ def case_real_failure_still_warns(tmp):
 def case_unknown_branch_warns(tmp):
     repo, d = make_repo(tmp), make_script_dir(tmp)
     # A mistyped name never existed locally; its absence after the merge is not a success.
-    out = run("unknown_branch_warns", repo, d, delete_local=False, branch="feat/typo")
+    out = run("unknown_branch_warns", repo, d, branch="feat/typo")
     msg = out["cleanup_message"]
     if not msg.startswith("WARNING") or "not found" not in msg:
         fail("unknown_branch_warns", f"got {msg!r}")
     print("ok unknown_branch_warns")
+
+
+def case_worktree_holding_branch(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    # The worktree passed for removal holds the feature branch; deleting the branch first
+    # always failed ("checked out at ..."), leaving it behind with a WARNING.
+    git(repo, "checkout", "-q", "main")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    out = run("worktree_holding_branch", repo, d, worktree=wt)
+    msg, wmsg = out["cleanup_message"], out["worktree_message"]
+    if "WARNING" in msg or "WARNING" in wmsg or branch_exists(repo) or wt.exists():
+        fail("worktree_holding_branch", f"got cleanup={msg!r} worktree={wmsg!r}")
+    print("ok worktree_holding_branch")
+
+
+def case_base_checkout_fails(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    # The remote merge already landed; a failed local checkout must not swallow the result JSON.
+    out = run("base_checkout_fails", repo, d, base="no-such-base")
+    msg = out["cleanup_message"]
+    if not msg.startswith("WARNING") or "no-such-base" not in msg or not branch_exists(repo):
+        fail("base_checkout_fails", f"got {msg!r}")
+    print("ok base_checkout_fails")
 
 
 def _force_remove(func, path, _exc):
@@ -137,10 +156,12 @@ def _force_remove(func, path, _exc):
 def main():
     tmp = tempfile.mkdtemp(prefix="merge-cleanup-")
     try:
-        case_already_deleted_by_merge(tmp)
+        case_hub_never_deletes_local(tmp)
         case_deleted_by_script(tmp)
         case_real_failure_still_warns(tmp)
         case_unknown_branch_warns(tmp)
+        case_worktree_holding_branch(tmp)
+        case_base_checkout_fails(tmp)
     finally:
         shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")

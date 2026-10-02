@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Review backlog batch: merge cleanup owner, Codex curate nudge, --no-commit PR push, hooks security floor (6 units) (dev v4.10.5) (2026-10-02)
 - [done] task-grill: skill-extraction interview slots for new skills (dev v4.10.4) (2026-10-02)
 - [done] gongmun-draft and report-draft skills: 공문 회신 drafting and 개조식 report authoring (prod v3.2.0) (2026-10-02)
 - [done] harness-curate hook-deny counts real hook and commit-guard denials, not mid-text mentions (dev v4.10.3) (2026-10-01)

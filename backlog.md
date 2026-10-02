@@ -13,28 +13,19 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #291 — review backlog batch: merge cleanup, curate nudge, PR staging, security floor (2026-10-02)
+
+- [ ] [constraint] Step 1's dirty-tree commit (`commit-and-push.sh --no-push` without `--files`) still stages every changed/untracked file via changed-files.sh, so a stray edit present before Step 1 is committed and then pushed; `--no-commit` closed only the PR-push half of PR #277 (source: code-review) — dev/skills/task-review-cycle/SKILL.md:84
+- [ ] [constraint] No test drives `hub.sh merge`'s GitHub remote-head delete (MERGED vs queued vs cross-repository); add a stub-`gh` case asserting when the refs DELETE fires (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:311
+- [ ] [constraint] Nothing mechanically keeps `--no-commit` on the hub PR block's `--pr` call; assert it where a test already parses SKILL.md's Step 1 bash (source: code-review) — dev/skills/task-review-cycle/SKILL.md:111
+- [ ] [debt] Under a merge queue `gh pr merge` exits 0 on enqueue, so `hub.sh merge` returns merge_ok:true and merge-and-cleanup.sh deletes the local branch and reports "merged" for an unmerged PR; return merge_ok=false or a `queued` result when the post-merge state is not MERGED (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:315
+- [ ] [debt] Run from inside the linked worktree it should remove, merge-and-cleanup.sh's base checkout fails (base is checked out in the main worktree), so worktree removal and branch delete are both skipped and worktree_message stays empty; cd to the main worktree first and add an inside-worktree test (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:91
+- [ ] [debt] The remote-head delete puts the raw headRefName into the API path (a `#`/`%` targets the wrong ref) and silences every failure; URL-encode each segment and append a failed delete to merge_output (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:317
+- [ ] [debt] `find_codex_session_files` parses every rollout head before any mtime filter, inside the SessionStart hook; let `--check-due` drop files older than the last run before the cwd parse (source: code-review) — dev/skills/harness-curate/scripts/record_run.py:124
+
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
-- [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80
-- [ ] [debt] Done/verification maps to `Success:` (the building PR's acceptance criteria) and Decision rules/Exceptions to `Constraint:`, mixing the future skill's runtime checks and branching with build-time criteria; consider moving them into `Skill slots:` (source: code-review) — dev/skills/task-grill/references/skill-extraction.md:24
-
-### PR #282 — skill version bump check for new bundled files (2026-09-23)
-
-- [ ] [debt] Fixture-repo helpers (`_git` with hooks disabled, base commit + `origin/main` update-ref) are duplicated across CI test files; move them to one shared module under scripts/ci/ (source: code-review) — scripts/ci/test_check_skill_version_bump.py:52
-
-### PR #280 — merge cleanup false branch warning (2026-09-23)
-
-- [ ] [debt] `git branch -D` runs before `git worktree remove`, so a worktree_path holding the feature branch always leaves the branch behind with a WARNING (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:97
-- [ ] [debt] Unguarded `git checkout "$BASE_BRANCH"` under `set -e` can exit after a successful remote merge without printing the result JSON (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:87
-- [ ] [harness] Local branch cleanup has two owners: `hub.sh merge` (`gh --delete-branch`) and merge-and-cleanup.sh; the Forgejo path deletes remote only — make one owner (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:307
-
-### PR #278 — SessionStart nudge when a harness-curate run is due (2026-09-23)
-
-- [ ] [debt] `record_run.py --check-due` counts only Claude transcripts, so a Codex-only repo never gets the curate nudge; count the project's date-partitioned Codex sessions too (`scan_transcripts.py` already locates them) (source: codex) — dev/skills/harness-curate/scripts/record_run.py:127
-
-### PR #277 — review panel on by default for non-lite routes (2026-09-21)
-
-- [ ] [constraint] Step 1's hub PR block calls `commit-and-push.sh --pr` without `--files`, so a dirty tree is auto-staged: PR #277 swept unrelated `.gitignore`/`.ignore` edits into a pushed commit (reverted in-branch). Pass the Step 1 file list, or make `--pr` reuse the existing commit when HEAD already holds the change (source: cycle) — dev/skills/task-review-cycle/SKILL.md:104
+- [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
 
 ### PR #272 — review slot shell-out follow-ups
 
@@ -44,7 +35,3 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #254 — memory-guard follow-ups
 
 - [ ] [FEAT] Gate shell-based memory writes in `memory-guard` — the hook matches `Write|Edit` only, so `printf ... > ~/.claude/projects/<slug>/memory/note.md` writes ungated; `commit-guard`'s PreToolUse(Bash) static command analysis is the precedent to follow *(deferred: no shell-path memory write has been observed; the other four PR #254 follow-ups shipped without it in PR for 4.9.6 — revisit against a recorded case)*
-
-### Salvaged from `plan/security-hit-pattern` (branch deleted 2026-09-18)
-
-- [ ] [HARNESS] `SECURITY_HIT` misses security-relevant hook files — the pattern in `dev/skills/task-review-cycle/references/risk-routing.md:15` (`auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment|\.github/workflows`) does not match `dev/hooks/commit-guard/guard.py` or `dev/hooks/memory-guard/guard.py`, so a change to a guard hook never raises `EFFORT="high"` and never forces the hub route. Add `hooks/.*guard` (and consider `dev/hooks/` generally) to the pattern. Originally filed 2026-07-04 against the old `dev-tools/hooks/commit-guard/` path; paths rewritten here. The companion item on the commit-guard `;`/newline false-block is already resolved by the in-chain branch attribution in `guard.py:751-787`.

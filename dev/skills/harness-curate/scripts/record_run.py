@@ -16,6 +16,8 @@ Usage:
 `--check-due` is the read side, called by the SessionStart maintenance hook (itself
 debounced to once a day). It prints one nudge line when the last run is older than
 DUE_DAYS AND at least DUE_SESSIONS transcripts are newer than it; otherwise nothing.
+Transcripts are Claude's plus the project's Codex rollouts, and the last run is the newer
+of the two state files, so a Codex-only repo is nudged too.
 Both conditions, not either: a dormant repo has nothing new to mine, and a busy week
 right after a run is not yet worth a second pass. Always exits 0.
 
@@ -34,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from scan_transcripts import (  # noqa: E402
     codex_home,
     codex_state_dir,
+    find_codex_session_files,
     resolve_project_dir,
 )
 
@@ -99,39 +102,54 @@ def record(project, now_ms=None):
     return claude_path, codex_path
 
 
-def new_sessions(state_dir, since_ms):
-    """Transcripts in the resolved project dir modified after `since_ms`."""
-    try:
-        names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
-    except OSError:
-        return 0
+def count_newer(paths, since_ms):
     count = 0
-    for n in names:
+    for fp in paths:
         try:
-            if os.path.getmtime(os.path.join(state_dir, n)) * 1000 > since_ms:
+            if os.path.getmtime(fp) * 1000 > since_ms:
                 count += 1
         except OSError:
             pass
     return count
 
 
+def new_sessions(state_dir, since_ms):
+    """Transcripts in the resolved project dir modified after `since_ms`."""
+    try:
+        names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
+    except OSError:
+        return 0
+    return count_newer((os.path.join(state_dir, n) for n in names), since_ms)
+
+
+def new_codex_sessions(project, since_ms):
+    """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
+    return count_newer(find_codex_session_files(codex_home(), project), since_ms)
+
+
+def last_run_ms(path):
+    last = read_state(path).get("lastRunMs") or 0
+    return last if isinstance(last, (int, float)) else 0
+
+
 def due_message(project, now_ms=None):
     """Return the nudge line, or None when a curate run is not due."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     path = state_path(project)
-    last = read_state(path).get("lastRunMs") or 0
-    if not isinstance(last, (int, float)):
-        last = 0
+    last = max(last_run_ms(path),
+               last_run_ms(os.path.join(codex_state_dir(codex_home(), project), STATE_FILE)))
     if last and now_ms - last <= DUE_DAYS * DAY_MS:
         return None
     sessions = new_sessions(os.path.dirname(path), last)
+    if sessions < DUE_SESSIONS:  # the Codex scan reads every rollout's head; skip it when unneeded
+        sessions += new_codex_sessions(project, last)
     if sessions < DUE_SESSIONS:
         return None
     age = f"{int((now_ms - last) // DAY_MS)}d ago" if last else "never"
     return (
         f"HARNESS-CURATE DUE: last run {age}, {sessions} sessions since. "
         "At the start of your next reply, suggest in one sentence that the user run "
-        "`/dev:harness-curate`, then continue their task."
+        "`/dev:harness-curate` (Claude Code) or `$harness-curate` (Codex), then continue their task."
     )
 
 
@@ -235,6 +253,23 @@ def run_tests():
         sessions(DUE_SESSIONS, mtime=(old - DAY_MS) / 1000)
         check("due: sessions older than last run do not count",
               due_message(due_repo, now) is None)
+
+        # Codex-only repo: no Claude transcripts, enough date-partitioned Codex rollouts
+        os.environ["CODEX_HOME"] = codex
+        codex_repo = os.path.join(tmpdir, "codex-only")
+        os.makedirs(codex_repo)
+        day_dir = os.path.join(codex, "sessions", "2026", "10", "01")
+        os.makedirs(day_dir, exist_ok=True)
+        meta = json.dumps({"type": "session_meta", "payload": {"cwd": codex_repo}})
+        for i in range(DUE_SESSIONS):
+            with open(os.path.join(day_dir, f"rollout-{i}.jsonl"), "w") as f:
+                f.write(meta + "\n")
+        check("due: Codex-only sessions fire",
+              "/dev:harness-curate" in (due_message(codex_repo, now) or ""))
+        write_state(os.path.join(codex_state_dir(codex, codex_repo), STATE_FILE),
+                    {"lastRunMs": now - DAY_MS})
+        check("due: a recent run recorded on the Codex side does not fire",
+              due_message(codex_repo, now) is None)
     finally:
         for k, v in saved.items():
             if v is None:

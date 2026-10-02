@@ -400,6 +400,47 @@ def case_verify_head_missing_guard_fails_open(tmp):
     print("OK: --verify-head fails open on a missing guard with guard_skipped=true")
 
 
+def case_no_commit_leaves_dirty_tree(tmp):
+    """--no-commit publishes HEAD as-is: the hub PR block must never auto-stage.
+
+    PR #277: Step 1 had already committed the change, the hub block's `--pr` call found an
+    unrelated dirty .gitignore, auto-staged it, and pushed it in a second commit.
+    """
+    repo = make_repo(tmp)
+    remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
+    git(remote.parent, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated.mkdir(parents=True)
+    shutil.copy(SCRIPT, isolated / "commit-and-push.sh")
+    (isolated / "hub.sh").write_text(
+        "#!/usr/bin/env bash\necho '{\"pr_number\": \"7\", \"pr_url\": \"u/7\"}'\n",
+        newline="\n",
+    )
+    before = head(repo)
+    (repo / "keep.md").write_text("unrelated edit\n")
+    (repo / "stray.txt").write_text("untracked\n")
+    proc = subprocess.run(
+        ["bash", str(isolated / "commit-and-push.sh"), "--pr", "--no-commit",
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("--pr --no-commit", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    payload = json.loads(proc.stdout)
+    if payload.get("committed") is not False or payload.get("pr_number") != "7":
+        fail("--pr --no-commit", f"expected committed=false and the PR, got {proc.stdout!r}")
+    if head(repo) != before:
+        fail("--pr --no-commit", "a new commit was created")
+    status = git(repo, "status", "--porcelain").stdout.splitlines()
+    if sorted(status) != [" M keep.md", "?? stray.txt"]:
+        fail("--pr --no-commit", f"dirty files were touched: {status}")
+    pushed = git(remote, "rev-parse", "refs/heads/feature/test").stdout.strip()
+    if pushed != before:
+        fail("--pr --no-commit", f"remote holds {pushed}, expected HEAD {before}")
+    print("OK: --pr --no-commit pushes HEAD and leaves the dirty tree alone")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -423,6 +464,7 @@ def main():
         case_verify_head_accepts_a_guarded_commit(tmp)
         case_verify_head_rejects_an_unguarded_head(tmp)
         case_verify_head_missing_guard_fails_open(tmp)
+        case_no_commit_leaves_dirty_tree(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

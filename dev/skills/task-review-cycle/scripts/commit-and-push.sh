@@ -3,6 +3,7 @@
 #
 # Usage:
 #   commit-and-push.sh --message <text> [--files "f1 f2 ..."] [--no-push] [--pr] [--base <branch>]
+#   commit-and-push.sh --message <text> --no-commit [--pr] [--base <branch>]
 #   commit-and-push.sh --verify-head
 #
 # Flags:
@@ -13,13 +14,18 @@
 #                      or merged.
 #   --files <list>     Space-separated file paths to stage (default: auto-detect via changed-files.sh)
 #   --no-push          Commit locally only; skip push and PR creation
+#   --no-commit        Stage and commit nothing, even on a dirty tree; guard and
+#                      push/PR the existing HEAD. For a caller that has already
+#                      committed (the review cycle's hub PR block), so unrelated
+#                      dirty files cannot ride into the pushed branch (PR #277).
+#                      --message still supplies the PR title/body.
 #   --pr               Create a PR after pushing
 #   --base <branch>    Base branch for the PR (default: main)
 #
 # Output: JSON to stdout
 #   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped}
-#   committed=false means the tree was clean and HEAD was pushed/PR'd as-is
-#   (re-run against an already-committed branch). That path still runs
+#   committed=false means nothing was staged (a clean tree, or --no-commit) and HEAD
+#   was pushed/PR'd as-is (re-run against an already-committed branch). That path still runs
 #   commit-guard against HEAD's own subject, so a branch committed outside this
 #   harness cannot reach a PR or main unchecked.
 #   guard_skipped=true means commit-guard could not be run (missing guard.py or
@@ -45,6 +51,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MESSAGE=""
 FILES=""
 NO_PUSH=false
+NO_COMMIT=false
 CREATE_PR=false
 VERIFY_HEAD=false
 BASE_BRANCH="main"
@@ -54,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --message) MESSAGE="$2"; shift 2 ;;
     --files)   FILES="$2";   shift 2 ;;
     --no-push) NO_PUSH=true; shift ;;
+    --no-commit) NO_COMMIT=true; shift ;;
     --pr)      CREATE_PR=true; shift ;;
     --verify-head) VERIFY_HEAD=true; shift ;;
     --base)    BASE_BRANCH="$2"; shift 2 ;;
@@ -63,6 +71,10 @@ done
 
 if [ -z "$MESSAGE" ] && [ "$VERIFY_HEAD" != "true" ]; then
   echo "ERROR: --message is required" >&2
+  exit 1
+fi
+if [ "$NO_COMMIT" = "true" ] && { [ "$NO_PUSH" = "true" ] || [ -n "$FILES" ]; }; then
+  echo "ERROR: --no-commit cannot be combined with --no-push or --files" >&2
   exit 1
 fi
 
@@ -124,7 +136,8 @@ if [ "$VERIFY_HEAD" = "true" ]; then
 fi
 
 # --- Resolve file list ---
-if [ -z "$FILES" ]; then
+# --no-commit leaves FILES empty, so the clean-tree branch below publishes HEAD as-is.
+if [ -z "$FILES" ] && [ "$NO_COMMIT" != "true" ]; then
   FILES=$(bash "$SCRIPT_DIR/changed-files.sh" | tr '\n' ' ')
 fi
 FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')

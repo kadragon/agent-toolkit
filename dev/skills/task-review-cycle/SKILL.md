@@ -108,13 +108,13 @@ COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
 <[TYPE] message from above>
 COMMIT_MSG
 )
-RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --pr --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
+RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --pr --no-commit --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 PR_NUMBER=$(jq -r '.pr_number' <<<"$RESULT")
 PR_URL=$(jq -r '.pr_url' <<<"$RESULT")
 ```
 
-Idempotent: the local commit above is reused. `pr_number` null but `pr_url` not → take
-`basename "$PR_URL"`. Both null → halt.
+Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty file.
+`pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
 
