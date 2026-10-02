@@ -45,7 +45,8 @@ BAD_DATE = [
 ]
 EVIDENCE = re.compile(r"실적|만족도|결과|성과")
 YEAR = re.compile(r"(19|20)\d{2}(학년도|년|\.\s*\d)|’\d{2}\.")
-ATTACH = re.compile(r"^\s*\[?\s*(붙임|별첨)\s*\d*\s*\]?(\s|$)")
+ATTACH = re.compile(r"^\s*(\[\s*(붙임|별첨)\s*\d*\s*\]|(붙임|별첨)\s*\d+\.?(\s|$)|(붙임|별첨)\s*$|(붙임|별첨)\s{2,})")
+ROMAN_INLINE = re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\.?\s+(\S.*)$")
 LABEL_MAX = 12        # a ○ line this short is a label (`○ 향후 계획`), not a sentence
 WEEKDAY_DATE = re.compile(r"(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*\(([월화수목금토일])\)")
 WEEKDAYS = "월화수목금토일"
@@ -76,7 +77,7 @@ def load(path):
     if path.lower().endswith(".hwpx"):
         return paragraphs_from_hwpx(path)
     with open(path, encoding="utf-8-sig") as f:
-        return [line.rstrip("\n") for line in f if line.strip()]
+        return [line.rstrip("\n") for line in f]   # blank lines kept so L%d matches the file
 
 
 def lint(lines, allow_numbered=False):
@@ -89,10 +90,16 @@ def lint(lines, allow_numbered=False):
     expect_title = False
     for i, raw in enumerate(lines, 1):
         s = raw.strip()
+        if not s:
+            continue
         if ATTACH.match(s):
             break
         if ROMAN.match(s):
             expect_title = True
+            continue
+        m = ROMAN_INLINE.match(s)
+        if m:
+            chapter, box, label, has_circle, expect_title = m.group(1), "", "", False, False
             continue
         if expect_title:
             chapter, box, label, has_circle, expect_title = s, "", "", False, False
@@ -155,7 +162,7 @@ def lint(lines, allow_numbered=False):
             res.append(("WARN", "R12", i, "unfilled `%s`" % m.group(0), s))
 
         # footnote marks (`Team**,` / `** 설명`) stay; an opening `**word` with no close is a broken bold
-        if UNCLOSED_BOLD.search(BOLD_PAIR.sub("", BULLET.sub("", s))):
+        if UNCLOSED_BOLD.search(BULLET.sub("", BOLD_PAIR.sub("", s))):
             res.append(("FAIL", "R13", i, "unpaired `**` bold marker", s))
     return res
 
@@ -212,6 +219,22 @@ def selftest():
         got = {r[1] for r in lint(lines)}
         assert rule in got, (rule, got)
     assert lint(["1. 사업부서"], allow_numbered=True) == []
+    # a line-leading bold pair is not an unpaired marker
+    assert lint([" ○ **총 예산**은 60,935천원임", "**총 예산**은 60,935천원임"]) == []
+    # body text that merely starts with 붙임/별첨 does not end the check
+    assert "R4" in {r[1] for r in lint(["붙임 자료와 같이 진행함", " ○ 지원하였습니다."])}
+    assert lint(["붙임  1. 참석자 명단 1부.", " ○ 지원하였습니다."]) == []
+    # a one-line roman chapter heading still scopes R3
+    assert "R3" in {r[1] for r in lint(["Ⅱ. 현황 및 문제점", " ○ 회수 기준을 강화할 필요가 있음"])}
+    # line numbers count blank lines in a text draft
+    import os
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as f:
+        f.write("□ 개요\n\n ○ 지원하였습니다.\n")
+    try:
+        assert [r[2] for r in lint(load(f.name))] == [3], lint(load(f.name))
+    finally:
+        os.unlink(f.name)
     print("selftest ok")
 
 
