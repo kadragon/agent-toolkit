@@ -13,6 +13,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
+
+- [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80
+- [ ] [debt] Done/verification maps to `Success:` (the building PR's acceptance criteria) and Decision rules/Exceptions to `Constraint:`, mixing the future skill's runtime checks and branching with build-time criteria; consider moving them into `Skill slots:` (source: code-review) — dev/skills/task-grill/references/skill-extraction.md:24
+
 ### PR #282 — skill version bump check for new bundled files (2026-09-23)
 
 - [ ] [debt] Fixture-repo helpers (`_git` with hooks disabled, base commit + `origin/main` update-ref) are duplicated across CI test files; move them to one shared module under scripts/ci/ (source: code-review) — scripts/ci/test_check_skill_version_bump.py:52
