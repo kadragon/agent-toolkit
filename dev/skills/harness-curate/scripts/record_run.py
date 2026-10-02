@@ -143,7 +143,9 @@ def due_message(project, now_ms=None):
                last_run_ms(os.path.join(codex_state_dir(codex_home(), project), STATE_FILE)))
     if last and now_ms - last <= DUE_DAYS * DAY_MS:
         return None
-    sessions = new_sessions(os.path.dirname(path), last) + new_codex_sessions(project, last)
+    sessions = new_sessions(os.path.dirname(path), last)
+    if sessions < DUE_SESSIONS:  # the Codex scan reads every rollout's head; skip it when unneeded
+        sessions += new_codex_sessions(project, last)
     if sessions < DUE_SESSIONS:
         return None
     age = f"{int((now_ms - last) // DAY_MS)}d ago" if last else "never"

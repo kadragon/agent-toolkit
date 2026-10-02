@@ -84,7 +84,7 @@ def fail(case, detail):
 def case_hub_never_deletes_local(_tmp):
     # Two owners raced for the local branch (PR #280): gh's --delete-branch deleted it on GitHub,
     # the Forgejo path never did. Local cleanup now has one owner -- this script.
-    code = [ln for ln in HUB.read_text().splitlines() if not ln.lstrip().startswith("#")]
+    code = [ln for ln in HUB.read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
     if any("--delete-branch" in ln for ln in code):
         fail("hub_never_deletes_local", "hub.sh still passes --delete-branch to gh pr merge")
     print("ok hub_never_deletes_local")

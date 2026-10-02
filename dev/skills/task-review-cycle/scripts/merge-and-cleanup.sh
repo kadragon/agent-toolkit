@@ -3,7 +3,7 @@
 #
 # Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json> [worktree_path]
 #   merge_strategy_json: e.g. '{"squash":true,"merge":true,"rebase":true}'
-#   worktree_path: optional, removes the worktree after cleanup
+#   worktree_path: optional, removes the worktree before the local branch is deleted
 #
 # Output: JSON with merge result and cleanup status.
 

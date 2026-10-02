@@ -24,8 +24,8 @@
 #
 # Output: JSON to stdout
 #   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped}
-#   committed=false means the tree was clean and HEAD was pushed/PR'd as-is
-#   (re-run against an already-committed branch). That path still runs
+#   committed=false means nothing was staged (a clean tree, or --no-commit) and HEAD
+#   was pushed/PR'd as-is (re-run against an already-committed branch). That path still runs
 #   commit-guard against HEAD's own subject, so a branch committed outside this
 #   harness cannot reach a PR or main unchecked.
 #   guard_skipped=true means commit-guard could not be run (missing guard.py or

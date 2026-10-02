@@ -13,6 +13,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #291 — review backlog batch: merge cleanup, curate nudge, PR staging, security floor (2026-10-02)
+
+- [ ] [constraint] Step 1's dirty-tree commit (`commit-and-push.sh --no-push` without `--files`) still stages every changed/untracked file via changed-files.sh, so a stray edit present before Step 1 is committed and then pushed; `--no-commit` closed only the PR-push half of PR #277 (source: code-review) — dev/skills/task-review-cycle/SKILL.md:84
+- [ ] [constraint] No test drives `hub.sh merge`'s GitHub remote-head delete (MERGED vs queued vs cross-repository); add a stub-`gh` case asserting when the refs DELETE fires (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:311
+- [ ] [constraint] Nothing mechanically keeps `--no-commit` on the hub PR block's `--pr` call; assert it where a test already parses SKILL.md's Step 1 bash (source: code-review) — dev/skills/task-review-cycle/SKILL.md:111
+
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
