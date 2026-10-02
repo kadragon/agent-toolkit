@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-grill: skill-extraction interview slots for new skills (dev v4.10.4) (2026-10-02)
 - [done] gongmun-draft and report-draft skills: 공문 회신 drafting and 개조식 report authoring (prod v3.2.0) (2026-10-02)
 - [done] harness-curate hook-deny counts real hook and commit-guard denials, not mid-text mentions (dev v4.10.3) (2026-10-01)
 - [done] harness-curate: upgrade no-op pass, check-vs-review classify, unwired checks, TOOL-COST, --session (dev v4.10.2) (2026-10-01)

@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Grill
@@ -61,6 +61,8 @@ look it up instead of asking.
 1. Identify the open questions blocking scope/design (from the current conversation or the
    caller's brief). When the Outcome is a recurring automation (a hook, a `/loop` or scheduled
    run, a CI workflow, a cron job), also seed the unsettled questions in `references/automation.md`.
+   When the Outcome is a new or substantially rewritten skill, also seed the unsettled slots in
+   `references/skill-extraction.md`.
 2. Ask the first one, per the `Q:` / `Recommended:` format above.
 3. Wait for the user's reply. Accept a direct answer, an edit to the recommendation, or a
    confirmation of the recommendation. In a non-interactive run there is no reply to wait
@@ -75,7 +77,8 @@ look it up instead of asking.
    Out of scope: <explicit exclusions — feeds Sprint Contract's Out of scope>
    ```
    Omit a field only if the interview genuinely surfaced nothing for it — do not leave it
-   blank silently.
+   blank silently. Only when `references/skill-extraction.md` was used, append its `Skill slots:`
+   block after the four fields. It is part of the summary, not a file (Rule 5).
 6. **Implementer check.** Read the draft as an implementer who has only this block. List the
    questions that implementer would ask before building. Look up each one the repo answers
    (Rule 3) and fold the fact into the draft. Each remaining question is still open: go back
