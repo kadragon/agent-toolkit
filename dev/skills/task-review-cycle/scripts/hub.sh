@@ -10,7 +10,7 @@
 #   pr-get                                  → {pr_number, pr_url}   (open PR for current branch)
 #   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n}
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
-#   merge <pr_number> <squash|merge|rebase> → {merge_ok, merge_output}
+#   merge <pr_number> <squash|merge|rebase> → {merge_ok, queued, unconfirmed, merge_output}
 #
 # Auth:
 #   github  — gh CLI must be authenticated (gh auth login)
@@ -304,27 +304,53 @@ case "$SUBCOMMAND" in
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     if [ "$HUB_TYPE" = "github" ]; then
       MERGE_OK=true
+      QUEUED=false
+      UNCONFIRMED=false
       MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "--${STRATEGY}" 2>&1) || MERGE_OK=false
-      # Remote head only, matching the Forgejo branch below: gh's delete-branch flag also deletes
-      # the local branch, and local cleanup belongs to merge-and-cleanup.sh alone. Best-effort —
-      # the repo's auto-delete setting may already have removed it, and a fork head is not ours.
-      # Only once MERGED: under a merge queue gh exits 0 on enqueue, and deleting the head then
-      # closes the PR unmerged.
+      # Under a merge queue gh exits 0 on enqueue, so exit 0 alone is not a merge: only a MERGED
+      # state is. Anything else is merge_ok=false, so merge-and-cleanup.sh keeps the local branch:
+      # OPEN is reported as queued, a state gh could not report (after retries) as unconfirmed.
       if [ "$MERGE_OK" = "true" ]; then
-        HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository 2>/dev/null || echo '{}')
-        HEAD_REF=$(jq -r 'if .state == "MERGED" and (.isCrossRepository | not) then (.headRefName // "") else "" end' <<<"$HEAD_INFO")
-        if [ -n "$HEAD_REF" ]; then
-          gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/${HEAD_REF}" >/dev/null 2>&1 || true
+        HEAD_INFO='{}'
+        for attempt in 1 2 3; do
+          HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository 2>/dev/null) && break
+          HEAD_INFO='{}'
+          [ "$attempt" -lt 3 ] && sleep 1
+        done
+        PR_STATE=$(jq -r '.state // ""' <<<"$HEAD_INFO")
+        if [ "$PR_STATE" != "MERGED" ]; then
+          MERGE_OK=false
+          if [ "$PR_STATE" = "OPEN" ]; then
+            QUEUED=true
+            MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"PR is OPEN after gh pr merge (enqueued in a merge queue); not merged yet"
+          else
+            UNCONFIRMED=true
+            MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Could not confirm the PR merged (state: '${PR_STATE:-unknown}'); check the hub"
+          fi
         fi
       fi
-      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, merge_output: $out}'
+      # Remote head only, matching the Forgejo branch below: gh's delete-branch flag also deletes
+      # the local branch, and local cleanup belongs to merge-and-cleanup.sh alone. Never a fork
+      # head, and only once MERGED: deleting a queued PR's head closes it unmerged. Each ref
+      # segment is URL-encoded (a raw `#`/`%` targets another path). A failure is reported, except
+      # a ref already gone — the repo's auto-delete setting may have removed it first.
+      if [ "$MERGE_OK" = "true" ]; then
+        HEAD_REF=$(jq -r 'if .isCrossRepository | not then (.headRefName // "" | split("/") | map(@uri) | join("/")) else "" end' <<<"$HEAD_INFO")
+        if [ -n "$HEAD_REF" ] \
+          && ! DELETE_ERR=$(gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/${HEAD_REF}" 2>&1 >/dev/null) \
+          && [[ "$DELETE_ERR" != *"Reference does not exist"* ]]; then
+          MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head delete failed: ${DELETE_ERR}"
+        fi
+      fi
+      jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --argjson unconfirmed "$UNCONFIRMED" \
+        --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: $queued, unconfirmed: $unconfirmed, merge_output: $out}'
     else
       require_forgejo_token
       PAYLOAD=$(jq -n --arg do "$STRATEGY" '{Do: $do, delete_branch_after_merge: true}')
       MERGE_OK=true
       MERGE_OUTPUT=$(fj_api POST "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/merge" "$PAYLOAD" 2>&1) || MERGE_OK=false
       [ "$MERGE_OK" = "false" ] && MERGE_OUTPUT="HTTP $(fj_code): ${MERGE_OUTPUT}"
-      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, merge_output: $out}'
+      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: false, unconfirmed: false, merge_output: $out}'
     fi
     ;;
 

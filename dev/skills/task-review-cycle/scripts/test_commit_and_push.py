@@ -441,6 +441,43 @@ def case_no_commit_leaves_dirty_tree(tmp):
     print("OK: --pr --no-commit pushes HEAD and leaves the dirty tree alone")
 
 
+def case_staged_only(tmp):
+    """--prefer-staged commits a non-empty index as-is: an unstaged or untracked stray stays out.
+
+    PR #291: Step 1's dirty-tree commit auto-staged every changed file via changed-files.sh,
+    so a stray edit present before Step 1 was committed and then pushed with the PR.
+    """
+    repo = make_repo(tmp)
+    (repo / "tasks.md").write_text("in scope\n")
+    git(repo, "add", "tasks.md")
+    (repo / "keep.md").write_text("stray edit\n")
+    (repo / "stray.txt").write_text("untracked\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("--prefer-staged", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    if name_status(repo) != ["M\ttasks.md"]:
+        fail("--prefer-staged", f"commit holds {name_status(repo)}, expected only tasks.md")
+    # What stayed out is reported, so a partial index cannot silently drop reviewed work.
+    left = json.loads(proc.stdout).get("unstaged_left")
+    if left != ["keep.md", "stray.txt"]:
+        fail("--prefer-staged", f"expected unstaged_left [keep.md, stray.txt], got {left!r}")
+    status = sorted(git(repo, "status", "--porcelain").stdout.splitlines())
+    if status != [" M keep.md", "?? stray.txt"]:
+        fail("--prefer-staged", f"strays were touched: {status}")
+    empty = make_repo(tmp)
+    (empty / "keep.md").write_text("unstaged only\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--message", "[TEST] cycle"],
+        cwd=empty, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or name_status(empty) != ["M\tkeep.md"]:
+        fail("--prefer-staged", f"an empty index must auto-detect: {proc.stderr.strip()!r}")
+    print("OK: --prefer-staged commits a staged index only, else auto-detects")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -465,6 +502,7 @@ def main():
         case_verify_head_rejects_an_unguarded_head(tmp)
         case_verify_head_missing_guard_fails_open(tmp)
         case_no_commit_leaves_dirty_tree(tmp)
+        case_staged_only(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

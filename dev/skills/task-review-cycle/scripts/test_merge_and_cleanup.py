@@ -147,6 +147,148 @@ def case_base_checkout_fails(tmp):
     print("ok base_checkout_fails")
 
 
+# Stub gh for the real hub.sh: `pr merge` exits 0, `pr view` prints $GH_VIEW, `api` logs its args
+# to $GH_LOG and exits $GH_API_RC (printing $GH_API_ERR on failure).
+GH_STUB = """#!/usr/bin/env bash
+case "$1 $2" in
+  "pr merge") echo "merged or enqueued"; exit 0 ;;
+  "pr view") [ "$GH_VIEW" = "null" ] && exit 1; echo "$GH_VIEW"; exit 0 ;;
+esac
+if [ "$1" = "api" ]; then
+  printf '%s\\n' "$*" >> "$GH_LOG"
+  [ "${GH_API_RC:-0}" = 0 ] || { echo "$GH_API_ERR" >&2; exit "$GH_API_RC"; }
+  exit 0
+fi
+exit 1
+"""
+
+
+def run_hub_merge(tmp, view, api_rc=0, api_err=""):
+    """Run the real hub.sh merge against a stub gh; return (json, api calls)."""
+    repo = make_repo(tmp)
+    git(repo, "remote", "add", "origin", "git@github.com:o/r.git")
+    bindir = Path(tempfile.mkdtemp(dir=tmp))
+    (bindir / "gh").write_text(GH_STUB, newline="\n")
+    (bindir / "gh").chmod(0o755)
+    log = bindir / "api.log"
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
+               GH_VIEW=json.dumps(view), GH_LOG=str(log),
+               GH_API_RC=str(api_rc), GH_API_ERR=api_err)
+    proc = subprocess.run(["bash", str(HUB), "merge", "1", "squash"], cwd=repo, env=env,
+                          check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        fail("hub_merge", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
+    calls = log.read_text().splitlines() if log.exists() else []
+    return json.loads(proc.stdout), calls
+
+
+def case_hub_remote_delete_when(tmp):
+    # The remote head is deleted only once the PR is MERGED from a same-repo branch.
+    merged = {"state": "MERGED", "headRefName": "feat/x", "isCrossRepository": False}
+    out, calls = run_hub_merge(tmp, merged)
+    if out["merge_ok"] is not True or out.get("queued") is not False:
+        fail("hub_remote_delete_when", f"MERGED: got {out!r}")
+    if calls != ["api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/x"]:
+        fail("hub_remote_delete_when", f"MERGED: api calls {calls!r}")
+    _, calls = run_hub_merge(tmp, dict(merged, isCrossRepository=True))
+    if calls:
+        fail("hub_remote_delete_when", f"cross-repository head was deleted: {calls!r}")
+    print("ok hub_remote_delete_when")
+
+
+def case_hub_merge_queue_is_not_merged(tmp):
+    # Under a merge queue gh exits 0 on enqueue; the PR is still OPEN, so nothing merged yet.
+    out, calls = run_hub_merge(tmp, {"state": "OPEN", "headRefName": "feat/x",
+                                     "isCrossRepository": False})
+    if out["merge_ok"] is not False or out.get("queued") is not True or calls:
+        fail("hub_merge_queue_is_not_merged", f"got {out!r}, api calls {calls!r}")
+    print("ok hub_merge_queue_is_not_merged")
+
+
+def case_hub_ref_is_encoded_and_failure_reported(tmp):
+    # A raw `#` or `%` in the ref would target a different path; `/` separates segments.
+    view = {"state": "MERGED", "headRefName": "feat/a#b%c", "isCrossRepository": False}
+    out, calls = run_hub_merge(tmp, view, api_rc=1, api_err="HTTP 403: forbidden")
+    if calls != ["api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/a%23b%25c"]:
+        fail("hub_ref_is_encoded", f"api calls {calls!r}")
+    if out["merge_ok"] is not True or "HTTP 403: forbidden" not in out["merge_output"]:
+        fail("hub_delete_failure_reported", f"got {out!r}")
+    print("ok hub_ref_is_encoded_and_failure_reported")
+
+
+def case_cleanup_reports_queued(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    (d / "hub.sh").write_text(
+        "#!/usr/bin/env bash\necho '{\"merge_ok\": false, \"queued\": true, \"merge_output\": \"q\"}'\n",
+        newline="\n")
+    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                           '{"squash":true}'], cwd=repo, check=False, capture_output=True, text=True)
+    out = json.loads(proc.stdout)
+    if out["merge_ok"] is not False or out.get("queued") is not True \
+            or "queued" not in out["merge_message"] or not branch_exists(repo):
+        fail("cleanup_reports_queued", f"got {out!r}")
+    print("ok cleanup_reports_queued")
+
+
+def case_run_from_inside_worktree(tmp):
+    # The caller's shell sits in the linked worktree being removed; base is checked out in the
+    # main worktree, so checking it out here failed and skipped every cleanup step.
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "main")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                           '{"squash":true}', "."], cwd=wt, check=False,
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        fail("run_from_inside_worktree", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
+    out = json.loads(proc.stdout)
+    msg, wmsg = out["cleanup_message"], out["worktree_message"]
+    if "WARNING" in msg or not wmsg or "WARNING" in wmsg or branch_exists(repo) or wt.exists():
+        fail("run_from_inside_worktree", f"got cleanup={msg!r} worktree={wmsg!r}")
+    print("ok run_from_inside_worktree")
+
+
+def case_inside_worktree_keeps_main_branch(tmp):
+    # Moving to the main worktree must never switch the branch someone else has checked out there.
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "-b", "feat/other", "main")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                           '{"squash":true}', "."], cwd=wt, check=False,
+                          capture_output=True, text=True)
+    out = json.loads(proc.stdout)
+    current = git(repo, "branch", "--show-current").stdout.strip()
+    if current != "feat/other" or wt.exists() or branch_exists(repo) \
+            or "not updated" not in out["cleanup_message"]:
+        fail("inside_worktree_keeps_main_branch", f"main checkout on {current!r}, got {out!r}")
+    print("ok inside_worktree_keeps_main_branch")
+
+
+def case_linked_worktree_without_path_stays(tmp):
+    # No worktree_path: the script is not removing this worktree, so it does not leave it either.
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "-b", "feat/other", "main")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                           '{"squash":true}'], cwd=wt, check=False, capture_output=True, text=True)
+    out = json.loads(proc.stdout)
+    if git(repo, "branch", "--show-current").stdout.strip() != "feat/other":
+        fail("linked_worktree_without_path_stays", f"main checkout switched: {out!r}")
+    print("ok linked_worktree_without_path_stays")
+
+
+def case_hub_merge_state_unconfirmed(tmp):
+    # gh pr view failing after a successful merge is an unknown state, not a failed merge.
+    out, calls = run_hub_merge(tmp, None)
+    if out["merge_ok"] is not False or out.get("unconfirmed") is not True \
+            or out.get("queued") is not False or calls:
+        fail("hub_merge_state_unconfirmed", f"got {out!r}, api calls {calls!r}")
+    print("ok hub_merge_state_unconfirmed")
+
+
 def _force_remove(func, path, _exc):
     # git writes read-only object files; Windows refuses to delete them until they are writable.
     os.chmod(path, stat.S_IWRITE)
@@ -162,6 +304,14 @@ def main():
         case_unknown_branch_warns(tmp)
         case_worktree_holding_branch(tmp)
         case_base_checkout_fails(tmp)
+        case_hub_remote_delete_when(tmp)
+        case_hub_merge_queue_is_not_merged(tmp)
+        case_hub_ref_is_encoded_and_failure_reported(tmp)
+        case_cleanup_reports_queued(tmp)
+        case_run_from_inside_worktree(tmp)
+        case_inside_worktree_keeps_main_branch(tmp)
+        case_linked_worktree_without_path_stays(tmp)
+        case_hub_merge_state_unconfirmed(tmp)
     finally:
         shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")

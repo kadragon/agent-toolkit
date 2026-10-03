@@ -13,15 +13,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #291 — review backlog batch: merge cleanup, curate nudge, PR staging, security floor (2026-10-02)
+### PR #292 — merge-queue-safe merge, staged-only Step 1 commit, worktree-safe cleanup (2026-10-03)
 
-- [ ] [constraint] Step 1's dirty-tree commit (`commit-and-push.sh --no-push` without `--files`) still stages every changed/untracked file via changed-files.sh, so a stray edit present before Step 1 is committed and then pushed; `--no-commit` closed only the PR-push half of PR #277 (source: code-review) — dev/skills/task-review-cycle/SKILL.md:84
-- [ ] [constraint] No test drives `hub.sh merge`'s GitHub remote-head delete (MERGED vs queued vs cross-repository); add a stub-`gh` case asserting when the refs DELETE fires (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:311
-- [ ] [constraint] Nothing mechanically keeps `--no-commit` on the hub PR block's `--pr` call; assert it where a test already parses SKILL.md's Step 1 bash (source: code-review) — dev/skills/task-review-cycle/SKILL.md:111
-- [ ] [debt] Under a merge queue `gh pr merge` exits 0 on enqueue, so `hub.sh merge` returns merge_ok:true and merge-and-cleanup.sh deletes the local branch and reports "merged" for an unmerged PR; return merge_ok=false or a `queued` result when the post-merge state is not MERGED (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:315
-- [ ] [debt] Run from inside the linked worktree it should remove, merge-and-cleanup.sh's base checkout fails (base is checked out in the main worktree), so worktree removal and branch delete are both skipped and worktree_message stays empty; cd to the main worktree first and add an inside-worktree test (source: code-review) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:91
-- [ ] [debt] The remote-head delete puts the raw headRefName into the API path (a `#`/`%` targets the wrong ref) and silences every failure; URL-encode each segment and append a failed delete to merge_output (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:317
-- [ ] [debt] `find_codex_session_files` parses every rollout head before any mtime filter, inside the SessionStart hook; let `--check-due` drop files older than the last run before the cwd parse (source: code-review) — dev/skills/harness-curate/scripts/record_run.py:124
+- [ ] [constraint] With an empty index, Step 1's `--prefer-staged` falls back to changed-files.sh auto-detect, so a standalone task-review run or a resumed branch whose only dirt is an unrelated untracked file still commits and pushes that stray; decide whether an empty index on a branch that already has commits should verify HEAD instead of auto-committing (source: codex, code-review) — dev/skills/task-review-cycle/SKILL.md:82
 
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
