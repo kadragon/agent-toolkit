@@ -80,16 +80,16 @@ COMMIT_MSG
 )
 DIRTY=$(git status --porcelain)
 if [[ -n "$DIRTY" ]]; then
-  RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --prefer-staged --message "${COMMIT_MESSAGE}")
+  BASE_BRANCH="<from Setup>"
+  RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --prefer-staged --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 else
   RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --verify-head)
 fi
 ```
 
-`--prefer-staged` commits a non-empty index alone (strays stay out; `unstaged_left` lists them).
-`--verify-head` commits nothing; it guards the existing HEAD and returns the `resumed` sentinel.
-Skipping it is the one path on which a commit made outside this harness reaches a PR or `main`
-unchecked. Non-zero exit → HEAD is rejected; `guard_skipped: true` → report it.
+`--prefer-staged` commits a non-empty index alone; an empty index ahead of the base runs `--verify-head`:
+no commit, HEAD guarded (the only check on outside commits), `resumed` returned. `unstaged_left` lists
+dirt left out (in scope → stage, re-run). Non-zero exit → HEAD rejected; `guard_skipped: true` → report.
 
 **Route by risk** — `references/risk-routing.md`, evaluated on every run including explicit path
 flags. Its floor block is mandatory: all four captures force hub with required CI — neither

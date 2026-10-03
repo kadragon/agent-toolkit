@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review-cycle: empty index ahead of base verifies HEAD instead of auto-committing (dev v4.10.7) (2026-10-03)
 - [done] Merge-queue-safe merge, staged-only Step 1 commit, worktree-safe cleanup, cheaper curate nudge (dev v4.10.6) (2026-10-03)
 - [done] Review backlog batch: merge cleanup owner, Codex curate nudge, --no-commit PR push, hooks security floor (6 units) (dev v4.10.5) (2026-10-02)
 - [done] task-grill: skill-extraction interview slots for new skills (dev v4.10.4) (2026-10-02)

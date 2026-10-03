@@ -478,6 +478,108 @@ def case_staged_only(tmp):
     print("OK: --prefer-staged commits a staged index only, else auto-detects")
 
 
+def case_staged_empty_index_ahead_verifies_head(tmp):
+    """An empty index on a branch already ahead of --base commits nothing and guards HEAD.
+
+    PR #292: the empty-index fallback auto-detected every changed file, so a resumed branch
+    whose only dirt was an unrelated untracked file committed and pushed that stray.
+    """
+    repo = make_repo(tmp)
+    # main or master, per init.defaultBranch -- whichever make_repo branched from.
+    base = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/main",
+               "refs/heads/master").stdout.strip()
+    (repo / "tasks.md").write_text("reviewed work\n")
+    git(repo, "commit", "-qam", "[TEST] earlier cycle")
+    before = head(repo)
+    (repo / "stray.txt").write_text("untracked\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("--prefer-staged ahead", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    payload = json.loads(proc.stdout)
+    if payload.get("committed") is not False or payload.get("resumed") is not True:
+        fail("--prefer-staged ahead", f"expected the resume sentinel, got {proc.stdout!r}")
+    if payload.get("unstaged_left") != ["stray.txt"]:
+        fail("--prefer-staged ahead", f"expected unstaged_left [stray.txt], got {proc.stdout!r}")
+    if head(repo) != before:
+        fail("--prefer-staged ahead", "a new commit was created")
+    git(repo, "commit", "--amend", "-qm", "unguarded subject")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode == 0:
+        fail("--prefer-staged ahead", "an unguarded HEAD must be rejected, got exit 0")
+    print("OK: --prefer-staged with an empty index ahead of base verifies HEAD instead")
+
+
+def case_staged_empty_index_not_ahead_auto_detects(tmp):
+    """Nothing ahead of a resolvable base -- even one only origin lags behind -- keeps auto-detect.
+
+    A local base holding unpushed commits leaves origin/<base> behind, so a fresh branch looks
+    ahead of origin alone; it must still commit its first-run edits.
+    """
+    repo = make_repo(tmp)
+    base = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/main",
+               "refs/heads/master").stdout.strip()
+    git(repo, "update-ref", f"refs/remotes/origin/{base}", "HEAD")
+    git(repo, "checkout", "-q", base)
+    (repo / "tasks.md").write_text("unpushed base work\n")
+    git(repo, "commit", "-qam", "[TEST] unpushed")
+    git(repo, "checkout", "-q", "-b", "feature/fresh")
+    (repo / "keep.md").write_text("first-run edit\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or name_status(repo) != ["M\tkeep.md"]:
+        fail("--prefer-staged not ahead", f"expected an auto-detect commit: {proc.stdout!r} "
+             f"{proc.stderr.strip()!r}")
+    print("OK: --prefer-staged with nothing ahead of the local base still auto-detects")
+
+
+def case_staged_empty_index_ahead_publishes_head(tmp):
+    """Without --no-push, an empty index ahead of base still pushes HEAD and opens the PR."""
+    repo = make_repo(tmp)
+    base = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/main",
+               "refs/heads/master").stdout.strip()
+    remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
+    git(remote.parent, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated.mkdir(parents=True)
+    shutil.copy(SCRIPT, isolated / "commit-and-push.sh")
+    shutil.copy(SCRIPT.parent / "changed-files.sh", isolated / "changed-files.sh")
+    (isolated / "hub.sh").write_text(
+        "#!/usr/bin/env bash\necho '{\"pr_number\": \"7\", \"pr_url\": \"u/7\"}'\n",
+        newline="\n",
+    )
+    (repo / "tasks.md").write_text("reviewed work\n")
+    git(repo, "commit", "-qam", "[TEST] earlier cycle")
+    before = head(repo)
+    (repo / "stray.txt").write_text("untracked\n")
+    proc = subprocess.run(
+        ["bash", str(isolated / "commit-and-push.sh"), "--prefer-staged", "--pr",
+         "--base", base, "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("--prefer-staged ahead --pr", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    payload = json.loads(proc.stdout)
+    if (payload.get("committed") is not False or payload.get("pushed") is not True
+            or payload.get("pr_number") != "7" or payload.get("unstaged_left") != ["stray.txt"]):
+        fail("--prefer-staged ahead --pr", f"expected HEAD published as-is, got {proc.stdout!r}")
+    pushed = git(remote, "rev-parse", "refs/heads/feature/test").stdout.strip()
+    if head(repo) != before or pushed != before:
+        fail("--prefer-staged ahead --pr", "HEAD changed or was not pushed")
+    print("OK: --prefer-staged with an empty index ahead of base publishes HEAD unchanged")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -503,6 +605,9 @@ def main():
         case_verify_head_missing_guard_fails_open(tmp)
         case_no_commit_leaves_dirty_tree(tmp)
         case_staged_only(tmp)
+        case_staged_empty_index_ahead_verifies_head(tmp)
+        case_staged_empty_index_not_ahead_auto_detects(tmp)
+        case_staged_empty_index_ahead_publishes_head(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

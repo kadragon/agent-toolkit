@@ -15,7 +15,10 @@
 #                      or merged.
 #   --files <list>     Space-separated file paths to stage (default: auto-detect via changed-files.sh)
 #   --prefer-staged    A non-empty index is committed exactly as staged, staging
-#                      nothing more; an empty index falls back to auto-detect.
+#                      nothing more. An empty index on a branch ahead of --base
+#                      commits nothing (dirt in unstaged_left): --verify-head
+#                      under --no-push, else --no-commit. One with nothing
+#                      ahead falls back to auto-detect.
 #                      For a caller that staged its reviewed in-scope files, so a
 #                      stray edit present beforehand stays out (PR #291).
 #   --no-push          Commit locally only; skip push and PR creation
@@ -25,13 +28,16 @@
 #                      dirty files cannot ride into the pushed branch (PR #277).
 #                      --message still supplies the PR title/body.
 #   --pr               Create a PR after pushing
-#   --base <branch>    Base branch for the PR (default: main)
+#   --base <branch>    Base branch for the PR and the --prefer-staged ahead check (default: main)
 #
 # Output: JSON to stdout
 #   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped, unstaged_left}
-#   unstaged_left lists changed/untracked files a --prefer-staged index commit left out ([] otherwise).
-#   committed=false means nothing was staged (a clean tree, or --no-commit) and HEAD
-#   was pushed/PR'd as-is (re-run against an already-committed branch). That path still runs
+#   unstaged_left lists changed/untracked files a --prefer-staged run left out ([] otherwise).
+#   resumed=true (--verify-head, or --prefer-staged --no-push on an empty index ahead of
+#   --base) means nothing was committed or pushed; HEAD was only guarded.
+#   committed=false otherwise means nothing was staged (a clean tree, --no-commit, or
+#   --prefer-staged on an empty index ahead of --base) and HEAD was pushed/PR'd as-is
+#   (re-run against an already-committed branch). That path still runs
 #   commit-guard against HEAD's own subject, so a branch committed outside this
 #   harness cannot reach a PR or main unchecked.
 #   guard_skipped=true means commit-guard could not be run (missing guard.py or
@@ -93,6 +99,32 @@ STAGED_ONLY=false
 if [ "$PREFER_STAGED" = "true" ] && ! git diff --cached --quiet; then
   STAGED_ONLY=true
 fi
+# An empty index on a branch already ahead of the base is a resumed cycle: its
+# reviewed work is committed, so auto-detect would only sweep in strays (PR #292).
+# Commit nothing and report the dirt: --no-push verifies HEAD, otherwise HEAD is
+# published as-is (the --no-commit path). Ahead means ahead of EVERY resolvable
+# base ref — a local base with unpushed commits, or a stale origin/<base>, would
+# otherwise make a fresh branch look resumed. Nothing ahead, or no resolvable
+# base, keeps auto-detect: a standalone first run that never staged needs its commit.
+UNSTAGED_LEFT=""
+if [ "$PREFER_STAGED" = "true" ] && [ "$STAGED_ONLY" != "true" ]; then
+  AHEAD=false
+  for ref in "origin/$BASE_BRANCH" "$BASE_BRANCH"; do
+    git rev-parse --verify -q "$ref^{commit}" >/dev/null || continue
+    if [ "$(git rev-list --count "$ref..HEAD")" -eq 0 ]; then
+      AHEAD=false
+      break
+    fi
+    AHEAD=true
+  done
+  if [ "$AHEAD" = "true" ]; then
+    if [ "$NO_PUSH" = "true" ]; then VERIFY_HEAD=true; else NO_COMMIT=true; fi
+    UNSTAGED_LEFT=$(bash "$SCRIPT_DIR/changed-files.sh")
+  fi
+fi
+unstaged_json() {
+  printf '%s' "$UNSTAGED_LEFT" | jq -R . | jq -sc 'map(select(length > 0))'
+}
 
 # --- commit-guard ---
 # The PreToolUse(Bash) hook cannot see commits made here: the agent's Bash command
@@ -145,9 +177,12 @@ run_commit_guard() {
 # resume path is the one route by which an unchecked commit reaches a PR or main.
 if [ "$VERIFY_HEAD" = "true" ]; then
   run_commit_guard "$(git log -1 --format=%s)" "publishing HEAD"
+  UNSTAGED_JSON=$(unstaged_json)
   jq -n --arg hash "$(git rev-parse HEAD)" --argjson guard_skipped "$GUARD_SKIPPED" \
+    --argjson unstaged_left "$UNSTAGED_JSON" \
     '{commit_hash: $hash, committed: false, resumed: true, pushed: false,
-      pr_number: null, pr_url: null, guard_skipped: $guard_skipped}'
+      pr_number: null, pr_url: null, guard_skipped: $guard_skipped,
+      unstaged_left: $unstaged_left}'
   exit 0
 fi
 
@@ -164,7 +199,6 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
-UNSTAGED_LEFT=""
 if [ "$STAGED_ONLY" = "true" ]; then
   run_commit_guard "$MESSAGE" "committing"
   if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1); then
@@ -234,7 +268,7 @@ else
   run_commit_guard "$(git log -1 --format=%s)" "publishing HEAD"
 fi
 COMMIT_HASH=$(git rev-parse HEAD)
-UNSTAGED_JSON=$(printf '%s' "$UNSTAGED_LEFT" | jq -R . | jq -sc 'map(select(length > 0))')
+UNSTAGED_JSON=$(unstaged_json)
 
 if [ "$NO_PUSH" = "true" ]; then
   jq -n --arg hash "$COMMIT_HASH" --argjson committed "$COMMITTED" \
