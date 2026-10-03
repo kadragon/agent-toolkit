@@ -124,7 +124,7 @@ def new_sessions(state_dir, since_ms):
 
 def new_codex_sessions(project, since_ms):
     """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
-    return count_newer(find_codex_session_files(codex_home(), project), since_ms)
+    return count_newer(find_codex_session_files(codex_home(), project, since_ms), since_ms)
 
 
 def last_run_ms(path):
@@ -270,6 +270,21 @@ def run_tests():
                     {"lastRunMs": now - DAY_MS})
         check("due: a recent run recorded on the Codex side does not fire",
               due_message(codex_repo, now) is None)
+
+        # Rollouts not newer than the last run are dropped before their head is parsed:
+        # --check-due runs inside the SessionStart hook, over every rollout ever written.
+        import scan_transcripts
+        parsed = []
+        real_parse = scan_transcripts._codex_session_meta_cwd
+        scan_transcripts._codex_session_meta_cwd = lambda fp: parsed.append(fp) or real_parse(fp)
+        try:
+            stale = (now - 2 * DAY_MS) / 1000
+            for name in os.listdir(day_dir):
+                os.utime(os.path.join(day_dir, name), (stale, stale))
+            new_codex_sessions(codex_repo, now - DAY_MS)
+        finally:
+            scan_transcripts._codex_session_meta_cwd = real_parse
+        check("due: rollouts older than the last run are not parsed", parsed == [])
     finally:
         for k, v in saved.items():
             if v is None:

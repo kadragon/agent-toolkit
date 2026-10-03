@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Merge-queue-safe merge, staged-only Step 1 commit, worktree-safe cleanup, cheaper curate nudge (dev v4.10.6) (2026-10-03)
 - [done] Review backlog batch: merge cleanup owner, Codex curate nudge, --no-commit PR push, hooks security floor (6 units) (dev v4.10.5) (2026-10-02)
 - [done] task-grill: skill-extraction interview slots for new skills (dev v4.10.4) (2026-10-02)
 - [done] gongmun-draft and report-draft skills: 공문 회신 drafting and 개조식 report authoring (prod v3.2.0) (2026-10-02)

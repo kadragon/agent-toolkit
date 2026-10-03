@@ -5,7 +5,8 @@
 #   merge_strategy_json: e.g. '{"squash":true,"merge":true,"rebase":true}'
 #   worktree_path: optional, removes the worktree before the local branch is deleted
 #
-# Output: JSON with merge result and cleanup status.
+# Output: JSON with merge result and cleanup status. queued=true: the PR entered a merge queue and
+# is not merged yet (merge_ok=false), so local cleanup is skipped.
 
 set -euo pipefail
 
@@ -73,8 +74,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
 MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
+QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 if [ "$MERGE_OK" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
+elif [ "$QUEUED" = "true" ]; then
+  MERGE_MSG="PR #${PR_NUMBER} queued for merge, not merged yet"
 else
   MERGE_MSG="Merge failed for PR #${PR_NUMBER}"
 fi
@@ -86,6 +90,15 @@ WORKTREE_MSG=""
 # hub.sh merge deletes the remote head only (both hubs); this block is the sole owner of the
 # local branch and worktree.
 if [ "$MERGE_OK" = "true" ]; then
+  # Run from inside a linked worktree (often the one being removed), `git checkout <base>` fails:
+  # base is checked out in the main worktree. Resolve the worktree path first, then work there.
+  if [ -n "$WORKTREE_PATH" ]; then
+    WORKTREE_PATH=$(cd "$WORKTREE_PATH" 2>/dev/null && pwd -P || printf '%s' "$WORKTREE_PATH")
+  fi
+  if [ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+    MAIN_WORKTREE=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+    cd "$MAIN_WORKTREE"
+  fi
   # The remote merge already landed: a failed checkout (dirty tree, unknown base) must still
   # reach the JSON below, not exit under set -e with the merge result unreported.
   if ! CHECKOUT_ERR=$(git checkout "$BASE_BRANCH" 2>&1 >/dev/null); then
@@ -120,6 +133,7 @@ fi
 # --- Output JSON safely with jq ---
 jq -n \
   --argjson merge_ok "$MERGE_OK" \
+  --argjson queued "$QUEUED" \
   --arg merge_method "$MERGE_METHOD" \
   --arg merge_message "$MERGE_MSG" \
   --arg merge_output "$MERGE_OUTPUT" \
@@ -127,6 +141,7 @@ jq -n \
   --arg worktree_message "$WORKTREE_MSG" \
   '{
     merge_ok: $merge_ok,
+    queued: $queued,
     merge_method: $merge_method,
     merge_message: $merge_message,
     merge_output: $merge_output,

@@ -134,6 +134,48 @@ class RecoveryTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unexpected commit", result.stderr)
 
+    def step1_blocks(self):
+        review = SCRIPT.parents[2] / "task-review-cycle" / "SKILL.md"
+        section = review.read_text().split("## Step 1: Commit, route, PR", 1)[1]
+        section = section.split("\n## Step 2", 1)[0]
+        return [chunk.split("```", 1)[0] for chunk in section.split("```bash\n")[1:]]
+
+    def run_with_recording_helper(self, block):
+        """Run a Step 1 block against stub helpers; return the args commit-and-push.sh got."""
+        with tempfile.TemporaryDirectory() as directory:
+            skill = Path(directory)
+            (skill / "scripts").mkdir()
+            log = skill / "args.log"
+            (skill / "scripts" / "commit-and-push.sh").write_text(
+                f'printf "%s\\n" "$@" > "{log}"\n'
+                "echo '{\"pr_number\":\"1\",\"pr_url\":\"u/1\"}'\n")
+            (skill / "scripts" / "preflight.sh").write_text(
+                "echo '{\"base_branch\":\"main\"}'\n")
+            block = block.replace("<absolute parent directory of the loaded SKILL.md>", str(skill))
+            result = subprocess.run(["bash", "-e", "-c", block], cwd=self.repo,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return log.read_text().splitlines()
+
+    def test_dirty_step1_commits_only_the_staged_index(self):
+        """PR #291: a stray edit present before Step 1 must not ride into the commit.
+
+        The cycle stages its reviewed in-scope files before validation; Step 1 then
+        commits that index (--prefer-staged) instead of auto-staging every changed file.
+        test_commit_and_push.py pins what the flag does; this pins that Step 1 passes it.
+        """
+        (self.repo / "stray.txt").write_text("stray\n")
+        self.assertIn("--prefer-staged", self.run_with_recording_helper(self.step1_blocks()[0]))
+
+    def test_hub_pr_block_never_commits(self):
+        """PR #277: the hub PR block's --pr call must carry --no-commit, or it auto-stages
+        a dirty file Step 1 left behind and pushes it in a second commit."""
+        hub_block = next(b for b in self.step1_blocks() if "--pr " in b)
+        (self.repo / "stray.txt").write_text("stray\n")
+        args = self.run_with_recording_helper(hub_block)
+        self.assertIn("--pr", args)
+        self.assertIn("--no-commit", args)
+
     def test_save_refused_on_base_branch(self):
         # A --tree run's archive heredoc executes from the main checkout unless it cds
         # into the worktree; keying that contract to `main` blocks the next cycle's save.

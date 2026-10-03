@@ -356,16 +356,23 @@ def _codex_session_meta_cwd(fp):
     return None
 
 
-def find_codex_session_files(codex_root, real_path):
+def find_codex_session_files(codex_root, real_path, since_ms=None):
     """*.jsonl under <codex_root>/sessions (archived_sessions excluded — see module
     docstring) whose session_meta.cwd matches real_path. Cheap because only the leading
-    lines of each file are read (benchmarked at ~0.1s for 1400+ files), not the whole file."""
+    lines of each file are read (benchmarked at ~0.1s for 1400+ files), not the whole file.
+    since_ms drops files not modified after it before their head is read."""
     root = os.path.join(codex_root, "sessions")
     if not os.path.isdir(root):
         return []
     target = os.path.normcase(os.path.abspath(real_path))
     matches = []
     for fp in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        if since_ms is not None:
+            try:
+                if os.path.getmtime(fp) * 1000 <= since_ms:
+                    continue
+            except OSError:
+                continue
         cwd = _codex_session_meta_cwd(fp)
         if cwd and os.path.normcase(os.path.abspath(cwd)) == target:
             matches.append(fp)

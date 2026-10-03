@@ -3,6 +3,7 @@
 #
 # Usage:
 #   commit-and-push.sh --message <text> [--files "f1 f2 ..."] [--no-push] [--pr] [--base <branch>]
+#   commit-and-push.sh --message <text> --prefer-staged [--no-push] [--pr] [--base <branch>]
 #   commit-and-push.sh --message <text> --no-commit [--pr] [--base <branch>]
 #   commit-and-push.sh --verify-head
 #
@@ -13,6 +14,10 @@
 #                      new commit to guard but HEAD is still about to be pushed
 #                      or merged.
 #   --files <list>     Space-separated file paths to stage (default: auto-detect via changed-files.sh)
+#   --prefer-staged    A non-empty index is committed exactly as staged, staging
+#                      nothing more; an empty index falls back to auto-detect.
+#                      For a caller that staged its reviewed in-scope files, so a
+#                      stray edit present beforehand stays out (PR #291).
 #   --no-push          Commit locally only; skip push and PR creation
 #   --no-commit        Stage and commit nothing, even on a dirty tree; guard and
 #                      push/PR the existing HEAD. For a caller that has already
@@ -52,6 +57,7 @@ MESSAGE=""
 FILES=""
 NO_PUSH=false
 NO_COMMIT=false
+PREFER_STAGED=false
 CREATE_PR=false
 VERIFY_HEAD=false
 BASE_BRANCH="main"
@@ -62,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --files)   FILES="$2";   shift 2 ;;
     --no-push) NO_PUSH=true; shift ;;
     --no-commit) NO_COMMIT=true; shift ;;
+    --prefer-staged) PREFER_STAGED=true; shift ;;
     --pr)      CREATE_PR=true; shift ;;
     --verify-head) VERIFY_HEAD=true; shift ;;
     --base)    BASE_BRANCH="$2"; shift 2 ;;
@@ -76,6 +83,14 @@ fi
 if [ "$NO_COMMIT" = "true" ] && { [ "$NO_PUSH" = "true" ] || [ -n "$FILES" ]; }; then
   echo "ERROR: --no-commit cannot be combined with --no-push or --files" >&2
   exit 1
+fi
+if [ "$PREFER_STAGED" = "true" ] && { [ "$NO_COMMIT" = "true" ] || [ -n "$FILES" ]; }; then
+  echo "ERROR: --prefer-staged cannot be combined with --no-commit or --files" >&2
+  exit 1
+fi
+STAGED_ONLY=false
+if [ "$PREFER_STAGED" = "true" ] && ! git diff --cached --quiet; then
+  STAGED_ONLY=true
 fi
 
 # --- commit-guard ---
@@ -136,8 +151,9 @@ if [ "$VERIFY_HEAD" = "true" ]; then
 fi
 
 # --- Resolve file list ---
-# --no-commit leaves FILES empty, so the clean-tree branch below publishes HEAD as-is.
-if [ -z "$FILES" ] && [ "$NO_COMMIT" != "true" ]; then
+# --no-commit leaves FILES empty, so the clean-tree branch below publishes HEAD as-is;
+# a staged-only commit never stages, so it skips detection too.
+if [ -z "$FILES" ] && [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
   FILES=$(bash "$SCRIPT_DIR/changed-files.sh" | tr '\n' ' ')
 fi
 FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
@@ -147,7 +163,14 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
-if [ -n "$FILES" ]; then
+if [ "$STAGED_ONLY" = "true" ]; then
+  run_commit_guard "$MESSAGE" "committing"
+  if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1); then
+    jq -n --arg e "commit failed: $COMMIT_OUT" '{error: $e}' >&2
+    exit 1
+  fi
+  COMMITTED=true
+elif [ -n "$FILES" ]; then
   run_commit_guard "$MESSAGE" "committing"
   # `git add` treats a pathspec matching neither the worktree nor the index as
   # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in

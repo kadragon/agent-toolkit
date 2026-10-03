@@ -68,9 +68,8 @@ On the base branch: derive a short slug from the diff, then `git checkout -b <ty
 Derive `COMMIT_MESSAGE` from `git diff --stat HEAD` and `git log --oneline -5`; the `[TYPE]` prefix
 is mandatory (commit-guard runs inside the script and rejects otherwise). Capture it — and the Step 2
 contract, the other free text composed here — with a **quoted** heredoc delimiter, never an
-interpolated assignment (`docs/conventions.md`). A
-clean resumed branch reuses its commit; if its diff against the base is empty and no review
-remains, report no work and stop before this block.
+interpolated assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if its
+diff against the base is empty and no review remains, report no work and stop before this block.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -81,12 +80,13 @@ COMMIT_MSG
 )
 DIRTY=$(git status --porcelain)
 if [[ -n "$DIRTY" ]]; then
-  RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --message "${COMMIT_MESSAGE}")
+  RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --prefer-staged --message "${COMMIT_MESSAGE}")
 else
   RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --verify-head)
 fi
 ```
 
+`--prefer-staged` commits a non-empty index (the cycle's staged scope) alone: a stray edit stays out.
 `--verify-head` commits nothing; it guards the existing HEAD and returns the `resumed` sentinel.
 Skipping it is the one path on which a commit made outside this harness reaches a PR or `main`
 unchecked. Non-zero exit → HEAD is rejected; `guard_skipped: true` → report it.
@@ -244,7 +244,7 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` / `checks-never-registered` | Stop, ask the user |
-| Merge fails (`merge_ok: false`) | Report; never force-delete |
+| Merge fails (`merge_ok: false`; `queued: true` = enqueued, not merged) | Report; never force-delete |
 
 Scripts: `preflight.sh`, `commit-and-push.sh`, `claude-review.sh`, `agy-review.sh`,
 `codex-review.sh`, `ci-wait.sh`, `ci-failure-logs.sh`, `merge-and-cleanup.sh`, `hub.sh` (adapter).
