@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-altitude-audit: edge 7 re-file bar marked moot after PR #272 (2026-10-03)
 - [done] task-graph-audit: row 7 annotated as closed by the PR #272 review-slot shell-out (2026-10-03)
 - [done] task-review-cycle: empty index ahead of base verifies HEAD instead of auto-committing (dev v4.10.7) (2026-10-03)
 - [done] Merge-queue-safe merge, staged-only Step 1 commit, worktree-safe cleanup, cheaper curate nudge (dev v4.10.6) (2026-10-03)
