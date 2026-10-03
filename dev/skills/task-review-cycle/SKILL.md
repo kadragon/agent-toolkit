@@ -80,7 +80,7 @@ COMMIT_MSG
 )
 DIRTY=$(git status --porcelain)
 if [[ -n "$DIRTY" ]]; then
-  BASE_BRANCH=$(bash "$SKILL_DIR/scripts/preflight.sh" | jq -r '.base_branch')
+  BASE_BRANCH="<from Setup>"
   RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --prefer-staged --base "${BASE_BRANCH}" --message "${COMMIT_MESSAGE}")
 else
   RESULT=$(bash "$SKILL_DIR/scripts/commit-and-push.sh" --verify-head)
