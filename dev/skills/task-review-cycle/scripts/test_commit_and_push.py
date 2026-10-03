@@ -478,6 +478,45 @@ def case_staged_only(tmp):
     print("OK: --prefer-staged commits a staged index only, else auto-detects")
 
 
+def case_staged_empty_index_ahead_verifies_head(tmp):
+    """An empty index on a branch already ahead of --base commits nothing and guards HEAD.
+
+    PR #292: the empty-index fallback auto-detected every changed file, so a resumed branch
+    whose only dirt was an unrelated untracked file committed and pushed that stray.
+    """
+    repo = make_repo(tmp)
+    # main or master, per init.defaultBranch -- whichever make_repo branched from.
+    base = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/main",
+               "refs/heads/master").stdout.strip()
+    (repo / "tasks.md").write_text("reviewed work\n")
+    git(repo, "commit", "-qam", "[TEST] earlier cycle")
+    before = head(repo)
+    (repo / "stray.txt").write_text("untracked\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        fail("--prefer-staged ahead", f"exit {proc.returncode}: {proc.stderr.strip()}")
+    payload = json.loads(proc.stdout)
+    if payload.get("committed") is not False or payload.get("resumed") is not True:
+        fail("--prefer-staged ahead", f"expected the resume sentinel, got {proc.stdout!r}")
+    if payload.get("unstaged_left") != ["stray.txt"]:
+        fail("--prefer-staged ahead", f"expected unstaged_left [stray.txt], got {proc.stdout!r}")
+    if head(repo) != before:
+        fail("--prefer-staged ahead", "a new commit was created")
+    git(repo, "commit", "--amend", "-qm", "unguarded subject")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
+         "--message", "[TEST] cycle"],
+        cwd=repo, check=False, capture_output=True, text=True,
+    )
+    if proc.returncode == 0:
+        fail("--prefer-staged ahead", "an unguarded HEAD must be rejected, got exit 0")
+    print("OK: --prefer-staged with an empty index ahead of base verifies HEAD instead")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -503,6 +542,7 @@ def main():
         case_verify_head_missing_guard_fails_open(tmp)
         case_no_commit_leaves_dirty_tree(tmp)
         case_staged_only(tmp)
+        case_staged_empty_index_ahead_verifies_head(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

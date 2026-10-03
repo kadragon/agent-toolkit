@@ -13,10 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #292 — merge-queue-safe merge, staged-only Step 1 commit, worktree-safe cleanup (2026-10-03)
-
-- [ ] [constraint] With an empty index, Step 1's `--prefer-staged` falls back to changed-files.sh auto-detect, so a standalone task-review run or a resumed branch whose only dirt is an unrelated untracked file still commits and pushes that stray; decide whether an empty index on a branch that already has commits should verify HEAD instead of auto-committing (source: codex, code-review) — dev/skills/task-review-cycle/SKILL.md:82
-
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
