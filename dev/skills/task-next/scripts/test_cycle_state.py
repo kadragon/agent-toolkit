@@ -157,14 +157,14 @@ class RecoveryTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             return log.read_text().splitlines()
 
-    def test_dirty_step1_commits_only_the_staged_index(self):
+    def test_dirty_step1_passes_prefer_staged(self):
         """PR #291: a stray edit present before Step 1 must not ride into the commit.
 
         The cycle stages its reviewed in-scope files before validation; Step 1 then
         commits that index (--prefer-staged) instead of auto-staging every changed file.
         test_commit_and_push.py pins what the flag does; this pins that Step 1 passes it.
         """
-        (self.repo / "stray.txt").write_text("stray\n")
+        (self.repo / "code.txt").write_text("dirty\n")
         self.assertIn("--prefer-staged", self.run_with_recording_helper(self.step1_blocks()[0]))
 
     def test_hub_pr_block_never_commits(self):

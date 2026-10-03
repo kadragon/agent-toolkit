@@ -5,8 +5,8 @@
 #   merge_strategy_json: e.g. '{"squash":true,"merge":true,"rebase":true}'
 #   worktree_path: optional, removes the worktree before the local branch is deleted
 #
-# Output: JSON with merge result and cleanup status. queued=true: the PR entered a merge queue and
-# is not merged yet (merge_ok=false), so local cleanup is skipped.
+# Output: JSON with merge result and cleanup status. merge_ok=false skips local cleanup; then
+# queued=true means the PR entered a merge queue, unconfirmed=true that gh could not report its state.
 
 set -euo pipefail
 
@@ -75,10 +75,13 @@ MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" 2>&1
 MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
 QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
+UNCONFIRMED=$(jq -r '.unconfirmed // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 if [ "$MERGE_OK" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
 elif [ "$QUEUED" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} queued for merge, not merged yet"
+elif [ "$UNCONFIRMED" = "true" ]; then
+  MERGE_MSG="PR #${PR_NUMBER} merge not confirmed (state unavailable); check the hub before retrying"
 else
   MERGE_MSG="Merge failed for PR #${PR_NUMBER}"
 fi
@@ -90,23 +93,38 @@ WORKTREE_MSG=""
 # hub.sh merge deletes the remote head only (both hubs); this block is the sole owner of the
 # local branch and worktree.
 if [ "$MERGE_OK" = "true" ]; then
-  # Run from inside a linked worktree (often the one being removed), `git checkout <base>` fails:
-  # base is checked out in the main worktree. Resolve the worktree path first, then work there.
+  CAN_CLEAN=true
+  IN_TARGET=false
+  BASE_NOTE=""
+  # Run from inside the linked worktree being removed, `git checkout <base>` fails: base is checked
+  # out in the main worktree. Only then move there — and never switch the branch it holds, which
+  # may be another agent's: on a different branch, base is left un-updated and cleanup continues.
   if [ -n "$WORKTREE_PATH" ]; then
     WORKTREE_PATH=$(cd "$WORKTREE_PATH" 2>/dev/null && pwd -P || printf '%s' "$WORKTREE_PATH")
+    if [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$WORKTREE_PATH" ]; then
+      IN_TARGET=true
+      MAIN_WORKTREE=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+      if ! cd "$MAIN_WORKTREE" 2>/dev/null; then
+        CAN_CLEAN=false
+        CLEANUP_MSG="WARNING: Could not enter main worktree '${MAIN_WORKTREE}'; local cleanup skipped"
+      fi
+    fi
   fi
-  if [ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
-    MAIN_WORKTREE=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-    cd "$MAIN_WORKTREE"
+  if [ "$CAN_CLEAN" = "true" ]; then
+    CURRENT_BRANCH=$(git branch --show-current)
+    if [ "$IN_TARGET" = "true" ] && [ "$CURRENT_BRANCH" != "$BASE_BRANCH" ]; then
+      BASE_NOTE=" (base '${BASE_BRANCH}' not updated: main worktree is on '${CURRENT_BRANCH:-detached HEAD}')"
+    # The remote merge already landed: a failed checkout (dirty tree, unknown base) must still
+    # reach the JSON below, not exit under set -e with the merge result unreported.
+    elif ! CHECKOUT_ERR=$(git checkout "$BASE_BRANCH" 2>&1 >/dev/null); then
+      CAN_CLEAN=false
+      CLEANUP_MSG="WARNING: Could not check out '${BASE_BRANCH}'; local cleanup skipped: ${CHECKOUT_ERR}"
+    else
+      git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
+      git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+    fi
   fi
-  # The remote merge already landed: a failed checkout (dirty tree, unknown base) must still
-  # reach the JSON below, not exit under set -e with the merge result unreported.
-  if ! CHECKOUT_ERR=$(git checkout "$BASE_BRANCH" 2>&1 >/dev/null); then
-    CLEANUP_MSG="WARNING: Could not check out '${BASE_BRANCH}'; local cleanup skipped: ${CHECKOUT_ERR}"
-  else
-    git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
-    git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
-
+  if [ "$CAN_CLEAN" = "true" ]; then
     # Worktree first: a worktree holding the feature branch blocks `git branch -D`.
     if [ -n "$WORKTREE_PATH" ]; then
       if git worktree remove "$WORKTREE_PATH" 2>/dev/null; then
@@ -125,6 +143,7 @@ if [ "$MERGE_OK" = "true" ]; then
     else
       CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}': ${DELETE_ERR}"
     fi
+    CLEANUP_MSG="${CLEANUP_MSG}${BASE_NOTE}"
   fi
 else
   CLEANUP_MSG="Skipped — merge did not succeed"
@@ -134,6 +153,7 @@ fi
 jq -n \
   --argjson merge_ok "$MERGE_OK" \
   --argjson queued "$QUEUED" \
+  --argjson unconfirmed "$UNCONFIRMED" \
   --arg merge_method "$MERGE_METHOD" \
   --arg merge_message "$MERGE_MSG" \
   --arg merge_output "$MERGE_OUTPUT" \
@@ -142,6 +162,7 @@ jq -n \
   '{
     merge_ok: $merge_ok,
     queued: $queued,
+    unconfirmed: $unconfirmed,
     merge_method: $merge_method,
     merge_message: $merge_message,
     merge_output: $merge_output,

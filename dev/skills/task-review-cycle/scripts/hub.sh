@@ -10,7 +10,7 @@
 #   pr-get                                  → {pr_number, pr_url}   (open PR for current branch)
 #   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n}
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
-#   merge <pr_number> <squash|merge|rebase> → {merge_ok, queued, merge_output}
+#   merge <pr_number> <squash|merge|rebase> → {merge_ok, queued, unconfirmed, merge_output}
 #
 # Auth:
 #   github  — gh CLI must be authenticated (gh auth login)
@@ -305,12 +305,18 @@ case "$SUBCOMMAND" in
     if [ "$HUB_TYPE" = "github" ]; then
       MERGE_OK=true
       QUEUED=false
+      UNCONFIRMED=false
       MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "--${STRATEGY}" 2>&1) || MERGE_OK=false
       # Under a merge queue gh exits 0 on enqueue, so exit 0 alone is not a merge: only a MERGED
-      # state is. Anything else (still OPEN, or a state gh could not report) is merge_ok=false, so
-      # merge-and-cleanup.sh keeps the local branch; OPEN is reported as queued.
+      # state is. Anything else is merge_ok=false, so merge-and-cleanup.sh keeps the local branch:
+      # OPEN is reported as queued, a state gh could not report (after retries) as unconfirmed.
       if [ "$MERGE_OK" = "true" ]; then
-        HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository 2>/dev/null || echo '{}')
+        HEAD_INFO='{}'
+        for attempt in 1 2 3; do
+          HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository 2>/dev/null) && break
+          HEAD_INFO='{}'
+          [ "$attempt" -lt 3 ] && sleep 1
+        done
         PR_STATE=$(jq -r '.state // ""' <<<"$HEAD_INFO")
         if [ "$PR_STATE" != "MERGED" ]; then
           MERGE_OK=false
@@ -318,7 +324,8 @@ case "$SUBCOMMAND" in
             QUEUED=true
             MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"PR is OPEN after gh pr merge (enqueued in a merge queue); not merged yet"
           else
-            MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Could not confirm the PR merged (state: '${PR_STATE:-unknown}')"
+            UNCONFIRMED=true
+            MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Could not confirm the PR merged (state: '${PR_STATE:-unknown}'); check the hub"
           fi
         fi
       fi
@@ -335,15 +342,15 @@ case "$SUBCOMMAND" in
           MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head delete failed: ${DELETE_ERR}"
         fi
       fi
-      jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --arg out "$MERGE_OUTPUT" \
-        '{merge_ok: $ok, queued: $queued, merge_output: $out}'
+      jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --argjson unconfirmed "$UNCONFIRMED" \
+        --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: $queued, unconfirmed: $unconfirmed, merge_output: $out}'
     else
       require_forgejo_token
       PAYLOAD=$(jq -n --arg do "$STRATEGY" '{Do: $do, delete_branch_after_merge: true}')
       MERGE_OK=true
       MERGE_OUTPUT=$(fj_api POST "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/merge" "$PAYLOAD" 2>&1) || MERGE_OK=false
       [ "$MERGE_OK" = "false" ] && MERGE_OUTPUT="HTTP $(fj_code): ${MERGE_OUTPUT}"
-      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: false, merge_output: $out}'
+      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: false, unconfirmed: false, merge_output: $out}'
     fi
     ;;
 

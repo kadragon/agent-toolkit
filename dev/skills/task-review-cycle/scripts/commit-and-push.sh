@@ -28,7 +28,8 @@
 #   --base <branch>    Base branch for the PR (default: main)
 #
 # Output: JSON to stdout
-#   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped}
+#   {commit_hash, committed, pushed, pr_number, pr_url, guard_skipped, unstaged_left}
+#   unstaged_left lists changed/untracked files a --prefer-staged index commit left out ([] otherwise).
 #   committed=false means nothing was staged (a clean tree, or --no-commit) and HEAD
 #   was pushed/PR'd as-is (re-run against an already-committed branch). That path still runs
 #   commit-guard against HEAD's own subject, so a branch committed outside this
@@ -163,6 +164,7 @@ FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
+UNSTAGED_LEFT=""
 if [ "$STAGED_ONLY" = "true" ]; then
   run_commit_guard "$MESSAGE" "committing"
   if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1); then
@@ -170,6 +172,8 @@ if [ "$STAGED_ONLY" = "true" ]; then
     exit 1
   fi
   COMMITTED=true
+  # Report what stayed out, so a partial index cannot silently drop reviewed work.
+  UNSTAGED_LEFT=$(bash "$SCRIPT_DIR/changed-files.sh")
 elif [ -n "$FILES" ]; then
   run_commit_guard "$MESSAGE" "committing"
   # `git add` treats a pathspec matching neither the worktree nor the index as
@@ -230,12 +234,13 @@ else
   run_commit_guard "$(git log -1 --format=%s)" "publishing HEAD"
 fi
 COMMIT_HASH=$(git rev-parse HEAD)
+UNSTAGED_JSON=$(printf '%s' "$UNSTAGED_LEFT" | jq -R . | jq -sc 'map(select(length > 0))')
 
 if [ "$NO_PUSH" = "true" ]; then
   jq -n --arg hash "$COMMIT_HASH" --argjson committed "$COMMITTED" \
-    --argjson guard_skipped "$GUARD_SKIPPED" \
+    --argjson guard_skipped "$GUARD_SKIPPED" --argjson unstaged_left "$UNSTAGED_JSON" \
     '{commit_hash: $hash, committed: $committed, pushed: false, pr_number: null,
-      pr_url: null, guard_skipped: $guard_skipped}'
+      pr_url: null, guard_skipped: $guard_skipped, unstaged_left: $unstaged_left}'
   exit 0
 fi
 
@@ -279,11 +284,13 @@ jq -n \
   --arg pr_number "$PR_NUMBER" \
   --arg pr_url "$PR_URL" \
   --argjson guard_skipped "$GUARD_SKIPPED" \
+  --argjson unstaged_left "$UNSTAGED_JSON" \
   '{
     commit_hash: $hash,
     committed: $committed,
     pushed: true,
     pr_number: ($pr_number | if . == "" then null else . end),
     pr_url: ($pr_url | if . == "" then null else . end),
-    guard_skipped: $guard_skipped
+    guard_skipped: $guard_skipped,
+    unstaged_left: $unstaged_left
   }'

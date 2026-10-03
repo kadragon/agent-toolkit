@@ -460,6 +460,10 @@ def case_staged_only(tmp):
         fail("--prefer-staged", f"exit {proc.returncode}: {proc.stderr.strip()}")
     if name_status(repo) != ["M\ttasks.md"]:
         fail("--prefer-staged", f"commit holds {name_status(repo)}, expected only tasks.md")
+    # What stayed out is reported, so a partial index cannot silently drop reviewed work.
+    left = json.loads(proc.stdout).get("unstaged_left")
+    if left != ["keep.md", "stray.txt"]:
+        fail("--prefer-staged", f"expected unstaged_left [keep.md, stray.txt], got {left!r}")
     status = sorted(git(repo, "status", "--porcelain").stdout.splitlines())
     if status != [" M keep.md", "?? stray.txt"]:
         fail("--prefer-staged", f"strays were touched: {status}")

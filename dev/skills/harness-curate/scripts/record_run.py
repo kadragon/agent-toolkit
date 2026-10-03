@@ -124,7 +124,7 @@ def new_sessions(state_dir, since_ms):
 
 def new_codex_sessions(project, since_ms):
     """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
-    return count_newer(find_codex_session_files(codex_home(), project, since_ms), since_ms)
+    return len(find_codex_session_files(codex_home(), project, since_ms))
 
 
 def last_run_ms(path):
