@@ -69,14 +69,14 @@ Cycles: **C1** qa retry (1×) · **C2** stuck-fix cap (3×) · **C3** CI failure
 | 4 | skill/agent/command frontmatter valid | `harness-check.yml` → `skill-frontmatter` job | mechanical |
 | 5 | plugin-root portability + capture-before-use | `harness-check.yml` → `harness-drift` job | mechanical |
 | 6 | **implement → qa-verifier (mandatory, no self-verification)** | nothing — SKILL.md prose only | **gap (P0)** |
-| 7 | **2-1 Agent-path review slot → orchestrator (`SendMessage(to: "main")`)** | nothing — a line in the spawn prompt. Scoped to the in-process Agent path and any named/background agent this skill spawns; `agy-review.sh`, `codex-review.sh` and the non-Claude `claude-review.sh` fallback return over captured stdout and carry no such risk | **gap (P0)** |
+| 7 | ~~2-1 Agent-path review slot → orchestrator (`SendMessage(to: "main")`)~~ | edge removed by PR #272: the Claude slot is no longer a spawned agent but a foreground `claude-review.sh` shell-out under a Bash timeout, for every runtime, returning over captured stdout like `agy-review.sh` and `codex-review.sh` | closed (PR #272) |
 | 8 | **loop bounds C1 (1×), C2 (3×), C3 (3×)** | nothing. `task-next/SKILL.md` states it outright: *"This is a prompted constraint, not a mechanically enforced cap — no loop-counter tooling exists for implementer sub-agents."* | **gap (P1)** |
 | 9 | Sprint Contract exists before implement | nothing | gap (P2) |
 | 10 | pre-merge cleanup contract (CHANGELOG ≤160 chars, backlog line deletion) | nothing | gap (P2) |
 | 11 | working-tree gate, plan-mode gate | nothing — the model runs `git status` and decides | gap (P2) |
 | 12 | `task-new` ↔ `task-next` boundary (no double entry) | nothing | gap (P3) |
 
-**5 of 12 edges are mechanical.** All five check a *node's output* (a commit, a version, a
+**5 of 12 edges are mechanical** (as audited; row 7 has since been closed by removing the edge). All five check a *node's output* (a commit, a version, a
 frontmatter block). **Zero check a transition.** The pipeline verifies what was produced and never
 verifies which path produced it.
 
