@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### docs/annotate-task-graph-audit-row-7 — task-graph-audit row 7 annotated as closed (2026-10-03)
+
+- [ ] [doc] `harness-altitude-audit.md` still carries a live re-file bar for "Review transport accounting (edge #7)" and its `7→2` row; PR #272 removed that edge, so note it there so nobody re-files an item for a SendMessage path that no longer exists (source: code-review) — docs/design/harness-altitude-audit.md:269
+
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
