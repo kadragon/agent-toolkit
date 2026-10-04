@@ -50,15 +50,18 @@ command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; e
 # body verbatim and returns non-zero at EOF, hence the || true under set -e.
 IFS= read -r -d '' PROMPT <<EOF || true
 Review changes on the current branch against ${BASE_BRANCH}.
+List only problems you would block the merge for. For each one, give the file and line, why it is wrong, and how to show it fails. Improvements, refactors and nits do not block a merge, so leave them out.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
 2. Invoke Skill "${SLOT_ID}" with args "${EFFORT}" to review — the skill name is exactly \`${SLOT_ID}\`; the effort goes in the args field, never in the name. Empty args = default effort. Do not invoke any other review skill or command.
 3. Return findings as a JSON array and NOTHING else — no prose, no code fence:
-   [{"file":"...","line":N,"severity":"P0".."P3","confidence":0-100,"problem":"...","fix":"...","source":"${SLOT_ID}"}]
+   [{"file":"...","line":N,"severity":"P0"|"P1","confidence":0-100,"problem":"...","failure":"...","fix":"...","source":"${SLOT_ID}"}]
+   severity: P0 = data loss, security hole, crash, or a broken contract; P1 = wrong behavior that must be fixed before merge.
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
-   The array IS the \`${SLOT_ID}\` run's findings — every one of them, as it reported them. Do not filter, re-rank, re-judge, merge, summarize or drop a finding. \`[]\` means the reviewer ran and found nothing; it never means you could not read its output.
+   failure = how to show it fails: a concrete input or state and the wrong output or crash it produces, or the test or command that would fail. Required for every finding. If the reviewer gave none and you cannot name one, keep the finding with failure "" — never invent a scenario. For a design-doc finding below, failure names the User Story or decision the diff leaves unmet.
+   The array IS the \`${SLOT_ID}\` run's merge-blocking findings — every one of them, as it reported them. Leave out only what cannot block a merge (reuse, simplification, efficiency, altitude or style cleanups); never re-rank, re-judge, merge, summarize or drop a blocking finding. \`[]\` means the reviewer ran and found nothing blocking; it never means you could not read its output.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this branch's diff.
-Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, >5 style nits.
+Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, style nits.
 If there are no findings, return [].
 EOF
 

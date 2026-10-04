@@ -11,6 +11,10 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Harness — review effort
+
+- [ ] [harness] task-review-cycle: decide whether `SECURITY_HIT` still needs `EFFORT=high` for the `code-review` slot — the user-cited Opus 5.5 guide claims lower effort out-finds Opus 5 at high with fewer false positives [unverified — read https://claude.dev/blog/getting-the-most-out-of-opus-5-5/], but this is the security path: build a fixture set of security diffs with known bugs, run `claude-review.sh` at default vs `high`, compare recall and false positives, then change only on evidence. `evals/` today holds trigger cases only.
+
 ## Review Backlog
 
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)

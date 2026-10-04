@@ -18,7 +18,7 @@ auto-selection, which carries no token.
 ## Arguments
 
 - `--from <caller>` — required caller token.
-- `--auto` — skip the Step 3 confirmation; apply every in-scope finding.
+- `--auto` — skip the Step 3 confirmation; apply every in-scope P0/P1 finding.
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
 - `--lite` / `--pr` — request a merge path; required CI and risk gates still apply.
 - `--panel` — force the agy + Codex panel, and with it hub (`--no-hub` still wins): the codex reclaim
@@ -167,9 +167,9 @@ source still working. Never bound a wait with a `sleep`: it outlives the cycle (
 Follow `references/consolidation-guide.md`. A `contract` finding is in-scope P0, never dropped by
 confidence or by `--auto`.
 
-Without `--auto`: present the table and wait. With `--auto`: every in-scope finding is approved.
-Out-of-scope findings go to `backlog.md` under `## Review Backlog` (format in the guide) — never
-`tasks.md`.
+Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
+approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
+(format in the guide) — never `tasks.md`.
 
 ## Step 4: Apply
 
