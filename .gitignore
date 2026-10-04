@@ -30,3 +30,6 @@ skills-lock.json
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# pr-study mod: engine-generated type declarations (rewritten on every load)
+pr-study/.claude-plugin/types/

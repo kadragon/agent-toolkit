@@ -14,6 +14,11 @@
       "name": "prod",
       "source": "./prod",
       "description": "Personal Claude Code productivity skills by kadragon"
+    },
+    {
+      "name": "pr-study",
+      "source": "./pr-study",
+      "description": "Claude Code-only mod: side pane of study points for the current PR diff"
     }
   ]
 }
