@@ -12,7 +12,7 @@ disable-model-invocation: true
 ## Arguments
 
 - `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
-- `--auto` — skip the consolidation confirmation; apply every in-scope finding.
+- `--auto` — skip the consolidation confirmation; apply every in-scope P0/P1 finding.
 - `--pr` / `--lite` — request PR+CI or direct merge; risk and mandatory CI gates still apply.
 - `--panel` — force the agy + Codex panel, which also forces PR+CI unless `--no-hub`. Without it the panel runs on
   every PR+CI and `--no-hub` route and stays off on the lite path (`dev:task-review-cycle`).

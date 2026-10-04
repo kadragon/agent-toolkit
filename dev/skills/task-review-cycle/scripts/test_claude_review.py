@@ -170,6 +170,21 @@ def case_contract_is_not_executed(tmp):
     check("$HOME was not expanded", "$HOME" in prompt)
 
 
+def case_blocking_scope_and_failure_field(tmp):
+    """Opus 5.5 review guidance: list only merge-blocking problems, each with how it fails.
+
+    consolidation-guide.md keys off both: P2/P3 never gate a merge, and a code-review finding
+    with an empty failure field is folded into the low-confidence note.
+    """
+    print("\ncase: prompt scopes to merge-blocking findings and requires a failure field")
+    _, prompt = run(tmp, ["main", ""], stdout=envelope("[]"))
+    flat = " ".join(prompt.split())
+    check("scoped to merge-blocking problems", "only problems you would block the merge for" in flat, prompt[:800])
+    check("schema severity is P0/P1 only", '"severity":"P0"|"P1"' in flat and "P3" not in flat, prompt[:800])
+    check("schema carries a failure field", '"failure":"' in flat, prompt[:800])
+    check("failure is defined as a concrete demonstration", "how to show it fails" in flat, prompt[:800])
+
+
 def case_effort_reaches_prompt(tmp):
     print("\ncase: effort arg lands in the skill args, not the skill name")
     _, prompt = run(tmp, ["main", "high"], stdout=envelope("[]"))
@@ -263,6 +278,7 @@ def main():
             case_contract_reaches_prompt,
             case_contract_is_not_executed,
             case_effort_reaches_prompt,
+            case_blocking_scope_and_failure_field,
             case_array_passthrough,
             case_empty_array_passthrough,
             case_prose_wrapped_array_recovered,

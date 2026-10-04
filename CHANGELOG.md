@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review-cycle: reviewer reports merge-blocking findings only, each with a failure demo (dev v4.10.8) (2026-10-04)
 - [done] harness-altitude-audit: edge 7 re-file bar marked moot after PR #272 (2026-10-03)
 - [done] task-graph-audit: row 7 annotated as closed by the PR #272 review-slot shell-out (2026-10-03)
 - [done] task-review-cycle: empty index ahead of base verifies HEAD instead of auto-committing (dev v4.10.7) (2026-10-03)
