@@ -11,7 +11,7 @@ route the panel's `agy` and `codex`.
    branch, the concern does not apply to the actual pattern, or there is no concrete path to harm.
 3. **Drop low confidence and excluded categories.** Confidence < 50 goes to a collapsed
    "Low confidence (not actioned)" note, not the table. So does a `code-review` finding with an
-   empty `failure` — no input, state, test, or command that shows it fails. Panel findings carry
+   empty `failure` — no input, state, test, command, or unmet User Story that shows it fails. Panel findings carry
    no `failure` field and skip that check. Also drop: purely theoretical risk
    (DoS, timing), style a linter owns, missing rate limiting / audit logs / monitoring,
    third-party vulnerabilities, test-file nits unless the test is wrong, doc gaps in untouched
@@ -44,4 +44,5 @@ path):
 ```
 
 Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing test or rule ·
-`[harness]` tooling/CI. Append to an existing section; never overwrite earlier groups.
+`[harness]` tooling/CI. An in-scope P2/P3 line ends with `(introduced here)`. Append to an
+existing section; never overwrite earlier groups.

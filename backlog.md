@@ -13,7 +13,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Harness — review effort
 
-- [ ] [harness] task-review-cycle: decide whether `SECURITY_HIT` still needs `EFFORT=high` for the `code-review` slot — Opus 5.5 at lower effort reportedly out-finds Opus 5 at high with fewer false positives (https://claude.dev/blog/getting-the-most-out-of-opus-5-5/), but this is the security path: build a fixture set of security diffs with known bugs, run `claude-review.sh` at default vs `high`, compare recall and false positives, then change only on evidence. `evals/` today holds trigger cases only.
+- [ ] [harness] task-review-cycle: decide whether `SECURITY_HIT` still needs `EFFORT=high` for the `code-review` slot — the user-cited Opus 5.5 guide claims lower effort out-finds Opus 5 at high with fewer false positives [unverified — read https://claude.dev/blog/getting-the-most-out-of-opus-5-5/], but this is the security path: build a fixture set of security diffs with known bugs, run `claude-review.sh` at default vs `high`, compare recall and false positives, then change only on evidence. `evals/` today holds trigger cases only.
 
 ## Review Backlog
 

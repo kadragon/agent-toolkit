@@ -180,9 +180,11 @@ def case_blocking_scope_and_failure_field(tmp):
     _, prompt = run(tmp, ["main", ""], stdout=envelope("[]"))
     flat = " ".join(prompt.split())
     check("scoped to merge-blocking problems", "only problems you would block the merge for" in flat, prompt[:800])
-    check("schema severity is P0/P1 only", '"severity":"P0"|"P1"' in flat and "P3" not in flat, prompt[:800])
+    check("schema severity is P0/P1 only", '"severity":"P0"|"P1",' in flat and '"P2"' not in flat and "P3" not in flat, prompt[:800])
     check("schema carries a failure field", '"failure":"' in flat, prompt[:800])
     check("failure is defined as a concrete demonstration", "how to show it fails" in flat, prompt[:800])
+    # Blocking-only and the passthrough rule must agree, or the headless run gets two opposite orders.
+    check("passthrough never drops a blocking finding", "never re-rank, re-judge, merge, summarize or drop a blocking finding" in flat, prompt[:1600])
 
 
 def case_effort_reaches_prompt(tmp):
