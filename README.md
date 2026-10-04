@@ -2,7 +2,7 @@
 
 Personal agent plugin marketplace by kadragon.
 
-Two plugins:
+Three plugins:
 
 ### `dev` — development
 
@@ -25,6 +25,14 @@ Two plugins:
 |---|---|---|---|
 | `hwpx` | Korean HWPX document creation and editing | ✅ | ✅ |
 | `persona-debate` | Structured debate among Korean personas | ✅ | ⚠️ |
+
+### `pr-study` — PR study pane (Claude Code only)
+
+A function-hook mod: docks a pane beside the transcript with study points for the current branch's
+diff against `main` (file +/− bars, concept cards, tickable self-check questions, links to
+`.repo-quiz/mistakes.md`). Refreshes after each main-loop turn when the diff changed; `/pr-study`
+forces a rebuild. Uses one `haiku` call per changed diff. Docking needs the fullscreen layout. The mod
+API is early access, so a Claude Code update may break it. Not shipped to Codex.
 
 ## Installation
 
@@ -55,6 +63,7 @@ npx skills add kadragon/agent-toolkit --skill harness-init
 claude plugin marketplace add kadragon/agent-toolkit
 claude plugin install dev@kadragon
 claude plugin install prod@kadragon
+claude plugin install pr-study@kadragon  # optional, Claude Code only
 ```
 
 Via `~/.claude/settings.json`:
