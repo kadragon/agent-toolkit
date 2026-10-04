@@ -1,6 +1,6 @@
 {
   "name": "pr-study",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Code-only mod: a side pane of study points for the current branch's diff, linked to repo-quiz mistakes.",
   "author": {
     "name": "kadragon"
