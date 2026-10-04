@@ -11,6 +11,10 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Harness — review effort follow-up
+
+- [ ] [harness] task-review-cycle: build a discriminating fixture set for `EFFORT=high` on `SECURITY_HIT` — the 2026-10-04 security-effort run (`dev/skills/task-review-cycle/evals/security-effort/RESULTS.md`) could not separate default vs high (ceiling effect, n=4, unpinned model); plant subtler bugs (race, crypto misuse, multi-file auth flows) and re-measure recall/false positives before touching the rule (source: code-review PR #295)
+
 ## Review Backlog
 
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)

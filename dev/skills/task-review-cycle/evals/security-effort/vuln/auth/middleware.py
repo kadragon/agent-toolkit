@@ -1,5 +1,7 @@
+# Intentional eval fixture — plants an auth bypass. Not production code.
 from flask import abort, g, request
 
+# Dummy credential for the fixture; not a real secret.
 SECRET = b"server-side-secret"
 
 
