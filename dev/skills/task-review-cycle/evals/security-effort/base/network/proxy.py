@@ -1,3 +1,4 @@
+# Eval fixture file. Not production code.
 import requests
 
 ALLOWED_HOSTS = {"api.internal.example", "cdn.example"}

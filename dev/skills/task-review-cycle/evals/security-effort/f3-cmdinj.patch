@@ -1,9 +1,6 @@
---- dev/skills/task-review-cycle/evals/security-effort/base/network_fetcher.py	2026-10-04 20:39:39
-+++ dev/skills/task-review-cycle/evals/security-effort/vuln/network_fetcher.py	2026-10-04 20:44:34
-@@ -1,8 +1,9 @@
-+# Intentional eval fixture — plants command injection. Not production code.
- import subprocess
- 
+--- dev/skills/task-review-cycle/evals/security-effort/base/network_fetcher.py	2026-10-04 20:57:32
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/network_fetcher.py	2026-10-04 20:57:32
+@@ -4,6 +4,6 @@
  
  def ping(host: str) -> str:
      out = subprocess.run(

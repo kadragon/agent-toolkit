@@ -1,4 +1,4 @@
-# Intentional eval fixture — plants command injection. Not production code.
+# Eval fixture file. Not production code.
 import subprocess
 
 

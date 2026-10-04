@@ -1,11 +1,6 @@
---- dev/skills/task-review-cycle/evals/security-effort/base/auth/middleware.py	2026-10-04 20:44:37
-+++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/middleware.py	2026-10-04 20:44:41
-@@ -1,3 +1,4 @@
-+# Intentional eval fixture — plants an auth bypass. Not production code.
- from flask import abort, g, request
- 
- # Dummy credential for the fixture; not a real secret.
-@@ -9,6 +10,9 @@
+--- dev/skills/task-review-cycle/evals/security-effort/base/auth/middleware.py	2026-10-04 20:57:32
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/middleware.py	2026-10-04 20:57:32
+@@ -10,6 +10,9 @@
  
  
  def auth_middleware():

@@ -17,34 +17,39 @@ from this directory's shipped `base/`/`vuln/` pairs (one pair per repo),
 `claude-review.sh base "high"` per fixture — 8 headless reviews, all exit 0,
 all outputs parseable JSON arrays, kept in `runs/`. Raw outputs are the
 record; the table below is the scoring. Model: the `claude` CLI default on
-2026-10-04 (not pinned — a re-run limit). A first run used files differing
-cosmetically (unsorted imports, an extra unused `import os` in f3-vuln,
-`except Exception as exc:`); no finding in any run referenced those lines,
-and the run below re-measures the shipped bytes, so the fidelity question
-is settled by measurement, not by argument.
+2026-10-04 (not pinned — a re-run limit). Base and vuln files share one
+identical neutral header (`Eval fixture file. Not production code.`), so no
+diff line names the planted bug — recall below measures the reviewer, not a
+label. Two earlier runs used files differing cosmetically (import order,
+`except ... as exc`, then bug-naming headers); no finding in any run
+referenced those lines, and this final run measures the shipped bytes.
 
-FP definition (from `README.md`): a finding that does not describe the
-planted bug or its direct consequences. Restatements of the same bug and
-same-line consequences count as recall, not FP.
+FP definition (unified with `README.md`): FP = a finding on a line the patch
+did not add (strict-line rule). `*` = describes the planted bug but cites a
+context line (misaligned citation, semantically recall).
 
 | Fixture | Planted bug | Default: recall / FP / total | High: recall / FP / total |
 |---|---|---|---|
-| f1 auth bypass | `?debug=true` → admin | P0 conf 100 + demo / 0 / 2 | P0 conf 100 + demo / 0 / 2 |
-| f2 secret leak | `SECRET_KEY` logged | P0 conf 95 + demo / 0 / 3 | P0 conf 100 + demo / 0 / 4 |
-| f3 cmd injection | `shell=True` f-string | P0 conf 100 + demo / 0 / 4 | P0 conf 100 + demo / 0 / 3 |
-| f4 SSRF | fixed host → user URL | P0 conf 100 + demo / 0 / 6 | P0 conf 100 + demo / 0 / 4 |
+| f1 auth bypass | `?debug=true` → admin | P0 conf 100 + demo / 0 / 2 | P0 conf 100 + demo / 0 / 4 |
+| f2 secret leak | `SECRET_KEY` logged | P0 conf 100 + demo / 0 / 3 | P0 conf 98 + demo / 0 / 3 |
+| f3 cmd injection | `shell=True` f-string | P0 conf 100 + demo / 1 / 5 | P0 conf 100 + demo / 0 / 3 |
+| f4 SSRF | fixed host → user URL | P0 conf 98 + demo / 1 / 4 | P0 conf 98 + demo / 2* / 6 |
 
-Recall: 8/8 — every planted bug caught at P0, confidence 95–100, each with
-a concrete failure demo. No empty `failure` fields. FP: 0 in all 8 cells.
-Totals (verbosity) vary 2–6 with no effort pattern (default 15, high 13).
+Recall: 8/8 — every planted bug caught at P0, confidence 98–100, each with
+a concrete failure demo. No empty `failure` fields. FP (strict): default 2,
+high 2 (+1 annotated misaligned citation). Totals (verbosity) vary 2–6 with
+no effort pattern (default 14, high 16).
 
 ## Decision (change only on evidence)
 
-No measured recall gain and no false-positive difference on this set → the
+No measured recall gain and no false-positive advantage on this set → the
 `EFFORT="high"` rule in `SKILL.md` Step 2 / `references/risk-routing.md`
-stays. Two limits keep this honest rather than exonerating: a ceiling effect
-(default already catches these outright, so the set cannot separate the
-efforts) and n=4 on an unpinned model. The discriminating follow-up (subtler
-bugs: race, crypto misuse, multi-file auth flows) is queued in `backlog.md`
-— revisit there before touching the rule. The cost of a missed security bug
-still outweighs the extra tokens on security diffs.
+stays. Limits, stated plainly: a ceiling effect (default already catches
+these outright, so the set cannot separate the efforts); n=4 on an unpinned
+model; the baseline arm passes empty args (this repo's documented default —
+any level stickiness inside the built-in review skill is uncontrolled); and
+`low` was never run, so the guide's lowest-effort claim is untested here.
+The discriminating follow-up (subtler bugs: race, crypto misuse, multi-file
+auth flows) is queued in `backlog.md` — revisit there before touching the
+rule. The cost of a missed security bug still outweighs the extra tokens on
+security diffs.

@@ -1,4 +1,4 @@
-# Intentional eval fixture — plants SSRF. Not production code.
+# Eval fixture file. Not production code.
 import requests
 
 

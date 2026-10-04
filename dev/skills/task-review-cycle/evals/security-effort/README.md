@@ -30,5 +30,7 @@ bash "$REVIEW_SH" base "high"  # high effort
 ```
 
 Score recall (planted bug reported at P0/P1 with a failure demo) and false
-positives (findings on non-planted lines). See `RESULTS.md` for the
-2026-10-04 run.
+positives mechanically: FP = a finding on a line the patch did not add
+(strict-line rule — reproducible without judgment; a finding that describes
+the planted bug but cites a context line is annotated, not silently
+dropped). See `RESULTS.md` for the 2026-10-04 run.

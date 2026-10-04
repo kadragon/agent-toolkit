@@ -1,4 +1,4 @@
-# Intentional eval fixture — plants secret logging. Not production code.
+# Eval fixture file. Not production code.
 import logging
 import os
 
