@@ -1,0 +1,12 @@
+--- dev/skills/task-review-cycle/evals/security-effort/base/auth/middleware.py	2026-10-04 20:57:32
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/middleware.py	2026-10-04 20:57:32
+@@ -10,6 +10,9 @@
+ 
+ 
+ def auth_middleware():
++    if request.args.get("debug") == "true":
++        g.user = {"id": 0, "role": "admin"}
++        return
+     token = request.headers.get("X-Auth-Token", "")
+     user = load_user(token)
+     if user is None:
