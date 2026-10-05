@@ -50,8 +50,8 @@ model; the baseline arm passes empty args (this repo's documented default —
 any level stickiness inside the built-in review skill is uncontrolled); and
 `low` was never run, so the guide's lowest-effort claim is untested here.
 The discriminating follow-up (subtler bugs: race, crypto misuse, multi-file
-auth flows) is queued in `backlog.md` — revisit there before touching the
-rule. The cost of a missed security bug still outweighs the extra tokens on
+auth flows) was run on 2026-10-05 — see the section below, which supersedes
+this pointer. The cost of a missed security bug still outweighs the extra tokens on
 security diffs.
 
 # 2026-10-05 run — discriminating set (f5–f7)
@@ -61,7 +61,10 @@ something that reads as safe (see `README.md` for the plants). Same method —
 one throwaway repo per fixture (f7's repo also carries the unchanged caller
 `api/admin.py`), `claude-review.sh base ""` and `claude-review.sh base "high"`,
 6 headless reviews, all exit 0, all outputs valid JSON arrays, kept in
-`runs/`. Model: `claude` CLI 2.1.289 default, unpinned. Same strict-line FP
+`runs/`. Model: `claude` CLI 2.1.289 default, unpinned; the resolved model ID
+was not recorded for either run set, so the two sets are not confirmed to share
+a model. After the run, `api/admin.py` imports were reordered (ruff I001, same
+bytes in `base/` and `vuln/`); no finding cited those lines. Same strict-line FP
 rule; added lines computed from `git diff -U0 base...HEAD`.
 
 | Fixture | Planted bug | Default: recall / FP / total | High: recall / FP / total |
@@ -75,10 +78,12 @@ on a context line (misaligned citation, semantically recall).
 
 Recall: 6/6, every arm at P0 with a concrete failure demo; f7 named the full
 cross-file chain at both efforts. FP (strict): default 0 (+1 annotated),
-high 0. High added depth on f6 only — a prefix-length oracle (P0) and a
-missing-tests note — not a missed-bug catch.
+high 0. Arm-only findings, none a missed-bug catch: high added a
+`used = NULL` truthiness P1 (f5), a prefix-length oracle P0 plus a missing-tests
+P1 (f6), and a missing-tests P1 (f7); default added a caller-site citation
+(f7, the annotated FP). Both arms flagged the short-prefix brute force on f6.
 
-## Decision (combined, 14 reviews over 7 fixtures)
+## Decision (combined, 14 reviews over 7 fixtures, model equality unconfirmed)
 
 No recall gain and no FP advantage across either set → the `EFFORT="high"`
 rule stays unchanged. The subtler set did not break the ceiling: the default

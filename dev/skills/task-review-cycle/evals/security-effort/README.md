@@ -2,8 +2,9 @@
 
 Fixture set for the `EFFORT=high`-on-`SECURITY_HIT` decision
 (`../trigger-eval.json` holds trigger cases only; this directory holds the
-recall experiment). Each `.patch` is a minimal diff that plants exactly one
-known vulnerability in a clean file. Every fixture trips the `SECURITY_HIT`
+recall experiment). Each `.patch` is a minimal diff that plants one known
+vulnerability chain: f1–f6 in a single clean file, f7 across two changed
+files plus one unchanged caller the repo must also carry. Every fixture trips the `SECURITY_HIT`
 capture in `../../references/risk-routing.md`, so each one represents the
 diff class the `EFFORT="high"` rule fires on.
 
