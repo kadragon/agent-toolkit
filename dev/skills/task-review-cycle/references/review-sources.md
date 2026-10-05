@@ -6,7 +6,7 @@ engine-dependent branch left to document.
 
 ## Panel source launch
 
-Lite reuses the codex block below as its one, awaited reviewer (`risk-routing.md` → *Lite
+Lite reuses the codex block below as its one reviewer, run in the foreground (`risk-routing.md` → *Lite
 reviewer*); the rest of this section is the panel. Launch the panel sources (every non-lite route,
 per `risk-routing.md` → *Panel*) in the turn **before** the reviewer call, `run_in_background:
 true`, so they run while the reviewer holds the foreground for up to its 600s.

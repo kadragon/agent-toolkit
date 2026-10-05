@@ -102,7 +102,9 @@ The cycle skills (`dev:task-new`, `dev:task-next`) may spawn `explorer`, `implem
 in `--tree` / `--all` mode — `qa-verifier` by name. `harness-init` creates **no** agent roles (its
 Step 4b), so a role-less repo is the designed state of a freshly initialized harness, not a defect.
 This section is the canonical fallback for all three roles. On the default path the review cycle's
-single reviewer is the independent check, so no verifier role is spawned at all.
+single reviewer is the independent check, so no verifier role is spawned at all. Exception: on the
+lite path that reviewer is Codex, which reads no contract, so acceptance criteria are self-graded
+and disclosed (`dev:task-review-cycle` → `references/risk-routing.md`).
 
 **Roster check — before any agent spawn.** A role exists only if `.claude/agents/{role}.md` or
 `~/.claude/agents/{role}.md` is present. Never stop on an empty roster, and never create the role

@@ -19,7 +19,7 @@ disable-model-invocation: true
   (`dev:task-review-cycle`).
 
 Restate the Sprint Contract in the same invocation when the implementation was not yet verified
-against it; the reviewer grades it.
+against it; the reviewer grades it (on lite, the orchestrator grades it inline — not independent).
 
 Call the Skill tool with "dev:task-review-cycle", passing `--from task-review` **plus** this
 invocation's `args` unchanged — e.g. `--from task-review --auto`. Forward it on every path,

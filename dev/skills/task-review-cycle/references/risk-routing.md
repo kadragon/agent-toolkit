@@ -53,11 +53,18 @@ has no merge, so it runs the panel reclaim once at its stop point instead. An en
 preflight reports unavailable is skipped, not waited for.
 
 **Lite reviewer** — lite runs Codex as its one reviewer instead of the Claude reviewer, so a
-low-risk diff spends no Claude tokens on review. Launch the codex block from `review-sources.md`
-as one background task (Bash `run_in_background: true`) and wait for its completion notification:
-lite has no `ci-wait.sh` runway, so the findings must land before Step 3 or they never get applied.
-Never bound the wait with a `sleep`. Codex reviews the diff only and takes no Sprint Contract, so
-the orchestrator grades each acceptance criterion inline against the recorded evidence, reports
-each unmet one as a `contract` finding, and discloses that contract grading was not independent.
-Codex unavailable, non-zero, exit 75 (locked), or empty → record `Reviewers Skipped: <reason>` and
-run SKILL.md Step 2's Claude reviewer block instead.
+low-risk diff spends no Claude tokens on review (user-approved trade, 2026-10-05). Run the codex
+block from `review-sources.md` in the **foreground** with Bash `timeout: 600000`, the same shape as
+the Claude reviewer: lite has no `ci-wait.sh` runway, so the findings must land before Step 3, and
+a background task would hang the cycle on a lost completion notification (SKILL.md Step 2).
+`timings.log` puts every measured run at 43–228s, well inside the cap. That block always exits 0,
+so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}` or
+`"locked"` marker, no review text, the 600s timeout, or codex unavailable → record `Reviewers
+Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead.
+
+Codex reviews the diff only and takes no Sprint Contract, so on lite the orchestrator grades each
+acceptance criterion inline against the recorded evidence and reports each unmet one as a
+`contract` finding. Step 4's "re-run the reviewer once" after a fixed `contract` finding is the
+same inline re-grade. Both are self-grading by the author: disclose in the report that contract
+grading was not independent. Lite already requires a readily verified, low-risk diff; anything
+less routes hub, where the Claude reviewer grades the contract.

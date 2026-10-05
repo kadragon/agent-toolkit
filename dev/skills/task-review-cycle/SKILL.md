@@ -150,8 +150,8 @@ cycle once hung on a finished review. Same shape as `hamelsmu/claude-review-loop
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
-coverage, the contract). 600s is the Bash tool's ceiling, not a tuned budget, and this fallback is
-the one path where independence fails — the author grades their own code. Disclose it; required
+coverage, the contract). 600s is the Bash tool's ceiling, not a tuned budget; this fallback and lite's
+contract grading are where independence fails — the author grades their own code. Disclose it; required
 checks stay the only mechanical guard, and inline review cannot satisfy a policy that requires an
 independent reviewer.
 
@@ -240,7 +240,7 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel, non-zero exit, or the 600s Bash timeout | Record `Reviewers Skipped`, review inline, note it in the report |
+| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer, else review inline; report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` / `checks-never-registered` | Stop, ask the user |
