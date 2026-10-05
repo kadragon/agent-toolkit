@@ -1,0 +1,18 @@
+--- dev/skills/task-review-cycle/evals/security-effort/base/auth/invite.py	2026-10-05 15:33:02
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/invite.py	2026-10-05 15:33:02
+@@ -4,9 +4,12 @@
+ 
+ def redeem_invite(db: sqlite3.Connection, code: str, user_id: int) -> bool:
+     """Bind a one-time invite code to user_id. Returns False if unknown or spent."""
+-    cur = db.execute(
+-        "UPDATE invites SET used = 1, user_id = ? WHERE code = ? AND used = 0",
++    row = db.execute("SELECT used FROM invites WHERE code = ?", (code,)).fetchone()
++    if row is None or row[0]:
++        return False
++    db.execute(
++        "UPDATE invites SET used = 1, user_id = ? WHERE code = ?",
+         (user_id, code),
+     )
+     db.commit()
+-    return cur.rowcount == 1
++    return True

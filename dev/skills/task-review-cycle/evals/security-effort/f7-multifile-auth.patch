@@ -1,0 +1,26 @@
+--- dev/skills/task-review-cycle/evals/security-effort/base/auth/decorators.py	2026-10-05 15:33:02
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/decorators.py	2026-10-05 15:33:02
+@@ -4,11 +4,12 @@
+ from flask import abort, g
+ 
+ 
+-def require_role(role):
++def require_role(roles):
++    """roles: the role names allowed to call the view."""
+     def deco(fn):
+         @wraps(fn)
+         def wrapper(*args, **kwargs):
+-            if g.user["role"] != role:
++            if g.user["role"] not in roles:
+                 abort(403)
+             return fn(*args, **kwargs)
+         return wrapper
+--- dev/skills/task-review-cycle/evals/security-effort/base/auth/session.py	2026-10-05 15:33:02
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/auth/session.py	2026-10-05 15:33:02
+@@ -13,4 +13,5 @@
+     if found is None:
+         abort(401)
+     role, verified = found
+-    g.user = {"role": role, "verified": verified}
++    # Unverified accounts carry no role until email confirmation.
++    g.user = {"role": role if verified else "", "verified": verified}
