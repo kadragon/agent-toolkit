@@ -142,3 +142,27 @@ with olefile.OleFileIO("file.hwp") as ole:
 ```
 
 This is best-effort text extraction only — no formatting/table structure, and inline control characters (footnotes, field markers) need extra filtering for clean output. For anything beyond a quick text preview, prefer `convert_hwp.ps1` (Hancom COM) when available.
+
+## HWP → HWPX conversion
+
+SKILL.md Critical Rule 1 — commands:
+
+```powershell
+# Resolve SKILL_DIR at runtime (run from any directory)
+$SKILL_DIR = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Or hard-code: $SKILL_DIR = "$env:USERPROFILE\.claude\plugins\cache\kadragon\prod\<ver>\skills\hwpx"
+
+# Single file conversion (exits non-zero + stderr on failure; original preserved)
+powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp"
+# Output: absolute path to the new .hwpx file
+
+# Batch: convert all .hwp in current directory
+Get-ChildItem -Filter "*.hwp" | ForEach-Object {
+    powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path $_.FullName
+}
+
+# Add -Force to overwrite an existing same-name .hwpx (default: abort if target exists)
+powershell -ExecutionPolicy Bypass -File "$SKILL_DIR\scripts\convert_hwp.ps1" -Path "file.hwp" -Force
+```
+> ⚠️ `forceopen:true` bypasses Hancom's macro security prompt. Only call on trusted input files.
+> ⚠️ `forceopen:true` is a mode string passed to the COM method `hwp.Open(path, "HWP", "forceopen:true")` inside `convert_hwp.ps1` — it is **not** a `Hwp.exe` command-line flag. `Start-Process ... -ArgumentList "/forceopen", path` is silently ignored; always go through `convert_hwp.ps1`, never invoke `Hwp.exe` directly with it.

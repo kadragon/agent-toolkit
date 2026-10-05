@@ -205,6 +205,7 @@ Held in first run of first paragraph:
 - 10pt font: height=1000
 - 12pt font: height=1200
 - Default margin (left/right): 8504 (≈ 30mm)
+- Body width (A4 minus left/right margins): 42520 (≈ 150mm)
 - Default margin (top): 5668 (≈ 20mm)
 - Default margin (bottom): 4252 (≈ 15mm)
 
