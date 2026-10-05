@@ -5,7 +5,7 @@
 | Layer | Technology |
 |-------|-----------|
 | Plugin format | Claude Code plugin (`.claude-plugin/plugin.json`) |
-| Languages | Bash (hooks, scripts), Python 3.x (data/analysis scripts), TypeScript (`pr-study` function-hook mod) |
+| Languages | Bash (hooks, scripts), Python 3.x (data/analysis scripts) |
 | Distribution | GitHub marketplace via `kadragon/agent-toolkit` |
 | CI | GitHub Actions |
 | Secondary target | Codex (`.codex-plugin/plugin.json`, `.agents/plugins/`) |
@@ -24,13 +24,6 @@ dev/
       references/              # reference docs for skill system prompt
       examples/
   commands/                    # slash commands
-
-pr-study/                      # Claude Code-only function-hook mod (no .codex-plugin)
-  .claude-plugin/plugin.json   # "types" names the $.state contract
-  hooks/hooks.json             # { "modules": ["./register.tsx"] }
-  hooks/register.tsx           # TypeScript hooks module
-  types/index.d.ts             # PluginState contract
-  tests/*.test.ts              # run: claude plugin test pr-study
 
 prod/
   .claude-plugin/plugin.json
