@@ -43,6 +43,8 @@ CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
 codex_status=0
 if [[ "$CODEX_AVAILABLE" == "true" ]]; then
   bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" || codex_status=$?
+else
+  echo '{"codex_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
 if [ "$codex_status" -eq 75 ]; then
   echo '{"codex_review":"locked"}' >&2      # another cycle holds the workspace slot — skipped, not failed
@@ -52,5 +54,6 @@ fi
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
+`unavailable` means preflight found no codex: the block never ran a review.
 `codex-review.sh` and `agy-review.sh` both persist a result; a run still going when the cycle
 moves on is reclaimed before merge per `late-source-reclaim.md`.
