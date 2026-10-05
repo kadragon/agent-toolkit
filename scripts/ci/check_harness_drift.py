@@ -224,6 +224,11 @@ ANCHOR_PREFIX_SEP_RE = re.compile(r"^\s*[:(—]")
 # internal layout.
 PATH_QUALIFIER_RE = re.compile(r"([A-Za-z0-9._-]+)/(?:[A-Za-z0-9._-]+/)*$")
 # Known extensions only: a permissive `\.\w+` also matches prose like "e.g".
+# Target-repo root files skills cite bare; never a bundled sibling, so an unresolved bare
+# mention of one inside a references/ doc is not drift.
+TARGET_REPO_ROOT_FILES = frozenset(
+    {"AGENTS.md", "CLAUDE.md", "README.md", "CHANGELOG.md", "backlog.md", "tasks.md"}
+)
 FILE_MENTION_RE = re.compile(r"([A-Za-z0-9._-]+\.(?:md|sh|py|json|ya?ml|toml|txt))")
 SIGNAL_REF_RE = re.compile(r"\bSignals?\s+(\d+)(?:\s+and\s+(\d+))?\b")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
@@ -874,6 +879,24 @@ def resolve_line_target(
             return (
                 None,
                 f"references/{named} is not a bundled file (deleted, renamed, or a typo)",
+                mention.end(),
+            )
+        # Inside a `references/` doc a bare name cited right before its ref is a sibling
+        # doc, so the same fail-closed rule applies when no bundled file carries that
+        # basename at all. Skipped: an ambiguous basename (`SKILL.md`, PR #216), a
+        # well-known target-repo root file, and a mention not adjacent to the ref — that
+        # one belongs to unrelated prose (`backlog.md` … §2 above).
+        if (
+            qualifier is None
+            and source.parent.name == "references"
+            and named not in basename_index
+            and named not in TARGET_REPO_ROOT_FILES
+            and ARROW_GAP_RE.match(line[mention.end() : ref_start])
+        ):
+            return (
+                None,
+                f"{named} is not a bundled sibling (deleted, renamed, or a typo); "
+                "path-qualify a target-repo file, e.g. `docs/x.md`",
                 mention.end(),
             )
         return None, None, mention.end()

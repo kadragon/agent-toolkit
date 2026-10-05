@@ -432,6 +432,40 @@ def main() -> int:
             run_refs("`dev:beta` -> `SKILL.md` §1 covers it", alpha, index) == [],
         )
 
+        print("\nFail closed on an unresolved bare sibling name inside references/")
+        # PR #300 rewrote `references/x.md` pointers in references docs to bare `x.md`,
+        # which bypassed the `references/`-prefix fail-closed branch above.
+        bare = run_refs("See `gone.md` §2 for detail.", notes, index)
+        check("bare unresolved §-ref in a references doc is reported", bare != [], f"got {bare}")
+        arrow = run_refs("See `gone.md` → *Some Section*.", notes, index)
+        check("bare unresolved arrow-ref in a references doc is reported", arrow != [], f"got {arrow}")
+        check(
+            "path-qualified target-repo file stays silent",
+            run_refs("`docs/workflows.md` §2 and `./backlog.md` §3", notes, index) == [],
+        )
+        check(
+            "bare unresolved name in a SKILL.md stays silent (target-repo file)",
+            run_refs("Record it in `backlog.md` §2.", alpha, index) == [],
+        )
+        # PR #301 review: the fail-closed rule must not fire on unrelated prose.
+        check(
+            "a non-adjacent bare name before an arrow label stays silent",
+            run_refs("Update `gone.md` and set status → **done**", notes, index) == [],
+        )
+        check(
+            "a non-adjacent bare name before a local §N stays silent",
+            run_refs("Append to `gone.md` using the format in §2 above.", notes, index) == [],
+        )
+        check(
+            "a well-known target-repo root file stays silent",
+            run_refs('Add a row to AGENTS.md § "Docs Index" and CLAUDE.md → *Git*.', notes, index)
+            == [],
+        )
+        check(
+            "an ambiguous bare `SKILL.md` in a references doc stays skipped (PR #216)",
+            run_refs('See SKILL.md § "No Such Section".', notes, index) == [],
+        )
+
     print("\nBundled-script references resolve against the owning skill")
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

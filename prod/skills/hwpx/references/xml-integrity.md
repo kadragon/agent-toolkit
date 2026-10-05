@@ -92,7 +92,7 @@ xml_str = re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', '', xml_str, flags=r
 
 HWP auto-recalculates linesegarray on open. Documents with no `<hp:linesegarray>` also valid — removal is no-op.
 
-## Workflow 2 (unpack → Edit → pack) caution
+## SKILL.md Workflow 2 (unpack → Edit → pack) caution
 
 `unpack.py` extracts raw bytes as-is (no lxml re-serialization). Editing must be direct text modification:
 

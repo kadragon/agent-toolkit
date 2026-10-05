@@ -17,10 +17,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #300 — Re-qualify context-pointer WARNs (2026-10-05)
+### PR #301 — references/ bare-name fail-closed (2026-10-05)
 
-- [ ] [constraint] check_harness_drift `resolve_line_target` returns no problem for an unresolved bare sibling `*.md` name inside `references/*.md`, so the `references/x.md` → `x.md` rewrites lost the fail-closed rename check (`references/` prefix only) — make an unresolved bare sibling name in a references/ doc an error (source: code-review) — scripts/ci/check_harness_drift.py:868
-- [ ] [doc] hwpx heading `## Workflow 2 (unpack → Edit → pack) caution` is still a SKILL.md-relative pointer; `check_context_pointers` skips `#` lines — qualify as SKILL.md Workflow 2 if no anchor depends on it (source: code-review) — prod/skills/hwpx/references/xml-integrity.md:95
+- [ ] [constraint] A bare `*.md` in a references/ doc resolves against the global basename index, not `source.parent` first-and-only: a deleted sibling whose basename ships in exactly one other skill is graded against that skill's anchors instead of failing closed (pre-existing cross-skill fallback) (source: code-review) — scripts/ci/check_harness_drift.py:842
 
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
