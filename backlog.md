@@ -17,10 +17,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #301 — references/ bare-name fail-closed (2026-10-05)
-
-- [ ] [constraint] A bare `*.md` in a references/ doc resolves against the global basename index, not `source.parent` first-and-only: a deleted sibling whose basename ships in exactly one other skill is graded against that skill's anchors instead of failing closed (pre-existing cross-skill fallback) (source: code-review) — scripts/ci/check_harness_drift.py:842
-
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
