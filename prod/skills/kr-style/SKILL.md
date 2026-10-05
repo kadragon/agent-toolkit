@@ -1,13 +1,12 @@
 ---
 name: kr-style
 description: >-
-  Rewrite Korean prose that reads like a translation into Korean that reads like
-  it was written in Korean — drops the English syntax, inflection, and
-  preposition transfers, then verifies with a script that exits 0. Use before
-  handing the user any Korean prose longer than a few paragraphs. NOT for
-  typo/spacing correction, NOT for rendering one language into another, NOT for
-  changing what the text claims.
-version: 1.0.0
+  Rewrite Korean prose that reads like a translation so it reads as written in
+  Korean — drops English syntax, inflection, and preposition transfers, then
+  verifies with a script that exits 0. Use before handing over Korean prose
+  longer than a few paragraphs. NOT for typo/spacing fixes, translation between
+  languages, or changing what the text claims.
+version: 1.0.1
 allowed-tools: Bash Read Edit Write Grep
 ---
 
