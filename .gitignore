@@ -6,9 +6,6 @@ __pycache__/
 .claude/worktrees/
 .worktrees/
 # .claude/agents/*.md are tracked — validate-harness.sh §11 checks them.
-# persona-actor.md stays untracked: it is a spine-exempt variant of
-# prod/agents/persona-actor.md (see backlog.md).
-.claude/agents/persona-actor.md
 .security-scan/
 /cache/
 

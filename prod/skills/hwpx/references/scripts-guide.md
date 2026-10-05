@@ -1,6 +1,116 @@
 # Script Usage Guide
 
-Utility scripts in `scripts/`. See SKILL.md "Script summary" table for one-line descriptions.
+Utility scripts in `scripts/`.
+
+## Script summary
+
+| Script | Purpose |
+|----------|------|
+| `scripts/build.py build` | **Core** — template + XML → HWPX assembly (includes `--update-preview`) |
+| `scripts/build.py analyze` | HWPX deep analysis (blueprint for reference-based generation) |
+| `scripts/build.py next-id` | look up next `hp:p` ID — for collision-free new paragraph insertion |
+| `scripts/office.py unpack` | HWPX → directory (raw bytes + `.hwpx_pack_order` manifest) |
+| `scripts/office.py pack` | directory → HWPX (restores entry order/compression from manifest, mimetype first) |
+| `scripts/validate.py validate` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate `hp:p` ID/duplicate `hp:tbl` id + charPr font-size check. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors; `--min-pt N` adjusts readable-size threshold (default 5pt) |
+| `scripts/validate.py page-guard` | page-drift risk check vs. reference (restore-mode gate / edit-mode reference) |
+| `scripts/text.py extract` | HWPX text extraction — plain or markdown, optional table inclusion |
+| `scripts/text.py patch` | safe text replacement — str.replace + lineseg strip + ID verification. `--after anchor` for context-limited replacement |
+| `scripts/table.py dump` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; `--cell col,row` for verbose cell inspector (paraPr/charPr/runs/linesegarray); `--style-map` for paraPr/charPr/pt grid per cell |
+| `scripts/table.py locate` | byte-span search for text-containing elements (`hp:tbl`/`hp:tr`/`hp:p`/`hp:tc`) — find table/paragraph positions in single-line section0.xml (extract with `--extract-dir`); accepts `.hwpx` or unpacked directory |
+| `scripts/table.py delete` | delete table rows — remove `<hp:tr>` + auto-fix rowCnt/rowSpan/rowAddr (`--list` to view rows) |
+| `scripts/table.py insert` | insert table row — insert `<hp:tr>` + auto-fix rowCnt/rowAddr/rowSpan (`--grow` to extend group-end rowSpan) |
+| `scripts/table.py replace` | replace table cell content — replace paragraphs of target `<hp:tc>`'s direct `<hp:subList>` + lineseg strip + ID collision check; accepts `.hwpx` or unpacked directory (in-place); `--run` for multi-charPr runs; `--preserve-style` to reuse existing charPr/paraPr (with optional `--charpr` override); `--append-para PARAPR CHARPR TEXT` / `--match-style N TEXT` to **add** a paragraph keeping existing ones (공문 "밑에 한 줄 추가") |
+| `scripts/table.py toggle-check` | toggle a checkbox `[  ]` ↔ `[√]` next to a `--label` in a cell — flips only the box preceding the label, leaves sibling boxes (KR 정부/별지 서식 다중 체크박스) untouched; reversible |
+| `scripts/table.py fill` | bulk-fill multiple cells from JSON data (`{table_id: {col,row: text}}`) using preserve-style logic — WARN on unreadable font sizes, collects all warnings before summary |
+| `scripts/table.py strip-lineseg` | remove `<hp:linesegarray>` (`--inplace` or `--output` required) — prevents both the "document corrupted" warning and the silent load failure (blank `빈 문서`) after text edits |
+| `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |
+| `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
+
+> ⚠️ `hp:tbl id` collisions — confirm which table `--table-id` resolves to before trusting it: SKILL.md Workflow 2.
+
+## build.py build usage
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+# 빈 문서 (base 템플릿)
+python3 "$SKILL_DIR/scripts/build.py" build --output result.hwpx
+
+# 템플릿 사용
+python3 "$SKILL_DIR/scripts/build.py" build --template gonmun --output result.hwpx
+
+# 커스텀 section0.xml 오버라이드
+python3 "$SKILL_DIR/scripts/build.py" build --template gonmun --section my_section0.xml --output result.hwpx
+
+# header도 오버라이드
+python3 "$SKILL_DIR/scripts/build.py" build --header my_header.xml --section my_section0.xml --output result.hwpx
+
+# 메타데이터 설정
+python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
+  --title "제목" --creator "작성자" --output result.hwpx
+```
+
+### Practical pattern: write section0.xml inline → build
+
+```bash
+set -euo pipefail
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+# 1. section0.xml을 임시파일로 작성 (per-session unique dir — parallel-safe)
+HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
+trap 'rm -rf "$HWPX_WORK"' EXIT  # error-path cleanup: fires on any set -e trigger or normal exit
+SECTION=$(mktemp "$HWPX_WORK/section0_XXXXXX")  # trailing X's only — a .xml suffix after the X's makes BSD/macOS mktemp silently create a literal, non-random name (exit 0), so the 2nd call collides with "File exists"
+cat > "$SECTION" << 'XMLEOF'
+<?xml version='1.0' encoding='UTF-8'?>
+<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
+        xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">
+  <!-- secPr 포함 첫 문단 (base/section0.xml에서 복사) -->
+  <!-- ... -->
+  <hp:p id="1000000002" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">
+    <hp:run charPrIDRef="0">
+      <hp:t>본문 내용</hp:t>
+    </hp:run>
+  </hp:p>
+  <!-- 새 문단은 <hp:linesegarray> 없이 작성 — Hancom이 열 때 자동 계산.
+       템플릿 오버레이 문단을 복사해 온 경우에만 strip-lineseg 필요 (SKILL.md Workflow 1 flow step 2 참고) -->
+</hs:sec>
+XMLEOF
+
+# 2. 빌드
+python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result.hwpx
+
+# 3. 정리 (trap이 처리; 명시적 제거도 가능)
+rm -rf "$HWPX_WORK"
+# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 정리했습니다."
+```
+
+## Batch text extraction
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+# Batch extraction from folder list (bash)
+for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
+  echo "=== $f ==="
+  python3 "$SKILL_DIR/scripts/text.py" extract "$f" --format markdown
+done
+
+# Recursive search + save results to files
+find . -name "*.hwpx" | while IFS= read -r f; do
+  out="${f%.hwpx}.txt"
+  python3 "$SKILL_DIR/scripts/text.py" extract "$f" > "$out"
+  echo "→ $out"
+done
+```
+
+**Windows PowerShell** (`$SKILL_DIR` is a bash variable — not usable in PowerShell directly. Replace with absolute or relative path):
+```powershell
+$skillScripts = "C:\path\to\skills\hwpx\scripts"  # Replace with absolute path to SKILL_DIR\scripts
+Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
+    Write-Host "=== $($_.FullName) ==="
+    python "$skillScripts\text.py" extract $_.FullName --format markdown
+}
+```
 
 ## Safe text replacement (text.py patch)
 

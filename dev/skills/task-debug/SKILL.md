@@ -1,13 +1,13 @@
 ---
 name: task-debug
 description: >-
-  Diagnosis loop for a hard bug or a performance regression — build a tight, red-capable
-  reproduction command before forming any theory, then rank falsifiable hypotheses,
-  instrument one variable at a time, and land the regression test. Use when something
-  throws, crashes, hangs, corrupts output, or got slow and the cause is unknown — "debug
-  this", "diagnose this", "why is it failing". NOT for a defect whose cause is already
-  identified — write the fix and its test directly.
-version: 1.0.0
+  Diagnosis loop for a hard bug or performance regression — build a red-capable
+  reproduction command before any theory, rank falsifiable hypotheses, instrument
+  one variable at a time, land the regression test. Use for "debug this",
+  "diagnose this", "why is it failing" — something throws, crashes, hangs,
+  corrupts output, or got slow with an unknown cause. NOT when the cause is
+  already identified — fix and test directly.
+version: 1.0.1
 ---
 
 # Debug

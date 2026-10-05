@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Skill context diet: trimmed 5 descriptions, split hwpx and repo-quiz SKILL.md under 250 lines (dev v4.10.13, prod v3.2.1) (2026-10-05)
 - [done] pr-study: plugin removed (2026-10-05)
 - [done] task-review-cycle: subtler security-effort fixtures still show no high-effort gain (dev v4.10.12) (2026-10-05)
 - [done] task-review-cycle: codex block emits an `unavailable` marker when preflight finds no codex (dev v4.10.11) (2026-10-05)

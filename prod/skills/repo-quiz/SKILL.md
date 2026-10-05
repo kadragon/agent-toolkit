@@ -5,7 +5,7 @@ description: >-
   conventions, data flow, gotchas — plus the wrong-answer log and XP/streak
   progress persisted in `.repo-quiz/`. NOT for writing docs or an onboarding
   guide, NOT for general programming trivia.
-version: 1.1.2
+version: 1.1.3
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 
@@ -35,24 +35,7 @@ exception is the human-readable text you pass to `--title` and `--note`: it land
 identifiers inside it verbatim). The illustrative examples below are written in Korean for this
 reason; mirror that.
 
-## Credits
-
-Design in this skill borrows from, and credits:
-
-- **[CodebaseQA](https://github.com/context-labs/codebase-qa)** — the multi-type question
-  bank (bug hunt, code trace, cloze, free recall, "why") and the gamification-plus-retrieval
-  framing generally.
-- **[open-spaced-repetition/py-fsrs](https://github.com/open-spaced-repetition/py-fsrs)** —
-  the FSRS scheduler (Free Spaced Repetition Scheduler), used in place of hand-rolled SM-2
-  when the package is installed.
-- **Duolingo's gamification case study** — streak-freeze, type-weighted XP, and tiered
-  achievements as motivation mechanics.
-- **[Understand-Anything](https://github.com/understand-anything/understand-anything)** —
-  dependency-ordered codebase tours (teach boundaries/entry points before their dependents)
-  and persona-scaled depth (junior/mid/senior).
-- **Retrieval-practice literature** (e.g. Roediger & Karpicke on the testing effect) — free
-  recall produces stronger retention than recognition (multiple-choice), which is why
-  free-recall questions are weighted higher and preferred as a concept matures.
+Design credits (CodebaseQA, py-fsrs, Duolingo, Understand-Anything, retrieval-practice literature): `references/credits.md`.
 
 ## The state manager does the bookkeeping
 
@@ -66,39 +49,15 @@ Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
 python3 "$Q" --repo <repo-root> <subcommand> [flags]
 ```
 
-Use **`python3`**, not bare `python` — many systems (current macOS included) ship only
-`python3`, and `python` there exits "command not found" before the script ever runs. Also
-note that **each tool call runs in a fresh shell**, so a `Q=...` assignment does not persist
-across blocks: re-capture `Q` (or inline the absolute path) at the top of *every* shell block
-that calls the script — the `python3 "$Q" …` lines below assume `Q` is defined in that same
-block. This is the repo's capture-before-use convention.
+Use **`python3`**, not bare `python` (many systems, current macOS included, ship only
+`python3`). **Each tool call runs in a fresh shell**: re-capture `Q` at the top of *every*
+shell block that calls the script (capture-before-use).
 
-Never do the date math or scheduler arithmetic yourself — call the script. Its `--test` flag
-self-checks the logic if you ever suspect it's misbehaving. FSRS is used automatically when
-`py-fsrs` is importable; if it isn't (or a review call errors for any reason), the script
-falls back to SM-2 for that review — scheduling still works, just less optimally. When
-`py-fsrs` is missing entirely, surface the one-time install offer described in *Running a
-round → step 1* so the user can opt into the better scheduler.
+Never do the date math or scheduler arithmetic yourself — call the script (`--test`
+self-checks it). FSRS is used when `py-fsrs` is importable; otherwise (or on a review error)
+the script falls back to SM-2 for that review.
 
-| Command | Use |
-|---------|-----|
-| `init` | First run: creates `.repo-quiz/` and adds it to `.gitignore`. Idempotent. |
-| `status` | Dashboard JSON: xp, level, xp_to_next, streak, freezes, total_concepts, due_count, due[], `config` (persona, daily_goal), `achievements`, `scheduler` (`fsrs`\|`sm2`), `fsrs_available`, `fsrs_notice_seen`. |
-| `due --count N` | Concepts due for review today, most-overdue first (JSON). |
-| `record --concept SLUG --correct true\|false [--grade again\|hard\|good\|easy] [--type TYPE] [--title T] [--note N] [--session ID]` | Apply one answer: schedule + XP + streak + achievements + logs. Prints the new schedule/score. |
-| `config [--get] [--set-persona junior\|mid\|senior] [--set-daily-goal N] [--seen-fsrs-notice]` | Read or update persona/daily goal, or mark the one-time FSRS install notice as shown. With no flags, prints current config. |
-
-`--type` is the question-type slug (see below); defaults to `mc` if omitted. `--grade`
-overrides the correct/wrong → schedule-quality mapping for self-graded free-recall answers
-(the user picks 1–4 after seeing the revealed answer); omit it for auto-graded types
-(MC/fill-blank), where correct → `good` and wrong → `again` are inferred automatically.
-
-State written under `<repo-root>/.repo-quiz/` (gitignored — it's the user's personal
-progress, not a team artifact):
-- `progress.json` — xp, level, streak, freezes, achievements, config, and per-concept
-  schedule (FSRS fields or SM-2 `ef`/`interval`/`reps`, whichever scheduler produced it)
-- `history.jsonl` — append-only log, one line per question asked (includes `type`, `grade`)
-- `mistakes.md` — human-readable wrong-answer notes, so the user can skim what tripped them up
+Subcommands: `init` (first run, idempotent) · `status` (dashboard JSON incl. due[], config, achievements, scheduler, fsrs flags) · `due --count N` · `record --concept SLUG --correct true|false [--grade again|hard|good|easy] [--type TYPE] [--title T] [--note N] [--session ID]` · `config [--get] [--set-persona junior|mid|senior] [--set-daily-goal N] [--seen-fsrs-notice]`. Full table, flag semantics, state files under `.repo-quiz/` (gitignored, personal progress), recording examples, difficulty, and gamification rules: `references/state-reference.md`.
 
 ### Concepts and slugs
 
@@ -129,10 +88,8 @@ effect"). Every type still requires the grounding rule below — no exceptions.
 | `free-recall` | No options offered — ask the open question, let the user answer unaided, *then* reveal the grounded answer and have the user self-rate 1–4 (feeds `--grade again|hard|good|easy`). | Concepts the user has already gotten right at least once via a recognition-based type — this is the highest-demand type, so prefer it as a concept matures. |
 | `why` | Elaborative: "why is it this way?" — asks for the *reasoning*, not just the fact. | Design decisions and invariants (e.g. why plugin.json bumps both `.claude-plugin` and `.codex-plugin`) — pairs well with senior-persona depth. |
 
-`record --type <slug>` writes the type into `history.jsonl`; if omitted, it defaults to `mc`.
-Grading feeds directly into both the schedule and XP (see below), so pick the type that
-actually matches what you asked — don't label a free-recall question `mc` just because it's
-convenient.
+`record --type <slug>` (default `mc`) feeds both the schedule and XP, so pass the type you
+actually asked — never label a free-recall question `mc` for convenience.
 
 ## Running a round
 
@@ -150,28 +107,7 @@ achievements, and — crucially — which concepts are **due** for review. Defau
 "quiz me on 3 things") and honor an explicit `config --set-daily-goal N` if the user wants a
 different standing default.
 
-**Offer the FSRS upgrade once.** `status` also reports `fsrs_available`. If it's `false` and
-`fsrs_notice_seen` is `false`, the script is running on the SM-2 fallback — tell the user, one
-time, that installing FSRS gives measurably better scheduling (fewer reviews for the same
-retention) and offer to install it before the round:
-
-> 📈 지금은 SM-2 스케줄러로 진행 중입니다. FSRS(`py-fsrs`)를 설치하면 같은 암기 효과에
-> 리뷰 횟수가 줄어듭니다. 설치할까요? — `python3 -m pip install --user fsrs`
-
-Install into **the same interpreter that runs the quiz** so `import fsrs` will resolve —
-derive it from the `python`/`python3` you invoke `$Q` with (e.g. `<that-python> -m pip install
---user fsrs`; on an externally-managed environment add `--break-system-packages`, or use the
-user's venv/`uv pip install fsrs`). This needs the user's go-ahead — installing a package is
-their call, so ask, don't run it silently. After they install, no code change is needed: the
-next `status`/`record` picks FSRS up automatically. Whether they install or decline, mark the
-notice so you don't nag next time, then proceed with the round either way:
-
-```sh
-Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
-python3 "$Q" --repo <repo-root> config --seen-fsrs-notice
-```
-
-If `fsrs_available` is already `true`, skip all of this — FSRS is in use.
+**Offer the FSRS upgrade once.** If `status` shows `fsrs_available: false` and `fsrs_notice_seen: false`, follow `references/fsrs-offer.md` — tell the user once, ask before installing (installing is their call), then `config --seen-fsrs-notice` whether they install or decline. If `fsrs_available` is `true`, skip it.
 
 ### 2. Build the whole round up front — all N questions before asking any
 
@@ -223,9 +159,8 @@ If the user hasn't set a persona and their answers suggest a mismatch (breezing 
 junior-level questions, or struggling badly with senior-level ones), suggest
 `config --set-persona <level>` rather than silently guessing every round.
 
-Hold the drafted set in your working context (a short scratch list of stem / type / options /
-correct / concept-slug per question is enough) — you don't persist it; `record` in step 3
-captures each result as it's answered.
+Hold the drafted set as a scratch list (stem / type / options / correct / concept-slug) — don't
+persist it; `record` in step 3 captures each result as it's answered.
 
 ### 3. Ask the pre-built questions, one at a time
 
@@ -244,8 +179,7 @@ self-rate 1–4 (map 1→again, 2→hard, 3→good, 4→easy). Keep the stem sho
   D  아무것도 — CI가 자동으로 올려줌
 ```
 
-After each answer, immediately record it — don't batch, so a mid-round interruption still
-saves progress:
+After each answer, record it immediately — don't batch, so an interruption still saves progress:
 
 ```sh
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
@@ -254,31 +188,11 @@ python3 "$Q" --repo <repo-root> record \
   --title "dev 수정 시 버전 범프" --session <round-id>
 ```
 
-On a **wrong** answer, pass a `--note` that will land in `mistakes.md`: state the correct
-answer, *why*, and a file pointer — that note is what the user rereads later, so make it
-teach.
-
-```sh
-Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
-python3 "$Q" --repo <repo-root> record \
-  --concept version-bump-rule --correct false --type mc \
-  --title "dev 수정 시 버전 범프" \
-  --note "정답: **B**. dev/ 아래 파일을 수정하면 dev/.claude-plugin/plugin.json 과 dev/.codex-plugin/plugin.json 버전을 **둘 다** 올려야 합니다(동기화 유지). AGENTS.md 'Golden Principles' #1 참고 — 안 그러면 CI가 머지를 막습니다." \
-  --session <round-id>
-```
-
-For a self-graded free-recall question, pass the user's self-rating as `--grade` (still pass
-`--correct` too — `true` unless the user says they got it flatly wrong):
-
-```sh
-Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
-python3 "$Q" --repo <repo-root> record \
-  --concept version-bump-rule --correct true --type free-recall --grade hard \
-  --title "dev 수정 시 버전 범프" --session <round-id>
-```
-
-Use one `--session` id for the whole round (a short label like `2026-07-16a`) so the history
-groups cleanly.
+On a **wrong** answer, pass a `--note` (lands in `mistakes.md`): the correct answer, *why*, and a
+file pointer — that note is what the user rereads, so make it teach. For self-graded free-recall,
+pass the user's 1–4 rating as `--grade` and still pass `--correct` (`true` unless they say they got
+it flatly wrong). Examples of both: `references/state-reference.md` § "Recording examples". Use
+one `--session` id for the whole round (e.g. `2026-07-16a`) so the history groups cleanly.
 
 #### Give a real explanation after every answer — right *or* wrong
 
@@ -299,17 +213,9 @@ than something this repo settles, mark it as such ("Broader context: …") so th
 repo-ground-truth from your added color — and if you're not sure a claim is current, say so
 rather than asserting it. One good pointer beats a paragraph of filler; don't pad.
 
-Example spoken follow-up (correct answer):
+Example spoken follow-up: `references/state-reference.md` § "Explanation example".
 
-> ✅ 정답 — **B**. `plugin.json` 두 파일이 함께 올라가는 이유는, 마켓플레이스가 하나의
-> 릴리스로 스킬을 Claude Code *와* Codex 양쪽에 배포하기 때문입니다. 버전이 어긋나면 둘이
-> desync되죠 (`AGENTS.md` Golden Principle #1; CI의 `harness-check.yml`가 강제).
-> **Broader context:** 이건 "릴리스 버전의 단일 진실 공급원(single source of truth)"이라는
-> 표준 관행입니다 — 배포 타깃이 여럿인 모노레포(npm workspaces, Cargo workspaces)도 같은
-> 부류의 버그를 겪고, 그래서 Changesets 같은 도구가 형제 버전을 lockstep으로 유지합니다.
-> 나중에 자동 버전 범프를 붙일 일이 있으면 한 번 볼 만합니다.
-
-Deliver this out loud between questions; the `--note` above is the *persisted* short form for
+Deliver this out loud between questions; the wrong-answer `--note` is the *persisted* short form for
 `mistakes.md`, the spoken version is the fuller teach. If the extra tip is genuinely useful to
 reread later, fold a one-line version of it into `--note` too.
 
@@ -328,28 +234,6 @@ user sees it:
 
 Keep it encouraging and specific. Missing a question is the mechanism, not a failure — it's
 what schedules the concept to come back until it sticks.
-
-## Difficulty
-
-Let it ride on the schedule rather than a manual dial. A concept the user keeps getting right
-reappears less often (its interval grows under FSRS or SM-2 alike); a missed one comes back
-soon. If the user explicitly wants harder questions, go deeper — ask *why* a design choice was
-made or how two parts interact, and prefer `why`/free-recall — but keep every answer checkable
-against the code. `config.persona` (see above) is the standing version of "make it harder":
-set it once instead of re-asking every round.
-
-## Gamification
-
-- **Type-weighted XP.** Correct answers pay more for higher-demand types, so grinding easy MC
-  yields little: `mc`=1.0×, `fill-blank`=1.2×, `code-trace`/`bug-hunt`/`why`=1.5×,
-  `free-recall`=2.0× (× 10 XP, rounded). Wrong answers always pay a flat 3 XP
-  (participation credit). Level = 1 + xp // 100. (Duolingo gamification case study.)
-- **Streak-freeze.** The user starts with 1 freeze. Missing exactly one day auto-consumes a
-  freeze and preserves the streak instead of resetting it; missing more than one day resets it
-  regardless. `status.freezes` shows the remaining count.
-- **Achievements.** Modest, difficulty-tiered milestones tracked in `status.achievements`
-  (e.g. `first-correct`, `first-bug-hunt`, `streak-3`/`streak-7`/`streak-30`). Call out a new
-  one in the round recap — that's the whole point of tracking it.
 
 ## Guardrails
 

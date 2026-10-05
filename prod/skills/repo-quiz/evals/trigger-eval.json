@@ -1,0 +1,8 @@
+[
+  {"query": "quiz me on this repository's architecture and conventions", "should_trigger": true},
+  {"query": "start a spaced-repetition quiz on this repo", "should_trigger": true},
+  {"query": "show my repo quiz streak, XP, and wrong-answer log", "should_trigger": true},
+  {"query": "write a design doc for the new caching layer", "should_trigger": false},
+  {"query": "this endpoint throws intermittently — diagnose it", "should_trigger": false},
+  {"query": "break this approved spec into backlog tickets in dependency order", "should_trigger": false}
+]
