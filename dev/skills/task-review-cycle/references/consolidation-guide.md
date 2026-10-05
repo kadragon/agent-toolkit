@@ -2,7 +2,8 @@
 
 Step 3 of `task-review-cycle`. Sources tag their findings: `code-review` (the reviewer's
 `code-review` run), `contract` (the reviewer's Sprint Contract grading), and on every non-lite
-route the panel's `agy` and `codex`.
+route the panel's `agy` and `codex`. Lite has no `code-review` source: `codex` is its reviewer and
+`contract` comes from the orchestrator's inline grading (`risk-routing.md` → *Lite reviewer*).
 
 ## Procedure
 

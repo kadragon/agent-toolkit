@@ -44,10 +44,20 @@ it chooses neither a route nor a reviewer count alone.
 Unknown risk defaults to hub.
 
 **Panel** — the agy + Codex sources run by default on every hub route and on `--no-hub`. A route
-judged lite runs the single reviewer only. The reason is runway: `late-source-reclaim.md`'s
+judged lite runs one reviewer only, Codex (*Lite reviewer* below). The reason is runway: `late-source-reclaim.md`'s
 pre-merge reclaim waits out `ci-wait.sh`, which lite skips, so a lite panel run reaches the
 reclaim with the panel sources still `.pending` every time, and its findings land post-merge,
 reported and never applied. An explicit `--panel` therefore forces hub, even on a diff whose
 captures are all empty — except under `--no-hub`, which always wins and stays local. `--no-hub`
 has no merge, so it runs the panel reclaim once at its stop point instead. An engine that
 preflight reports unavailable is skipped, not waited for.
+
+**Lite reviewer** — lite runs Codex as its one reviewer instead of the Claude reviewer, so a
+low-risk diff spends no Claude tokens on review. Launch the codex block from `review-sources.md`
+as one background task (Bash `run_in_background: true`) and wait for its completion notification:
+lite has no `ci-wait.sh` runway, so the findings must land before Step 3 or they never get applied.
+Never bound the wait with a `sleep`. Codex reviews the diff only and takes no Sprint Contract, so
+the orchestrator grades each acceptance criterion inline against the recorded evidence, reports
+each unmet one as a `contract` finding, and discloses that contract grading was not independent.
+Codex unavailable, non-zero, exit 75 (locked), or empty → record `Reviewers Skipped: <reason>` and
+run SKILL.md Step 2's Claude reviewer block instead.
