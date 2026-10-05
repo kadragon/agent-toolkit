@@ -211,7 +211,7 @@ Held in first run of first paragraph:
 
 ## python-hwpx API mapping
 
-> **Deprecated** — Do NOT use python-hwpx API directly. Use `build_hwpx.py` (SKILL.md Workflow 1) or direct XML editing instead. See SKILL.md Critical Rule 10. This section is retained for reference only.
+> **Deprecated** — Do NOT use python-hwpx API directly. Use `build.py build` (SKILL.md Workflow 1) or direct XML editing instead. See SKILL.md Critical Rule 9. This section is retained for reference only.
 
 | Operation | python-hwpx method | Note |
 |------|---------------------|------|
