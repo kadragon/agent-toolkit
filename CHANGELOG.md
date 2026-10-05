@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] check_harness_drift fails closed on unresolved bare sibling names in references/ docs (prod v3.2.3) (2026-10-05)
 - [done] Context-pointer WARNs re-qualified in 15 references/*.md (dev v4.10.14, prod v3.2.2) (2026-10-05) → docs/writing-for-agents.md
 - [done] check_harness_drift: WARN on SKILL.md-relative pointers left in references/*.md (2026-10-05) → docs/writing-for-agents.md
 - [done] Skill context diet: trimmed 5 descriptions, split hwpx and repo-quiz SKILL.md under 250 lines (dev v4.10.13, prod v3.2.1) (2026-10-05)

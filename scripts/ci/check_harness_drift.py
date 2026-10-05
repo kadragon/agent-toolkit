@@ -876,6 +876,21 @@ def resolve_line_target(
                 f"references/{named} is not a bundled file (deleted, renamed, or a typo)",
                 mention.end(),
             )
+        # Inside a `references/` doc a bare name is a sibling doc, so the same fail-closed
+        # rule applies when no bundled file carries that basename at all. An ambiguous
+        # basename (`SKILL.md`) stays a deliberate skip; a target-repo file there must
+        # carry its path (`./backlog.md`).
+        if (
+            qualifier is None
+            and source.parent.name == "references"
+            and named not in basename_index
+        ):
+            return (
+                None,
+                f"{named} is not a bundled sibling (deleted, renamed, or a typo); "
+                "path-qualify a target-repo file, e.g. `./backlog.md`",
+                mention.end(),
+            )
         return None, None, mention.end()
     return target, None, mention.end()
 
