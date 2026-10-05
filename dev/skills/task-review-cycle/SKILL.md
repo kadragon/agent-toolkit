@@ -118,7 +118,8 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 ## Step 2: Review
 
-**One Claude reviewer, always — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
+**Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
+**one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (Step 1 floor) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
 absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
@@ -145,13 +146,12 @@ an execution-based criterion against the evidence line above, staying silent on 
 is absent rather than failing it. Grading happens outside this session, so the agent that wrote the
 code never certifies it. Keep it a shell-out: Bash enforces `timeout` where the `Agent` tool has
 none, and a lost completion notification (upstream claude-code #49150, #58637, #68117) is how this
-cycle used to sit forever on a finished review. Same shape as `hamelsmu/claude-review-loop` and
-`ktaletsk/council`.
+cycle once hung on a finished review. Same shape as `hamelsmu/claude-review-loop`, `ktaletsk/council`.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
-coverage, the contract). 600s is the Bash tool's ceiling, not a tuned budget, and this fallback is
-the one path where independence fails — the author grades their own code. Disclose it; required
+coverage, the contract). 600s is the Bash tool's ceiling, not a tuned budget; this fallback and lite's
+contract grading are where independence fails — the author grades their own code. Disclose it; required
 checks stay the only mechanical guard, and inline review cannot satisfy a policy that requires an
 independent reviewer.
 
@@ -206,7 +206,7 @@ Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a l
 
 ## Step 6: Merge
 
-**Lite path** — no panel source ran, so nothing to reclaim; merge locally and push `main`:
+**Lite path** — the Codex run finished in Step 2, so nothing to reclaim; merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -240,7 +240,7 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel, non-zero exit, or the 600s Bash timeout | Record `Reviewers Skipped`, review inline, note it in the report |
+| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer, else review inline; report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` / `checks-never-registered` | Stop, ask the user |
