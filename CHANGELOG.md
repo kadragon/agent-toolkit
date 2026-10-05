@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] check_harness_drift: fail closed when a bare references/ name resolves only to another skill (2026-10-06)
 - [done] check_harness_drift fails closed on unresolved bare sibling names in references/ docs (prod v3.2.3) (2026-10-05)
 - [done] Context-pointer WARNs re-qualified in 15 references/*.md (dev v4.10.14, prod v3.2.2) (2026-10-05) → docs/writing-for-agents.md
 - [done] check_harness_drift: WARN on SKILL.md-relative pointers left in references/*.md (2026-10-05) → docs/writing-for-agents.md

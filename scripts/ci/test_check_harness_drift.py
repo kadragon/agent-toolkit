@@ -465,6 +465,18 @@ def main() -> int:
             "an ambiguous bare `SKILL.md` in a references doc stays skipped (PR #216)",
             run_refs('See SKILL.md § "No Such Section".', notes, index) == [],
         )
+        # A bare name in a references doc is a sibling: a deleted sibling whose basename
+        # ships once in another skill must not be graded against that skill's anchors.
+        cross = run_refs("See `signal-taxonomy.md` §7 for detail.", notes, index)
+        check("bare name resolving only to another skill is reported", cross != [], f"got {cross}")
+        check(
+            "...in the arrow form too",
+            run_refs("See `signal-taxonomy.md` → *7. Instruction-layer overlap*.", notes, index) != [],
+        )
+        check(
+            "a references/-qualified cross-skill name still resolves",
+            run_refs("See `references/signal-taxonomy.md` §7 for detail.", notes, index) == [],
+        )
 
     print("\nBundled-script references resolve against the owning skill")
     with tempfile.TemporaryDirectory() as tmp:

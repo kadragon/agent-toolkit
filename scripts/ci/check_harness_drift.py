@@ -900,6 +900,23 @@ def resolve_line_target(
                 mention.end(),
             )
         return None, None, mention.end()
+    # The same sibling reading holds when the name *does* resolve, but only via the global
+    # unique-basename fallback to another skill: a deleted sibling would otherwise be graded
+    # against that skill's anchors. A cross-skill pointer takes a path qualifier instead.
+    if (
+        qualifier is None
+        and source.parent.name == "references"
+        and target.parent != source.parent
+        and named not in TARGET_REPO_ROOT_FILES
+        and ARROW_GAP_RE.match(line[mention.end() : ref_start])
+    ):
+        return (
+            None,
+            f"{named} is not a sibling of this references doc (resolves only to "
+            f"{target.relative_to(REPO_ROOT)}); path-qualify a cross-skill pointer, "
+            f"e.g. `{skill_dir_of(target).name}/.../{named}`",
+            mention.end(),
+        )
     return target, None, mention.end()
 
 
