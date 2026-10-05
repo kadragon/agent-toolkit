@@ -17,10 +17,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #299 — skill context diet follow-ups (2026-10-05)
-
-- [ ] [CONSTRAINT] Extend `check_harness_drift.py` to WARN on context-relative pointers in `{plugin}/skills/*/references/*.md` — `see below`/`see above`, bare `rule N`/`Workflow N` without a `SKILL.md` qualifier, and a `references/` path prefix written from inside `references/`; PR #299's reviewer found five such pointers left by a SKILL.md split that CI passed (source: code-review) — docs/writing-for-agents.md → *Context pointers*
-
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*
