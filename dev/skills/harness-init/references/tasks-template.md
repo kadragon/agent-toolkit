@@ -18,7 +18,7 @@ close, so any content that must outlive the sprint would be destroyed by that re
 | Queued work, review findings, security findings, follow-ups | `backlog.md` — persistent |
 
 Do **not** add `## Review Backlog`, `## Security Fixes`, or any other findings section to
-`tasks.md`. Those go to `backlog.md` (see `references/backlog-template.md`). This is enforced:
+`tasks.md`. Those go to `backlog.md` (see `backlog-template.md`). This is enforced:
 `task_nodes.py prune-tasks` refuses to run against a `tasks.md` carrying a persistent findings
 section, and tells you to move it.
 
@@ -108,4 +108,4 @@ covered backlog line(s) back to `[ ]` itself — it never deletes a line.
 
 - State machine enforced by `scripts/reconcile-harness.py` (sync C)
 - Schema validated by `scripts/validate-harness.sh` and `sync D-1`
-- Invariants: `references/harness-invariants.md` → "Reconciliation Contract"
+- Invariants: `harness-invariants.md` → "Reconciliation Contract"

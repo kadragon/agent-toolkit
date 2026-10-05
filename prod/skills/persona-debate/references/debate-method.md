@@ -51,7 +51,7 @@ schemas, CLAUDE.md). Cut it where you can; across N×2 spawns it adds up:
   Feed `persona` + the 1–2 narrative fields relevant to the question (e.g.
   `professional_persona` for a work-policy debate) + the key demographics
   (age/sex/region/occupation). Drop the rest. Roughly halves per-spawn input.
-- **Condensed openings in Round 1** (see below), not the raw transcript.
+- **Condensed openings in Round 1** (see *Round structure*), not the raw transcript.
 - **Round discipline.** Shallow/binary questions: run Round 0 only and synthesize
   — skip Round 1 entirely. Only spend the second round when openings genuinely
   diverge and the topic warrants it. Keep N at the low end when unsure.

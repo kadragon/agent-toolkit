@@ -1,6 +1,6 @@
 # HWPX Editing Gotchas
 
-Traps causing silent failures and no-op edits in existing HWPX. Read before modifying text/tables in Workflow 2.
+Traps causing silent failures and no-op edits in existing HWPX. Read before modifying text/tables in SKILL.md Workflow 2.
 
 ## 1. FORMULA fields — editing cached value is no-op
 

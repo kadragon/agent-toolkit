@@ -79,7 +79,7 @@ done
 
 | State | Action |
 |-------|--------|
-| `.meta` with `status=ok` and a non-empty `review_file` | Read the review file. Put its findings through `references/consolidation-guide.md` and Step 4 apply, exactly as an in-time source. A resulting change commits via `commit-and-push.sh`; on the hub path that re-enters CI — wait for it green again, and say in the report that the reclaim cost an extra CI round. |
+| `.meta` with `status=ok` and a non-empty `review_file` | Read the review file. Put its findings through `consolidation-guide.md` and Step 4 apply, exactly as an in-time source. A resulting change commits via `commit-and-push.sh`; on the hub path that re-enters CI — wait for it green again, and say in the report that the reclaim cost an extra CI round. |
 | `.pending` only, `pid` alive under `kill -0` | The source is still running. Merge, and report the `.meta` path the user can read when it lands. |
 | `.pending` only, `pid` dead | The run died without a result. Nothing to reclaim; the `Reviewers Skipped` line stands. |
 | `.meta` with `status=failed` or `empty`, or no files at all | Nothing to reclaim; the `Reviewers Skipped` line stands. |

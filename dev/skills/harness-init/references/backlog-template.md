@@ -6,7 +6,7 @@ maintenance routine section C reports its state every session; line transitions 
 `task_nodes.py prune-backlog` at `task-next` pre-merge cleanup, not by reconcile.
 
 Nothing persistent belongs in `tasks.md`; that file is the current Sprint Contract and is deleted
-whole at sprint close (`references/tasks-template.md` → *Invariant*).
+whole at sprint close (`tasks-template.md` → *Invariant*).
 
 ## Required Schema
 
@@ -85,4 +85,4 @@ Rules for any such section:
   `scripts/reconcile-harness.py` (sync C) reverts `[>]` → `[ ]` on `status: failed` and on any
   orphan sweep (`tasks.md` absent) — it never removes a backlog line; line deletion is
   `prune-backlog`'s exclusive job
-- Invariants: `references/harness-invariants.md` → "Reconciliation Contract"
+- Invariants: `harness-invariants.md` → "Reconciliation Contract"

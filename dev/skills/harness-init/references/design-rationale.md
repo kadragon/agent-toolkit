@@ -6,7 +6,7 @@ Why `harness-init`'s rules are what they are. The rules themselves live in `SKIL
 
 Three sources inform the design:
 
-1. **Anthropic** — Generator-Evaluator separation; every harness component encodes a model-limitation assumption that needs periodic re-examination. (The "context reset over compaction" guidance from the same source is itself one such assumption — re-check it per model; see `references/workflows-template.md` → Context Anxiety.)
+1. **Anthropic** — Generator-Evaluator separation; every harness component encodes a model-limitation assumption that needs periodic re-examination. (The "context reset over compaction" guidance from the same source is itself one such assumption — re-check it per model; see `workflows-template.md` → Context Anxiety.)
 2. **OpenAI** — AGENTS.md is a map, not an encyclopedia (~100 lines); the repo is the system of record; golden principles are enforced mechanically; garbage collection is automated.
 3. **Practical experience** — progressive disclosure (index → detail), agent-readable lint errors, sub-agent context manifests.
 
