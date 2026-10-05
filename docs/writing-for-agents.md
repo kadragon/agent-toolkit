@@ -44,8 +44,9 @@ prose verbatim, and every reference that was relative to SKILL.md breaks in the 
 `see below`/`see above`, a bare `rule 19` or `Workflow 4`, a `references/x.md` path written from
 the skill root. Re-qualify each one in the moved text (`SKILL.md Critical Rule 19`,
 `editing-gotchas.md §3`), then grep the skill's other references for pointers to the headings the
-split removed. `check_harness_drift.py` resolves only `§ "heading"` pointers, so the rest pass CI
-— PR #299 shipped five of them to review that way.
+split removed. `check_harness_drift.py` resolves `§ "heading"` pointers and only WARNs
+(`[context-pointer]`) on the rest in `references/*.md`, so they still pass CI — PR #299 shipped
+five of them to review that way.
 
 ## The two loads
 

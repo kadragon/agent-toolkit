@@ -869,6 +869,54 @@ def main() -> int:
         mod.check_ordered_list_markers("1.2. subsection\n") == [],
     )
 
+    print("\ncontext pointers (PR #299 SKILL.md-split shapes)")
+    ref = Path("dev/skills/demo/references/moved.md")
+
+    def ctx(text: str, path: Path = ref) -> list[str]:
+        return mod.check_context_pointers(text, path)
+
+    check("`see below` in a reference doc warns", len(ctx("Details (see below).\n")) == 1)
+    check("`See above` warns case-insensitively", len(ctx("See above for the flag.\n")) == 1)
+    check("a bare `rule 19` warns", len(ctx("Per rule 19, never retry.\n")) == 1)
+    check("a bare `Workflow 4` warns", len(ctx("Then run Workflow 4.\n")) == 1)
+    check(
+        "a skill-root `references/x.md` path warns",
+        len(ctx("Read `references/other.md` first.\n")) == 1,
+    )
+    check(
+        "every pointer on a line is reported",
+        len(ctx("See above and rule 3, then `references/x.md`.\n")) == 3,
+    )
+    check(
+        "`SKILL.md Critical Rule 19` is qualified",
+        ctx("Per `SKILL.md` Critical Rule 19, never retry.\n") == [],
+    )
+    check(
+        "a sibling-file qualifier counts too",
+        ctx("See editing-gotchas.md Workflow 2.\n") == [],
+    )
+    check(
+        "a plugin-qualified skill counts too",
+        ctx("prod:hwpx 스킬의 Workflow 2 위에서 쓴다.\n") == [],
+    )
+    check(
+        "a cross-skill `<skill>` → `references/x.md` path is qualified",
+        ctx("Owned by `dev:task-next` → `references/cycle.md`.\n") == [],
+    )
+    check(
+        "a heading that defines a rule is not a pointer",
+        ctx("## Rule 3 — never block\n### Workflow 2\n") == [],
+    )
+    check("a fenced block is exempt", ctx("```\nsee below\nrule 4\n```\n") == [])
+    check(
+        "a bare `references/` path inside a longer path is not a skill-root path",
+        ctx("Read `dev/skills/x/references/y.md`.\n") == [],
+    )
+    check(
+        "a SKILL.md is not scanned — there the pointers resolve",
+        ctx("See below. Rule 3. `references/x.md`.\n", Path("dev/skills/demo/SKILL.md")) == [],
+    )
+
     print("\n----")
     failed = _results.count(False)
     if failed:

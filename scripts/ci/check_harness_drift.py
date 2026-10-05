@@ -557,6 +557,46 @@ def check_ordered_list_markers(text: str) -> list[str]:
     return problems
 
 
+SEE_RELATIVE_RE = re.compile(r"\bsee (?:below|above)\b", re.IGNORECASE)
+BARE_RULE_RE = re.compile(r"\b(?:rule|workflow) \d+\b", re.IGNORECASE)
+# Lookbehind rejects `dev/skills/x/references/y.md` — only a path that starts at
+# `references/` is written from the skill root.
+SKILL_ROOT_REF_RE = re.compile(r"(?<![\w./-])references/[\w.-]+\.md")
+# A sibling filename or a plugin-qualified skill (`prod:hwpx Workflow 2`) names the owner.
+POINTER_QUALIFIER_RE = re.compile(r"\.md\b|\b(?:dev|prod):[\w-]+")
+
+
+def check_context_pointers(text: str, path: Path) -> list[str]:
+    """Flag pointers in a `references/*.md` that were relative to the SKILL.md they left.
+
+    A SKILL.md split under the size cap moves prose verbatim, so `see below`, a bare
+    `rule 19`, and a `references/x.md` path written from the skill root all stop
+    resolving in the new file. PR #299 shipped five of them past CI. WARN-only: the
+    patterns are heuristic and pre-existing reference docs carry them.
+    """
+    if path.parent.name != "references":
+        return []
+    problems = []
+    for line in _blank_code_fences(text).splitlines():
+        stripped = line.strip()
+        found = [m.group(0) for m in SEE_RELATIVE_RE.finditer(line)]
+        if not stripped.startswith("#"):
+            found += [
+                m.group(0) for m in BARE_RULE_RE.finditer(line)
+                if not POINTER_QUALIFIER_RE.search(line[max(0, m.start() - 40):m.start()])
+            ]
+        found += [
+            m.group(0) for m in SKILL_ROOT_REF_RE.finditer(line)
+            if not line[:m.start()].rstrip(" `*'\"").endswith(("→", "->"))
+        ]
+        for pointer in found:
+            problems.append(
+                f"{pointer!r} was relative to the SKILL.md this text left — qualify it "
+                f"(`SKILL.md Rule N`, `<file>.md §N`, a sibling filename): {stripped!r}"
+            )
+    return problems
+
+
 def check_bundled_script_refs(text: str, path: Path) -> list[str]:
     """Every `$SKILL_DIR/scripts/<name>` must resolve to a file the skill actually bundles.
 
@@ -1046,13 +1086,15 @@ def main() -> int:
         section_refs = check_section_refs(text, path, basename_index, anchor_cache)
         script_refs = check_bundled_script_refs(text, path)
         with_refs = check_bundled_with_refs(text, path)
+        context_pointers = check_context_pointers(text, path)
 
         if (not portability and not positional and not ordered_lists and not capture
-                and not section_refs and not script_refs and not with_refs):
+                and not section_refs and not script_refs and not with_refs
+                and not context_pointers):
             print(
                 f"OK   {rel} ({skill_name}): plugin-root portability + positional params "
                 "+ ordered-list markers + capture-before-use + section refs "
-                "+ bundled scripts + bundled-with attributions clean"
+                "+ bundled scripts + bundled-with attributions + context pointers clean"
             )
             continue
 
@@ -1070,6 +1112,8 @@ def main() -> int:
             print(f"ERROR {rel} ({skill_name}) [bundled-script-ref]: {msg}")
         for msg in with_refs:
             print(f"ERROR {rel} ({skill_name}) [bundled-with-ref]: {msg}")
+        for msg in context_pointers:
+            print(f"WARN {rel} ({skill_name}) [context-pointer]: {msg}")
 
         if (portability or positional or ordered_lists or section_refs
                 or script_refs or with_refs):

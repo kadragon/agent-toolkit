@@ -30,7 +30,7 @@ codex plugin add prod@kadragon
 |---------|---------|
 | `bash dev/skills/harness-init/scripts/validate-harness.sh` | Full harness structural validation + maturity level |
 | `bash tools/sweep.sh` | Garbage collection: lint scan, doc drift, principle violations |
-| `python3 scripts/ci/check_harness_drift.py` | Over shipped skills: plugin-root portability, capture-before-use, `§`/`Signal N`/`<file>.md` → *Section* refs, `$SKILL_DIR/scripts/*` refs, and `(bundled with <plugin>:<skill>)` attributions |
+| `python3 scripts/ci/check_harness_drift.py` | Over shipped skills: plugin-root portability, capture-before-use, `§`/`Signal N`/`<file>.md` → *Section* refs, `$SKILL_DIR/scripts/*` refs, and `(bundled with <plugin>:<skill>)` attributions; WARN-only `[context-pointer]` on SKILL.md-relative pointers left in `references/*.md` |
 | `python3 scripts/ci/check_asset_hygiene.py` | Over every tracked file in `dev/`/`prod/`: invisible/control characters, Cyrillic homoglyphs in Latin tokens, hardcoded personal paths |
 | `python3 scripts/ci/check_skill_frontmatter.py` | Skill/agent/command frontmatter parses as YAML, required keys present (needs PyYAML) |
 | `python3 scripts/ci/check_skill_size.py` | Every `SKILL.md` ≤ 250 lines, or listed in `scripts/ci/skill-size-ratchet.json` with a ceiling that only goes down |
