@@ -58,8 +58,8 @@ block from `review-sources.md` in the **foreground** with Bash `timeout: 600000`
 the Claude reviewer: lite has no `ci-wait.sh` runway, so the findings must land before Step 3, and
 a background task would hang the cycle on a lost completion notification (SKILL.md Step 2).
 `timings.log` puts every measured run at 43–228s, well inside the cap. That block always exits 0,
-so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}` or
-`"locked"` marker, no review text, the 600s timeout, or codex unavailable → record `Reviewers
+so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}`,
+`"locked"`, or `"unavailable"` marker, no review text, or the 600s timeout → record `Reviewers
 Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead.
 
 Codex reviews the diff only and takes no Sprint Contract, so on lite the orchestrator grades each

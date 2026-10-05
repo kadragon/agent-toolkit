@@ -17,10 +17,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #297 — lite path reviews with Codex alone (2026-10-05)
-
-- [ ] [harness] The codex block in review-sources.md exits silently (no stderr marker) when `codex_available` is false, so lite's Reviewers Skipped reason cannot tell "unavailable" from "empty review"; emit `{"codex_review":"unavailable"}` (source: agy) — dev/skills/task-review-cycle/references/review-sources.md:44 (introduced here)
-
 ### PR #290 — task-grill skill-extraction interview slots (2026-10-02)
 
 - [ ] [harness] No consumer carries the `Skill slots:` block: neither the Sprint Contract template (`docs/eval-criteria.md`) nor the task-spec template has a field for it, and no skill-authoring route (harness-capture/harness-curate → `skill-creator`) invokes task-grill first; caller wiring was deferred by user decision (source: code-review) — dev/skills/task-grill/SKILL.md:80 *(deferred: caller wiring held by user decision; excluded again from the 2026-10-02 batch)*

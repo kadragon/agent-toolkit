@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review-cycle: codex block emits an `unavailable` marker when preflight finds no codex (dev v4.10.11) (2026-10-05)
 - [done] task-review-cycle: lite path reviews with Codex alone to save Claude tokens (dev v4.10.10) (2026-10-05)
 - [done] pr-study: Claude Code-only plugin docking a PR-diff study pane (pr-study v0.1.1) (2026-10-05)
 - [done] task-review-cycle: security-effort fixtures keep EFFORT=high on no measured gain (dev v4.10.9) (2026-10-04)
