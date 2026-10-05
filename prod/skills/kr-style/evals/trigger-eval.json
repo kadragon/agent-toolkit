@@ -26,7 +26,7 @@
   {
     "query": "translate this English specification into Korean",
     "should_trigger": false,
-    "waived": "lexical proxy false positive, measured on this branch: kr-style ranks 1st at 0.2461. The query's discriminating tokens are `Korean` and `English`, and kr-style's description is the only English-classed one in the corpus carrying both — it carries them inside its own `NOT for rendering one language into another` clause, which the token proxy cannot read as a negation. The defense against auto-selection is that clause, read semantically. A real non-trigger case — kept for skill-creator's model-judged runner."
+    "waived": "lexical proxy false positive, measured on this branch: kr-style ranks 1st at 0.1694 (re-measured after the 2026-10-05 description trim). The query's discriminating tokens are `Korean` and `English`, and kr-style's description is the only English-classed one in the corpus carrying both — `English` in its rewrite clause and the negation inside its own `NOT for ... translation between languages` clause, which the token proxy cannot read as a negation. The defense against auto-selection is that clause, read semantically. A real non-trigger case — kept for skill-creator's model-judged runner."
   },
   {
     "query": "generate a formal HWPX report file with a signature table",

@@ -39,6 +39,14 @@ becomes a dead end wherever the section does not exist. State the rule's one-lin
 beside the pointer, on the file-absent branch. Nothing in CI catches this: the pointer resolves
 here, which is the only place the checkers look.
 
+**Text moved out of a SKILL.md takes its pointers with it.** A split under the size cap moves
+prose verbatim, and every reference that was relative to SKILL.md breaks in the new file:
+`see below`/`see above`, a bare `rule 19` or `Workflow 4`, a `references/x.md` path written from
+the skill root. Re-qualify each one in the moved text (`SKILL.md Critical Rule 19`,
+`editing-gotchas.md §3`), then grep the skill's other references for pointers to the headings the
+split removed. `check_harness_drift.py` resolves only `§ "heading"` pointers, so the rest pass CI
+— PR #299 shipped five of them to review that way.
+
 ## The two loads
 
 Every document and pointer spends one of two budgets:

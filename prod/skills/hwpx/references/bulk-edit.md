@@ -7,7 +7,7 @@ Moved out of SKILL.md Workflow 2. Read before a multi-item, multi-cell, or N-fil
 Many items → split into stages to catch silent failures early, verify each stage in Hancom.
 
 1. **unpack once** — run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first, then `python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx "$HWPX_WORK/unpacked/"`. Stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` and `./unpacked/` collisions when two sessions run concurrently in the same CWD. All later stages cumulatively modify `$HWPX_WORK/unpacked/Contents/section0.xml`.
-2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`references/editing-gotchas.md` §3).
+2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`editing-gotchas.md` §3).
 3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`. On failure, the dir is preserved for artifact inspection — clean manually when done.
 
@@ -62,7 +62,7 @@ try:
 
         section_path.write_text(s, encoding="utf-8")
 
-        # 필수: 텍스트를 바꿨으면 줄바꿈 캐시를 버린다 (rule 19).
+        # 필수: 텍스트를 바꿨으면 줄바꿈 캐시를 버린다 (SKILL.md Critical Rule 19).
         # 생략하면 치환 텍스트가 원본보다 짧아 줄 수가 줄었을 때 한글이 로드에
         # 실패하고 빈 문서를 띄운다 — validate.py는 --baseline 없이는 못 잡는다.
         subprocess.run(

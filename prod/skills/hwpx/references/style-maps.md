@@ -104,7 +104,7 @@ Formal docs with visual separation. Color-background header bars + number badges
 Korean gov/biz documents commonly wrap a title or section header in a colored 1-cell banner,
 or a 3-column stripe (accent color | title | accent color). This is not template-specific —
 add the border/char styles to whichever template's `header.xml` you're already using, following
-the `itemCnt` bump rule in "header.xml editing guide".
+the `itemCnt` bump rule in `hwpx-format.md` § "header.xml Editing Guide".
 
 **1. Add a background-color `borderFill` to header.xml:**
 ```xml

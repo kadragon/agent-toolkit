@@ -26,7 +26,7 @@ Utility scripts in `scripts/`.
 | `scripts/table.py calc-widths` | table column-width calculation — ratio → HWPUNIT (guarantees sum = body width) |
 | `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
 
-> ⚠️ **`hp:tbl id` collisions**: two unrelated tables can share the same `hp:tbl id` — `--table-id` may still happen to resolve the intended table, but that's not guaranteed. `validate.py validate` now flags duplicate `hp:tbl` ids (see Workflow 4). When uncertain which table `--table-id` resolves to, confirm first with `table.py locate --tag hp:tbl --contains "..."` or `table.py dump --contains "..."` before trusting `--table-id` alone.
+> ⚠️ `hp:tbl id` collisions — confirm which table `--table-id` resolves to before trusting it: SKILL.md Workflow 2.
 
 ## build.py build usage
 
@@ -72,7 +72,7 @@ cat > "$SECTION" << 'XMLEOF'
     </hp:run>
   </hp:p>
   <!-- 새 문단은 <hp:linesegarray> 없이 작성 — Hancom이 열 때 자동 계산.
-       템플릿 오버레이 문단을 복사해 온 경우에만 strip-lineseg 필요 (Workflow 1 flow step 2 참고) -->
+       템플릿 오버레이 문단을 복사해 온 경우에만 strip-lineseg 필요 (SKILL.md Workflow 1 flow step 2 참고) -->
 </hs:sec>
 XMLEOF
 

@@ -12,7 +12,7 @@ Moved out of SKILL.md. `$Q` below is `<dir-of-the-repo-quiz-SKILL.md>/scripts/qu
 | `record --concept SLUG --correct true\|false [--grade again\|hard\|good\|easy] [--type TYPE] [--title T] [--note N] [--session ID]` | Apply one answer: schedule + XP + streak + achievements + logs. Prints the new schedule/score. |
 | `config [--get] [--set-persona junior\|mid\|senior] [--set-daily-goal N] [--seen-fsrs-notice]` | Read or update persona/daily goal, or mark the one-time FSRS install notice as shown. With no flags, prints current config. |
 
-`--type` is the question-type slug (see below); defaults to `mc` if omitted. `--grade`
+`--type` is the question-type slug (SKILL.md § "Question types"); defaults to `mc` if omitted. `--grade`
 overrides the correct/wrong → schedule-quality mapping for self-graded free-recall answers
 (the user picks 1–4 after seeing the revealed answer); omit it for auto-graded types
 (MC/fill-blank), where correct → `good` and wrong → `again` are inferred automatically.
@@ -55,7 +55,7 @@ Let it ride on the schedule rather than a manual dial. A concept the user keeps 
 reappears less often (its interval grows under FSRS or SM-2 alike); a missed one comes back
 soon. If the user explicitly wants harder questions, go deeper — ask *why* a design choice was
 made or how two parts interact, and prefer `why`/free-recall — but keep every answer checkable
-against the code. `config.persona` (see above) is the standing version of "make it harder":
+against the code. `config.persona` (SKILL.md § "Scale depth to persona") is the standing version of "make it harder":
 set it once instead of re-asking every round.
 
 ## Gamification

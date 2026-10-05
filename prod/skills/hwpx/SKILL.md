@@ -123,6 +123,8 @@ python3 "$SKILL_DIR/scripts/validate.py" validate edited.hwpx --baseline documen
 
 > **Validate timing when overwriting original**: if planning to overwrite with the original filename, run `validate --baseline` **first**. Order: `pack to temp → validate --baseline original → copy to final`. Overwriting the original first removes the baseline, forcing validation without `--baseline` and risking false-positive duplicate ID reports.
 
+> ⚠️ **`hp:tbl id` collisions**: two unrelated tables can share the same `hp:tbl id` — `--table-id` may still happen to resolve the intended table, but that's not guaranteed. `validate.py validate` now flags duplicate `hp:tbl` ids (see Workflow 4). When uncertain which table `--table-id` resolves to, confirm first with `table.py locate --tag hp:tbl --contains "..."` or `table.py dump --contains "..."` before trusting `--table-id` alone.
+
 ### Bulk edits
 
 Many items, many cells, or N files → read `$SKILL_DIR/references/bulk-edit.md` first: stage-by-stage pack → validate → open in Hancom with `assert s.count(old) == expected` on every `str.replace()`; `table.py replace` directly on an unpacked dir for multi-cell edits (`--preserve-style --text` keeps run styling — `--para 0 0 ""` resets charPrIDRef to 0); the N-file loop (slugged unpack dirs, `strip-lineseg` after every text change, `validate --baseline` before overwriting).
@@ -208,8 +210,6 @@ Read `$SKILL_DIR/references/reference-restore.md` first — full command sequenc
 4. **Build** — build with extracted header.xml + new section0.xml
 5. **Validate** — `validate.py validate`
 6. **Page guard** — `validate.py page-guard` (re-fix on failure)
-
-> ⚠️ **`hp:tbl id` collisions**: two unrelated tables can share the same `hp:tbl id` — `--table-id` may still happen to resolve the intended table, but that's not guaranteed. `validate.py validate` now flags duplicate `hp:tbl` ids (see Workflow 4). When uncertain which table `--table-id` resolves to, confirm first with `table.py locate --tag hp:tbl --contains "..."` or `table.py dump --contains "..."` before trusting `--table-id` alone.
 
 ## Critical Rules
 

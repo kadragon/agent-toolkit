@@ -179,8 +179,7 @@ self-rate 1–4 (map 1→again, 2→hard, 3→good, 4→easy). Keep the stem sho
   D  아무것도 — CI가 자동으로 올려줌
 ```
 
-After each answer, immediately record it — don't batch, so a mid-round interruption still
-saves progress:
+After each answer, record it immediately — don't batch, so an interruption still saves progress:
 
 ```sh
 Q=<dir-of-this-SKILL.md>/scripts/quiz_state.py
@@ -189,10 +188,11 @@ python3 "$Q" --repo <repo-root> record \
   --title "dev 수정 시 버전 범프" --session <round-id>
 ```
 
-Wrong-answer and self-graded free-recall `record` examples: `references/state-reference.md` § "Recording examples".
-
-Use one `--session` id for the whole round (a short label like `2026-07-16a`) so the history
-groups cleanly.
+On a **wrong** answer, pass a `--note` (lands in `mistakes.md`): the correct answer, *why*, and a
+file pointer — that note is what the user rereads, so make it teach. For self-graded free-recall,
+pass the user's 1–4 rating as `--grade` and still pass `--correct` (`true` unless they say they got
+it flatly wrong). Examples of both: `references/state-reference.md` § "Recording examples". Use
+one `--session` id for the whole round (e.g. `2026-07-16a`) so the history groups cleanly.
 
 #### Give a real explanation after every answer — right *or* wrong
 
@@ -215,7 +215,7 @@ rather than asserting it. One good pointer beats a paragraph of filler; don't pa
 
 Example spoken follow-up: `references/state-reference.md` § "Explanation example".
 
-Deliver this out loud between questions; the `--note` above is the *persisted* short form for
+Deliver this out loud between questions; the wrong-answer `--note` is the *persisted* short form for
 `mistakes.md`, the spoken version is the fuller teach. If the extra tip is genuinely useful to
 reread later, fold a one-line version of it into `--note` too.
 
