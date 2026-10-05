@@ -1,0 +1,9 @@
+--- dev/skills/task-review-cycle/evals/security-effort/base/crypto/tokens.py	2026-10-05 15:33:02
++++ dev/skills/task-review-cycle/evals/security-effort/vuln/crypto/tokens.py	2026-10-05 15:33:02
+@@ -12,4 +12,5 @@
+ 
+ def verify(payload: bytes, sig: str) -> bool:
+     expected = sign(payload)
+-    return hmac.compare_digest(sig, expected)
++    # v1 clients send a shortened signature; compare against the same prefix.
++    return hmac.compare_digest(sig, expected[: len(sig)])

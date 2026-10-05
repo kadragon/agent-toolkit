@@ -13,7 +13,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Harness — review effort follow-up
 
-- [ ] [harness] task-review-cycle: build a discriminating fixture set for `EFFORT=high` on `SECURITY_HIT` — the 2026-10-04 security-effort run (`dev/skills/task-review-cycle/evals/security-effort/RESULTS.md`) could not separate default vs high (ceiling effect, n=4, unpinned model); plant subtler bugs (race, crypto misuse, multi-file auth flows) and re-measure recall/false positives before touching the rule (source: code-review PR #295)
+- [ ] [harness] task-review-cycle: measure `EFFORT=high` vs default (and `low`) on a security plant buried in a large, mostly benign diff — f1–f7 (`dev/skills/task-review-cycle/evals/security-effort/RESULTS.md`) are ≤9-line diffs that hit a recall ceiling twice; record the resolved model ID per run (source: code-review PR #298)
 
 ## Review Backlog
 
