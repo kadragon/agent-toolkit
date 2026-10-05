@@ -307,7 +307,7 @@ Do not key any of these hooks on the payload's `team_name` field — it is depre
 
 ### `task-created-contract.sh` — enforce Spawn Prompt Contract
 
-Reject any task whose prompt is missing any of the 4 contract fields (Objective, Output format, Tools to use, Boundaries). This turns `references/harness-invariants.md` → "Spawn Prompt Contract" into a mechanical check.
+Reject any task whose prompt is missing any of the 4 contract fields (Objective, Output format, Tools to use, Boundaries). This turns `harness-invariants.md` → "Spawn Prompt Contract" into a mechanical check.
 
 ```bash
 #!/usr/bin/env bash
@@ -374,7 +374,7 @@ exit 0
 
 ### `teammate-idle-nudge.sh` — prevent premature stop
 
-When a teammate goes idle with open tasks in its assigned scope, send a nudge instead of letting it stop. Targets the "context anxiety" pattern (see `references/workflows-template.md`).
+When a teammate goes idle with open tasks in its assigned scope, send a nudge instead of letting it stop. Targets the "context anxiety" pattern (see `workflows-template.md`).
 
 ```bash
 #!/usr/bin/env bash

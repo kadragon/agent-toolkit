@@ -139,5 +139,5 @@ one `<hp:tr>`, `cellAddr` `(0,0)`, `(1,0)`, `(2,0)` — remember each needs its 
 with no text run (or a decorative glyph), and the middle cell the title text with a plain/white
 `borderFillIDRef` background.
 
-This is exactly the `proposal` template's major/sub-item header pattern generalized — see above
+This is exactly the `proposal` template's major/sub-item header pattern generalized — see *proposal layout pattern*
 for a working column-count-2 example with concrete IDs.

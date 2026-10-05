@@ -92,7 +92,7 @@ Windows `python` interprets `/tmp` as a drive-relative path, which diverges from
 
 ## Fallback: extracting text from a legacy OLE `.hwp` without Hancom (reference only)
 
-This is a documented workaround for when Hancom/COM isn't available or `convert_hwp.ps1` fails (see the magic-bytes note in SKILL.md Workflow 2/3) — not a new supported script or workflow. Requires `olefile` (`python -m pip install olefile`, see above).
+This is a documented workaround for when Hancom/COM isn't available or `convert_hwp.ps1` fails (see the magic-bytes note in SKILL.md Workflow 2/3) — not a new supported script or workflow. Requires `olefile` (`python -m pip install olefile`; see *Python Invocation*).
 
 **Fast preview** — the `PrvText` OLE stream holds a plain-text preview capped at roughly the first 1000 characters:
 

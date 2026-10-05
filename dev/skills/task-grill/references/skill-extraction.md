@@ -6,7 +6,7 @@
 Use this file when the Outcome is a new or substantially rewritten skill (a SKILL.md).
 The goal is the judgment the user would never write down unprompted — that part makes the
 skill's output match how the user actually works. Each slot must end resolved: by the user's
-answer, by a repo lookup (Rule 3), or by an explicit "N/A". Ask only slots the request and
+answer, by a repo lookup (SKILL.md Rule 3), or by an explicit "N/A". Ask only slots the request and
 the repo leave unsettled. Anchor questions on the most recent real instance of the job
 ("Last time you did this, what did you do first?"), not on the abstract procedure.
 
@@ -28,4 +28,4 @@ there too, not in `Success:`/`Constraint:`: those two stay the building PR's own
 `Success:` names each Done/verification item, Decision rule and Exception as one such
 criterion ("SKILL.md checks/handles <item>"), so none is lost before a caller reads
 `Skill slots:`. List all seven, including repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
-unanswered in a non-interactive run goes to the handoff as unresolved (Rule 4), never as "N/A".
+unanswered in a non-interactive run goes to the handoff as unresolved (SKILL.md Rule 4), never as "N/A".

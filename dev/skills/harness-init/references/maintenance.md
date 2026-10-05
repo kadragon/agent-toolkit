@@ -10,7 +10,7 @@ Maintain repo agent instruction files under **minimal-noise policy**.
 - `.agents/skills` → `../.claude/skills` symlink
 - `backlog.md` / `tasks.md` — follow reconciliation contract (backlog.md = the only persistent queue; tasks.md = Sprint Contract only)
 
-All thresholds, paths, contracts live in `references/harness-invariants.md`. Update there when values change.
+All thresholds, paths, contracts live in `harness-invariants.md`. Update there when values change.
 
 ## When to run
 
@@ -33,7 +33,7 @@ Silent unless action taken or error occurs.
 
 ## A) AGENTS.md Update Rules
 
-4-rule edit policy below also embedded verbatim in AGENTS.md's `## Maintenance` section by `harness-init` (see `references/harness-invariants.md` → "AGENTS.md Edit Policy"). Any session editing AGENTS.md — not only sync sessions — follows same filter. Keep two copies in lockstep.
+4-rule edit policy below also embedded verbatim in AGENTS.md's `## Maintenance` section by `harness-init` (see `harness-invariants.md` → "AGENTS.md Edit Policy"). Any session editing AGENTS.md — not only sync sessions — follows same filter. Keep two copies in lockstep.
 
 Update `AGENTS.md` **only** when ALL true:
 
@@ -112,7 +112,7 @@ maintained here — that is transcript-driven and lives in `harness-curate`.
 
 ### D-1) Docs structure check
 
-Verify **schema** (not content) of harness-related docs. Full schemas in `references/backlog-template.md` and `references/tasks-template.md`; minimal assertions below match those templates:
+Verify **schema** (not content) of harness-related docs. Full schemas in `backlog-template.md` and `tasks-template.md`; minimal assertions below match those templates:
 
 - `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings
 - `tasks.md` must have: top-level `# Title`, `status:` line, sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
