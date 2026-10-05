@@ -447,6 +447,20 @@ def main() -> int:
             "bare unresolved name in a SKILL.md stays silent (target-repo file)",
             run_refs("Record it in `backlog.md` §2.", alpha, index) == [],
         )
+        # PR #301 review: the fail-closed rule must not fire on unrelated prose.
+        check(
+            "a non-adjacent bare name before an arrow label stays silent",
+            run_refs("Update `gone.md` and set status → **done**", notes, index) == [],
+        )
+        check(
+            "a non-adjacent bare name before a local §N stays silent",
+            run_refs("Append to `gone.md` using the format in §2 above.", notes, index) == [],
+        )
+        check(
+            "a well-known target-repo root file stays silent",
+            run_refs('Add a row to AGENTS.md § "Docs Index" and CLAUDE.md → *Git*.', notes, index)
+            == [],
+        )
         check(
             "an ambiguous bare `SKILL.md` in a references doc stays skipped (PR #216)",
             run_refs('See SKILL.md § "No Such Section".', notes, index) == [],
