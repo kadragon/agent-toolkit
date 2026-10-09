@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.3.2
+version: 2.3.3
 disable-model-invocation: true
 ---
 
@@ -217,7 +217,7 @@ unverified.
 
 - **`references/signal-taxonomy.md`** — detection rules, thresholds, and delegate brief per signal.
 - **`references/transcript-format.md`** — `*.jsonl` record shapes, grep patterns, project-path encoding.
-- **`scripts/scan_transcripts.py`** — bounded scanner (Step 1); prints every dropped count.
+- **`scripts/scan_transcripts.py`** — bounded scanner (Step 1); prints every dropped count. Over 1,100 lines — to edit it, read its `SECTION MAP` comment block and then only the function you need.
 - **`scripts/record_run.py`** — stamps `lastRunMs` in `.harness-curator-state.json` (Step 6), mirrored best-effort to Codex; `--check-due` is the read side the SessionStart maintenance hook calls (>14d AND >=10 new sessions); `--test`.
 - **`scripts/check_plugin_contracts.py`** — repo rules that contradict a plugin contract (Step 2 contract drift); read-only; `--test`.
 - **`scripts/disable_plugins.py`** — project-scope plugin disable (Step 5); `--test`.

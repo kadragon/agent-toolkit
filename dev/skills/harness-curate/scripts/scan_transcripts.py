@@ -83,6 +83,19 @@ import os
 import re
 import sys
 
+# ---- SECTION MAP ----
+# This file is too large to read whole. Find a function with `grep -n '^def <name>'` and
+# read only its range. Module constants (caps, regexes) follow this block. The names below
+# are checked against the real top-level defs by test_scan_transcripts.py.
+#   verifier failures: _is_hook_deny
+#   tool cost: _tool_label, _size_units, _rank_tool_cost
+#   session filter: _session_id, session_matches, codex_rollout_id
+#   project dirs and state: encode_project, _loose_key, _jsonl_count, _iso_to_ms, read_last_run_ms, resolve_project_dir
+#   codex sessions: codex_home, codex_state_dir, _codex_session_meta_cwd, find_codex_session_files, _codex_message_text, _codex_turn_signal, scan_codex_files, build_codex_summary
+#   claude transcripts (scan_dir is the core per-record loop): keep_prompt, text_of, _tool_result_text, scan_dir, _split_new
+#   report output: emit, emit_codex
+#   entry point, scope and arg parsing: main
+
 # ---- caps (bounded output) ----
 PROMPT_CAP = 250        # prompts shown per project (most recent kept)
 CORRECTION_CAP = 40     # correction samples per project
