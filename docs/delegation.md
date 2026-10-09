@@ -1,28 +1,35 @@
 # Delegation
 
-**This file does not decide *whether* to delegate — it defines *how*, once that decision is made.**
-The threshold lives in your platform's global instruction layer — `~/.claude/CLAUDE.md` (Claude
-Code) or `~/.codex/AGENTS.md` (Codex). Default inline. Delegate only when the user asks or a skill
-directs — **and** only if the work then also clears the global gate (10+ files to read/summarize ·
-3+ truly independent units · output would flood main context). Both conditions, not either.
-Coupled, sequential, or judgment-heavy work stays inline. This repo imposes no lower bar.
+Apply platform/base/global constraints first. The local policy below specializes only what
+those layers permit; it never relaxes a higher-level prohibition or invents an exception.
+
+Default inline; delegate research or implementation only when the user or an applicable
+skill directs it and the work meets this repository's provisional threshold: 10+ files
+to investigate, 3+ genuinely independent units, or substantial context pressure.
+These thresholds remain local policy pending evidence for changing them.
+
+An authorized workflow's independent verification is assessed separately for its
+independence benefit and cost; neither file count nor parallelism alone gates it.
+It remains optional unless an already authorized workflow requires it, including the
+existing review/worktree QA. Eligibility never mandates a spawn.
 
 ## Pattern Selection
 
-```
-Q1. Does the task decompose into >1 genuinely parallel subtask?
-    No  → single session. No delegation. Stop.
-    Yes → Q2.
-Q2. Do subtasks need to share findings mid-flight?
-    Yes → Agent Team (Agent with name: + SendMessage)
-    No  → Sub-agent (Agent tool, run_in_background ok)
-```
+After the permission and local-policy checks above pass, select by task shape:
 
-Most work in this repo is sequential: explore → implement → verify. Default to sub-agent mode.
+| Task shape | Route |
+|---|---|
+| One isolated research/verification task with a material context or independence benefit | Subagent eligible; no parallel sibling required |
+| Independent parallel tasks requiring findings to be exchanged during execution | Agent Team eligible where supported |
+| Independent parallel tasks whose results can be combined at completion | Subagents eligible |
+| Tightly coupled/sequential work, or no material isolation benefit | Inline |
+
+These routes describe eligibility, not a requirement to spawn. A sequential workflow may
+still contain an independently useful verification step.
 
 ## Role Routing
 
-No row below is a gate. When the threshold above is met, match the job to the role:
+No row below grants permission. After the applicable checks above pass, match the job to the role:
 
 | Job | Delegate to | Model | Context to pass |
 |-----|-------------|-------|-----------------|
@@ -43,7 +50,8 @@ enforces a timeout while the `Agent` tool does not, and an agent's completion no
 lost (upstream claude-code #49150, #58637, #68117) — which stalled cycles on reviews that had
 already finished. A headless process also carries no session context, so independence is stronger
 there, not weaker. `task-next --tree` and parallel `--all` units keep a per-worktree `qa-verifier` for the same
-correctness reason. Every other delegation still requires both conditions.
+correctness reason. Those checks belong to the authorized workflow's independent verification;
+research and implementation still require direction and the provisional local threshold.
 
 ## Background Routing (non-blocking)
 
@@ -57,7 +65,7 @@ correctness reason. Every other delegation still requires both conditions.
 | Trigger | Action |
 |---------|--------|
 | Same failure ×2 | `codex:rescue` with an explicit brief — what failed, what was already tried |
-| Once the cause is known | Encode the fix mechanically (hook/lint/test) per the global harness-ratchet rule so it cannot recur |
+| Once the cause is known | Encode verified recurring failures mechanically (hook/lint/test) where evidence justifies it |
 
 ## Spawn Prompt Contract (all 4 fields mandatory)
 
