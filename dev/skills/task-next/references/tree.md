@@ -73,6 +73,10 @@ The agent works entirely inside the worktree — it must NOT touch `plugin.json`
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
 A stuck report → the parent records it as a `note` from the worktree (`cycle.md` → *Stuck-fix stop*).
 
+Carry all three original Git authorization fields verbatim in both briefs and handoff
+(`git-authorization.md`). Before any worktree commit check `cycle_state.py authorize --action
+commit` there. No commit authority → keep changes and worktree intact; skip collapse and report.
+
 **QA:** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
 must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
@@ -110,7 +114,7 @@ contract archive: `cycle_state.py retire` belongs after a merge, not after an ab
 
 **Collapse after QA passes:**
 
-Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). If `git status` inside the worktree shows dirty files, commit them before proceeding — `git worktree remove` refuses on a dirty worktree.
+Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). If `git status` inside the worktree shows dirty files, check commit authority from the worktree before committing them — `git worktree remove` refuses on a dirty worktree.
 
 ```bash
 SLUG=<slug>            # same slug used in the Branch step above

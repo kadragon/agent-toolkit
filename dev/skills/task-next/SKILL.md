@@ -1,10 +1,11 @@
 ---
 name: task-next
-version: 2.2.0
+version: 2.3.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
-  Sprint Contract, implement, version bump, review. Flags: --all (batch execution),
-  --tree (worktree isolation). New work you just described → task-new.
+  Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
+  direct base-branch merge/push). Flags: --all (batch execution), --tree (worktree isolation).
+  New work you just described → task-new.
 disable-model-invocation: true
 ---
 
@@ -85,7 +86,8 @@ blocker; all groups blocked → report and stop.
 
 ## Step 3 — Run the cycle
 
-Follow `references/cycle.md` end to end with these overrides:
+Follow `references/cycle.md` end to end with these overrides. Verify the actual user
+invocation and preserve its Git limits per `references/git-authorization.md` before writes:
 
 **Mark active — after the plan gate.**
 - `tasks.md` h1 block (`status: open`) → flip to `status: active`; the block is the contract.

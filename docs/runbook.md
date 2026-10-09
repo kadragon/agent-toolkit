@@ -137,3 +137,6 @@ Separate mechanism: delegation-gate evidence files live in `.claude/tmp/` (gitig
 
 **Manual** (default): run `bash tools/sweep.sh` between features or before releases.
 No SessionStart hook — sweep is too heavy for every session on this repo.
+
+Git effects follow the original contract's approval source/actions/limits, not `--from` or
+`--auto`; read `dev:task-next` → `references/git-authorization.md` before writes.

@@ -1,6 +1,6 @@
 interface:
   display_name: "Next Task"
-  short_description: "Pull the next queued backlog item and run the full code cycle"
-  default_prompt: "Use $task-next to pull the next item from the backlog and run the code cycle on it."
+  short_description: "Implement, review, commit, push, PR and merge queued work"
+  default_prompt: "Use $task-next to implement and review the next queued item, then commit, push, create a PR and merge, possibly with direct base-branch merge/push, within my stated Git limits."
 policy:
   allow_implicit_invocation: false

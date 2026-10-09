@@ -49,7 +49,9 @@ Run tests locally to confirm the fix works.
 
 ### 4. Commit and Push
 
-Determine the commit message yourself based on the fix just applied (you have full context). Reference the PR number in the message. Then stage, commit with that message, and push directly — no subagent needed for a single-file CI fix.
+Determine the commit message yourself based on the fix just applied (you have full context). Reference the PR number in the message. Use `commit-and-push.sh` with the exact fix paths so commit/push authority is checked;
+never bypass it with raw Git writes. Retain the original approval source/actions/limits;
+`--auto` permits in-scope fixes, not expanded Git authority. No subagent is needed for one file.
 
 ### 5. Re-check CI
 
@@ -60,7 +62,8 @@ increment it (they route to the user-escalation branch in "Wait for CI" instead)
 
 ## Merge and Clean Up
 
-After CI passes, merge the PR and clean up:
+After CI passes, check `base-merge` authority; PR-only stops with the reviewed PR.
+Within established merge authority, merge and clean up:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"

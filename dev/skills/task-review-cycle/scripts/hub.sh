@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$SCRIPT_DIR/git-authority.sh"
+
 SUBCOMMAND="${1:?Usage: hub.sh <detect|repo-info|pr-create|pr-get|ci-status|ci-logs|merge> [args]}"
 shift
 
@@ -160,6 +163,7 @@ case "$SUBCOMMAND" in
     ;;
 
   pr-create)
+    require_git_authority --action pr-write
     BASE=""; TITLE=""; BODY=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -300,6 +304,8 @@ case "$SUBCOMMAND" in
     ;;
 
   merge)
+    AUTHORITY_BRANCH="${3:-$(git branch --show-current)}"
+    require_git_authority --branch "$AUTHORITY_BRANCH" --action base-merge
     PR_NUMBER="${1:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     if [ "$HUB_TYPE" = "github" ]; then

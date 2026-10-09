@@ -39,11 +39,18 @@ constraints proceed. A same-session explicit "continue" already authorizes resum
 Unattended runs proceed within approved constraints; unresolved material decisions are reported
 as blocked, never silently approved.
 
+Git effects have a separate boundary: read `git-authorization.md`, verify the originating
+user invocation/instruction and archive its allowed actions and limits. Scope approval,
+router matches and handoff flags do not authorize Git writes. Reuse established permission.
+
 ## Sprint Contract
 
 ```markdown
 **Tag:** [FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]
 **Scope:** files or areas this change touches
+**Approval source:** <verified user-invoked: or explicit-user: instruction and scope; otherwise unknown>
+**Allowed Git actions:** <comma-separated authorized actions; none when unknown>
+**Git limits:** <none | implementation-only | no-push | pr-only | unknown>
 **Acceptance criteria:**
 - [ ] one concrete criterion per item → the test, command, or observation that proves it
 **Out of scope:** explicit exclusions
@@ -198,7 +205,8 @@ checks on the final changed candidate. Additional reviewers never substitute for
 
 **Do not commit.** Call the Skill tool with "dev:task-review-cycle" and
 `args: --from <task-next|task-new> --auto`, and **restate the Sprint Contract verbatim** in the
-invocation, with the archive path and validation evidence. If the hand-off loses context, recover
+invocation, with the archive path, validation evidence, and all three Git authorization
+fields verbatim. Stop at the authorized boundary per `git-authorization.md`. If the hand-off loses context, recover
 the saved original rather than infer it from the diff. The review cycle commits, reviews the diff
 against the contract, routes by risk and required CI, applies findings, records out-of-scope items to
 `backlog.md`, and merges.

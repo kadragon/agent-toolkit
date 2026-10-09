@@ -19,7 +19,8 @@ stay queued; list them in the final report for the next run.
 ### A2 — Decide execution mode
 
 Apply `cycle.md` → *Plan gate* once to unresolved decisions in the selected batch. Reuse approved
-scope, criteria, and approach for each unit. Neither `[FEAT]` nor file count excludes a unit.
+scope, criteria, and approach for each unit. Carry the original approval source, allowed Git
+actions and limits verbatim into aggregate/unit contracts per `git-authorization.md`. Neither `[FEAT]` nor file count excludes a unit.
 
 **Sequential (default):** small tasks, coupled units, shared-file edits, or work whose preparation
 and hand-off cost outweighs parallel savings. Use one branch and an aggregate Sprint Contract,
@@ -57,7 +58,9 @@ finishing silently; it cannot ask the user directly. The integration session rec
 report as a `note` on the unit's branch (`cycle.md` → *Stuck-fix stop*) so a fresh run sees it.
 
 Each implementer archives its unit contract in the worktree, implements and runs focused checks,
-then commits only unit changes on its own branch. Return branch, worktree, contract/archive path,
+then checks `cycle_state.py authorize --action commit` from its own worktree before
+committing only unit changes. Without commit authority preserve the uncommitted result; do not
+collapse/remove that worktree. Return branch, worktree, contract/archive path,
 checks with exit codes, and unmet criteria. Incomplete/unusable results remain recoverable on
 that worktree/branch; exclude them from integration and report why.
 
@@ -70,7 +73,8 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
 
 ### A5 — Integrate and converge
 
-1. In the main checkout on the integration branch, merge verified unit branches. On conflict,
+1. In the integration checkout, run `cycle_state.py authorize --action integrate` before
+   merging verified unit branches. Never apply `integrate` authority on a base branch. On conflict,
    abort that merge and preserve the conflicting branch/worktree for resolution. Record merged,
    excluded, and conflicted units explicitly; do not infer them from post-squash ancestry.
 2. If nothing integrates, stop with all recoverable work preserved. Otherwise, confirm the

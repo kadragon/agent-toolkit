@@ -12,6 +12,8 @@ evidence --command TEXT --exit N [--log PATH] [--env TEXT] records a validation 
 the contract, with HEAD and the index tree, so a later session can judge reuse.
 note reads text from stdin and appends it to the branch's notes, so a stuck or interrupted
 run hands its failed approaches to a fresh session instead of re-trying them.
+authorize --action ACTION [--branch NAME] checks explicit Git authority from the existing
+Markdown contract; missing/legacy or unknown authority denies affected writes.
 inspect reports the current branch, HEAD, all dirty state, the saved contract, the saved
 evidence, the notes, and whether the recorded tree still matches the working index.
 retire [--branch NAME] deletes a branch's archive after a confirmed merge, so a reused
@@ -65,6 +67,52 @@ def check_criteria(text):
                 )
 
 
+GIT_ACTIONS = {"commit", "feature-push", "pr-write", "base-merge", "base-push", "integrate"}
+LIMIT_ACTIONS = {
+    "none": GIT_ACTIONS,
+    "no-push": {"commit", "integrate"},
+    "pr-only": {"commit", "feature-push", "pr-write", "integrate"},
+    "implementation-only": set(),
+    "unknown": set(),
+}
+
+
+def check_authority(text, action):
+    """Read explicit Markdown authority; never infer permission from flags or legacy scope.
+
+    The orchestrator must verify the source against the actual user message before
+    archiving it. This validates the recorded boundary, not the identity of its author.
+    Duplicate, commented and fenced fields cannot manufacture an approval.
+    """
+    visible = re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.S)
+    fields = {}
+    fence = None
+    for line in visible.splitlines():
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if marker:
+            token = marker.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+            continue
+        if fence or line[:1].isspace():
+            continue
+        match = re.fullmatch(r"\*\*(Approval source|Allowed Git actions|Git limits):\*\*\s*(.+)", line)
+        if match:
+            name, value = match.groups()
+            if name in fields:
+                raise ValueError(f"Git authority denied: duplicate {name}")
+            fields[name] = value.strip()
+    source = fields.get("Approval source", "")
+    if not re.match(r"^(user-invoked|explicit-user):\s*\S", source):
+        raise ValueError("Git authority denied: unknown approval source; verify the actual user instruction")
+    actions = {value.strip() for value in fields.get("Allowed Git actions", "").split(",")}
+    limit = fields.get("Git limits", "unknown")
+    if limit not in LIMIT_ACTIONS or not actions <= GIT_ACTIONS or action not in actions & LIMIT_ACTIONS[limit]:
+        raise ValueError(f"Git authority denied: {action} is not established (Git limits: {limit})")
+
+
 def git(*args):
     return subprocess.check_output(["git", *args], text=True).rstrip("\n")
 
@@ -88,6 +136,9 @@ def main():
     evidence.add_argument("--exit", dest="exit_code", type=int, required=True)
     evidence.add_argument("--log")
     evidence.add_argument("--env")
+    authorize = sub.add_parser("authorize", help="Deny an unestablished Git action before execution")
+    authorize.add_argument("--action", choices=sorted(GIT_ACTIONS), required=True)
+    authorize.add_argument("--branch")
     sub.add_parser("note")
     sub.add_parser("inspect")
     retire = sub.add_parser("retire")
@@ -122,6 +173,18 @@ def main():
             temporary.write_text(text, encoding="utf-8")
             temporary.replace(path)
             result = {"branch": branch, "contract_path": str(path)}
+        elif args.subcommand == "authorize":
+            if not path.exists():
+                raise ValueError(f"Git authority denied: no archived contract for '{branch}'")
+            if args.action in {"integrate", "feature-push"}:
+                try:
+                    remote_base = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+                except subprocess.CalledProcessError:
+                    remote_base = ""
+                if branch in (*BASE_BRANCHES, remote_base.removeprefix("origin/")):
+                    raise ValueError(f"Git authority denied: {args.action} cannot target base branch '{branch}'")
+            check_authority(path.read_text(encoding="utf-8"), args.action)
+            result = {"branch": branch, "action": args.action, "authorized": True}
         elif args.subcommand == "evidence":
             if not path.exists():
                 raise ValueError(f"No archived contract for '{branch}'; save it before evidence")

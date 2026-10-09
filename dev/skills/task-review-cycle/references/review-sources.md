@@ -26,7 +26,8 @@ keeps that safe.
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 [[ "$AGY_AVAILABLE" == "true" ]] && { bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || echo '{"agy_review":"failed"}' >&2; }
@@ -35,7 +36,8 @@ AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")

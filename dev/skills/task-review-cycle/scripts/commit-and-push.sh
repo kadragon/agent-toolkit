@@ -60,6 +60,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+source "$SCRIPT_DIR/git-authority.sh"
+
 MESSAGE=""
 FILES=""
 NO_PUSH=false
@@ -194,12 +196,18 @@ if [ -z "$FILES" ] && [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]
 fi
 FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
 
+# Check requested PR authority before any push in a combined publish/PR call.
+if [[ "$CREATE_PR" == true && "$VERIFY_HEAD" != true && "$NO_PUSH" != true ]]; then
+  require_git_authority --action pr-write
+fi
+
 # --- Stage and commit ---
 # A clean tree on a push/PR run means the branch is already committed (e.g. a
 # re-run of the review cycle) — skip the commit and push/PR the existing HEAD.
 # A clean tree on a --no-push run has nothing to do at all, so that stays fatal.
 COMMITTED=false
 if [ "$STAGED_ONLY" = "true" ]; then
+  require_git_authority --action commit
   run_commit_guard "$MESSAGE" "committing"
   if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1); then
     jq -n --arg e "commit failed: $COMMIT_OUT" '{error: $e}' >&2
@@ -209,6 +217,7 @@ if [ "$STAGED_ONLY" = "true" ]; then
   # Report what stayed out, so a partial index cannot silently drop reviewed work.
   UNSTAGED_LEFT=$(bash "$SCRIPT_DIR/changed-files.sh")
 elif [ -n "$FILES" ]; then
+  require_git_authority --action commit
   run_commit_guard "$MESSAGE" "committing"
   # `git add` treats a pathspec matching neither the worktree nor the index as
   # fatal, and that fatal aborts the WHOLE batch — the sibling modified files in
@@ -288,6 +297,12 @@ fi
 # failure looks intermittent and clears on retry. Route push output away from
 # both streams on success (2>&1 >/dev/null: stdout→/dev/null, stderr→capture);
 # surface it only on failure.
+PUSH_BRANCH=$(git branch --show-current)
+if [[ "$PUSH_BRANCH" == "$BASE_BRANCH" || "$PUSH_BRANCH" == main || "$PUSH_BRANCH" == master ]]; then
+  require_git_authority --action base-push
+else
+  require_git_authority --action feature-push
+fi
 if ! PUSH_OUT=$(git push -u origin HEAD 2>&1 >/dev/null); then
   # Encode via jq: git error output routinely contains quotes/newlines that
   # would produce malformed JSON under raw interpolation.

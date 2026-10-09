@@ -9,7 +9,8 @@ Evaluate on every run, including explicit path flags.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
 SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment|\.github/workflows|(^|/)(dev|prod)/hooks|(^|/)\.claude/hooks/|(^|/)\.githooks/' | head -1 || true)

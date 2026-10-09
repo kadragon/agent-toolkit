@@ -22,6 +22,9 @@ notes list approaches a stuck run already tried; do not repeat them — then an 
 `tasks.md` block or an explicitly approved contract still in the conversation. Legacy run with no
 copy → reconstruct with the user from the backlog/spec and diff, marking reconstruction explicitly.
 A missing contract is unknown scope, not permission to review only the diff or declare completion.
+Recover the original approval source/actions/limits verbatim (`git-authorization.md`). Missing
+legacy fields establish no Git effect; resume approval or `--auto` never widens prior limits.
+An actual new user instruction may revise them through the existing approved archive replacement.
 
 **Nothing in flight.** `contract` null, `changes` empty, and no commits ahead of the base means
 this branch owns no cycle — a branch created ahead of the work, or one whose cycle already merged

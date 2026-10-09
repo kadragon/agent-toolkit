@@ -13,6 +13,7 @@ Run: python3 dev/skills/task-review-cycle/scripts/test_merge_and_cleanup.py
 Exits 0 on success, 1 on the first failure.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -47,12 +48,23 @@ def make_repo(tmp):
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "[TEST] init")
     git(repo, "checkout", "-q", "-b", FEATURE)
+    for branch in (FEATURE, "feat/typo", "feat/other"):
+        slot = repo / ".git/task-cycle" / hashlib.sha256(branch.encode()).hexdigest()
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / "contract.md").write_text(
+            "**Approval source:** user-invoked: fixture workflow\n"
+            "**Allowed Git actions:** base-merge\n**Git limits:** none\n")
     return repo
 
 
 def make_script_dir(tmp):
-    d = Path(tempfile.mkdtemp(dir=tmp))
+    d = Path(tempfile.mkdtemp(dir=tmp)) / "skills/task-review-cycle/scripts"
+    d.mkdir(parents=True)
     shutil.copy(SCRIPT, d / "merge-and-cleanup.sh")
+    shutil.copy(SCRIPT.parent / "git-authority.sh", d / "git-authority.sh")
+    state = d / "../../task-next/scripts/cycle_state.py"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(SCRIPT.parent / "../../task-next/scripts/cycle_state.py", state)
     (d / "hub.sh").write_text(HUB_STUB, newline="\n")
     return d
 
@@ -295,9 +307,45 @@ def _force_remove(func, path, _exc):
     func(path)
 
 
+def case_unauthorized_merge_never_calls_hub(tmp):
+    for limit in ("pr-only", "no-push", "implementation-only", "unknown"):
+        repo, d = make_repo(tmp), make_script_dir(tmp)
+        slot = repo / ".git/task-cycle" / hashlib.sha256(FEATURE.encode()).hexdigest() / "contract.md"
+        slot.write_text(slot.read_text().replace("**Git limits:** none", f"**Git limits:** {limit}"))
+        marker = d / "called"
+        (d / "hub.sh").write_text(f"#!/bin/bash\ntouch '{marker}'\n")
+        proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                               '{"squash":true}'], cwd=repo, capture_output=True, text=True)
+        if proc.returncode == 0 or marker.exists() or not branch_exists(repo):
+            fail("unauthorized_merge", f"hub called or recovery lost with {limit}")
+    print("ok unauthorized merge denied before hub and cleanup")
+
+
+def case_hub_writes_check_authority(tmp):
+    for subcommand, args in (("pr-create", ["--base", "main", "--title", "test"]),
+                            ("merge", ["1", "squash"])):
+        repo = make_repo(tmp)
+        git(repo, "remote", "add", "origin", "git@github.com:o/r.git")
+        slot = repo / ".git/task-cycle" / hashlib.sha256(FEATURE.encode()).hexdigest() / "contract.md"
+        slot.write_text("**Approval source:** --from task-next --auto\n"
+                        "**Allowed Git actions:** pr-write, base-merge\n**Git limits:** none\n")
+        bindir = Path(tempfile.mkdtemp(dir=tmp))
+        log = bindir / "writes"
+        (bindir / "gh").write_text(f"#!/bin/bash\necho called >> '{log}'\n")
+        (bindir / "gh").chmod(0o755)
+        proc = subprocess.run(["bash", str(HUB), subcommand, *args], cwd=repo,
+                              env=dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}"),
+                              capture_output=True, text=True)
+        if proc.returncode == 0 or log.exists():
+            fail("hub authority", f"{subcommand} reached gh with flag-only source")
+    print("ok hub create/merge deny before remote CLI")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="merge-cleanup-")
     try:
+        case_hub_writes_check_authority(tmp)
+        case_unauthorized_merge_never_calls_hub(tmp)
         case_hub_never_deletes_local(tmp)
         case_deleted_by_script(tmp)
         case_real_failure_still_warns(tmp)

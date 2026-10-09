@@ -1,18 +1,10 @@
 # Backlog
 
-## 2. P0 — review-authorization-boundary
-
-Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 2. Read the design's authorization cases before changing caller gates or Git actions.
-
-- [ ] [HARNESS] Expose task-new/task-next Git effects in Claude descriptions and Codex sidecars; carry the existing contract's approval source and Git limits through review/batch/tree/resume; enforce those limits before local commits, push/PR writes, and lite/hub merge without repeating valid approvals or treating --from/--auto as authorization. Read `docs/design/harness-policy-alignment.md`, slice 2, before forming the contract.
-
-Acceptance: explicit Markdown approval-source/action/limit fields persist in the existing contract archive without a new schema; router/flag claims establish no authority; implementation-only blocks local commits; unknown authority denies affected actions; lite checks direct base-branch merge/push permission before entry; hub/batch/tree/resume preserve limits and authorized automation. Approach: enumerate affected entry/handoff paths and focused action-boundary tests before edits; broader state/execution redesign requires a separate ticket.
-
 ## 3. P1 — harness-init-simplification
 
 Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 3. Read the conditional-section and size-policy decisions before editing templates or validation.
 
-- [ ] [HARNESS] Simplify harness-init templates and validation: remove the >20-output-lines delegation rule, condition optional sections on real invariants/delegation needs, reduce mandatory generic/verbatim blocks, and align size purposes, thresholds, messages, and tests while retaining useful defect detection. Read `docs/design/harness-policy-alignment.md`, slice 3, before forming the contract. *(blocked by: 2-review-authorization-boundary)*
+- [ ] [HARNESS] Simplify harness-init templates and validation: remove the >20-output-lines delegation rule, condition optional sections on real invariants/delegation needs, reduce mandatory generic/verbatim blocks, and align size purposes, thresholds, messages, and tests while retaining useful defect detection. Read `docs/design/harness-policy-alignment.md`, slice 3, before forming the contract.
 
 Acceptance: the Sprint Contract settles generation/validator/session size thresholds and messages before edits; the design's Golden Principles/Delegation/Token Economy/Maintenance policy replaces contradictory verbatim mandates; minimal/existing fixtures, broken references/configuration, configured delegation and each size boundary are covered. Approach: update owning examples/rationale/invariants with validator changes; preserve applicable safety rules and version both dev manifests when shipped assets change.
 
