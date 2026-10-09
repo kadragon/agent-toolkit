@@ -1,18 +1,10 @@
 # Backlog
 
-## 3. P1 — harness-init-simplification
-
-Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 3. Read the conditional-section and size-policy decisions before editing templates or validation.
-
-- [ ] [HARNESS] Simplify harness-init templates and validation: remove the >20-output-lines delegation rule, condition optional sections on real invariants/delegation needs, reduce mandatory generic/verbatim blocks, and align size purposes, thresholds, messages, and tests while retaining useful defect detection. Read `docs/design/harness-policy-alignment.md`, slice 3, before forming the contract.
-
-Acceptance: the Sprint Contract settles generation/validator/session size thresholds and messages before edits; the design's Golden Principles/Delegation/Token Economy/Maintenance policy replaces contradictory verbatim mandates; minimal/existing fixtures, broken references/configuration, configured delegation and each size boundary are covered. Approach: update owning examples/rationale/invariants with validator changes; preserve applicable safety rules and version both dev manifests when shipped assets change.
-
 ## 4. P2 — subagent-model-selection-policy
 
 Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 4. Read the platform-specific precedence corrections; model omission does not activate automatic routing.
 
-- [ ] [HARNESS] Document task-specific model/effort selection in docs/delegation.md and platform resolution in docs/platform-specs.md: advisory Light/Standard/Deep, expected total cost, evidence-based escalation, resolved defaults, Claude version/forced-mode exceptions, and Codex custom-agent precedence; retain current role pins and separate headless review policy. Read `docs/design/harness-policy-alignment.md`, slice 4, before forming the contract. *(blocked by: 3-harness-init-simplification)*
+- [ ] [HARNESS] Document task-specific model/effort selection in docs/delegation.md and platform resolution in docs/platform-specs.md: advisory Light/Standard/Deep, expected total cost, evidence-based escalation, resolved defaults, Claude version/forced-mode exceptions, and Codex custom-agent precedence; retain current role pins and separate headless review policy. Read `docs/design/harness-policy-alignment.md`, slice 4, before forming the contract.
 
 Acceptance: the policy is explicitly provisional; advisory model tiers are independent of unchanged Effort Tier budgets; dated official sources and installed-version evidence support platform precedence, or local availability is marked unverified; common policy carries no fixed provider IDs and existing runtime settings remain unchanged. Approach: policy-first P2 documentation, no global rules, new router, or duplicate roles.
 

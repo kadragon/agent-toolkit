@@ -9,11 +9,8 @@ disable-model-invocation: true
 
 # Harness Init
 
-Set up the harness — scaffolding, constraints, feedback loops, docs — so agents do reliable,
-consistent work in this repo.
-
+Set up minimal, evidence-grounded repository instructions and checks.
 ## Core Philosophy
-
 **If the agent struggles, that's a harness defect** — fix the environment, not the prompt. And
 find the simplest thing that works: every component encodes an assumption about what the model
 cannot do alone, so start minimal and add scaffolding only on a concrete failure. A harness built
@@ -46,10 +43,9 @@ broken here — report the upgrade path, let the repo earn it (Level 2 same-sess
 already exists; Level 3 only on demonstrated risk; existing repo: one level per session).
 
 **The operator's own instruction layer is a sizing input.** Read `~/.claude/CLAUDE.md` (Claude
-Code) or `~/.codex/AGENTS.md` (Codex) before writing any delegation wording; never write to it. If
-it says *default inline, delegate only above N files*, the generated docs must not read stricter —
-a gate that contradicts a higher-precedence file gets ignored and teaches the operator the harness
-is noise. Roles and orchestrators are created at init only on an explicit request (Steps 4b/4c).
+Code) or `~/.codex/AGENTS.md` (Codex) before writing any delegation wording; never write to it. Higher-level prohibitions remain binding. Local thresholds specialize only choices the
+upper layer permits; derive them from the inspected policy, never an assumed numeric global gate.
+Roles and orchestrators are created at init only on an explicit request (Steps 4b/4c).
 
 ## Step 0b: Reconcile with higher-precedence layers
 
@@ -60,8 +56,8 @@ instructions:
 |---|---|
 | Repo rule **specializes** the upper layer (narrower scope, stricter threshold, a repo value filling a placeholder) | Write it |
 | Repo rule uses an **opt-out the upper layer grants** | Write it, labeled inline (`Overrides global: …`) |
-| Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep (the copy is that rule's only reach on Codex/Cursor). Verified single-tool repo → trim the redundant items, never a whole mandated block |
-| Repo rule **contradicts** the upper layer | **Stop and ask.** Quote both sides, recommend one, ask which wins — batched into one prompt |
+| Repo rule **restates** an upper-layer rule with no delta | Multi-tool repo → keep (the copy is that rule's only reach on Codex/Cursor). Verified single-tool repo → trim verified redundant items |
+| Repo rule **contradicts** the upper layer | Honor the higher-level boundary; ask only if an unresolved local choice materially affects the outcome |
 
 Asking never halts the run: generate everything the conflict does not touch first; with no user
 to ask, skip the rule, state the assumption, surface both sides in the return value. Fires on
@@ -76,17 +72,16 @@ keep versus replace.
 
 **Settle the docs language now.** Every artifact goes in that language, not the chat language.
 Resolve in order: an existing repo Language Policy → the global instruction file's policy → ask
-once. Domain terms with no real equivalent stay in the source language. Two carve-outs: matcher
-text (trigger phrases, `description:` fields) follows what the operator types, and
-`harness:verbatim` blocks stay in English unchanged.
+once. Domain terms with no real equivalent stay in the source language. Matcher text (trigger phrases, `description:` fields) follows what the operator types.
 
 ## Step 2: Define golden principles
 
-Three to seven invariants that, if violated, cause the most damage. Each must be **mechanically
+Document only real project invariants that, if violated, cause the most damage; omit the section
+when none apply, with no minimum count. Each must be **mechanically
 enforceable** (lint, test, or hook), **specific to this project**, and **grounded in real pain**.
 Ask: "What rules, if broken, cause the most pain here?" Examples per stack:
-`references/golden-principles-guide.md`. Add the **Agent Integrity Principle** everywhere — an
-unread value is written `[unknown — read {source}]`, never guessed.
+`references/golden-principles-guide.md`. Preserve applicable integrity boundaries: an unread value is
+`[unknown — read {source}]`, never guessed; avoid duplicating verified higher-level guidance.
 
 ## Step 3: Create AGENTS.md
 
@@ -95,18 +90,25 @@ A map, not an encyclopedia: target ≤100 lines, hard warn >200. The primary ant
 this from the repo?" and delete it if yes. Architecture summaries, linter-owned style, README
 paraphrases all fail it; navigational pointers (the Docs Index) and a non-obvious command pass.
 
-**Required sections:** `## Docs Index`, `## Golden Principles`, `## Delegation`, `## Token
-Economy`, `## Working with Existing Code`, `## Language Policy`, `## Maintenance`. Structure:
-`examples/agents-md-example.md`. Two blocks are copied **verbatim** with their
-`<!-- harness:verbatim … -->` comment — `## Maintenance` (the edit policy) and `## Token Economy`
-(on a Claude-Code-only repo, trim the items the base instructions already impose).
+**Required sections:** `## Docs Index`, `## Working with Existing Code`, `## Language Policy`.
+Adapt `examples/agents-md-example.md`; it demonstrates choices, not a required full-file copy.
+
+| Section | Include when |
+|---|---|
+| Golden Principles | Real project invariants exist; no invented minimum count |
+| Delegation | Configured roles or an actual delegation workflow exist; no empty routing table |
+| Token Economy | Useful project-specific guidance survives the non-inferability filter; otherwise omit |
+| Maintenance / edit policy | Concise applicable guidance or a valid pointer to existing policy is sufficient; no fixed heading/count |
+
+Apply the same filter to all sections. Preserve project-specific safety boundaries; generic
+blocks have no verbatim-copy or pruning exemption. Size diagnostics: PASS <=100, WARN 101–200,
+strong WARN >200; size alone never fails validation. Session warnings start above 200.
 
 **Index only the docs this run creates.** One row per file Step 4 produced; never
 `docs/delegation.md`, which init does not create. The same applies to `docs/*.md` mentions in the
 body — `validate-harness.sh` flags every reference whose file is missing.
 
-A code example beats prose; critical rules first; workflow and delegation detail, evaluation
-criteria, and architecture deep dives belong in `docs/`, not here.
+Keep critical boundaries here; workflow, evaluation, and architecture detail belongs in `docs/`.
 
 ## Step 3a: Path-scoped rules (`.claude/rules/`) — conditional
 
@@ -131,8 +133,7 @@ failing. Templates are self-describing scaffolds in English; bodies go in the St
 | `docs/eval-criteria.md` | the repo grades its own skills or artifacts against rubrics | `references/eval-criteria-template.md` |
 | `docs/delegation.md` | **not at init** — created with the repo's first role by `dev:harness-curate` | this marketplace's own `docs/delegation.md` is the reference shape |
 
-Name every skipped doc in the Step 10 summary with its trigger (`validate-harness.sh`: `INFO`).
-
+Name skipped docs and their triggers in Step 10 (`validate-harness.sh`: `INFO`).
 ### Step 4a: Sprint / backlog files — only if the repo runs sprints
 
 `backlog.md` from `references/backlog-template.md` when the repo adopts the queue flow — it is
@@ -195,7 +196,7 @@ preemptively, and never with an empty roster.
 - **`CLAUDE.md`** — exactly `@AGENTS.md`. A validated invariant; repair with
   `scripts/sync-claude-md.sh`. Claude-specific guidance goes in `.claude/rules/` or `AGENTS.md`.
 - **Memory boundary** — harness files hold durable repo facts; auto-memory holds the model's
-  discovered preferences. State it once in `## Maintenance`. Env vars:
+  discovered preferences. State it once in applicable edit-policy guidance or its referenced doc. Env vars:
   `references/power-user-settings.md`.
 - **`.claudeignore`** — compose from `references/claudeignore-template.md` for the Step 1 stack.
 - **`.agents/skills` symlink** → `../.claude/skills`:
@@ -213,9 +214,8 @@ preemptively, and never with an empty roster.
 
 Run `scripts/validate-harness.sh`. Non-zero → halt, show the full report, do not auto-fix. It
 checks required files, the AGENTS.md size band, the `CLAUDE.md` pointer, the symlink, the
-`backlog.md` schema, the `## Maintenance` block, golden principles, delegation, and enforcement.
-Manual checklist: no generated rule contradicts the operator's global layer (every Step 0b
-conflict was resolved by the user); each golden principle has a check; no doc names a role that
+`backlog.md` schema, edit-policy presence, conditional golden principles/delegation, configuration syntax, and enforcement.
+Manual checklist: no generated rule contradicts the operator's global layer (higher-level prohibitions remain honored; unresolved local choices are surfaced); each golden principle has a check; no doc names a role that
 does not exist; no role pins a model; every skipped doc is named with its trigger; `docs/` files
 do not duplicate each other.
 
@@ -225,7 +225,7 @@ Show all five: the full `AGENTS.md`; every created file with a one-line purpose;
 deliberately not created and what would create it** (roles/orchestrator → `harness-curate`
 evidence; each skipped doc → its trigger; `backlog.md` → adopting sprints; sweep → the first
 drift signal; Layers 1–3 → a level upgrade or a demonstrated risk); the maturity level reached
-and the next level's cost; how to update `AGENTS.md` (the four `## Maintenance` conditions).
+and the next level's cost; how to update `AGENTS.md` (the applicable edit policy or its pointer).
 Do not describe a fresh init as drift-proof — only Level 3 makes drift prevention mechanical.
 
 ## Ongoing maintenance

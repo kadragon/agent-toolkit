@@ -7,25 +7,23 @@
 #   1. Required files exist (AGENTS.md, CLAUDE.md, docs/runbook.md); the other
 #      docs and backlog.md are conditional — absence reported as INFO
 #   1b. Executable text file line endings (*.sh/*.bash/*.py)
-#   2. AGENTS.md size policy (target ≤100, warn ≤120, fail >120)
+#   2. AGENTS.md size policy (target ≤100, warn >100, strong warn >200; no size-only failure)
 #   3. All files referenced in AGENTS.md docs index exist
-#   4. Golden principles section present and 3-7 items
-#   5. Delegation table is present and non-empty
+#   4. Golden principles conditional on real invariants; no item-count mandate
+#   5. Delegation guidance conditional on configured roles/workflows
 #   6. Enforcement layer detected (hooks, pre-commit, or CI)
 #   7. CLAUDE.md is exactly "@AGENTS.md" (sync B invariant)
 #   8. .agents/skills → ../.claude/skills symlink (sync E invariant)
 #   9. backlog.md schema (checkbox items under ## headings; sync D-1)
-#  10. AGENTS.md ## Maintenance section embeds edit-policy rules
+#  10. AGENTS.md carries a concise edit policy or a valid policy pointer
 #  11. .claude/agents/*.md carry the role-template spine (Step 4b resync)
 #
 # A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Sections 1–5 and 7–11 use [[ =~ ]] bash builtins, no grep
 # subprocesses. Section 1b uses grep per file. AGENTS.md is read in a single
-# pass — no repeated file scans. Section 0 uses grep twice: agent file
-# detection (find | grep -q) and SKILL.md content matching (grep -qiE), and
-# its flags are reused by sections 1, 5, 6b, and 11. Section 11 gates on
-# has_agents, then lists the role files with one more find and reads each of
-# them in a single pass.
+# pass; referenced policy docs are read only when present. Section 0 detects
+# Claude/Codex roles and workflow/skill surfaces; section 11 retains Claude
+# role-spine checks without imposing that format on Codex TOML roles.
 
 set -euo pipefail
 
@@ -52,24 +50,33 @@ echo ""
 
 # ── 0. Delegation-surface detection ────────────────────────
 # Computed before any check that depends on it (sections 1, 5, 6b, 11).
-# `has_agents` / `has_orchestrator` answer "does this repo have anything to
-# delegate to?" — init creates neither, so their absence is the designed
+# `has_agents` / `has_orchestrator` answer "does this repo have configured
+# delegation?" — init creates neither, so their absence is the designed
 # default, not a defect. Several checks below downgrade WARN to INFO on it.
-# Uses `find` instead of bash-builtin `compgen` so this runs under `sh`/`zsh`
-# invocation as well as `bash`.
+# Uses find for platform-specific role and skill paths; execute this script with bash.
 has_agents=false
 has_orchestrator=false
+has_delegation_workflow=false
+if [[ -f docs/workflows.md ]] && grep -qiE '^##[[:space:]]+Delegation[[:space:]]+Workflow([[:space:]]|$)' docs/workflows.md; then
+    has_delegation_workflow=true
+fi
 if [[ -d ".claude/agents" ]]; then
     find ".claude/agents" -maxdepth 1 -type f -name "*.md" -print -quit 2>/dev/null | grep -q . && has_agents=true
 fi
-if [[ -d ".claude/skills" ]]; then
-    while IFS= read -r -d '' skill; do
-        if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
-            has_orchestrator=true
-            break
-        fi
-    done < <(find ".claude/skills" -maxdepth 2 -name "SKILL.md" -print0 2>/dev/null)
+has_codex_agents=false
+if [[ -d ".codex/agents" ]]; then
+    find ".codex/agents" -maxdepth 1 -type f -name "*.toml" -print -quit 2>/dev/null | grep -q . && has_codex_agents=true
 fi
+for skill_root in .claude/skills .agents/skills; do
+    if [[ -d "$skill_root" ]]; then
+        while IFS= read -r -d '' skill; do
+            if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
+                has_orchestrator=true
+                break
+            fi
+        done < <(find -L "$skill_root" -maxdepth 2 -type f -name "SKILL.md" -print0 2>/dev/null)
+    fi
+done
 
 # ── 1. Required files ──────────────────────────────────────
 # Two tiers. Always-required: the map, its pointer, and the one doc whose
@@ -104,6 +111,47 @@ done
 # Harness state files (sync C/D-1 operate on these when the sprint flow is used)
 [[ -f "backlog.md" ]] && pass "backlog.md exists" \
     || info "backlog.md absent — created when the repo adopts the backlog/sprint flow (sync C/D-1 no-op until then)"
+
+# Configuration syntax is a correctness check, not template conformance.
+echo ""
+echo "--- Configuration Integrity ---"
+for config in .claude/settings.json .claude/settings.local.json .claude/trigger-routes.json; do
+    [[ -f "$config" ]] || continue
+    if jq -e -s 'length == 1 and (.[0] | type == "object")' "$config" >/dev/null 2>&1; then
+        pass "$config is a JSON object"
+    else
+        fail "$config malformed or not an object (requires jq)"
+    fi
+done
+# Probe capability rather than assuming a python3 shim or tomllib is installed.
+toml_python=""
+for interpreter in python3 python; do
+    candidate=$(command -v "$interpreter" || true)
+    if [[ -n "$candidate" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+        toml_python="$candidate"
+        break
+    fi
+done
+while IFS= read -r config; do
+    [[ -f "$config" ]] || continue
+    if [[ -z "$toml_python" ]]; then
+        fail "$config cannot be validated — Python 3.11+ with tomllib unavailable (python3/python)"
+        continue
+    fi
+    if config_roles=$("$toml_python" - "$config" 2>/dev/null <<'TOML_CONFIG'
+import sys
+import tomllib
+with open(sys.argv[1], "rb") as stream:
+    data = tomllib.load(stream)
+print("roles" if any(isinstance(value, dict) for value in data.get("agents", {}).values()) else "none")
+TOML_CONFIG
+    ); then
+        pass "$config parses as TOML"
+        [[ "$config_roles" == "roles" ]] && has_codex_agents=true
+    else
+        fail "$config malformed TOML or invalid agents configuration"
+    fi
+done < <(printf '%s\n' .codex/config.toml; find .codex/agents -maxdepth 1 -type f -name '*.toml' 2>/dev/null || true)
 
 # ── 1b. Executable text line endings ───────────────────────
 echo ""
@@ -141,11 +189,11 @@ echo "--- AGENTS.md Size ---"
 if [[ -f "AGENTS.md" ]]; then
     lines=$(wc -l < AGENTS.md | tr -d ' ')
     if [[ $lines -le 100 ]]; then
-        pass "AGENTS.md is $lines lines (limit: 100)"
-    elif [[ $lines -le 120 ]]; then
-        warn "AGENTS.md is $lines lines (limit: 100, slightly over)"
+        pass "AGENTS.md is $lines lines (target: <=100)"
+    elif [[ $lines -le 200 ]]; then
+        warn "AGENTS.md is $lines lines (target: <=100; review for redundant guidance)"
     else
-        fail "AGENTS.md is $lines lines (limit: 100, too long)"
+        warn "AGENTS.md is $lines lines (strong warning: >200; move detail to docs/ and leave pointers)"
     fi
 fi
 
@@ -155,15 +203,19 @@ fi
 
 referenced_docs=""
 has_golden=false
-principle_count=0
+golden_content=false
 has_delegation=false
-has_maintenance=false
-maint_rule_count=0
+maintenance_content=false
+instruction_edit_policy=false
 in_golden_section=false
 in_maintenance_section=false
 
 if [[ -f "AGENTS.md" ]]; then
-    while IFS= read -r line; do
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        if [[ "$line" =~ ([Uu]pdate|[Ee]dit|[Mm]aintain).*(this[[:space:]]file|AGENTS\.md) ]]; then
+            instruction_edit_policy=true
+        fi
         # Extract backtick-quoted doc references: `docs/...`
         remaining="$line"
         while [[ "$remaining" =~ \`(docs/[a-zA-Z0-9_./-]+)\` ]]; do
@@ -177,7 +229,7 @@ if [[ -f "AGENTS.md" ]]; then
         fi
         # Track Maintenance section (carries the AGENTS.md edit policy)
         if [[ "$line" =~ ^##[[:space:]]+Maintenance ]]; then
-            has_maintenance=true; in_maintenance_section=true; in_golden_section=false; continue
+            in_maintenance_section=true; in_golden_section=false; continue
         fi
         # Detect Delegation section header (must precede section-exit logic to avoid continue skipping it)
         if [[ "$line" =~ ^##[[:space:]].*Delegation ]]; then
@@ -185,11 +237,11 @@ if [[ -f "AGENTS.md" ]]; then
         fi
         if $in_golden_section; then
             [[ "$line" =~ ^## ]] && { in_golden_section=false; continue; }
-            [[ "$line" =~ ^[0-9]+\. ]] && principle_count=$((principle_count + 1))
+            [[ "$line" =~ [[:alnum:]] ]] && golden_content=true
         fi
         if $in_maintenance_section; then
             [[ "$line" =~ ^## ]] && { in_maintenance_section=false; continue; }
-            [[ "$line" =~ ^[0-9]+\. ]] && maint_rule_count=$((maint_rule_count + 1))
+            [[ "$line" =~ [[:alnum:]] ]] && maintenance_content=true
         fi
     done < AGENTS.md
     referenced_docs="${referenced_docs%$'\n'}"
@@ -216,15 +268,13 @@ echo "--- Golden Principles ---"
 
 if [[ -f "AGENTS.md" ]]; then
     if $has_golden; then
-        if [[ $principle_count -ge 3 && $principle_count -le 7 ]]; then
-            pass "$principle_count golden principles defined (ideal: 3-7)"
-        elif [[ $principle_count -gt 0 ]]; then
-            warn "$principle_count golden principles (recommend 3-7)"
+        if $golden_content; then
+            pass "Golden Principles contains project guidance (check enforcement manually)"
         else
-            warn "Golden Principles section exists but no numbered items found"
+            warn "Golden Principles section is empty — document real invariants or omit it"
         fi
     else
-        fail "No Golden Principles section in AGENTS.md"
+        info "Golden Principles absent — add only for real project invariants"
     fi
 fi
 
@@ -235,15 +285,21 @@ echo "--- Delegation ---"
 if [[ -f "AGENTS.md" ]]; then
     if $has_delegation; then
         pass "Delegation section exists in AGENTS.md"
+    elif $has_agents || $has_codex_agents || $has_orchestrator || $has_delegation_workflow || [[ -f docs/delegation.md ]]; then
+        warn "No Delegation section in AGENTS.md — configured roles/workflow need guidance"
     else
-        warn "No Delegation section in AGENTS.md"
+        info "Delegation absent — no configured roles or delegation workflow"
     fi
 fi
 
 if [[ -f "docs/delegation.md" ]]; then
     pass "docs/delegation.md exists with detailed routing"
-elif $has_agents || $has_orchestrator; then
-    warn "docs/delegation.md missing — this repo has agents/orchestrators but no routing doc"
+elif $has_agents || $has_codex_agents || $has_orchestrator; then
+    if $has_delegation && [[ -f docs/workflows.md ]]; then
+        pass "Delegation guidance uses the existing workflow doc"
+    else
+        warn "docs/delegation.md missing — this repo has agents/orchestrators but no routing doc"
+    fi
 else
     info "docs/delegation.md absent — no agent roles or orchestrator to route to yet (created with the first role; see dev:harness-curate)"
 fi
@@ -345,15 +401,20 @@ fi
 echo ""
 echo "--- AGENTS.md Maintenance Section ---"
 
+# A nonempty section, inline update instruction, or referenced edit-policy doc
+# is sufficient. This detects presence; policy quality remains a manual check.
 if [[ -f "AGENTS.md" ]]; then
-    if $has_maintenance; then
-        if [[ $maint_rule_count -ge 4 ]]; then
-            pass "AGENTS.md ## Maintenance has $maint_rule_count numbered rules (edit policy embedded)"
-        else
-            warn "AGENTS.md ## Maintenance has only $maint_rule_count rules (expected ≥4 from edit policy)"
+    has_policy_pointer=false
+    while IFS= read -r doc; do
+        [[ -f "$doc" ]] || continue
+        if grep -qiE '(update|edit|maintain).*(AGENTS\.md|instruction)' "$doc"; then
+            has_policy_pointer=true
         fi
+    done <<< "$referenced_docs"
+    if $maintenance_content || $instruction_edit_policy || $has_policy_pointer; then
+        pass "AGENTS.md edit policy present (inline or referenced; no fixed heading/count)"
     else
-        fail "AGENTS.md missing ## Maintenance section — sync A edit policy not internalized"
+        warn "No AGENTS.md edit policy found — add concise applicable guidance or a valid pointer"
     fi
 fi
 

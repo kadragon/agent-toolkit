@@ -16,20 +16,18 @@ Skip for trivial features.
 
 ## `code` — Implementation
 
-The primary cycle for behavioral changes. Delegation checkpoints are **named steps** in this workflow — they are not optional "consult if needed" references.
-
-**Delegation in a freshly initialized repo.** `harness-init` creates no agent roles and no orchestrator, so on a new repo every step below runs **inline in the main thread**: it does its own scope check, its own implementation, its own verification pass. That is the intended starting state, not a gap. Keep the steps — the discipline is the point — and drop the words "delegate to X" from any step whose X does not exist here yet. Roles arrive later via `dev:harness-curate` on transcript evidence; when one does, restore the delegation wording for that step only.
+The primary cycle for behavioral changes. New repositories run inline by default; init creates
+no roles or orchestrator. Add delegation guidance only for configured roles or an actual workflow,
+within higher-level authorization. Existing workflow guidance may hold the routing details.
 
 **Step 0: Branch**
-Before any edit, ensure you're on a feature branch — never on `main`/`master`. If currently on the default branch, run `git checkout -b <type>/<slug>` (e.g. `feat/user-auth`, `fix/login-redirect`). Exceptions must be declared explicitly in this repo's `AGENTS.md` / `CLAUDE.md`.
+Before editing, use a feature branch within the user's Git authorization.
 
-**Step 1: Scope check (delegation gate)**
-Check objective delegation triggers from `docs/delegation.md`:
-- Does the target module exceed the file/LOC threshold? → Delegate to Analysis agent before proceeding.
-- Does the change touch ≥3 directories? → Delegate to Architecture analysis agent.
-- Is this the first edit in this directory this session? → Delegate to Explore agent.
-- Does the file match a critical path pattern? → Delegate to Analysis agent.
-If none of the triggers match, proceed directly.
+**Step 1: Scope check**
+Inspect the relevant code first. Use verified local delegation thresholds only when higher-level
+instructions permit delegation; do not attribute invented numeric gates to a global policy.
+Independent verification is assessed for its benefit separately from parallel implementation.
+Name only available roles; omit delegation-doc pointers until the doc exists.
 
 **Step 1.5: File Ownership Declaration (multi-agent only)**
 If the sprint will spawn ≥2 parallel subagents OR use Agent Teams, the lead MUST declare file-ownership globs per role BEFORE spawning anyone — for plain subagents in `tasks.md` — or inline in the conversation when this cycle wrote no `tasks.md` — for Agent Teams via the native shared task list (`TaskCreate`; `tasks.md` stays read-only during team work). Overlapping globs cause silent overwrites. Cross-boundary edits require explicit lead approval — teammates do not cross globs unilaterally.

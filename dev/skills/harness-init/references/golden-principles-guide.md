@@ -1,6 +1,7 @@
 # Golden Principles Guide
 
-Golden principles are the 3-7 invariants specific to a project that, if violated, cause the most damage. They must be mechanically enforceable — a principle without a lint rule, test, or hook is just a wish.
+Golden principles are real project invariants that, if violated, cause the most damage.
+There is no minimum count; omit the section when no applicable invariant exists. They must be mechanically enforceable — a principle without a lint rule, test, or hook is just a wish.
 
 ## How to Discover Golden Principles
 
@@ -63,47 +64,24 @@ Ask these questions:
 
 ## Delegation Discipline (Cross-Cutting Principle)
 
-Delegation is not a "nice-to-have guideline" — when the project uses sub-agents, delegation discipline should be a golden principle. The reason: agents consistently overestimate their own understanding and skip delegation when triggers are subjective. If "delegate before modifying unfamiliar module" is the rule, the agent will decide it's familiar enough and proceed directly every time.
+Configured roles or an actual delegation workflow can justify delegation guidance. Default
+inline; higher-level prohibitions remain binding. Add objective triggers only for verified
+coordination needs, within choices the higher layers permit. A threshold is a local policy,
+not an assumed global gate; file counts or output length alone do not mandate delegation.
 
-**The fix: objective, measurable triggers that remove agent judgment from the decision.**
+Independent verification can justify a separate reviewer without parallel implementation.
+Name only available roles or supported built-ins. Keep detailed routing in an existing workflow
+or delegation doc when needed; no mandatory table or generic golden principle is required.
 
-### Why Subjective Triggers Fail
-
-| Subjective trigger | Agent's likely reasoning | Result |
-|---|---|---|
-| "Before modifying unfamiliar module" | "I read the file, I understand it" | Skips delegation |
-| "When the change is complex" | "This is straightforward" | Skips delegation |
-| "If unsure about the impact" | "I'm fairly confident" | Skips delegation |
-
-Models have a systematic bias toward overconfidence about their own comprehension. Any trigger that requires self-assessment of understanding will be bypassed.
-
-### Objective Trigger Examples
-
-| Objective trigger | Why it works |
-|---|---|
-| "Module has >5 files OR >500 LOC" | Measurable, no judgment needed |
-| "File not in the last 10 commits by this agent session" | Git history is factual |
-| "Touches ≥3 modules in one change" | Count-based, unambiguous |
-| "Changes a file matching `**/auth/**` or `**/billing/**`" | Path-based, mechanical |
-| "Any schema migration" | File-type trigger, no judgment |
-| "First edit in a directory this session" | Session-scoped, trackable |
-
-### Writing the Principle
-
-**Good:** "Before modifying any module with >5 files: delegate to Explore agent. Before any change touching ≥3 directories: delegate to Architecture analysis agent. No exceptions — this is a golden principle, not a suggestion."
-
-**Bad:** "Delegate when working on unfamiliar or complex parts of the codebase."
-
-### Enforcement
-
-Delegation principles can be enforced via:
-- **PreToolUse hook** — Check if the target file/directory matches a delegation trigger before allowing Edit/Write
-- **Workflow checkpoint** — Delegation is a named step in the `code` workflow, not a footnote
-- **Session log audit** — Sweep checks whether delegation actually happened for qualifying changes
+Enforce a justified critical-path trigger mechanically only after an observed miss or a
+concrete safety need, using existing hooks/workflow checks. A prose threshold that contradicts
+higher-level authorization cannot grant permission to spawn.
 
 ## Agent Integrity Principle (Universal)
 
-Add this principle to **every** project that uses AI agents. It prevents the single most common silent failure: agents fabricating values they haven't directly observed.
+Preserve applicable integrity boundaries against fabricated values. Read the targeted
+instruction layers before duplicating this rule; its universal relevance does not require a
+new Golden Principles section or another copy in every repository.
 
 **The principle:** `not_observed != absent`. Missing local proof means unverified — not impossible, not default, not inferred from general knowledge.
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # F) Context Size Check
 #
-# Warns if the file that Claude loads every message exceeds LIMIT lines.
+# Warns when the effective instruction file exceeds LIMIT lines (default >200).
+# Generation targets <=100; validation warns above 100, strongly above 200.
+# Size alone never fails either check.
 # - If CLAUDE.md is a pointer (exactly "@AGENTS.md"), the effective file is AGENTS.md.
 # - Otherwise, CLAUDE.md itself is the effective file.
 #
@@ -9,8 +11,7 @@
 #   0  Always — overflow is signaled via stdout only, not exit code
 #
 # Rationale: CLAUDE.md / AGENTS.md is re-loaded with every user message.
-# Past ~200 lines the per-message token cost starts dominating the context budget
-# (5k+ tokens wasted per message on instructions the agent has already internalized).
+# Line count is a review-cost heuristic, not a correctness or token-cost claim.
 
 set -euo pipefail
 
@@ -44,8 +45,8 @@ if [ "$lines" -gt "$LIMIT" ]; then
     printf '  hint: ~%s lines are inside fenced code blocks — AGENTS.md is a map, move examples to docs/\n' "$code_lines"
   fi
 
-  h2_dup=$(grep -c '^## ' "$effective" 2>/dev/null || echo 0)
-  h2_uniq=$(grep '^## ' "$effective" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+  h2_dup=$(grep -c '^## ' "$effective" 2>/dev/null || true)
+  h2_uniq=$(awk '/^## / && !seen[$0]++ {count++} END {print count+0}' "$effective")
   if [ "$h2_dup" -gt "$h2_uniq" ]; then
     printf '  hint: duplicate ## headings detected (%s total, %s unique) — merge redundant sections\n' \
       "$h2_dup" "$h2_uniq"
