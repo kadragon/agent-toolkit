@@ -13,6 +13,7 @@
   "enabledPlugins": {
     "typescript-lsp@claude-plugins-official": false,
     "playwright@claude-plugins-official": false,
-    "humanize-korean@im-not-ai": false
+    "humanize-korean@im-not-ai": false,
+    "frontend-design@claude-plugins-official": false
   }
 }
