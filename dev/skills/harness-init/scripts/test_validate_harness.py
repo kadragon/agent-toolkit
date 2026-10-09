@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -104,6 +105,33 @@ class HarnessTests(unittest.TestCase):
         result = self.run_script()
         self.assertNotIn("No Delegation section", result.stdout)
         self.assertNotIn("no routing doc", result.stdout)
+
+    def test_role_free_workflow_template(self):
+        template = Path(__file__).resolve().parent.parent / "references/workflows-template.md"
+        self.write("docs/workflows.md", template.read_text())
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("WARN: 0", result.stdout)
+
+    def test_python_only_toml_validation(self):
+        self.write(".codex/config.toml", '[agents.reviewer]\ndescription = "Review"\n')
+        self.write("bin/python3", "#!/bin/sh\nexit 127\n")
+        self.write("bin/python", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        for name in ("python3", "python"):
+            (self.root / "bin" / name).chmod(0o755)
+        result = self.run_script(PATH=f"{self.root / 'bin'}:{os.environ['PATH']}")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(".codex/config.toml parses as TOML", result.stdout)
+
+    def test_missing_toml_tooling_is_distinct_from_syntax(self):
+        self.write(".codex/config.toml", "[agents]\n")
+        for name in ("python3", "python"):
+            self.write(f"bin/{name}", "#!/bin/sh\nexit 127\n")
+            (self.root / "bin" / name).chmod(0o755)
+        result = self.run_script(PATH=f"{self.root / 'bin'}:{os.environ['PATH']}")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("cannot be validated", result.stdout)
+        self.assertNotIn("malformed TOML", result.stdout)
 
     def test_workflow_only_delegation(self):
         self.write("docs/workflows.md", "# Code\n## Delegation workflow\nDelegate to the built-in reviewer when authorized.\n")

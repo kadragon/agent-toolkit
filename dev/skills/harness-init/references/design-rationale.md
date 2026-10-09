@@ -48,6 +48,9 @@ when configured Claude/Codex roles or actual workflows exist. Token Economy is o
 project-specific guidance. An edit policy may be concise or an existing valid pointer rather
 than a named four-item section. Validate presence mechanically; assess relevance/enforcement
 manually. Correctly absent optional sections produce INFO, not recurring warnings.
+Role-free workflows declare actual delegation with a `## Delegation Workflow` heading;
+conditional template prose is not a configured workflow. Config syntax checks require jq for
+JSON and a working python3/python with tomllib for TOML; missing tooling is reported distinctly.
 
 The generation target remains 100 lines. Validation warns at 101–200 and strongly above 200;
 session warnings start above 200 (explicit overrides retained). There is no size-only failure:

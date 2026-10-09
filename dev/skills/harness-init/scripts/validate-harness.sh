@@ -57,7 +57,7 @@ echo ""
 has_agents=false
 has_orchestrator=false
 has_delegation_workflow=false
-if [[ -f docs/workflows.md ]] && grep -qiE '(^##.*Delegation|delegate to|delegation.*(workflow|routing))' docs/workflows.md; then
+if [[ -f docs/workflows.md ]] && grep -qiE '^##[[:space:]]+Delegation[[:space:]]+Workflow([[:space:]]|$)' docs/workflows.md; then
     has_delegation_workflow=true
 fi
 if [[ -d ".claude/agents" ]]; then
@@ -123,9 +123,22 @@ for config in .claude/settings.json .claude/settings.local.json .claude/trigger-
         fail "$config malformed or not an object (requires jq)"
     fi
 done
+# Probe capability rather than assuming a python3 shim or tomllib is installed.
+toml_python=""
+for interpreter in python3 python; do
+    candidate=$(command -v "$interpreter" || true)
+    if [[ -n "$candidate" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+        toml_python="$candidate"
+        break
+    fi
+done
 while IFS= read -r config; do
     [[ -f "$config" ]] || continue
-    if config_roles=$(python3 - "$config" 2>/dev/null <<'TOML_CONFIG'
+    if [[ -z "$toml_python" ]]; then
+        fail "$config cannot be validated — Python 3.11+ with tomllib unavailable (python3/python)"
+        continue
+    fi
+    if config_roles=$("$toml_python" - "$config" 2>/dev/null <<'TOML_CONFIG'
 import sys
 import tomllib
 with open(sys.argv[1], "rb") as stream:
@@ -136,7 +149,7 @@ TOML_CONFIG
         pass "$config parses as TOML"
         [[ "$config_roles" == "roles" ]] && has_codex_agents=true
     else
-        fail "$config malformed (requires Python 3.11+ tomllib)"
+        fail "$config malformed TOML or invalid agents configuration"
     fi
 done < <(printf '%s\n' .codex/config.toml; find .codex/agents -maxdepth 1 -type f -name '*.toml' 2>/dev/null || true)
 
