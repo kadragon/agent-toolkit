@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Align delegation and invocation policy (dev v4.10.16) (2026-10-09) → docs/delegation.md
 - [done] scan_transcripts.py: test-enforced SECTION MAP for range reads (dev v4.10.15) (2026-10-09)
 - [done] check_harness_drift: fail closed when a bare references/ name resolves only to another skill (2026-10-06)
 - [done] check_harness_drift fails closed on unresolved bare sibling names in references/ docs (prod v3.2.3) (2026-10-05)

@@ -1,11 +1,23 @@
 # Invocation
 
-Who may fire a skill. This is the one axis every skill in this repo is classified on. The
-rules below are the target state — the repo is **partially migrated onto them**: the
-`task-review` / `task-review-cycle` split, the *Notation* migration and both halves of
-*Per-platform fields* have landed, as have the user-invoked one-line descriptions; only the
-`## Invocation axis — CI enforcement` item in `backlog.md` is still open. `docs/design/invocation-axis.md`
-holds the rationale. Field syntax lives in `docs/platform-specs.md`; the policy lives here.
+Who may fire a skill. This is the one axis every skill in this repo is classified on.
+`scripts/ci/check_skill_frontmatter.py` enforces the policy's structural rules:
+
+- **Axis coherence:** Claude's `disable-model-invocation: true` and Codex's sidecar
+  `policy.allow_implicit_invocation: false` agree for each skill.
+- **Call graph:** operative Skill tool calls cannot target a user-invoked skill, regardless
+  of the caller's axis.
+- **Notation:** operative cross-skill instructions use explicit namespaced Skill tool calls;
+  residual `Skill(ns:name)` spelling requires a local exemption marker when it invokes nothing.
+
+Axis coherence covers tracked skill directories; call-graph and notation checks scan tracked
+shipped Markdown in skill bundles, agent definitions, and commands. They are structural checks,
+not proof of runtime routing or user authorization. The `skill-frontmatter` job in
+`.github/workflows/harness-check.yml` runs `scripts/ci/test_check_skill_frontmatter.py`, then
+the checker; violations fail CI. Run both locally after staging new files.
+
+`docs/design/invocation-axis.md` holds the rationale. Field syntax lives in
+`docs/platform-specs.md`; the policy lives here.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `.agents/invocation.md`
 (PR #878, PR #880), with one deviation — this repo ships two plugins, so every cross-skill

@@ -19,8 +19,12 @@ The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when
 
 ## Scope
 
-Look yourself first — one or two searches. Spawn `explorer` (or the built-in `Explore` when no
-such role exists) only when the survey means reading 10+ files or would flood the main context.
+Look yourself first — one or two searches. Delegate research to `explorer` (or the built-in
+`Explore` when no such role exists) only when the user or an applicable skill directs it,
+higher-level constraints permit it, and applicable repository policy is met. In this Toolkit
+repository, the provisional research threshold is 10+ files to investigate or substantial
+context pressure (`docs/delegation.md`); other repositories use their own applicable policy.
+Eligibility never mandates a spawn.
 
 ## Plan gate
 
@@ -72,9 +76,14 @@ contract on the integration branch before convergence cleanup.
 
 ## Implement
 
-Inline by default. Delegate to `implementer` only past the global gate — 10+ files or 3+
-independent units (`docs/delegation.md`) — with a brief carrying the contract, absolute paths of
-every in-scope file, and the lint/test command; the implementer runs related checks and
+Inline by default. Delegate to `implementer` only when the user or an applicable skill directs
+it, higher-level constraints permit it, and applicable repository policy is met. In this Toolkit
+repository, the provisional threshold is 10+ files to investigate, 3+ genuinely independent units,
+or substantial context pressure (`docs/delegation.md`); other repositories use their own applicable
+policy. An authorized workflow's independent verification is assessed separately for its
+independence benefit and cost; neither file count nor parallelism alone gates it. Verification
+is optional unless that workflow requires it. When delegation is warranted, pass a brief carrying
+the contract, absolute paths of every in-scope file, and the lint/test command; the implementer runs related checks and
 reports through its final output, the only channel a role-file agent has
 (`docs/delegation.md`); brief it never to finish silently. Rules either way:
 

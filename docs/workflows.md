@@ -28,8 +28,9 @@ Ensure you're on a feature branch. `git checkout -b <type>/<slug>` if on `main`.
 
 **Step 1: Scope check**
 Establish what the change touches. Look yourself first (1–2 searches). Spawn `explorer` only when
-this cycle was directed to (by the user, or by the skill driving it) **and** the survey also clears
-the global gate — 10+ files to read, or output that would flood main context.
+the user or an applicable skill directs it and higher-level constraints permit it, **and** the
+survey meets this repository's provisional research threshold — 10+ files to investigate or
+substantial context pressure (`docs/delegation.md`). Eligibility never mandates a spawn.
 
 **Step 2: Sprint Contract**
 Before writing, define "done" in concrete, testable terms. Template in `docs/eval-criteria.md`.
@@ -37,15 +38,19 @@ Approval reuse and durable contract ownership live in `dev:task-next` → `refer
 intake, tickets, and resume follow that same authority.
 
 **Step 3: Implement**
-Implement directly. Delegate to `implementer` (with spec + conventions) only when the global
-delegation bar is met — e.g. a backlog batch of independent items.
+Implement directly. Delegate to `implementer` (with spec + conventions) only when the user or an
+applicable skill directs it, higher-level constraints permit it, and this repository's provisional
+threshold is met: 10+ files to investigate, 3+ genuinely independent units, or substantial context
+pressure (`docs/delegation.md`).
 
 **Step 4: QA**
 Implementers run focused checks; independent review separately grades requirements and
 code quality and never replaces required checks; full required checks run on
 the completed candidate after version bump and cleanup. Both rules are owned by `dev:task-next` →
-`references/cycle.md`, under *Implement* and *Validation evidence*. Sequential `--all` shares one
-final review; parallel units also get worktree QA.
+`references/cycle.md`, under *Implement* and *Validation evidence*. Independent verification is
+assessed separately for its independence benefit and cost,
+without a file-count or parallelism gate; it remains optional unless an authorized workflow
+requires it. Sequential `--all` shares one final review; parallel units also get worktree QA.
 
 **Step 5: Version bump**
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
