@@ -9,6 +9,7 @@ description: >-
   한국 정부·기업 양식 처리. 첨부된 .hwpx 파일 추출·번역·요약도 지원. 한글 문서 작성,
   표 편집, 양식 변환, 본문 추출, 번역, 요약 작업에 사용. 영어·한국어 요청 모두 지원하며
   HWPX 문서 작업에 필요한 XML 구조와 스타일을 함께 처리.
+version: 1.0.0
 ---
 
 # HWPX Document Skill — XML-first Workflow

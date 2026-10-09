@@ -5,6 +5,7 @@ description: >-
   by risk and required checks). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
   (request the merge path), --panel (force agy + Codex; default on every non-lite route).
 disable-model-invocation: true
+version: 1.0.0
 ---
 
 # Dev Review Cycle

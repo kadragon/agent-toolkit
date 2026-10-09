@@ -1,28 +1,12 @@
 # Backlog
 
-## 4. P2 — subagent-model-selection-policy
-
-Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 4. Read the platform-specific precedence corrections; model omission does not activate automatic routing.
-
-- [ ] [HARNESS] Document task-specific model/effort selection in docs/delegation.md and platform resolution in docs/platform-specs.md: advisory Light/Standard/Deep, expected total cost, evidence-based escalation, resolved defaults, Claude version/forced-mode exceptions, and Codex custom-agent precedence; retain current role pins and separate headless review policy. Read `docs/design/harness-policy-alignment.md`, slice 4, before forming the contract.
-
-Acceptance: the policy is explicitly provisional; advisory model tiers are independent of unchanged Effort Tier budgets; dated official sources and installed-version evidence support platform precedence, or local availability is marked unverified; common policy carries no fixed provider IDs and existing runtime settings remain unchanged. Approach: policy-first P2 documentation, no global rules, new router, or duplicate roles.
-
 ## 5. P2 — subagent-model-selection-evaluation
 
 Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 5 and Testing Decisions. Read the paired-run protocol before launching agents; keep the existing headless review-effort experiment separate.
 
-- [ ] [HARNESS] Evaluate approximately 10–20 representative delegated tasks against current settings using paired inputs/criteria: Claude per-spawn overrides and Codex unpinned evaluation roles or built-ins; record requested/actual settings, client/default/forced context, quality, retries, lead review, elapsed time, tokens and measured or explicitly estimated cost; recommend role-specific keep/change/unverified outcomes without removing production pins. Read `docs/design/harness-policy-alignment.md`, slice 5, before forming the contract. *(blocked by: 4-subagent-model-selection-policy)*
+- [ ] [HARNESS] Evaluate approximately 10–20 representative delegated tasks against current settings using paired inputs/criteria: Claude per-spawn overrides and Codex unpinned evaluation roles or built-ins; record requested/actual settings, client/default/forced context, quality, retries, lead review, elapsed time, tokens and measured or explicitly estimated cost; recommend role-specific keep/change/unverified outcomes without removing production pins. Read `docs/design/harness-policy-alignment.md`, slice 5, before forming the contract.
 
 Acceptance: preregister 10–20 task IDs total, finite attempts/time/cost-token budgets per platform, observation methods and benefit thresholds; setting-unverified runs cannot support model-effect claims; recommendations meet the design's paired-input/repeat/quality evidence bars and include total retry/review cost; unfinished platforms remain unverified and pin changes require a follow-up. Approach: staged platform runs using existing evaluation conventions and evaluation-only selection reasons; no permanent telemetry or reviewer-process changes.
-
-## 6. Skill frontmatter hygiene
-
-Source: `docs/design/skill-review-followups.md` → Implementation Decisions, slice A. Read the design before forming the Sprint Contract; covers only residual hygiene not owned by backlog 1–5.
-
-- [ ] [HARNESS] Add missing `version:` to dev/skills/harness-init, task-review, task-review-cycle, repo-dependabot and prod/skills/hwpx, persona-debate; audit `allowed-tools` per skill (gongmun-draft/report-draft absent, kr-style Glob omission) with a one-line reason each. Read `docs/design/skill-review-followups.md`, slice A, before forming the contract.
-
-Acceptance: `grep -r '^version:' dev/skills prod/skills` shows zero misses; frontmatter checker and harness validation pass; bumps follow conventions with both manifests in sync; model-pin lines untouched. Approach: metadata-only fix, no authorization or delegation changes. Dependencies: none (soft: prefer after 1–3 land to avoid racing P0/P1 edits).
 
 ## 7. HWPX trigger and report coupling
 

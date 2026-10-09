@@ -53,6 +53,37 @@ there, not weaker. `task-next --tree` and parallel `--all` units keep a per-work
 correctness reason. Those checks belong to the authorized workflow's independent verification;
 research and implementation still require direction and the provisional local threshold.
 
+## Task-specific Model Selection (provisional)
+
+Choose model and reasoning effort per authorized delegated task by complexity, risk,
+and verifiability. Optimize expected total cost: initial work, retries, lead review,
+and executable verification, including elapsed time and tokens. This is an evaluation
+hypothesis; improved quality or cost has not been demonstrated by paired runs.
+
+| Advisory tier | Task signals | Selection rationale |
+|---|---|---|
+| Light | Clear input, low failure impact, mistakes readily detected by a cheap check | Favor a supported economical model/effort combination |
+| Standard | Some ambiguity or interacting requirements, bounded impact, reliable checks | Balance reasoning capability against expected retry and review cost |
+| Deep | Material ambiguity, high failure impact, or mistakes hard to detect | Consider greater reasoning capability and stronger verification |
+
+These tiers neither authorize delegation nor impose a workflow gate or provider mapping.
+Prefer a justified per-spawn choice when the runtime and higher-level instructions permit
+it; otherwise use the resolved platform default. See `docs/platform-specs.md` →
+*Subagent Model and Effort Resolution* before interpreting an override or omitted model.
+Use only model/effort combinations supported by the active client and account.
+
+The Role Routing table's pins are current defaults retained until evaluation. Keep
+role-specific pins when evidence favors them; removing every pin is not the objective.
+Headless review selection remains owned by `dev:task-review-cycle`, separately from this
+subagent policy. This policy adds no router, global rules, telemetry, or duplicate roles.
+
+Escalate reasoning capability only after an observable miss suggests it is insufficient:
+for example, repeated failure on a valid reproduction after the task and inputs are clear.
+Check environmental failures, unavailable tools, and contradictory requirements first;
+those do not establish a model deficiency. Carry findings and unresolved issues into any
+retry. Compare total retry/review cost before recommending a permanent pin change in the
+queued model-selection evaluation.
+
 ## Background Routing (non-blocking)
 
 | Trigger | Delegate to | Context |
@@ -81,6 +112,10 @@ Every `Agent(...)` call must include:
 Missing any field → reject and rewrite the spawn prompt.
 
 ## Effort Tier
+
+This is the task/brief tool-call budget axis. It is independent of the advisory
+Light/Standard/Deep model-selection axis: there is no mandatory one-to-one mapping.
+A model tier grants no extra calls and leaves the stop/report rule unchanged.
 
 Embed in every spawn prompt:
 

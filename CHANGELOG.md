@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Model selection policy and skill metadata hygiene (dev v4.10.19 / prod v3.2.4) (2026-10-09) → docs/platform-specs.md
 - [done] Simplify conditional harness initialization and size checks (dev v4.10.18) (2026-10-09)
 - [done] Enforce workflow Git authorization boundaries (dev v4.10.17) (2026-10-09) → docs/invocation.md
 - [done] Align delegation and invocation policy (dev v4.10.16) (2026-10-09) → docs/delegation.md
