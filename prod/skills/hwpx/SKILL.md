@@ -3,13 +3,14 @@ name: hwpx
 description: >-
   Create, edit, or read HWPX (Hancom/한글) documents — text, tables, styles,
   OWPML, Korean gov/biz forms. Reading an attached .hwpx (extract, translate,
-  summarize) goes through here too. NOT .docx/.xlsx/PDF/Markdown, NOT legacy
-  binary .hwp, NOT 한글 app GUI how-to.
+  summarize) goes through here too. Legacy binary .hwp files are accepted via
+  conversion to .hwpx (Windows + Hancom; otherwise guide manual re-saving).
+  NOT .docx/.xlsx/PDF/Markdown, NOT 한글 app GUI how-to.
   한글 HWPX 문서를 만들고, 편집하고, 읽는 작업 지원. 텍스트, 표, 스타일, OWPML,
   한국 정부·기업 양식 처리. 첨부된 .hwpx 파일 추출·번역·요약도 지원. 한글 문서 작성,
   표 편집, 양식 변환, 본문 추출, 번역, 요약 작업에 사용. 영어·한국어 요청 모두 지원하며
   HWPX 문서 작업에 필요한 XML 구조와 스타일을 함께 처리.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -59,7 +60,7 @@ python -m pip install olefile defusedxml   # python -m pip, not bare pip — the
 - OS-specific Python invocation, encoding gotchas (Windows cp949/UTF-8, codepoint escaping), subprocess encoding, and temp-file placement: see `$SKILL_DIR/references/environment.md`
 - Layout: `scripts/` (build, office, table, text, validate, `convert_hwp.ps1`) · `templates/` (`base` + `gonmun`/`report`/`minutes`/`proposal` overlays) · `references/` (index in Critical Rule 8). Per-script purpose table and CLI examples: `$SKILL_DIR/references/scripts-guide.md`.
 
-## 임시 작업 디렉토리
+## Temporary working directory
 
 작업 중 `.hwpx_work/` 숨김 폴더가 생성됩니다. 최종 파일 완성 후 반드시 사용자에게 `rm -rf .hwpx_work/`(Windows: `Remove-Item -Recurse -Force .hwpx_work`)를 제시하거나 워크플로우 마지막 단계에서 자동 실행.
 

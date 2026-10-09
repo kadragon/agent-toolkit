@@ -1,15 +1,16 @@
 # 보고서 hwpx 편집 레시피
 
-prod:hwpx 스킬의 Workflow 2(수정)·5(참조 기반 생성) 위에서 쓰는 보고서 전용 조각이다. 일반 규칙(lineseg 제거, validate, 한글 열기 확인)은 prod:hwpx를 따른다. `$HWPX_DIR`·`$LINT`는 1절 블록에서 정한다.
+prod:hwpx 스킬의 Workflow 2(수정)·5(참조 기반 생성) 위에서 쓰는 보고서 전용 조각이다. 일반 규칙(lineseg 제거, validate, 한글 열기 확인)은 prod:hwpx를 따른다. Call the Skill tool with "prod:hwpx" for document operations below. Resolve its scripts from the loaded hwpx SKILL.md; report-draft makes no assumption about its installation directory.
 
 ## 1. 수정 대상 파악
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded report-draft SKILL.md>"
-HWPX_DIR="$SKILL_DIR/../hwpx"
 LINT="$SKILL_DIR/scripts/lint_report.py"
-python3 "$HWPX_DIR/scripts/build.py" analyze <원본.hwpx>
+[[ -r "$LINT" ]] || { echo "Bundled report linter unavailable: $LINT" >&2; exit 1; }
 ```
+
+Call the Skill tool with "prod:hwpx" to analyze the original via Workflow 5 (`build.py analyze`).
 
 - 본문 문단은 `" ○ "` 런(charPr 보통체) + 내용 런 여러 개로 나뉜다. 한 줄에 맞추려고 자간·장평을 줄인 charPr이 섞여 있다(analyze 출력의 `spacing=`·`ratio=`).
 - 장 제목(Ⅰ~Ⅴ)은 1행 3열 표다. 표 안 텍스트는 건드리지 않는다.
@@ -48,9 +49,17 @@ s = s[:i] + P.format(pp="52", runs=R(39, "□ 현황")) + s[i:]
 
 ## 5. 저장 순서
 
-1. 원본을 스크래치로 복사 → unpack → 편집 스크립트(모든 치환 assert) → `python3 "$HWPX_DIR/scripts/table.py" strip-lineseg <section0.xml> --inplace`
-2. pack → `python3 "$HWPX_DIR/scripts/validate.py" validate <결과> --baseline <원본>`
-3. `python3 "$LINT" <결과>` exit 0
+1. Call the Skill tool with "prod:hwpx" for Workflow 2: copy the original to scratch, unpack, apply the approved edits with replacement assertions, and strip stale lineseg caches with `table.py strip-lineseg` before packing.
+2. Within the hwpx workflow, pack and run Workflow 4 validation with the original as `--baseline`; require VALID.
+3. Run report-draft lint on the result; resolve the linter again in this shell block and require exit 0:
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded report-draft SKILL.md>"
+LINT="$SKILL_DIR/scripts/lint_report.py"
+[[ -r "$LINT" ]] || { echo "Bundled report linter unavailable: $LINT" >&2; exit 1; }
+python3 "$LINT" <결과.hwpx>
+```
+
 4. 새 파일명 `<원본명>_수정.hwpx`로 복사, md5 대조. 같은 이름이 있으면 멈추고 묻는다.
 5. 한글로 열어 창 제목이 파일명인지 확인(`빈 문서`면 로드 실패).
 

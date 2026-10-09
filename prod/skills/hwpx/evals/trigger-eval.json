@@ -2,5 +2,13 @@
   {
     "query": "문서 편집해줘",
     "should_trigger": true
+  },
+  {
+    "query": "Convert legacy binary .hwp to .hwpx",
+    "should_trigger": true
+  },
+  {
+    "query": "Read an attached legacy .hwp Hancom document",
+    "should_trigger": true
   }
 ]

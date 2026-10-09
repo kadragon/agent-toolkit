@@ -4,7 +4,7 @@ description: |
   공무원 조직의 **개조식 보고서**(사업 계획(안)·추진 계획·검토·결과·상황·회의 결과 보고, 행사·평가 계획, 1쪽 보고서)를 노트·원문으로 새로 작성하거나, 기존 보고서 hwpx를 점검해 수정안을 먼저 보여 준 뒤 새 파일로 반영한다. 결론 먼저, 기호 체계(□ > ○ > - > ※), 현황 및 문제점 분리, 공문서 표기, lint·kr-style 게이트를 적용한다.
   트리거: "보고서 작성", "보고서 초안", "보고서 고쳐줘", "이 hwpx 보고서 수정해줘", "개조식으로 정리", "기관장 보고".
   구분: 대외 발신 공문·회신·메일은 gongmun-draft. 보고서가 아닌 일반 hwpx 생성·편집은 hwpx.
-version: 1.0.1
+version: 1.0.2
 ---
 
 # 보고서 작성·수정
@@ -14,8 +14,7 @@ version: 1.0.1
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 LINT="$SKILL_DIR/scripts/lint_report.py"
-HWPX_DIR="$SKILL_DIR/../hwpx"
-[[ -r "$LINT" && -r "$HWPX_DIR/scripts/validate.py" ]] || { echo "report-draft or hwpx scripts missing under $SKILL_DIR/.." >&2; exit 1; }
+[[ -r "$LINT" ]] || { echo "Bundled report linter unavailable: $LINT" >&2; exit 1; }
 ```
 
 ## 모드 분기
@@ -53,7 +52,7 @@ HWPX_DIR="$SKILL_DIR/../hwpx"
 |---|--------|-----------|
 | G1 | `python3 "$LINT" <파일>` (기관 서식형은 `--allow-numbered`) | exit 0. WARN(R2·R10~R12)은 고칠 수 있으면 고치고, 남기면 이유를 보고 |
 | G2 | Skill 도구를 "prod:kr-style"로 호출해 윤문 | 감사 스크립트 exit 0 |
-| G3 | `python3 "$HWPX_DIR/scripts/validate.py" validate <결과> --baseline <원본>` (A는 `--baseline` 생략) | VALID |
+| G3 | Call the Skill tool with "prod:hwpx" for Workflow 4 validation of the result; B passes the original as `--baseline`, A omits it | VALID |
 | G4 | 한글로 열기 | 창 제목이 파일명(`빈 문서` 아님) |
 
 G2 절차:

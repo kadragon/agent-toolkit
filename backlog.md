@@ -8,14 +8,6 @@ Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, 
 
 Acceptance: preregister 10–20 task IDs total, finite attempts/time/cost-token budgets per platform, observation methods and benefit thresholds; setting-unverified runs cannot support model-effect claims; recommendations meet the design's paired-input/repeat/quality evidence bars and include total retry/review cost; unfinished platforms remain unverified and pin changes require a follow-up. Approach: staged platform runs using existing evaluation conventions and evaluation-only selection reasons; no permanent telemetry or reviewer-process changes.
 
-## 7. HWPX trigger and report coupling
-
-Source: `docs/design/skill-review-followups.md` → Implementation Decisions, slice B. Read the design before forming the Sprint Contract.
-
-- [ ] [HARNESS] Fix hwpx description-vs-behavior contradiction on legacy `.hwp` (SKILL.md:7 vs :218) and decouple report-draft `HWPX_DIR="$SKILL_DIR/../hwpx"` sibling-path coupling toward Skill-tool invocation or plugin-root resolution. Read `docs/design/skill-review-followups.md`, slice B, before forming the contract.
-
-Acceptance: `.hwp` requests route to hwpx; trigger-collision check passes; report-draft lint/validate flows pass after decoupling; no behavior change to conversion itself. Approach: description fix plus path decoupling in one slice; check other `../<skill>` references. Dependencies: none.
-
 ## 8. Evidence-rule and wording corrections
 
 Source: `docs/design/skill-review-followups.md` → Implementation Decisions, slice C. Read the design before forming the Sprint Contract.
