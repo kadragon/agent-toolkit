@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Enforce workflow Git authorization boundaries (dev v4.10.17) (2026-10-09) → docs/invocation.md
 - [done] Align delegation and invocation policy (dev v4.10.16) (2026-10-09) → docs/delegation.md
 - [done] scan_transcripts.py: test-enforced SECTION MAP for range reads (dev v4.10.15) (2026-10-09)
 - [done] check_harness_drift: fail closed when a bare references/ name resolves only to another skill (2026-10-06)

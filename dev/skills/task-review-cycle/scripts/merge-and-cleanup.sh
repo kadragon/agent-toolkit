@@ -71,7 +71,9 @@ fi
 
 # --- Merge PR (hub.sh routes to gh or the Forgejo/Gitea REST API) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
+source "$SCRIPT_DIR/git-authority.sh"
+require_git_authority --branch "$FEATURE_BRANCH" --action base-merge
+MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" "$FEATURE_BRANCH" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
 MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
 QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)

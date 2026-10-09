@@ -216,3 +216,12 @@ are all model-invoked, which is the default, so they carry no fields and need no
 | `reference-review` | model | Read-only comparison; stops for the user's pick before any edit. |
 
 Adding a skill means placing it in this table in the same PR.
+
+## Git approval boundary
+
+Caller traces and flags do not establish user authorization. The original Markdown contract
+archives `Approval source`, `Allowed Git actions`, and `Git limits`; no new approval store or
+JSON schema is introduced. The owning procedure is `dev:task-next` →
+`references/git-authorization.md`. Explicit full-workflow invocation grants documented effects
+within narrower user limits; implementation-only and unknown legacy authority grant no
+unestablished Git write. Commit/push/PR/merge helpers enforce the recorded action boundary.

@@ -9,24 +9,21 @@ description: >-
 
 ## Caller gate
 
-Before Setup, look for `--from <caller>` in the invocation. **Present** → strip it and run; any
-caller name counts (`task-review`, `task-new`, `task-next`). **Absent** → stop before Step 0. Do
-not commit, push, open a PR, or merge; say the review cycle is reached through `/task-review` and
-let the human fire it (`docs/invocation.md` → *The invariant*). The gate catches router
-auto-selection, which carries no token.
+Require `--from <caller>` before Setup; absent → stop without Git writes and direct the human
+to `/task-review`. Any caller name is a trace, not authentication. Before Step 1, read
+`../task-next/references/git-authorization.md`: verify the originating user instruction,
+recover the original contract with approval source/actions/limits verbatim, and establish the
+allowed route. Missing legacy authority denies affected actions; flags never expand approval.
 
 ## Arguments
 
-- `--from <caller>` — required caller token.
-- `--auto` — skip the Step 3 confirmation; apply every in-scope P0/P1 finding.
-- `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
-- `--lite` / `--pr` — request a merge path; required CI and risk gates still apply.
-- `--panel` — force the agy + Codex panel, and with it hub (`--no-hub` still wins): the codex reclaim
-  needs `ci-wait.sh` runway. The panel runs by default on every hub and `--no-hub` route, never lite.
+- `--from <caller>` — required caller trace only.
+- `--auto` — approve in-scope P0/P1 review fixes, not Git effects.
+- `--no-hub` — local commit/review only; still requires commit permission.
+- `--lite` / `--pr` — request a path within authority and mandatory CI/risk gates.
+- `--panel` — force agy + Codex and hub unless `--no-hub`; default on non-lite routes.
 
-**Sprint Contract.** Recover the caller's archived original if not restated (Tag / Scope /
-Acceptance criteria / Out of scope / Lint-test command). It is branch-keyed under the common Git
-dir:
+**Sprint Contract.** Recover the archived original and evidence before writes:
 
 ```bash
 STATE="<absolute parent directory of the loaded SKILL.md>/../task-next/scripts/cycle_state.py"
@@ -34,11 +31,9 @@ STATE="<absolute parent directory of the loaded SKILL.md>/../task-next/scripts/c
 python3 "$STATE" inspect
 ```
 
-`contract` non-null is the original; `evidence` carries the recorded validation run. Implementation
-callers with a missing contract return to recovery, not diff-only review. Only a standalone
-`task-review` with neither a restated nor a recoverable contract may grade the diff alone; disclose
-that limit. Preserve the archive through merge (Step 6 retires it). Approval and check-reuse rules:
-`../task-next/references/cycle.md` → *Plan gate* and *Validation evidence*.
+Implementation callers with no contract return to recovery. Only standalone `task-review`
+without an original may grade the diff alone; archive its verified authority and disclose that
+limit. Preserve the archive through merge. Check reuse: shared cycle's *Validation evidence*.
 
 ## Prerequisites and Setup
 
@@ -60,7 +55,6 @@ Stop if the bundled scripts cannot be resolved or `has_errors` is `true`. The re
 branch, so later blocks re-run it for free for the fields they need (shell state does not persist).
 
 ## Step 0: Feature branch
-
 On the base branch: derive a short slug from the diff, then `git checkout -b <type>/<slug>`.
 
 ## Step 1: Commit, route, PR
@@ -98,6 +92,9 @@ flags. Its floor block is mandatory: all four captures force hub with required C
 escalates, never below. `--no-hub` stays local-only and stops before merge; report required remote
 checks as pending. Announce chosen path, rationale, mandatory checks, and panel on/off in one line.
 
+Before choosing lite, run `cycle_state.py authorize --action base-merge` and `--action
+base-push`; both must pass. PR-only routes hub; no-push routes local review. Unknown commit
+authority stops before Step 1 with work/evidence preserved (`git-authorization.md`).
 Hub path — push and open the PR before any review:
 
 ```bash
@@ -143,10 +140,8 @@ bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTR
 It grades requirements and code quality as separate axes in one read-only pass, printing the
 findings array on stdout. It never runs the lint/test command (`--permission-mode plan`); it grades
 an execution-based criterion against the evidence line above, staying silent on one when that line
-is absent rather than failing it. Grading happens outside this session, so the agent that wrote the
-code never certifies it. Keep it a shell-out: Bash enforces `timeout` where the `Agent` tool has
-none, and a lost completion notification (upstream claude-code #49150, #58637, #68117) is how this
-cycle once hung on a finished review. Same shape as `hamelsmu/claude-review-loop`, `ktaletsk/council`.
+is absent rather than failing it. Grading runs outside this session. Keep the foreground shell-out; agent completion
+notifications are not a reliable wait boundary.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
@@ -163,7 +158,6 @@ the merge is what makes not-waiting safe, and #248 removed the quorum rule becau
 source still working. Never bound a wait with a `sleep`: it outlives the cycle (nine orphaned once).
 
 ## Step 3: Consolidate and confirm
-
 Follow `references/consolidation-guide.md`. A `contract` finding is in-scope P0, never dropped by
 confidence or by `--auto`.
 
@@ -186,7 +180,6 @@ In this order, because everything before the last step changes the tree the chec
    cycle — last, so the recorded tree is the tree that was checked.
 
 ## Step 5: Commit
-
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
@@ -206,18 +199,26 @@ Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a l
 
 ## Step 6: Merge
 
+PR-only: reclaim late panel results, finish checks and report the reviewed PR; stop before
+merge. Unknown merge authority preserves the PR and archive. Never retire an unmerged cycle.
+
 **Lite path** — the Codex run finished in Step 2, so nothing to reclaim; merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
 BASE_BRANCH="<from Setup>"
-git checkout "$BASE_BRANCH" && git pull origin "$BASE_BRANCH"
+STATE="<absolute task-next skill directory>/scripts/cycle_state.py"
+python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-merge || exit 1
+python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
+git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH"
 git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'"
+python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
-Push rejected (branch protection) → `git reset --hard origin/<base>`, `git checkout <feature>`,
-continue on the hub path from Step 1's PR block; launch the panel before `ci-wait.sh`. Report: "라이트 패스 완료 — main에 직접 병합 및 푸시됨. PR·CI 없음."
+Push rejected → preserve the local merge and feature branch; report the failure. Never
+reset hard automatically. Recover the hub path within established authority; report lite
+completion only after direct base push succeeds.
 
 **Retire the archive on either path**, only after the merge is confirmed — one left behind
 resurrects this cycle's contract for the next branch deriving the same name: `python3
@@ -234,7 +235,6 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 ```
 
 ## Error handling
-
 | Failure | Action |
 |---------|--------|
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |

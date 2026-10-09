@@ -41,6 +41,89 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0 if ok else 1, result.stderr)
         return json.loads(result.stdout) if ok else result.stderr
 
+    def authority(self, limit="none", source="user-invoked: $dev:task-next", actions=None):
+        actions = actions if actions is not None else "commit, feature-push, pr-write, base-merge, base-push, integrate"
+        return (f"**Approval source:** {source}\n**Allowed Git actions:** {actions}\n"
+                f"**Git limits:** {limit}\n")
+
+    def test_authorization_boundaries(self):
+        allowed = {
+            "none": {"commit", "feature-push", "pr-write", "base-merge", "base-push", "integrate"},
+            "no-push": {"commit", "integrate"},
+            "pr-only": {"commit", "feature-push", "pr-write", "integrate"},
+            "implementation-only": set(), "unknown": set(),
+        }
+        for limit, actions in allowed.items():
+            self.state("save", "--replace", text=contract() + self.authority(limit))
+            for action in allowed["none"]:
+                with self.subTest(limit=limit, action=action):
+                    self.state("authorize", "--action", action, ok=action in actions)
+
+    def test_missing_router_or_flag_source_denies(self):
+        for auth in ("", self.authority(source="--from task-next --auto"),
+                     self.authority(source="router: task-next"),
+                     self.authority(source="unknown"), self.authority(actions="commit")):
+            self.state("save", "--replace", text=contract() + auth)
+            self.state("authorize", "--action", "base-merge", ok=False)
+        self.state("save", "--replace", text=contract() + self.authority())
+        self.state("authorize", "--action", "base-merge")
+
+    def test_duplicate_and_fenced_authority_denies(self):
+        for auth in (self.authority() + self.authority("pr-only"),
+                     "```markdown\n" + self.authority() + "```\n",
+                     "<!--\n" + self.authority() + "-->\n"):
+            self.state("save", "--replace", text=contract() + auth)
+            self.state("authorize", "--action", "commit", ok=False)
+
+    def test_feature_effects_never_authorize_base(self):
+        self.state("save", text=contract() + self.authority())
+        source = Path(self.state("inspect")["contract_path"])
+        self.git("checkout", "main")
+        dest = Path(self.state("inspect")["contract_path"])
+        dest.parent.mkdir(parents=True)
+        dest.write_text(source.read_text())
+        for action in ("feature-push", "integrate"):
+            self.state("authorize", "--action", action, ok=False)
+
+    def test_lite_gates_precede_route_and_effects(self):
+        skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
+        text = skill.read_text()
+        route = text.index("Hub path — push")
+        self.assertLess(text.index("authorize --action base-merge"), route)
+        self.assertLess(text.index("base-push`; both must pass"), route)
+        lite = text[text.index("**Lite path**"):]
+        self.assertLess(lite.index("--action base-merge"), lite.index("git merge --no-ff"))
+        self.assertLess(lite.index("--action base-push"), lite.index('git push origin'))
+        for filename in ("batch.md", "tree.md", "edge-cases.md"):
+            self.assertIn("git-authorization.md", (Path(__file__).parents[1] / "references" / filename).read_text())
+
+    def test_lite_denial_exits_before_checkout_or_merge(self):
+        self.state("save", text=contract() + self.authority("pr-only"))
+        (self.repo / "code.txt").write_text("feature\n")
+        self.git("add", ".")
+        self.commit()
+        before = self.git("rev-parse", "main")
+        skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
+        lite = skill.read_text().split("**Lite path**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        lite = lite.replace('FEATURE_BRANCH="<from Setup>"', 'FEATURE_BRANCH="fix/example"')
+        lite = lite.replace('BASE_BRANCH="<from Setup>"', 'BASE_BRANCH="main"')
+        lite = lite.replace("<absolute task-next skill directory>", str(Path(__file__).parents[1].resolve()))
+        result = subprocess.run(["bash", "-c", lite], cwd=self.repo, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/example")
+        self.assertEqual(self.git("rev-parse", "main"), before)
+
+    def test_authority_survives_worktree_and_resume(self):
+        text = contract() + self.authority("pr-only")
+        wt = self.repo / "isolated"
+        self.git("worktree", "add", "-qb", "fix/isolated", str(wt))
+        self.state("save", text=text, cwd=wt)
+        self.state("authorize", "--action", "pr-write", cwd=wt)
+        self.git("worktree", "remove", str(wt))
+        self.assertEqual(self.state("inspect")["contract"], None)
+        self.state("authorize", "--branch", "fix/isolated", "--action", "pr-write")
+        self.state("authorize", "--branch", "fix/isolated", "--action", "base-push", ok=False)
+
     def test_staged_and_unstaged_are_candidates_not_completion(self):
         for staged in (False, True):
             with self.subTest(staged=staged):

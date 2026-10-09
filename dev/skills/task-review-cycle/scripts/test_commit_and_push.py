@@ -16,6 +16,7 @@ Run: python3 dev/skills/task-review-cycle/scripts/test_commit_and_push.py
 Exits 0 on success, 1 on the first failure.
 """
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -36,6 +37,24 @@ def git(repo, *args, check=True):
     )
 
 
+def archive_authority(repo, limit="none", source="user-invoked: fixture workflow"):
+    branch = git(repo, "branch", "--show-current").stdout.strip()
+    common = Path(git(repo, "rev-parse", "--git-common-dir").stdout.strip())
+    slot = repo / common / "task-cycle" / hashlib.sha256(branch.encode()).hexdigest()
+    slot.mkdir(parents=True, exist_ok=True)
+    (slot / "contract.md").write_text(
+        f"**Approval source:** {source}\n"
+        "**Allowed Git actions:** commit, feature-push, pr-write, base-merge, base-push, integrate\n"
+        f"**Git limits:** {limit}\n")
+
+
+def copy_authority(script_dir):
+    shutil.copy(SCRIPT.parent / "git-authority.sh", script_dir / "git-authority.sh")
+    state = script_dir / "../../task-next/scripts/cycle_state.py"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(SCRIPT.parent / "../../task-next/scripts/cycle_state.py", state)
+
+
 def make_repo(tmp):
     """A throwaway repo with tasks.md + keep.md committed."""
     repo = Path(tempfile.mkdtemp(dir=tmp))
@@ -54,6 +73,7 @@ def make_repo(tmp):
     # exactly those two. Move to a feature branch so the fixture reflects real
     # usage; the protected-branch behavior gets its own cases below.
     git(repo, "checkout", "-q", "-b", "feature/test")
+    archive_authority(repo)
     return repo
 
 
@@ -193,6 +213,7 @@ def case_guard_protected_branch(tmp):
     """A commit on main without the allow-main marker must be refused."""
     repo = make_repo(tmp)
     git(repo, "checkout", "-q", "-B", "main")
+    archive_authority(repo)
     (repo / "keep.md").write_text("keep\nmore\n")
     before = head(repo)
 
@@ -210,6 +231,7 @@ def case_guard_allow_main_marker(tmp):
     """The documented opt-in marker still unblocks main -- the guard is not a wall."""
     repo = make_repo(tmp)
     git(repo, "checkout", "-q", "-B", "main")
+    archive_authority(repo)
     (repo / "AGENTS.md").write_text("# repo\n\n<!-- commit-guard: allow-main -->\n")
     (repo / "keep.md").write_text("keep\nmore\n")
 
@@ -227,9 +249,10 @@ def case_guard_missing(tmp):
     Staged into a bare directory tree so the script's
     `$SCRIPT_DIR/../../../hooks/commit-guard/guard.py` resolves to nothing.
     """
-    stand_in = Path(tmp) / "standin" / "skills" / "task-review-cycle" / "scripts"
+    stand_in = Path(tmp) / "standin" / "skills" / "task-review-cycle" / "skills" / "task-review-cycle" / "scripts"
     stand_in.mkdir(parents=True)
     shutil.copy(SCRIPT, stand_in / SCRIPT.name)
+    copy_authority(stand_in)
 
     repo = make_repo(tmp)
     (repo / "keep.md").write_text("keep\nmore\n")
@@ -382,10 +405,11 @@ def case_verify_head_rejects_an_unguarded_head(tmp):
 def case_verify_head_missing_guard_fails_open(tmp):
     """A missing guard must fail open here too -- loudly, with guard_skipped=true."""
     repo = make_repo(tmp)
-    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "skills" / "task-review-cycle" / "scripts"
     isolated.mkdir(parents=True)
     copied = isolated / "commit-and-push.sh"
     shutil.copy(SCRIPT, copied)
+    copy_authority(isolated)
     proc = subprocess.run(
         ["bash", str(copied), "--verify-head"],
         cwd=repo, check=False, capture_output=True, text=True,
@@ -410,13 +434,15 @@ def case_no_commit_leaves_dirty_tree(tmp):
     remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
     git(remote.parent, "init", "-q", "--bare", str(remote))
     git(repo, "remote", "add", "origin", str(remote))
-    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "skills" / "task-review-cycle" / "scripts"
     isolated.mkdir(parents=True)
     shutil.copy(SCRIPT, isolated / "commit-and-push.sh")
+    copy_authority(isolated)
     (isolated / "hub.sh").write_text(
         "#!/usr/bin/env bash\necho '{\"pr_number\": \"7\", \"pr_url\": \"u/7\"}'\n",
         newline="\n",
     )
+    archive_authority(repo, "pr-only")
     before = head(repo)
     (repo / "keep.md").write_text("unrelated edit\n")
     (repo / "stray.txt").write_text("untracked\n")
@@ -531,6 +557,7 @@ def case_staged_empty_index_not_ahead_auto_detects(tmp):
     (repo / "tasks.md").write_text("unpushed base work\n")
     git(repo, "commit", "-qam", "[TEST] unpushed")
     git(repo, "checkout", "-q", "-b", "feature/fresh")
+    archive_authority(repo)
     (repo / "keep.md").write_text("first-run edit\n")
     proc = subprocess.run(
         ["bash", str(SCRIPT), "--prefer-staged", "--no-push", "--base", base,
@@ -551,9 +578,10 @@ def case_staged_empty_index_ahead_publishes_head(tmp):
     remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
     git(remote.parent, "init", "-q", "--bare", str(remote))
     git(repo, "remote", "add", "origin", str(remote))
-    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "scripts"
+    isolated = Path(tempfile.mkdtemp(dir=tmp)) / "skills" / "task-review-cycle" / "scripts"
     isolated.mkdir(parents=True)
     shutil.copy(SCRIPT, isolated / "commit-and-push.sh")
+    copy_authority(isolated)
     shutil.copy(SCRIPT.parent / "changed-files.sh", isolated / "changed-files.sh")
     (isolated / "hub.sh").write_text(
         "#!/usr/bin/env bash\necho '{\"pr_number\": \"7\", \"pr_url\": \"u/7\"}'\n",
@@ -580,6 +608,44 @@ def case_staged_empty_index_ahead_publishes_head(tmp):
     print("OK: --prefer-staged with an empty index ahead of base publishes HEAD unchanged")
 
 
+def case_implementation_only_blocks_before_commit(tmp):
+    repo = make_repo(tmp)
+    state = SCRIPT.parent / "../../task-next/scripts/cycle_state.py"
+    slot = json.loads(subprocess.check_output(
+        [sys.executable, str(state), "inspect"], cwd=repo, text=True))["contract_path"]
+    path = Path(slot)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("**Approval source:** explicit-user: implement only\n"
+                    "**Allowed Git actions:** commit\n**Git limits:** implementation-only\n")
+    before = head(repo)
+    (repo / "keep.md").write_text("reviewable changes\n")
+    proc, _ = run_script(repo, "keep.md")
+    if proc.returncode == 0 or head(repo) != before or git(repo, "diff", "--cached", "--name-only").stdout:
+        fail("implementation-only", "unauthorized commit or staging occurred")
+    print("OK: implementation-only denies before staging and commit")
+
+
+def case_remote_boundaries(tmp):
+    for limit, source in (("no-push", "user-invoked: workflow"),
+                          ("unknown", "--from task-next --auto")):
+        for create_pr in (False, True):
+            repo = make_repo(tmp)
+            remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
+            git(remote.parent, "init", "-q", "--bare", str(remote))
+            git(repo, "remote", "add", "origin", str(remote))
+            archive_authority(repo, limit, source)
+            (repo / "keep.md").write_text("independent working change\n")
+            before = head(repo)
+            args = ["bash", str(SCRIPT), "--no-commit", "--message", "[TEST] boundary"]
+            if create_pr:
+                args.append("--pr")
+            proc = subprocess.run(args, cwd=repo, capture_output=True, text=True)
+            if (proc.returncode == 0 or head(repo) != before
+                    or git(remote, "show-ref", check=False).stdout):
+                fail("remote boundary", f"write occurred for {limit}, pr={create_pr}")
+    print("OK: no-push and unknown deny push/PR without changing HEAD or remote refs")
+
+
 def main():
     if not SCRIPT.is_file():
         fail("setup", f"script not found: {SCRIPT}")
@@ -588,6 +654,8 @@ def main():
 
     tmp = tempfile.mkdtemp(prefix="commit-and-push-test-")
     try:
+        case_remote_boundaries(tmp)
+        case_implementation_only_blocks_before_commit(tmp)
         case_staged_deletion(tmp)
         case_deletion_only(tmp)
         case_unstaged_deletion(tmp)

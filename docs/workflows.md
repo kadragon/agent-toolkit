@@ -109,3 +109,6 @@ Models prematurely wrap up work as context fills. Countermeasures:
 | `sweep` | Fix trivial `[doc]` items inline |
 
 Not permitted: writing production code during `draft` or `sweep`.
+
+Git effects follow the original contract's approval source/actions/limits, not `--from` or
+`--auto`; read `dev:task-next` → `references/git-authorization.md` before writes.

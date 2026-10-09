@@ -1,10 +1,10 @@
 ---
 name: task-new
-version: 2.2.0
+version: 2.3.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
-  branch, Sprint Contract, implement, version bump, review. Already on the queue
-  instead → task-next.
+  branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
+  (possibly direct base-branch merge/push). Already on the queue instead → task-next.
 disable-model-invocation: true
 ---
 
@@ -57,7 +57,8 @@ user to re-invoke (or queue them for `task-next --all`).
 ## Step 3 — Run the cycle
 
 Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that references
-directory) with these overrides:
+directory) with these overrides. Verify the originating user invocation and preserve its
+Git limits per `../task-next/references/git-authorization.md` before writes:
 
 - **Branch** — no stdin; pass `--tag <TYPE>` from Step 1, or omit it when untagged and accept the
   `fix/` fallback.
