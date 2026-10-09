@@ -24,7 +24,8 @@ against it; the reviewer grades it (on lite, the orchestrator grades it inline â
 Before handoff, verify this actual human invocation and any narrower Git instructions per
 `../task-next/references/git-authorization.md`. Carry the originating instruction and the
 contract's approval source/actions/limits verbatim; archive any explicitly approved revision.
-With no original contract, archive a diff-review contract with those fields and concrete checks;
+With no original contract, create a feature branch first when on the base branch, then
+archive a diff-review contract with those fields and concrete checks;
 this does not pretend to recover implementation criteria. Never use `--from` as approval.
 
 Call the Skill tool with "dev:task-review-cycle", passing `--from task-review` **plus** this

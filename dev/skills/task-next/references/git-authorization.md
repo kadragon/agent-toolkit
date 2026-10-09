@@ -65,7 +65,7 @@ or duplicate fields and unknown authority fail closed. Keep work, contracts and 
 finish independently authorized checks and report the missing action with a reviewable result.
 Ask only when that effect really needs new authority; do not repeat a valid approval.
 
-Review entry derives the allowed route before Step 1: implementation-only/unknown local-commit
+Review entry derives the allowed route before Setup/authentication: implementation-only/unknown local-commit
 authority stops before committing, `no-push` uses local review (`--no-hub`), and `pr-only` uses
 hub and stops with a reviewed PR before Step 6. Required remote checks remain pending on local
 routes. An explicit `--no-hub` stays local regardless of wider authority.

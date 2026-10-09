@@ -6,15 +6,14 @@ description: >-
 ---
 
 # Dev Review Cycle
-
 ## Caller gate
 
 Require `--from <caller>` before Setup; absent → stop without Git writes and direct the human
-to `/task-review`. Any caller name is a trace, not authentication. Before Step 1, read
+to `/task-review`. Any caller name is a trace, not authentication. Before Setup, read
 `../task-next/references/git-authorization.md`: verify the originating user instruction,
 recover the original contract with approval source/actions/limits verbatim, and establish the
-allowed route. Missing legacy authority denies affected actions; flags never expand approval.
-
+allowed route. No-push selects `--no-hub` for every preflight call before auth probes.
+Missing legacy authority denies affected actions; flags never expand approval.
 ## Arguments
 
 - `--from <caller>` — required caller trace only.
@@ -34,7 +33,6 @@ python3 "$STATE" inspect
 Implementation callers with no contract return to recovery. Only standalone `task-review`
 without an original may grade the diff alone; archive its verified authority and disclose that
 limit. Preserve the archive through merge. Check reuse: shared cycle's *Validation evidence*.
-
 ## Prerequisites and Setup
 
 GitHub remote → `gh` authenticated. Forgejo/Gitea → `FORGEJO_TOKEN` or `GITEA_TOKEN` set
@@ -44,7 +42,8 @@ parent directory of the `SKILL.md` loaded this turn.
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/preflight.sh" ]] || { echo "Bundled preflight unavailable: $SKILL_DIR/scripts/preflight.sh" >&2; exit 1; }
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")   # append --no-hub when that flag is set
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")   # append --no-hub when that flag is set
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
 CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
@@ -93,13 +92,14 @@ escalates, never below. `--no-hub` stays local-only and stops before merge; repo
 checks as pending. Announce chosen path, rationale, mandatory checks, and panel on/off in one line.
 
 Before choosing lite, run `cycle_state.py authorize --action base-merge` and `--action
-base-push`; both must pass. PR-only routes hub; no-push routes local review. Unknown commit
+base-push`; both must pass. PR-only routes hub; no-push already selected local review. Unknown commit
 authority stops before Step 1 with work/evidence preserved (`git-authorization.md`).
 Hub path — push and open the PR before any review:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
 <[TYPE] message from above>
@@ -124,7 +124,8 @@ absent required result blocks merge, even if the reviewer cannot assess it. Bash
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh")
+LOCAL_FLAG="<from authorization route: --no-hub or empty>"
+PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 EFFORT="<high when Step 1's SECURITY_HIT was non-empty or the risk is material, else empty>"
 CONTRACT=$(cat <<'SPRINT_CONTRACT'
@@ -140,8 +141,7 @@ bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTR
 It grades requirements and code quality as separate axes in one read-only pass, printing the
 findings array on stdout. It never runs the lint/test command (`--permission-mode plan`); it grades
 an execution-based criterion against the evidence line above, staying silent on one when that line
-is absent rather than failing it. Grading runs outside this session. Keep the foreground shell-out; agent completion
-notifications are not a reliable wait boundary.
+is absent rather than failing it. Grading runs outside this session in a foreground shell-out.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,

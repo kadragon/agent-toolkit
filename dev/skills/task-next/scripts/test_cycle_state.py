@@ -113,6 +113,26 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(self.git("branch", "--show-current"), "fix/example")
         self.assertEqual(self.git("rev-parse", "main"), before)
 
+    def test_local_route_preflight_needs_no_remote_auth(self):
+        skill_dir = Path(__file__).parents[2] / "task-review-cycle"
+        text = (skill_dir / "SKILL.md").read_text()
+        setup = text.split("## Prerequisites and Setup", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        setup = setup.replace("<absolute parent directory of the loaded SKILL.md>", str(skill_dir.resolve()))
+        setup = setup.replace("<from authorization route: --no-hub or empty>", "--no-hub")
+        result = subprocess.run(["bash", "-c", setup + '\nprintf "%s" "$PREFLIGHT"'],
+                                cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        probe = json.loads(result.stdout)
+        self.assertTrue(probe["no_hub"])
+        self.assertFalse(probe["has_errors"])
+        self.assertLess(text.index("Before Setup"), text.index("## Prerequisites and Setup"))
+        for doc in (text, (skill_dir / "references/risk-routing.md").read_text(),
+                    (skill_dir / "references/review-sources.md").read_text()):
+            self.assertNotIn('preflight.sh")', doc)
+        wrapper = (skill_dir.parent / "task-review/SKILL.md").read_text()
+        self.assertLess(wrapper.index("create a feature branch first"),
+                        wrapper.index("archive a diff-review contract"))
+
     def test_authority_survives_worktree_and_resume(self):
         text = contract() + self.authority("pr-only")
         wt = self.repo / "isolated"
