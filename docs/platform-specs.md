@@ -188,15 +188,14 @@ Hook I/O same as Claude Code (JSON on stdin, JSON on stdout, exit codes).
 
 ### Agents (Codex)
 
-NOT a plugin-level concept. Use `AGENTS.md`:
+Custom subagents are separate from plugin packaging and `AGENTS.md` instructions.
+Project roles use `.codex/agents/*.toml`; personal roles use `~/.codex/agents/*.toml`.
+Each standalone file requires `name`, `description`, and `developer_instructions`.
+Existing built-ins need no duplicate custom role. See *Subagent Model and Effort Resolution*
+below before trying to override a pinned custom role.
 
-```
-{repo-root}/AGENTS.md          → project-level instructions
-{repo-root}/.agents/AGENTS.md  → standard location
-~/.codex/AGENTS.md             → user-global
-```
-
-Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists at repo root.
+`AGENTS.md` supplies repository instructions, not a custom-agent model configuration.
+Its discovery/size contract is documented in the official [AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md).
 
 ### Marketplace (Codex)
 
@@ -217,6 +216,66 @@ Files concatenate hierarchically. 32 KiB limit. This is why `AGENTS.md` exists a
 ```
 
 ---
+
+## Subagent Model and Effort Resolution
+
+Official sources checked 2026-10-09. Model omission resolves settings; it does not
+implement task-specific routing. Active tool options and higher-level instructions govern.
+
+### Claude Code
+
+For v2.1.251+, ordinary model order is invocation → role `model` →
+`CLAUDE_CODE_SUBAGENT_MODEL` → main model; earlier clients prioritized that variable.
+From v2.1.257, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` bypasses role/invocation choices:
+with a model variable it forces that model; alone it uses the main model except Explore.
+Forks and forked skills with `model: inherit` still use the main model.
+
+Effort resolves separately: `CLAUDE_CODE_EFFORT_LEVEL` → invocation → role → session.
+Invocation effort is supported for non-fork subagents from v2.1.292. Supported levels
+vary by model. Allowlists, providers, aliases and spawn hooks can alter model resolution;
+check actual settings with `/tasks` instead of inferring them from requested settings.
+
+Source: [Claude subagents](https://code.claude.com/docs/en/sub-agents), sections
+*Choose a model*, *Run every subagent on one model*, and *Choose an effort level*.
+
+### Codex
+
+Model and `model_reasoning_effort` resolve separately: custom-agent field → explicit
+spawn value → corresponding `[agents]` default → parent setting. A spawn/default model
+without either effort override uses that model's default effort. A custom file setting
+only model preserves the previously resolved effort; set effort too when incompatible.
+Custom TOML locations/schema are described under *Agents (Codex)* above.
+
+Source: [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents),
+sections *Custom agents* and *Global settings*, checked 2026-10-09.
+
+### Installed-client evidence and evaluation boundary
+
+| Command run 2026-10-09 | Observed output | Verification boundary |
+|---|---|---|
+| `claude --version` | `2.1.295 (Claude Code)` | Installed version exceeds the documented model/force/effort thresholds; no live precedence run |
+| `codex --version` | `codex-cli 0.162.0` | Client available; local custom-role/default resolution not exercised |
+
+Runtime-resolved model/effort, forced/default environment, provider/account availability,
+and actual pricing are **unverified** here. Slice 5 of
+`docs/design/harness-policy-alignment.md` must preflight those facts and record requested
+versus actual settings before paired evaluation; a version probe proves installation only.
+Production role pins, defaults and headless-review settings are unchanged.
+
+## Skill Tool-Allowlist Audit
+
+Reviewed 2026-10-09 for `docs/design/skill-review-followups.md`, slice A.
+These decisions retain the existing frontmatter and permission boundaries.
+Absence of `allowed-tools` adds no skill-specific allowlist; session permissions still apply.
+
+| Prod skill | Decision and one-line rationale |
+|---|---|
+| gongmun-draft | Retain absence: source reading and the mandatory `prod:kr-style` Skill call need the session's available tools; narrowing is a separate permission change. |
+| report-draft | Retain absence: source verification uses WebSearch/WebFetch and document/style flows invoke Skill alongside Bash validation. |
+| kr-style | Retain existing list without Glob: supplied text/files and known bundled audit paths require no filename discovery; Bash/Grep remain available. |
+| repo-quiz | Retain Glob and Edit: repository discovery and the scoped mistakes-log prose append need both. |
+| hwpx | Retain absence: XML edits, bundled Python/PowerShell scripts and Hancom-open verification depend on available platform tools. |
+| persona-debate | Retain absence: Bash sampling and Skill/agent-based persona rounds require the active session's tools. |
 
 ## Cross-Platform Rules
 

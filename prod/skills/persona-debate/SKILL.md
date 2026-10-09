@@ -5,6 +5,7 @@ description: >-
   message, product, pricing, or policy — outputs consensus, disagreements,
   minority report. Also fits "how would ordinary people react". NOT for real
   survey/interview analysis or fictional dialogue. Korean output.
+version: 1.0.0
 ---
 
 # Persona Debate

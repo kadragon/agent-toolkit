@@ -240,9 +240,12 @@ takes **one** `--skill` per run and bumps the plugin every run, so a change touc
 needs the second skill's frontmatter edited by hand — re-running would bump the plugin twice for
 one change.
 
-**A skill that ships no `version:` frontmatter stays that way.** `dev:task-review-cycle` is one:
-it is an internal primitive with no standalone entry point, and nothing reads a version off it.
-Do not add the key to satisfy this table — an absent version is a valid state.
+**Initialize unversioned skills only in an explicitly scoped metadata migration.**
+The approved `docs/design/skill-review-followups.md` slice A initializes the six existing
+unversioned skills at `1.0.0`, including the internal `task-review-cycle` primitive.
+This records a metadata baseline, not a behavior change or new invocation entry point.
+Thereafter apply the skill-level bump table above; unrelated changes do not initialize
+missing versions incidentally.
 
 **CI enforces the bundled-file row for `references/` and `scripts/` only.**
 `scripts/ci/check_skill_version_bump.py` fails a branch that adds a file under either directory
