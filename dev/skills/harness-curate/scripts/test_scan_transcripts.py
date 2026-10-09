@@ -664,6 +664,34 @@ def test_scan_dir_hook_deny_outranks_pending_ci_kind():
         )
 
 
+def test_section_map_lists_every_top_level_def():
+    """The SECTION MAP comment names exactly the module's top-level functions.
+
+    Agents grep the map, then read only the range they need; a def the map omits (or a
+    stale name it keeps) sends them back to reading the whole file.
+    """
+    import ast
+
+    src = SCRIPT.read_text(encoding="utf-8")
+    defs = {n.name for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
+    lines = src.splitlines()
+    try:
+        start = lines.index("# ---- SECTION MAP ----")
+    except ValueError:
+        check("section map block present", False, "no '# ---- SECTION MAP ----' line")
+        return
+    mapped = set()
+    for line in lines[start + 1:]:
+        if not line.startswith("#"):
+            break
+        if ":" in line:
+            mapped |= {n.strip() for n in line.split(":", 1)[1].split(",") if n.strip()}
+    check("section map names every top-level def", defs <= mapped,
+          f"missing: {sorted(defs - mapped)}")
+    check("section map names no stale def", mapped <= defs,
+          f"stale: {sorted(mapped - defs)}")
+
+
 SUITES = [
     (
         "resolve_project_dir: exact match beats higher-file-count fuzzy match",
@@ -772,6 +800,10 @@ SUITES = [
     (
         "emit: TOOL-COST capped with dropped count",
         test_emit_prints_tool_cost_with_dropped,
+    ),
+    (
+        "section map: every top-level def, no stale names",
+        test_section_map_lists_every_top_level_def,
     ),
 ]
 
