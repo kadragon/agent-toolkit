@@ -1,133 +1,59 @@
-# TaskFlow Agent Rules
+# Agent Rules Example
 
-A Next.js 14 SaaS task management app with PostgreSQL, Prisma ORM, and Tailwind CSS.
+Adapt this example to verified repository needs. Keep the Docs Index, Working with Existing
+Code and Language Policy; omit conditional sections with no applicable content. Index only
+existing docs, and preserve project-specific safety boundaries.
 
 ## Docs Index (read on demand)
 
-**Six rows is the mature-repo case, not what `harness-init` produces.** Index only the docs that exist: a fresh init always writes `docs/runbook.md`, adds the conditional docs whose "Create when" fired (`harness-init` Step 4 table), and never writes `docs/delegation.md` — that one arrives with the repo's first agent role, via `dev:harness-curate`. Most inits emit one to three rows here.
-
-**This applies to the whole file, not just this table.** `sweep.sh`/`validate-harness.sh` flag *every* `docs/*.md` reference in AGENTS.md whose file is missing, so the `docs/delegation.md` row below — and the same path where the `## Delegation` section's prose cites it — must be dropped together at init and added back with the doc.
-
 | File | When to read |
 |------|--------------|
-| `docs/architecture.md` | Before modifying source structure or adding new modules |
-| `docs/conventions.md` | Before writing new components, API routes, or DB queries |
-| `docs/workflows.md` | When starting any implementation cycle |
-| `docs/delegation.md` | Before delegating to sub-agents — *not created at init; omit this row until the doc exists* |
-| `docs/eval-criteria.md` | When evaluating completed features |
 | `docs/runbook.md` | For build, test, deploy commands and troubleshooting |
 
-## Golden Principles
+Add architecture, conventions, workflows, or evaluation rows only for docs created under
+harness-init Step 4. Add a delegation-doc pointer only when that doc exists.
 
-Invariants enforced mechanically. Violations block commits.
+## Golden Principles (conditional)
 
-1. **No raw Prisma outside `lib/db/`** — All database access goes through typed query functions. Enforced by ESLint `no-restricted-imports` rule.
-2. **Input validation at API boundary** — Every API route and server action validates input with Zod schemas from `lib/validators/`. Enforced by custom ESLint rule.
-3. **No `any` type** — TypeScript strict mode with `noImplicitAny`. Enforced by `tsconfig.json` + CI type check.
-4. **Server components by default** — `"use client"` only when the component needs browser APIs or event handlers. Enforced by PR review checklist.
-5. **Audit fields on all mutations** — Every INSERT/UPDATE includes `createdAt`/`updatedAt` via Prisma middleware. Enforced by Prisma middleware (automatic).
+Include only real, project-specific invariants and their executable enforcement. For example,
+a project whose lint config restricts database imports could document that boundary here.
+No minimum item count; omit this section when there is no applicable invariant.
 
-## Delegation (Hard Stop)
+## Delegation (conditional)
 
-Delegation is a golden principle — skipping a mandatory gate is a violation. Read `docs/delegation.md` for full routing table, context manifests, and orchestrator patterns. All triggers are objective and measurable.
+Include when configured roles or a real delegation workflow exist. Default inline; delegate
+only within higher-level authorization and the repository's justified thresholds. Independent
+verification can justify separate work without parallel implementation. Name only available
+roles, and point to an existing workflow/routing doc when detail is needed.
 
-**Mechanical enforcement.** Auto-delegation is description-driven first — every agent/orchestrator this table names carries a directive `description:` ("ALWAYS invoke when X — do NOT inline-execute"). Two optional hooks back it up only where evidence warrants:
-- `.claude/hooks/trigger-router.sh` (UserPromptSubmit) maps prompt phrases → explicit `Use Skill(X)` / `Spawn Agent(X)` instructions. **Fallback only** — add routes for delegations that measurably misfire, not preemptively.
-- `.claude/hooks/delegation-gate.sh` (PreToolUse on `Edit|Write`) blocks edits to critical paths without prior delegation evidence in `.claude/tmp/`. **Critical-path repos only** — install when the delegation table has at least one path-based "Mandatory, blocking" row. This example shows the maximalist case (both hooks); most repos ship neither and rely on the directive descriptions.
+A new init creates no roles or orchestrator by default. Omit this section and its routing
+pointers in that case. Derive local thresholds from evidence, not analysis-output length or
+an assumed global numeric rule. Existing Claude roles and Codex custom-agent configuration
+are delegation surfaces; neither platform requires duplicate roles on the other.
 
-If you installed the gate, a mandatory row that fires halts an inline edit. If you installed the router, update both the table here and `.claude/trigger-routes.json` in the same commit.
+## Token Economy (optional)
 
-**Execution mode selection (read `docs/delegation.md` → Pattern Selection):**
-- Sub-agents share findings mid-flight → Agent Team (`Agent` with `name:` + `SendMessage`)
-- Independent parallel results → Orchestrator-Subagent (`Agent` with `run_in_background`)
-- Phase-dependent → Hybrid
-
-**This table is the maximalist case — a mature repo after months of use, not what `harness-init` produces.** A freshly initialized repo has **no rows here at all**: init creates no agent roles and no orchestrator, so there is nothing to route to, and every row below arrived later via `dev:harness-curate` on transcript evidence. Most repos settle at 2–4 rows, not ten; some stay at zero. A `Mandatory, blocking` row with no hook behind it is prose, and a blocking row that contradicts `~/.claude/CLAUDE.md` (or the platform's base instructions) loses to that layer — keep such rows a subset of what it permits and demote the rest to `Optional`.
-
-Every `docs/delegation.md` pointer in this section goes with those rows: the doc does not exist at init, so a copy that keeps the pointers ships dangling references (see the Docs Index note above).
-
-No row pins a model. Spawns inherit the session model; the caller overrides per spawn when a specific task warrants it (`docs/delegation.md` → Model Selection).
-
-| Trigger (objective) | Delegate | Mode | Gate |
-|---------------------|----------|------|------|
-| Target module has >5 files or >500 LOC | Explore agent | sub-agent | Optional |
-| Change touches ≥3 directories | Architecture analysis | sub-agent | Mandatory, blocking |
-| First edit in a directory this session | Explore agent | sub-agent | Optional |
-| File matches `**/auth/**`, `**/billing/**`, `prisma/migrations/**` | Analysis agent | sub-agent | Mandatory, blocking |
-| After implementation, when verification is delegated at all | QA verification | sub-agent | Optional |
-| Feature complete | Product evaluator | sub-agent | Optional |
-| Multi-perspective review needed | Review team (× N) | **agent team** | Optional |
-| Cross-layer refactor (≥3 modules) | Refactor team | **agent team** | Escalation |
-| Every commit | Code reviewer | background | Background |
-| Same failure x2 | Deep investigation | sub-agent | Escalation, blocking |
-
-**Intermediate artifacts:** session scratchpad dir, `{phase:02d}_{agent}_{artifact}.{ext}`. See `docs/delegation.md` → Data Transfer Protocols.
-
-<!-- harness:verbatim — mandated block, exempt from the non-inferability filter. Do not trim or paraphrase. -->
-## Token Economy
-
-Rules that apply every message — keep the context window lean.
-
-1. Do not re-read a file already read in this session. If you need to check a change, read only the diff/region.
-2. Do not call tools just to confirm information you already have. Simple questions deserve direct answers.
-3. Run independent tool calls in parallel (multiple reads, grep + glob, etc.) — not sequentially.
-4. Delegate any analysis that would produce >20 lines of output to a sub-agent; return only the conclusion to this context.
-5. Do not restate what the user just said. They can read their own message.
+Retain only useful project-specific instructions, such as which large generated artifacts to
+exclude from routine reads. Omit this section when higher layers already cover its guidance.
 
 ## Working with Existing Code
 
-Boundaries the linter can't express — ✅ do / ⚠️ do carefully / 🚫 never (test/build commands live in `docs/runbook.md`):
-
-| | |
-|---|---|
-| ✅ | Style with Tailwind utility classes; put server actions beside their page in `app/` |
-| ⚠️ | `src/components/ui/` are shadcn primitives — regenerate via `npx shadcn-ui add`, never hand-edit; schema changes need `npx prisma migrate dev --name {desc}` |
-| 🚫 | CSS modules or styled-components; a shared cross-page actions file |
+State verified operational boundaries the linter cannot express. For example, generated
+components may require regeneration rather than manual editing. Test/build commands belong
+in the runbook. Replace these examples with the repository's actual boundaries.
 
 ## Language Policy
 
-- Code, commits, docs: English
-- User-facing strings: i18n via `next-intl` (English + Korean)
+- Code, commits, docs: use the language resolved from existing repository/global policy.
+- User-facing strings: follow the existing localization convention.
 
-## Platform Pointers (optional — include only in multi-agent-tool environments)
-
-If the team uses more than one AI coding tool, add this section so each tool's agent finds the canonical rules:
-
-```markdown
-## Platform Pointers
-- Claude Code / Codex: `AGENTS.md` (this file)
-- Cursor: `.cursorrules` (add `@AGENTS.md` inside it)
-- Gemini CLI: `GEMINI.md` (add `@AGENTS.md` pointer)
-- GitHub Copilot: `.github/copilot-instructions.md` (copy key sections)
-```
-
-**Skip this section** on single-tool repos — it adds noise with no benefit.
-
-<!-- harness:verbatim — mandated block, exempt from the non-inferability filter. Do not trim or paraphrase. -->
 ## Maintenance
 
-Update this file **only** when ALL of the following are true:
+Update this file for stable operational guidance that code/configuration does not reveal and
+whose absence would cause mistakes. Prefer correcting stale guidance over appending. A valid
+pointer to an existing edit policy is also sufficient; this heading and wording are optional.
 
-1. Information is not directly discoverable from code / config / manifests / docs
-2. It is operationally significant — affects build, test, deploy, or runtime safety
-3. It would likely cause mistakes if left undocumented
-4. It is stable and not task-specific
-
-**Never add:** architecture summaries, directory overviews, style conventions
-already enforced by tooling, anything already visible in the repo, or
-temporary / task-specific instructions.
-
-Prefer modifying or removing outdated entries over appending. When unsure, add
-a short inline `TODO:` comment rather than inventing guidance.
-
-Size budget: target ≤100 lines, hard warn >200. Move long content to
-`docs/*.md` (read on demand, cross-tool) and leave a pointer line here. On a
-Claude-Code-only repo you may instead use `.claude/rules/*.md` (path-scoped,
-auto-loads when the matching area is touched); on a multi-tool repo keep the
-content in `docs/` so Codex/Cursor see it too.
-
-**Memory boundary:** durable code/repo facts live here, in `.claude/rules/`, and
-`docs/` — human-authored and version-controlled. Claude Code's auto-memory
-(`MEMORY.md`) holds the model's discovered preferences and cross-session
-learnings only; never promote a code fact into auto-memory, and don't hand-edit
-`MEMORY.md`.
+Target <=100 lines. Validation warns above 100, strongly warns above 200, and never fails on
+size alone; session checks warn above 200. Move detail into existing docs with a pointer.
+Durable repository facts belong in version-controlled harness files; follow the operator's
+memory policy for preferences and learned context. No block has a verbatim-copy exemption.

@@ -11,7 +11,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 **Goal:** Any AI agent can understand the repo without asking questions.
 
 **Required artifacts:**
-- [ ] `AGENTS.md` — index ≤100 lines with Docs Index, Golden Principles, Delegation section
+- [ ] `AGENTS.md` — index targeting ≤100 lines with Docs Index, working-code boundaries and Language Policy; concise edit guidance or a valid pointer
 - [ ] `CLAUDE.md` → `@AGENTS.md` pointer
 - [ ] `docs/runbook.md` — build/test/deploy commands and known failure modes
 
@@ -24,7 +24,13 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 | `docs/workflows.md` | the repo runs a defined work cycle worth writing down |
 | `docs/eval-criteria.md` | the repo runs the Sprint Contract flow |
 | `backlog.md` | the repo adopts the backlog/sprint flow |
-| `docs/delegation.md` | the repo has its first agent role or orchestrator |
+| Golden Principles | real project invariants exist; no minimum count |
+| Delegation guidance | configured Claude/Codex roles or an actual delegation workflow exist |
+| Token Economy | useful project-specific guidance exists; optional |
+| `docs/delegation.md` | roles/workflow need detail not already in an existing workflow doc |
+
+Size warnings above 100 (strong above 200) do not fail a level; session checks warn only above
+200. Broken references and malformed configuration remain failures.
 
 **Passes Level 1 when:** `scripts/validate-harness.sh` exits 0 for all Level 1 checks.
 

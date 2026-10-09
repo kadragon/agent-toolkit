@@ -36,27 +36,32 @@ This is not a style preference. An ETH Zurich study ([arxiv 2602.11988](https://
 
 It does **not** prune navigational pointers (the `## Docs Index`, "read `docs/x.md` when …") or a concrete non-obvious command or example. Those name real files but earn their tokens by cutting discovery cost, which is the point of a map.
 
-**Two limits — both places the filter has actually misfired:**
+**Retain verified safety boundaries and navigation.** All generic blocks now pass the same
+filter; no `harness:verbatim` marker exempts boilerplate from pruning. A claim that higher-level
+instructions already cover a rule requires reading and quoting those instructions for the
+targeted platforms. Multi-tool support does not automatically justify whole copied blocks.
 
-1. A block carrying `<!-- harness:verbatim … -->` is out of scope. It was mandated deliberately, so "the agent already knows this" is not an argument against it.
-2. The filter licenses cutting what the agent would rediscover *from the repo*. It does **not** license cutting a line because some higher-precedence instruction file (the base harness, `~/.claude/CLAUDE.md`, a parent AGENTS.md) supposedly already says it. That is a different claim and far easier to get wrong, because those files are not in front of you while you edit. If you cut on those grounds, quote the covering text in the proposal; if you cannot quote it, you have not verified it, so keep the line. And a quote only settles it on a **single-tool** repo — AGENTS.md is read by Codex/Cursor/Copilot too, each with its own base instructions, so "Claude's base harness already says this" leaves the line load-bearing for every other reader.
+## Conditional sections and size
 
-**Why the mandated blocks carry their marker.** The `## Maintenance` edit policy and `## Token Economy` rules are copied verbatim, and the mandate lives in a skill that only loads while harness-init runs. An AGENTS.md carrying those blocks *unmarked* reads to any later trimming pass (`claude-md-improver`, `/doctor`, a human editor) as generic boilerplate — exactly the shape the filter deletes. The marker travels with the file and lets the block defend itself, for ~8 tokens, rendered invisibly in Markdown.
+Golden Principles records real project invariants, without a minimum count. Delegation applies
+when configured Claude/Codex roles or actual workflows exist. Token Economy is optional,
+project-specific guidance. An edit policy may be concise or an existing valid pointer rather
+than a named four-item section. Validate presence mechanically; assess relevance/enforcement
+manually. Correctly absent optional sections produce INFO, not recurring warnings.
+
+The generation target remains 100 lines. Validation warns at 101–200 and strongly above 200;
+session warnings start above 200 (explicit overrides retained). There is no size-only failure:
+the former >120 failure contradicted the 100–200 soft zone and treated line count as correctness.
+Broken references and malformed configuration still fail. Regression fixtures cover 99/100/101
+and 199/200/201 with message and exit semantics, plus minimal and existing harnesses.
 
 ## Instruction-layer reconciliation (Step 0b)
 
-**Why ask instead of deciding.** Precedence between layers is **not spec**. Never assert a winner you cannot quote a source for — which is exactly why a contradiction is a question for the user rather than a silent call.
-
-**How to ask.** Surface it before generating the affected file, not after: quote both sides verbatim (`file:line` for the global file; for base instructions, quote the covering text and label it `[base instructions — {model id}, this session]`, since no `file:line` exists), state which side you recommend and why, then ask which is authoritative. Batch every conflict into one prompt — one round-trip, not one per rule.
-
-**Asking does not mean halting the run.** Generate every artifact the conflict does not touch first, then ask, then write the affected ones. That ordering is itself what a global hard-stop rule typically requires — this operator's, verbatim: *"Material ambiguity affecting scope, irreversible effects, external communication, or expected output → finish everything independent of the answer first, then Grill: one question at a time (or one batched question prompt), each with recommended answer + rationale; answer in code → read, don't ask."* Read the invoking layer's own wording rather than assuming this one; `Skill(dev:task-grill)` is available when the conflicts need real interviewing. <!-- notation-exempt: availability note, not a step this file runs -->
-
-**Running without a user to ask — never block.** This skill is reachable from a subagent or teammate, where the ask has no recipient. The same operator layer covers it: *"Running AS a subagent/teammate: no user access — never block. State the assumption, finish the work, surface the open question in the return value."* So: generate the non-conflicting artifacts, skip the conflicting rule rather than guessing at it, state the assumption, and surface the conflict — both sides quoted — in the return value. The Step 9 checklist item is satisfied by surfacing it upward, not by having an answer.
-
-**Two bounds, so the gate doesn't become noise:**
-
-- It fires on *contradiction*, not resemblance. Similar phrasing about different subjects, and a repo rule that merely reaches a tool the global file cannot, are not conflicts.
-- It covers rules **this run is about to write**. Auditing conflicts already sitting in an existing `AGENTS.md` / `docs/` / `.claude/rules/` belongs to a `dev:harness-curate` run — Audit mode points there instead of re-implementing that sweep.
+Honor higher-level prohibitions without asking the user to choose which layer wins. Local
+thresholds specialize only choices those layers permit; an inspected layer with no numeric
+gate provides no number to attribute to it. Ask only for a material unresolved local decision,
+and complete independent work while awaiting it. Existing-policy audits belong to
+`dev:harness-curate`; this check covers rules the current init writes.
 
 ## Docs language (Step 1)
 
@@ -68,7 +73,10 @@ Domain terms with no real equivalent in the target language (a local platform's 
 
 ## Token Economy overlap
 
-Current Claude models are already told to batch independent tool calls, not to re-read a file they just edited, and not to restate the user. On a **Claude-Code-only** repo, trim those items and keep only the repo-specific ones (what to delegate, what "conclusion only" means here). On a multi-tool repo the block stays whole — the repo copy is that rule's only reach on Codex/Cursor/Copilot. Either way, drop any item whose entire content is "the model already behaves this way on every tool you target" — the same load-bearing test the sweep applies to everything else.
+Use project-specific guidance only where it changes useful behavior. Check the actual targeted
+instruction layers before retaining a duplicate; tool count alone is no reason to copy a generic
+block. Output length is not a delegation trigger. A repository's evidence and authorized workflow
+set its delegation boundaries, including the distinct benefit of independent verification.
 
 ## Auto-delegation is description-driven
 

@@ -33,7 +33,7 @@ Silent unless action taken or error occurs.
 
 ## A) AGENTS.md Update Rules
 
-4-rule edit policy below also embedded verbatim in AGENTS.md's `## Maintenance` section by `harness-init` (see `harness-invariants.md` → "AGENTS.md Edit Policy"). Any session editing AGENTS.md — not only sync sessions — follows same filter. Keep two copies in lockstep.
+Apply the filter below when editing AGENTS.md (see `harness-invariants.md` → "AGENTS.md Edit Policy"). Concise applicable guidance or a valid policy pointer suffices; no verbatim copy or fixed heading/count is required.
 
 Update `AGENTS.md` **only** when ALL true:
 
@@ -52,7 +52,7 @@ Update `AGENTS.md` **only** when ALL true:
 Edits minimal. Prefer modifying/removing outdated entries over appending.
 Unsure → add short inline `TODO:` comment, don't invent guidance.
 
-**If AGENTS.md lacks `## Maintenance` section:** repo bootstrapped by older init or set up manually. Add section in-place using this exact rule list — costs nothing, makes policy visible to every future session.
+**If edit guidance is absent:** add concise applicable policy or a pointer to an existing policy. Preserve useful safety boundaries; avoid duplicating generic blocks.
 
 ---
 
@@ -229,5 +229,5 @@ Run `scripts/validate-harness.sh` to confirm invariants still hold after sync.
 ## What the maintenance routine does NOT do
 
 - **auto-sweep without check** — `tools/sweep.sh` (installed by harness-init Step 5) runs as a post-sync step but only if the file exists. Trigger policy beyond that (manual / SessionStart hook / cron) chosen at init time, recorded in `docs/runbook.md`.
-- **full validation** — `scripts/validate-harness.sh` does deeper structural checks (golden principle count, reference integrity, enforcement layer detection). Run after intentional harness change; routine only catches mechanically fixable drift.
+- **full validation** — `scripts/validate-harness.sh` does deeper structural checks (conditional principle/delegation guidance, reference/configuration integrity, enforcement layer detection). Run after intentional harness change; routine only catches mechanically fixable drift.
 - **content rewriting** — maintenance routine never rewrites body of `backlog.md`, `tasks.md`, or `AGENTS.md`. Fixes schemas, moves state through reconciliation contract; everything else is human's call.
