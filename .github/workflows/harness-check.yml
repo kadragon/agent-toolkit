@@ -153,6 +153,9 @@ jobs:
       - name: Run dev/hooks/commit-guard/guard.py --test
         run: python3 dev/hooks/commit-guard/guard.py --test
 
+      - name: Run dev/hooks/commit-guard/test_guard.py
+        run: python3 dev/hooks/commit-guard/test_guard.py
+
       - name: Run dev/hooks/memory-guard/guard.py --test
         run: python3 dev/hooks/memory-guard/guard.py --test
 
@@ -210,6 +213,91 @@ jobs:
       # rejections, and the NO-STORE/EMPTY/PENDING exit codes the skill branches on.
       - name: Run dev/skills/harness-capture/scripts/session_notes.py --test
         run: python3 dev/skills/harness-capture/scripts/session_notes.py --test
+
+  dev-skill-self-tests:
+    name: dev skill script self-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: Run dev/skills/harness-curate/scripts/test_scan_transcripts.py
+        run: python3 dev/skills/harness-curate/scripts/test_scan_transcripts.py
+
+      - name: Run dev/skills/harness-curate/scripts/check_plugin_contracts.py --test
+        run: python3 dev/skills/harness-curate/scripts/check_plugin_contracts.py --test
+
+      - name: Run dev/skills/harness-curate/scripts/disable_plugins.py --test
+        run: python3 dev/skills/harness-curate/scripts/disable_plugins.py --test
+
+      - name: Run dev/skills/harness-init/scripts/test_reconcile_harness.py
+        run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
+
+      - name: Run dev/skills/task-next/scripts/backlog_candidates.py --test
+        run: python3 dev/skills/task-next/scripts/backlog_candidates.py --test
+
+      - name: Run dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
+        run: python3 dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
+
+  prod-skill-self-tests:
+    name: prod skill script self-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      # hwpx and report-draft parse untrusted XML through defusedxml; without fsrs,
+      # quiz_state.py --test SKIPs the FSRS scheduler path users with py-fsrs take.
+      - name: Install defusedxml and fsrs
+        run: python3 -m pip install --quiet defusedxml fsrs
+
+      - name: Run prod/skills/hwpx/scripts/_common.py --test
+        run: python3 prod/skills/hwpx/scripts/_common.py --test
+
+      - name: Run prod/skills/hwpx/scripts/build.py --test
+        run: python3 prod/skills/hwpx/scripts/build.py --test
+
+      - name: Run prod/skills/hwpx/scripts/office.py --test
+        run: python3 prod/skills/hwpx/scripts/office.py --test
+
+      - name: Run prod/skills/hwpx/scripts/table.py --test
+        run: python3 prod/skills/hwpx/scripts/table.py --test
+
+      - name: Run prod/skills/hwpx/scripts/text.py --test
+        run: python3 prod/skills/hwpx/scripts/text.py --test
+
+      - name: Run prod/skills/hwpx/scripts/validate.py --test
+        run: python3 prod/skills/hwpx/scripts/validate.py --test
+
+      - name: Run prod/skills/kr-style/scripts/kr_audit.py --test
+        run: python3 prod/skills/kr-style/scripts/kr_audit.py --test
+
+      - name: Run prod/skills/repo-quiz/scripts/quiz_state.py --test
+        run: python3 prod/skills/repo-quiz/scripts/quiz_state.py --test
+
+      - name: Run prod/skills/report-draft/scripts/lint_report.py --test
+        run: python3 prod/skills/report-draft/scripts/lint_report.py --test
+
+  test-suites-wired:
+    name: Every bundled test suite runs in CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Run scripts/ci/check_test_suites_wired.py --test
+        run: python3 scripts/ci/check_test_suites_wired.py --test
+
+      - name: Run scripts/ci/check_test_suites_wired.py
+        run: python3 scripts/ci/check_test_suites_wired.py
 
   bump-version-test:
     name: bump-version.sh regression test
