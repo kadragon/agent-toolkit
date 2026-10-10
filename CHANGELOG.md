@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Evidence-rule and wording corrections (prod v3.2.6) (2026-10-10)
 - [done] HWPX trigger and report coupling (prod v3.2.5) (2026-10-09)
 - [done] Model selection policy and skill metadata hygiene (dev v4.10.19 / prod v3.2.4) (2026-10-09) → docs/platform-specs.md
 - [done] Simplify conditional harness initialization and size checks (dev v4.10.18) (2026-10-09)
