@@ -8,14 +8,6 @@ Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, 
 
 Acceptance: preregister 10–20 task IDs total, finite attempts/time/cost-token budgets per platform, observation methods and benefit thresholds; setting-unverified runs cannot support model-effect claims; recommendations meet the design's paired-input/repeat/quality evidence bars and include total retry/review cost; unfinished platforms remain unverified and pin changes require a follow-up. Approach: staged platform runs using existing evaluation conventions and evaluation-only selection reasons; no permanent telemetry or reviewer-process changes.
 
-## 8. Evidence-rule and wording corrections
-
-Source: `docs/design/skill-review-followups.md` → Implementation Decisions, slice C. Read the design before forming the Sprint Contract.
-
-- [ ] [HARNESS] Unify gongmun-draft unverified-value rule (:18 vs :97) toward `[확인 필요]` placeholders listed in Step 5, and narrow repo-quiz single-writer invariant (:247–249) to its scoped `mistakes.md` exception. Read `docs/design/skill-review-followups.md`, slice C, before forming the contract.
-
-Acceptance: both gongmun lines agree (draft with placeholders, never fabricated dates); repo-quiz invariant matches `allowed-tools`; docs-only inspection, no behavior tests. Approach: wording-only correction, no fallback routing or availability changes. Dependencies: none.
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.

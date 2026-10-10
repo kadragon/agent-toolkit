@@ -5,7 +5,7 @@ description: >-
   conventions, data flow, gotchas — plus the wrong-answer log and XP/streak
   progress persisted in `.repo-quiz/`. NOT for writing docs or an onboarding
   guide, NOT for general programming trivia.
-version: 1.1.3
+version: 1.1.4
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 
@@ -244,7 +244,7 @@ what schedules the concept to come back until it sticks.
   reach beyond the repo (industry practice, recent tooling/trends), but keep it clearly
   labeled as broader context and honest about certainty — never let outside color get graded
   or blur into the repo ground truth.
-- **The script is the single writer of state.** Don't hand-edit `progress.json` or
-  `history.jsonl`. You may append richer prose to `mistakes.md` with `Edit` if the user wants
+- **The script is the single writer of `progress.json` and `history.jsonl`.** Don't hand-edit either file.
+  The scoped exception is appending richer prose to `mistakes.md` with `Edit` if the user wants
   fuller notes, but routine wrong-answer capture goes through `record --note`.
 - **Respect the count.** `daily_goal` (5 by default) unless the user asks for more.
