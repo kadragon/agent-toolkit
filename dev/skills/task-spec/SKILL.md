@@ -7,7 +7,7 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.1.1
+version: 1.2.0
 ---
 
 # To Spec
@@ -84,6 +84,12 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    `## Out of Scope`, which never graduates. Omit the section entirely when nothing is foggy;
    a spec that is foggier than it is decided is a signal the scope is too large for one
    spec, so say so instead of filling the section.
+
+   **Skill extraction handoff.** When the resolved summary includes `Skill slots:`, append
+   `## Skill slots` after Further Notes and copy all seven slots verbatim, including source
+   paths and explicit N/A values. Keep runtime checks, decision rules and exceptions there;
+   Testing Decisions states how the authored skill's handling of them will be verified.
+   Omit this section for summaries without extraction.
 
 4. **Review with user.** Present the written spec (or a summary + file path) and wait for
    explicit approval before any downstream skill (`task-tickets`, or direct implementation)

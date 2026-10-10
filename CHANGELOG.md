@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Preserve skill extraction slots through authoring handoffs (dev v4.10.20) (2026-10-10) → docs/eval-criteria.md
 - [done] Evidence-rule and wording corrections (prod v3.2.6) (2026-10-10)
 - [done] HWPX trigger and report coupling (prod v3.2.5) (2026-10-09)
 - [done] Model selection policy and skill metadata hygiene (dev v4.10.19 / prod v3.2.4) (2026-10-09) → docs/platform-specs.md
