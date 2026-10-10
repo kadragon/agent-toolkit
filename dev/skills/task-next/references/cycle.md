@@ -58,6 +58,11 @@ router matches and handoff flags do not authorize Git writes. Reuse established 
 ```
 
 The Tag is what the reviewer grades a `[FIX]` reproduction criterion against — write it in.
+When the resolved skill-authoring summary includes `Skill slots:`, append its entire seven-slot
+block verbatim to the contract and archive, including sources and explicit N/A values. For
+a queued skill-authoring item, read the cited spec/summary and recover that block before
+implementation. Keep runtime rules in the slots and make acceptance criteria check that the
+authored skill implements them. With no extraction summary, omit the block.
 `cycle_state.py save` refuses a criterion with no `→ <check>`. When the check is a test and test
 infrastructure exists, write it first and watch it fail before implementing — for `[FEAT]` as
 well as `[FIX]`, whose contract names the test that fails before and passes after. A multi-item

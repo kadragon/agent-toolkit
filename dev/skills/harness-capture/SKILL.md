@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 3.1.0
+version: 3.2.0
 ---
 
 # Capture Learnings — session retrospective
@@ -117,6 +117,13 @@ or after a compaction.
    Mechanism before sentence: a rule expressible as a check goes there first; prose is the
    fallback. Every proposal names in one line **the concrete failure this prevents** ("without
    this: X happens again") — for memory it lands in the body.
+
+   **Skill-authoring handoff.** For a confirmed new skill or substantial rewrite outside the
+   review-cycle heavy-work deferral below, resolve unsettled extraction slots by calling the
+   Skill tool with "dev:task-grill", then call the Skill tool with "skill-creator" carrying
+   the four-field summary and entire `Skill slots:` block verbatim. Reuse already resolved
+   slots from the conversation/repo; a complete summary goes directly to the creator.
+   Small wording or trigger fixes use the existing creator brief without extraction.
 
 4. Nothing clears the gate → say so in one line and stop, then flush the ids you just read so
    the next retrospective does not re-litigate them. That is the normal outcome.

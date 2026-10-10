@@ -114,6 +114,13 @@ Before any implementation cycle, agree on "done":
 **Lint/test command:** {command to run to verify}
 ```
 
+For new or substantially rewritten skills, append `Skill slots:` after the contract only
+when extraction was used. Carry all seven slots verbatim from the resolved summary, including
+source paths and explicit N/A values: Triggers, Inputs, Steps, Decision rules,
+Done / verification, Exceptions, Toolbox. Runtime checks and branches stay in those slots;
+acceptance criteria separately verify that the authored skill implements them. Ordinary
+development contracts omit this block.
+
 Reuse approved criteria before coding; no separate evaluator approval is required. The evaluator
 grades against this contract. Approval rules live in the shared code cycle.
 

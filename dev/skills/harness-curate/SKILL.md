@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.3.3
+version: 2.4.0
 disable-model-invocation: true
 ---
 
@@ -189,7 +189,12 @@ Done when: the table is shown and `record_run.py` exited 0, or was skipped for o
 
 ## Step 7 — Route to the creator (on confirmation)
 
-Ask whether to act on the **top** candidate now. Never auto-create. On yes, invoke the matching
+Ask whether to act on the **top** candidate now. Never auto-create. On yes, for a new skill or
+substantial skill rewrite, reuse slots already resolved by the conversation/repo; if any
+extraction slot remains unsettled, call the Skill tool with "dev:task-grill" first. Pass the
+resolved four-field summary and entire `Skill slots:` block verbatim to the Skill tool with
+"skill-creator". A complete summary goes directly to the creator. Description optimization
+and small wording fixes use the existing brief without extraction. For other assets, invoke the matching
 skill with a brief — goal · constraint · **the objective check that accepts the edit** (a
 `skill-creator` eval pass, a re-run of the missed trigger, a fixture event piped through the
 hook). Failing the check means revert, not retry-until-green. No check available → the edit may

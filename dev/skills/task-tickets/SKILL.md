@@ -6,7 +6,7 @@ description: >-
   order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.1.1
+version: 1.2.0
 ---
 
 # To Tickets
@@ -87,6 +87,10 @@ items from approved spec").
    before the feature that reads it). Sort the ticket list so a dependency's ticket always
    precedes its dependents.
 4. **Draft numbered ticket titles + scope, acceptance criteria, approach, and dependencies.**
+   For skill-authoring tickets whose source contains Skill slots, cite that section's path
+   (or preserve the conversation's block verbatim under the ticket) so the contract author
+   can recover all seven slots unchanged. Acceptance criteria check the authored skill's
+   runtime rules; the source slots retain those rules, sources and N/A values.
    Cite the approved source in each ticket. Apply `../task-next/references/cycle.md` → *Plan gate*:
    reuse approved granularity/order; ask only about new slicing decisions or changed scope before
    writing. Create `backlog.md` if this authorized ticket-writing path needs it.
