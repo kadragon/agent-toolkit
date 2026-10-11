@@ -25,6 +25,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #316 — commit-guard newline carry and status-band Windows path (2026-10-11)
+
+- [ ] [debt] commit-guard proves only the first branch creation in a command: a second `git checkout -b` after another creation or switch is never carried across `;`/newline, so `git checkout -b a; git checkout -b b; git commit` false-blocks from live `main` even when `b` is free (source: agy) — dev/hooks/commit-guard/guard.py (introduced here)
+
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [debt] status-band keeps the pre-compaction context fill for up to a minute after a manual `/compact`: `session.compact` is a gating hook, so the mod stays out of it and waits for the tick or the next measure (source: code-review) — mods/hooks/status-band/register.tsx
