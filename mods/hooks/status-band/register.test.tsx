@@ -29,9 +29,13 @@ type World = {
   branch: string | null
   percent: number | undefined
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]
+  turns: number
+  surfaces: ('terminal' | 'desktop' | 'vscode' | 'mobile')[]
   isUsageDown: boolean
   ticks: (() => void)[]
   gitCalls: number
+  // Set to hold the next git call open until the test lets it go.
+  gitGate?: Promise<void>
 }
 
 // The engine beneath the plugin: what the session, the clock, git and the band
@@ -45,16 +49,18 @@ const world = (on: On): World => {
     rateLimits: [
       { kind: 'five_hour', percentUsed: 88, resetsAt: new Date(NOW + 124 * MINUTE).toISOString() },
     ],
+    turns: 3,
+    surfaces: ['terminal'],
     isUsageDown: false,
     ticks: [],
     gitCalls: 0,
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
-  on('session.end', async () => ({ sessionId: 's1' }))
   on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('session.model', async () => ({ value: state.model }))
   on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
+  on('session.turns', async () => ({ value: state.turns }))
   on('session.usage', async () => {
     if (state.isUsageDown) throw new Error('usage is down')
 
@@ -75,10 +81,15 @@ const world = (on: On): World => {
   })
   on('process.run', async () => {
     state.gitCalls += 1
+    const branch = state.branch
+    const gate = state.gitGate
 
-    if (state.branch === null) throw new Error('git is not installed')
+    state.gitGate = undefined
+    await gate
 
-    return { value: { exitCode: 0, stdout: `${state.branch}\n`, stderr: '' } }
+    if (branch === null) throw new Error('git is not installed')
+
+    return { value: { exitCode: 0, stdout: `${branch}\n`, stderr: '' } }
   })
   on('turn.step', async function* ($, e) {
     return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], usage: USAGE }
@@ -88,7 +99,7 @@ const world = (on: On): World => {
   on('model.complete', async () => ({
     value: { isAnswered: true, text: 'Run the tests', usage: USAGE },
   }))
-  on('session.surfaces', async () => ({ value: ['terminal'] }))
+  on('session.surfaces', async () => ({ value: state.surfaces }))
   on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
     const { Box } = $.ui.resolve(e)
 
@@ -98,8 +109,20 @@ const world = (on: On): World => {
   return state
 }
 
-const start = ($: Engine, isInteractive = true) =>
-  $.session.start({ cwd: '/work/agent-toolkit', surface: 'terminal', isInteractive })
+// Lets the work a hook or a tick started without waiting for it settle.
+const settle = () => new Promise<void>(resolve => setTimeout(resolve, 20))
+
+const start = async ($: Engine) => {
+  const result = await $.session.start({
+    cwd: '/work/agent-toolkit',
+    surface: 'terminal',
+    isInteractive: true,
+  })
+
+  await settle()
+
+  return result
+}
 
 // Reads the stream to its end, as the query loop does.
 const step = async ($: Engine, fields: Record<string, unknown> = {}) => {
@@ -119,12 +142,17 @@ const step = async ($: Engine, fields: Record<string, unknown> = {}) => {
   return read.value
 }
 
-const measure = ($: Engine) =>
-  $.session.measure({
+const measure = async ($: Engine) => {
+  const result = await $.session.measure({
     context: { window: 200_000, percent: 0 },
     rateLimits: [],
     changed: ['context'],
   })
+
+  await settle()
+
+  return result
+}
 
 const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', props = {}) => {
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, ...props }, surface })
@@ -139,15 +167,12 @@ const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', pr
   return { ui, texts, color: context?.props.color }
 }
 
-// Lets the work a tick started settle.
-const settle = () => new Promise<void>(resolve => setTimeout(resolve, 20))
-
 test('the band draws both rows on the terminal and the desktop', async ($, on) => {
-  world(on)
-
-  await start($)
+  const state = world(on)
 
   for (const surface of ['terminal', 'desktop'] as const) {
+    state.surfaces = [surface]
+    await start($)
     const { ui, texts, color } = await drawn($, surface)
 
     expect(texts).toEqual([
@@ -228,23 +253,88 @@ test('the clock tick moves the elapsed time', async ($, on) => {
   await ui.unmount()
 })
 
-test('a /clear keeps the tick and any other end stops it', async ($, on) => {
+test('a slow read does not undo the effort a step reported meanwhile', async ($, on) => {
   const state = world(on)
 
   await start($)
-  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
-  state.ticks.shift()?.()
+  let release = () => {}
+  state.gitGate = new Promise<void>(resolve => (release = resolve))
+  const measured = measure($)
+  await step($, { effort: 'high' })
+  release()
+  await measured
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('[Opus 5.5 ◑ high]')
+  await ui.unmount()
+})
+
+test('a read that started earlier and ended later is dropped', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  let release = () => {}
+  state.gitGate = new Promise<void>(resolve => (release = resolve))
+  const slow = measure($)
+  state.branch = 'newer'
+  await measure($)
+  release()
+  await slow
   await settle()
+  const { ui, texts } = await drawn($)
 
-  expect(state.ticks.length).toBe(1)
+  expect(texts[0]).toContain('git:(newer)')
+  await ui.unmount()
+})
 
-  await $.session.end({ reason: 'logout' } as Parameters<Engine['session']['end']>[0])
-  const calls = state.gitCalls
-  state.ticks.shift()?.()
-  await settle()
+test('a changed model drops the effort the last one ran at', async ($, on) => {
+  const state = world(on)
 
-  expect(state.ticks.length).toBe(0)
-  expect(state.gitCalls).toBe(calls)
+  await start($)
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('before the first prompt the context reads 0%, later a missing reading is left out', async ($, on) => {
+  const state = world(on)
+  state.percent = undefined
+  state.turns = 0
+
+  await start($)
+  const fresh = await drawn($)
+
+  expect(fresh.texts[1]).toBe('Context ░░░░░░░░░░ 0%')
+  await fresh.ui.unmount()
+
+  state.turns = 2
+  await measure($)
+  const later = await drawn($)
+
+  expect(later.texts[1]).toBeUndefined()
+  expect(later.texts[2]).toBe('5h: 88% (2h 4m)')
+  await later.ui.unmount()
+})
+
+test('a failed usage read keeps the last figures', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  state.isUsageDown = true
+  state.now = NOW + 10 * MINUTE
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts).toEqual([
+    '[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  15m',
+    'Context █░░░░░░░░░ 12%',
+    ' │ 5h: 88% (1h 54m)',
+  ])
+  await ui.unmount()
 })
 
 test('a failing git call or usage read leaves those figures out and fails nothing', async ($, on) => {
@@ -258,17 +348,49 @@ test('a failing git call or usage read leaves those figures out and fails nothin
 
   expect(started.cwd).toBe('/work/agent-toolkit')
   expect(measured.changed).toEqual(['context'])
-  expect(texts).toEqual(['[Opus 5.5] │ agent-toolkit │ ⏱️  <1m', 'Context ░░░░░░░░░░ 0%', undefined])
+  expect(texts).toEqual([undefined, undefined, undefined])
+  expect((await ui.find({ type: 'Text', text: /agent-toolkit/ }))?.text).toBe(
+    '[Opus 5.5] │ agent-toolkit',
+  )
   await ui.unmount()
 })
 
-test('a run with nobody at the prompt reads nothing and starts no timer', async ($, on) => {
+test('where no surface draws the band it reads nothing and starts no timer', async ($, on) => {
   const state = world(on)
+  state.surfaces = ['vscode']
 
-  await start($, false)
+  await start($)
+  await measure($)
 
   expect(state.ticks.length).toBe(0)
   expect(state.gitCalls).toBe(0)
+})
+
+test('a surface that attaches after the start gets the band at the next measure', async ($, on) => {
+  const state = world(on)
+  state.surfaces = []
+
+  await start($)
+  state.surfaces = ['desktop']
+  await measure($)
+  const { ui, texts } = await drawn($, 'desktop')
+
+  expect(texts[0]).toContain('agent-toolkit')
+  expect(state.ticks.length).toBe(1)
+  await ui.unmount()
+})
+
+test('a slow git does not hold the session start', async ($, on) => {
+  const state = world(on)
+  state.gitGate = new Promise<void>(() => {})
+
+  const started = await $.session.start({
+    cwd: '/work/agent-toolkit',
+    surface: 'terminal',
+    isInteractive: true,
+  })
+
+  expect(started.cwd).toBe('/work/agent-toolkit')
 })
 
 test('with suggestions up, the status rows and the buttons are both drawn', async ($, on) => {
@@ -286,6 +408,34 @@ test('with suggestions up, the status rows and the buttons are both drawn', asyn
 
   expect(texts[0]).toContain('agent-toolkit')
   expect((await ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
+  await ui.unmount()
+})
+
+test('in a band too short for both, the suggestions keep their rows', async ($, on) => {
+  world(on)
+
+  await start($)
+  await $.turn.complete({
+    answer: 'I changed the parser and left the tests alone. '.repeat(4),
+    durationMs: 10,
+    isAborted: false,
+    turnId: 't1',
+    reason: 'answer',
+  } as Parameters<Engine['turn']['complete']>[0])
+  const { ui, texts } = await drawn($, 'terminal', { maxRows: 4 })
+
+  expect(texts[0]).toBeUndefined()
+  expect((await ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
+  await ui.unmount()
+})
+
+test('next-steps switched off, the status rows still draw', { options: { nextStepsEnabled: false } }, async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('agent-toolkit')
   await ui.unmount()
 })
 

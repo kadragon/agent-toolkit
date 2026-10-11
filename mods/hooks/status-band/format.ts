@@ -79,15 +79,19 @@ const basename = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\
 export const headline = (status: StatusBand): string => {
   const dir = basename(status.cwd)
   const place = status.branch === undefined ? dir : `${dir} git:(${status.branch})`
-  const elapsed = `⏱️  ${duration(status.now - status.startedAt)}`
+  const elapsed =
+    status.startedAt === undefined ? '' : `⏱️  ${duration(status.now - status.startedAt)}`
 
   return [status.model === '' ? '' : modelSegment(status), place, elapsed]
     .filter(segment => segment !== '')
     .join(SEPARATOR)
 }
 
+// A fill the engine has no reading for is left out, never drawn as 0%.
 export const contextText = (status: StatusBand): string =>
-  `Context ${bar(status.contextPercent)} ${Math.round(clampPercent(status.contextPercent))}%`
+  status.contextPercent === undefined
+    ? ''
+    : `Context ${bar(status.contextPercent)} ${Math.round(clampPercent(status.contextPercent))}%`
 
 // A window the engine has no reading for is left out, never drawn as 0%.
 export const limitsText = (status: StatusBand): string =>

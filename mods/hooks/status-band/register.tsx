@@ -8,17 +8,31 @@ import { contextText, headline, levelOf, limitsText } from './format'
 // The elapsed time and the reset countdowns read in minutes.
 const TICK_MS = 60_000
 const GIT_TIMEOUT_MS = 2000
+// The surfaces the engine raises the band above the prompt on.
+const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
 const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
-// The band is a convenience: a figure the engine cannot give is left out, and
-// nothing here may fail a hook.
-const refresh = async ($: EngineInterface, effort: StatusBand['effort']): Promise<void> => {
+// What one load of the module keeps between hooks.
+type Live = {
+  effort: StatusBand['effort']
+  tick?: { cancel: () => void }
+  asked: number
+  drawn: number
+}
+
+// The band is a convenience: a figure the engine cannot give is left out or
+// kept as last read, and nothing here may fail a hook.
+const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
+  live.asked += 1
+  const order = live.asked
+
   try {
-    const [model, cwd, usage, now, git] = await Promise.all([
+    const [model, cwd, usage, turns, now, git] = await Promise.all([
       $.session.model().catch(() => ''),
       $.session.cwd().catch(() => ''),
       $.session.usage().catch(() => null),
+      $.session.turns().catch(() => null),
       $.clock.now(),
       $.process
         .run(['git', 'branch', '--show-current'], { timeoutMs: GIT_TIMEOUT_MS })
@@ -26,66 +40,89 @@ const refresh = async ($: EngineInterface, effort: StatusBand['effort']): Promis
     ])
     const branch = git?.exitCode === 0 ? git.stdout.trim() : ''
 
-    await update($, statusBand, () => ({
-      model,
-      effort,
-      cwd,
-      branch: branch === '' ? undefined : branch,
-      startedAt: usage?.startedAt ?? now,
-      now,
-      contextPercent: usage?.context.percent,
-      rateLimits: usage?.rateLimits ?? [],
-    }))
+    await update($, statusBand, current => {
+      // A read that started earlier and ended later must not undo a newer one.
+      if (order < live.drawn) return current
+
+      live.drawn = order
+      const name = model === '' ? (current?.model ?? '') : model
+
+      if (current !== null && current.model !== name) {
+        // The effort was the last model's; the next step reports this one's.
+        live.effort = undefined
+      } else if (live.effort === undefined) {
+        // A reload starts the module over; the session's value is still good.
+        live.effort = current?.effort
+      }
+
+      return {
+        model: name,
+        effort: live.effort,
+        cwd,
+        branch: branch === '' ? undefined : branch,
+        startedAt: usage?.startedAt ?? current?.startedAt,
+        now,
+        // Before the first prompt nothing is in the window: that 0 is a reading.
+        contextPercent:
+          usage === null
+            ? current?.contextPercent
+            : (usage.context.percent ?? (turns === 0 ? 0 : undefined)),
+        rateLimits: usage?.rateLimits ?? current?.rateLimits ?? [],
+      }
+    })
   } catch {
     // Keeps what was last drawn.
+  }
+}
+
+// Reads the figures and keeps the minute tick, where a surface draws the band.
+const watch = async ($: EngineInterface, live: Live): Promise<void> => {
+  try {
+    const surfaces = await $.session.surfaces()
+
+    if (!surfaces.some(surface => BAND_SURFACES.includes(surface))) return
+
+    live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
+    await refresh($, live)
+  } catch {
+    // Nothing to draw on.
   }
 }
 
 export const register: Register = (on, options) => {
   if (options.statusBandEnabled === false) return
 
-  let effort: StatusBand['effort']
-  let tick: { cancel: () => void } | undefined
+  const live: Live = { effort: undefined, asked: 0, drawn: 0 }
 
+  // Neither hook waits for the read: a slow git must not hold the session.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.isInteractive) {
-      await refresh($, effort)
-      tick?.cancel()
-      tick = $.clock.every(TICK_MS, () => void refresh($, effort))
-    }
+    void watch($, live)
 
     return result
   })
 
-  on('session.end', ($, e, next) => {
-    // A `/clear` ends the session without starting another, so the tick stays.
-    if (e.reason !== 'clear') {
-      tick?.cancel()
-      tick = undefined
-    }
+  // Raised after each main-thread turn too, which may have switched the branch;
+  // a surface that attached after the start gets its tick here.
+  on('session.measure', ($, e, next) => {
+    void watch($, live)
 
     return next(e)
   })
 
   // The request is passed on untouched: only its effort is read.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined && e.effort !== effort) {
-      effort = e.effort
+    if (e.agentId === undefined && e.effort !== live.effort) {
+      const effort = e.effort
+
+      live.effort = effort
       await update($, statusBand, current =>
         current === null ? null : { ...current, effort },
       ).catch(() => undefined)
     }
 
     return yield* next(e)
-  })
-
-  // Raised after each main-thread turn too, which may have switched the branch.
-  on('session.measure', async ($, e, next) => {
-    await refresh($, effort)
-
-    return next(e)
   })
 }
 
@@ -94,23 +131,22 @@ type BandElements = Pick<Elements['terminal'], 'Box' | 'Text'>
 // This mod's rows of the band above the prompt. `hooks/band.tsx` draws them:
 // the engine takes one band hook per plugin, and `$` stays in that hook's file.
 export const statusRows = ({ Box, Text }: BandElements, status: StatusBand): RenderElement => {
+  const context = contextText(status)
   const limits = limitsText(status)
 
   return (
     <Box flexDirection="column">
-      <Text wrap="truncate-end">
-        {headline(status)}
-      </Text>
-      <Box>
-        <Text color={levelOf(status.contextPercent)}>
-          {contextText(status)}
-        </Text>
-        {limits === '' ? null : (
-          <Text dimColor wrap="truncate-end">
-            {` │ ${limits}`}
-          </Text>
-        )}
-      </Box>
+      <Text wrap="truncate-end">{headline(status)}</Text>
+      {context === '' && limits === '' ? null : (
+        <Box>
+          {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
+          {limits === '' ? null : (
+            <Text dimColor wrap="truncate-end">
+              {context === '' ? limits : ` │ ${limits}`}
+            </Text>
+          )}
+        </Box>
+      )}
     </Box>
   )
 }

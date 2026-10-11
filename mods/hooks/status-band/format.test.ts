@@ -43,6 +43,12 @@ describe('headline', () => {
     expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main) │ ⏱️  <1m')
   })
 
+  test('leaves the elapsed time out when the session start is unknown', () => {
+    expect(headline({ ...STATUS, startedAt: undefined })).toBe(
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)',
+    )
+  })
+
   test('shows an effort it has no glyph for as given', () => {
     expect(headline({ ...STATUS, effort: 4096 })).toContain('[Opus 5.5 4096]')
   })
@@ -70,8 +76,8 @@ describe('context', () => {
     expect(contextText({ ...STATUS, contextPercent: 100 })).toBe('Context ██████████ 100%')
   })
 
-  test('draws an empty bar before the first response', () => {
-    expect(contextText({ ...STATUS, contextPercent: undefined })).toBe('Context ░░░░░░░░░░ 0%')
+  test('is left out with no reading', () => {
+    expect(contextText({ ...STATUS, contextPercent: undefined })).toBe('')
   })
 
   test('keeps the bar inside its ten cells', () => {

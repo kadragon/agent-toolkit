@@ -11,12 +11,25 @@ const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
 // The engine takes one hook per plugin on the band above the prompt, so the
 // mods that draw there are stacked here, each handing over its rows.
-export const register: Register = on => {
+// The status rows are two; next-steps draws a heading, its buttons and Dismiss.
+const STATUS_ROWS = 2
+const NEXT_STEPS_CHROME_ROWS = 2
+
+export const register: Register = (on, options) => {
+  // `$.state` outlives a reload, so a mod switched off mid-session still has its
+  // last value there: the option decides, not the value.
+  const hasStatus = options.statusBandEnabled !== false
+  const hasNextSteps = options.nextStepsEnabled !== false
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const status = await read($, statusBand)
-    const steps = e.props.isWorking ? null : await read($, nextSteps)
+    const steps = hasNextSteps && !e.props.isWorking ? await read($, nextSteps) : null
+    const stepRows = steps === null ? 0 : steps.suggestions.length + NEXT_STEPS_CHROME_ROWS
+    // A digit reaches only a button inside the band's window, so the status
+    // rows give way where both would not fit.
+    const status =
+      hasStatus && stepRows + STATUS_ROWS <= e.props.maxRows ? await read($, statusBand) : null
 
     if (status === null && steps === null) return next(e)
 

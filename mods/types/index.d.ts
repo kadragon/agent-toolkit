@@ -5,7 +5,7 @@ export type StatusBand = {
   effort?: string | number
   cwd: string
   branch?: string
-  startedAt: number
+  startedAt?: number
   now: number
   contextPercent?: number
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]

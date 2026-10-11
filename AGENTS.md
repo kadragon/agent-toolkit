@@ -49,7 +49,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 - `plugin.json` is the release contract — bump it last, after all skill changes, before PR
 - Skills are in `{plugin}/skills/{name}/SKILL.md` — `description:` field drives auto-invocation
 - Agent roles in `.claude/agents/*.md` — used both as subagent and Agent Teams teammate
-- Mods (function hooks) live only in `mods/hooks/{name}/`; run `claude plugin validate ./mods && claude plugin test ./mods` locally — CI does not
+- Mods (function hooks) live only in `mods/hooks/{name}/`, plus `mods/hooks/band.tsx`, the one hook that draws every mod's rows above the prompt; run `claude plugin validate ./mods && claude plugin test ./mods` locally — CI does not
 - Tests: Python scripts in `{plugin}/skills/{name}/scripts/` — run with `python {script} --test` if `--test` flag exists
 - Validate harness: run `validate-harness.sh` from the installed `dev/harness-init` skill. Resolve the newest cached copy:
   ```sh
