@@ -13,10 +13,10 @@ LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only)
-SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment|\.github/workflows|(^|/)(dev|prod)/hooks|(^|/)\.claude/hooks/|(^|/)\.githooks/' | head -1 || true)
+SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|network|\.env$|/env[./]|/env$|environment|\.github/workflows|(^|/)(dev|prod|mods)/hooks|(^|/)\.claude/hooks/|(^|/)\.githooks/' | head -1 || true)
 BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | cut -f1,2 | grep -m1 -e '-' || true)
 MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
-SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod)/.*\.(sh|py|ps1|cjs)$' | head -1 || true)
+SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod|mods)/.*\.(sh|py|ps1|cjs|ts|tsx)$' | head -1 || true)
 ```
 
 | Capture non-empty | Floor |
