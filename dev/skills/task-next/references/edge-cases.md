@@ -53,7 +53,9 @@ never-auto-default rule, and it outranks the Plan gate's unattended clause. On a
 preserve work and ask which action the user wants; do not infer authorization to discard it.
 
 **Deferred backlog item (≥2 candidates)** — surface the blocker and confirm it is resolved; if
-not, skip to the next candidate. All deferred → report and stop.
+not, skip to the next candidate. All deferred → stop with the blocker report in `SKILL.md`
+Step 2, adding each candidate just inspected with the same label: an item deferred in prose
+carries no marker, so `--parked` does not list it.
 
 **Deferred item in a group** — warn and continue with the group's non-deferred items; all
 deferred → skip the group.

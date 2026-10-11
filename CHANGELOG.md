@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] task-next all-blocked stop lists each parked item and who can clear it (dev v4.10.23) (2026-10-11)
+- [done] Drop the unloaded per-hook `dev/hooks/*/hooks.json` copies (dev v4.10.23) (2026-10-11)
 - [done] Remove the next-steps mod and its `Next steps` / `Next steps model` settings (mods v0.2.3) (2026-10-11)
 - [done] commit-guard follows a proven branch creation across a newline or ; (dev v4.10.22) (2026-10-11)
 - [done] status-band reads a Windows home through one separator (mods v0.2.2) (2026-10-11)

@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.4.0
+version: 2.5.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -59,6 +59,7 @@ CANDIDATES="$SKILL_DIR/scripts/backlog_candidates.py"
 [[ -r "$CANDIDATES" ]] || { echo "Bundled script missing or unreadable: $CANDIDATES" >&2; exit 1; }
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md              # fast path, cap 3
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md --full-scan  # full list, type priority
+python3 "$CANDIDATES" --backlog backlog.md --parked                      # blocked/deferred items, Step 2 stop
 ```
 
 The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
@@ -82,7 +83,25 @@ Print every group as `[N] <source>: <title> (<M> items)` and wait for a number (
 `[1]`). Zero groups → read stderr first; report "backlog and tasks are clear" only when nothing
 was hidden. A group of >8 open items → confirm all-or-subset with the user (unattended: abort and
 report). A group whose every open item is deferred/blocked is not a candidate — surface the
-blocker; all groups blocked → report and stop.
+blocker.
+
+**All groups blocked → report the blockers, then stop.** Run `--parked` and end the report with
+every item it lists: the item, its marker, and one label. The user should not have to ask what
+the blockers are or which ones this session could clear.
+
+- **agent can clear** — the blocker is work this session can do, such as a check to run or a
+  change no queue item covers. Say what the work is.
+- **needs you** — a decision, a credential or access, an external event, or a date. Say what.
+
+Label by the root blocker. An item `blocked by` another queue item inherits that item's label,
+followed down the chain: in an all-blocked stop the named item is itself parked, so it is never
+clearable just because it is on the queue. Read each marker's payload and check it against the
+repo before labelling; an unverified guess is labelled `unknown`.
+
+A marker whose blocker has verifiably landed is not a blocker. Delete it per
+`references/cycle.md` → *Blocked-marker sync*, re-run Step 1, and report the stop only if the
+queue is still all blocked; name the markers removed. Clearing any other blocker is new work:
+offer it, do not start it unasked.
 
 ## Step 3 — Run the cycle
 
