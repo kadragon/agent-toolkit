@@ -2,12 +2,16 @@ import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { StatusBand } from '../../types'
-import { contextText, headline, levelOf, limitsText } from './format'
+import { enabledPlugins, hookCommands, hooksFileCommands, installPaths, manifestHooks } from './count'
+import { contextText, headlineSegments, levelOf, limitsSegments } from './format'
+import type { Segment } from './format'
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
 // The elapsed time and the reset countdowns read in minutes.
 const TICK_MS = 60_000
 const GIT_TIMEOUT_MS = 2000
+const MINUTE_MS = 60_000
+const DEFAULT_CACHE_TTL_MINUTES = 60
 // The surfaces the engine raises the band above the prompt on.
 const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
@@ -21,6 +25,78 @@ type Live = {
   tick?: { cancel: () => void }
   asked: number
   drawn: number
+  // Null once a `/clear` emptied the window: nothing of it is cached.
+  cacheExpiresAt?: number | null
+  // The counts of what the session is set up with; they hold for the session.
+  setup: Setup
+}
+
+type Setup = Pick<StatusBand, 'hooks' | 'skills'>
+
+// The handlers a plugin's default hooks file, its manifest and the files the
+// manifest names add; a file that is not there adds none.
+const pluginHooks = async ($: EngineInterface, root: string): Promise<number> => {
+  const { files, inline } = await $.fs
+    .read(`${root}/.claude-plugin/plugin.json`)
+    .then(manifestHooks)
+    .catch(() => manifestHooks('{}'))
+  const counts = await Promise.all(
+    files.map(file =>
+      $.fs
+        .read(`${root}/${file}`)
+        .then(hooksFileCommands)
+        .catch(() => 0),
+    ),
+  )
+
+  return counts.reduce((total, count) => total + count, inline)
+}
+
+// The command hooks in force: the settings' own and every enabled plugin's.
+// The engine lists none, so they are counted off the files that declare them.
+const countHooks = async ($: EngineInterface): Promise<number> => {
+  const settings = await $.settings.read()
+  const own = hookCommands(settings.hooks)
+  const enabled = enabledPlugins(settings)
+
+  if (enabled.length === 0) return own
+
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+
+  if (configDir === undefined && home === undefined) throw new Error('no home directory')
+
+  const paths = installPaths(
+    await $.fs.read(`${configDir ?? `${home}/.claude`}/plugins/installed_plugins.json`),
+  )
+  const counts = await Promise.all(
+    enabled.map(id => (paths[id] === undefined ? 0 : pluginHooks($, paths[id]))),
+  )
+
+  return counts.reduce((total, count) => total + count, own)
+}
+
+// The skill listing as /context counts it, estimated locally: no request is sent.
+const readSkills = async ($: EngineInterface): Promise<StatusBand['skills']> => {
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+
+  if (context.breakdown === undefined) return undefined
+
+  const skills = context.breakdown.skills
+
+  return { count: skills?.totalSkills ?? 0, tokens: skills?.tokens ?? 0 }
+}
+
+// Reads a count once and keeps it; one the engine could not give is asked again.
+const readSetup = async ($: EngineInterface, live: Live): Promise<Setup> => {
+  const [hooks, skills] = await Promise.all([
+    live.setup.hooks ?? countHooks($).catch(() => undefined),
+    live.setup.skills ?? readSkills($).catch(() => undefined),
+  ])
+
+  live.setup = { hooks, skills }
+
+  return live.setup
 }
 
 // The band is a convenience: a figure the engine cannot give is left out or
@@ -30,7 +106,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
   const order = live.asked
 
   try {
-    const [model, cwd, usage, turns, now, git] = await Promise.all([
+    const [model, cwd, usage, turns, now, git, setup] = await Promise.all([
       $.session.model().catch(() => ''),
       $.session.cwd().catch(() => ''),
       $.session.usage().catch(() => null),
@@ -39,6 +115,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
       $.process
         .run(['git', 'branch', '--show-current'], { timeoutMs: GIT_TIMEOUT_MS })
         .catch(() => null),
+      readSetup($, live),
     ])
     // Git answering with no name (no repository, a detached HEAD) is a reading.
     const branch = git === null ? null : git.exitCode === 0 ? git.stdout.trim() : ''
@@ -73,6 +150,12 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
             ? current?.contextPercent
             : (usage.context.percent ?? (turns === 0 ? 0 : undefined)),
         rateLimits: usage?.rateLimits ?? current?.rateLimits ?? [],
+        cacheExpiresAt:
+          live.cacheExpiresAt === null
+            ? undefined
+            : (live.cacheExpiresAt ?? current?.cacheExpiresAt),
+        hooks: setup.hooks ?? current?.hooks,
+        skills: setup.skills ?? current?.skills,
       }
     })
   } catch {
@@ -102,7 +185,10 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
 export const register: Register = (on, options) => {
   if (options.statusBandEnabled === false) return
 
-  const live: Live = { effort: undefined, isEffortFresh: false, asked: 0, drawn: 0 }
+  const ttl = options.statusBandCacheTtlMinutes
+  const cacheTtlMs =
+    (typeof ttl === 'number' && ttl > 0 ? ttl : DEFAULT_CACHE_TTL_MINUTES) * MINUTE_MS
+  const live: Live = { effort: undefined, isEffortFresh: false, asked: 0, drawn: 0, setup: {} }
 
   // Neither hook waits for the read: a slow git must not hold the session.
   on('session.start', async ($, e, next) => {
@@ -143,12 +229,16 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.reason === 'clear') void watch($, live)
+    if (e.reason === 'clear') {
+      live.cacheExpiresAt = null
+      void watch($, live)
+    }
 
     return result
   })
 
-  // The request is passed on untouched: only its effort is read.
+  // The request is passed on untouched: only its effort is read, and a
+  // response of the main loop renews the prompt cache from that moment.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) live.isEffortFresh = true
 
@@ -161,27 +251,56 @@ export const register: Register = (on, options) => {
       ).catch(() => undefined)
     }
 
-    return yield* next(e)
+    const result = yield* next(e)
+
+    if (e.agentId === undefined && result.usage !== null) {
+      try {
+        const cacheExpiresAt = (await $.clock.now()) + cacheTtlMs
+
+        live.cacheExpiresAt = cacheExpiresAt
+        await update($, statusBand, current =>
+          current === null ? null : { ...current, cacheExpiresAt },
+        )
+      } catch {
+        // Keeps the last countdown.
+      }
+    }
+
+    return result
   })
 }
 
 type BandElements = Pick<Elements['terminal'], 'Box' | 'Text'>
 
+const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
+  segments.map((segment, index) => (
+    <Text
+      key={`run-${index}`}
+      color={segment.color}
+      bold={segment.isBold}
+      dimColor={segment.isDim}
+    >
+      {segment.text}
+    </Text>
+  ))
+
 // This mod's rows of the band above the prompt. `hooks/band.tsx` draws them:
 // the engine takes one band hook per plugin, and `$` stays in that hook's file.
-export const statusRows = ({ Box, Text }: BandElements, status: StatusBand): RenderElement => {
+export const statusRows = (elements: BandElements, status: StatusBand): RenderElement => {
+  const { Box, Text } = elements
   const context = contextText(status)
-  const limits = limitsText(status)
+  const limits = limitsSegments(status)
 
   return (
     <Box flexDirection="column">
-      <Text wrap="truncate-end">{headline(status)}</Text>
-      {context === '' && limits === '' ? null : (
+      <Text wrap="truncate-end">{runs(elements, headlineSegments(status))}</Text>
+      {context === '' && limits.length === 0 ? null : (
         <Box>
           {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
-          {limits === '' ? null : (
-            <Text dimColor wrap="truncate-end">
-              {context === '' ? limits : ` │ ${limits}`}
+          {limits.length === 0 ? null : (
+            <Text wrap="truncate-end">
+              {context === '' ? null : <Text dimColor> │ </Text>}
+              {runs(elements, limits)}
             </Text>
           )}
         </Box>

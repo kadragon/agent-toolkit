@@ -9,6 +9,10 @@ export type StatusBand = {
   now: number
   contextPercent?: number
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]
+  // When the prompt cache lapses unless a response renews it first.
+  cacheExpiresAt?: number
+  hooks?: number
+  skills?: { count: number; tokens: number }
 }
 
 declare module 'claude-code' {

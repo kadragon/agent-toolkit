@@ -22,6 +22,9 @@ const WINDOWS: readonly (readonly [kind: string, label: string])[] = [
 
 export type Level = 'success' | 'warning' | 'error'
 
+// One run of a row drawn in its own color; `color` is a theme key.
+export type Segment = { text: string; color?: string; isBold?: boolean; isDim?: boolean }
+
 // `claude-opus-5-5` reads as `Opus 5.5`; a name of any other shape is kept.
 export const modelLabel = (model: string): string => {
   const match = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[[^\]]+\])?$/.exec(model.trim())
@@ -76,17 +79,65 @@ const modelSegment = (status: StatusBand): string => {
 
 const basename = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
 
-export const headline = (status: StatusBand): string => {
-  const dir = basename(status.cwd)
-  const git = status.branch === undefined ? '' : `git:(${status.branch})`
-  const place = [dir, git].filter(part => part !== '').join(' ')
-  const elapsed =
-    status.startedAt === undefined ? '' : `⏱️  ${duration(status.now - status.startedAt)}`
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`
 
-  return [status.model === '' ? '' : modelSegment(status), place, elapsed]
-    .filter(segment => segment !== '')
-    .join(SEPARATOR)
+// `4200` reads as `4.2k`; under a thousand the count is kept.
+export const tokens = (count: number): string =>
+  count < 1000 ? String(Math.round(count)) : `${(count / 1000).toFixed(1)}k`
+
+// What is left of the prompt cache, counted from the last response.
+export const cacheText = (status: StatusBand): string => {
+  if (status.cacheExpiresAt === undefined) return ''
+
+  const left = status.cacheExpiresAt - status.now
+
+  return left <= 0 ? 'cache expired' : `cache ${duration(left)}`
 }
+
+const joined = (groups: Segment[][], separator: string): Segment[] =>
+  groups
+    .filter(group => group.length > 0)
+    .flatMap((group, index) =>
+      index === 0 ? group : [{ text: separator, isDim: true }, ...group],
+    )
+
+// A figure the engine has no reading for is left out, with its separator.
+export const headlineSegments = (status: StatusBand): Segment[] => {
+  const dir = basename(status.cwd)
+  const cache = cacheText(status)
+  const place: Segment[] = dir === '' ? [] : [{ text: dir, color: 'suggestion', isBold: true }]
+
+  if (status.branch !== undefined) {
+    place.push({ text: `${dir === '' ? '' : ' '}git:(${status.branch})`, color: 'autoAccept' })
+  }
+
+  return joined(
+    [
+      status.model === '' ? [] : [{ text: modelSegment(status), color: 'claude', isBold: true }],
+      place,
+      status.startedAt === undefined
+        ? []
+        : [{ text: `⏱️  ${duration(status.now - status.startedAt)}` }],
+      cache === ''
+        ? []
+        : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
+      status.hooks === undefined
+        ? []
+        : [{ text: plural(status.hooks, 'hook'), color: 'permission' }],
+      status.skills === undefined
+        ? []
+        : [
+            { text: plural(status.skills.count, 'skill'), color: 'remember' },
+            { text: ` (${tokens(status.skills.tokens)})`, isDim: true },
+          ],
+    ],
+    SEPARATOR,
+  )
+}
+
+const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
+
+export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
 
 // A fill the engine has no reading for is left out, never drawn as 0%.
 export const contextText = (status: StatusBand): string =>
@@ -95,15 +146,25 @@ export const contextText = (status: StatusBand): string =>
     : `Context ${bar(status.contextPercent)} ${Math.round(clampPercent(status.contextPercent))}%`
 
 // A window the engine has no reading for is left out, never drawn as 0%.
-export const limitsText = (status: StatusBand): string =>
-  WINDOWS.flatMap(([kind, label]) => {
-    const limit = status.rateLimits.find(candidate => candidate.kind === kind)
+export const limitsSegments = (status: StatusBand): Segment[] =>
+  joined(
+    WINDOWS.map(([kind, label]): Segment[] => {
+      const limit = status.rateLimits.find(candidate => candidate.kind === kind)
 
-    if (limit === undefined) return []
+      if (limit === undefined) return []
 
-    const resetsAt = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
-    const left = resetsAt - status.now
-    const reset = Number.isNaN(left) || left <= 0 ? '' : ` (${duration(left)})`
+      const resetsAt = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
+      const left = resetsAt - status.now
+      const used: Segment[] = [
+        { text: `${label}: `, isDim: true },
+        { text: `${Math.round(limit.percentUsed)}%`, color: levelOf(limit.percentUsed) },
+      ]
 
-    return [`${label}: ${Math.round(limit.percentUsed)}%${reset}`]
-  }).join(' | ')
+      return Number.isNaN(left) || left <= 0
+        ? used
+        : [...used, { text: ` (${duration(left)})`, isDim: true }]
+    }),
+    ' | ',
+  )
+
+export const limitsText = (status: StatusBand): string => textOf(limitsSegments(status))

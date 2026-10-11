@@ -44,6 +44,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [FEAT] Gate shell-based memory writes in `memory-guard` — the hook matches `Write|Edit` only, so `printf ... > ~/.claude/projects/<slug>/memory/note.md` writes ungated; `commit-guard`'s PreToolUse(Bash) static command analysis is the precedent to follow *(deferred: no shell-path memory write has been observed; the other four PR #254 follow-ups shipped without it in PR for 4.9.6 — revisit against a recorded case)*
 
+### PR #111 — commit-guard follow-up
+
+- [ ] [FIX] commit-guard newline/`;`-separator false-block — `_split_segments` in `dev/hooks/commit-guard/guard.py` normalizes unquoted newlines to `;`, but in-chain branch-creation state (`git checkout -b X`) carries only across `&&` (`main`: "Branch attribution may only carry across '&&'"). So a common multi-line script — `git checkout -b X` on one line, `git commit` on a later line — drops the branch switch, falls back to the live branch (`main`), and false-blocks a legitimate commit. Hit during the PR #111 follow-up (worked around by splitting into separate Bash calls). Consider carrying a successful-looking `checkout -b`/`switch -c` across `;`/newline too, or blocking only when no branch switch appears in any prior segment regardless of operator. Preserve the fail-toward-block contract for genuinely ambiguous chains *(recovered 2026-10-11 from the deleted local branch `plan/security-hit-pattern`, written 2026-07-04; the `&&`-only rule is still in the code, the false-block itself was not re-run)*
+
 ## mods — next-steps follow-ups
 
 - [ ] [CONSTRAINT] Run `claude plugin validate ./mods` and `claude plugin test ./mods` in `harness-check.yml` — today both are a local gate only (`docs/runbook.md` → Validate); `check_test_suites_wired.py` lists only `*.py` suites, so it reports all suites wired while the mods `*.test.ts(x)` files run in no job — extend it in the same change; first settle how CI installs a pinned `claude` CLI and whether `plugin test` runs unauthenticated *(deferred: user chose local evidence for V1 on 2026-10-11)*
