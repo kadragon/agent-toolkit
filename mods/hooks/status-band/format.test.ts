@@ -66,6 +66,12 @@ describe('headline', () => {
     )
   })
 
+  test('cuts a long branch name so the figures after it stay on the row', () => {
+    expect(headline({ ...STATUS, branch: 'feat/status-band-colors-cache-countdown' })).toBe(
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…) │ ⏱️  <1m',
+    )
+  })
+
   test('shows an effort it has no glyph for as given', () => {
     expect(headline({ ...STATUS, effort: 4096 })).toContain('[Opus 5.5 4096]')
   })

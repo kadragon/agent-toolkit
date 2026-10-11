@@ -35,7 +35,22 @@ describe('installPaths', () => {
       plugins: { 'a@m': [{ installPath: '/p/a' }, { installPath: '/p/old' }], 'b@m': [] },
     })
 
-    expect(installPaths(text)).toEqual({ 'a@m': '/p/a' })
+    expect(installPaths(text, '/work/repo')).toEqual({ 'a@m': '/p/a' })
+  })
+
+  test("prefers this project's install, then the user's own", () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { scope: 'project', projectPath: '/work/other', installPath: '/p/other' },
+          { scope: 'user', installPath: '/p/user' },
+          { scope: 'project', projectPath: '/work/repo', installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    expect(installPaths(text, '/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
+    expect(installPaths(text, '/work/repository')).toEqual({ 'a@m': '/p/user' })
   })
 })
 

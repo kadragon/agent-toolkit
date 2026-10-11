@@ -25,6 +25,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #315 — status band colors, cache countdown, hook and skill counts (2026-10-11)
+
+- [ ] [debt] status-band builds the installed-plugins path as `${home}/.claude` with a forward slash, unchecked against a Windows `USERPROFILE`; a failed read only leaves the hook count out (source: agy) — mods/hooks/status-band/register.tsx (introduced here)
+
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [debt] status-band keeps the pre-compaction context fill for up to a minute after a manual `/compact`: `session.compact` is a gating hook, so the mod stays out of it and waits for the tick or the next measure (source: code-review) — mods/hooks/status-band/register.tsx

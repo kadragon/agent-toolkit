@@ -3,6 +3,8 @@
 import type { StatusBand } from '../../types'
 
 const BAR_CELLS = 10
+// A longer branch name is cut, so it does not push the figures after it off the row.
+const BRANCH_CELLS = 24
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
@@ -108,7 +110,12 @@ export const headlineSegments = (status: StatusBand): Segment[] => {
   const place: Segment[] = dir === '' ? [] : [{ text: dir, color: 'suggestion', isBold: true }]
 
   if (status.branch !== undefined) {
-    place.push({ text: `${dir === '' ? '' : ' '}git:(${status.branch})`, color: 'autoAccept' })
+    const branch =
+      status.branch.length > BRANCH_CELLS
+        ? `${status.branch.slice(0, BRANCH_CELLS - 1)}…`
+        : status.branch
+
+    place.push({ text: `${dir === '' ? '' : ' '}git:(${branch})`, color: 'autoAccept' })
   }
 
   return joined(

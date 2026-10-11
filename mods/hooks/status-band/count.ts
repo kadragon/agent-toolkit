@@ -33,18 +33,29 @@ export const enabledPlugins = (settings: Record<string, unknown>): string[] =>
     ? Object.entries(settings.enabledPlugins).flatMap(([id, isOn]) => (isOn === true ? [id] : []))
     : []
 
-// Where the installed-plugins file says each plugin's directory is.
-export const installPaths = (text: string): Record<string, string> => {
+const covers = (projectPath: unknown, cwd: string): boolean =>
+  typeof projectPath === 'string' &&
+  (cwd === projectPath || cwd.startsWith(`${projectPath.replace(/[\\/]+$/, '')}/`))
+
+// Where the installed-plugins file says each plugin's directory is. A plugin
+// installed more than once is read from the install made for this project,
+// else the user's own, else the first listed.
+export const installPaths = (text: string, cwd: string): Record<string, string> => {
   const file: unknown = JSON.parse(text)
   const plugins = isRecord(file) && isRecord(file.plugins) ? file.plugins : {}
 
   return Object.fromEntries(
-    Object.entries(plugins).flatMap(([id, installs]) => {
-      const first: unknown = Array.isArray(installs) ? installs[0] : undefined
+    Object.entries(plugins).flatMap(([id, listed]) => {
+      const installs = (Array.isArray(listed) ? listed : []).filter(
+        (install): install is Record<string, unknown> & { installPath: string } =>
+          isRecord(install) && typeof install.installPath === 'string',
+      )
+      const install =
+        installs.find(candidate => covers(candidate.projectPath, cwd)) ??
+        installs.find(candidate => candidate.projectPath === undefined) ??
+        installs[0]
 
-      return isRecord(first) && typeof first.installPath === 'string'
-        ? [[id, first.installPath]]
-        : []
+      return install === undefined ? [] : [[id, install.installPath]]
     }),
   )
 }
@@ -52,7 +63,7 @@ export const installPaths = (text: string): Record<string, string> => {
 const relative = (path: string): string => path.replace(/^\.\//, '')
 
 // What a plugin's manifest adds to its default hooks file: the files it names,
-// and the hooks it carries inline.
+// and the hooks it carries inline. The engine loads both together.
 export const manifestHooks = (text: string): { files: string[]; inline: number } => {
   const manifest: unknown = JSON.parse(text)
   const named = isRecord(manifest) ? manifest.hooks : undefined

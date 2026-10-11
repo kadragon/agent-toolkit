@@ -11,8 +11,9 @@ const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
 // The engine takes one hook per plugin on the band above the prompt, so the
 // mods that draw there are stacked here, each handing over its rows.
-// The status rows are two; next-steps draws a heading, its buttons and Dismiss.
-const STATUS_ROWS = 2
+// The status rows are two under a blank one; next-steps draws a heading, its
+// buttons and Dismiss.
+const STATUS_ROWS = 3
 const NEXT_STEPS_CHROME_ROWS = 2
 // The brackets, the hotkey and the spaces the terminal draws around a label.
 const BUTTON_CHROME_CELLS = 7

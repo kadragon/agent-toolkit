@@ -29,6 +29,7 @@ type Live = {
   cacheExpiresAt?: number | null
   // The counts of what the session is set up with; they hold for the session.
   setup: Setup
+  setupRead?: Promise<void>
 }
 
 type Setup = Pick<StatusBand, 'hooks' | 'skills'>
@@ -68,6 +69,7 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
 
   const paths = installPaths(
     await $.fs.read(`${configDir ?? `${home}/.claude`}/plugins/installed_plugins.json`),
+    await $.session.cwd(),
   )
   const counts = await Promise.all(
     enabled.map(id => (paths[id] === undefined ? 0 : pluginHooks($, paths[id]))),
@@ -80,24 +82,45 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
 const readSkills = async ($: EngineInterface): Promise<StatusBand['skills']> => {
   const { context } = await $.session.usage({ breakdown: 'summary' })
 
-  if (context.breakdown === undefined) return undefined
+  const skills = context.breakdown?.skills
 
-  const skills = context.breakdown.skills
-
-  return { count: skills?.totalSkills ?? 0, tokens: skills?.tokens ?? 0 }
+  return skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens }
 }
 
-// Reads a count once and keeps it; one the engine could not give is asked again.
-const readSetup = async ($: EngineInterface, live: Live): Promise<Setup> => {
-  const [hooks, skills] = await Promise.all([
-    live.setup.hooks ?? countHooks($).catch(() => undefined),
-    live.setup.skills ?? readSkills($).catch(() => undefined),
-  ])
+// Reads the counts apart from the other figures, which must not wait for the
+// files: one read at a time, a count once read kept, one the engine could not
+// give asked again the next time.
+const loadSetup = ($: EngineInterface, live: Live): void => {
+  if (live.setupRead !== undefined) return
+  if (live.setup.hooks !== undefined && live.setup.skills !== undefined) return
 
-  live.setup = { hooks, skills }
+  live.setupRead = (async () => {
+    const [hooks, skills] = await Promise.all([
+      live.setup.hooks ?? countHooks($).catch(() => undefined),
+      live.setup.skills ?? readSkills($).catch(() => undefined),
+    ])
+    const setup = { hooks: live.setup.hooks ?? hooks, skills: live.setup.skills ?? skills }
 
-  return live.setup
+    live.setup = setup
+    await update($, statusBand, current =>
+      current === null
+        ? null
+        : {
+            ...current,
+            hooks: setup.hooks ?? current.hooks,
+            skills: setup.skills ?? current.skills,
+          },
+    )
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      live.setupRead = undefined
+    })
 }
+
+// Only a response that read or wrote the prompt cache renews it.
+const isCached = (usage: { cache_read_input_tokens: number; cache_creation_input_tokens: number } | null): boolean =>
+  usage !== null && usage.cache_read_input_tokens + usage.cache_creation_input_tokens > 0
 
 // The band is a convenience: a figure the engine cannot give is left out or
 // kept as last read, and nothing here may fail a hook.
@@ -106,7 +129,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
   const order = live.asked
 
   try {
-    const [model, cwd, usage, turns, now, git, setup] = await Promise.all([
+    const [model, cwd, usage, turns, now, git] = await Promise.all([
       $.session.model().catch(() => ''),
       $.session.cwd().catch(() => ''),
       $.session.usage().catch(() => null),
@@ -115,7 +138,6 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
       $.process
         .run(['git', 'branch', '--show-current'], { timeoutMs: GIT_TIMEOUT_MS })
         .catch(() => null),
-      readSetup($, live),
     ])
     // Git answering with no name (no repository, a detached HEAD) is a reading.
     const branch = git === null ? null : git.exitCode === 0 ? git.stdout.trim() : ''
@@ -131,7 +153,9 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         live.isEffortFresh = false
       } else if (current !== null && current.model !== name) {
         // The effort was the last model's; the next step reports this one's.
+        // So was the prompt cache: a switch forfeits it.
         live.effort = undefined
+        live.cacheExpiresAt = null
       } else if (live.effort === undefined) {
         // A reload starts the module over; the session's value is still good.
         live.effort = current?.effort
@@ -154,8 +178,8 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
           live.cacheExpiresAt === null
             ? undefined
             : (live.cacheExpiresAt ?? current?.cacheExpiresAt),
-        hooks: setup.hooks ?? current?.hooks,
-        skills: setup.skills ?? current?.skills,
+        hooks: live.setup.hooks ?? current?.hooks,
+        skills: live.setup.skills ?? current?.skills,
       }
     })
   } catch {
@@ -176,6 +200,7 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
     }
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
+    loadSetup($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -194,6 +219,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
 
+    live.setup = {}
     void watch($, live)
 
     return result
@@ -226,19 +252,20 @@ export const register: Register = (on, options) => {
   })
 
   // A `/clear` empties the window and starts the timer over; no measure follows it.
+  // Whatever ends the session, the conversation that follows has its own cache.
   on('session.end', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.reason === 'clear') {
-      live.cacheExpiresAt = null
-      void watch($, live)
-    }
+    live.cacheExpiresAt = null
+    live.setup = {}
+
+    if (e.reason === 'clear') void watch($, live)
 
     return result
   })
 
   // The request is passed on untouched: only its effort is read, and a
-  // response of the main loop renews the prompt cache from that moment.
+  // response of the main loop renews the prompt cache from when it was sent.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) live.isEffortFresh = true
 
@@ -251,19 +278,24 @@ export const register: Register = (on, options) => {
       ).catch(() => undefined)
     }
 
+    const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
     const result = yield* next(e)
 
-    if (e.agentId === undefined && result.usage !== null) {
-      try {
-        const cacheExpiresAt = (await $.clock.now()) + cacheTtlMs
+    // The step does not wait for the band: the countdown is written behind it.
+    if (sentAt !== undefined && isCached(result.usage)) {
+      void sentAt
+        .then(at => {
+          if (at === undefined) return undefined
 
-        live.cacheExpiresAt = cacheExpiresAt
-        await update($, statusBand, current =>
-          current === null ? null : { ...current, cacheExpiresAt },
-        )
-      } catch {
-        // Keeps the last countdown.
-      }
+          const cacheExpiresAt = at + cacheTtlMs
+
+          live.cacheExpiresAt = cacheExpiresAt
+
+          return update($, statusBand, current =>
+            current === null ? null : { ...current, cacheExpiresAt },
+          )
+        })
+        .catch(() => undefined)
     }
 
     return result
@@ -284,15 +316,16 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
     </Text>
   ))
 
-// This mod's rows of the band above the prompt. `hooks/band.tsx` draws them:
-// the engine takes one band hook per plugin, and `$` stays in that hook's file.
+// This mod's rows of the band above the prompt, under a blank row that keeps
+// them off the line above. `hooks/band.tsx` draws them: the engine takes one
+// band hook per plugin, and `$` stays in that hook's file.
 export const statusRows = (elements: BandElements, status: StatusBand): RenderElement => {
   const { Box, Text } = elements
   const context = contextText(status)
   const limits = limitsSegments(status)
 
   return (
-    <Box flexDirection="column">
+    <Box key="status-band" flexDirection="column" marginTop={1}>
       <Text wrap="truncate-end">{runs(elements, headlineSegments(status))}</Text>
       {context === '' && limits.length === 0 ? null : (
         <Box>

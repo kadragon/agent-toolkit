@@ -19,7 +19,7 @@ const BAND = {
 const USAGE = {
   input_tokens: 1,
   output_tokens: 1,
-  cache_read_input_tokens: 0,
+  cache_read_input_tokens: 10,
   cache_creation_input_tokens: 0,
 }
 
@@ -40,6 +40,10 @@ type World = {
   settings?: Record<string, unknown>
   files: Record<string, string>
   skills?: { totalSkills: number; tokens: number }
+  settingsReads: number
+  // How long the next responses take to come back.
+  stepMs: number
+  isUncached: boolean
 }
 
 // The engine beneath the plugin: what the session, the clock, git and the band
@@ -59,6 +63,9 @@ const world = (on: On): World => {
     ticks: [],
     gitCalls: 0,
     files: {},
+    settingsReads: 0,
+    stepMs: 0,
+    isUncached: false,
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -86,6 +93,8 @@ const world = (on: On): World => {
     } as never
   })
   on('settings.read', async () => {
+    state.settingsReads += 1
+
     if (state.settings === undefined) throw new Error('settings are down')
 
     return { value: state.settings }
@@ -118,7 +127,15 @@ const world = (on: On): World => {
     return { value: { exitCode: 0, stdout: `${branch}\n`, stderr: '' } }
   })
   on('turn.step', async function* ($, e) {
-    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], usage: USAGE }
+    state.now += state.stepMs
+
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: 'ok',
+      toolUses: [],
+      usage: state.isUncached ? { ...USAGE, cache_read_input_tokens: 0 } : USAGE,
+    }
   })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
@@ -164,6 +181,9 @@ const step = async ($: Engine, fields: Record<string, unknown> = {}) => {
   let read = await stream.next()
 
   while (read.done !== true) read = await stream.next()
+
+  // The countdown is written behind the step.
+  await settle()
 
   return read.value
 }
@@ -323,7 +343,7 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ cache 1h 0m')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
   await ui.unmount()
 })
 
@@ -703,4 +723,72 @@ test('a count that cannot be read is left out, fails nothing and is asked again'
 
   expect(after.texts[0]).toContain('│ 4 hooks')
   await after.ui.unmount()
+})
+
+test('the cache is counted from when the request was sent, not when the answer ended', async ($, on) => {
+  const state = world(on)
+  state.stepMs = 4 * MINUTE
+
+  await start($)
+  await step($)
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('⏱️  9m │ cache 56m')
+  await ui.unmount()
+})
+
+test('a response that neither read nor wrote the cache starts no countdown', async ($, on) => {
+  const state = world(on)
+  state.isUncached = true
+
+  await start($)
+  await step($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('a session that ends for another conversation takes its countdown with it', async ($, on) => {
+  world(on)
+
+  await start($)
+  await step($)
+  await $.session.end({ reason: 'resume' } as Parameters<Engine['session']['end']>[0])
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('the counts are read once, apart from the other figures, and again for a new session', async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+  state.skills = { totalSkills: 2, tokens: 300 }
+
+  await start($)
+  await measure($)
+  await measure($)
+
+  expect(state.settingsReads).toBe(1)
+
+  state.settings = {}
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(state.settingsReads).toBe(2)
+  expect(texts[0]).toContain('│ 0 hooks │ 2 skills (300)')
+  await ui.unmount()
+})
+
+test('a blank row keeps the band off the line above it', async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
 })
