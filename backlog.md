@@ -36,11 +36,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] status-band cannot tell that the engine ended its `clock.every` interval after a refused period, so the minute tick is not re-armed in that case (source: code-review) — mods/hooks/status-band/register.tsx
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx
 
-### PR #312 — mods plugin with next-steps suggestions (2026-10-11)
-
-- [ ] [debt] next-steps holds `turn.complete` open for the model call (1.2s measured, 8s cap); whether the engine sequences anything after that chain is unconfirmed — measure in an interactive session before moving the call to a timer (source: code-review) — mods/hooks/next-steps/register.tsx
-- [ ] [debt] next-steps digit hotkeys take a bare digit typed into an empty prompt while the band is up, so a reply that starts with `2` picks suggestion 2 instead; the digits are the user-approved V1 UX, so changing them is a product decision (source: code-review) — mods/hooks/next-steps/register.tsx
-
 ### PR #272 — review slot shell-out follow-ups
 
 - [ ] [HARNESS] Re-fit `agy-review.sh`'s `--print-timeout` to the reviewer's runway — the Claude slot now holds the foreground for at most 600s and the cycle no longer waits past it, so agy's 15m self-cap means it will almost never report in time; decide the new cap against `timings.log` per `late-source-reclaim.md`, not against one cycle *(deferred: `timings.log` is written only by `codex-review.sh`, so it carries zero agy rows — and agy persists no sidecar, so the cap governs only how long an unreadable run continues, not whether its findings land; revisit when agy timing is recorded)*
@@ -49,8 +44,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [FEAT] Gate shell-based memory writes in `memory-guard` — the hook matches `Write|Edit` only, so `printf ... > ~/.claude/projects/<slug>/memory/note.md` writes ungated; `commit-guard`'s PreToolUse(Bash) static command analysis is the precedent to follow *(deferred: no shell-path memory write has been observed; the other four PR #254 follow-ups shipped without it in PR for 4.9.6 — revisit against a recorded case)*
 
-## mods — next-steps follow-ups
+## mods — follow-ups
 
 - [ ] [CONSTRAINT] Run `claude plugin validate ./mods` and `claude plugin test ./mods` in `harness-check.yml` — today both are a local gate only (`docs/runbook.md` → Validate); `check_test_suites_wired.py` lists only `*.py` suites, so it reports all suites wired while the mods `*.test.ts(x)` files run in no job — extend it in the same change; first settle how CI installs a pinned `claude` CLI and whether `plugin test` runs unauthenticated *(deferred: user chose local evidence for V1 on 2026-10-11)*
-- [ ] [FEAT] next-steps V2: rule-based suggestions from explicit harness state before the model fallback — recommend a `dev` command only on a recorded tool result or task state, never on a file merely existing; keep the rules as pure functions beside `mods/hooks/next-steps/suggest.ts` *(deferred: V1 ships model-only by design; needs a spec)*
-- [ ] [FEAT] next-steps V3: record suggestion adoption and feed it to `harness-curate` *(blocked by: next-steps V2)*

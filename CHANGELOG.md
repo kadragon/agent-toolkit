@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Remove the next-steps mod and its `Next steps` / `Next steps model` settings (mods v0.2.3) (2026-10-11)
 - [done] commit-guard follows a proven branch creation across a newline or ; (dev v4.10.22) (2026-10-11)
 - [done] status-band reads a Windows home through one separator (mods v0.2.2) (2026-10-11)
 - [done] Status band colors, cache countdown, hook and skill counts (mods v0.2.1) (2026-10-11)

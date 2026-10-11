@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": {
     "name": "kadragon"
   },
@@ -11,17 +11,10 @@
   "keywords": [
     "mods",
     "function-hooks",
-    "next-steps",
     "status-band"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "nextStepsEnabled": {
-      "type": "boolean",
-      "title": "Next steps",
-      "description": "Suggest up to three follow-up prompts above the prompt after each answer.",
-      "default": true
-    },
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
@@ -33,12 +26,6 @@
       "title": "Status band cache TTL (minutes)",
       "description": "How long the prompt cache is taken to live after a response, for the status band's countdown: 60, or 5 where the session runs on the short cache.",
       "default": 60
-    },
-    "nextStepsModel": {
-      "type": "string",
-      "title": "Next steps model",
-      "description": "Model alias or id that writes the suggestions.",
-      "default": "haiku"
     }
   }
 }

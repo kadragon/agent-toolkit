@@ -146,9 +146,6 @@ const world = (on: On): World => {
   })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('model.complete', async () => ({
-    value: { isAnswered: true, text: 'Run the tests', usage: USAGE },
-  }))
   on('session.surfaces', async () => ({ value: state.surfaces }))
   on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
     const { Box } = $.ui.resolve(e)
@@ -518,58 +515,6 @@ test('a slow git does not hold the session start', async ($, on) => {
   })
 
   expect(started.cwd).toBe('/work/agent-toolkit')
-})
-
-test('with suggestions up, the status rows and the buttons are both drawn', async ($, on) => {
-  world(on)
-
-  await start($)
-  await $.turn.complete({
-    answer: 'I changed the parser and left the tests alone. '.repeat(4),
-    durationMs: 10,
-    isAborted: false,
-    turnId: 't1',
-    reason: 'answer',
-  } as Parameters<Engine['turn']['complete']>[0])
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('agent-toolkit')
-  expect((await ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
-  await ui.unmount()
-})
-
-test('in a band too short for both, the suggestions keep their rows', async ($, on) => {
-  world(on)
-
-  await start($)
-  await $.turn.complete({
-    answer: 'I changed the parser and left the tests alone. '.repeat(4),
-    durationMs: 10,
-    isAborted: false,
-    turnId: 't1',
-    reason: 'answer',
-  } as Parameters<Engine['turn']['complete']>[0])
-  const short = await drawn($, 'terminal', { maxRows: 4 })
-
-  expect(short.texts[0]).toBeUndefined()
-  expect((await short.ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
-  await short.ui.unmount()
-
-  // `[ 1: Run the tests ]` wraps to two rows in ten columns: 2 + 2 + 2 > 5.
-  const narrow = await drawn($, 'terminal', { maxRows: 5, bodyColumns: 10 })
-
-  expect(narrow.texts[0]).toBeUndefined()
-  await narrow.ui.unmount()
-})
-
-test('next-steps switched off, the status rows still draw', { options: { nextStepsEnabled: false } }, async ($, on) => {
-  world(on)
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('agent-toolkit')
-  await ui.unmount()
 })
 
 test('switched off, it draws nothing and starts no timer', { options: { statusBandEnabled: false } }, async ($, on) => {
