@@ -28,6 +28,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #316 — commit-guard newline carry and status-band Windows path (2026-10-11)
 
 - [ ] [debt] commit-guard proves only the first branch creation in a command: a second `git checkout -b` after another creation or switch is never carried across `;`/newline, so `git checkout -b a; git checkout -b b; git commit` false-blocks from live `main` even when `b` is free (source: agy) — dev/hooks/commit-guard/guard.py (introduced here)
+- [ ] [FIX] commit-guard reads a shell comment to the end of the command, not the end of the line: `_split_segments` turns newlines into `;` before `shlex` strips `#` comments, so `# note` on one line hides every later line and `# note\ngit commit -m 'wip'` passes from `main` unchecked — both guards skipped; reproduced on `main` at 17e4f26, predates this PR (source: inline review) — dev/hooks/commit-guard/guard.py `_split_segments`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 

@@ -395,6 +395,13 @@ check(
     run_hook("git checkout -b taken\ngit commit -m '[FEAT] y'", branch="main",
              cwd=_carry_repo) == 2,
 )
+_git(_carry_repo, "branch", "release")
+_git(_carry_repo, "tag", "release")
+check(
+    "newline carry: creating an existing name that is also a tag still blocks",
+    run_hook("git checkout -b release\ngit commit -m '[FEAT] y'", branch="main",
+             cwd=_carry_repo) == 2,
+)
 check(
     "newline carry: creating a name under an existing branch still blocks",
     run_hook("git checkout -b taken/sub\ngit commit -m '[FEAT] y'", branch="main",

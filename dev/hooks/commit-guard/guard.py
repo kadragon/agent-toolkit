@@ -25,8 +25,9 @@ The hook path applies two guards:
      only when the creation is proven to succeed: it is a literal `git
      checkout -b <name>` / `git switch -c <name>` that runs unconditionally,
      follows nothing but inert segments, sits in no heredoc, and the branch is
-     creatable in the repo right now (`_branch_creatable`). A later
-     switch in the chain ends that proof. It is dropped across `||`/`|`/`&`,
+     creatable in the repo right now (`_branch_creatable`). Any later segment
+     that is neither inert nor a commit ends that proof, and a commit aimed at
+     another repo (`-C`, `GIT_DIR=`) is not covered by it. It is dropped across `||`/`|`/`&`,
      an unproven `;`/newline, or a `cd`, so a commit that may actually land on
      main is not mis-attributed to an un-run checkout. A bare switch — `git
      checkout <ref>` / `git switch <ref>` with a single ref, no `--` pathspec
@@ -452,17 +453,26 @@ def _is_inert(segment):
     return sub < len(rest) and rest[sub] in _REF_NEUTRAL_SUBCOMMANDS
 
 
-def _names_other_git(segment):
-    """True if the segment names `git` with anything but a subcommand in
-    _REF_NEUTRAL_SUBCOMMANDS — a switch, an alias, a reset: something that may
-    move HEAD off a branch created earlier in the chain.
+def _redirects_git(segment):
+    """True if the segment aims its git call at another repository: a `GIT_*`
+    assignment in front of it, or any git-level option (`-C <path>`,
+    `--git-dir`, `--work-tree`) before the subcommand. An unparseable segment
+    counts as redirecting.
     """
-    toks = _tokens(segment)
-    for i, tok in enumerate(toks):
-        if os.path.basename(tok) == "git":
-            sub = _git_subcommand_at(toks, i + 1)
-            return sub >= len(toks) or toks[sub] not in _REF_NEUTRAL_SUBCOMMANDS
-    return False
+    try:
+        parts = shlex.split(segment.strip())
+    except ValueError:
+        return True
+    i = 0
+    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
+        if parts[i].startswith("GIT_"):
+            return True
+        i += 1
+    while i < len(parts) and parts[i] in _GIT_WRAPPERS:
+        i += 1
+    if i >= len(parts) or os.path.basename(parts[i]) != "git":
+        return False
+    return _git_subcommand_at(parts, i + 1) != i + 1
 
 
 def _is_provable_creation(segment, name):
@@ -502,7 +512,8 @@ def _branch_creatable(cwd, name, _override=None):
     try:
         # a name git rewrites ('@{-1}' → the previous branch) is not a literal
         fmt = git("check-ref-format", "--branch", name)
-        refs = git("for-each-ref", "--format=%(refname:short)", "refs/heads/")
+        # the full name: a short one comes back as 'heads/<name>' beside a same-named tag
+        refs = git("for-each-ref", "--format=%(refname)", "refs/heads/")
         git_dir = git("rev-parse", "--absolute-git-dir")
         unmerged = git("ls-files", "--unmerged")
     except Exception:
@@ -515,7 +526,7 @@ def _branch_creatable(cwd, name, _override=None):
         return False
     want = name.casefold()
     for ref in refs.splitlines():
-        have = ref.strip().casefold()
+        have = ref.strip()[len("refs/heads/"):].casefold()
         if have == want or have.startswith(want + "/") or want.startswith(have + "/"):
             return False
     return True
@@ -1029,9 +1040,17 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
                 # chain_stack depth is unprovable past this segment.
                 any_switch_seen = True
                 stack_reliable = False
-            # The proof covers the creation alone: a later switch may fail and
-            # leave HEAD where it was, so its target is trusted across '&&' only.
-            if _names_other_git(stripped):
+        if carries_semicolon and created is None:
+            # The proof covers the creation and the repo it ran in, nothing after.
+            if _redirects_git(stripped):
+                # this very git call runs somewhere the creation did not
+                running_branch = None
+                chain_stack = []
+                carries_semicolon = False
+            elif not _is_inert(stripped) and not _is_git_commit(stripped):
+                # a later switch may fail and leave HEAD where it was, and any
+                # other command (`pushd`, a script, a line that does not parse)
+                # may move HEAD or the directory: trusted across '&&' only
                 carries_semicolon = False
         if not _is_inert(stripped):
             ref_touched = True
@@ -1512,6 +1531,20 @@ def _test():
           on_main("git checkout -b feature/x; git co main; git commit -m '[FEAT] y'") == 2)
     check("no creation: bare switches joined by ';' still fall back to live main → blocked",
           on_main("git checkout main && git checkout typo; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a switch split by a line continuation → blocked",
+          on_main("git checkout -b feature/x\ngit checkout \\\n  main\n"
+                  "git commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then pushd elsewhere → blocked",
+          on_main("git checkout -b feature/x; pushd /other; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a script that may switch → blocked",
+          on_main("git checkout -b feature/x; bash switch.sh; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a commit aimed at another repo with -C → blocked",
+          on_main("git checkout -b feature/x\ngit -C /other commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a commit aimed at another repo with GIT_DIR= → blocked",
+          on_main("git checkout -b feature/x\nGIT_DIR=/other/.git git commit -m '[FEAT] y'") == 2)
+    check("semicolon: two commits after the creation, the first with a heredoc message, both pass",
+          on_main("git checkout -b feature/x\ngit commit -m \"$(cat <<'EOF'\n[FEAT] y\nEOF\n)\"\n"
+                  "git add -A\ngit commit -m '[FEAT] z'") == 0)
     # a name the shell rewrites is not the name that was checked
     check("semicolon: creation of a quoted \"$BRANCH\" → blocked",
           on_main("git checkout -b \"$BRANCH\"\ngit commit -m '[FEAT] y'") == 2)
@@ -1565,6 +1598,10 @@ def _test():
     git_in(repo, "branch", "taken")
     git_in(repo, "branch", "topic/deep/leaf")
     git_in(repo, "checkout", "-q", "-b", "elsewhere")  # so '@{-1}' resolves to a real branch
+    git_in(repo, "branch", "release")
+    git_in(repo, "tag", "release")  # a same-named tag makes the short ref name 'heads/release'
+    check("creatable: an existing branch that shares its name with a tag is not",
+          _branch_creatable(repo, "release") is False)
     check("creatable: a new name in a real repo", _branch_creatable(repo, "feature/new") is True)
     check("creatable: an existing branch is not", _branch_creatable(repo, "taken") is False)
     check("creatable: an existing branch differing only in case is not",
