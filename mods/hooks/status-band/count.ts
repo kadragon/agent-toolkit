@@ -72,6 +72,13 @@ export const installPaths = (text: string, cwd: string): Record<string, string> 
 
 const relative = (path: string): string => path.replace(/^\.\//, '')
 
+// `path` beneath `base`, in the separator `base` is written with: a Windows
+// home or install path keeps its backslashes all the way down.
+export const under = (base: string, path: string): string =>
+  base.includes('\\') && !base.includes('/')
+    ? `${base}\\${path.replace(/\//g, '\\')}`
+    : `${base}/${path}`
+
 // What a plugin's manifest adds to its default hooks file: the files it names,
 // and the hooks it carries inline. The engine loads both together.
 export const manifestHooks = (text: string): { files: string[]; inline: number } => {
