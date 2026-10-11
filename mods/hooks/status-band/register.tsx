@@ -2,7 +2,14 @@ import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { StatusBand } from '../../types'
-import { enabledPlugins, hookCommands, hooksFileCommands, installPaths, manifestHooks } from './count'
+import {
+  enabledPlugins,
+  hookCommands,
+  hooksFileCommands,
+  installPaths,
+  manifestHooks,
+  under,
+} from './count'
 import { contextText, headlineSegments, levelOf, limitsSegments } from './format'
 import type { Segment } from './format'
 
@@ -43,13 +50,13 @@ type Setup = Pick<StatusBand, 'hooks' | 'skills'>
 // manifest names add; a file that is not there adds none.
 const pluginHooks = async ($: EngineInterface, root: string): Promise<number> => {
   const { files, inline } = await $.fs
-    .read(`${root}/.claude-plugin/plugin.json`)
+    .read(under(root, '.claude-plugin/plugin.json'))
     .then(manifestHooks)
     .catch(() => manifestHooks('{}'))
   const counts = await Promise.all(
     files.map(file =>
       $.fs
-        .read(`${root}/${file}`)
+        .read(under(root, file))
         .then(hooksFileCommands)
         .catch(() => 0),
     ),
@@ -77,10 +84,12 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 
-  if (configDir === undefined && home === undefined) throw new Error('no home directory')
+  const claudeDir = configDir ?? (home === undefined ? undefined : under(home, '.claude'))
+
+  if (claudeDir === undefined) throw new Error('no home directory')
 
   const paths = installPaths(
-    await $.fs.read(`${configDir ?? `${home}/.claude`}/plugins/installed_plugins.json`),
+    await $.fs.read(under(claudeDir, 'plugins/installed_plugins.json')),
     await $.session.cwd(),
   )
   const counts = await Promise.all(

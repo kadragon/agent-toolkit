@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { enabledPlugins, hookCommands, hooksFileCommands, installPaths, manifestHooks } from './count'
+import {
+  enabledPlugins,
+  hookCommands,
+  hooksFileCommands,
+  installPaths,
+  manifestHooks,
+  under,
+} from './count'
 
 const GROUP = { matcher: 'Bash', hooks: [{ type: 'command' }, { type: 'command' }] }
 
@@ -88,5 +95,22 @@ describe('manifestHooks', () => {
       files: ['hooks/hooks.json', 'a.json'],
       inline: 2,
     })
+  })
+})
+
+describe('under', () => {
+  test('joins a POSIX base with a forward slash', () => {
+    expect(under('/home/me', '.claude')).toBe('/home/me/.claude')
+    expect(under('/p/plain', 'hooks/hooks.json')).toBe('/p/plain/hooks/hooks.json')
+  })
+
+  test('keeps a backslash base in backslashes all the way down', () => {
+    expect(under('C:\\Users\\me', '.claude')).toBe('C:\\Users\\me\\.claude')
+    expect(under('C:\\p\\plain', 'hooks/hooks.json')).toBe('C:\\p\\plain\\hooks\\hooks.json')
+  })
+
+  test('leaves a base that already mixes in forward slashes on them', () => {
+    expect(under('C:/Users/me', '.claude')).toBe('C:/Users/me/.claude')
+    expect(under('C:\\Users/me', '.claude')).toBe('C:\\Users/me/.claude')
   })
 })

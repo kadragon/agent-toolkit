@@ -39,6 +39,8 @@ type World = {
   // Unset, the settings read fails and the breakdown carries no skills.
   settings?: Record<string, unknown>
   files: Record<string, string>
+  // What the environment holds; a name not listed is unset.
+  env: Record<string, string>
   skills?: { totalSkills: number; tokens: number }
   settingsReads: number
   // How long the next responses take to come back.
@@ -63,6 +65,7 @@ const world = (on: On): World => {
     ticks: [],
     gitCalls: 0,
     files: {},
+    env: { HOME: '/home/me' },
     settingsReads: 0,
     stepMs: 0,
     isUncached: false,
@@ -99,9 +102,13 @@ const world = (on: On): World => {
 
     return { value: state.settings }
   })
-  on('env.get', async ($, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('env.get', async ($, e) => ({ value: state.env[e.name] }))
+  // The engine makes a path absolute before it asks. A Windows path is not
+  // absolute on the host these tests run on, so it arrives beneath the working
+  // directory with its own separators intact, and is found by its tail.
   on('fs.read', async ($, e) => {
-    const text = state.files[e.path]
+    const name = Object.keys(state.files).find(file => e.path === file || e.path.endsWith(`/${file}`))
+    const text = name === undefined ? undefined : state.files[name]
 
     if (text === undefined) throw new Error(`no such file: ${e.path}`)
 
@@ -687,6 +694,29 @@ test("the hook count adds the enabled plugins' hooks to the settings' own", asyn
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ 7 hooks')
+  await ui.unmount()
+})
+
+test('a Windows home is read through backslashes alone', async ($, on) => {
+  const state = world(on)
+  state.env = { USERPROFILE: 'C:\\Users\\me' }
+  state.settings = { enabledPlugins: { 'plain@m': true, 'named@m': true } }
+  state.files = {
+    'C:\\Users\\me\\.claude\\plugins\\installed_plugins.json': JSON.stringify({
+      plugins: {
+        'plain@m': [{ installPath: 'C:\\p\\plain' }],
+        'named@m': [{ installPath: 'C:\\p\\named' }],
+      },
+    }),
+    'C:\\p\\plain\\hooks\\hooks.json': hooksFile(3),
+    'C:\\p\\named\\.claude-plugin\\plugin.json': JSON.stringify({ hooks: './sub/hooks.json' }),
+    'C:\\p\\named\\sub\\hooks.json': hooksFile(2),
+  }
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ 5 hooks')
   await ui.unmount()
 })
 

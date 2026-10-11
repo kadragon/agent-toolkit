@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] commit-guard follows a proven branch creation across a newline or ; (dev v4.10.22) (2026-10-11)
+- [done] status-band reads a Windows home through one separator (mods v0.2.2) (2026-10-11)
 - [done] Status band colors, cache countdown, hook and skill counts (mods v0.2.1) (2026-10-11)
 - [done] task-review-cycle risk routing covers `mods/` hooks and TypeScript (dev v4.10.21) (2026-10-11)
 - [done] mods status band above the prompt (mods v0.2.0) (2026-10-11) → docs/architecture.md
