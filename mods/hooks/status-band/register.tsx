@@ -16,6 +16,8 @@ const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 // What one load of the module keeps between hooks.
 type Live = {
   effort: StatusBand['effort']
+  // True from a main-loop step until the next read: that effort is the model's now.
+  isEffortFresh: boolean
   tick?: { cancel: () => void }
   asked: number
   drawn: number
@@ -38,7 +40,8 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         .run(['git', 'branch', '--show-current'], { timeoutMs: GIT_TIMEOUT_MS })
         .catch(() => null),
     ])
-    const branch = git?.exitCode === 0 ? git.stdout.trim() : ''
+    // Git answering with no name (no repository, a detached HEAD) is a reading.
+    const branch = git === null ? null : git.exitCode === 0 ? git.stdout.trim() : ''
 
     await update($, statusBand, current => {
       // A read that started earlier and ended later must not undo a newer one.
@@ -47,7 +50,9 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
       live.drawn = order
       const name = model === '' ? (current?.model ?? '') : model
 
-      if (current !== null && current.model !== name) {
+      if (live.isEffortFresh) {
+        live.isEffortFresh = false
+      } else if (current !== null && current.model !== name) {
         // The effort was the last model's; the next step reports this one's.
         live.effort = undefined
       } else if (live.effort === undefined) {
@@ -58,8 +63,8 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
       return {
         model: name,
         effort: live.effort,
-        cwd,
-        branch: branch === '' ? undefined : branch,
+        cwd: cwd === '' ? (current?.cwd ?? '') : cwd,
+        branch: branch === null ? current?.branch : branch === '' ? undefined : branch,
         startedAt: usage?.startedAt ?? current?.startedAt,
         now,
         // Before the first prompt nothing is in the window: that 0 is a reading.
@@ -80,7 +85,12 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
   try {
     const surfaces = await $.session.surfaces()
 
-    if (!surfaces.some(surface => BAND_SURFACES.includes(surface))) return
+    if (!surfaces.some(surface => BAND_SURFACES.includes(surface))) {
+      live.tick?.cancel()
+      live.tick = undefined
+
+      return
+    }
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
     await refresh($, live)
@@ -92,7 +102,7 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
 export const register: Register = (on, options) => {
   if (options.statusBandEnabled === false) return
 
-  const live: Live = { effort: undefined, asked: 0, drawn: 0 }
+  const live: Live = { effort: undefined, isEffortFresh: false, asked: 0, drawn: 0 }
 
   // Neither hook waits for the read: a slow git must not hold the session.
   on('session.start', async ($, e, next) => {
@@ -111,8 +121,37 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // The band follows the surfaces: one that attaches gets it at once, and the
+  // tick stops when the last one that draws it leaves.
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+
+    void watch($, live)
+
+    return result
+  })
+
+  on('session.detach', async ($, e, next) => {
+    const result = await next(e)
+
+    void watch($, live)
+
+    return result
+  })
+
+  // A `/clear` empties the window and starts the timer over; no measure follows it.
+  on('session.end', async ($, e, next) => {
+    const result = await next(e)
+
+    if (e.reason === 'clear') void watch($, live)
+
+    return result
+  })
+
   // The request is passed on untouched: only its effort is read.
   on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) live.isEffortFresh = true
+
     if (e.agentId === undefined && e.effort !== live.effort) {
       const effort = e.effort
 

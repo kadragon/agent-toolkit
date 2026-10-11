@@ -39,6 +39,11 @@ describe('headline', () => {
     )
   })
 
+  test('draws the branch alone when the directory has no name', () => {
+    expect(headline({ ...STATUS, cwd: '/' })).toBe('[Opus 5.5 ◔ medium] │ git:(main) │ ⏱️  <1m')
+    expect(headline({ ...STATUS, cwd: '', branch: undefined })).toBe('[Opus 5.5 ◔ medium] │ ⏱️  <1m')
+  })
+
   test('leaves the model out when the engine named none', () => {
     expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main) │ ⏱️  <1m')
   })

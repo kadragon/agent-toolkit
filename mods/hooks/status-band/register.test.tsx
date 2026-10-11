@@ -58,6 +58,9 @@ const world = (on: On): World => {
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('session.attach', async ($, e) => ({ clientId: e.clientId }))
+  on('session.detach', async ($, e) => ({ clientId: e.clientId }))
+  on('session.end', async () => ({ sessionId: 's1' }))
   on('session.model', async () => ({ value: state.model }))
   on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
   on('session.turns', async () => ({ value: state.turns }))
@@ -292,12 +295,86 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
 
   await start($)
   await step($)
+  await measure($)
   state.model = 'claude-haiku-5-5'
   await measure($)
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
   await ui.unmount()
+})
+
+test('the effort a step reported under the new model is kept', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  await step($)
+  await measure($)
+  state.model = 'claude-sonnet-5-5'
+  await step($)
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('[Sonnet 5.5 ◔ medium]')
+  await ui.unmount()
+})
+
+test('a git call that fails keeps the last branch, one that names none drops it', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  state.branch = null
+  await measure($)
+  const kept = await drawn($)
+
+  expect(kept.texts[0]).toContain('git:(main)')
+  await kept.ui.unmount()
+
+  state.branch = ''
+  await measure($)
+  const dropped = await drawn($)
+
+  expect(dropped.texts[0]).toBe('[Opus 5.5] │ agent-toolkit │ ⏱️  5m')
+  await dropped.ui.unmount()
+})
+
+test('a /clear re-reads the figures at once', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  state.percent = undefined
+  state.turns = 0
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const { ui, texts } = await drawn($)
+
+  expect(texts[1]).toBe('Context ░░░░░░░░░░ 0%')
+  await ui.unmount()
+})
+
+test('an attaching surface gets the band at once and the tick stops when it leaves', async ($, on) => {
+  const state = world(on)
+  state.surfaces = []
+
+  await start($)
+  state.surfaces = ['desktop']
+  await $.session.attach({ clientId: 'c1' } as Parameters<Engine['session']['attach']>[0])
+  await settle()
+  const { ui, texts } = await drawn($, 'desktop')
+
+  expect(texts[0]).toContain('agent-toolkit')
+  expect(state.ticks.length).toBe(1)
+  await ui.unmount()
+
+  state.surfaces = []
+  await $.session.detach({ clientId: 'c1', reason: 'detach' } as Parameters<Engine['session']['detach']>[0])
+  await settle()
+  const calls = state.gitCalls
+  state.ticks.shift()?.()
+  await settle()
+
+  expect(state.gitCalls).toBe(calls)
+  expect(state.ticks.length).toBe(0)
 })
 
 test('before the first prompt the context reads 0%, later a missing reading is left out', async ($, on) => {
@@ -422,11 +499,17 @@ test('in a band too short for both, the suggestions keep their rows', async ($, 
     turnId: 't1',
     reason: 'answer',
   } as Parameters<Engine['turn']['complete']>[0])
-  const { ui, texts } = await drawn($, 'terminal', { maxRows: 4 })
+  const short = await drawn($, 'terminal', { maxRows: 4 })
 
-  expect(texts[0]).toBeUndefined()
-  expect((await ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
-  await ui.unmount()
+  expect(short.texts[0]).toBeUndefined()
+  expect((await short.ui.find({ key: 'next-step-1' }))?.props.label).toBe('Run the tests')
+  await short.ui.unmount()
+
+  // `[ 1: Run the tests ]` wraps to two rows in ten columns: 2 + 2 + 2 > 5.
+  const narrow = await drawn($, 'terminal', { maxRows: 5, bodyColumns: 10 })
+
+  expect(narrow.texts[0]).toBeUndefined()
+  await narrow.ui.unmount()
 })
 
 test('next-steps switched off, the status rows still draw', { options: { nextStepsEnabled: false } }, async ($, on) => {

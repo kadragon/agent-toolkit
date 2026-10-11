@@ -25,6 +25,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #313 — mods status band above the prompt (2026-10-11)
+
+- [ ] [debt] status-band keeps the pre-compaction context fill for up to a minute after a manual `/compact`: `session.compact` is a gating hook, so the mod stays out of it and waits for the tick or the next measure (source: code-review) — mods/hooks/status-band/register.tsx
+- [ ] [debt] status-band cannot tell that the engine ended its `clock.every` interval after a refused period, so the minute tick is not re-armed in that case (source: code-review) — mods/hooks/status-band/register.tsx
+- [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx
+
 ### PR #312 — mods plugin with next-steps suggestions (2026-10-11)
 
 - [ ] [harness] `task-review-cycle` risk routing matches `(dev|prod)/hooks` and `^(dev|prod)/.*\.(sh|py|ps1|cjs)$`, so a change to `mods/hooks/*.ts(x)` trips neither `SECURITY_HIT` nor `SCRIPT_HIT` and stays lite-eligible (source: code-review) — dev/skills/task-review-cycle/references/risk-routing.md → Floor

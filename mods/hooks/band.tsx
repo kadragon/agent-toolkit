@@ -14,6 +14,8 @@ const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 // The status rows are two; next-steps draws a heading, its buttons and Dismiss.
 const STATUS_ROWS = 2
 const NEXT_STEPS_CHROME_ROWS = 2
+// The brackets, the hotkey and the spaces the terminal draws around a label.
+const BUTTON_CHROME_CELLS = 7
 
 export const register: Register = (on, options) => {
   // `$.state` outlives a reload, so a mod switched off mid-session still has its
@@ -25,7 +27,15 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
 
     const steps = hasNextSteps && !e.props.isWorking ? await read($, nextSteps) : null
-    const stepRows = steps === null ? 0 : steps.suggestions.length + NEXT_STEPS_CHROME_ROWS
+    const columns = Math.max(1, e.props.bodyColumns)
+    // A long suggestion wraps: count the rows its `[ n: label ]` really takes.
+    const stepRows =
+      steps === null
+        ? 0
+        : steps.suggestions.reduce(
+            (rows, text) => rows + Math.ceil((text.length + BUTTON_CHROME_CELLS) / columns),
+            NEXT_STEPS_CHROME_ROWS,
+          )
     // A digit reaches only a button inside the band's window, so the status
     // rows give way where both would not fit.
     const status =

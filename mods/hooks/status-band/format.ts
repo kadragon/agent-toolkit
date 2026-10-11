@@ -78,7 +78,8 @@ const basename = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\
 
 export const headline = (status: StatusBand): string => {
   const dir = basename(status.cwd)
-  const place = status.branch === undefined ? dir : `${dir} git:(${status.branch})`
+  const git = status.branch === undefined ? '' : `git:(${status.branch})`
+  const place = [dir, git].filter(part => part !== '').join(' ')
   const elapsed =
     status.startedAt === undefined ? '' : `⏱️  ${duration(status.now - status.startedAt)}`
 
