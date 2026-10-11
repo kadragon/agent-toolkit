@@ -19,7 +19,7 @@ const BAND = {
 const USAGE = {
   input_tokens: 1,
   output_tokens: 1,
-  cache_read_input_tokens: 0,
+  cache_read_input_tokens: 10,
   cache_creation_input_tokens: 0,
 }
 
@@ -36,6 +36,14 @@ type World = {
   gitCalls: number
   // Set to hold the next git call open until the test lets it go.
   gitGate?: Promise<void>
+  // Unset, the settings read fails and the breakdown carries no skills.
+  settings?: Record<string, unknown>
+  files: Record<string, string>
+  skills?: { totalSkills: number; tokens: number }
+  settingsReads: number
+  // How long the next responses take to come back.
+  stepMs: number
+  isUncached: boolean
 }
 
 // The engine beneath the plugin: what the session, the clock, git and the band
@@ -54,6 +62,10 @@ const world = (on: On): World => {
     isUsageDown: false,
     ticks: [],
     gitCalls: 0,
+    files: {},
+    settingsReads: 0,
+    stepMs: 0,
+    isUncached: false,
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -64,16 +76,36 @@ const world = (on: On): World => {
   on('session.model', async () => ({ value: state.model }))
   on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
   on('session.turns', async () => ({ value: state.turns }))
-  on('session.usage', async () => {
+  on('session.usage', async ($, e) => {
     if (state.isUsageDown) throw new Error('usage is down')
+
+    const breakdown =
+      e.breakdown === undefined || state.skills === undefined
+        ? {}
+        : { breakdown: { skills: { ...state.skills, includedSkills: 0, skillFrontmatter: [] } } }
 
     return {
       value: {
         startedAt: NOW - 5 * MINUTE,
-        context: { window: 200_000, percent: state.percent },
+        context: { window: 200_000, percent: state.percent, ...breakdown },
         rateLimits: state.rateLimits,
       },
-    }
+    } as never
+  })
+  on('settings.read', async () => {
+    state.settingsReads += 1
+
+    if (state.settings === undefined) throw new Error('settings are down')
+
+    return { value: state.settings }
+  })
+  on('env.get', async ($, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('fs.read', async ($, e) => {
+    const text = state.files[e.path]
+
+    if (text === undefined) throw new Error(`no such file: ${e.path}`)
+
+    return { value: text }
   })
   on('clock.now', async () => ({ value: state.now }))
   // A period ends when the test says so.
@@ -95,7 +127,15 @@ const world = (on: On): World => {
     return { value: { exitCode: 0, stdout: `${branch}\n`, stderr: '' } }
   })
   on('turn.step', async function* ($, e) {
-    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], usage: USAGE }
+    state.now += state.stepMs
+
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: 'ok',
+      toolUses: [],
+      usage: state.isUncached ? { ...USAGE, cache_read_input_tokens: 0 } : USAGE,
+    }
   })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
@@ -141,6 +181,9 @@ const step = async ($: Engine, fields: Record<string, unknown> = {}) => {
   let read = await stream.next()
 
   while (read.done !== true) read = await stream.next()
+
+  // The countdown is written behind the step.
+  await settle()
 
   return read.value
 }
@@ -218,7 +261,7 @@ test("a main-loop step shows its effort and a subagent's does not change it", as
   const { ui, texts } = await drawn($)
 
   expect(result.answer).toBe('ok')
-  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m │ cache 1h 0m')
   await ui.unmount()
 })
 
@@ -533,5 +576,275 @@ test('switched off, it draws nothing and starts no timer', { options: { statusBa
   expect(texts).toEqual([undefined, undefined, undefined])
   expect(state.ticks.length).toBe(0)
   expect(state.gitCalls).toBe(0)
+  await ui.unmount()
+})
+
+const colorOf = async (ui: Awaited<ReturnType<typeof drawn>>['ui'], text: RegExp) =>
+  (await ui.find({ type: 'Text', text }))?.props.color
+
+test('each segment of the rows is drawn in its own color', async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'true' }] }] } }
+  state.skills = { totalSkills: 2, tokens: 300 }
+
+  await start($)
+  await step($)
+  const { ui } = await drawn($)
+
+  expect(await colorOf(ui, /^\[Opus 5\.5 ◔ medium\]$/)).toBe('claude')
+  expect(await colorOf(ui, /^agent-toolkit$/)).toBe('suggestion')
+  expect(await colorOf(ui, /^ git:\(main\)$/)).toBe('autoAccept')
+  expect(await colorOf(ui, /^cache 1h 0m$/)).toBe('planMode')
+  expect(await colorOf(ui, /^1 hook$/)).toBe('permission')
+  expect(await colorOf(ui, /^2 skills$/)).toBe('remember')
+  expect(await colorOf(ui, /^88%$/)).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: /^5h: $/ }))?.props.dimColor).toBe(true)
+  await ui.unmount()
+})
+
+test("the cache counts down from the last main-loop response, a subagent's leaves it", async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  await step($)
+  state.now = NOW + 10 * MINUTE
+  await step($, { agentId: 'agent-1' })
+  await measure($)
+  const running = await drawn($)
+
+  expect(running.texts[0]).toContain('⏱️  15m │ cache 50m')
+  await running.ui.unmount()
+
+  state.now = NOW + 60 * MINUTE
+  await measure($)
+  const lapsed = await drawn($)
+
+  expect(lapsed.texts[0]).toContain('⏱️  1h 5m │ cache expired')
+  expect(await colorOf(lapsed.ui, /^cache expired$/)).toBe('warning')
+  await lapsed.ui.unmount()
+})
+
+test('a /clear takes the cache figure down until the next response', async ($, on) => {
+  world(on)
+
+  await start($)
+  await step($)
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const cleared = await drawn($)
+
+  expect(cleared.texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await cleared.ui.unmount()
+
+  await step($)
+  const renewed = await drawn($)
+
+  expect(renewed.texts[0]).toContain('│ cache 1h 0m')
+  await renewed.ui.unmount()
+})
+
+test(
+  'the cache is counted against the configured lifetime',
+  { options: { statusBandCacheTtlMinutes: 5 } },
+  async ($, on) => {
+    world(on)
+
+    await start($)
+    await step($)
+    const { ui, texts } = await drawn($)
+
+    expect(texts[0]).toContain('│ cache 5m')
+    await ui.unmount()
+  },
+)
+
+const hooksFile = (count: number): string =>
+  JSON.stringify({
+    hooks: { PostToolUse: [{ matcher: 'Bash', hooks: Array(count).fill({ type: 'command' }) }] },
+  })
+
+test("the hook count adds the enabled plugins' hooks to the settings' own", async ($, on) => {
+  const state = world(on)
+  state.settings = {
+    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command' }, { type: 'command' }] }] },
+    enabledPlugins: { 'plain@m': true, 'off@m': false, 'named@m': true, 'gone@m': true },
+  }
+  state.files = {
+    '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({
+      plugins: {
+        'plain@m': [{ installPath: '/p/plain' }],
+        'off@m': [{ installPath: '/p/off' }],
+        'named@m': [{ installPath: '/p/named' }],
+      },
+    }),
+    '/p/plain/hooks/hooks.json': hooksFile(3),
+    '/p/off/hooks/hooks.json': hooksFile(10),
+    '/p/named/.claude-plugin/plugin.json': JSON.stringify({ hooks: './hooks.json' }),
+    '/p/named/hooks.json': hooksFile(2),
+  }
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ 7 hooks')
+  await ui.unmount()
+})
+
+test('the skill count carries the size of its listing', async ($, on) => {
+  const state = world(on)
+  state.skills = { totalSkills: 49, tokens: 4234 }
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ 49 skills (4.2k)')
+  await ui.unmount()
+})
+
+test('a count that cannot be read is left out, fails nothing and is asked again', async ($, on) => {
+  const state = world(on)
+  state.settings = { enabledPlugins: { 'plain@m': true } }
+
+  const started = await start($)
+  const before = await drawn($)
+
+  expect(started.cwd).toBe('/work/agent-toolkit')
+  expect(before.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await before.ui.unmount()
+
+  state.files = {
+    '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({
+      plugins: { 'plain@m': [{ installPath: '/p/plain' }] },
+    }),
+    '/p/plain/hooks/hooks.json': hooksFile(4),
+  }
+  await measure($)
+  const after = await drawn($)
+
+  expect(after.texts[0]).toContain('│ 4 hooks')
+  await after.ui.unmount()
+})
+
+test('the cache is counted from when the request was sent, not when the answer ended', async ($, on) => {
+  const state = world(on)
+  state.stepMs = 4 * MINUTE
+
+  await start($)
+  await step($)
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('⏱️  9m │ cache 56m')
+  await ui.unmount()
+})
+
+test('a response that neither read nor wrote the cache starts no countdown', async ($, on) => {
+  const state = world(on)
+  state.isUncached = true
+
+  await start($)
+  await step($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('a session that ends for another conversation takes its countdown with it', async ($, on) => {
+  world(on)
+
+  await start($)
+  await step($)
+  await $.session.end({ reason: 'resume' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('the counts follow the settings turn by turn, and a failed read keeps the last one', async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+  state.skills = { totalSkills: 2, tokens: 300 }
+
+  await start($)
+  state.settings = {}
+  state.skills = { totalSkills: 3, tokens: 450 }
+  await measure($)
+  const changed = await drawn($)
+
+  expect(changed.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
+  await changed.ui.unmount()
+
+  state.settings = undefined
+  await measure($)
+  const kept = await drawn($)
+
+  expect(kept.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
+  await kept.ui.unmount()
+})
+
+test("a new session does not keep the last one's counts", async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+
+  await start($)
+  state.settings = undefined
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('hooks switched off in the settings count as none', async ($, on) => {
+  const state = world(on)
+  state.settings = {
+    disableAllHooks: true,
+    hooks: { Stop: [{ hooks: [{ type: 'command' }] }] },
+  }
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('│ 0 hooks')
+  await ui.unmount()
+})
+
+test('a countdown started under one model is dropped under another, whatever steps began since', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  state.isUncached = true
+  await step($, { model: 'claude-haiku-5-5' })
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('a blank row keeps the band off the line above it', async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
+})
+
+test('in a band of two rows the figures stay and the blank row gives way', async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui, texts } = await drawn($, 'terminal', { maxRows: 2 })
+
+  expect(texts[0]).toContain('agent-toolkit')
+  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(0)
   await ui.unmount()
 })

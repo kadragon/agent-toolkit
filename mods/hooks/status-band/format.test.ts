@@ -1,7 +1,19 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { StatusBand } from '../../types'
-import { bar, contextText, duration, headline, levelOf, limitsText, modelLabel } from './format'
+import {
+  bar,
+  cacheText,
+  contextText,
+  duration,
+  headline,
+  headlineSegments,
+  levelOf,
+  limitsSegments,
+  limitsText,
+  modelLabel,
+  tokens,
+} from './format'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
 const MINUTE = 60_000
@@ -51,6 +63,12 @@ describe('headline', () => {
   test('leaves the elapsed time out when the session start is unknown', () => {
     expect(headline({ ...STATUS, startedAt: undefined })).toBe(
       '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)',
+    )
+  })
+
+  test('cuts a long branch name so the figures after it stay on the row', () => {
+    expect(headline({ ...STATUS, branch: 'feat/status-band-colors-cache-countdown' })).toBe(
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…) │ ⏱️  <1m',
     )
   })
 
@@ -132,5 +150,62 @@ describe('duration', () => {
     expect(duration(HOUR)).toBe('1h 0m')
     expect(duration(2 * HOUR + 4 * MINUTE)).toBe('2h 4m')
     expect(duration(6 * 24 * HOUR + 7 * HOUR + 30 * MINUTE)).toBe('6d 7h')
+  })
+})
+
+describe('cache', () => {
+  test('reads the time left, and expired once it is past', () => {
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 58 * MINUTE })).toBe('cache 58m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 30_000 })).toBe('cache <1m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW })).toBe('cache expired')
+  })
+
+  test('is left out before the first response', () => {
+    expect(cacheText(STATUS)).toBe('')
+  })
+})
+
+describe('counts', () => {
+  test('follow the timers: the cache, the hooks, then the skills and their size', () => {
+    expect(
+      headline({
+        ...STATUS,
+        cacheExpiresAt: NOW + 58 * MINUTE,
+        hooks: 21,
+        skills: { count: 49, tokens: 4234 },
+      }),
+    ).toBe(
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  <1m │ cache 58m │ 21 hooks │ 49 skills (4.2k)',
+    )
+  })
+
+  test('name one of a thing in the singular', () => {
+    expect(headline({ ...STATUS, hooks: 1, skills: { count: 1, tokens: 80 } })).toContain(
+      '1 hook │ 1 skill (80)',
+    )
+  })
+
+  test('write a thousand tokens and over in thousands', () => {
+    expect(tokens(999)).toBe('999')
+    expect(tokens(1000)).toBe('1.0k')
+    expect(tokens(12_345)).toBe('12.3k')
+  })
+})
+
+describe('segments', () => {
+  test('dim the separators and leave the figures at full strength', () => {
+    const segments = headlineSegments(STATUS)
+
+    expect(segments.filter(segment => segment.isDim).map(segment => segment.text)).toEqual([
+      ' │ ',
+      ' │ ',
+    ])
+    expect(segments[0]).toEqual({ text: '[Opus 5.5 ◔ medium]', color: 'claude', isBold: true })
+  })
+
+  test('color each window by its own fill', () => {
+    const colors = limitsSegments(STATUS).flatMap(({ color }) => (color === undefined ? [] : [color]))
+
+    expect(colors).toEqual(['warning', 'success'])
   })
 })
