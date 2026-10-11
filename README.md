@@ -34,10 +34,16 @@ build and may break on an update; `dev` and `prod` do not depend on it.
 | Mod | Description | Setting |
 |---|---|---|
 | `next-steps` | After an answer, suggests up to three follow-up prompts above the prompt. A digit puts one in the draft for you to edit or send, `0` dismisses. Nothing is sent for you. | `Next steps` (on by default), `Next steps model` (`haiku`) |
+| `status-band` | Two rows above the prompt: model and effort, directory and git branch, session time, then context fill and the 5-hour and 7-day rate limits with their resets. A figure the engine has no reading for is left out. | `Status band` (on by default) |
 
 Each suggestion costs one small model call per eligible turn. Turns that were interrupted, refused,
 errored, run by a subagent, or answered in under 100 characters are skipped. UX after the community
 `next-steps` mod (hamzafer.github.io).
+
+`status-band` shows what a `statusLine` command such as claude-hud
+(github.com/jarrodwatts/claude-hud, whose layout it follows) shows, so running both draws the same
+figures twice: remove the `statusLine` entry from your `settings.json` if you switch. The mod never
+edits your settings. It redraws once a minute and after each turn.
 
 ## Installation
 

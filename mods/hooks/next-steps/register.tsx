@@ -1,5 +1,5 @@
-import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import { atom, update } from 'claude-code'
+import type { Elements, Register, RenderElement } from 'claude-code'
 
 import { buildPrompt, isEligible, parseSuggestions } from './suggest'
 
@@ -71,42 +71,38 @@ export const register: Register = (on, options) => {
 
     return result
   })
+}
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const current = await read($, nextSteps)
+type BandElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
 
-    if (current === null || e.props.hasSurvey || e.props.isWorking) {
-      return next(e)
-    }
-
-    const { Box, Button, Text } = $.ui.resolve(e)
-
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>Next steps (a digit fills the prompt, 0 dismisses)</Text>
-        {current.suggestions.map((text, index) => (
-          <Button
-            key={`next-step-${index + 1}`}
-            hotkey={String(index + 1)}
-            label={text}
-            plain
-            onPress={async () => {
-              // `insert` keeps a draft in progress; the band stays while no box took it.
-              const filled = await $.prompt.fill({ text, mode: 'insert' })
-
-              if (filled.isFilled) await update($, nextSteps, () => null)
-            }}
-          />
-        ))}
+// This mod's rows of the band above the prompt. `hooks/band.tsx` draws them:
+// the engine takes one band hook per plugin, and `$` stays in that hook's file.
+export const nextStepRows = (
+  { Box, Button, Text }: BandElements,
+  suggestions: readonly string[],
+  onPick: (text: string) => Promise<void>,
+  onDismiss: () => Promise<void>,
+): RenderElement => {
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Next steps (a digit fills the prompt, 0 dismisses)</Text>
+      {suggestions.map((text, index) => (
         <Button
-          key="next-step-dismiss"
-          hotkey="0"
-          label="Dismiss"
+          key={`next-step-${index + 1}`}
+          hotkey={String(index + 1)}
+          label={text}
           plain
-          dimColor
-          onPress={() => update($, nextSteps, () => null)}
+          onPress={() => onPick(text)}
         />
-      </Box>
-    )
-  })
+      ))}
+      <Button
+        key="next-step-dismiss"
+        hotkey="0"
+        label="Dismiss"
+        plain
+        dimColor
+        onPress={onDismiss}
+      />
+    </Box>
+  )
 }

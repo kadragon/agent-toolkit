@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "kadragon"
   },
@@ -11,7 +11,8 @@
   "keywords": [
     "mods",
     "function-hooks",
-    "next-steps"
+    "next-steps",
+    "status-band"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -19,6 +20,12 @@
       "type": "boolean",
       "title": "Next steps",
       "description": "Suggest up to three follow-up prompts above the prompt after each answer.",
+      "default": true
+    },
+    "statusBandEnabled": {
+      "type": "boolean",
+      "title": "Status band",
+      "description": "Show the model, effort, directory, git branch, session time, context fill and rate limits above the prompt.",
       "default": true
     },
     "nextStepsModel": {

@@ -37,7 +37,9 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
   hooks/
     hooks.json                 # names the one hooks module the engine loads
     register.ts                # entry: calls each mod's register by name
+    band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows
     next-steps/                # one directory per mod: register.tsx, pure logic, *.test.ts(x)
+    status-band/
   types/index.d.ts             # $.state contract for every mod
 
 .claude/
@@ -74,6 +76,9 @@ plugin.json
 - Inside a mod, engine calls (`$`, `on`, JSX) stay in `register.tsx`; decision logic is plain
   TypeScript beside it with no `claude-code` import, so it survives an API change and tests without `$`.
 - A mod never submits a prompt or changes a turn's result on its own: it offers, the person acts.
+- The engine takes one unmatched hook per event from a plugin, and one per `ui.render` site. Mods that
+  draw above the prompt each export a row builder, and `mods/hooks/band.tsx` holds the single band hook
+  that stacks them; `$` and an atom's key never cross an import, so both are spelled in that file.
 - `dev/skills/harness-init/references/` is internal to harness-init; do not reference from other skills
 
 ## Key Abstractions
