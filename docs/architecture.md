@@ -38,8 +38,7 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
     hooks.json                 # names the one hooks module the engine loads
     register.ts                # entry: calls each mod's register by name
     band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows
-    next-steps/                # one directory per mod: register.tsx, pure logic, *.test.ts(x)
-    status-band/
+    status-band/               # one directory per mod: register.tsx, pure logic, *.test.ts(x)
   types/index.d.ts             # $.state contract for every mod
 
 .claude/

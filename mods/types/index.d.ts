@@ -1,5 +1,3 @@
-export type NextSteps = { turnId: string; suggestions: string[] }
-
 export type StatusBand = {
   model: string
   effort?: string | number
@@ -19,6 +17,6 @@ export type StatusBand = {
 
 declare module 'claude-code' {
   interface PluginState {
-    mods: { nextSteps: NextSteps | null; statusBand: StatusBand | null }
+    mods: { statusBand: StatusBand | null }
   }
 }
