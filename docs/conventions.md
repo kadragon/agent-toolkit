@@ -199,9 +199,10 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 `dev/.claude-plugin/plugin.json` and `prod/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
 
 `mods/.claude-plugin/plugin.json` is a third independent line. `mods` is Claude Code only, so it
-has no `.codex-plugin` manifest to keep in sync. A mod added is a minor (it fires on its own, like
-a hook); a mod removed is a patch; a `userConfig` key removed or renamed is a major, because a
-stored setting stops resolving.
+has no `.codex-plugin` manifest to keep in sync. It follows the table below with a mod read as a
+hook: a mod added is a minor, because it fires on its own; a mod or a `userConfig` key removed or
+renamed is a patch, because neither is invoked by name. Say a renamed key in the CHANGELOG entry's
+owning doc — the stored setting silently falls back to its default.
 
 | Change type | Bump |
 |-------------|------|

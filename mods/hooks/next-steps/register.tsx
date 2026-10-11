@@ -6,6 +6,8 @@ import { buildPrompt, isEligible, parseSuggestions } from './suggest'
 // UX after the community `next-steps` mod (hamzafer.github.io): offer up to
 // three prompts after a turn, fill the draft on a digit, never send.
 const MODEL_TIMEOUT_MS = 8000
+// The surfaces the engine raises the band above the prompt on.
+const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
 const nextSteps = atom({ plugin: 'mods', key: 'nextSteps' } as const, null)
 
@@ -17,30 +19,48 @@ export const register: Register = (on, options) => {
       ? options.nextStepsModel
       : 'haiku'
   let userPrompt = ''
+  let isRefused = false
 
-  // Fails open: a stale band is better than a prompt that does not send.
-  on('prompt.submit', async ($, e, next) => {
+  // A subagent's run raises no `turn.start`, so this is the main loop's prompt.
+  on('turn.start', async ($, e, next) => {
     userPrompt = e.text
     await update($, nextSteps, () => null)
 
     return next(e)
-  }).catch(($, e, next) => next(e))
+  })
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
 
-    if (!isEligible(e)) return result
+    if (e.agentId !== undefined) return result
 
     // A suggestion is a convenience: nothing here may fail or change the turn.
     try {
-      const reply = await $.model.complete({
-        model,
-        prompt: buildPrompt(userPrompt, e.answer),
-        maxTokens: 200,
-        effort: 'low',
-        timeoutMs: MODEL_TIMEOUT_MS,
-      })
-      const suggestions = reply.isAnswered ? parseSuggestions(reply.text) : []
+      let suggestions: string[] = []
+      const surfaces = isRefused || !isEligible(e) ? [] : await $.session.surfaces()
+
+      if (surfaces.some(surface => BAND_SURFACES.includes(surface))) {
+        const reply = await $.model
+          .complete({
+            model,
+            prompt: buildPrompt(userPrompt, e.answer),
+            maxTokens: 200,
+            effort: 'low',
+            timeoutMs: MODEL_TIMEOUT_MS,
+          })
+          .catch(() => null)
+
+        if (reply === null) {
+          // The engine refused to send the request (a blocked or unknown model):
+          // every later turn would be refused the same way, so say it once and stop.
+          isRefused = true
+          $.ui.toast(
+            `Next steps is off for this session: the "Next steps model" setting (${model}) was refused.`,
+          )
+        } else if (reply.isAnswered) {
+          suggestions = parseSuggestions(reply.text)
+        }
+      }
 
       await update($, nextSteps, () =>
         suggestions.length > 0 ? { turnId: e.turnId, suggestions } : null,
@@ -71,8 +91,10 @@ export const register: Register = (on, options) => {
             label={text}
             plain
             onPress={async () => {
-              await $.prompt.fill({ text, mode: 'replace' })
-              await update($, nextSteps, () => null)
+              // `insert` keeps a draft in progress; the band stays while no box took it.
+              const filled = await $.prompt.fill({ text, mode: 'insert' })
+
+              if (filled.isFilled) await update($, nextSteps, () => null)
             }}
           />
         ))}

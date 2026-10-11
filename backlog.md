@@ -25,6 +25,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #312 — mods plugin with next-steps suggestions (2026-10-11)
+
+- [ ] [harness] `task-review-cycle` risk routing matches `(dev|prod)/hooks` and `^(dev|prod)/.*\.(sh|py|ps1|cjs)$`, so a change to `mods/hooks/*.ts(x)` trips neither `SECURITY_HIT` nor `SCRIPT_HIT` and stays lite-eligible (source: code-review) — dev/skills/task-review-cycle/references/risk-routing.md → Floor
+- [ ] [debt] next-steps holds `turn.complete` open for the model call (1.2s measured, 8s cap); whether the engine sequences anything after that chain is unconfirmed — measure in an interactive session before moving the call to a timer (source: code-review) — mods/hooks/next-steps/register.tsx
+- [ ] [debt] next-steps digit hotkeys take a bare digit typed into an empty prompt while the band is up, so a reply that starts with `2` picks suggestion 2 instead; the digits are the user-approved V1 UX, so changing them is a product decision (source: code-review) — mods/hooks/next-steps/register.tsx
+
 ### PR #272 — review slot shell-out follow-ups
 
 - [ ] [HARNESS] Re-fit `agy-review.sh`'s `--print-timeout` to the reviewer's runway — the Claude slot now holds the foreground for at most 600s and the cycle no longer waits past it, so agy's 15m self-cap means it will almost never report in time; decide the new cap against `timings.log` per `late-source-reclaim.md`, not against one cycle *(deferred: `timings.log` is written only by `codex-review.sh`, so it carries zero agy rows — and agy persists no sidecar, so the cap governs only how long an unreadable run continues, not whether its findings land; revisit when agy timing is recorded)*
@@ -35,6 +41,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## mods — next-steps follow-ups
 
-- [ ] [CONSTRAINT] Run `claude plugin validate ./mods` and `claude plugin test ./mods` in `harness-check.yml` — today both are a local gate only (`docs/runbook.md` → Validate); first settle how CI installs a pinned `claude` CLI and whether `plugin test` runs unauthenticated *(deferred: user chose local evidence for V1 on 2026-10-11)*
+- [ ] [CONSTRAINT] Run `claude plugin validate ./mods` and `claude plugin test ./mods` in `harness-check.yml` — today both are a local gate only (`docs/runbook.md` → Validate); `check_test_suites_wired.py` lists only `*.py` suites, so it reports all suites wired while the mods `*.test.ts(x)` files run in no job — extend it in the same change; first settle how CI installs a pinned `claude` CLI and whether `plugin test` runs unauthenticated *(deferred: user chose local evidence for V1 on 2026-10-11)*
 - [ ] [FEAT] next-steps V2: rule-based suggestions from explicit harness state before the model fallback — recommend a `dev` command only on a recorded tool result or task state, never on a file merely existing; keep the rules as pure functions beside `mods/hooks/next-steps/suggest.ts` *(deferred: V1 ships model-only by design; needs a spec)*
 - [ ] [FEAT] next-steps V3: record suggestion adoption and feed it to `harness-curate` *(blocked by: next-steps V2)*

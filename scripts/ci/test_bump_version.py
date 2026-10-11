@@ -129,6 +129,19 @@ def test_claude_only_bump():
             f"[all] mods not bumped: {version_of(mods, '  \"version\": ')!r}",
         )
 
+        # `all` must read every plugin before it rewrites any: a half-applied
+        # run would bump dev and prod a second time on the retry.
+        dev = root / "dev" / ".claude-plugin" / "plugin.json"
+        before = version_of(dev, '  "version": ')
+        mods.rename(mods.with_suffix(".bak"))
+        result = run(script, "all", "patch")
+        check(result.returncode != 0, "[all] bump passed with the mods manifest missing")
+        check(
+            version_of(dev, '  "version": ') == before,
+            f"[all] dev bumped ({before} -> {version_of(dev, '  \"version\": ')!r}) before mods failed",
+        )
+        mods.with_suffix(".bak").rename(mods)
+
         (root / "dev" / ".codex-plugin" / "plugin.json").unlink()
         result = run(script, "dev", "patch")
         check(result.returncode != 0, "[dev] bump passed with the Codex manifest missing")

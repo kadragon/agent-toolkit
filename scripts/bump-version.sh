@@ -6,12 +6,12 @@
 # Claude Code only (function hooks), so it has the Claude manifest alone.
 #
 # Semver rules — full table: docs/conventions.md → Plugin Version Bump Rules.
-#   add skill/agent/command/hook → minor
+#   add skill/agent/command/hook/mod → minor
 #   modify any shipped asset     → patch
 #   add a bundled file to an existing skill (scripts/references/examples/evals) → patch
 #     (reachable only through the skill that already shipped, so the consumer gained a
 #     changed skill, not a new asset)
-#   remove/rename a hook         → patch (a hook has no invocable name)
+#   remove/rename a hook or mod  → patch (neither has an invocable name)
 #   remove/rename skill/agent/command → major (breaks a by-name call)
 set -euo pipefail
 
@@ -62,18 +62,28 @@ read_version() {
   echo "$version"
 }
 
+manifests_of() {
+  echo "${REPO_ROOT}/$1/.claude-plugin/plugin.json"
+  is_claude_only "$1" || echo "${REPO_ROOT}/$1/.codex-plugin/plugin.json"
+}
+
+# Exits unless every manifest of the plugin exists and carries a version.
+check_plugin() {
+  local json
+  while IFS= read -r json; do
+    read_version "$json" > /dev/null
+  done < <(manifests_of "$1")
+}
+
 bump_plugin() {
   local plugin="$1" bump_type="$2"
-  local manifests=("${REPO_ROOT}/${plugin}/.claude-plugin/plugin.json")
-  is_claude_only "$plugin" || manifests+=("${REPO_ROOT}/${plugin}/.codex-plugin/plugin.json")
-
-  # Read every manifest before rewriting any, so a missing one changes nothing.
-  local json current claude_ver="" versions=()
-  for json in "${manifests[@]}"; do
+  local json current claude_ver="" manifests=() versions=()
+  while IFS= read -r json; do
     current=$(read_version "$json")
+    manifests+=("$json")
     versions+=("$current")
     [[ -n "$claude_ver" ]] || claude_ver="$current"
-  done
+  done < <(manifests_of "$plugin")
 
   local new_version
   new_version=$(bump_semver "$claude_ver" "$bump_type")
@@ -157,6 +167,14 @@ if [[ -n "$SKILL_NAME" ]]; then
   [[ -f "$_skill_md" ]] || { echo "Not found: $_skill_md" >&2; exit 1; }
   grep -q '^version:' "$_skill_md" || { echo "No 'version:' field in $_skill_md" >&2; exit 1; }
 fi
+
+# Every manifest of every target is read here, so a missing or unparseable one
+# stops the run before anything is rewritten — `all` included.
+case "$PLUGIN" in
+  dev|prod|mods) check_plugin "$PLUGIN" ;;
+  all) for _plugin in dev prod mods; do check_plugin "$_plugin"; done ;;
+  *) usage ;;
+esac
 
 # ── Execute ───────────────────────────────────────────────────────────────────
 
