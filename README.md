@@ -2,7 +2,7 @@
 
 Personal agent plugin marketplace by kadragon.
 
-Two plugins:
+Three plugins:
 
 ### `dev` — development
 
@@ -25,6 +25,19 @@ Two plugins:
 |---|---|---|---|
 | `hwpx` | Korean HWPX document creation and editing | ✅ | ✅ |
 | `persona-debate` | Structured debate among Korean personas | ✅ | ⚠️ |
+
+### `mods` — Claude Code interface mods
+
+Claude Code only. Built on the early-access function-hooks API, so it needs a recent Claude Code
+build and may break on an update; `dev` and `prod` do not depend on it.
+
+| Mod | Description | Setting |
+|---|---|---|
+| `next-steps` | After an answer, suggests up to three follow-up prompts above the prompt. A digit puts one in the draft for you to edit or send, `0` dismisses. Nothing is sent for you. | `Next steps` (on by default), `Next steps model` (`haiku`) |
+
+Each suggestion costs one small model call per eligible turn. Turns that were interrupted, refused,
+errored, run by a subagent, or answered in under 100 characters are skipped. UX after the community
+`next-steps` mod (hamzafer.github.io).
 
 ## Installation
 
@@ -55,6 +68,7 @@ npx skills add kadragon/agent-toolkit --skill harness-init
 claude plugin marketplace add kadragon/agent-toolkit
 claude plugin install dev@kadragon
 claude plugin install prod@kadragon
+claude plugin install mods@kadragon   # optional
 ```
 
 Via `~/.claude/settings.json`:

@@ -304,8 +304,12 @@ def main() -> int:
     )
     check(
         "a root contributing no files is an error, named",
-        len(mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"])) == 1
-        and "prod" in mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"])[0],
+        len(mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"])) == len(mod.CORPUS_ROOTS) - 1
+        and all(
+            any(f"'{root}'" in error for error in mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"]))
+            for root in mod.CORPUS_ROOTS
+            if root != "dev"
+        ),
         mod.empty_corpus_errors([mod.REPO_ROOT / "dev" / "x.md"]),
     )
     check(

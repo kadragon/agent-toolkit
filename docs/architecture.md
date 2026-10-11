@@ -5,7 +5,7 @@
 | Layer | Technology |
 |-------|-----------|
 | Plugin format | Claude Code plugin (`.claude-plugin/plugin.json`) |
-| Languages | Bash (hooks, scripts), Python 3.x (data/analysis scripts) |
+| Languages | Bash (hooks, scripts), Python 3.x (data/analysis scripts), TypeScript (`mods/` function hooks only) |
 | Distribution | GitHub marketplace via `kadragon/agent-toolkit` |
 | CI | GitHub Actions |
 | Secondary target | Codex (`.codex-plugin/plugin.json`, `.agents/plugins/`) |
@@ -31,6 +31,14 @@ prod/
   skills/
     hwpx/
     persona-debate/
+
+mods/                          # Claude Code only — no .codex-plugin, not in the Codex marketplace
+  .claude-plugin/plugin.json   # own semver line; userConfig holds each mod's options
+  hooks/
+    hooks.json                 # names the one hooks module the engine loads
+    register.ts                # entry: calls each mod's register by name
+    next-steps/                # one directory per mod: register.tsx, pure logic, *.test.ts(x)
+  types/index.d.ts             # $.state contract for every mod
 
 .claude/
   agents/                      # project-level agent roles (not shipped)
@@ -61,6 +69,11 @@ plugin.json
 ### Boundaries
 
 - Each plugin is independently installable — no shared deps at runtime
+- `mods/` is the only place function-hooks code lives. The API is early access and moves between
+  Claude Code releases, so nothing under `dev/` or `prod/` may depend on a mod being loaded.
+- Inside a mod, engine calls (`$`, `on`, JSX) stay in `register.tsx`; decision logic is plain
+  TypeScript beside it with no `claude-code` import, so it survives an API change and tests without `$`.
+- A mod never submits a prompt or changes a turn's result on its own: it offers, the person acts.
 - `dev/skills/harness-init/references/` is internal to harness-init; do not reference from other skills
 
 ## Key Abstractions

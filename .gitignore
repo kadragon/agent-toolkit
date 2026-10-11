@@ -27,3 +27,7 @@ skills-lock.json
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Type declarations the Claude Code engine writes beside a mod it hot-reloads.
+mods/.claude-plugin/types/
+mods/tsconfig.json

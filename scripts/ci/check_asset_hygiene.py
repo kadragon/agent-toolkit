@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Hygiene checks for shipped plugin assets (dev/, prod/).
+"""Hygiene checks for shipped plugin assets (dev/, prod/, mods/).
 
-Everything under `dev/` and `prod/` is installed into other repositories and loaded
+Everything under `dev/`, `prod/` and `mods/` is installed into other repositories and loaded
 verbatim into an agent's context. Three checks run over every tracked file under those
 roots, catching defects no other job in `harness-check.yml` sees. (a) and (b) are two
 shapes of one risk — text that reads differently to a reviewer than to the model — and
@@ -49,7 +49,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Shipped plugin roots. Anything outside these is repo tooling, not installed anywhere.
-CORPUS_ROOTS = ("dev", "prod")
+CORPUS_ROOTS = ("dev", "prod", "mods")
 
 
 def _forbidden_chars() -> dict[int, str]:
