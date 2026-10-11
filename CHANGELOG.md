@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods status band above the prompt (mods v0.2.0) (2026-10-11) → docs/architecture.md
 - [done] mods plugin with next-steps suggestions (mods v0.1.0) (2026-10-11) → docs/architecture.md
 - [done] Preserve skill extraction slots through authoring handoffs (dev v4.10.20) (2026-10-10) → docs/eval-criteria.md
 - [done] Evidence-rule and wording corrections (prod v3.2.6) (2026-10-10)
