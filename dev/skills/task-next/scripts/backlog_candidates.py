@@ -3,6 +3,7 @@
 
 Usage:
   python3 backlog_candidates.py --tasks PATH --backlog PATH [--full-scan] [--json]
+  python3 backlog_candidates.py --tasks PATH --backlog PATH --parked [--json]
   python3 backlog_candidates.py --test
 
   --tasks PATH    path to tasks.md (optional file; absent path is treated as empty input,
@@ -11,6 +12,10 @@ Usage:
                    so a missing/unreadable file here is treated as a real error, not "no candidates")
   --full-scan     run the full-scan algorithm instead of the fast path (see below)
   --json          emit a JSON array of candidate objects instead of the plain-text list
+  --parked        list the open items a blocked/deferred marker parks, instead of candidates:
+                   `<source>:<line> [<heading>] <item text verbatim>` per item (with --json, an
+                   array carrying each marker's kind and payload). This is what an all-blocked
+                   stop reports, so the user does not have to ask what the blockers are.
 
 Output (plain text, one line per candidate, in the algorithm's selection order):
   [N] <source>: <heading> (<M> items)
@@ -634,11 +639,41 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
             msgs.append(
                 f"{label}: {len(open_boxes)} open item(s), all parked by a "
                 "`*(blocked by: …)*` / `*(deferred: …)*` marker — clear a blocker to make one "
-                "actionable."
+                "actionable. Re-run with --parked to list each item and its blocker."
             )
         elif boxes and not drifted:
             msgs.append(f"{label}: no open items (all `[x]`/`[>]`).")
     return msgs
+
+
+def parked_items(label: str, tokens: list[dict]) -> list[dict]:
+    """Open items in one file that a resolvable blocked/deferred marker parks, in document order.
+
+    The complement of the actionable set, by the same `_is_blocked` test the selectors use — so an
+    item listed here is exactly one a candidate run skipped for its marker. `heading` is the
+    nearest level-1..3 heading above the item, or None for one above the first heading.
+    """
+    out = []
+    heading = None
+    for t in tokens:
+        if t["type"] == "heading":
+            heading = t["title"]
+        elif t["type"] == "checkbox" and t["state"] == " " and _is_blocked(t["text"]):
+            markers = [
+                {"kind": m.group(1).lower(), "payload": m.group(2).strip()}
+                for m in _BLOCK_MARKER_RE.finditer(t["text"])
+                if not (m.group(1).lower() == "blocked by" and _is_placeholder_payload(m.group(2)))
+            ]
+            out.append(
+                {"source": label, "line": t["line"], "heading": heading, "text": t["text"], "markers": markers}
+            )
+    return out
+
+
+def format_parked(items: list[dict]) -> list[str]:
+    return [
+        f"{it['source']}:{it['line']} [{it['heading'] or 'no heading'}] {it['text']}" for it in items
+    ]
 
 
 def truncation_note(shown: int, total: int) -> str | None:
@@ -709,6 +744,7 @@ def main(argv: list[str]) -> int:
     backlog_path = None
     full_scan_flag = False
     json_flag = False
+    parked_flag = False
 
     i = 0
     while i < len(argv):
@@ -727,6 +763,9 @@ def main(argv: list[str]) -> int:
             i += 1
         elif a == "--json":
             json_flag = True
+            i += 1
+        elif a == "--parked":
+            parked_flag = True
             i += 1
         else:
             i += 1
@@ -763,6 +802,17 @@ def main(argv: list[str]) -> int:
             "deleted at sprint close; move these to backlog.md verbatim or they will be lost and "
             "are not selectable here.\n"
         )
+
+    if parked_flag:
+        parked = parked_items("tasks.md", tasks_tokens) + parked_items("backlog.md", backlog_tokens)
+        if json_flag:
+            print(json.dumps(parked))
+        else:
+            for line in format_parked(parked):
+                print(line)
+        if not parked:
+            sys.stderr.write("No open item carries a blocked/deferred marker.\n")
+        return 0
 
     candidates = full_scan(tasks_tokens, backlog_tokens) if full_scan_flag else fast_path(tasks_tokens, backlog_tokens)
 
@@ -1529,8 +1579,8 @@ status: open
 """
     out = zero_candidate_diagnosis(tokenize(""), tokenize(all_parked))
     _assert(
-        any("2 open item(s), all parked" in line for line in out),
-        "all-parked is reported as parked, with the count, not as an empty queue",
+        any("2 open item(s), all parked" in line and "--parked" in line for line in out),
+        "all-parked is reported as parked, with the count and the --parked pointer, not as an empty queue",
     )
 
     # 8c: actionable items exist but sit above the first heading
@@ -1665,6 +1715,50 @@ status: open
         len(out) == 1 and "no headings or items at all" in out[0],
         "empty-in still yields one explanatory line, never an empty diagnosis",
     )
+
+    # ---- Test 9: parked_items — the blockers an all-blocked stop has to report ----
+    print("\nTest 9: parked_items — lists what the markers park, and nothing else")
+    parked_mix = """- [ ] stray parked *(deferred: before any heading)*
+
+## Auth
+- [ ] add login *(blocked by: 3-upstream-api)*
+- [ ] actionable one
+- [x] done *(blocked by: 3-upstream-api)*
+- [>] moved *(deferred: later)*
+
+### Docs
+- [ ] document the `*(blocked by: <slug>)*` format
+- [ ] wrapped item
+  continues here *(deferred: needs ops values)* *(blocked by: sink-lock)*
+"""
+    got = parked_items("backlog.md", tokenize(parked_mix))
+    _assert(
+        [(it["line"], it["heading"]) for it in got] == [(1, None), (4, "Auth"), (11, "Docs")],
+        "only open, resolvably-marked items are listed, each under its nearest heading",
+    )
+    _assert(
+        got[1]["markers"] == [{"kind": "blocked by", "payload": "3-upstream-api"}]
+        and got[2]["markers"]
+        == [
+            {"kind": "deferred", "payload": "needs ops values"},
+            {"kind": "blocked by", "payload": "sink-lock"},
+        ],
+        "each marker's kind and payload is carried, including several on a wrapped item",
+    )
+    _assert(
+        format_parked(got)[:2]
+        == [
+            "backlog.md:1 [no heading] stray parked *(deferred: before any heading)*",
+            "backlog.md:4 [Auth] add login *(blocked by: 3-upstream-api)*",
+        ],
+        "the plain-text line carries source, line, heading and the item text verbatim",
+    )
+    _assert(json.loads(json.dumps(got)) == got, "parked items round-trip through JSON for --json")
+    _assert(
+        len(parked_items("backlog.md", tokenize(all_parked))) == 2,
+        "the count matches the all-parked diagnosis for the same input",
+    )
+    _assert(parked_items("backlog.md", tokenize(all_done)) == [], "a file with no parked item lists nothing")
 
     print(f"\n=== Results: {PASS_COUNT} PASS, {FAIL_COUNT} FAIL ===")
     return 0 if FAIL_COUNT == 0 else 1

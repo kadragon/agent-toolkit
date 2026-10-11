@@ -8,7 +8,8 @@ separate cost/independence decision, not the meaning of the flag.
 
 Run Step 1's full scan. One heading group is one unit. Preserve empty-queue, blocked/deferred,
 and malformed-input behavior from the candidate selector. Zero eligible units → report and stop
-without creating a branch or contract.
+without creating a branch or contract; when the units are all blocked, that report is the blocker
+list in `SKILL.md` Step 2.
 
 Render a numbered list with tag, scope, and blockers. Accept comma lists, inclusive ranges, or
 `all`; report out-of-range indices. Empty/unparseable input → re-prompt once, then stop.
