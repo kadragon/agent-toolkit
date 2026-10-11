@@ -33,7 +33,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #312 — mods plugin with next-steps suggestions (2026-10-11)
 
-- [ ] [harness] `task-review-cycle` risk routing matches `(dev|prod)/hooks` and `^(dev|prod)/.*\.(sh|py|ps1|cjs)$`, so a change to `mods/hooks/*.ts(x)` trips neither `SECURITY_HIT` nor `SCRIPT_HIT` and stays lite-eligible (source: code-review) — dev/skills/task-review-cycle/references/risk-routing.md → Floor
 - [ ] [debt] next-steps holds `turn.complete` open for the model call (1.2s measured, 8s cap); whether the engine sequences anything after that chain is unconfirmed — measure in an interactive session before moving the call to a timer (source: code-review) — mods/hooks/next-steps/register.tsx
 - [ ] [debt] next-steps digit hotkeys take a bare digit typed into an empty prompt while the band is up, so a reply that starts with `2` picks suggestion 2 instead; the digits are the user-approved V1 UX, so changing them is a product decision (source: code-review) — mods/hooks/next-steps/register.tsx
 
