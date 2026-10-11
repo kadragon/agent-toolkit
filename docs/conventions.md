@@ -198,6 +198,11 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 
 `dev/.claude-plugin/plugin.json` and `prod/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
 
+`mods/.claude-plugin/plugin.json` is a third independent line. `mods` is Claude Code only, so it
+has no `.codex-plugin` manifest to keep in sync. A mod added is a minor (it fires on its own, like
+a hook); a mod removed is a patch; a `userConfig` key removed or renamed is a major, because a
+stored setting stops resolving.
+
 | Change type | Bump |
 |-------------|------|
 | Skill, agent, or command added | minor: `x.Y.z → x.(Y+1).0` |
@@ -255,7 +260,7 @@ directories (`evals/`, `examples/`, `templates/`, …) fall under the same row, 
 not by CI. When the new file only moves existing `SKILL.md` content, a patch is correct: add the
 trailer `Skill-Bump-Exempt: <skill> — <reason>` (or `<plugin>:<skill>`) to a commit on the branch.
 
-Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`).
+Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`). The same job holds `prod/` and `mods/` to it.
 
 Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):
 
@@ -266,11 +271,14 @@ bash scripts/bump-version.sh dev patch
 # minor bump + skill version
 bash scripts/bump-version.sh dev minor --skill harness-curate patch
 
-# bump both plugins
+# patch bump for mods (single Claude manifest)
+bash scripts/bump-version.sh mods patch
+
+# bump every plugin
 bash scripts/bump-version.sh all patch
 ```
 
-Files updated per plugin: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and optionally `skills/{name}/SKILL.md`.
+Files updated per plugin: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` (not for `mods`), and optionally `skills/{name}/SKILL.md`.
 
 **Stale local bump on sync**: if uncommitted local changes already bumped a plugin version (e.g. `3.7.34 → 3.7.35`) and `git pull` brings in a merged PR that bumped the same manifest further (e.g. `3.7.34 → 3.8.0`), the two edits conflict on the version line. Resolve by re-deriving the bump from the new base, not by keeping either literal value — e.g. local was a patch-level change, so the correct resolution is `3.8.0 → 3.8.1`, not `3.7.35`.
 

@@ -1,0 +1,31 @@
+{
+  "name": "mods",
+  "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
+  "version": "0.1.0",
+  "author": {
+    "name": "kadragon"
+  },
+  "homepage": "https://github.com/kadragon/agent-toolkit",
+  "repository": "https://github.com/kadragon/agent-toolkit",
+  "license": "MIT",
+  "keywords": [
+    "mods",
+    "function-hooks",
+    "next-steps"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "nextStepsEnabled": {
+      "type": "boolean",
+      "title": "Next steps",
+      "description": "Suggest up to three follow-up prompts above the prompt after each answer.",
+      "default": true
+    },
+    "nextStepsModel": {
+      "type": "string",
+      "title": "Next steps model",
+      "description": "Model alias or id that writes the suggestions.",
+      "default": "haiku"
+    }
+  }
+}

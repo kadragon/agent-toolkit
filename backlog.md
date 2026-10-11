@@ -32,3 +32,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #254 — memory-guard follow-ups
 
 - [ ] [FEAT] Gate shell-based memory writes in `memory-guard` — the hook matches `Write|Edit` only, so `printf ... > ~/.claude/projects/<slug>/memory/note.md` writes ungated; `commit-guard`'s PreToolUse(Bash) static command analysis is the precedent to follow *(deferred: no shell-path memory write has been observed; the other four PR #254 follow-ups shipped without it in PR for 4.9.6 — revisit against a recorded case)*
+
+## mods — next-steps follow-ups
+
+- [ ] [CONSTRAINT] Run `claude plugin validate ./mods` and `claude plugin test ./mods` in `harness-check.yml` — today both are a local gate only (`docs/runbook.md` → Validate); first settle how CI installs a pinned `claude` CLI and whether `plugin test` runs unauthenticated *(deferred: user chose local evidence for V1 on 2026-10-11)*
+- [ ] [FEAT] next-steps V2: rule-based suggestions from explicit harness state before the model fallback — recommend a `dev` command only on a recorded tool result or task state, never on a file merely existing; keep the rules as pure functions beside `mods/hooks/next-steps/suggest.ts` *(deferred: V1 ships model-only by design; needs a spec)*
+- [ ] [FEAT] next-steps V3: record suggestion adoption and feed it to `harness-curate` *(blocked by: next-steps V2)*

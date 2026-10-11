@@ -98,15 +98,52 @@ def test_skill_bump(newline, label):
         )
 
 
+def test_claude_only_bump():
+    """`mods` ships no Codex manifest; dev/prod must keep requiring both."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        script = make_repo(root, "\n")
+        mods = root / "mods" / ".claude-plugin" / "plugin.json"
+        mods.parent.mkdir(parents=True, exist_ok=True)
+        write(mods, MANIFEST.format(version="0.1.0"), "\n")
+        for platform in (".claude-plugin", ".codex-plugin"):
+            prod = root / "prod" / platform / "plugin.json"
+            prod.parent.mkdir(parents=True, exist_ok=True)
+            write(prod, MANIFEST.format(version="2.0.0"), "\n")
+
+        result = run(script, "mods", "minor")
+        check(result.returncode == 0, f"[mods] exit {result.returncode}: {result.stderr}")
+        check(
+            version_of(mods, '  "version": ') == "0.2.0",
+            f"[mods] manifest not bumped: {version_of(mods, '  \"version\": ')!r}",
+        )
+        check(
+            not (root / "mods" / ".codex-plugin").exists(),
+            "[mods] bump created a Codex manifest",
+        )
+
+        result = run(script, "all", "patch")
+        check(result.returncode == 0, f"[all] exit {result.returncode}: {result.stderr}")
+        check(
+            version_of(mods, '  "version": ') == "0.2.1",
+            f"[all] mods not bumped: {version_of(mods, '  \"version\": ')!r}",
+        )
+
+        (root / "dev" / ".codex-plugin" / "plugin.json").unlink()
+        result = run(script, "dev", "patch")
+        check(result.returncode != 0, "[dev] bump passed with the Codex manifest missing")
+
+
 def main():
     test_skill_bump("\n", "LF")
     test_skill_bump("\r\n", "CRLF")
+    test_claude_only_bump()
 
     if FAILURES:
         for failure in FAILURES:
             print(f"FAIL {failure}")
         return 1
-    print("PASS scripts/bump-version.sh (LF + CRLF skill bump, no silent no-op)")
+    print("PASS scripts/bump-version.sh (LF + CRLF skill bump, Claude-only plugin bump)")
     return 0
 
 

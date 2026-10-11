@@ -14,6 +14,11 @@
       "name": "prod",
       "source": "./prod",
       "description": "Personal Claude Code productivity skills by kadragon"
+    },
+    {
+      "name": "mods",
+      "source": "./mods",
+      "description": "Claude Code interface mods by kadragon (function hooks, early access)"
     }
   ]
 }

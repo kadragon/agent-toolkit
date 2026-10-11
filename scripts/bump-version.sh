@@ -2,6 +2,9 @@
 # Bump plugin and/or skill versions atomically.
 # Usage: bump-version.sh <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 #
+# dev and prod carry a Claude and a Codex manifest, bumped in sync. mods is
+# Claude Code only (function hooks), so it has the Claude manifest alone.
+#
 # Semver rules — full table: docs/conventions.md → Plugin Version Bump Rules.
 #   add skill/agent/command/hook → minor
 #   modify any shipped asset     → patch
@@ -18,7 +21,7 @@ usage() {
   cat >&2 <<EOF
 Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 
-  plugin:     dev | prod | all
+  plugin:     dev | prod | mods | all
   bump type:  major | minor | patch
 
   --skill <name> [major|minor|patch]
@@ -28,6 +31,7 @@ Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 Examples:
   $0 dev patch
   $0 dev minor --skill harness-curate patch
+  $0 mods patch
   $0 all patch
 EOF
   exit 1
@@ -45,29 +49,41 @@ bump_semver() {
   esac
 }
 
+# Plugins that ship no .codex-plugin manifest.
+is_claude_only() {
+  [[ "$1" == "mods" ]]
+}
+
+read_version() {
+  local json="$1" version
+  [[ -f "$json" ]] || { echo "Not found: $json" >&2; exit 1; }
+  version=$(grep '"version"' "$json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/' | tr -d '\r')
+  [[ -n "$version" ]] || { echo "Could not parse version from $json" >&2; exit 1; }
+  echo "$version"
+}
+
 bump_plugin() {
   local plugin="$1" bump_type="$2"
-  local claude_json="${REPO_ROOT}/${plugin}/.claude-plugin/plugin.json"
-  local codex_json="${REPO_ROOT}/${plugin}/.codex-plugin/plugin.json"
+  local manifests=("${REPO_ROOT}/${plugin}/.claude-plugin/plugin.json")
+  is_claude_only "$plugin" || manifests+=("${REPO_ROOT}/${plugin}/.codex-plugin/plugin.json")
 
-  [[ -f "$claude_json" ]] || { echo "Not found: $claude_json" >&2; exit 1; }
-  [[ -f "$codex_json"  ]] || { echo "Not found: $codex_json"  >&2; exit 1; }
-
-  local claude_ver codex_ver
-  claude_ver=$(grep '"version"' "$claude_json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/' | tr -d '\r')
-  [[ -n "$claude_ver" ]] || { echo "Could not parse version from $claude_json" >&2; exit 1; }
-  codex_ver=$(grep '"version"' "$codex_json" | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/' | tr -d '\r')
-  [[ -n "$codex_ver" ]] || { echo "Could not parse version from $codex_json" >&2; exit 1; }
+  # Read every manifest before rewriting any, so a missing one changes nothing.
+  local json current claude_ver="" versions=()
+  for json in "${manifests[@]}"; do
+    current=$(read_version "$json")
+    versions+=("$current")
+    [[ -n "$claude_ver" ]] || claude_ver="$current"
+  done
 
   local new_version
   new_version=$(bump_semver "$claude_ver" "$bump_type")
 
-  perl -pi -e "s/\"version\": *\"\Q${claude_ver}\E\"/\"version\": \"${new_version}\"/" "$claude_json"
-  perl -pi -e "s/\"version\": *\"\Q${codex_ver}\E\"/\"version\": \"${new_version}\"/" "$codex_json"
-
-  # The parse above tolerates spacing the replace once did not — verify rather than trust.
-  local json
-  for json in "$claude_json" "$codex_json"; do
+  local index
+  for index in "${!manifests[@]}"; do
+    json="${manifests[$index]}"
+    current="${versions[$index]}"
+    perl -pi -e "s/\"version\": *\"\Q${current}\E\"/\"version\": \"${new_version}\"/" "$json"
+    # The parse above tolerates spacing the replace once did not — verify rather than trust.
     grep -q "\"version\": \"${new_version}\"" "$json" || {
       echo "Failed to rewrite version in $json" >&2
       exit 1
@@ -147,7 +163,7 @@ fi
 echo "Bumping versions (${BUMP_TYPE}):"
 
 case "$PLUGIN" in
-  dev|prod)
+  dev|prod|mods)
     bump_plugin "$PLUGIN" "$BUMP_TYPE"
     if [[ -n "$SKILL_NAME" ]]; then
       bump_skill "$PLUGIN" "$SKILL_NAME" "$SKILL_BUMP"
@@ -156,6 +172,7 @@ case "$PLUGIN" in
   all)
     bump_plugin "dev" "$BUMP_TYPE"
     bump_plugin "prod" "$BUMP_TYPE"
+    bump_plugin "mods" "$BUMP_TYPE"
     ;;
   *) usage ;;
 esac

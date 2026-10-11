@@ -15,7 +15,11 @@
 # Install plugins from local path
 claude plugin install ./dev
 claude plugin install ./prod
+claude plugin install ./mods   # Claude Code only; needs a build with function hooks
 ```
+
+To try a mod without installing it: `claude --plugin-dir ./mods` loads it for that session and
+reloads on save.
 
 ### Codex Plugin Install
 
@@ -40,6 +44,8 @@ codex plugin add prod@kadragon
 | `python3 dev/skills/task-next/scripts/test_cycle_state.py` | Contract/evidence/notes archive durability, criterion-check refusal, base-branch refusal, retirement, and the review cycle's clean-tree resume guard |
 | `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
 | `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
+| `claude plugin validate ./mods` | Reads the hooks module as the engine will: which events it hooks, which `$` calls it makes, and everything the engine would refuse |
+| `claude plugin test ./mods` | Runs every `*.test.ts(x)` under `mods/` against the engine. **Local only — no CI job runs it**, so run both `mods` commands before every `mods/` PR |
 
 **`git add` a new file before you trust these checkers.** Every one of them walks
 `git ls-files`, so an untracked file is invisible to all of them: a new shipped asset passes
@@ -68,7 +74,7 @@ python3 -m venv .venv && .venv/bin/pip install pyyaml
 
 ```bash
 # Check which plugin.json versions are on this branch vs main
-git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json
+git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json mods/.claude-plugin/plugin.json
 ```
 
 ## Common Failures
