@@ -756,30 +756,75 @@ test('a session that ends for another conversation takes its countdown with it',
   await start($)
   await step($)
   await $.session.end({ reason: 'resume' } as Parameters<Engine['session']['end']>[0])
-  await start($)
+  await settle()
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
   await ui.unmount()
 })
 
-test('the counts are read once, apart from the other figures, and again for a new session', async ($, on) => {
+test('the counts follow the settings turn by turn, and a failed read keeps the last one', async ($, on) => {
   const state = world(on)
   state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
   state.skills = { totalSkills: 2, tokens: 300 }
 
   await start($)
-  await measure($)
-  await measure($)
-
-  expect(state.settingsReads).toBe(1)
-
   state.settings = {}
+  state.skills = { totalSkills: 3, tokens: 450 }
+  await measure($)
+  const changed = await drawn($)
+
+  expect(changed.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
+  await changed.ui.unmount()
+
+  state.settings = undefined
+  await measure($)
+  const kept = await drawn($)
+
+  expect(kept.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
+  await kept.ui.unmount()
+})
+
+test("a new session does not keep the last one's counts", async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+
+  await start($)
+  state.settings = undefined
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
+  await ui.unmount()
+})
+
+test('hooks switched off in the settings count as none', async ($, on) => {
+  const state = world(on)
+  state.settings = {
+    disableAllHooks: true,
+    hooks: { Stop: [{ hooks: [{ type: 'command' }] }] },
+  }
+
   await start($)
   const { ui, texts } = await drawn($)
 
-  expect(state.settingsReads).toBe(2)
-  expect(texts[0]).toContain('│ 0 hooks │ 2 skills (300)')
+  expect(texts[0]).toContain('│ 0 hooks')
+  await ui.unmount()
+})
+
+test('a countdown started under one model is dropped under another, whatever steps began since', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  state.isUncached = true
+  await step($, { model: 'claude-haiku-5-5' })
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
   await ui.unmount()
 })
 
@@ -790,5 +835,16 @@ test('a blank row keeps the band off the line above it', async ($, on) => {
   const { ui } = await drawn($)
 
   expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
+})
+
+test('in a band of two rows the figures stay and the blank row gives way', async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui, texts } = await drawn($, 'terminal', { maxRows: 2 })
+
+  expect(texts[0]).toContain('agent-toolkit')
+  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(0)
   await ui.unmount()
 })

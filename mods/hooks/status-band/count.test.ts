@@ -52,6 +52,19 @@ describe('installPaths', () => {
     expect(installPaths(text, '/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
     expect(installPaths(text, '/work/repository')).toEqual({ 'a@m': '/p/user' })
   })
+
+  test('takes the nearest project around the directory, whichever separator it uses', () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { projectPath: 'C:\\work', installPath: '/p/outer' },
+          { projectPath: 'C:\\work\\repo', installPath: '/p/inner' },
+        ],
+      },
+    })
+
+    expect(installPaths(text, 'C:\\work\\repo\\src')).toEqual({ 'a@m': '/p/inner' })
+  })
 })
 
 describe('manifestHooks', () => {

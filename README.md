@@ -47,9 +47,9 @@ edits your settings. It redraws once a minute and after each turn.
 
 The cache figure is an estimate: the engine tells a mod neither the cache's lifetime nor what is
 left of it, so the band counts the setting's minutes down from the last main-thread response. Set
-it to `5` where your session runs on the short cache. The hook count is the command hooks in your
+it to `5` where your session runs on the short cache. The hook count is the hook handlers in your
 merged settings plus those of every enabled plugin, read off the files that declare them; hooks
-modules such as this one's are not counted. Both counts are read once per session. A branch name over 24
+modules such as this one's are not counted. Both counts are read again after each turn. A branch name over 24
 characters is cut so the figures after it stay on the row, and a blank row keeps the band off the
 line above it.
 

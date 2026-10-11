@@ -11,6 +11,8 @@ export type StatusBand = {
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]
   // When the prompt cache lapses unless a response renews it first.
   cacheExpiresAt?: number
+  // The model that cache was made under: a switch forfeits it.
+  cacheModel?: string
   hooks?: number
   skills?: { count: number; tokens: number }
 }
