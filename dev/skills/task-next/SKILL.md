@@ -59,7 +59,7 @@ CANDIDATES="$SKILL_DIR/scripts/backlog_candidates.py"
 [[ -r "$CANDIDATES" ]] || { echo "Bundled script missing or unreadable: $CANDIDATES" >&2; exit 1; }
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md              # fast path, cap 3
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md --full-scan  # full list, type priority
-python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md --parked     # blocked/deferred items, Step 2 stop
+python3 "$CANDIDATES" --backlog backlog.md --parked                      # blocked/deferred items, Step 2 stop
 ```
 
 The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
@@ -89,13 +89,19 @@ blocker.
 every item it lists: the item, its marker, and one label. The user should not have to ask what
 the blockers are or which ones this session could clear.
 
-- **agent can clear** — the blocker is work this session can do: an open queue item named by
-  `blocked by` (say which one), a check to run, or a marker whose blocker already landed (stale,
-  per `references/cycle.md` → *Blocked-marker sync*).
+- **agent can clear** — the blocker is work this session can do, such as a check to run or a
+  change no queue item covers. Say what the work is.
 - **needs you** — a decision, a credential or access, an external event, or a date. Say what.
 
-Read each marker's payload and check it against the repo before labelling; an unverified guess
-is labelled `unknown`. Clearing a blocker is new work: offer it, do not start it unasked.
+Label by the root blocker. An item `blocked by` another queue item inherits that item's label,
+followed down the chain: in an all-blocked stop the named item is itself parked, so it is never
+clearable just because it is on the queue. Read each marker's payload and check it against the
+repo before labelling; an unverified guess is labelled `unknown`.
+
+A marker whose blocker has verifiably landed is not a blocker. Delete it per
+`references/cycle.md` → *Blocked-marker sync*, re-run Step 1, and report the stop only if the
+queue is still all blocked; name the markers removed. Clearing any other blocker is new work:
+offer it, do not start it unasked.
 
 ## Step 3 — Run the cycle
 

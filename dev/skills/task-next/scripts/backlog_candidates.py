@@ -3,7 +3,7 @@
 
 Usage:
   python3 backlog_candidates.py --tasks PATH --backlog PATH [--full-scan] [--json]
-  python3 backlog_candidates.py --tasks PATH --backlog PATH --parked [--json]
+  python3 backlog_candidates.py --backlog PATH --parked [--json]
   python3 backlog_candidates.py --test
 
   --tasks PATH    path to tasks.md (optional file; absent path is treated as empty input,
@@ -12,9 +12,13 @@ Usage:
                    so a missing/unreadable file here is treated as a real error, not "no candidates")
   --full-scan     run the full-scan algorithm instead of the fast path (see below)
   --json          emit a JSON array of candidate objects instead of the plain-text list
-  --parked        list the open items a blocked/deferred marker parks, instead of candidates:
-                   `<source>:<line> [<heading>] <item text verbatim>` per item (with --json, an
-                   array carrying each marker's kind and payload). This is what an all-blocked
+  --parked        list the backlog.md open items a blocked/deferred marker parks, instead of
+                   candidates: `<backlog path>:<line> [<heading>] <item text>` per item (with
+                   --json, an array carrying each marker's kind and payload). The text is the
+                   tokenizer's folded form — checkbox prefix dropped, wrapped lines joined,
+                   comments and fences blanked — so open the line before editing the item; it is
+                   not a verbatim match string. tasks.md is not listed: its checkboxes are never
+                   selectable, so nothing there is parked queue work. This is what an all-blocked
                    stop reports, so the user does not have to ask what the blockers are.
 
 Output (plain text, one line per candidate, in the algorithm's selection order):
@@ -636,10 +640,16 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
         # Only reachable when nothing actionable exists, so these never contradict the
         # stray/attributed lines above.
         if open_boxes:
+            # --parked lists backlog.md only, so the pointer would mislead on tasks.md.
+            pointer = (
+                " Re-run with --parked to list each item and its blocker."
+                if label == "backlog.md"
+                else ""
+            )
             msgs.append(
                 f"{label}: {len(open_boxes)} open item(s), all parked by a "
                 "`*(blocked by: …)*` / `*(deferred: …)*` marker — clear a blocker to make one "
-                "actionable. Re-run with --parked to list each item and its blocker."
+                f"actionable.{pointer}"
             )
         elif boxes and not drifted:
             msgs.append(f"{label}: no open items (all `[x]`/`[>]`).")
@@ -649,9 +659,11 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
 def parked_items(label: str, tokens: list[dict]) -> list[dict]:
     """Open items in one file that a resolvable blocked/deferred marker parks, in document order.
 
-    The complement of the actionable set, by the same `_is_blocked` test the selectors use — so an
-    item listed here is exactly one a candidate run skipped for its marker. `heading` is the
-    nearest level-1..3 heading above the item, or None for one above the first heading.
+    The complement of the actionable set, by the same `_is_blocked` test the selectors use. Only
+    meaningful for backlog.md, where a checkbox is selectable: there, a listed item is one a
+    candidate run skipped for its marker. `heading` is the nearest level-1..3 heading above the
+    item, or None for one above the first heading. `text` is the tokenizer's folded item text,
+    not the source line.
     """
     out = []
     heading = None
@@ -804,7 +816,7 @@ def main(argv: list[str]) -> int:
         )
 
     if parked_flag:
-        parked = parked_items("tasks.md", tasks_tokens) + parked_items("backlog.md", backlog_tokens)
+        parked = parked_items(backlog_path or "backlog.md", backlog_tokens)
         if json_flag:
             print(json.dumps(parked))
         else:
@@ -1582,6 +1594,12 @@ status: open
         any("2 open item(s), all parked" in line and "--parked" in line for line in out),
         "all-parked is reported as parked, with the count and the --parked pointer, not as an empty queue",
     )
+    out = zero_candidate_diagnosis(tokenize(all_parked), tokenize(""))
+    _assert(
+        any("2 open item(s), all parked" in line for line in out)
+        and not any("--parked" in line for line in out),
+        "tasks.md gets no --parked pointer: that listing covers backlog.md only",
+    )
 
     # 8c: actionable items exist but sit above the first heading
     orphan_items = """- [ ] stray item one
@@ -1731,7 +1749,7 @@ status: open
 - [ ] wrapped item
   continues here *(deferred: needs ops values)* *(blocked by: sink-lock)*
 """
-    got = parked_items("backlog.md", tokenize(parked_mix))
+    got = parked_items("docs/backlog.md", tokenize(parked_mix))
     _assert(
         [(it["line"], it["heading"]) for it in got] == [(1, None), (4, "Auth"), (11, "Docs")],
         "only open, resolvably-marked items are listed, each under its nearest heading",
@@ -1748,10 +1766,14 @@ status: open
     _assert(
         format_parked(got)[:2]
         == [
-            "backlog.md:1 [no heading] stray parked *(deferred: before any heading)*",
-            "backlog.md:4 [Auth] add login *(blocked by: 3-upstream-api)*",
+            "docs/backlog.md:1 [no heading] stray parked *(deferred: before any heading)*",
+            "docs/backlog.md:4 [Auth] add login *(blocked by: 3-upstream-api)*",
         ],
-        "the plain-text line carries source, line, heading and the item text verbatim",
+        "the plain-text line carries the given source path, line, heading and item text",
+    )
+    _assert(
+        got[2]["text"] == "wrapped item continues here *(deferred: needs ops values)* *(blocked by: sink-lock)*",
+        "a wrapped item's text is the folded form, at its first line number",
     )
     _assert(json.loads(json.dumps(got)) == got, "parked items round-trip through JSON for --json")
     _assert(
