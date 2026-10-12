@@ -412,6 +412,20 @@ check(
     run_hook("git checkout -b feature/new\ngit commit -m '[FEAT] y'", branch="main",
              cwd=tempfile.mkdtemp()) == 2,
 )
+check(
+    "second creation: two free names in a real repo let the later commit through",
+    run_hook("git checkout -b feature/a; git checkout -b feature/b; git commit -m '[FEAT] y'",
+             branch="main", cwd=_carry_repo) == 0,
+)
+check(
+    "second creation: an existing second name in a real repo still blocks",
+    run_hook("git checkout -b feature/a; git checkout -b taken; git commit -m '[FEAT] y'",
+             branch="main", cwd=_carry_repo) == 2,
+)
+check(
+    "comment line above a commit on main in a real repo still blocks",
+    run_hook("# note\ngit commit -m '[FEAT] y'", branch="main", cwd=_carry_repo) == 2,
+)
 with open(os.path.join(_git(_carry_repo, "rev-parse", "--absolute-git-dir").stdout.strip(),
                        "MERGE_HEAD"), "w", encoding="utf-8") as _fh:
     _fh.write("0" * 40 + "\n")
