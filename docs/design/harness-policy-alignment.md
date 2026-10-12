@@ -56,7 +56,7 @@ independently. Starting P2 earlier would change the agreed rollout, not resolve 
 | 2 | P0 | `review-authorization-boundary` | Inherited authorization limits on both merge paths |
 | 3 | P1 | `harness-init-simplification` | Minimal initialization accepted without hiding defects |
 | 4 | P2 | `subagent-model-selection-policy` | Task-specific policy and accurate platform resolution docs |
-| 5 | P2 | `subagent-model-selection-evaluation` | Measured baseline versus per-task selection |
+| 5 | P2 | `subagent-model-selection-evaluation` | Measured baseline versus per-task selection — dropped 2026-10-12, never run |
 
 ## User Stories
 
@@ -260,6 +260,10 @@ official documentation establishes that unavailable installation's behavior.
   The active runtime's allowed spawn options and higher-level instructions still govern.
 
 ### 5. P2 — Model selection evaluation
+
+**Dropped 2026-10-12 by the user before any run.** No evaluation artifact exists, the
+backlog item is removed, and the slice 4 policy stays provisional. The protocol below is
+kept as the bar a re-filed evaluation would have to meet.
 
 Scope: a bounded evaluation artifact following existing repository eval conventions;
 policy refinements only when directly supported by the results.

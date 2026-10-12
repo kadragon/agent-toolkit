@@ -1,13 +1,5 @@
 # Backlog
 
-## 5. P2 — subagent-model-selection-evaluation
-
-Source: `docs/design/harness-policy-alignment.md` → Implementation Decisions, slice 5 and Testing Decisions. Read the paired-run protocol before launching agents; keep the existing headless review-effort experiment separate.
-
-- [ ] [HARNESS] Evaluate approximately 10–20 representative delegated tasks against current settings using paired inputs/criteria: Claude per-spawn overrides and Codex unpinned evaluation roles or built-ins; record requested/actual settings, client/default/forced context, quality, retries, lead review, elapsed time, tokens and measured or explicitly estimated cost; recommend role-specific keep/change/unverified outcomes without removing production pins. Read `docs/design/harness-policy-alignment.md`, slice 5, before forming the contract.
-
-Acceptance: preregister 10–20 task IDs total, finite attempts/time/cost-token budgets per platform, observation methods and benefit thresholds; setting-unverified runs cannot support model-effect claims; recommendations meet the design's paired-input/repeat/quality evidence bars and include total retry/review cost; unfinished platforms remain unverified and pin changes require a follow-up. Approach: staged platform runs using existing evaluation conventions and evaluation-only selection reasons; no permanent telemetry or reviewer-process changes.
-
 ## Harness — `task-*` edge enforcement (rescoped)
 
 Source: `docs/design/task-graph-audit.md`, re-scored in `docs/design/harness-altitude-audit.md`.
@@ -19,21 +11,10 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Harness — review effort follow-up
-
-- [ ] [harness] task-review-cycle: measure `EFFORT=high` vs default (and `low`) on a security plant buried in a large, mostly benign diff — f1–f7 (`dev/skills/task-review-cycle/evals/security-effort/RESULTS.md`) are ≤9-line diffs that hit a recall ceiling twice; record the resolved model ID per run (source: code-review PR #298)
-
 ## Review Backlog
-
-### PR #316 — commit-guard newline carry and status-band Windows path (2026-10-11)
-
-- [ ] [debt] commit-guard proves only the first branch creation in a command: a second `git checkout -b` after another creation or switch is never carried across `;`/newline, so `git checkout -b a; git checkout -b b; git commit` false-blocks from live `main` even when `b` is free (source: agy) — dev/hooks/commit-guard/guard.py (introduced here)
-- [ ] [FIX] commit-guard reads a shell comment to the end of the command, not the end of the line: `_split_segments` turns newlines into `;` before `shlex` strips `#` comments, so `# note` on one line hides every later line and `# note\ngit commit -m 'wip'` passes from `main` unchecked — both guards skipped; reproduced on `main` at 17e4f26, predates this PR (source: inline review) — dev/hooks/commit-guard/guard.py `_split_segments`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
-- [ ] [debt] status-band keeps the pre-compaction context fill for up to a minute after a manual `/compact`: `session.compact` is a gating hook, so the mod stays out of it and waits for the tick or the next measure (source: code-review) — mods/hooks/status-band/register.tsx
-- [ ] [debt] status-band cannot tell that the engine ended its `clock.every` interval after a refused period, so the minute tick is not re-armed in that case (source: code-review) — mods/hooks/status-band/register.tsx
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx
 
 ### PR #272 — review slot shell-out follow-ups

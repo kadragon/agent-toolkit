@@ -24,8 +24,9 @@ The hook path applies two guards:
      (where the creation is guaranteed to have run), and across `;`/newline
      only when the creation is proven to succeed: it is a literal `git
      checkout -b <name>` / `git switch -c <name>` that runs unconditionally,
-     follows nothing but inert segments, sits in no heredoc, and the branch is
-     creatable in the repo right now (`_branch_creatable`). Any later segment
+     follows nothing but inert segments, commits and earlier proven creations,
+     sits in no heredoc, and the branch is creatable in the repo right now
+     (`_branch_creatable`) beside those earlier names. Any later segment
      that is neither inert nor a commit ends that proof, and a commit aimed at
      another repo (`-C`, `GIT_DIR=`) is not covered by it. It is dropped across `||`/`|`/`&`,
      an unproven `;`/newline, or a `cd`, so a commit that may actually land on
@@ -157,13 +158,72 @@ def _has_expandable_subst(raw_arg):
     return False
 
 
+# Characters after which a '#' opens a word, and so a comment: whitespace and
+# the shell metacharacters. Anywhere else ('a#b', '$#', '${#v}') it is text.
+_COMMENT_PRECEDERS = " \t\n;&|()<>"
+
+
+def _strip_comments(command):
+    """The command with every shell comment removed: an unquoted, unescaped '#'
+    that opens a word, through the end of its own line. The newline stays, so
+    the next line is still a separate command. Quote characters inside a
+    comment are dropped with it and cannot open a span over later lines.
+    """
+    buf = []
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if ch == "\\" and not in_single and i + 1 < n:
+            buf.append(command[i:i + 2])  # an escaped character is never syntax
+            i += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif (ch == "#" and not in_single and not in_double
+              and (i == 0 or command[i - 1] in _COMMENT_PRECEDERS)):
+            while i < n and command[i] != "\n":
+                i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    return "".join(buf)
+
+
+def _operator_run(tok):
+    """The separators in a token made only of '&', '|' and ';', else None.
+
+    shlex returns adjacent punctuation as one token, so an operator at the end
+    of a line arrives glued to the ';' its newline became: '&&;', '||;', '|;',
+    '&;', ';;'. Read as text, that token hides every command after it. A ';'
+    straight after another operator is that newline and separates nothing more.
+    """
+    if not tok or any(ch not in "&|;" for ch in tok):
+        return None
+    ops = []
+    i = 0
+    while i < len(tok):
+        op = tok[i:i + 2] if tok[i:i + 2] in ("&&", "||") else tok[i]
+        i += len(op)
+        if op == ";" and ops:
+            continue
+        ops.append(op)
+    return ops
+
+
 def _split_segments(command):
     """Quote-aware split on shell segment separators: ; && || | & and newline.
 
     Uses shlex.shlex with posix=False so quoted tokens are preserved verbatim
     (e.g. '[FEAT] a && b' stays as one token) — downstream _tokens() then
     calls shlex.split() which correctly unquotes them.  Newlines outside quotes
-    are pre-normalized to ';' via a simple quote-tracking pass.
+    are pre-normalized to ';' via a simple quote-tracking pass. Comments are
+    removed first (_strip_comments): once newlines are ';' a comment has no end
+    of line left to stop at, and would swallow every later command.
 
     Returns (segments, operators): a list of raw segment strings (individual
     segments may be empty) and a parallel list of the separator operator that
@@ -176,6 +236,7 @@ def _split_segments(command):
     # Replace unquoted newlines with ';' (newline = command separator in shell).
     # A simple state-machine is sufficient since we don't need full posix quoting
     # here — we just need to know if we're inside a single or double-quoted span.
+    command = _strip_comments(command)
     buf = []
     in_single = False
     in_double = False
@@ -198,23 +259,27 @@ def _split_segments(command):
         # '~-./*?=' — without '@{}' a reflog ref like '@{-1}' gets split into
         # separate one-char tokens ('@', '{', '-1', '}'), which then get
         # rejoined with spaces and corrupt the segment text.
-        lex.wordchars += "@{}"
+        # Comments are already gone, so a '#' still here is text ('a#b'):
+        # shlex must neither split on it nor read it as a comment to the end.
+        lex.wordchars += "@{}#"
+        lex.commenters = ""
         tokens = list(lex)
     except ValueError:
         segs = re.split(r"&&|\|\||[;|\n&]", command)
         return segs, [None] * len(segs)
 
-    _SEP_OPS = {"&&", "||", "|", ";", "&"}
     segments = []
     operators: list = [None]  # operator preceding each segment; first has none
     current = []
     for tok in tokens:
-        if tok in _SEP_OPS:
-            segments.append(" ".join(current))
-            operators.append(tok)
-            current = []
-        else:
+        ops = _operator_run(tok)
+        if ops is None:
             current.append(tok)
+            continue
+        for op in ops:
+            segments.append(" ".join(current))
+            operators.append(op)
+            current = []
     segments.append(" ".join(current))
     return segments, operators
 
@@ -489,14 +554,22 @@ _IN_PROGRESS_MARKERS = (
 )
 
 
+def _names_collide(a, b):
+    """True if branches a and b cannot both exist: equal, or one sits above the
+    other (`feature` and `feature/x`). Compared case-insensitively, as loose
+    refs are on a case-folding filesystem."""
+    a = a.casefold()
+    b = b.casefold()
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
 def _branch_creatable(cwd, name, _override=None):
     """True only when creating and switching to branch <name> in cwd is proven
     able to succeed: the name is a valid branch name, no existing branch equals
     it, sits above it or sits below it (`feature` blocks `feature/x` and the
-    reverse), no merge/rebase/cherry-pick/revert is in progress, and the index
-    holds no unmerged entry. Names compare case-insensitively, as loose refs
-    are on a case-folding filesystem. Any git failure (not a repo, timeout,
-    missing git) answers False.
+    reverse, see _names_collide), no merge/rebase/cherry-pick/revert is in
+    progress, and the index holds no unmerged entry. Any git failure (not a
+    repo, timeout, missing git) answers False.
 
     _override may be a bool, or a callable(cwd, name) → bool, for tests.
     """
@@ -524,12 +597,9 @@ def _branch_creatable(cwd, name, _override=None):
         return False
     if any(os.path.exists(os.path.join(git_dir.strip(), m)) for m in _IN_PROGRESS_MARKERS):
         return False
-    want = name.casefold()
-    for ref in refs.splitlines():
-        have = ref.strip()[len("refs/heads/"):].casefold()
-        if have == want or have.startswith(want + "/") or want.startswith(have + "/"):
-            return False
-    return True
+    return not any(
+        _names_collide(name, ref.strip()[len("refs/heads/"):]) for ref in refs.splitlines()
+    )
 
 
 def _bare_switch_target(segment):
@@ -937,9 +1007,10 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
     # A heredoc body outside quotes is split into segments like real commands,
     # so a creation "seen" there may be text. A quoted `"$(cat <<'EOF' ...)"`
     # commit message stays one token and is no obstacle.
-    has_heredoc = "<<" in _outside_quotes(command)
+    has_heredoc = "<<" in _outside_quotes(_strip_comments(command))
     ref_touched = False      # True once an earlier segment was anything but inert
     carries_semicolon = False  # the attribution comes from a creation proven to succeed
+    proven_created = []      # names created under that proof, absent from the live refs
     for idx, seg in enumerate(segments):
         # Branch attribution carries across '&&' (predecessor guaranteed to have
         # succeeded), and across ';' or a newline only from a creation proven to
@@ -978,15 +1049,21 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
             # or opened a compound command around it, it is spelled as a literal `checkout -b`/`switch -c`,
             # and the branch can be created in the repo as it stands now. Only
             # then does a following ';' say as much as '&&' would.
+            # A proof still standing (carries_semicolon) means everything before
+            # was inert, a commit or a proven creation: the repo differs from
+            # the live one only by the names in proven_created.
             carries_semicolon = (
                 not has_heredoc
-                and not ref_touched
+                and (not ref_touched or carries_semicolon)
                 and _runs_unconditionally(idx, segments, operators)
                 and _is_provable_creation(stripped, created)
+                and not any(_names_collide(created, earlier) for earlier in proven_created)
                 and _branch_creatable(
                     _git_cwd(stripped, running_cwd), created, _override=creatable_override,
                 )
             )
+            if carries_semicolon:
+                proven_created.append(created)
         else:
             # A bare switch re-attributes the chain to its target when EITHER:
             #   (a) the target is a protected branch — `checkout -b X && checkout
@@ -1529,6 +1606,101 @@ def _test():
           on_main("git checkout -b feature/x; git checkout typo; git commit -m '[FEAT] y'") == 2)
     check("semicolon: creation, then a git alias that may switch → blocked",
           on_main("git checkout -b feature/x; git co main; git commit -m '[FEAT] y'") == 2)
+    # a second creation is proven on top of a first one that still stands
+    check("semicolon: two creations in a row, commit lands on the second → passes",
+          on_main("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'") == 0)
+    check("newline: creation, commit, second creation, commit → passes",
+          on_main("git checkout -b a\ngit commit -m '[FEAT] y'\n"
+                  "git switch -c b\ngit commit -m '[FEAT] z'") == 0)
+    check("semicolon: second creation of the first one's name → blocked",
+          on_main("git checkout -b a; git checkout -b a; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: second creation under the first one's name → blocked",
+          on_main("git checkout -b a; git checkout -b a/x; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: second creation above the first one's name → blocked",
+          on_main("git checkout -b a/x; git checkout -b A; git commit -m '[FEAT] y'") == 2)
+    check("semicolon: second creation not creatable in the repo → blocked",
+          run("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'", branch="main",
+              creatable=lambda cwd, name: name == "a") == 2)
+    check("semicolon: second creation after an unproven first → blocked",
+          run("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'", branch="main",
+              creatable=lambda cwd, name: name == "b") == 2)
+    check("semicolon: second creation behind '&&' is conditional → blocked",
+          on_main("git checkout -b a; test -f x && git checkout -b b; "
+                  "git commit -m '[FEAT] y'") == 2)
+    check("semicolon: a script between the two creations → blocked",
+          on_main("git checkout -b a; ./prepare.sh; git checkout -b b; "
+                  "git commit -m '[FEAT] y'") == 2)
+    check("semicolon: a switch between the two creations → blocked",
+          on_main("git checkout -b a; git checkout main; git checkout -b b; "
+                  "git commit -m '[FEAT] y'") == 2)
+    check("semicolon: second creation named main → blocked",
+          on_main("git checkout -b a; git checkout -b main; git commit -m '[FEAT] y'") == 2)
+
+    # a comment ends at its own line, never at the end of the command
+    check("comment line above a commit on main → blocked",
+          on_main("# note\ngit commit -m '[FEAT] y'") == 2)
+    check("comment line above a badly typed commit → type-blocked",
+          run("# note\ngit commit -m 'wip'") == 2)
+    check("trailing comment on an earlier line does not hide the commit → blocked",
+          on_main("git status # look first\ngit commit -m '[FEAT] y'") == 2)
+    check("comment after ';' does not hide the next line → blocked",
+          on_main("git add -A;# stage\ngit commit -m '[FEAT] y'") == 2)
+    check("'#' inside a word is text, not a comment → blocked",
+          on_main("echo a#b; git commit -m '[FEAT] y'") == 2)
+    check("'$#' is text, not a comment → blocked",
+          on_main("echo $#; git commit -m '[FEAT] y'") == 2)
+    check("an apostrophe in a comment opens no quote over later lines → blocked",
+          on_main("# don't skip\ngit status; git commit -m '[FEAT] y'") == 2)
+    check("an escaped '#' is text, not a comment → blocked",
+          on_main("echo \\# x; git commit -m '[FEAT] y'") == 2)
+    check("a commented-out commit is no commit → passes",
+          on_main("# git commit -m 'wip'\ngit status") == 0)
+    check("a commit after '#' on its own line stays commented out → passes",
+          on_main("git status # git commit -m 'wip'") == 0)
+    check("'#' in a quoted message is kept and type-checked → passes",
+          run("git commit -m '[FIX] close #316'") == 0)
+    check("'#' opening a quoted message is kept → type-blocked",
+          run("git commit -m '#316 fix'") == 2)
+    check("'#' in a double-quoted message survives a comment on the line above",
+          run("# note\ngit commit -m \"[FIX] see #316\"") == 0)
+    check("comment between a proven creation and the commit keeps the carry → passes",
+          on_main("git checkout -b feature/x\n# now commit\ngit commit -m '[FEAT] y'") == 0)
+    check("'<<' inside a comment is not a heredoc → passes",
+          on_main("# a << b\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 0)
+    check("a creation that is only a comment proves nothing → blocked",
+          on_main("# git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
+    # an operator at the end of a line still separates the next line
+    check("';' then newline does not hide the commit → blocked",
+          on_main("git add -A;\ngit commit -m '[FEAT] y'") == 2)
+    check("'&&' then newline does not hide the commit → blocked",
+          on_main("git add -A &&\ngit commit -m '[FEAT] y'") == 2)
+    check("'&&' then newline: the commit is still type-checked",
+          run("git add -A &&\ngit commit -m 'wip'") == 2)
+    check("'||' then newline does not hide the commit → blocked",
+          on_main("make lint ||\ngit commit -m '[FEAT] y'") == 2)
+    check("'|' then newline does not hide the commit → blocked",
+          on_main("echo x |\ngit commit -m '[FEAT] y'") == 2)
+    check("'&' then newline does not hide the commit → blocked",
+          on_main("sleep 1 &\ngit commit -m '[FEAT] y'") == 2)
+    check("'&&' then newline carries a creation like '&&' on one line → passes",
+          on_main("git checkout -b feature/x &&\ngit commit -m '[FEAT] y'",
+                  creatable=False) == 0)
+    check("'||' then newline after a proven creation → blocked",
+          on_main("git checkout -b feature/x ||\ngit commit -m '[FEAT] y'") == 2)
+    check("creation after '||' then newline is conditional → blocked",
+          on_main("make lint ||\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
+    check("a redirect operator is still text, not a separator",
+          _split_segments("make 2>&1 | tee log")[1] == [None, "|"])
+    check("_split_segments: '&&' then newline is one '&&'",
+          _split_segments("a &&\nb") == (["a", "b"], [None, "&&"]))
+    check("_split_segments: ';' then newline is one ';'",
+          _split_segments("a;\nb") == (["a", "b"], [None, ";"]))
+
+    check("_strip_comments keeps the newline that ends the comment",
+          _strip_comments("a # b\nc") == "a \nc")
+    check("_split_segments: text after a comment line is its own segment",
+          _split_segments("# note\ngit commit -m 'wip'")[0] == ["", "git commit -m 'wip'"])
+
     check("no creation: bare switches joined by ';' still fall back to live main → blocked",
           on_main("git checkout main && git checkout typo; git commit -m '[FEAT] y'") == 2)
     check("semicolon: creation, then a switch split by a line continuation → blocked",
