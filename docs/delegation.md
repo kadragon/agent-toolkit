@@ -75,7 +75,9 @@ Use only model/effort combinations supported by the active client and account.
 The Role Routing table's pins are current defaults retained until evaluation. Keep
 role-specific pins when evidence favors them; removing every pin is not the objective.
 Headless review selection remains owned by `dev:task-review-cycle`, separately from this
-subagent policy. This policy adds no router, global rules, telemetry, or duplicate roles.
+subagent policy. This policy adds no router, telemetry, or duplicate roles. The user's
+personal global `AGENTS.md` carries its own model-selection lines under *Delegation*;
+they apply first, as a higher layer.
 
 Escalate reasoning capability only after an observable miss suggests it is insufficient:
 for example, repeated failure on a valid reproduction after the task and inputs are clear.

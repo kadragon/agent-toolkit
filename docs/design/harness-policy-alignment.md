@@ -231,6 +231,10 @@ The agreed common policy is:
   pins where they improve results; removing all pins is not the objective.
 - Keep headless review model policy separate. Create no router skill/script, additional
   global AGENTS.md block, permanent telemetry system, or speculative custom roles.
+  Superseded in part on 2026-10-12: the user added a model-selection block to the
+  *Delegation* section of their personal global `AGENTS.md`, adapted from
+  `obra/superpowers@bb92a77:skills/subagent-driven-development/SKILL.md` → *Model
+  Selection*. The rest of this bullet stands.
 
 Platform facts checked in the conversation on 2026-10-09; reverify for the installed
 clients before writing authoritative platform docs or running evaluation:
