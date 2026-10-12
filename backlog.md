@@ -13,6 +13,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #320 — commit-guard comment and line-end operator (2026-10-12)
+
+- [ ] [FIX] commit-guard does not see a commit behind a shell keyword or a leading redirect: `if true; then git commit -m 'wip'; fi`, `for f in a; do git commit -m 'wip'; done` and `>log git commit -m 'wip'` exit 0 from `main` — `_is_git_commit` wants `git` as the first word after `command`/`exec`; predates this PR (source: code-review) — dev/hooks/commit-guard/guard.py `_is_git_commit`
+- [ ] [FIX] commit-guard parses a heredoc body as commands: an apostrophe in the body (`Don't panic`) fuses every later line into one segment and hides a commit after the heredoc, and a body line reading `git commit -m "wip"` false-blocks — since this PR also when it follows a `#` body line, which used to swallow it (source: code-review) — dev/hooks/commit-guard/guard.py `_split_segments`
+- [ ] [debt] commit-guard keeps four hand-rolled quote scanners (`_strip_comments`, the newline pass in `_split_segments`, `_outside_quotes`, `_has_expandable_subst`) that disagree on escapes, and none follows a quote nested in `"$( … )"`: `echo "$(echo "x #")"; git commit -m 'wip'` exits 0 from `main`; predates this PR (source: code-review) — dev/hooks/commit-guard/guard.py
+
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx

@@ -72,7 +72,8 @@ it; otherwise use the resolved platform default. See `docs/platform-specs.md` â†
 *Subagent Model and Effort Resolution* before interpreting an override or omitted model.
 Use only model/effort combinations supported by the active client and account.
 
-The Role Routing table's pins are current defaults retained until evaluation. Keep
+The Role Routing table's pins are current defaults; the paired-run evaluation meant to
+test them was dropped on 2026-10-12 without a run. Keep
 role-specific pins when evidence favors them; removing every pin is not the objective.
 Headless review selection remains owned by `dev:task-review-cycle`, separately from this
 subagent policy. This policy adds no router, telemetry, or duplicate roles. The user's
@@ -83,8 +84,7 @@ Escalate reasoning capability only after an observable miss suggests it is insuf
 for example, repeated failure on a valid reproduction after the task and inputs are clear.
 Check environmental failures, unavailable tools, and contradictory requirements first;
 those do not establish a model deficiency. Carry findings and unresolved issues into any
-retry. Compare total retry/review cost before recommending a permanent pin change in the
-queued model-selection evaluation.
+retry. Compare total retry/review cost before recommending a permanent pin change.
 
 ## Background Routing (non-blocking)
 

@@ -172,23 +172,28 @@ def _strip_comments(command):
     buf = []
     in_single = False
     in_double = False
+    word_start = True  # the next character would open a word
     i = 0
     n = len(command)
     while i < n:
         ch = command[i]
         if ch == "\\" and not in_single and i + 1 < n:
             buf.append(command[i:i + 2])  # an escaped character is never syntax
+            # `a\ #b` is one word; a line continuation joins two lines and
+            # leaves the boundary where it was
+            if command[i + 1] != "\n":
+                word_start = False
             i += 2
             continue
         if ch == "'" and not in_double:
             in_single = not in_single
         elif ch == '"' and not in_single:
             in_double = not in_double
-        elif (ch == "#" and not in_single and not in_double
-              and (i == 0 or command[i - 1] in _COMMENT_PRECEDERS)):
+        elif ch == "#" and not in_single and not in_double and word_start:
             while i < n and command[i] != "\n":
                 i += 1
             continue
+        word_start = not in_single and not in_double and ch in _COMMENT_PRECEDERS
         buf.append(ch)
         i += 1
     return "".join(buf)
@@ -199,8 +204,7 @@ def _operator_run(tok):
 
     shlex returns adjacent punctuation as one token, so an operator at the end
     of a line arrives glued to the ';' its newline became: '&&;', '||;', '|;',
-    '&;', ';;'. Read as text, that token hides every command after it. A ';'
-    straight after another operator is that newline and separates nothing more.
+    '&;', ';;'. Read as text, that token hides every command after it.
     """
     if not tok or any(ch not in "&|;" for ch in tok):
         return None
@@ -209,8 +213,6 @@ def _operator_run(tok):
     while i < len(tok):
         op = tok[i:i + 2] if tok[i:i + 2] in ("&&", "||") else tok[i]
         i += len(op)
-        if op == ";" and ops:
-            continue
         ops.append(op)
     return ops
 
@@ -277,6 +279,11 @@ def _split_segments(command):
             current.append(tok)
             continue
         for op in ops:
+            if op == ";" and not current and len(operators) > 1:
+                # Nothing since the last operator: this ';' is the newline after
+                # a line-end operator (`a &&` + newline, with or without a space
+                # or comment between) or an empty line, and separates nothing.
+                continue
             segments.append(" ".join(current))
             operators.append(op)
             current = []
@@ -460,8 +467,8 @@ def _outside_quotes(command):
 def _runs_unconditionally(idx, segments, operators):
     """True if segment idx runs whatever came before it: it opens the command or
     follows ';'/newline. An operator left at the end of a line (`make lint ||`
-    + newline) yields an empty segment that holds the real operator, so the
-    walk goes back through empty segments to the one that decides.
+    + newline) stays the next line's operator (_split_segments drops the
+    newline's ';'); the walk back covers an empty segment that still holds one.
     """
     j = idx
     while True:
@@ -1691,6 +1698,27 @@ def _test():
           on_main("make lint ||\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
     check("a redirect operator is still text, not a separator",
           _split_segments("make 2>&1 | tee log")[1] == [None, "|"])
+    check("'&&', a space, then newline carries a creation like '&&' → passes",
+          on_main("git checkout -b feature/x origin/main && \ngit commit -m '[FEAT] y'") == 0)
+    check("'&&', a comment, then newline carries a creation like '&&' → passes",
+          on_main("git checkout -b feature/x origin/main && # go\n"
+                  "git commit -m '[FEAT] y'") == 0)
+    check("'||', a comment, then newline still drops the creation → blocked",
+          on_main("git checkout -b feature/x || # or\ngit commit -m '[FEAT] y'") == 2)
+    check("'&&', a comment, then newline does not hide a commit on main → blocked",
+          on_main("git add -A && # stage\ngit commit -m '[FEAT] y'") == 2)
+    check("an empty line between a proven creation and the commit keeps the carry",
+          on_main("git checkout -b feature/x\n\ngit commit -m '[FEAT] y'") == 0)
+    check("_split_segments: '&&', space, newline is one '&&'",
+          _split_segments("a && \nb") == (["a", "b"], [None, "&&"]))
+    check("an escaped space before '#' keeps it text → blocked",
+          on_main("echo a\\ #b; git commit -m '[FEAT] y'") == 2)
+    check("a line continuation before '#' keeps it text → blocked",
+          on_main("echo a\\\n#b; git commit -m '[FEAT] y'") == 2)
+    check("_strip_comments: '#' after a continuation following a space is a comment",
+          _strip_comments("a \\\n# b\nc") == "a \\\n\nc")
+    check("_strip_comments: '#' right after a closing quote is text",
+          _strip_comments("echo 'a'#b") == "echo 'a'#b")
     check("_split_segments: '&&' then newline is one '&&'",
           _split_segments("a &&\nb") == (["a", "b"], [None, "&&"]))
     check("_split_segments: ';' then newline is one ';'",
