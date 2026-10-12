@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] commit-guard sees a commit behind a shell keyword, redirect or heredoc (dev v4.10.25) (2026-10-12)
 - [done] commit-guard no longer loses a commit behind a comment or a line-end operator, and follows a second proven branch creation (dev v4.10.24) (2026-10-12)
 - [done] task-next all-blocked stop lists each parked item and who can clear it (dev v4.10.23) (2026-10-11)
 - [done] Drop the unloaded per-hook `dev/hooks/*/hooks.json` copies (dev v4.10.23) (2026-10-11)
