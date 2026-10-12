@@ -86,13 +86,36 @@ _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # wrapper words that may precede 'git' but do not affect semantics
 _GIT_WRAPPERS = {"command", "exec"}
 
+# Words that stand before a command without being one: the reserved words a
+# compound command puts there (`then git commit`, `do git commit`) and the
+# grouping and negation marks.
+_SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "time", "!", "{", "("}
+# A redirect: an optional fd, the operator, then its target when attached.
+_REDIRECT = re.compile(r"^\d*(?:<<<|<<-?|<>|<&|>>|>&|>\||&>>|&>|<|>)(.*)$")
+
+
+def _command_start(parts):
+    """Index of the command word in a token list: past the shell keywords,
+    env-assigns and redirects (`>log git commit`) that may lead it."""
+    i = 0
+    while i < len(parts):
+        tok = parts[i]
+        m = _REDIRECT.match(tok)
+        if m:
+            i += 1 if m.group(1) else 2  # a bare operator takes the next token
+        elif tok in _SHELL_KEYWORDS or _ENV_ASSIGN.match(tok):
+            i += 1
+        else:
+            break
+    return i
+
 
 def _tokens(s):
-    """Tokenize a shell fragment, stripping LEADING env-assigns only.
+    """Tokenize a shell fragment from its command word on (_command_start).
 
-    Env-assign stripping applies only to the prefix before the command name:
-    once we've seen the first non-assign token (the command), remaining tokens
-    (e.g. -m 'foo=bar') are left intact.
+    The stripping applies only to the prefix before the command name: once
+    we've seen the command, remaining tokens (e.g. -m 'foo=bar', `echo then`)
+    are left intact.
 
     On shlex.split ValueError (unbalanced quotes etc.) → return [] so the
     segment is treated as non-commit (fail-open), preserving the documented
@@ -103,11 +126,7 @@ def _tokens(s):
         parts = shlex.split(s)
     except ValueError:
         return []  # unparseable segment → fail-open (not a commit)
-    # strip only the leading env-assignment prefix (before the command name)
-    i = 0
-    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
-        i += 1
-    return parts[i:]
+    return parts[_command_start(parts):]
 
 
 def _raw_tokens(s):
@@ -127,40 +146,185 @@ def _raw_tokens(s):
         parts = shlex.split(s, posix=False)
     except ValueError:
         return []
-    i = 0
-    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
-        i += 1
-    return parts[i:]
-
-
-def _has_expandable_subst(raw_arg):
-    """True if raw_arg (a message token with its original quotes intact) contains
-    a shell-EXPANDABLE command substitution — a '$(' or backtick that is NOT
-    inside single quotes. Single-quoted substitution is literal (git receives it
-    verbatim), so it is decidable and must be type-checked → returns False.
-    """
-    in_single = False
-    in_double = False
-    i = 0
-    n = len(raw_arg)
-    while i < n:
-        ch = raw_arg[i]
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif not in_single:
-            if ch == "`":
-                return True
-            if ch == "$" and i + 1 < n and raw_arg[i + 1] == "(":
-                return True
-        i += 1
-    return False
+    return parts[_command_start(parts):]
 
 
 # Characters after which a '#' opens a word, and so a comment: whitespace and
 # the shell metacharacters. Anywhere else ('a#b', '$#', '${#v}') it is text.
 _COMMENT_PRECEDERS = " \t\n;&|()<>"
+
+# What _scan says each character of a command is.
+_CODE = "c"      # unquoted command text, separators included
+_ESC = "e"       # a backslash and the character it escapes
+_SQ = "s"        # single-quoted, the quotes included
+_DQ = "d"        # double-quoted: the quotes, and a "$( … )" inside them, included
+_COMMENT = "#"   # a comment, up to but not including its newline
+_HEREDOC = "h"   # a heredoc body and its delimiter line
+_JOIN = "j"      # a line continuation: the backslash and its newline
+
+
+def _scan(command):
+    """Say what each character of a shell command is. Returns (classes,
+    balanced): one of the constants above per character, and False when a quote
+    or a "$( … )" never closes.
+
+    The one place that tracks quoting; _strip_comments, _split_segments,
+    _outside_quotes and _has_expandable_subst all read its answer, so they
+    cannot disagree on an escape or on where a quote ends.
+
+    A `$(` inside double quotes opens a command of its own, with its own
+    quotes, comments and heredocs; all of it stays part of the string. An
+    unquoted `$(` is left as command text. A `<<` is a heredoc only when its
+    delimiter line follows: `$((1<<2))` has none, and swallowing the lines
+    after it would hide them.
+    """
+    n = len(command)
+    cls = [_CODE] * n
+    balanced = True
+
+    def heredoc_word(i):
+        """The (delimiter, strip_tabs) a '<<' ending at i announces, or None."""
+        strip = command[i:i + 1] == "-"
+        if strip:
+            i += 1
+        while i < n and command[i] in " \t":
+            i += 1
+        word = []
+        quote = None
+        while i < n:
+            ch = command[i]
+            if quote:
+                if ch == quote:
+                    quote = None
+                else:
+                    word.append(ch)
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "\\" and i + 1 < n:
+                i += 1
+                word.append(command[i])
+            elif ch in " \t\n;&|<>()":
+                break
+            else:
+                word.append(ch)
+            i += 1
+        if quote or not word:
+            return None
+        return "".join(word), strip
+
+    def bodies(i, pending):
+        """Mark the heredoc bodies starting at i; returns the index after them."""
+        for delim, strip in pending:
+            j = i
+            while True:
+                if j >= n:
+                    return i  # no delimiter line: not a heredoc after all
+                end = command.find("\n", j)
+                if end == -1:
+                    end = n
+                line = command[j:end]
+                if (line.lstrip("\t") if strip else line) == delim:
+                    break
+                j = end + 1
+            j = min(end + 1, n)
+            cls[i:j] = [_HEREDOC] * (j - i)
+            i = j
+        return i
+
+    def double(i):
+        """From just past an opening '"' to just past the one that closes it."""
+        nonlocal balanced
+        while i < n:
+            ch = command[i]
+            if ch == "\\" and i + 1 < n:
+                cls[i] = cls[i + 1] = _ESC
+                i += 2
+                continue
+            cls[i] = _DQ
+            if ch == '"':
+                return i + 1
+            if ch == "$" and command[i + 1:i + 2] == "(":
+                cls[i + 1] = _DQ
+                i = code(i + 2, True)
+                continue
+            i += 1
+        balanced = False
+        return i
+
+    def code(i, nested):
+        """Command text from i: to the end, or (nested, inside a double-quoted
+        `$(`) to just past the ')' that closes it."""
+        nonlocal balanced
+        start = i
+        depth = 0
+        pending = []
+        word_start = True  # the next character would open a word
+        while i < n:
+            ch = command[i]
+            if ch == "\\" and i + 1 < n:
+                if command[i + 1] == "\n":
+                    # joins two lines and leaves the word boundary where it was
+                    cls[i] = cls[i + 1] = _JOIN
+                else:
+                    cls[i] = cls[i + 1] = _ESC  # `a\ #b` is one word
+                    word_start = False
+                i += 2
+                continue
+            if ch == "#" and word_start:
+                while i < n and command[i] != "\n":
+                    cls[i] = _COMMENT
+                    i += 1
+                continue
+            if ch == "'":
+                # in $'…' a backslash escapes; in '…' nothing does
+                ansi = i > 0 and command[i - 1] == "$" and cls[i - 1] == _CODE
+                j = i + 1
+                while j < n and command[j] != "'":
+                    j += 2 if ansi and command[j] == "\\" else 1
+                if j >= n:
+                    balanced = False
+                j = min(j + 1, n)
+                cls[i:j] = [_SQ] * (j - i)
+                i = j
+                word_start = False
+                continue
+            if ch == '"':
+                cls[i] = _DQ
+                i = double(i + 1)
+                word_start = False
+                continue
+            if ch == "\n":
+                i += 1
+                if pending:
+                    i = bodies(i, pending)
+                    pending = []
+                word_start = True
+                continue
+            if (command[i:i + 2] == "<<" and command[i + 2:i + 3] != "<"
+                    and command[i - 1:i] != "<"):
+                announced = heredoc_word(i + 2)
+                if announced:
+                    pending.append(announced)
+                i += 2
+                word_start = True
+                continue
+            if nested:
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    if depth == 0:
+                        cls[start:i + 1] = [_DQ] * (i + 1 - start)
+                        return i + 1
+                    depth -= 1
+            word_start = ch in _COMMENT_PRECEDERS
+            i += 1
+        if nested:
+            balanced = False
+            cls[start:] = [_DQ] * (n - start)
+        return i
+
+    code(0, False)
+    return cls, balanced
 
 
 def _strip_comments(command):
@@ -169,125 +333,102 @@ def _strip_comments(command):
     the next line is still a separate command. Quote characters inside a
     comment are dropped with it and cannot open a span over later lines.
     """
-    buf = []
-    in_single = False
-    in_double = False
-    word_start = True  # the next character would open a word
-    i = 0
-    n = len(command)
-    while i < n:
-        ch = command[i]
-        if ch == "\\" and not in_single and i + 1 < n:
-            buf.append(command[i:i + 2])  # an escaped character is never syntax
-            # `a\ #b` is one word; a line continuation joins two lines and
-            # leaves the boundary where it was
-            if command[i + 1] != "\n":
-                word_start = False
-            i += 2
-            continue
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif ch == "#" and not in_single and not in_double and word_start:
-            while i < n and command[i] != "\n":
-                i += 1
-            continue
-        word_start = not in_single and not in_double and ch in _COMMENT_PRECEDERS
-        buf.append(ch)
-        i += 1
-    return "".join(buf)
+    cls, _ = _scan(command)
+    return "".join(ch for ch, kind in zip(command, cls) if kind != _COMMENT)
 
 
-def _operator_run(tok):
-    """The separators in a token made only of '&', '|' and ';', else None.
+def _outside_quotes(command):
+    """The unquoted, unescaped command text alone: no quoted span, comment or
+    heredoc body."""
+    cls, _ = _scan(command)
+    return "".join(ch for ch, kind in zip(command, cls) if kind == _CODE)
 
-    shlex returns adjacent punctuation as one token, so an operator at the end
-    of a line arrives glued to the ';' its newline became: '&&;', '||;', '|;',
-    '&;', ';;'. Read as text, that token hides every command after it.
+
+def _has_expandable_subst(raw_arg):
+    """True if raw_arg (a message token with its original quotes intact) contains
+    a shell-EXPANDABLE command substitution — a '$(' or backtick that is neither
+    inside single quotes nor escaped. Those two are literal (git receives them
+    verbatim), so the message is decidable and must be type-checked → False.
     """
-    if not tok or any(ch not in "&|;" for ch in tok):
-        return None
-    ops = []
-    i = 0
-    while i < len(tok):
-        op = tok[i:i + 2] if tok[i:i + 2] in ("&&", "||") else tok[i]
-        i += len(op)
-        ops.append(op)
-    return ops
+    cls, _ = _scan(raw_arg)
+    for i, ch in enumerate(raw_arg):
+        if cls[i] in (_SQ, _ESC):
+            continue
+        if ch == "`" or (ch == "$" and raw_arg[i + 1:i + 2] == "("):
+            return True
+    return False
+
+
+def _operator_at(command, cls, i):
+    """The separator that starts at unquoted index i and its width, else
+    (None, 0). An '&' or '|' that belongs to a redirect ('2>&1', '&>log',
+    '>|f') is text."""
+    ch = command[i]
+    if ch in "\n;":
+        return ";", 1  # a newline separates commands like ';'
+    nxt = command[i + 1] if i + 1 < len(command) and cls[i + 1] == _CODE else ""
+    prev = command[i - 1] if i > 0 and cls[i - 1] == _CODE else ""
+    if ch == "&":
+        if nxt == "&":
+            return "&&", 2
+        if prev in ("<", ">") or nxt == ">":
+            return None, 0
+        return "&", 1
+    if ch == "|":
+        if nxt == "|":
+            return "||", 2
+        if prev == ">":
+            return None, 0
+        return "|", 1
+    return None, 0
 
 
 def _split_segments(command):
     """Quote-aware split on shell segment separators: ; && || | & and newline.
 
-    Uses shlex.shlex with posix=False so quoted tokens are preserved verbatim
-    (e.g. '[FEAT] a && b' stays as one token) — downstream _tokens() then
-    calls shlex.split() which correctly unquotes them.  Newlines outside quotes
-    are pre-normalized to ';' via a simple quote-tracking pass. Comments are
-    removed first (_strip_comments): once newlines are ';' a comment has no end
-    of line left to stop at, and would swallow every later command.
+    _scan says which characters are command text; only those can separate.
+    Comments, heredoc bodies and line continuations are left out of the
+    segments, quoted spans are kept verbatim (downstream _tokens() unquotes
+    them), and an unquoted paren is set apart so it never fuses with a word.
 
-    Returns (segments, operators): a list of raw segment strings (individual
-    segments may be empty) and a parallel list of the separator operator that
-    PRECEDES each segment (operators[0] is None; the rest are one of
-    '&&' '||' '|' ';' '&'). Callers use the operator to decide whether state
+    Returns (segments, operators): a list of stripped segment strings
+    (individual segments may be empty) and a parallel list of the separator
+    operator that PRECEDES each segment (operators[0] is None; the rest are one
+    of '&&' '||' '|' ';' '&'). Callers use the operator to decide whether state
     from an earlier segment (e.g. an in-chain branch creation) may carry into a
     later one — only '&&' guarantees the predecessor ran successfully; main()
     proves it separately for a creation followed by ';'.
     """
-    # Replace unquoted newlines with ';' (newline = command separator in shell).
-    # A simple state-machine is sufficient since we don't need full posix quoting
-    # here — we just need to know if we're inside a single or double-quoted span.
-    command = _strip_comments(command)
-    buf = []
-    in_single = False
-    in_double = False
-    for ch in command:
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif ch == "\n" and not in_single and not in_double:
-            ch = ";"
-        buf.append(ch)
-    normalized = "".join(buf)
-
-    # Lex with posix=False so quotes are kept as part of the token text.
-    # punctuation_chars groups '&&', '||', '|', ';', '&' as operator tokens.
-    try:
-        lex = shlex.shlex(normalized, posix=False, punctuation_chars="&|;<>")
-        lex.whitespace_split = False
-        # shlex's punctuation_chars mode only auto-extends wordchars with
-        # '~-./*?=' — without '@{}' a reflog ref like '@{-1}' gets split into
-        # separate one-char tokens ('@', '{', '-1', '}'), which then get
-        # rejoined with spaces and corrupt the segment text.
-        # Comments are already gone, so a '#' still here is text ('a#b'):
-        # shlex must neither split on it nor read it as a comment to the end.
-        lex.wordchars += "@{}#"
-        lex.commenters = ""
-        tokens = list(lex)
-    except ValueError:
-        segs = re.split(r"&&|\|\||[;|\n&]", command)
+    cls, balanced = _scan(command)
+    if not balanced:
+        # an unclosed quote: split on every separator, attribute nothing
+        segs = re.split(r"&&|\|\||[;|\n&]", _strip_comments(command))
         return segs, [None] * len(segs)
 
     segments = []
     operators: list = [None]  # operator preceding each segment; first has none
     current = []
-    for tok in tokens:
-        ops = _operator_run(tok)
-        if ops is None:
-            current.append(tok)
+    i = 0
+    while i < len(command):
+        ch, kind = command[i], cls[i]
+        if kind in (_COMMENT, _HEREDOC, _JOIN):
+            i += 1
             continue
-        for op in ops:
-            if op == ";" and not current and len(operators) > 1:
-                # Nothing since the last operator: this ';' is the newline after
-                # a line-end operator (`a &&` + newline, with or without a space
-                # or comment between) or an empty line, and separates nothing.
-                continue
-            segments.append(" ".join(current))
-            operators.append(op)
-            current = []
-    segments.append(" ".join(current))
+        op, width = _operator_at(command, cls, i) if kind == _CODE else (None, 0)
+        if op is None:
+            current.append(f" {ch} " if kind == _CODE and ch in "()" else ch)
+            i += 1
+            continue
+        i += width
+        if op == ";" and not "".join(current).strip() and len(operators) > 1:
+            # Nothing since the last operator: this ';' is the newline after
+            # a line-end operator (`a &&` + newline, with or without a space
+            # or comment between) or an empty line, and separates nothing.
+            continue
+        segments.append("".join(current).strip())
+        operators.append(op)
+        current = []
+    segments.append("".join(current).strip())
     return segments, operators
 
 
@@ -448,22 +589,6 @@ _PROVABLE_CREATION_RE = re.compile(
 )
 
 
-def _outside_quotes(command):
-    """The command with every quoted span removed, by the same quote tracking
-    _split_segments uses to decide which newlines separate commands."""
-    buf = []
-    in_single = False
-    in_double = False
-    for ch in command:
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif not in_single and not in_double:
-            buf.append(ch)
-    return "".join(buf)
-
-
 def _runs_unconditionally(idx, segments, operators):
     """True if segment idx runs whatever came before it: it opens the command or
     follows ';'/newline. An operator left at the end of a line (`make lint ||`
@@ -532,14 +657,14 @@ def _redirects_git(segment):
     counts as redirecting.
     """
     try:
-        parts = shlex.split(segment.strip())
+        parts = shlex.split(_LEAD_NOISE.sub("", segment))
     except ValueError:
         return True
-    i = 0
-    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
-        if parts[i].startswith("GIT_"):
-            return True
-        i += 1
+    # the same prefix _is_git_commit reads past, or a commit it sees behind
+    # `{` or `>log` would go unexamined here
+    i = _command_start(parts)
+    if any(_ENV_ASSIGN.match(tok) and tok.startswith("GIT_") for tok in parts[:i]):
+        return True
     while i < len(parts) and parts[i] in _GIT_WRAPPERS:
         i += 1
     if i >= len(parts) or os.path.basename(parts[i]) != "git":
@@ -1014,7 +1139,7 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
     # A heredoc body outside quotes is split into segments like real commands,
     # so a creation "seen" there may be text. A quoted `"$(cat <<'EOF' ...)"`
     # commit message stays one token and is no obstacle.
-    has_heredoc = "<<" in _outside_quotes(_strip_comments(command))
+    has_heredoc = "<<" in _outside_quotes(command)
     ref_touched = False      # True once an earlier segment was anything but inert
     carries_semicolon = False  # the attribution comes from a creation proven to succeed
     proven_created = []      # names created under that proof, absent from the live refs
@@ -1957,6 +2082,116 @@ def _test():
     check("precommit: backtick text is NOT excused", run_pre("`cat msg.txt`") == 2)
     check("precommit: valid type with $(...) in the body passes",
           run_pre("[FEAT] handle $(x) safely") == 0)
+
+    # a commit behind a shell keyword or a leading redirect is still a commit
+    check("commit in an if body → blocked",
+          on_main("if true; then git commit -m 'wip'; fi") == 2)
+    check("commit in a for body → blocked",
+          on_main("for f in a; do git commit -m 'wip'; done") == 2)
+    check("commit behind a leading redirect → blocked",
+          on_main(">log git commit -m 'wip'") == 2)
+    check("commit in an if body is type-checked",
+          run("if true; then git commit -m 'wip'; fi") == 2)
+    check("commit in an if body with a valid type → passes",
+          run("if true; then git commit -m '[FEAT] y'; fi") == 0)
+    check("commit in an else body → blocked",
+          on_main("if false; then :; else git commit -m '[FEAT] y'; fi") == 2)
+    check("commit in a while body → blocked",
+          on_main("while read -r f; do git commit -m '[FEAT] y'; done") == 2)
+    check("commit as an if condition → blocked",
+          on_main("if ! git commit -m '[FEAT] y'; then echo no; fi") == 2)
+    check("commit in a group after `then` → blocked",
+          on_main("if true; then { git commit -m '[FEAT] y'; }; fi") == 2)
+    check("commit behind `time` → blocked",
+          on_main("time git commit -m '[FEAT] y'") == 2)
+    check("commit behind a detached leading redirect → blocked",
+          on_main("> log git commit -m '[FEAT] y'") == 2)
+    check("commit behind a leading fd redirect → blocked",
+          on_main("2>&1 git commit -m '[FEAT] y'") == 2)
+    check("commit behind a redirect and an assignment → blocked",
+          on_main(">log GIT_EDITOR=true git commit -m '[FEAT] y'") == 2)
+    check("commit behind a leading redirect is type-checked",
+          run(">log git commit -m 'wip'") == 2)
+    check("a keyword as an argument opens no command → passes",
+          run("echo then git commit -m 'wip'") == 0)
+    check("creation and commit joined by '&&' in an if body → passes",
+          on_main("if true; then git checkout -b feature/x && git commit -m '[FEAT] y'; fi") == 0)
+    check("creation as an if condition proves nothing for the body → blocked",
+          on_main("if git checkout -b feature/x; then git commit -m '[FEAT] y'; fi") == 2)
+
+    check("semicolon: creation, then a grouped commit aimed at another repo → blocked",
+          on_main("git checkout -b feature/x; { git -C /other commit -m '[FEAT] y'; }") == 2)
+    check("semicolon: creation, then a redirected commit aimed at another repo → blocked",
+          on_main("git checkout -b feature/x; >log git -C /other commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a negated GIT_DIR= commit → blocked",
+          on_main("git checkout -b feature/x; ! GIT_DIR=/o/.git git commit -m '[FEAT] y'") == 2)
+    check("semicolon: creation, then a redirected commit in the same repo → passes",
+          on_main("git checkout -b feature/x\n>log git commit -m '[FEAT] y'") == 0)
+
+    # a heredoc body is text, not commands
+    check("an apostrophe in a heredoc body does not hide the commit after it → blocked",
+          on_main("cat <<EOF > note.txt\nDon't panic\nEOF\ngit commit -m '[FEAT] y'") == 2)
+    check("the commit after such a heredoc is type-checked",
+          run("cat <<EOF\nDon't panic\nEOF\ngit commit -m 'wip'") == 2)
+    check("a heredoc body line reading `git commit` is text → passes",
+          run("cat <<EOF\ngit commit -m \"wip\"\nEOF") == 0)
+    check("the same line after a '#' body line is text → passes",
+          run("cat <<EOF\n# title\ngit commit -m \"wip\"\nEOF") == 0)
+    check("a quoted delimiter ends the body all the same → passes",
+          run("cat <<'EOF'\ngit commit -m \"wip\"\nEOF\ngit status") == 0)
+    check("'<<-' ends at a tab-indented delimiter → blocked",
+          run("cat <<-EOF\n\tgit commit -m ok\n\tEOF\ngit commit -m 'wip'") == 2)
+    check("'<<-' body is text → passes",
+          run("cat <<-EOF\n\tgit commit -m wip\n\tEOF") == 0)
+    check("two heredocs on one line, both bodies are text → blocked after them",
+          run("cat <<A <<B\ngit commit -m one\nA\ngit commit -m two\nB\ngit commit -m 'wip'") == 2)
+    check("two heredocs on one line, both bodies are text → passes",
+          run("cat <<A <<B\ngit commit -m one\nA\ngit commit -m two\nB") == 0)
+    check("an operator on the heredoc line still governs the line after the body",
+          _split_segments("cat <<EOF &&\nbody\nEOF\nb") == (["cat <<EOF", "b"], [None, "&&"]))
+    check("a heredoc with no delimiter line hides nothing → blocked",
+          on_main("cat <<EOF\nbody\ngit commit -m '[FEAT] y'") == 2)
+    check("'<<' in arithmetic is no heredoc → blocked",
+          on_main("echo $((1<<2))\ngit commit -m '[FEAT] y'") == 2)
+    check("a here-string is no heredoc → blocked",
+          on_main("cat <<<EOF\ngit commit -m '[FEAT] y'\nEOF") == 2)
+    check("an apostrophe in a heredoc commit message → passes",
+          run("git commit -m \"$(cat <<'EOF'\n[FEAT] y\n\nDon't panic\nEOF\n)\"") == 0)
+    check("a commit after a heredoc message holding both quote kinds is still seen",
+          run("git commit -m \"$(cat <<'EOF'\n[FEAT] y\n\nDon't \"quote\"\nEOF\n)\"\n"
+              "git commit -m 'wip'") == 2)
+
+    # one scanner: escapes, and a quote nested in "$( … )"
+    check("a quote nested in \"$( … )\" does not hide the commit after it → blocked",
+          on_main("echo \"$(echo \"x #\")\"; git commit -m 'wip'") == 2)
+    check("the commit after it is type-checked",
+          run("echo \"$(echo \"x #\")\"; git commit -m 'wip'") == 2)
+    check("a ';' inside a nested quote separates nothing → passes",
+          run("echo \"$(echo \"a; git commit -m wip; b\")\"") == 0)
+    check("_split_segments keeps a nested \"$( … )\" in one segment",
+          _split_segments("echo \"$(echo \"a; b\")\"; c") ==
+          (["echo \"$(echo \"a; b\")\"", "c"], [None, ";"]))
+    check("a commit split by a line continuation → blocked",
+          on_main("git commit \\\n  -m '[FEAT] y'") == 2)
+    check("a commit split by a line continuation is type-checked",
+          run("git commit \\\n  -m 'wip'") == 2)
+    check("an escaped quote opens no span over later lines → blocked",
+          on_main("echo it\\'s\ngit commit -m '[FEAT] y'") == 2)
+    check("an escaped quote in a $'…' string does not end it → blocked",
+          on_main("echo $'it\\'s # x'; git commit -m '[FEAT] y'") == 2)
+    check("_outside_quotes drops a nested \"$( … )\" whole",
+          _outside_quotes("a \"$(b \"c << d\")\" e") == "a  e")
+    check("_has_expandable_subst: \"$(x)\" expands",
+          _has_expandable_subst("\"$(x)\""))
+    check("_has_expandable_subst: an escaped '$(' in double quotes is literal",
+          not _has_expandable_subst("\"\\$(x)\""))
+    check("_has_expandable_subst: an escaped backtick is literal",
+          not _has_expandable_subst("\"\\`x\\`\""))
+    check("_has_expandable_subst: '\\'' does not reopen a single quote",
+          _has_expandable_subst("'it'\\''s'$(x)") and
+          not _has_expandable_subst("'it'\\''s $(x)'"))
+    check("a message with an escaped '$(' is type-checked",
+          run("git commit -m \"\\$(date) wip\"") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
