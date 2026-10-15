@@ -16,7 +16,7 @@ Each smell is phrased as the question that exposes it.
 | **Mirror / tautology** | Is the expected value computed by the code under test, its helpers, or a copy of its logic inside the test? Does setup share the object it asserts on? | DELETE + GAP |
 | **Mocked subject** | Is the thing under test itself replaced by a double? Would the assertion pass with the real code deleted? | DELETE + GAP |
 | **Mock-only assertion** | Does it assert only that a mock was called, when the spec names an outcome? | DELETE or MERGE into an outcome test |
-| **Change detector** | Can only an intentional decision fail it — a constant, exact wording, private structure, a call count the spec never names? | DELETE |
+| **Change detector** | Can only an intentional decision fail it — a constant, exact wording, private structure, a call count the spec never names? | DELETE (its kills are decision mutants; no gap) |
 | **Text grep** | Does it assert that a source, config or doc file contains a line? It proves only that the file is the file. | DELETE |
 | **Framework test** | Does it exercise library or language mechanics rather than this code's own boundary? | DELETE |
 | **Trivial code** | Does it test a getter, constructor, constant or plain forwarding that does not validate, default, derive, normalize, enforce, or cause a side effect? | DELETE |
@@ -67,7 +67,8 @@ input, files, network, env) are reachable by default.
 
 ## Keep rules
 
-A candidate matching any rule below leaves the list in Step 2, with the rule named in the report.
+A candidate matching rules 2–6 leaves the list in Step 2, with the rule named in the report.
+Rule 1 needs the kill matrix and is applied in Step 4.
 
 1. **Sole killer** — it is the only test that kills some mutant (decided in Step 4).
 2. **Regression test** — its name, comment, or history links it to a fixed bug or incident.

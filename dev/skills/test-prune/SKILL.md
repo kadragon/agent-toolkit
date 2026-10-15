@@ -29,12 +29,16 @@ leave it unchanged.
 
 ## Ground rules
 
-- **Copy first.** Every mutation run happens in a disposable copy — a `git worktree` under the
-  session scratchpad directory. The original tree receives only the final Step 5 edits.
+- **Clean tree, then copy.** Step 3 needs a clean working tree — the copy is made from `HEAD`,
+  and measuring `HEAD` while Step 5 edits uncommitted code mixes two codebases. Dirty tree → ask
+  the user to commit or stash first. Every mutation run happens in a disposable `git worktree`
+  under the session scratchpad directory; the original tree receives only the Step 5 edits.
 - **Delete, merge, or keep — never weaken.** A kept test keeps every assertion it had.
 - **Audit-only requests stop after Step 4** with the report. Edits need a request to clean up.
 - **Gaps are reported, not filled.** Writing new tests is a separate task.
 - **Kept beats deleted when evidence is missing.** No recorded verdict, no removal.
+- **Edit, never commit.** The skill leaves its edits uncommitted for the user or the calling
+  workflow to review.
 
 ## Step 1 — Map where the count comes from
 
@@ -45,7 +49,7 @@ Export per-file test counts in machine-readable form and sort descending:
 | vitest | `vitest run --reporter=json --outputFile=<scratch>/counts.json` |
 | jest | `jest --json --outputFile=<scratch>/counts.json` |
 | pytest | `pytest --collect-only -q` (group the node ids by file) |
-| go | `go test -list '.*' ./...` |
+| go | `go test -json ./...` — count `pass`/`fail` events per `Test`, including `t.Run` subtests (`-list` shows top-level functions only) |
 
 Look for runner flags in the repo's own config before assuming these. For every parametrized
 block (`it.each`, `test.each`, `@pytest.mark.parametrize`, table tests) record **generated cases**
@@ -65,8 +69,9 @@ Report only tests you read. For each candidate, write one line:
 ```
 
 "Decision" means only an intentional edit (a constant, message wording, private structure) can
-fail it; "none" means no realistic change fails it. Then apply the *Keep rules* in the same
-reference: a test matching one leaves the list now, with the rule named.
+fail it; "none" means no realistic change fails it. Then apply *Keep rules* 2–6 in the same
+reference: a test matching one leaves the list now, with the rule named. Rule 1 (sole killer)
+needs the kill matrix and is decided in Step 4.
 
 On a large suite, readers may split by test directory; each returns lines in this format and
 nothing it did not read.
@@ -106,18 +111,29 @@ also kill them.
 
 ## Step 4 — Classify
 
-For each candidate T, with K(T) = the mutants T kills:
+For each candidate T, let K(T) = the mutants T kills, **minus** two kinds that do not count as
+bugs caught:
+
+- **Decision mutants** — the mutation changes only an intentional choice the spec does not fix
+  (exact message wording, a tunable constant, private structure). A change-detector test kills
+  these and nothing else.
+- **Unreachable mutants** — the mutation sits in a branch an upstream guard makes unreachable,
+  cited by file and line (`references/smells.md` → *Unreachable inputs*). Report the dead branch
+  itself under *Gaps* as removable code.
+
+Apply the first matching row:
 
 | Verdict | Condition | Action |
 |---|---|---|
-| **DELETE** | every mutant in K(T) is also killed by a kept test | remove T |
-| **MERGE** | T and siblings differ only in input values of one class | collapse to one case per distinct input class |
-| **DELETE + GAP** | K(T) is empty after the targeted mutants | remove T; log the behavior its title claims as a gap |
-| **KEEP** | T is the **sole killer** of any mutant, or a *Keep rule* applies | leave T; note why |
+| **DELETE + GAP** | K(T) is empty after the targeted mutants | remove T; log the behavior its title claims as a gap — unless every kill was a decision mutant, then no gap |
+| **KEEP** | T is the **sole killer** of any mutant in K(T), or a *Keep rule* applies | leave T; note why |
+| **MERGE** | T and siblings differ only in input values of one class, and no collapsed case is a sole killer | collapse to one case per distinct input class |
+| **DELETE** | K(T) is non-empty and every mutant in it is also killed by a kept test | remove T |
 
 Decide removals **as a set**, not one at a time: two tests can each look redundant because the
-other exists. Re-run every mutant in the union of the removal set's K(T) with the whole set
-removed; any mutant that turns SURVIVED returns its sole killer to KEEP.
+other exists. Let U = the union of K(T) over every DELETE and every collapsed MERGE case. Re-run
+U with the whole set removed. For each mutant that turns SURVIVED, return at least one removed
+test that killed it to KEEP, then re-run U again; repeat until no mutant in U survives.
 
 Classify every SURVIVED mutant from Step 3:
 
@@ -137,20 +153,24 @@ Edit the original tree: delete DELETE verdicts, collapse MERGE groups. A merged 
 distinct input class and a title that says what it checks. Kept tests stay byte-identical except
 for shared fixtures a deletion orphaned — remove those only when nothing else imports them.
 
+**Done:** every DELETE and MERGE verdict applied, no orphaned fixture left, the suite green once.
+
 ## Step 6 — Verify independently
 
-1. **Re-inject every mutant** in the removal set's union K(T) against the edited tree in one
-   pass. Every one must be KILLED.
+1. **Re-inject every mutant in U** against the edited tree in one pass. Every one must be KILLED.
 2. **Run the full suite at least 3 times** (5 when tests use real timers, concurrency, or
    network) — all green.
 3. **Before/after numbers** — test count, distinct checks, runtime.
 4. When another agent did Steps 4–5, a reviewer that took no part checks: no assertion weakened,
    every title matches its body, no new flakiness from real timers.
 
+**Done:** every mutant in U re-killed, every repeated full run green, numbers recorded.
+
 ## Report
 
 ```
-Removed: <n> tests (<m> merged into <k>) — kill set unchanged: <x>/<x> mutants re-killed
+Removed: <n> tests (<m> merged into <k>) — sampled kill set unchanged: <x>/<x> mutants in U
+re-killed (sample: <n> of <total> mutants, seed <s>; unsampled mutants were not checked)
 Runtime: <before> → <after>; count: <before> → <after>
 | Test | Verdict | Smell | Mutants it killed | Also killed by |
 Gaps: <file:line — mutation — behavior unprotected>

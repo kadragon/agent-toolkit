@@ -10,7 +10,7 @@ SCRATCH="<session scratchpad directory>"
 git worktree add "$SCRATCH/prune-copy" HEAD
 ```
 
-Run every mutant there. Install dependencies in the copy itself; a symlinked `node_modules` or
+Make the copy from a clean working tree (SKILL.md *Ground rules*). Run every mutant there. Install dependencies in the copy itself; a symlinked `node_modules` or
 virtualenv shared with the original can let a mutation run write into the original tree. Remove
 the worktree (`git worktree remove`) after the report.
 
@@ -57,9 +57,12 @@ whole suite for that mutant; a too-narrow selection reports false SURVIVED.
 
 ## Leave-one-out
 
-Without per-test kill data: for each mutant that was KILLED, rerun with candidate T removed (or
+Without per-test kill data: for each candidate T, rerun **every** KILLED mutant with T removed (or
 `.skip`ped in the copy). Still KILLED → another test covers it. Turned SURVIVED → T is its sole
-killer. Run only the KILLED mutants in T's code region; the rest cannot depend on T.
+killer. Do not narrow the rerun to T's own code region: a test kills mutants anywhere its
+execution reaches, including callees and shared helpers in other files. To cut cost, first
+rerun only T itself against all KILLED mutants; the ones T fails on are K(T), and only those need
+the without-T rerun.
 
 ## Traps
 
