@@ -275,6 +275,9 @@ jobs:
       - name: Run prod/skills/hwpx/scripts/text.py --test
         run: python3 prod/skills/hwpx/scripts/text.py --test
 
+      - name: Run HWPX content comparison regressions
+        run: python3 prod/skills/hwpx/scripts/test_compare.py
+
       - name: Run prod/skills/hwpx/scripts/validate.py --test
         run: python3 prod/skills/hwpx/scripts/validate.py --test
 
