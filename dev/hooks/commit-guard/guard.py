@@ -1977,9 +1977,9 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             # A cwd change voids branch attribution — the new directory may be a
             # different repo where the earlier checkout never applied. A cd that
             # may not run leaves both cwds.
-            moved = maybe_cwds(exp_toks[1])
-            running_cwds = (list(dict.fromkeys(running_cwds + moved)) if guarded or hidden
-                            else moved)
+            cd_cwds = maybe_cwds(exp_toks[1])
+            running_cwds = (list(dict.fromkeys(running_cwds + cd_cwds)) if guarded or hidden
+                            else cd_cwds)
             running_branch = None
             chain_stack = []
             carries_semicolon = False
@@ -3488,6 +3488,11 @@ def _test():
           on_main("cat <<EOF\n`echo \\`git commit -m wip\\``\nEOF") == 2)
     check("a nested escaped backtick in an unquoted backtick runs → blocked",
           on_main("echo `echo \\`git commit -m wip\\``") == 2)
+    check("a cd in a substitution body moves no HEAD: the chain's branch holds → passes",
+          on_main("git checkout -b feat && x=$(cd /tmp && ls) && git commit -m '[FIX] x'") == 0)
+    check("a switch after a cd in a substitution body drops the chain's branch → blocked",
+          on_main("git checkout -b feat && x=$(cd /tmp && git checkout main)"
+                  " && git commit -m '[FIX] x'") == 2)
     check("'||' after a clean case still drops the chain's branch → blocked",
           on_main("git checkout -b feat || case a in a) true;; esac && git commit -m '[FIX] x'") == 2)
     check("'||' between two clean compounds still drops the chain's branch → blocked",

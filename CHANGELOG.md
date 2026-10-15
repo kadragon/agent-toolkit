@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] commit-guard reads a cd inside a substitution body as no HEAD move (dev v4.10.31) (2026-10-15)
+- [done] hwpx table.py insert and delete skip nested-table cells and refuse a cell whose span does not parse (prod v3.2.10) (2026-10-15)
 - [done] commit-guard reads a quoted backtick and heredoc-body substitutions, and keeps the branch past a clean case or function (dev v4.10.30) (2026-10-15)
 - [done] hwpx table.py insert and delete read cellAddr, cellSpan and cellSz in either attribute order (prod v3.2.9) (2026-10-15)
 - [done] commit-guard reads a substitution as a command and checks each cwd a cd behind an expansion or in a case arm may leave (dev v4.10.29) (2026-10-15)

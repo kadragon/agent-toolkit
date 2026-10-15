@@ -366,6 +366,22 @@ def _int_attr(tag: str, name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _own_matches(pattern: re.Pattern, row: str) -> list[re.Match]:
+    """Matches of pattern in the row's own cells: a nested table's cells
+    count rows of that table, not of this one."""
+    nested = [(s, e) for _id, s, e in _find_all_table_spans(row)]
+    return [m for m in pattern.finditer(row) if not any(s <= m.start() < e for s, e in nested)]
+
+
+def _sub_own(pattern: re.Pattern, fn, row: str) -> str:
+    """pattern.sub(fn, row) over the row's own cells only (see _own_matches)."""
+    out, last = [], 0
+    for m in _own_matches(pattern, row):
+        out += [row[last:m.start()], fn(m)]
+        last = m.end()
+    return "".join(out) + row[last:]
+
+
 def _insert_row(xml: str, table_id: str, at_index: int,
                 row_xml: str, grow: set[tuple[int, int]]) -> tuple[str, list[str]]:
     span = find_table(xml, table_id)
@@ -390,6 +406,11 @@ def _insert_row(xml: str, table_id: str, at_index: int,
     prefix = tbl[:trs[0][0]]
     suffix = tbl[trs[-1][1]:]
     rows = [tbl[s:e] for s, e in trs]
+    for i, row in enumerate(rows):
+        try:
+            _row_cells(row)  # a span that does not parse cannot be proven not to straddle
+        except ValueError as err:
+            raise ValueError(f"row {i}: {err}") from None
     grown = 0
 
     def adjust(m: re.Match) -> str:
@@ -405,7 +426,7 @@ def _insert_row(xml: str, table_id: str, at_index: int,
         grown += 1
         return m.group(1) + m.group(2) + _set_attr(m.group(3), "rowSpan", rs + 1)
 
-    new_rows = [CELL_RE.sub(adjust, row) for row in rows]
+    new_rows = [_sub_own(CELL_RE, adjust, row) for row in rows]
     new_rows.insert(at_index, row_xml)
     new_rows = [_set_row_addr(r, i) for i, r in enumerate(new_rows)]
     new_prefix, nc = re.subn(
@@ -434,7 +455,7 @@ def _list_rows_insert(xml: str, table_id: str) -> None:
     for i, (s, e) in enumerate(trs):
         row = tbl[s:e]
         txt = " ".join(re.findall(r"<hp:t>(.*?)</hp:t>", row))
-        spans = [str(_int_attr(m.group(3), "rowSpan")) for m in CELL_RE.finditer(row)]
+        spans = [str(_int_attr(m.group(3), "rowSpan")) for m in _own_matches(CELL_RE, row)]
         print(f"  [{int(i)}] cells={len(spans)} rowSpans={spans}  {txt[:60]}")
 
 
@@ -1017,7 +1038,12 @@ def _triplet(m: re.Match) -> tuple[int, int, int] | None:
 
 
 def _row_cells(row: str) -> list[tuple[int, int, int]]:
-    return [t for m in TRIPLET_RE.finditer(row) if (t := _triplet(m)) is not None]
+    """(rowAddr, rowSpan, height) of each of the row's own cells. A cell whose
+    triplet does not parse has an unknown span, so no delete is provably safe."""
+    cells = [t for m in _own_matches(TRIPLET_RE, row) if (t := _triplet(m)) is not None]
+    if len(cells) != len(_own_matches(re.compile(r'<hp:tc\b'), row)):
+        raise ValueError("a cell's cellAddr/cellSpan/cellSz did not parse — unsupported")
+    return cells
 
 
 def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[str]]:
@@ -1031,9 +1057,15 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
     for i in del_idx:
         if i < 0 or i >= n:
             raise ValueError(f"row index {i} out of range (table has {n} rows)")
+    row_cells = []
+    for i, (s, e) in enumerate(trs):
+        try:
+            row_cells.append(_row_cells(tbl[s:e]))
+        except ValueError as err:
+            raise ValueError(f"row {i}: {err}") from None
     del_height: dict[int, int] = {}
     for i in del_idx:
-        cells = _row_cells(tbl[trs[i][0]:trs[i][1]])
+        cells = row_cells[i]
         if any(rs > 1 for (_ra, rs, _h) in cells):
             raise ValueError(f"row {i} contains a rowSpan>1 cell (anchor row) — unsupported")
         del_height[i] = cells[0][2] if cells else 0
@@ -1058,7 +1090,7 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
                     + _set_attr(m.group(3), "rowSpan", rs - len(covered)) + m.group(4)
                     + _set_attr(m.group(5), "height", h - sum(del_height[d] for d in covered)))
 
-        row = TRIPLET_RE.sub(_fix, row)
+        row = _sub_own(TRIPLET_RE, _fix, row)
         kept.append(row)
     kept = [_set_row_addr(r, idx) for idx, r in enumerate(kept)]
     new_prefix, nc = re.subn(
@@ -1092,7 +1124,11 @@ def _list_rows_delete(xml: str, table_id: str) -> None:
     for i, (s, e) in enumerate(trs):
         row = tbl[s:e]
         txt = "".join(re.findall(r"<hp:t>(.*?)</hp:t>", row))
-        cells = _row_cells(row)
+        try:
+            cells = _row_cells(row)
+        except ValueError as err:
+            print(f"  [{i}] {err}  {txt[:60]}")
+            continue
         spans = [rs for (_ra, rs, _h) in cells]
         print(f"  [{i}] cells={len(cells)} rowSpans={spans}  {txt[:60]}")
 
@@ -1371,6 +1407,8 @@ _FIXTURE_DIR_MODE = '''\
           <hp:tr>
             <hp:tc>
               <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:cellSpan colSpan="1" rowSpan="1"/>
+              <hp:cellSz width="100" height="100"/>
               <hp:subList id="101">
                 <hp:p id="200" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>행0</hp:t></hp:run></hp:p>
               </hp:subList>
@@ -1379,6 +1417,8 @@ _FIXTURE_DIR_MODE = '''\
           <hp:tr>
             <hp:tc>
               <hp:cellAddr colAddr="0" rowAddr="1"/>
+              <hp:cellSpan colSpan="1" rowSpan="1"/>
+              <hp:cellSz width="100" height="100"/>
               <hp:subList id="102">
                 <hp:p id="201" paraPrIDRef="10" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="5"><hp:t>행1</hp:t></hp:run></hp:p>
               </hp:subList>
@@ -1514,6 +1554,84 @@ def _run_tests() -> None:
             print("AC-ADDR-2c PASS: insert grows a reordered straddling span")
     except Exception as e:
         failures.append(f"AC-ADDR-2c FAIL: {e}")
+
+    # AC-NEST-ROW: insert/delete leave the cells of a table nested in a row alone.
+    # OWPML serializes a cell's subList before its cellAddr, so a nested table's
+    # cells come first in the row text.
+    def _sub_first_tc(col: int, row: int, rs: int, h: int, inner: str = "") -> str:
+        return (f'<hp:tc><hp:subList><hp:p id="0"><hp:run><hp:t>r{row}c{col}</hp:t></hp:run>'
+                f'</hp:p>{inner}</hp:subList>'
+                f'<hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
+                f'<hp:cellSpan colSpan="1" rowSpan="{rs}"/>'
+                f'<hp:cellSz width="100" height="{h}"/></hp:tc>')
+
+    _inner_tbl = ('<hp:tbl id="8" rowCnt="2" colCnt="1"><hp:sz width="50" height="999"/>'
+                  '<hp:tr>' + _sub_first_tc(0, 0, 2, 999) + '</hp:tr></hp:tbl>')
+
+    def _nest_xml(nest_row: int) -> str:
+        # (colAddr, rowSpan, height) per row; the row's first cell holds the nested table
+        spec = {0: [(0, 2, 200), (1, 1, 100)], 1: [(1, 1, 100)], 2: [(0, 1, 100), (1, 1, 100)]}
+        rows = ['<hp:tr>' + "".join(
+                    _sub_first_tc(c, r, rs, h, _inner_tbl if r == nest_row and k == 0 else "")
+                    for k, (c, rs, h) in enumerate(spec[r])) + '</hp:tr>'
+                for r in range(3)]
+        return ('<hp:tbl id="9" rowCnt="3" colCnt="2"><hp:sz width="200" height="300"/>'
+                + "".join(rows) + '</hp:tbl>')
+
+    _nested_span = '<hp:cellSpan colSpan="1" rowSpan="2"/><hp:cellSz width="100" height="999"/>'
+    try:
+        row_xml = '<hp:tr>' + _sub_first_tc(1, 0, 1, 100) + '</hp:tr>'
+        result, info = _insert_row(_nest_xml(0), "9", 1, row_xml, set())
+        if _nested_span not in result:
+            failures.append("AC-NEST-ROW-a FAIL: insert grew a nested table's rowSpan")
+        elif "rowSpan cells extended: 1" not in info:
+            failures.append(f"AC-NEST-ROW-a FAIL: grown count wrong: {info!r}")
+        else:
+            print("AC-NEST-ROW-a PASS: insert grows the outer anchor only")
+    except Exception as e:
+        failures.append(f"AC-NEST-ROW-a FAIL: {e}")
+    try:
+        result, _ = _delete_rows(_nest_xml(0), "9", {1})
+        if _nested_span not in result:
+            failures.append("AC-NEST-ROW-b FAIL: delete shrank a nested table's rowSpan")
+        else:
+            print("AC-NEST-ROW-b PASS: delete shrinks the outer anchor only")
+    except Exception as e:
+        failures.append(f"AC-NEST-ROW-b FAIL: {e}")
+    try:
+        result, _ = _delete_rows(_nest_xml(2), "9", {2})
+        if '<hp:sz width="200" height="200"/>' not in result:
+            failures.append("AC-NEST-ROW-c FAIL: deleted height was not the outer cell's")
+        else:
+            print("AC-NEST-ROW-c PASS: delete ignores a nested anchor and its height")
+    except Exception as e:
+        failures.append(f"AC-NEST-ROW-c FAIL: {e}")
+
+    # AC-TRIPLET-CLOSED: delete refuses a table with a cell whose triplet does not parse
+    _broken_tc = ('<hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellMargin/>'
+                  '<hp:cellSpan colSpan="1" rowSpan="2"/><hp:cellSz width="100" height="200"/>'
+                  '<hp:subList><hp:p id="0"><hp:run><hp:t>x</hp:t></hp:run></hp:p></hp:subList></hp:tc>')
+    _missing_tc = _addr_tc(0, 0, 1, 2, 200).replace(' rowSpan="2"', '')
+    for label, bad_tc, del_rows in (("a", _broken_tc, {0}), ("b", _broken_tc, {1}),
+                                    ("c", _missing_tc, {0})):
+        bad_xml = _reorder_xml.replace(_addr_tc(0, 0, 1, 2, 200, True), bad_tc)
+        try:
+            _delete_rows(bad_xml, "9", del_rows)
+            failures.append(f"AC-TRIPLET-CLOSED-{label} FAIL: delete accepted an unparseable cell")
+        except ValueError as e:
+            if "did not parse" in str(e):
+                print(f"AC-TRIPLET-CLOSED-{label} PASS: delete fails closed on an unparseable cell")
+            else:
+                failures.append(f"AC-TRIPLET-CLOSED-{label} FAIL: unexpected error {e}")
+        try:
+            row_xml = '<hp:tr>' + _addr_tc(1, 0, 1, 1, 100) + '</hp:tr>'
+            _insert_row(bad_xml, "9", 1, row_xml, set())
+            failures.append(f"AC-TRIPLET-CLOSED-ins-{label} FAIL: insert accepted an unparseable cell")
+        except ValueError as e:
+            if "did not parse" in str(e):
+                print(f"AC-TRIPLET-CLOSED-ins-{label} PASS: insert fails closed on an unparseable cell")
+            else:
+                failures.append(f"AC-TRIPLET-CLOSED-ins-{label} FAIL: unexpected error {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:
