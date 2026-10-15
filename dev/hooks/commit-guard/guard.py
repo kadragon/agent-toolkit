@@ -116,7 +116,7 @@ def _strip_expansions(tok):
             break
         try:
             end = _expansion_end(rest, 0)
-        except ValueError:
+        except (ValueError, RecursionError):
             return tok
         if end is None:
             break
@@ -188,7 +188,7 @@ def _command_start(parts, bare=None, expansions=False, raws=None):
             continue
         try:
             words = _words(rest)[0]
-        except ValueError:
+        except (ValueError, RecursionError):
             break
         if len(words) != 1:
             break
@@ -201,7 +201,7 @@ def _defines_function(segment):
     f`): its body runs when f is called, not where it is written."""
     try:
         parts, bare, _ = _words(_LEAD_NOISE.sub("", segment))
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
     if parts[:1] == ["function"] and bare[0]:
         return True
@@ -595,8 +595,11 @@ def _scan(command):
                 k = i - 1
                 while k >= start and command[k] in " \t":
                     k -= 1
-                if k < start or command[k] in ";&|(\n" or k in pattern_ends:
+                if k < start or k in pattern_ends:
                     return True
+                if (command[k] in ";&|(\n" and cls[k] == _CODE
+                        and not (command[k] == "|" and command[k - 1:k] == ">")):
+                    return True  # an unescaped separator, not the `|` of `>|`
                 m = _RESERVED_BEFORE.search(command, start, k + 1)
                 if m is None:
                     return False
@@ -1101,7 +1104,7 @@ def _redirects_git(segment):
     text = _LEAD_NOISE.sub("", segment)
     try:
         parts, bare, raws = _words(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         try:
             parts, bare, raws = shlex.split(text), None, None
         except ValueError:
@@ -2839,6 +2842,16 @@ def _test():
           on_main("if " * 1200 + "case x in x) true;; esac; git commit -m wip") == 2)
     check("'x=$()' is no function head: the in-chain branch holds → passes",
           on_main("git checkout -b feat && x=$() && git commit -m '[FIX] y'") == 0)
+    # fourth review: an escaped separator puts no word in command position
+    check("an escaped ';' before 'case' opens no case → blocked",
+          on_main("echo \\; case x | git commit -m wip") == 2)
+    check("an escaped ';' before 'do case' opens no case → blocked",
+          on_main("echo \\; do case x | git commit -m wip") == 2)
+    check("the '|' of '>|' before 'case' opens no case → blocked",
+          on_main("echo x >| case | git commit -m wip") == 2)
+    nest = 450
+    check("deeply nested \"$( … )\" does not crash the hook → blocked",
+          on_main("git commit -m wip " + "\"$(echo " * nest + "x" + ")\"" * nest) == 2)
     check("a case after `time` opens its arm → blocked",
           on_main("time case x in x) git commit -m wip;; esac") == 2)
     check("an expansion before git on the shlex path → blocked",
