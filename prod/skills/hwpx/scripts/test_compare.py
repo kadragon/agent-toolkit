@@ -245,6 +245,41 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(result['change_count'], 1)
         self.assertEqual(result['changes'][0]['after'], '')
 
+    def test_text_redistributed_between_runs_or_objects(self):
+        a = paragraph().replace('<hp:run><hp:t></hp:t></hp:run>',
+            '<hp:run charPrIDRef="1"><hp:t>AB</hp:t></hp:run><hp:run charPrIDRef="2"><hp:t>C</hp:t></hp:run>')
+        b = a.replace('>AB<', '>A<').replace('>C<', '>BC<')
+        result = self.pair(a, b, 2)
+        self.assertEqual(result['changes'], [])
+        self.assertEqual(result['non_content_changes'][0]['kind'], 'text_placement')
+        a = paragraph().replace('<hp:t></hp:t>', '<hp:t>AB<hp:fwSpace/>C</hp:t>')
+        self.assertFalse(self.pair(a, a.replace('>AB<', '>A<').replace('/>C<', '/>BC<'), 2)['complete'])
+        a = paragraph().replace('<hp:t></hp:t>', '<hp:t>AB</hp:t>' + table([['cell']]) + '<hp:t>C</hp:t>')
+        self.assertFalse(self.pair(a, a.replace('>AB<', '>A<').replace('>C<', '>BC<'), 2)['complete'])
+
+    def test_cell_paragraph_id_rebuilt_by_table_tool(self):
+        a = paragraph().replace('<hp:t></hp:t>', table([['32,000,000원']]))
+        b = a.replace('32,000,000', '35,000,000').replace('id="1000000100"', 'id="0"')
+        result = self.pair(a, b, 2)
+        self.assertEqual(result['change_count'], 1)
+        self.assertEqual(result['changes'][0]['after'], '35,000,000원')
+
+    def test_anonymous_table_host_with_stable_table_identity(self):
+        a = paragraph('', '0').replace('<hp:t></hp:t>', table([['A']]))
+        result = self.pair(a, a.replace('>A<', '>B<'))
+        self.assertEqual(result['change_count'], 1)
+        a += paragraph('', '0').replace('<hp:t></hp:t>', table([['C']]).replace('id="42"', 'id="43"'))
+        result = self.pair(a, a.replace('>A<', '>B<').replace('>C<', '>D<'))
+        self.assertEqual(result['change_count'], 2)
+
+    def test_new_section_cache_kind(self):
+        self.write(self.a, paragraph('A'))
+        new = document(paragraph('B').replace('</hp:p>', '<hp:linesegarray/></hp:p>')).encode()
+        self.write(self.b, paragraph('A'), {'Contents/section1.xml': new})
+        result = self.run_cli(2)
+        cache = [x for x in result['non_content_changes'] if x['location']=='Contents/section1.xml']
+        self.assertEqual(cache[0]['kind'], 'layout_cache')
+
     def test_missing_grid_dimensions_and_minutes_template(self):
         a = paragraph().replace('<hp:t></hp:t>', table([['A', 'B']]))
         a = a.replace(' rowCnt="1" colCnt="2"', '')

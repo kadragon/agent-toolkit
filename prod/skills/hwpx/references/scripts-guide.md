@@ -54,6 +54,7 @@ corrupt document, or discard a report because it found changes.
 | 2 | `incomplete` | Uncertain correspondence or changed unsupported content; confirmed changes may coexist |
 | 3 | `error` | Invalid/unreadable input or processing failure |
 
+The exit table applies to comparison runs; `--help` prints usage and exits 0.
 Both inputs remain unchanged. Section paths retain the archive's section filename;
 paragraph/table ordinals in paths are one-based within their parent. Cell rows and
 columns are one-based versions of `cellAddr`, with `span.rows`/`span.columns` retained.
@@ -77,6 +78,10 @@ two unique unchanged content anchors enclosing a single edited paragraph. Repeat
 labels/IDs cannot establish identity alone; multi-edit anonymous regions stay incomplete.
 An unanchored single body paragraph with a placeholder ID may be incomplete even when
 it looks like a simple edit; one paragraph in an established cell grid can be compared.
+Anonymous table-host paragraphs can be matched using unique stable table IDs and
+unchanged grids. Rewritten single-paragraph cells retain their grid location even if
+their paragraph ID changes. Same text redistributed between runs/anchored objects
+is reported separately as uninterpreted placement change, not passed as unchanged.
 Inserted/deleted/reordered paragraphs and changed table grids mark the affected scope
 incomplete rather than generating positional replacement cascades. Independent scopes
 can still report changes. Nested tables are excluded as a whole, without flattening.

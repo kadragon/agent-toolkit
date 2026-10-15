@@ -54,6 +54,7 @@ class Node:
     children: list[Node] = field(default_factory=list)
     shape: tuple = ()
     span: dict = field(default_factory=dict)
+    placement: tuple = ()
 
     def signature(self) -> tuple:
         return (self.kind, self.shape)
@@ -93,20 +94,25 @@ class Reader:
     def paragraph(self, el: ET.Element, location: str) -> Node:
         node = Node('paragraph', location, el)
         parts = []
-        for child in el:
+        placement = []
+        for run_index, child in enumerate(el):
             if child.tag == hp('linesegarray'):
                 continue
             if child.tag != hp('run'):
                 self.excluded(child, location, 'unsupported paragraph child')
                 continue
-            for item in child:
+            for item_index, item in enumerate(child):
                 if item.tag == hp('t'):
                     parts.append(self.text(item, location))
+                    placement.append((run_index, item_index, canonical(item)))
                 elif item.tag == hp('tbl'):
                     node.children.append(self.table(item, f'{location}/table[{len(node.children)+1}]'))
+                    placement.append((run_index, item_index, item.tag))
                 elif item.tag not in {hp('secPr'), hp('colPr')}:
                     self.excluded(item, location, 'unsupported run object/control')
+                    placement.append((run_index, item_index, item.tag))
         node.text = ''.join(parts)
+        node.placement = tuple(placement)
         return node
 
     def table(self, el: ET.Element, location: str) -> Node:
@@ -300,8 +306,12 @@ class Comparison:
             # Grid coordinates identify cells only after ruling out observable
             # movement between cells (including row/column reorder).
             return True
-        ids_a = [n.element.get('id', '') for n in aa]
-        ids_b = [n.element.get('id', '') for n in bb]
+        if a.kind == 'cell' and len(aa) == 1:
+            # The verified cell grid identifies this sole paragraph even when
+            # table.py rebuilds it with a fresh placeholder ID.
+            return True
+        ids_a = [n.element.get('id', '') if n.element.get('id') not in PLACEHOLDER_IDS else '' for n in aa]
+        ids_b = [n.element.get('id', '') if n.element.get('id') not in PLACEHOLDER_IDS else '' for n in bb]
         unique_a, unique_b = Counter(ids_a), Counter(ids_b)
         if ids_a != ids_b:
             self.incomplete(a.location, 'child identity/order changed', structural=True)
@@ -309,14 +319,24 @@ class Comparison:
         anchors = [i for i, (x, y) in enumerate(zip(aa, bb))
                    if x.content() == y.content() and old_contents.count(x.content()) == 1
                    and new_contents.count(y.content()) == 1]
+        table_ids_a = Counter(t.element.get('id', '') for n in aa for t in n.children if t.kind == 'table')
+        table_ids_b = Counter(t.element.get('id', '') for n in bb for t in n.children if t.kind == 'table')
         for i, (x, y) in enumerate(zip(aa, bb)):
             if x.content() == y.content():
                 continue
             identity = ids_a[i]
             if identity and identity not in PLACEHOLDER_IDS and unique_a[identity] == unique_b[identity] == 1:
                 continue
-            # A cell grid plus a single paragraph gives a stable content container.
-            if a.kind == 'cell' and len(aa) == 1:
+            # An anonymous host can still be identified by unique stable table IDs
+            # and matching grids, without treating changed cell text as its anchor.
+            if (x.kind == y.kind == 'paragraph' and x.text == y.text and x.children
+                    and len(x.children) == len(y.children)
+                    and all(t.kind == u.kind == 'table' and t.shape == u.shape
+                            and [c.shape for c in t.children] == [c.shape for c in u.children]
+                            and t.element.get('id') == u.element.get('id')
+                            and t.element.get('id', '') not in PLACEHOLDER_IDS | {''}
+                            and table_ids_a[t.element.get('id')] == table_ids_b[t.element.get('id')] == 1
+                            for t, u in zip(x.children, y.children))):
                 continue
             # Two real anchors bound one anonymous edit. Multiple replacements in
             # one region could hide same-count deletion/insertion and stay incomplete.
@@ -332,6 +352,10 @@ class Comparison:
             if canonical(a.element) != canonical(b.element):
                 self.incomplete(a.location, 'nested table changed; comparison unsupported')
             return
+        if a.kind == 'paragraph' and a.text == b.text and a.placement != b.placement:
+            self.report['non_content_changes'].append({'location': a.location, 'kind': 'text_placement',
+                                                       'reason': 'same text redistributed across runs or anchored objects'})
+            self.incomplete(a.location, 'text placement changed; formatting/layout effect not interpreted')
         if a.kind == 'paragraph' and a.text != b.text:
             self.report['changes'].append({'kind': 'paragraph', 'original_location': a.location,
                                            'revised_location': b.location, 'before': a.text, 'after': b.text})
@@ -368,12 +392,12 @@ def compare_documents(a: Document, b: Document) -> dict:
         comparison.compare_node(a.sections[name], b.sections[name])
         if a.residuals[name] != b.residuals[name]:
             report['non_content_changes'].append({'location': name, 'kind': 'uninterpreted_xml',
-                                                  'reason': 'non-text structure, attributes or unsupported objects changed'})
+                                                  'reason': 'XML outside text values changed; may overlap structural findings'})
             comparison.incomplete(name, 'changed XML outside supported text comparison')
     for name in sorted(a.caches.keys() | b.caches.keys()):
         if a.caches.get(name) != b.caches.get(name):
             report['non_content_changes'].append({'location': name,
-                                                  'kind': 'layout_cache' if name in a.sections else 'derived_cache',
+                                                  'kind': 'layout_cache' if name in a.sections or name in b.sections else 'derived_cache',
                                                   'reason': 'known layout/preview/editor cache changed; rendering not verified'})
     for name in sorted(a.members.keys() | b.members.keys()):
         if a.members.get(name) != b.members.get(name):
