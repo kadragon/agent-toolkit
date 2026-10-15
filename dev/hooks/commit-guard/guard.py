@@ -257,23 +257,58 @@ def _scan(command):
         nonlocal balanced
         start = i
         # What is open at this level, innermost last: 'cmd' (a subshell),
-        # 'subst' (`$(`), 'tick', 'arith' (`((`), 'array' (`=(`), 'param' (`${`).
+        # 'subst' (`$(`, `<(`, `>(`), 'tick', 'arith' (`((`), 'array' (`=(`),
+        # 'param' (`${`). `$((` opens 'subst' then 'arith'.
         opened = []
         pending = []  # (delimiter, strip_tabs, len(opened) where announced)
         word_start = True  # the next character would open a word
 
         def close():
-            """Close the innermost construct. A substitution takes the heredocs
-            announced inside it along: bash reads those from its own text, so
-            none of them reaches the lines after it."""
+            """Close the innermost construct and return what it was. A
+            substitution takes the heredocs announced inside it along: bash
+            reads those from its own text, so none of them reaches the lines
+            after it."""
             nonlocal pending
-            if opened.pop() in ("subst", "tick"):
+            kind = opened.pop()
+            if kind in ("subst", "tick"):
                 pending = [p for p in pending if p[2] <= len(opened)]
+            return kind
+
+        def inner():
+            """What is open since the innermost substitution: one starts a
+            fresh command, so an enclosing (( … )) or ${ … } does not reach in."""
+            k = len(opened)
+            while k and opened[k - 1] not in ("subst", "tick"):
+                k -= 1
+            return opened[k:]
+
+        def lone_dollar(i):
+            """Whether the '$' run just before i leaves one '$' for i: '$$' is
+            the shell's pid, so only an odd run does."""
+            k = i
+            while k > 0 and command[k - 1] == "$" and cls[k - 1] == _CODE:
+                k -= 1
+            return (i - k) % 2 == 1
+
+        def arith_closes(j):
+            """Whether the '((' ending just before j closes as '))'. bash reads
+            one that does not, such as `((a) )`, as two subshells."""
+            depth = 0
+            while j < n:
+                if command[j] == "(":
+                    depth += 1
+                elif command[j] == ")":
+                    if depth == 0:
+                        return command[j + 1:j + 2] == ")"
+                    depth -= 1
+                j += 1
+            return False
 
         while i < n:
             ch = command[i]
             # in arithmetic and in ${ … }, '#' and '<<' are operators
-            plain = "arith" not in opened and "param" not in opened
+            here = inner()
+            plain = "arith" not in here and "param" not in here
             if ch == "\\" and i + 1 < n:
                 if command[i + 1] == "\n":
                     # joins two lines and leaves the word boundary where it was
@@ -284,17 +319,15 @@ def _scan(command):
                 i += 2
                 continue
             if ch == "#" and word_start and plain:
-                while i < n and command[i] != "\n":
+                # bash finds the closing backtick before it reads a comment
+                while i < n and command[i] != "\n" and not (
+                        command[i] == "`" and "tick" in opened):
                     cls[i] = _COMMENT
                     i += 1
                 continue
             if ch == "'":
-                # in $'…' a backslash escapes; in '…' nothing does. '$$' is the
-                # shell's pid, so only an odd run of '$' leaves one for the quote.
-                k = i
-                while k > 0 and command[k - 1] == "$" and cls[k - 1] == _CODE:
-                    k -= 1
-                ansi = (i - k) % 2 == 1
+                # in $'…' a backslash escapes; in '…' nothing does
+                ansi = lone_dollar(i)
                 j = i + 1
                 while j < n and command[j] != "'":
                     j += 2 if ansi and command[j] == "\\" else 1
@@ -318,16 +351,17 @@ def _scan(command):
                 word_start = True
                 continue
             if ch == "`":
-                if opened and opened[-1] == "tick":
-                    close()
-                else:
+                # a closing backtick ends no word: `` `true`# `` is one word
+                word_start = not (opened and opened[-1] == "tick")
+                if word_start:
                     opened.append("tick")
+                else:
+                    close()
                 i += 1
-                word_start = True
                 continue
-            if ch == "$" and command[i + 1:i + 2] == "{":
+            if ch == "{" and lone_dollar(i):
                 opened.append("param")
-                i += 2
+                i += 1
                 word_start = False  # `${#v}` is a length, not a comment
                 continue
             if ch == "}" and opened and opened[-1] == "param":
@@ -336,28 +370,33 @@ def _scan(command):
                 word_start = False
                 continue
             if ch == "(":
-                if command[i + 1:i + 2] == "(":
-                    opened += ["arith", "arith"]
+                before = command[i - 1:i]
+                if command[i + 1:i + 2] == "(" and arith_closes(i + 2):
+                    opened += ["subst" if before == "$" else "arith", "arith"]
                     i += 2
                 else:
-                    if command[i - 1:i] == "$":
+                    if before in ("$", "<", ">"):
                         opened.append("subst")
                     else:
-                        opened.append("array" if command[i - 1:i] == "=" else "cmd")
+                        opened.append("array" if before == "=" else "cmd")
                     i += 1
                 word_start = True
                 continue
             if ch == ")":
                 if opened and opened[-1] not in ("param", "tick"):
-                    close()
-                elif nested and not opened:
+                    # past a subshell or a (( … )) a '#' opens a comment; past
+                    # a substitution or an array it is still in the word
+                    word_start = close() in ("cmd", "arith")
+                    i += 1
+                    continue
+                if nested and not opened:
                     cls[start:i + 1] = [_DQ] * (i + 1 - start)
                     return i + 1
                 i += 1
                 word_start = True
                 continue
             if (command[i:i + 2] == "<<" and command[i + 2:i + 3] != "<"
-                    and command[i - 1:i] != "<" and plain and "array" not in opened):
+                    and command[i - 1:i] != "<" and plain and "array" not in here):
                 announced = heredoc_word(i + 2)
                 i += 2
                 word_start = True
@@ -2272,6 +2311,32 @@ def _test():
           run("echo $((1+2)); cat <<EOF\ngit commit -m \"wip\"\nEOF") == 0)
     check("a '#' opening a heredoc delimiter is no comment → blocked",
           on_main("cat <<#X; git commit -m '[FEAT] y'\n#X") == 2)
+
+    # a '#' joined to a closing construct is still in the word
+    check("a '#' after a closing backtick is no comment → blocked",
+          on_main("echo `true`#; git commit -m wip") == 2)
+    check("a comment just inside backticks ends at the closing one → blocked",
+          on_main("echo `#x`; git commit -m wip") == 2)
+    check("a '#' after a closing $( … ) is no comment → blocked",
+          on_main("echo $(true)#; git commit -m wip") == 2)
+    check("a '#' after a closing $(( … )) is no comment → blocked",
+          on_main("echo $((1))#; git commit -m wip") == 2)
+    check("a '#' after a closing array is no comment → blocked",
+          on_main("x=(a)#; git commit -m wip") == 2)
+    check("a '#' after a closing subshell opens a comment → passes",
+          run("(true)#; git commit -m wip") == 0)
+    check("'((' that closes as ') )' is two subshells, '#' a comment → blocked",
+          on_main("((echo a) # it's\n) && git commit -m wip # '") == 2)
+    check("a heredoc announced in <( … ) does not reach past its ')' → blocked",
+          on_main("cat <(cat <<EOF)\ngit commit -m wip\nEOF") == 2)
+    check("'$${' opens no ${ … }, so a later heredoc is still text → passes",
+          run("echo $${\ncat <<EOF\ngit commit -m wip\nEOF\ngit status") == 0)
+    check("'$${' in a quoted $( … ) leaves it balanced → blocked",
+          on_main("echo \"$(echo $${)\"; git commit -m wip") == 2)
+    check("a heredoc in $( … ) inside an array is still text → passes",
+          run("x=( $(cat <<EOF\ngit commit -m wip\nEOF\n) )\ngit status") == 0)
+    check("a '#' in $( … ) inside $(( … )) opens a comment → blocked",
+          on_main("echo $(( $(echo 1 # \"\n) + 1 ))\ngit commit -m wip\n# \"") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
