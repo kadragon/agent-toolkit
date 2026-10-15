@@ -353,10 +353,17 @@ def _set_row_addr(row: str, new_idx: int) -> str:
     return "".join(result)
 
 
-CELL_RE = re.compile(
-    r'(<hp:cellAddr colAddr=")(\d+)(" rowAddr=")(\d+)("/>)'
-    r'(<hp:cellSpan colSpan="\d+" rowSpan=")(\d+)("/>)'
-)
+# Attribute order is free (see _col_row), so match whole tags and read them apart.
+CELL_RE = re.compile(r'(<hp:cellAddr\b[^>]*/>)(\s*)(<hp:cellSpan\b[^>]*/>)')
+
+
+def _set_attr(tag: str, name: str, value: int) -> str:
+    return re.sub(rf'(\s{name}=")\d+(")', lambda m: f"{m.group(1)}{int(value)}{m.group(2)}", tag, count=1)
+
+
+def _int_attr(tag: str, name: str) -> int | None:
+    m = re.search(rf'\s{name}="(\d+)"', tag)
+    return int(m.group(1)) if m else None
 
 
 def _insert_row(xml: str, table_id: str, at_index: int,
@@ -385,23 +392,20 @@ def _insert_row(xml: str, table_id: str, at_index: int,
     rows = [tbl[s:e] for s, e in trs]
     grown = 0
 
-    def adjust(m: re.Match, row_index: int) -> str:
-        col = int(m.group(2))
-        ra = int(m.group(4))
-        rs = int(m.group(7))
+    def adjust(m: re.Match) -> str:
+        nonlocal grown
+        addr = _col_row(m.group(1), "Addr")
+        rs = _int_attr(m.group(3), "rowSpan")
+        if addr is None or rs is None:
+            return m.group(0)
+        col, ra = addr
         straddle = ra <= at_index - 1 and ra + rs - 1 >= at_index
-        explicit = (ra, col) in grow
-        new_rs = rs + 1 if (straddle or explicit) else rs
-        return (m.group(1) + m.group(2) + m.group(3) + m.group(4) + m.group(5)
-                + m.group(6) + str(new_rs) + m.group(8))
+        if not (straddle or (ra, col) in grow):
+            return m.group(0)
+        grown += 1
+        return m.group(1) + m.group(2) + _set_attr(m.group(3), "rowSpan", rs + 1)
 
-    new_rows = []
-    for idx, row in enumerate(rows):
-        before = row
-        row = CELL_RE.sub(lambda m, i=idx: adjust(m, i), row)
-        grown += sum(1 for a, b in zip(CELL_RE.findall(before), CELL_RE.findall(row))
-                     if a[6] != b[6])
-        new_rows.append(row)
+    new_rows = [CELL_RE.sub(adjust, row) for row in rows]
     new_rows.insert(at_index, row_xml)
     new_rows = [_set_row_addr(r, i) for i, r in enumerate(new_rows)]
     new_prefix, nc = re.subn(
@@ -430,7 +434,7 @@ def _list_rows_insert(xml: str, table_id: str) -> None:
     for i, (s, e) in enumerate(trs):
         row = tbl[s:e]
         txt = " ".join(re.findall(r"<hp:t>(.*?)</hp:t>", row))
-        spans = [m[6] for m in CELL_RE.findall(row)]
+        spans = [str(_int_attr(m.group(3), "rowSpan")) for m in CELL_RE.finditer(row)]
         print(f"  [{int(i)}] cells={len(spans)} rowSpans={spans}  {txt[:60]}")
 
 
@@ -1001,17 +1005,19 @@ def cmd_toggle_check(args: argparse.Namespace) -> None:
 # ── delete ────────────────────────────────────────────────────────────────────
 
 TRIPLET_RE = re.compile(
-    r'(<hp:cellAddr colAddr="\d+" rowAddr=")(\d+)("/>)'
-    r'(<hp:cellSpan colSpan="\d+" rowSpan=")(\d+)("/>)'
-    r'(<hp:cellSz width="\d+" height=")(\d+)("/>)'
+    r'(<hp:cellAddr\b[^>]*/>)(\s*)(<hp:cellSpan\b[^>]*/>)(\s*)(<hp:cellSz\b[^>]*/>)'
 )
 
 
+def _triplet(m: re.Match) -> tuple[int, int, int] | None:
+    """(rowAddr, rowSpan, height) of a TRIPLET_RE match, or None if one is missing."""
+    vals = (_int_attr(m.group(1), "rowAddr"), _int_attr(m.group(3), "rowSpan"),
+            _int_attr(m.group(5), "height"))
+    return None if None in vals else vals
+
+
 def _row_cells(row: str) -> list[tuple[int, int, int]]:
-    return [
-        (int(m.group(2)), int(m.group(5)), int(m.group(8)))
-        for m in TRIPLET_RE.finditer(row)
-    ]
+    return [t for m in TRIPLET_RE.finditer(row) if (t := _triplet(m)) is not None]
 
 
 def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[str]]:
@@ -1040,15 +1046,17 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
             continue
         row = tbl[s:e]
 
-        def _fix(m: re.Match, old_i: int = i) -> str:
-            ra, rs = int(m.group(2)), int(m.group(5))
-            h = int(m.group(8))
+        def _fix(m: re.Match) -> str:
+            t = _triplet(m)
+            if t is None:
+                return m.group(0)
+            ra, rs, h = t
             covered = [d for d in del_idx if ra < d <= ra + rs - 1]
-            new_rs = rs - len(covered)
-            new_h = h - sum(del_height[d] for d in covered)
-            return (m.group(1) + str(ra) + m.group(3)
-                    + m.group(4) + str(new_rs) + m.group(6)
-                    + m.group(7) + str(new_h) + m.group(9))
+            if not covered:
+                return m.group(0)
+            return (m.group(1) + m.group(2)
+                    + _set_attr(m.group(3), "rowSpan", rs - len(covered)) + m.group(4)
+                    + _set_attr(m.group(5), "height", h - sum(del_height[d] for d in covered)))
 
         row = TRIPLET_RE.sub(_fix, row)
         kept.append(row)
@@ -1459,6 +1467,53 @@ def _run_tests() -> None:
             print("AC-ADDR-1 PASS: cellAddr/cellSpan read regardless of attribute order")
     except Exception as e:
         failures.append(f"AC-ADDR-1 FAIL: {e}")
+
+    # AC-ADDR-2: insert/delete find a cell whose rowAddr/rowSpan serialize first
+    def _addr_tc(col: int, row: int, cs: int, rs: int, h: int, reordered: bool = False) -> str:
+        if reordered:
+            head = (f'<hp:cellAddr rowAddr="{row}" colAddr="{col}"/>'
+                    f'<hp:cellSpan rowSpan="{rs}" colSpan="{cs}"/>')
+        else:
+            head = (f'<hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
+                    f'<hp:cellSpan colSpan="{cs}" rowSpan="{rs}"/>')
+        return (f'<hp:tc>{head}<hp:cellSz width="100" height="{h}"/>'
+                f'<hp:subList><hp:p id="0"><hp:run><hp:t>r{row}c{col}</hp:t></hp:run></hp:p>'
+                f'</hp:subList></hp:tc>')
+
+    _reorder_xml = (
+        '<hp:tbl id="9" rowCnt="3" colCnt="2"><hp:sz width="200" height="300"/>'
+        '<hp:tr>' + _addr_tc(0, 0, 1, 2, 200, True) + _addr_tc(1, 0, 1, 1, 100) + '</hp:tr>'
+        '<hp:tr>' + _addr_tc(1, 1, 1, 1, 100) + '</hp:tr>'
+        '<hp:tr>' + _addr_tc(0, 2, 1, 1, 100) + _addr_tc(1, 2, 1, 1, 100) + '</hp:tr>'
+        '</hp:tbl>'
+    )
+    try:
+        _delete_rows(_reorder_xml, "9", {0})
+        failures.append("AC-ADDR-2a FAIL: delete accepted a reordered rowSpan>1 anchor row")
+    except ValueError as e:
+        if "anchor" in str(e):
+            print("AC-ADDR-2a PASS: delete refuses a reordered rowSpan>1 anchor")
+        else:
+            failures.append(f"AC-ADDR-2a FAIL: unexpected error {e}")
+    try:
+        result, _ = _delete_rows(_reorder_xml, "9", {1})
+        if '<hp:cellSpan rowSpan="1" colSpan="1"/><hp:cellSz width="100" height="100"/>' not in result:
+            failures.append("AC-ADDR-2b FAIL: delete did not shrink a reordered straddling span")
+        else:
+            print("AC-ADDR-2b PASS: delete shrinks a reordered straddling span and its height")
+    except Exception as e:
+        failures.append(f"AC-ADDR-2b FAIL: {e}")
+    try:
+        row_xml = '<hp:tr>' + _addr_tc(1, 0, 1, 1, 100) + '</hp:tr>'
+        result, info = _insert_row(_reorder_xml, "9", 1, row_xml, set())
+        if '<hp:cellSpan rowSpan="3" colSpan="1"/>' not in result:
+            failures.append("AC-ADDR-2c FAIL: insert did not grow a reordered straddling span")
+        elif "rowSpan cells extended: 1" not in info:
+            failures.append(f"AC-ADDR-2c FAIL: grown count wrong: {info!r}")
+        else:
+            print("AC-ADDR-2c PASS: insert grows a reordered straddling span")
+    except Exception as e:
+        failures.append(f"AC-ADDR-2c FAIL: {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:

@@ -246,6 +246,41 @@ def _function_nesting(segment):
     return k > 0, depth, k > 0 and j + k == n
 
 
+# Words that open or close a compound command around the one inside it.
+_COMPOUND_SYNTAX = _SHELL_KEYWORDS | {"}", ")", "esac", "fi", "done"}
+
+
+def _compound_inert(segment):
+    """True if the segment, inside a function definition or a case, runs
+    nothing but an _is_inert command once the compound's own syntax is set
+    aside: a function head, a brace or paren, a reserved word. Whatever else
+    it runs may move HEAD or the directory, now or when the function is
+    called."""
+    try:
+        words, bare, _ = _words(segment)
+    except (ValueError, RecursionError):
+        return False
+    n = len(words)
+
+    def is_bare(k, word):
+        return k < n and bare[k] and words[k] == word
+
+    i = 0
+    while i < n:
+        if bare[i] and words[i] in _COMPOUND_SYNTAX:
+            i += 1
+        elif is_bare(i + 1, "(") and is_bare(i + 2, ")"):
+            i += 3  # `f ( )`
+        elif is_bare(i, "function") and i + 1 < n:
+            i += 4 if is_bare(i + 2, "(") and is_bare(i + 3, ")") else 2
+        else:
+            break
+    j = n
+    while j > i and bare[j - 1] and words[j - 1] in _COMPOUND_SYNTAX:
+        j -= 1
+    return _is_inert(shlex.join(words[i:j]))
+
+
 def _ansi_c(s, i):
     """Decode the $'…' string whose body starts at i. Returns (text, index past
     the closing quote); ValueError when it never closes."""
@@ -508,6 +543,13 @@ _JOIN = "j"      # a line continuation: the backslash and its newline
 _ESAC_AFTER = ("", " ", "\t", "\n", ";", "&", "|", ")")
 
 
+def _tick_text(raw, quoted):
+    """A backtick body as bash runs it: a backslash before '$', '`' or '\\'
+    (and, inside double quotes, '"') is dropped, so a nested `\\`…\\`` is a
+    substitution again."""
+    return re.sub(r'\\([$`\\"])' if quoted else r'\\([$`\\])', r"\1", raw)
+
+
 def _scan(command):
     """(classes, balanced) of _scan_full."""
     cls, balanced, _, _ = _scan_full(command)
@@ -518,17 +560,21 @@ def _scan_full(command):
     """Say what each character of a shell command is. Returns (classes,
     balanced, subs, arm): one of the constants above per character; False
     when a quote or a "$( … )" never closes; each outermost command
-    substitution as (body_start, body_end, quoted), its body being
-    command[body_start:body_end]; and per character, whether it sits in a
-    case arm.
+    substitution as (body_start, body_end, quoted, anchor, text), its body
+    being command[body_start:body_end], or text when that is not None (a
+    backtick body, unescaped); anchor is the index of the '<<' whose heredoc
+    body holds it, else None; and per character, where it sits in a
+    case: "arm" in an arm, "case" elsewhere between `case` and `esac`, else
+    False.
 
     The one place that tracks quoting; _strip_comments, _split_segments,
     _outside_quotes and _has_expandable_subst all read its answer, so they
     cannot disagree on an escape or on where a quote ends.
 
-    A `$(` inside double quotes opens a command of its own, with its own
-    quotes, comments and heredocs; all of it stays part of the string. An
-    unquoted `$(` is left as command text. A `<<` is a heredoc only when its
+    A `$(` or a backtick inside double quotes opens a command of its own,
+    with its own quotes, comments and heredocs; all of it stays part of the
+    string. So does one in a heredoc body under an unquoted delimiter, which
+    stays part of the body. An unquoted `$(` is left as command text. A `<<` is a heredoc only when its
     delimiter line follows: `$((1<<2))` has none, and swallowing the lines
     after it would hide them.
     """
@@ -536,10 +582,12 @@ def _scan_full(command):
     cls = [_CODE] * n
     balanced = True
     subs = []
-    arm = [False] * n
+    arm: list = [False] * n
 
     def heredoc_word(i):
-        """The (delimiter, strip_tabs) a '<<' ending at i announces, or None."""
+        """The (delimiter, strip_tabs, quoted) a '<<' ending at i announces,
+        or None. quoted: any part of the delimiter is quoted, which leaves the
+        body literal text."""
         strip = command[i:i + 1] == "-"
         if strip:
             i += 1
@@ -547,6 +595,7 @@ def _scan_full(command):
             i += 1
         word = []
         quote = None
+        quoted = False
         while i < n:
             ch = command[i]
             if quote:
@@ -556,9 +605,11 @@ def _scan_full(command):
                     word.append(ch)
             elif ch in "'\"":
                 quote = ch
+                quoted = True
             elif ch == "\\" and i + 1 < n:
                 i += 1
                 word.append(command[i])
+                quoted = True
             elif ch in " \t\n;&|<>()":
                 break
             else:
@@ -566,11 +617,50 @@ def _scan_full(command):
             i += 1
         if quote or not word:
             return None
-        return "".join(word), strip
+        return "".join(word), strip, quoted
 
-    def bodies(i, pending):
-        """Mark the heredoc bodies starting at i; returns the index after them."""
-        for delim, strip in pending:
+    def tick_end(i, end):
+        """The index of the backtick closing one opened just before i, or
+        None when none does before end."""
+        while i < end and command[i] != "`":
+            i += 2 if command[i] == "\\" else 1
+        return i if i < end else None
+
+    def body_substs(i, end, anchor):
+        """Note each substitution in a heredoc body, command[i:end], as an
+        outermost one: under an unquoted delimiter bash runs them. One that
+        does not close inside the body is no command, and ends the reading."""
+        nonlocal balanced
+        while i < end:
+            ch = command[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "`":
+                close_at = tick_end(i + 1, end)
+                if close_at is None:
+                    return
+                subs.append((i + 1, close_at, True, anchor,
+                             _tick_text(command[i + 1:close_at], False)))
+                i = close_at + 1
+                continue
+            if ch == "$" and command[i + 1:i + 2] == "(":
+                # code() reads the substitution's own quotes and parens; what
+                # it marks and whether it closes stay the body's business
+                kept, was = cls[i:], balanced
+                after = code(i + 2, True)
+                cls[i:], balanced = kept, was
+                if after > end:
+                    return
+                subs.append((i + 2, after - 1, True, anchor, None))
+                i = after
+                continue
+            i += 1
+
+    def bodies(i, pending, record=False):
+        """Mark the heredoc bodies starting at i; returns the index after them.
+        record: note the substitutions in an unquoted-delimiter body."""
+        for delim, strip, quoted, anchor in pending:
             j = i
             while True:
                 if j >= n:
@@ -582,6 +672,8 @@ def _scan_full(command):
                 if (line.lstrip("\t") if strip else line) == delim:
                     break
                 j = end + 1
+            if record and not quoted:
+                body_substs(i, j, anchor)
             j = min(end + 1, n)
             cls[i:j] = [_HEREDOC] * (j - i)
             i = j
@@ -600,12 +692,22 @@ def _scan_full(command):
             cls[i] = _DQ
             if ch == '"':
                 return i + 1
+            if ch == "`":
+                close_at = tick_end(i + 1, n)
+                if close_at is None:
+                    break
+                cls[i:close_at + 1] = [_DQ] * (close_at + 1 - i)
+                if record and balanced:
+                    subs.append((i + 1, close_at, True, None,
+                                 _tick_text(command[i + 1:close_at], True)))
+                i = close_at + 1
+                continue
             if ch == "$" and command[i + 1:i + 2] == "(":
                 cls[i + 1] = _DQ
                 body = i + 2
                 i = code(body, True)
                 if record and balanced:
-                    subs.append((body, i - 1, True))
+                    subs.append((body, i - 1, True, None, None))
                 continue
             i += 1
         balanced = False
@@ -624,7 +726,7 @@ def _scan_full(command):
         # and 'case_body' (the arm after its ')'). `$((` opens 'subst' then
         # 'arith'.
         opened = []
-        pending = []  # (delimiter, strip_tabs, len(opened) where announced)
+        pending = []  # (delimiter, strip_tabs, quoted, len(opened) where announced, '<<' index)
         word_start = True  # the next character would open a word
         # the outermost unquoted command substitution open at the top level:
         # (body_start, len(opened) once it opened)
@@ -644,9 +746,10 @@ def _scan_full(command):
             nonlocal pending, rec
             kind = opened.pop()
             if kind in ("subst", "tick"):
-                pending = [p for p in pending if p[2] <= len(opened)]
+                pending = [p for p in pending if p[3] <= len(opened)]
             if rec is not None and len(opened) < rec[1]:
-                subs.append((rec[0], i, False))
+                subs.append((rec[0], i, False, None,
+                             _tick_text(command[rec[0]:i], False) if kind == "tick" else None))
                 rec = None
             return kind
 
@@ -712,7 +815,8 @@ def _scan_full(command):
         while i < n:
             ch = command[i]
             if not nested:
-                arm[i] = "case_body" in opened
+                arm[i] = ("arm" if "case_body" in opened
+                          else "case" if any(k.startswith("case") for k in opened) else False)
             top = opened[-1] if opened else None
             if (top in ("case_subj", "case_start") and ch not in " \t\n"
                     and not (ch == "#" and word_start)):
@@ -771,7 +875,7 @@ def _scan_full(command):
             if ch == "\n":
                 i += 1
                 if pending:
-                    i = bodies(i, [p[:2] for p in pending])
+                    i = bodies(i, [p[:3] + p[4:] for p in pending], not nested and rec is None)
                     pending = []
                 word_start = True
                 continue
@@ -860,7 +964,7 @@ def _scan_full(command):
                 i += 2
                 word_start = True
                 if announced:
-                    pending.append(announced + (len(opened),))
+                    pending.append(announced + (len(opened), i - 2))
                     # the delimiter is a word even when it opens with '#'
                     if command[i:i + 1] == "-":
                         i += 1
@@ -946,7 +1050,7 @@ def _operator_at(command, cls, i):
 
 def _split_segments(command):
     """(segments, operators) of _split_full."""
-    segments, operators, _, _ = _split_full(command)
+    segments, operators, _, _, _ = _split_full(command)
     return segments, operators
 
 
@@ -961,12 +1065,14 @@ def _split_full(command):
     from the segment, leaving `$()` or two backticks in its place, so nothing
     inside it can split the segment.
 
-    Returns (segments, operators, arms, bodies): a list of stripped segment
+    Returns (segments, operators, arms, bodies, cases): a list of stripped segment
     strings (individual segments may be empty); a parallel list of the
     separator operator that PRECEDES each segment (operators[0] is None; the
     rest are one of '&&' '||' '|' ';' '&', or ')' after a case pattern); per
-    segment, whether it sits in a case arm; and per segment, the bodies of
-    the command substitutions in it, quoted or not, which run before it.
+    segment, whether it sits in a case arm; per segment, the bodies of
+    the command substitutions in it, quoted or not, which run before it;
+    and per segment, (in_case, open_after): whether any of it is inside a
+    case, and whether a case is still open where it ends.
     Callers use the operator to decide whether state from an earlier segment
     (e.g. an in-chain branch creation) may carry into a later one — only '&&'
     guarantees the predecessor ran successfully; main() proves it separately
@@ -976,28 +1082,40 @@ def _split_full(command):
     if not balanced:
         # an unclosed quote: split on every separator, attribute nothing
         segs = re.split(r"&&|\|\||[;|\n&]", _strip_comments(command))
-        return segs, [None] * len(segs), [False] * len(segs), [[] for _ in segs]
+        return (segs, [None] * len(segs), [False] * len(segs), [[] for _ in segs],
+                [(False, False)] * len(segs))
 
-    starts = {body: (end, quoted) for body, end, quoted in subs}
+    starts = {}
+    anchored = {}  # '<<' index → the heredoc body substitutions it announced
+    for body, end, quoted, anchor, text in subs:
+        if anchor is None:
+            starts[body] = (end, quoted, text)
+        else:
+            # run as the command holding the '<<' runs, not after the body
+            anchored.setdefault(anchor, []).append(command[body:end] if text is None else text)
     # the parens of an unquoted `$( … )` stay joined to the word around them
-    joined = {k for body, end, quoted in subs if not quoted for k in (body - 1, end)}
+    joined = {k for body, (end, quoted, _) in starts.items() if not quoted for k in (body - 1, end)}
     segments = []
     operators: list = [None]  # operator preceding each segment; first has none
-    arms, bodies = [], []
+    arms, bodies, cases = [], [], []
     current, in_arm, found = [], False, []
+    in_case, case_now = False, False
 
     def end_segment():
-        nonlocal current, in_arm, found
+        nonlocal current, in_arm, found, in_case
         segments.append("".join(current).strip())
         arms.append(in_arm)
         bodies.append(found)
-        current, in_arm, found = [], False, []
+        cases.append((in_case, bool(case_now)))
+        current, in_arm, found, in_case = [], False, [], False
 
     i = 0
     while i < len(command):
+        if i in anchored:
+            found += anchored.pop(i)
         if i in starts:
-            end, quoted = starts[i]
-            found.append(command[i:end])
+            end, quoted, text = starts[i]
+            found.append(command[i:end] if text is None else text)
             if not quoted and end > i:
                 i = end  # the body is read on its own
                 continue
@@ -1005,7 +1123,9 @@ def _split_full(command):
         if kind in (_COMMENT, _HEREDOC, _JOIN):
             i += 1
             continue
-        in_arm = in_arm or arm[i]
+        in_arm = in_arm or arm[i] == "arm"
+        case_now = arm[i]
+        in_case = in_case or bool(case_now)
         if kind == _PATTERN:
             if ch == ")":
                 # the arm after a case pattern runs only when it matches
@@ -1028,7 +1148,7 @@ def _split_full(command):
         end_segment()
         operators.append(op)
     end_segment()
-    return segments, operators, arms, bodies
+    return segments, operators, arms, bodies, cases
 
 
 def _is_git_commit(segment):
@@ -1763,7 +1883,7 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
     if level > _MAX_SUBST_DEPTH:
         raise RecursionError("command substitutions nest too deep")
     branch_override, reflog_override, creatable_override = overrides
-    segments, operators, arms, bodies = _split_full(command)
+    segments, operators, arms, bodies, cases = _split_full(command)
     effective_cwd_at = {}  # segment_index → the cwds it may run in
     effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
     running_cwds = list(cwds)
@@ -1784,6 +1904,11 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
     fn_pending = False       # a function head seen alone: its body follows
     nested_commits = []      # commits found in substitution bodies
     moved = False            # some git call here may move HEAD
+    # A function definition or a case, `case` to `esac`, is one compound: the
+    # chain state on entering it, restored past its end unless something in
+    # it is not provably inert (dirty).
+    compound = None
+    dirty = False
 
     def maybe_cwds(path):
         return list(dict.fromkeys(os.path.abspath(os.path.join(c, path)) for c in running_cwds))
@@ -1814,6 +1939,9 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             fn_pending = bare_head
             fn_depth = max(fn_depth + depth, 0)
         guarded = op == ")" or arms[idx] or head or bool(in_body)
+        if compound is None and (head or in_body or cases[idx][0]):
+            compound = (running_branch, list(chain_stack), stack_reliable, any_switch_seen)
+            dirty = False
         for body in bodies[idx]:
             if guarded:
                 found, body_moved = _commit_segments(
@@ -1825,6 +1953,7 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             nested_commits += found
             if body_moved:
                 # the substitution ran in a subshell, but on the same repo
+                dirty = True
                 moved = True
                 running_branch = None
                 chain_stack = []
@@ -1837,6 +1966,12 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
         # an expansion that may be empty leads the command: what follows it
         # may run, or may not
         hidden = exp_toks != toks
+        pattern = idx + 1 < len(operators) and operators[idx + 1] == ")"
+        if compound is not None and not pattern and not _compound_inert(stripped):
+            # what may move HEAD or the directory is open-ended (`eval`,
+            # `sh -c`, `pushd`, a function), so only a provably inert command
+            # leaves the compound clean
+            dirty = True
         if len(exp_toks) >= 2 and exp_toks[0] == "cd":
             # cd <path>: update running effective cwd (resolve relative paths).
             # A cwd change voids branch attribution — the new directory may be a
@@ -1992,6 +2127,13 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             ref_touched = True
         effective_cwd_at[idx] = list(running_cwds)
         effective_branch_at[idx] = running_branch
+        if compound is not None and fn_depth == 0 and not fn_pending and not cases[idx][1]:
+            # the compound ends here: its own separators, and its arms that
+            # may not run, say nothing of the chain around it
+            if not dirty:
+                running_branch, chain_stack, stack_reliable, any_switch_seen = compound
+                chain_stack = list(chain_stack)
+            compound = None
 
     # Collect all commit segments with their effective cwds and in-chain branch
     commit_segs = []
@@ -3277,6 +3419,80 @@ def _test():
     except RecursionError:
         deep_code = "RecursionError"
     check("a deeply nested \"$( … )\" commit does not fail open → blocked", deep_code == 2)
+    check("a backtick substitution inside double quotes runs → blocked",
+          on_main('echo "`git commit -m wip`"') == 2)
+    check("an escaped backtick inside double quotes is text → passes",
+          on_main('echo "\\`git commit -m wip\\`"') == 0)
+    check("a $( … ) in a heredoc body under an unquoted delimiter runs → blocked",
+          on_main("cat <<EOF\n$(git commit -m wip)\nEOF") == 2)
+    check("a backtick in a heredoc body under an unquoted delimiter runs → blocked",
+          on_main("cat <<EOF\n`git commit -m wip`\nEOF") == 2)
+    check("a $( … ) after text in a heredoc body runs → blocked",
+          on_main("cat <<-EOF\n\tnote: $(git commit -m wip)\n\tEOF\necho done") == 2)
+    check("a heredoc body under a quoted delimiter is text → passes",
+          on_main("cat <<'EOF'\n$(git commit -m wip)\nEOF") == 0)
+    check("a heredoc body under a backslash-quoted delimiter is text → passes",
+          on_main("cat <<\\EOF\n`git commit -m wip`\nEOF") == 0)
+    check("an escaped '\\$(' in a heredoc body is text → passes",
+          on_main("cat <<EOF\n\\$(git commit -m wip)\nEOF") == 0)
+    check("a $( … ) in a heredoc body that never closes is no command → passes",
+          on_main("cat <<EOF\n$(git commit -m wip\nEOF\necho ok") == 0)
+    check("a function definition with no switch keeps the chain's branch → passes",
+          on_main("git checkout -b feat && f() { true; } && git commit -m '[FIX] x'") == 0)
+    check("a function body over several lines keeps the chain's branch → passes",
+          on_main("git checkout -b feat && f()\n{\n  true\n} && git commit -m '[FIX] x'") == 0)
+    check("a case with no switch keeps the chain's branch → passes",
+          on_main("git checkout -b feat && case a in a) true;; b) echo;; esac && git commit -m '[FIX] x'")
+          == 0)
+    check("a nested case with no switch keeps the chain's branch → passes",
+          on_main("git checkout -b feat && case a in a) case b in b) true;; esac;; esac"
+                  " && git commit -m '[FIX] x'") == 0)
+    check("a function body that switches drops the chain's branch → blocked",
+          on_main("git checkout -b feat && f() { git checkout main; } && f && git commit -m '[FIX] x'")
+          == 2)
+    check("a function body that cds drops the chain's branch → blocked",
+          on_main("git checkout -b feat && f() { cd /x; } && git commit -m '[FIX] x'") == 2)
+    check("a function body running its arguments drops the chain's branch → blocked",
+          on_main("git checkout -b feat && f() { \"$@\"; } && f git checkout main"
+                  " && git commit -m '[FIX] x'") == 2)
+    check("a case arm that switches drops the chain's branch → blocked",
+          on_main("git checkout -b feat && case a in a) git checkout main;; esac"
+                  " && git commit -m '[FIX] x'") == 2)
+    check("a case subject that switches drops the chain's branch → blocked",
+          on_main("git checkout -b feat && case $(git checkout main) in *) true;; esac"
+                  " && git commit -m '[FIX] x'") == 2)
+    check("a commit inside a case arm still reads the live branch → blocked",
+          on_main("git checkout -b feat && case a in a) git commit -m '[FIX] x';; esac") == 2)
+    check("a commit in a function body still reads the live branch → blocked",
+          on_main("git checkout -b feat && f() { git commit -m '[FIX] x'; } && git checkout main && f")
+          == 2)
+    for arm in ("eval 'git checkout main'", "sh -c 'git checkout main'", "env git checkout main",
+                "pushd /x", "g", "x=$(true)"):
+        check(f"a case arm running {arm!r} drops the chain's branch → blocked",
+              on_main(f"git checkout -b feat && case a in a) {arm};; esac && git commit -m '[FIX] x'")
+              == 2)
+    check("a function body running 'eval' drops the chain's branch → blocked",
+          on_main("git checkout -b feat && f() { eval \"$1\"; } && git commit -m '[FIX] x'") == 2)
+    check("an 'if' in a case arm that only echoes keeps the chain's branch → passes",
+          on_main("git checkout -b feat && case a in a) if true; then echo y; fi;; esac"
+                  " && git commit -m '[FIX] x'") == 0)
+    check("a heredoc body's switch runs before a later '&&' commit → blocked",
+          on_main("git checkout -b feat && cat <<EOF && git commit -m '[FIX] x'\n"
+                  "$(git checkout main)\nEOF") == 2)
+    check("a heredoc body's commit runs in the cwd before a later cd → blocked",
+          run("cat <<EOF && cd /x\n$(git commit -m '[FIX] y')\nEOF",
+              branch=lambda cwd: "feature/y" if cwd == "/x" else "main") == 2)
+    check("a nested escaped backtick in a quoted backtick runs → blocked",
+          on_main('echo "`echo \\`git commit -m wip\\``"') == 2)
+    check("a nested escaped backtick in a heredoc body runs → blocked",
+          on_main("cat <<EOF\n`echo \\`git commit -m wip\\``\nEOF") == 2)
+    check("a nested escaped backtick in an unquoted backtick runs → blocked",
+          on_main("echo `echo \\`git commit -m wip\\``") == 2)
+    check("'||' after a clean case still drops the chain's branch → blocked",
+          on_main("git checkout -b feat || case a in a) true;; esac && git commit -m '[FIX] x'") == 2)
+    check("'||' between two clean compounds still drops the chain's branch → blocked",
+          on_main("git checkout -b feat && case a in a) true;; esac || f() { true; }"
+                  " && git commit -m '[FIX] x'") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).

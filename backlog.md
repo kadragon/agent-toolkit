@@ -13,11 +13,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #326 — commit-guard substitutions + HWPX cellAddr order (2026-10-15)
+### PR #327 — commit-guard quoted backticks + heredoc substitutions, hwpx insert/delete attribute order (2026-10-15)
 
-- [ ] [FIX] commit-guard does not read a backtick substitution inside double quotes, ``echo "`git commit -m wip`"`` (exits 0 from `main`), nor a `$( … )` in a heredoc body under an unquoted delimiter: `_scan`'s `double` and `bodies` mark both as text, so `_split_full` records no body for them (source: integration-check; pre-existing) — dev/hooks/commit-guard/guard.py `_scan`
-- [ ] [debt] `table.py insert`/`delete` still need `colAddr` before `rowAddr` and `colSpan` before `rowSpan`: `CELL_RE` and `TRIPLET_RE` skip a reordered cell, so `delete` neither refuses its rowSpan>1 anchor nor shrinks its span; only the readers `_own_cell_addr`/`_cell_span` were made order-free (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py `TRIPLET_RE`
-- [ ] [debt] a function definition or case arm drops the chain's created branch for every later segment: `git checkout -b feat && f() { true; } && git commit -m '[FIX] x'` blocks from `main` though bash only defines `f`; only a HEAD-moving git call or a `cd` in the body or arm needs to drop it (source: code-review; pre-existing) — dev/hooks/commit-guard/guard.py `_commit_segments`
+- [ ] [debt] `table.py insert`/`delete` rewrite the cells of a nested table inside a row too: `CELL_RE.sub`/`TRIPLET_RE.sub` compare a nested cell's rowAddr/rowSpan to the outer row index, so an insert can grow a nested span past its own rowCnt and a delete can refuse on a nested anchor; skip cells at `<hp:tbl>` depth > 0 as `_set_row_addr` does (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_insert_row`
+- [ ] [debt] `table.py delete` skips a cell whose cellAddr/cellSpan/cellSz triplet does not parse (a missing attribute, an element between the tags), so its rowSpan>1 anchor check passes; fail closed instead (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_row_cells`
+- [ ] [debt] `_commit_segments`'s cd branch assigns `moved = maybe_cwds(…)`, rebinding the HEAD-moved boolean to a list, so a cd inside a substitution body reads as a HEAD move; conservative, but the name clash hides intent (source: integration-check; pre-existing) — dev/hooks/commit-guard/guard.py `_commit_segments`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 

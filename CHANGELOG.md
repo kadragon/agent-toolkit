@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] commit-guard reads a quoted backtick and heredoc-body substitutions, and keeps the branch past a clean case or function (dev v4.10.30) (2026-10-15)
+- [done] hwpx table.py insert and delete read cellAddr, cellSpan and cellSz in either attribute order (prod v3.2.9) (2026-10-15)
 - [done] commit-guard reads a substitution as a command and checks each cwd a cd behind an expansion or in a case arm may leave (dev v4.10.29) (2026-10-15)
 - [done] hwpx table.py reads cellAddr and cellSpan in either attribute order (prod v3.2.8) (2026-10-15)
 - [done] commit-guard sees a commit behind an expansion, in a case arm or function body, or in a word shlex cannot read (2 units) (dev v4.10.28) (2026-10-15)
