@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] commit-guard reads no heredoc in arithmetic, no ANSI-C quote after a pid, no comment joined to a substitution (dev v4.10.27) (2026-10-15)
 - [done] harness-curate contract check skips change-record docs that quote a retired rule (dev v4.10.26) (2026-10-15)
 - [done] commit-guard sees a commit behind a shell keyword, redirect or heredoc (dev v4.10.25) (2026-10-12)
 - [done] commit-guard no longer loses a commit behind a comment or a line-end operator, and follows a second proven branch creation (dev v4.10.24) (2026-10-12)
