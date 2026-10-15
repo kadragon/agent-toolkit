@@ -1851,24 +1851,52 @@ _EVAL_COMMANDS = {"eval", "source", "."}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 
 
+# Words that run the command after them: `command -p`, `env FOO=1`,
+# `timeout -s KILL 5`. Their options are skipped; the value-taking ones
+# below take the next word with them.
+_RUNNER_WRAPPERS = {"builtin", "command", "env", "exec", "nohup", "timeout"}
+_WRAPPER_VALUE_OPTS = {"-s", "--signal", "-k", "--kill-after", "-u", "--unset", "-C", "--chdir"}
+# Shell options whose next word is their value, not a script: `-o pipefail`.
+_SHELL_VALUE_OPTS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+
 def _runs_code(toks):
-    """True if toks, past any _GIT_WRAPPERS, run shell code: an _EVAL_COMMANDS
-    word, or a shell given `-c` (alone or in a flag cluster such as `-lc`)."""
+    """True if toks, past any _RUNNER_WRAPPERS, run shell code: an
+    _EVAL_COMMANDS word, or a shell given `-c` among its options (alone or in
+    a cluster such as `-lc`)."""
     i = 0
-    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+    while i < len(toks) and os.path.basename(toks[i]) in _RUNNER_WRAPPERS:
+        wrapper = os.path.basename(toks[i])
         i += 1
+        while i < len(toks) and (toks[i].startswith("-") or _ENV_ASSIGN.match(toks[i])):
+            i += 2 if toks[i] in _WRAPPER_VALUE_OPTS else 1
+        if wrapper == "timeout" and i < len(toks):
+            i += 1  # the duration
     if i >= len(toks):
         return False
     if toks[i] in _EVAL_COMMANDS:
         return True
     if os.path.basename(toks[i]) not in _SHELLS:
         return False
-    for tok in toks[i + 1:]:
-        if not tok.startswith("-") or tok.startswith("--"):
+    j = i + 1
+    while j < len(toks):
+        tok = toks[j]
+        if tok == "--" or not tok.startswith(("-", "+")):
             break
-        if "c" in tok[1:]:
+        if tok in _SHELL_VALUE_OPTS:
+            j += 2
+            continue
+        if tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
             return True
+        j += 1
     return False
+
+
+def _keep_protected(branch):
+    """The chain's branch after a step that may have switched it: a protected
+    branch it may still be on stays, so a later commit is still blocked;
+    anything else is unknown (None: read the live branch)."""
+    return branch if branch in ("main", "master") else None
 
 
 def _may_move_head(segment):
@@ -1985,15 +2013,16 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
                 # the substitution ran in a subshell, but on the same repo
                 dirty = True
                 moved = True
-                running_branch = None
+                running_branch = _keep_protected(running_branch)
                 chain_stack = []
                 carries_semicolon = False
                 stack_reliable = False
                 any_switch_seen = True
         moved = moved or _may_move_head(stripped)
         if _runs_code(_tokens(stripped, expansions=True)):
-            # shell code that is not read may have switched: drop the chain's branch
-            running_branch = None
+            # shell code that is not read may have switched: drop the chain's
+            # branch, but not off a protected one it may still be on
+            running_branch = _keep_protected(running_branch)
             chain_stack = []
             carries_semicolon = False
             stack_reliable = False
@@ -3538,6 +3567,21 @@ def _test():
               on_main(f"git checkout -b feat && {runner} && git commit -m '[FIX] x'") == 2)
         check(f"a code runner {runner!r} in a substitution body drops the chain's branch → blocked",
               on_main(f"git checkout -b feat && x=$({runner}) && git commit -m '[FIX] x'") == 2)
+    for runner in ("bash -o pipefail -c 'git checkout main'", "bash --login -c 'git checkout main'",
+                   "bash -O extglob -c 'git checkout main'", "bash --norc -c 'git checkout main'",
+                   "env sh -c 'git checkout main'", "/usr/bin/env FOO=1 bash -c 'git checkout main'",
+                   "builtin eval 'git checkout main'", "command -p eval 'git checkout main'",
+                   "nohup sh -c 'git checkout main'", "timeout 5 sh -c 'git checkout main'",
+                   "timeout -s KILL 5 sh -c 'git checkout main'"):
+        check(f"a code runner {runner!r} drops the chain's branch → blocked",
+              on_main(f"git checkout -b feat && {runner} && git commit -m '[FIX] x'") == 2)
+    check("a shell given a script after options keeps the chain's branch → passes",
+          on_main("git checkout -b feat && bash -o pipefail ./run.sh && git commit -m '[FIX] x'") == 0)
+    # A runner leaves a protected branch the chain switched to where it may be.
+    for runner in ("sh -c true", "eval true", "x=$(sh -c true)"):
+        check(f"{runner!r} after a switch to main keeps main → blocked",
+              run(f"git checkout main && {runner} && git commit -m '[FIX] x'",
+                  branch="feature/x") == 2)
     check("a code runner on its own line drops the proven creation's branch → blocked",
           on_main("git checkout -b feat\nsh -c 'git checkout main'\ngit commit -m '[FIX] x'") == 2)
     # Residual, by decision: a script or build tool is not read, so it keeps the branch.

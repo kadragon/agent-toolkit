@@ -427,20 +427,21 @@ emit_blob_tail() {
   printf '\n' >&2
 }
 
-# Absolute plugin-cache paths the review text names that are gone from disk, one per line.
+# Absolute Codex plugin-cache paths the review text names that are gone from disk, one per line.
 # The companion's broker outlives a plugin upgrade and keeps the hook paths it started with; once
 # that version dir is pruned every Codex tool call fails, and the "review" is prose saying so
 # (seen 2026-10-15: broker held dev/4.10.29 after the cache moved to 4.10.30). A missing path is
-# read instead of the prose, whose wording varies. A path must start the word (`~/...` and
-# `$HOME/...` are not absolute here) and is cut at the first non-path byte, so a glob or a glued
-# Korean particle never reads as a missing file.
+# read instead of the prose, whose wording varies. Only `.codex/plugins/cache` is the broker's own:
+# a review may cite a pruned Claude cache path as a finding. A path must start the word (`~/...`
+# and `$HOME/...` are not absolute here) and is cut at the first non-path byte, so a glob or a
+# glued Korean particle never reads as a missing file; trailing `.`/`,` is sentence punctuation.
 missing_plugin_paths() {
   local text="$1" path
   printf '%s\n' "$text" \
-    | LC_ALL=C grep -oE '(^|[[:space:]`"'"'"'(])/[A-Za-z0-9._/-]*/plugins/cache/[A-Za-z0-9._/-]*' \
+    | LC_ALL=C grep -oE '(^|[[:space:]`"'"'"'(])/[A-Za-z0-9._/+@~%,-]*/\.codex/plugins/cache/[A-Za-z0-9._/+@~%,-]*' \
     | while IFS= read -r path; do
         path=${path#[[:space:]\`\"\'(]}
-        path=$(printf '%s' "$path" | sed 's/[.]*$//')
+        path=$(printf '%s' "$path" | sed 's/[.,]*$//')
         [ -e "$path" ] || printf '%s\n' "$path"
       done
   return 0

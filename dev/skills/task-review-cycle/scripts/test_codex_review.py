@@ -767,10 +767,15 @@ def case_stale_plugin_path_is_failure(tmp: Path, _live: int):
     print("\na review naming a live plugin path, a ~ path or a glob is still a review")
     live = tmp / "home" / ".codex" / "plugins" / "cache" / "kadragon" / "dev" / "4.10.30"
     live.mkdir(parents=True)
+    build = live.parent / "1.2.0+build.5@x~y%z"
+    build.mkdir()
     for label, body in (
         ("existing", f"P2 `{bash_path(live)}`. needs a look\n"),
         ("tilde", "P2 ~/.claude/plugins/cache/kadragon/dev/9.9.9/x.sh is fine\n"),
         ("glob", f"P3 {bash_path(live.parent)}/*/skills/x.sh resolves the newest\n"),
+        # Only the Codex hook cache is the broker's; a review may cite a pruned Claude one.
+        ("claude-cache", f"P2 settings.json points at {bash_path(tmp)}/.claude/plugins/cache/k/dev/1.0.0/x.sh\n"),
+        ("semver-build", f"P2 `{bash_path(build)}`, see there\n"),
     ):
         proc = run_with_sidecar(repo, tmp, ok_companion(tmp, f"comp-{label}", body), results)
         check(f"{label} path review exits 0", proc.returncode == 0, proc.stderr[-400:])
