@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #324 — commit-guard expansion, case arm, function body (2026-10-15)
+
+- [ ] [FIX] commit-guard does not see a commit inside a command-position substitution: `$(git commit -m wip)` exits 0 from `main` while bash runs the commit — `_command_start` steps over the `$( … )` body without reading it; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start`
+
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*

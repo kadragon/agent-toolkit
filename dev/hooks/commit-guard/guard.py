@@ -110,41 +110,29 @@ def _strip_expansions(tok):
         if m:
             rest = rest[m.end():]
             continue
-        pair = {"${": "}", "$(": ")"}.get(rest[:2])
-        if pair:
-            depth, j = 0, 1
-            while j < len(rest):
-                if rest[j] == rest[1]:
-                    depth += 1
-                elif rest[j] == pair:
-                    depth -= 1
-                    if not depth:
-                        break
-                j += 1
-            if j >= len(rest):
-                return tok
-            rest = rest[j + 1:]
-            continue
-        if rest[0] == "`":
-            j = rest.find("`", 1)
-            if j == -1:
-                return tok
-            rest = rest[j + 1:]
-            continue
-        break
+        try:
+            end = _expansion_end(rest, 0)
+        except ValueError:
+            return tok
+        if end is None:
+            break
+        rest = rest[end:]
     return rest
 
 
-def _command_start(parts, bare=None):
+def _command_start(parts, bare=None, expansions=False):
     """Index of the command word in a token list: past the shell keywords,
-    env-assigns and redirects (`>log git commit`) that may lead it, a case
-    pattern (`x)`, `case x in x)`), a function head (`f()`, `function f`), and
-    an expansion that may be empty (`$()git`, `$x git`). Such an expansion is
-    cut from the word in place.
+    env-assigns (`x=$(true)` too) and redirects (`>log git commit`) that may
+    lead it, and a function head (`f()`, `function f`). A case pattern never
+    reaches here: _split_segments ends a segment at its `)`.
 
-    bare[k] says token k had no quoting: only a bare `)` closes a pattern, so
-    `git commit -m ')' x` keeps its commit. Without it every token counts as
-    bare.
+    With expansions, also past an expansion that may be empty (`$()git`,
+    `$x git`), cut from the word in place. Only commit detection asks for it:
+    such a word may as well run something else (`x=echo; $x git checkout -b
+    f`), so it proves no branch switch.
+
+    bare[k] says token k had no quoting: a quoted `(` or `)` is text. Without
+    it every token counts as bare.
     """
     n = len(parts)
 
@@ -158,21 +146,11 @@ def _command_start(parts, bare=None):
         if m:
             i += 1 if m.group(1) else 2  # a bare operator takes the next token
             continue
-        if tok in _SHELL_KEYWORDS or _ENV_ASSIGN.match(tok):
-            i += 1
-            continue
-        if is_bare(i, "case") and is_bare(i + 2, "in"):
-            i += 3
-            continue
-        if is_bare(i, "function") and i + 1 < n:
-            i += 4 if is_bare(i + 2, "(") and is_bare(i + 3, ")") else 2
-            continue
-        if is_bare(i + 1, "(") and is_bare(i + 2, ")"):
-            i += 3  # `f()`, and `$()` padded by _split_segments
-            continue
-        if is_bare(i, "$") and is_bare(i + 1, "("):
-            # `$( … )` padded by _split_segments: one word bash may expand to
-            # nothing, leaving the word joined after it as the command
+        if (tok == "$" and expansions or _ENV_ASSIGN.match(tok) and tok.endswith("$")) \
+                and is_bare(i + 1, "("):
+            # `$( … )` or `x=$( … )` padded by _split_segments: one word, which
+            # bash may expand to nothing, leaving the word joined after it as
+            # the command
             depth, j = 0, i + 1
             while j < n:
                 if is_bare(j, "("):
@@ -186,14 +164,17 @@ def _command_start(parts, bare=None):
                 i = j + 1
                 continue
             break
-        # A case pattern: words, then a bare ')' with a command after it. A
-        # subshell's ')' is followed by nothing but redirects.
-        j = i
-        while j < n and parts[j] not in ("(", ")") and not _REDIRECT.match(parts[j]):
-            j += 1
-        if j > i and is_bare(j, ")") and j + 1 < n and not _REDIRECT.match(parts[j + 1]):
-            i = j + 1
+        if tok in _SHELL_KEYWORDS or _ENV_ASSIGN.match(tok):
+            i += 1
             continue
+        if is_bare(i, "function") and i + 1 < n:
+            i += 4 if is_bare(i + 2, "(") and is_bare(i + 3, ")") else 2
+            continue
+        if tok != "$" and is_bare(i + 1, "(") and is_bare(i + 2, ")"):
+            i += 3  # `f()`
+            continue
+        if not expansions:
+            break
         rest = _strip_expansions(tok)
         if rest != tok:
             if rest:
@@ -233,6 +214,12 @@ def _skip_group(s, i, opener, closer):
         ch = s[i]
         if ch == "\\":
             i += 2
+            continue
+        if s.startswith("$$", i):
+            i += 2
+            continue
+        if s.startswith("$'", i):
+            i = _ansi_c(s, i + 2)[1]
             continue
         if ch == "'":
             j = s.find("'", i + 1)
@@ -363,23 +350,29 @@ def _words(s):
     return words, bare
 
 
-def _tokens(s):
-    """Tokenize a shell fragment from its command word on (_command_start).
+def _tokens(s, expansions=False):
+    """Tokenize a shell fragment from its command word on (_command_start;
+    expansions as there).
 
     The stripping applies only to the prefix before the command name: once
     we've seen the command, remaining tokens (e.g. -m 'foo=bar', `echo then`)
     are left intact.
 
-    On a _words ValueError (an unclosed quote or expansion) → return [] so the
-    segment is treated as non-commit (fail-open), preserving the documented
-    never-block-on-parse-error contract.
+    _words cannot read a heredoc inside "$( … )" (an apostrophe in the body
+    of the usual `-m "$(cat <<'EOF' … )"` message), and shlex can: when _words
+    fails, shlex reads it. When both fail → return [] so the segment is treated
+    as non-commit (fail-open), preserving the documented never-block-on-parse-
+    error contract.
     """
     s = _LEAD_NOISE.sub("", s or "")
     try:
         parts, bare = _words(s)
     except ValueError:
-        return []  # unparseable segment → fail-open (not a commit)
-    return parts[_command_start(parts, bare):]
+        try:
+            parts, bare = shlex.split(s), None
+        except ValueError:
+            return []  # unparseable segment → fail-open (not a commit)
+    return parts[_command_start(parts, bare, expansions):]
 
 
 def _raw_tokens(s):
@@ -399,7 +392,7 @@ def _raw_tokens(s):
         parts = shlex.split(s, posix=False)
     except ValueError:
         return []
-    return parts[_command_start(parts):]
+    return parts[_command_start(parts, expansions=True):]
 
 
 # Characters after which a '#' opens a word, and so a comment: whitespace and
@@ -413,6 +406,7 @@ _SQ = "s"        # single-quoted, the quotes included
 _DQ = "d"        # double-quoted: the quotes, and a "$( … )" inside them, included
 _COMMENT = "#"   # a comment, up to but not including its newline
 _HEREDOC = "h"   # a heredoc body and its delimiter line
+_PATTERN = "p"   # a case pattern's '(', '|' or ')'
 _JOIN = "j"      # a line continuation: the backslash and its newline
 
 
@@ -511,7 +505,8 @@ def _scan(command):
         start = i
         # What is open at this level, innermost last: 'cmd' (a subshell),
         # 'subst' (`$(`, `<(`, `>(`), 'tick', 'arith' (`((`), 'array' (`=(`),
-        # 'param' (`${`), 'case' (`case` to `esac`). `$((` opens 'subst' then
+        # 'param' (`${`), 'case_pat' / 'case_body' (`case` to `esac`: reading
+        # a pattern, then the arm after its ')'). `$((` opens 'subst' then
         # 'arith'.
         opened = []
         pending = []  # (delimiter, strip_tabs, len(opened) where announced)
@@ -544,15 +539,19 @@ def _scan(command):
                 k -= 1
             return (i - k) % 2 == 1
 
+        pattern_ends = set()  # the ')' of each case pattern: an arm starts there
+
         def at_command(i):
             """Whether the word at i is in command position: first at this
-            level, or after a separator, an open paren or a reserved word."""
+            level, or after a separator, an open paren, a case pattern or a
+            reserved word."""
             k = i - 1
             while k >= start and command[k] in " \t":
                 k -= 1
-            if k < start or command[k] in ";&|(\n":
+            if k < start or command[k] in ";&|(\n" or k in pattern_ends:
                 return True
-            m = re.search(r"(?:^|[\s;&|(])(then|do|else|!|\{)$", command[start:k + 1])
+            m = re.search(r"(?:^|[\s;&|(])(if|elif|while|until|then|do|else|!|\{)$",
+                          command[start:k + 1])
             return m is not None
 
         def arith_closes(j):
@@ -642,6 +641,18 @@ def _scan(command):
                 i += 1
                 word_start = False
                 continue
+            case = opened[-1] if opened and opened[-1].startswith("case") else None
+            if case == "case_pat" and (ch in "|)" or ch == "(" and command[i - 1:i] not in "$<>"):
+                # a pattern's own punctuation: no subshell, pipe or close
+                cls[i] = _PATTERN
+                if ch == ")":
+                    opened[-1] = "case_body"
+                    pattern_ends.add(i)
+                i += 1
+                word_start = True
+                continue
+            if case == "case_body" and ch == ";" and command[i + 1:i + 2] in (";", "&"):
+                opened[-1] = "case_pat"  # `;;` / `;&`: the next pattern follows
             if ch == "(" and not (opened and opened[-1] == "param"
                                   and command[i - 1:i] != "$"):
                 # in ${ … } only `$(` opens anything: `${v//(/}` is a pattern
@@ -658,11 +669,6 @@ def _scan(command):
                 word_start = True
                 continue
             if ch == ")":
-                if opened and opened[-1] == "case":
-                    # a pattern's ')' closes nothing: `$(case a in a) …;; esac)`
-                    i += 1
-                    word_start = True
-                    continue
                 if opened and opened[-1] not in ("param", "tick"):
                     # past a subshell or a (( … )) a '#' opens a comment; past
                     # a substitution or an array it is still in the word
@@ -692,9 +698,9 @@ def _scan(command):
             if word_start and plain and command[i:i + 4] in ("case", "esac"):
                 after = command[i + 4:i + 5]
                 if command[i] == "c" and after in (" ", "\t") and at_command(i):
-                    opened.append("case")
+                    opened.append("case_pat")
                 elif (command[i] == "e" and after in ("", " ", "\t", "\n", ";", "&", "|", ")")
-                        and opened and opened[-1] == "case"):
+                        and case):
                     opened.pop()
             word_start = ch in _COMMENT_PRECEDERS
             i += 1
@@ -774,7 +780,7 @@ def _split_segments(command):
     Returns (segments, operators): a list of stripped segment strings
     (individual segments may be empty) and a parallel list of the separator
     operator that PRECEDES each segment (operators[0] is None; the rest are one
-    of '&&' '||' '|' ';' '&'). Callers use the operator to decide whether state
+    of '&&' '||' '|' ';' '&', or ')' after a case pattern). Callers use the operator to decide whether state
     from an earlier segment (e.g. an in-chain branch creation) may carry into a
     later one — only '&&' guarantees the predecessor ran successfully; main()
     proves it separately for a creation followed by ';'.
@@ -792,6 +798,14 @@ def _split_segments(command):
     while i < len(command):
         ch, kind = command[i], cls[i]
         if kind in (_COMMENT, _HEREDOC, _JOIN):
+            i += 1
+            continue
+        if kind == _PATTERN:
+            if ch == ")":
+                # the arm after a case pattern runs only when it matches
+                segments.append("".join(current).strip())
+                operators.append(")")
+                current = []
             i += 1
             continue
         op, width = _operator_at(command, cls, i) if kind == _CODE else (None, 0)
@@ -818,7 +832,7 @@ def _is_git_commit(segment):
     Handles wrapper words like 'command' (POSIX shell built-in that just
     executes the named command) preceding 'git'.
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions=True)
     if not toks:
         return False
     # skip optional wrapper words (e.g. 'command git commit')
@@ -846,7 +860,7 @@ def _git_cwd(segment, env_cwd):
 
     Relative -C values are resolved as absolute paths against env_cwd.
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions=True)
     # skip wrapper words
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
@@ -1041,8 +1055,8 @@ def _redirects_git(segment):
     except ValueError:
         return True
     # the same prefix _is_git_commit reads past, or a commit it sees behind
-    # `{` or `>log` would go unexamined here
-    i = _command_start(parts)
+    # `{`, `>log` or `$x` would go unexamined here
+    i = _command_start(parts, expansions=True)
     if any(_ENV_ASSIGN.match(tok) and tok.startswith("GIT_") for tok in parts[:i]):
         return True
     while i < len(parts) and parts[i] in _GIT_WRAPPERS:
@@ -1363,7 +1377,7 @@ def _parse_commit_args(segment):
     Bundled short options: -am parses the trailing 'm' as the message flag,
     consuming the next token as the message value.
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions=True)
     raw_toks = _raw_tokens(segment)  # quote-preserving; may desync (see _raw_tokens)
     # Only trust raw-token indices when the two tokenizers agree on token count.
     # A length mismatch means some token straddled a posix/non-posix split
@@ -2702,6 +2716,33 @@ def _test():
           on_main("x=$(case a in a) cat <<EOF;; esac)\ngit commit -m wip\nEOF") == 2)
     check("a heredoc in a case arm in $( … ) is still text inside it → passes",
           run("x=$(case a in a) cat <<EOF\ngit commit -m wip\nEOF\n;; esac)\ngit status") == 0)
+    check("a nested case's esac does not end the outer one → blocked",
+          on_main("echo \"$(case a in a) case b in b) echo;; esac;; c) cat <<EOF;; esac)\"\n"
+                  "git commit -m wip\nEOF") == 2)
+    check("_split_segments ends a segment at a case pattern's ')'",
+          _split_segments("case x in a|b) git commit;; esac") ==
+          (["case x in ab", "git commit", "esac"], [None, ")", ";"]))
+
+    # review of the above: never weaker than shlex, no pattern without a case
+    check("the usual heredoc message with an apostrophe, on main → blocked",
+          on_main("git commit -m \"$(cat <<'EOF'\n[FEAT] y\n\nit's done\nEOF\n)\"") == 2)
+    check("the usual heredoc message with an apostrophe is type-checked",
+          run("git commit -m \"$(cat <<'EOF'\nwip it's done\nEOF\n)\"") == 0
+          and _is_git_commit("git commit -m \"$(cat <<'EOF'\nwip it's\nEOF\n)\""))
+    check("a $'…' with an escaped quote inside \"$( … )\" → blocked",
+          on_main("git commit -m '[FIX] x' \"$(printf '%s' $'it\\'s')\"") == 2)
+    check("the ')' closing a split $( … ) is no case pattern → blocked",
+          on_main("echo $(git add -A; git commit -m wip) done") == 2)
+    check("a creation after a split $( … ) is not credited → blocked",
+          on_main("echo $(true; echo x) git checkout -b feat && git commit -m '[FEAT] y'") == 2)
+    check("a quoted ')' does not hide a -C redirect",
+          _redirects_git("git -C /other commit -m ')' -m '[FEAT] y'"))
+    check("a creation behind an expansion proves no switch → blocked",
+          on_main("x=echo; $x git checkout -b feature/x && git commit -m '[FIX] x'") == 2)
+    check("a quoted '}' in a leading ${ … } does not end it → blocked",
+          on_main("${x:+'}'}git commit -m wip") == 2)
+    check("an escaped backtick in a leading substitution → blocked",
+          on_main("`echo \\``git commit -m wip") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
