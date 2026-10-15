@@ -13,15 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #322 — commit-guard heredoc in arithmetic and ANSI-C quote after a pid (2026-10-15)
-
-- [ ] [FIX] commit-guard allows a commit whose segment `shlex` cannot read: `git commit -m wip $'a\'b'` (a `$'…'` with an escaped quote, or a nested-quote token) makes `_tokens` return `[]` and fail open; a command word built by an expansion (`$()git commit`, `$!git commit`, `${x#a}<<EOF git commit`) also exits 0 from `main` while bash runs the commit — found by the bash-with-stub-git fuzz, 3 seeds, every miss present before PR #321 (source: contract) — dev/hooks/commit-guard/guard.py `_tokens`, `_command_start`
-- [ ] [debt] a `case` pattern `)` inside `$( … )` closes the substitution early in `_scan`, so a heredoc announced later in it reaches past the real `)`: `x=$(case a in a) cat <<EOF;; esac)` then a `git commit` line; unverified on bash 5 (bash 3.2 rejects it) — fold into the PR #321 `case`-arm item (source: code-review) — dev/hooks/commit-guard/guard.py `_scan`
-
-### PR #321 — commit-guard shell keyword, redirect and heredoc (2026-10-12)
-
-- [ ] [FIX] commit-guard does not see a commit in a `case` arm or a function body: `case x in x) git commit -m 'wip';; esac` and `f() { git commit -m 'wip'; }; f` exit 0 from `main` — `_command_start` reads past keywords and redirects, not past a `pattern)` or a `name() {`; predates this PR (source: contract) — dev/hooks/commit-guard/guard.py `_command_start`
-
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*
