@@ -13,12 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #327 — commit-guard quoted backticks + heredoc substitutions, hwpx insert/delete attribute order (2026-10-15)
-
-- [ ] [debt] `table.py insert`/`delete` rewrite the cells of a nested table inside a row too: `CELL_RE.sub`/`TRIPLET_RE.sub` compare a nested cell's rowAddr/rowSpan to the outer row index, so an insert can grow a nested span past its own rowCnt and a delete can refuse on a nested anchor; skip cells at `<hp:tbl>` depth > 0 as `_set_row_addr` does (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_insert_row`
-- [ ] [debt] `table.py delete` skips a cell whose cellAddr/cellSpan/cellSz triplet does not parse (a missing attribute, an element between the tags), so its rowSpan>1 anchor check passes; fail closed instead (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_row_cells`
-- [ ] [debt] `_commit_segments`'s cd branch assigns `moved = maybe_cwds(…)`, rebinding the HEAD-moved boolean to a list, so a cd inside a substitution body reads as a HEAD move; conservative, but the name clash hides intent (source: integration-check; pre-existing) — dev/hooks/commit-guard/guard.py `_commit_segments`
-
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*
