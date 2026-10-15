@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #325 — HWPX content comparison (2026-10-15)
+
+- [ ] [debt] `table.py replace` misses valid cells when `hp:cellAddr` serializes `rowAddr` before `colAddr`: `_own_cell_addr` requires the opposite attribute order, producing `cell colAddr=0 rowAddr=0 not found`; reproduced during the compare integration check, while the same cell with reordered attributes succeeds (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py:56
+
 ### PR #324 — commit-guard expansion, case arm, function body (2026-10-15)
 
 - [ ] [FIX] commit-guard does not see a commit inside a command-position substitution: `$(git commit -m wip)` exits 0 from `main` while bash runs the commit — `_command_start` steps over the `$( … )` body without reading it; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start`

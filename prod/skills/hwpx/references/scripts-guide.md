@@ -13,6 +13,7 @@ Utility scripts in `scripts/`.
 | `scripts/office.py pack` | directory → HWPX (restores entry order/compression from manifest, mimetype first) |
 | `scripts/validate.py validate` | HWPX structure validation — ZIP/mimetype/XML + secCnt/itemCnt/IDRef/duplicate `hp:p` ID/duplicate `hp:tbl` id + charPr font-size check. With `--baseline ref.hwpx`, only new duplicate IDs vs. original are errors; `--min-pt N` adjusts readable-size threshold (default 5pt) |
 | `scripts/validate.py page-guard` | page-drift risk check vs. reference (restore-mode gate / edit-mode reference) |
+| `scripts/compare.py` | Read-only paragraph/cell content comparison; text/JSON reports distinguish changes, incomplete coverage and errors |
 | `scripts/text.py extract` | HWPX text extraction — plain or markdown, optional table inclusion |
 | `scripts/text.py patch` | safe text replacement — str.replace + lineseg strip + ID verification. `--after anchor` for context-limited replacement |
 | `scripts/table.py dump` | table cell map dump — list all table IDs or dump (rowAddr, colAddr, colSpan, rowSpan, text) for specific table; `--cell col,row` for verbose cell inspector (paraPr/charPr/runs/linesegarray); `--style-map` for paraPr/charPr/pt grid per cell |
@@ -27,6 +28,77 @@ Utility scripts in `scripts/`.
 | `scripts/convert_hwp.ps1` | HWP → HWPX conversion via Hancom COM (Windows only); deletes original on success |
 
 > ⚠️ `hp:tbl id` collisions — confirm which table `--table-id` resolves to before trusting it: SKILL.md Workflow 2.
+
+## compare.py usage
+
+Preserve the original before editing. Run `validate.py validate` against that original,
+then the applicable `page-guard` (required for reference restore), then compare, then
+inspect in Hancom. Comparison does not prove that the requested edit was the only edit,
+that page layout is unchanged, or that the file opens successfully in Hancom.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
+python3 "$SKILL_DIR/scripts/compare.py" original.hwpx revised.hwpx
+python3 "$SKILL_DIR/scripts/compare.py" original.hwpx revised.hwpx --json
+```
+
+Nonzero exits are expected comparison outcomes; capture the exit before deciding
+whether to continue an automated pipeline. Do not treat all nonzero exits as a
+corrupt document, or discard a report because it found changes.
+
+| Exit | Status | Meaning |
+|------|--------|---------|
+| 0 | `unchanged` | No differences in compared content/non-content scope; inspect exclusions |
+| 1 | `changed` | Complete within declared coverage, with content or known layout-cache differences |
+| 2 | `incomplete` | Uncertain correspondence or changed unsupported content; confirmed changes may coexist |
+| 3 | `error` | Invalid/unreadable input or processing failure |
+
+The exit table applies to comparison runs; `--help` prints usage and exits 0.
+Both inputs remain unchanged. Section paths retain the archive's section filename;
+paragraph/table ordinals in paths are one-based within their parent. Cell rows and
+columns are one-based versions of `cellAddr`, with `span.rows`/`span.columns` retained.
+For example, `Contents/section0.xml/paragraph[4]/table[1]/row[3]/col[2]` identifies
+the first table anchored in body paragraph 4, at grid row 3 and column 2. This is
+not a document-global table number. Empty paragraphs count. Cell child paragraphs
+have their own scoped paths. Each changed body paragraph or cell counts once;
+cell paragraph details do not increase the summary count. Complete paragraph strings
+are shown rather than inferred sentence matches. Quotes escape tabs/newlines visibly.
+
+JSON stdout contains one object with `schema_version: 1`, `status`, `complete`,
+`coverage`, `change_count`, `changes`, `structural_changes`, `non_content_changes`,
+`exclusions`, `incomplete_scopes` and `errors`. A content change has `kind`,
+`original_location`, `revised_location`, `before` and `after`; cell changes also have
+`span` and `paragraphs`. Findings contain `location` and `reason`; non-content findings
+add `kind`, exclusions add `input` and expanded XML `tag`, errors are strings.
+`complete` refers only to declared text coverage, never whole-document equivalence.
+
+Matching uses unchanged scoped structure, unique non-placeholder paragraph IDs or
+two unique unchanged content anchors enclosing a single edited paragraph. Repeated
+labels/IDs cannot establish identity alone; multi-edit anonymous regions stay incomplete.
+An unanchored single body paragraph with a placeholder ID may be incomplete even when
+it looks like a simple edit; one paragraph in an established cell grid can be compared.
+Anonymous table-host paragraphs can be matched using unique stable table IDs and
+unchanged grids. Rewritten single-paragraph cells retain their grid location even if
+their paragraph ID changes. Same text redistributed between runs/anchored objects
+is reported separately as uninterpreted placement change, not passed as unchanged.
+Inserted/deleted/reordered paragraphs and changed table grids mark the affected scope
+incomplete rather than generating positional replacement cascades. Independent scopes
+can still report changes. Nested tables are excluded as a whole, without flattening.
+
+ZIP timestamps/order/compression and XML attribute order/prefix spelling do not count
+as content edits. XML-defined newline normalization applies; spaces, tabs, explicit
+line breaks and empty paragraphs remain significant. Changed line-layout caches are
+reported separately. Standard preview text/image members, the settings caret position,
+and `content.hpf` ModifiedDate/lastsaveby metadata are known derived caches: their
+changes remain visible without forcing incomplete text coverage. Other member changes
+retain the conservative incomplete result. Reference restores that rebuild IDs or other
+members can be incomplete even when visually faithful; review those scopes manually.
+Changed unsupported XML, style attributes/header definitions,
+non-section members and binary assets require review and produce incomplete coverage.
+Unchanged unsupported objects are listed as exclusions. A zero content count with
+exclusions or incomplete scopes is not proof of an unchanged document. AI explanations
+must retain these qualifications and must not invent correspondence or intent judgments.
 
 ## build.py build usage
 

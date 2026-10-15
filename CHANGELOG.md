@@ -3,6 +3,7 @@
 ## Unreleased
 
 - [done] commit-guard sees a commit behind an expansion, in a case arm or function body, or in a word shlex cannot read (2 units) (dev v4.10.28) (2026-10-15)
+- [done] Compare HWPX paragraph and cell content with explicit incomplete coverage (prod v3.2.7) (2026-10-15) → docs/design/hwpx-content-compare.md
 - [done] commit-guard reads no heredoc in arithmetic, no ANSI-C quote after a pid, no comment joined to a substitution (dev v4.10.27) (2026-10-15)
 - [done] harness-curate contract check skips change-record docs that quote a retired rule (dev v4.10.26) (2026-10-15)
 - [done] commit-guard sees a commit behind a shell keyword, redirect or heredoc (dev v4.10.25) (2026-10-12)
