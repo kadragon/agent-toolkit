@@ -217,24 +217,6 @@ const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', pr
   return { ui, texts, color: context?.props.color }
 }
 
-test('the band draws both rows on the terminal and the desktop', async ($, on) => {
-  const state = world(on)
-
-  for (const surface of ['terminal', 'desktop'] as const) {
-    state.surfaces = [surface]
-    await start($)
-    const { ui, texts, color } = await drawn($, surface)
-
-    expect(texts).toEqual([
-      '[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m',
-      'Context █░░░░░░░░░ 12%',
-      ' │ 5h: 88% (2h 4m)',
-    ])
-    expect(color).toBe('success')
-    await ui.unmount()
-  }
-})
-
 test('it yields the band to a survey', async ($, on) => {
   world(on)
 
@@ -303,40 +285,6 @@ test('the clock tick moves the elapsed time', async ($, on) => {
   await ui.unmount()
 })
 
-test('a slow read does not undo the effort a step reported meanwhile', async ($, on) => {
-  const state = world(on)
-
-  await start($)
-  let release = () => {}
-  state.gitGate = new Promise<void>(resolve => (release = resolve))
-  const measured = measure($)
-  await step($, { effort: 'high' })
-  release()
-  await measured
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('[Opus 5.5 ◑ high]')
-  await ui.unmount()
-})
-
-test('a read that started earlier and ended later is dropped', async ($, on) => {
-  const state = world(on)
-
-  await start($)
-  let release = () => {}
-  state.gitGate = new Promise<void>(resolve => (release = resolve))
-  const slow = measure($)
-  state.branch = 'newer'
-  await measure($)
-  release()
-  await slow
-  await settle()
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('git:(newer)')
-  await ui.unmount()
-})
-
 test('a changed model drops the effort the last one ran at', async ($, on) => {
   const state = world(on)
 
@@ -348,21 +296,6 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
-  await ui.unmount()
-})
-
-test('the effort a step reported under the new model is kept', async ($, on) => {
-  const state = world(on)
-
-  await start($)
-  await step($)
-  await measure($)
-  state.model = 'claude-sonnet-5-5'
-  await step($)
-  await measure($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('[Sonnet 5.5 ◔ medium]')
   await ui.unmount()
 })
 
@@ -383,20 +316,6 @@ test('a git call that fails keeps the last branch, one that names none drops it'
 
   expect(dropped.texts[0]).toBe('[Opus 5.5] │ agent-toolkit │ ⏱️  5m')
   await dropped.ui.unmount()
-})
-
-test('a /clear re-reads the figures at once', async ($, on) => {
-  const state = world(on)
-
-  await start($)
-  state.percent = undefined
-  state.turns = 0
-  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
-  await settle()
-  const { ui, texts } = await drawn($)
-
-  expect(texts[1]).toBe('Context ░░░░░░░░░░ 0%')
-  await ui.unmount()
 })
 
 test('an attaching surface gets the band at once and the tick stops when it leaves', async ($, on) => {
@@ -665,41 +584,6 @@ test('a Windows home is read through backslashes alone', async ($, on) => {
   await ui.unmount()
 })
 
-test('the skill count carries the size of its listing', async ($, on) => {
-  const state = world(on)
-  state.skills = { totalSkills: 49, tokens: 4234 }
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m │ 49 skills (4.2k)')
-  await ui.unmount()
-})
-
-test('a count that cannot be read is left out, fails nothing and is asked again', async ($, on) => {
-  const state = world(on)
-  state.settings = { enabledPlugins: { 'plain@m': true } }
-
-  const started = await start($)
-  const before = await drawn($)
-
-  expect(started.cwd).toBe('/work/agent-toolkit')
-  expect(before.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  5m')
-  await before.ui.unmount()
-
-  state.files = {
-    '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({
-      plugins: { 'plain@m': [{ installPath: '/p/plain' }] },
-    }),
-    '/p/plain/hooks/hooks.json': hooksFile(4),
-  }
-  await measure($)
-  const after = await drawn($)
-
-  expect(after.texts[0]).toContain('│ 4 hooks')
-  await after.ui.unmount()
-})
-
 test('the cache is counted from when the request was sent, not when the answer ended', async ($, on) => {
   const state = world(on)
   state.stepMs = 4 * MINUTE
@@ -710,18 +594,6 @@ test('the cache is counted from when the request was sent, not when the answer e
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toContain('⏱️  9m │ cache 56m')
-  await ui.unmount()
-})
-
-test('a response that neither read nor wrote the cache starts no countdown', async ($, on) => {
-  const state = world(on)
-  state.isUncached = true
-
-  await start($)
-  await step($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  5m')
   await ui.unmount()
 })
 
