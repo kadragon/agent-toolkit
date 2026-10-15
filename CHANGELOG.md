@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] commit-guard reads sh -c, eval and source as a HEAD move; codex-review fails a review naming a pruned plugin path (dev v4.10.32) (2026-10-15)
+- [done] hwpx table.py delete rewrites the table height in any attribute order and refuses a size with no height (prod v3.2.11) (2026-10-15)
 - [done] commit-guard reads a cd inside a substitution body as no HEAD move (dev v4.10.31) (2026-10-15)
 - [done] hwpx table.py insert and delete skip nested-table cells and refuse a cell whose span does not parse (prod v3.2.10) (2026-10-15)
 - [done] commit-guard reads a quoted backtick and heredoc-body substitutions, and keeps the branch past a clean case or function (dev v4.10.30) (2026-10-15)

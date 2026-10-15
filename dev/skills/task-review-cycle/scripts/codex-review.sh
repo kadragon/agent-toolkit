@@ -427,6 +427,25 @@ emit_blob_tail() {
   printf '\n' >&2
 }
 
+# Absolute plugin-cache paths the review text names that are gone from disk, one per line.
+# The companion's broker outlives a plugin upgrade and keeps the hook paths it started with; once
+# that version dir is pruned every Codex tool call fails, and the "review" is prose saying so
+# (seen 2026-10-15: broker held dev/4.10.29 after the cache moved to 4.10.30). A missing path is
+# read instead of the prose, whose wording varies. A path must start the word (`~/...` and
+# `$HOME/...` are not absolute here) and is cut at the first non-path byte, so a glob or a glued
+# Korean particle never reads as a missing file.
+missing_plugin_paths() {
+  local text="$1" path
+  printf '%s\n' "$text" \
+    | LC_ALL=C grep -oE '(^|[[:space:]`"'"'"'(])/[A-Za-z0-9._/-]*/plugins/cache/[A-Za-z0-9._/-]*' \
+    | while IFS= read -r path; do
+        path=${path#[[:space:]\`\"\'(]}
+        path=$(printf '%s' "$path" | sed 's/[.]*$//')
+        [ -e "$path" ] || printf '%s\n' "$path"
+      done
+  return 0
+}
+
 # --- durable result sidecar --------------------------------------------------
 #
 # The caller runs this script as a background task with a bounded wait. When the wait is over the
@@ -723,6 +742,15 @@ case "$CODEX_MODE" in
       publish_result "empty" 1
       exit 1
     done
+    STALE_PATHS=$(missing_plugin_paths "$TEXT")
+    if [ -n "$STALE_PATHS" ]; then
+      printf 'ERROR: the review names plugin paths missing on disk, so its tool calls likely failed:\n%s\n' \
+        "$STALE_PATHS" >&2
+      printf 'HINT: restart the Codex broker — one started before a plugin upgrade keeps the old cache path. Stop the pid in this workspace'"'"'s codex-companion broker.json, then re-run.\n' >&2
+      emit_blob_tail "$TEXT" "review text"
+      publish_result "failed" 1
+      exit 1
+    fi
     publish_result "ok" 0 "$TEXT"
     emit_review "$TEXT"
     ;;

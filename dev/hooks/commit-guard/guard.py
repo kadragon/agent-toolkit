@@ -1843,10 +1843,40 @@ def _has_expansion(word):
     return "$" in word or "`" in word or _BRACE_EXPANSION.search(word) is not None
 
 
+# Commands that run shell code in this shell or a child of it: what that code
+# does to HEAD is not read, so it may move it. A script or build tool
+# (`./run.sh`, `bash run.sh`, `make`) is not one of them: a user decision
+# (2026-10-15) left those trusted, accepting the residual.
+_EVAL_COMMANDS = {"eval", "source", "."}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+
+
+def _runs_code(toks):
+    """True if toks, past any _GIT_WRAPPERS, run shell code: an _EVAL_COMMANDS
+    word, or a shell given `-c` (alone or in a flag cluster such as `-lc`)."""
+    i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    if i >= len(toks):
+        return False
+    if toks[i] in _EVAL_COMMANDS:
+        return True
+    if os.path.basename(toks[i]) not in _SHELLS:
+        return False
+    for tok in toks[i + 1:]:
+        if not tok.startswith("-") or tok.startswith("--"):
+            break
+        if "c" in tok[1:]:
+            return True
+    return False
+
+
 def _may_move_head(segment):
     """True if the segment, read past a leading expansion, runs a git
-    subcommand that may move HEAD."""
+    subcommand that may move HEAD, or runs shell code (_runs_code)."""
     toks = _tokens(segment, expansions=True)
+    if _runs_code(toks):
+        return True
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
         i += 1
@@ -1961,6 +1991,13 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
                 stack_reliable = False
                 any_switch_seen = True
         moved = moved or _may_move_head(stripped)
+        if _runs_code(_tokens(stripped, expansions=True)):
+            # shell code that is not read may have switched: drop the chain's branch
+            running_branch = None
+            chain_stack = []
+            carries_semicolon = False
+            stack_reliable = False
+            any_switch_seen = True
         toks = _tokens(stripped)
         exp_toks = _tokens(stripped, expansions=True)
         # an expansion that may be empty leads the command: what follows it
@@ -3493,6 +3530,20 @@ def _test():
     check("a switch after a cd in a substitution body drops the chain's branch → blocked",
           on_main("git checkout -b feat && x=$(cd /tmp && git checkout main)"
                   " && git commit -m '[FIX] x'") == 2)
+    for runner in ("sh -c 'git checkout main'", "bash -c 'git checkout main'",
+                   "/bin/zsh -lc 'git checkout main'", "eval 'git checkout main'",
+                   "eval \"$cmd\"", "source ./switch.sh", ". ./switch.sh",
+                   "command eval 'git checkout main'"):
+        check(f"a code runner {runner!r} drops the chain's branch → blocked",
+              on_main(f"git checkout -b feat && {runner} && git commit -m '[FIX] x'") == 2)
+        check(f"a code runner {runner!r} in a substitution body drops the chain's branch → blocked",
+              on_main(f"git checkout -b feat && x=$({runner}) && git commit -m '[FIX] x'") == 2)
+    check("a code runner on its own line drops the proven creation's branch → blocked",
+          on_main("git checkout -b feat\nsh -c 'git checkout main'\ngit commit -m '[FIX] x'") == 2)
+    # Residual, by decision: a script or build tool is not read, so it keeps the branch.
+    for cmd in ("npm test", "make lint", "./run-tests.sh", "bash ./run-tests.sh"):
+        check(f"{cmd!r} keeps the chain's branch → passes",
+              on_main(f"git checkout -b feat && {cmd} && git commit -m '[FIX] x'") == 0)
     check("'||' after a clean case still drops the chain's branch → blocked",
           on_main("git checkout -b feat || case a in a) true;; esac && git commit -m '[FIX] x'") == 2)
     check("'||' between two clean compounds still drops the chain's branch → blocked",

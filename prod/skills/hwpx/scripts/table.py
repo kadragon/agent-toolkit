@@ -1100,11 +1100,17 @@ def _delete_rows(xml: str, table_id: str, del_idx: set[int]) -> tuple[str, list[
     )
     if nc != 1:
         raise ValueError("rowCnt attribute not found on <hp:tbl>")
-    new_prefix, _ = re.subn(
-        r'(<hp:sz width="\d+" height=")(\d+)(")',
-        lambda m: m.group(1) + str(int(m.group(2)) - total_del_h) + m.group(3),
-        new_prefix, count=1,
-    )
+    # Attribute order is free (Hancom writes widthRelTo between width and
+    # height), so read the tag whole. A size with no readable height would
+    # keep the deleted rows' height, so it fails closed.
+    sz = re.search(r'<hp:sz\b[^>]*>', new_prefix)
+    if sz is not None:
+        height = _int_attr(sz.group(0), "height")
+        if height is None:
+            raise ValueError("<hp:sz> on the table has no height — unsupported")
+        new_prefix = (new_prefix[:sz.start()]
+                      + _set_attr(sz.group(0), "height", height - total_del_h)
+                      + new_prefix[sz.end():])
     new_tbl = new_prefix + "".join(kept) + suffix
     new_xml = xml[:ti] + new_tbl + xml[tend:]
     info = [
@@ -1632,6 +1638,27 @@ def _run_tests() -> None:
                 print(f"AC-TRIPLET-CLOSED-ins-{label} PASS: insert fails closed on an unparseable cell")
             else:
                 failures.append(f"AC-TRIPLET-CLOSED-ins-{label} FAIL: unexpected error {e}")
+
+    # AC-SZ-HEIGHT: delete rewrites the table height whatever sits between width
+    # and height, and refuses a table size with no height
+    _relto_xml = _reorder_xml.replace('<hp:sz width="200" height="300"/>',
+                                      '<hp:sz width="200" widthRelTo="ABSOLUTE" height="300"/>')
+    try:
+        result, _ = _delete_rows(_relto_xml, "9", {2})
+        if '<hp:sz width="200" widthRelTo="ABSOLUTE" height="200"/>' not in result:
+            failures.append("AC-SZ-HEIGHT-a FAIL: height after widthRelTo was not rewritten")
+        else:
+            print("AC-SZ-HEIGHT-a PASS: delete rewrites the height past widthRelTo")
+    except Exception as e:
+        failures.append(f"AC-SZ-HEIGHT-a FAIL: {e}")
+    try:
+        _delete_rows(_reorder_xml.replace(' height="300"', ''), "9", {2})
+        failures.append("AC-SZ-HEIGHT-b FAIL: delete accepted a table size with no height")
+    except ValueError as e:
+        if "height" in str(e):
+            print("AC-SZ-HEIGHT-b PASS: delete fails closed on a table size with no height")
+        else:
+            failures.append(f"AC-SZ-HEIGHT-b FAIL: unexpected error {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:

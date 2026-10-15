@@ -1,7 +1,7 @@
 {
   "name": "prod",
   "description": "Personal productivity skills for document authoring and persona-based analysis.",
-  "version": "3.2.10",
+  "version": "3.2.11",
   "author": {
     "name": "kadragon"
   },
