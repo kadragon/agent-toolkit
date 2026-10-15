@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] test-prune kills a timed-out run's process group and separates look-alike duplicates with a branching mutant (dev v4.11.1) (2026-10-15)
 - [done] Add test-prune skill: prune low-value tests only when mutation evidence shows the kill set holds (dev v4.11.0) (2026-10-15)
 - [done] commit-guard reads sh -c, eval and source as a HEAD move; codex-review fails a review naming a pruned plugin path (dev v4.10.32) (2026-10-15)
 - [done] hwpx table.py delete rewrites the table height in any attribute order and refuses a size with no height (prod v3.2.11) (2026-10-15)

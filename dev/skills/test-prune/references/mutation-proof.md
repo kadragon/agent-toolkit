@@ -50,7 +50,9 @@ A full run is often thousands of mutants. Sample instead:
 3. apply the mutant; print 3 lines of context around the changed span and check it is the
    intended token
 4. run the related tests (vitest related <file>, jest --findRelatedTests <file>,
-   pytest on the tests that import the module)
+   pytest on the tests that import the module) in their own process group, with a timeout of a
+   few times the baseline runtime; on timeout kill the whole group, not just the direct child,
+   and confirm no runner process is left before the next mutant
 5. record KILLED / SURVIVED / INVALID with the failing tests' ids
 ```
 
@@ -90,3 +92,7 @@ the without-T rerun.
    gap until someone shows the behavior differs; write the reason when it does not.
 9. **Code with no test coverage counts every mutant as survived.** That is a coverage fact, not a
    verdict on any existing test.
+10. **A timeout that kills only the runner leaves its workers running.** Vitest, jest and pytest-xdist
+    fork workers; a mutant that loops forever (a deleted loop body, `+=` flipped to `-=`) keeps
+    them spinning after the direct child dies, and their CPU load skews every later timeout.
+    Start the run with `setsid` or `start_new_session=True` and kill the process group.
