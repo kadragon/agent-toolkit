@@ -747,6 +747,41 @@ def case_sidecar_records_failure(tmp: Path, _live: int):
     check("no stale pending", not (results / "feat-x.pending").exists())
 
 
+def case_stale_plugin_path_is_failure(tmp: Path, _live: int):
+    print("\na review naming a pruned plugin cache path is a failure, not a review")
+    repo = make_review_repo(tmp, "wsprunedpath")
+    results = tmp / "results-prunedpath"
+    missing = bash_path(tmp / "home" / ".codex" / "plugins" / "cache" / "kadragon" / "dev"
+                        / "4.10.29" / "hooks" / "commit-guard" / "guard.py")
+    # The shape seen 2026-10-15: prose verdict, path in backticks, a Korean particle glued on.
+    text = (f"검토가 차단되어 정확성을 확인하지 못했습니다. 도구 실행 훅이 누락된 `{missing}`를 "
+            "참조하여 요청한 git diff가 실행되지 않았습니다.")
+    proc = run_with_sidecar(repo, tmp, ok_companion(tmp, "comp-stale", text), results)
+    check("stale path exits nonzero", proc.returncode not in (0, 75), f"rc={proc.returncode}")
+    check("stale path names the missing path", missing in proc.stderr, proc.stderr[-600:])
+    check("stale path hints a broker restart", "restart the Codex broker" in proc.stderr, proc.stderr[-600:])
+    check("stale path review not on stdout", "검토가 차단" not in proc.stdout, proc.stdout[-300:])
+    fields = meta_fields(results / "feat-x.meta") if (results / "feat-x.meta").exists() else {}
+    check("stale path status=failed", fields.get("status") == "failed", str(fields))
+
+    print("\na review naming a live plugin path, a ~ path or a glob is still a review")
+    live = tmp / "home" / ".codex" / "plugins" / "cache" / "kadragon" / "dev" / "4.10.30"
+    live.mkdir(parents=True)
+    build = live.parent / "1.2.0+build.5@x~y%z"
+    build.mkdir()
+    for label, body in (
+        ("existing", f"P2 `{bash_path(live)}`. needs a look\n"),
+        ("tilde", "P2 ~/.claude/plugins/cache/kadragon/dev/9.9.9/x.sh is fine\n"),
+        ("glob", f"P3 {bash_path(live.parent)}/*/skills/x.sh resolves the newest\n"),
+        # Only the Codex hook cache is the broker's; a review may cite a pruned Claude one.
+        ("claude-cache", f"P2 settings.json points at {bash_path(tmp)}/.claude/plugins/cache/k/dev/1.0.0/x.sh\n"),
+        ("semver-build", f"P2 `{bash_path(build)}`, see there\n"),
+    ):
+        proc = run_with_sidecar(repo, tmp, ok_companion(tmp, f"comp-{label}", body), results)
+        check(f"{label} path review exits 0", proc.returncode == 0, proc.stderr[-400:])
+        check(f"{label} path review on stdout", body.strip() in proc.stdout, proc.stdout[-300:])
+
+
 def case_sidecar_holds_untruncated_text(tmp: Path, _live: int):
     """stdout is head+tail truncated past the cap; the sidecar is the copy that stays whole."""
     print("\noversized review")
@@ -841,6 +876,7 @@ def main():
             case_sidecar_written_on_success,
             case_pending_visible_while_running,
             case_sidecar_records_failure,
+            case_stale_plugin_path_is_failure,
             case_sidecar_holds_untruncated_text,
             case_sidecar_clears_previous_run,
             case_unwritable_result_dir_is_not_fatal,

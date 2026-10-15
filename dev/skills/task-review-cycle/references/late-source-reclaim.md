@@ -41,7 +41,9 @@ trailing `-` stripped. Both sources use the same three files:
 
 `.meta` fields: `pid`, `started_at`, `mode`, `branch`, `base`, `head_sha`, `status`, `exit_code`,
 `finished_at`, `elapsed_seconds`, `review_file`. `status` is `ok` (a review was produced),
-`failed` (the companion exited non-zero) or `empty` (it ran but produced no extractable review).
+`failed` (the companion exited non-zero, or its review named a `.codex/plugins/cache` path missing
+on disk: a broker started before a plugin upgrade, whose tool calls all failed — restart that
+broker before re-running) or `empty` (it ran but produced no extractable review).
 agy's `.meta` has the same fields except `mode`; `failed` there means agy exited non-zero after
 partial output.
 

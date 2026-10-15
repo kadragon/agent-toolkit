@@ -13,10 +13,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #328 — hwpx insert/delete nested cells + fail-closed triplet, commit-guard cd rename (2026-10-15)
+### PR #329 — commit-guard code runners, hwpx sz height, codex stale broker (2026-10-15)
 
-- [ ] [debt] `_may_move_head` reads an opaque runner (`sh -c`, `bash -c`, `eval`, `./script`) as no HEAD move, top-level or in a substitution body, so `git checkout -b feat && sh -c 'git checkout main' && git commit` passes on main; PR #328's cd rename removed the one case (`$(cd … && sh -c …)`) the old name clash blocked by accident; decide whether a non-inert runner drops the chain's branch everywhere (source: code-review; pre-existing) — dev/hooks/commit-guard/guard.py `_may_move_head`
-- [ ] [debt] `table.py delete` rewrites the table `<hp:sz>` height only when `height=` directly follows `width="N" `; a Hancom file's `widthRelTo` between them leaves the height unchanged and the `subn` count is discarded; match the tag whole and fail closed on no height (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_delete_rows`
+- [ ] [debt] after a code runner or a HEAD-moving substitution the chain's branch falls back to the live branch read at hook time, which is stale once the runner switched, so `sh -c 'git checkout main' && git commit` on a live feature branch passes; an unknown branch should fail closed instead (source: code-review; pre-existing for `x=$(git checkout main)`) — dev/hooks/commit-guard/guard.py `_commit_segments`
+- [ ] [debt] `eval`/`source` run in this shell and may `cd`, but running_cwds is left unchanged, so `eval 'cd ../B' && git commit` reads repo A's branch (source: code-review) — dev/hooks/commit-guard/guard.py `_runs_code`
+- [ ] [debt] `_runs_code` does not see a runner behind `sudo` or `xargs` (source: code-review) — dev/hooks/commit-guard/guard.py `_RUNNER_WRAPPERS`
+- [ ] [constraint] `source .venv/bin/activate` is a runner by the 2026-10-15 decision, so `git checkout -b feat && source .venv/bin/activate && pytest && git commit` on main now blocks; decide whether an env-activate file is exempt (source: code-review) — dev/hooks/commit-guard/guard.py `_EVAL_COMMANDS`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
