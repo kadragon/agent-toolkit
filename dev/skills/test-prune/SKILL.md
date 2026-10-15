@@ -98,14 +98,20 @@ traps that produced false numbers in practice. In order:
    | SURVIVED | all related tests passed |
    | INVALID | compile error, import error, crash before any assertion, or unreviewed timeout — excluded |
 
+   A timeout is reviewed as KILLED only when the test asserts that the code does not block or
+   hang; any other timeout stays INVALID.
+
 4. **Record the kill matrix** — each mutant → the tests that killed it. Use the tool's per-test
    output only when it lists every killing test, not just the first; otherwise rerun with the
    candidate removed (leave-one-out).
 
 **No mutation tool available:** write the candidate's mutants by hand — wrong constant or
-boundary, flipped branch, dropped side effect, empty/default return, removed validation — apply
-each in the copy, and run the candidate alone, then the suite without it. Same table, same
-matrix.
+boundary, flipped branch, dropped side effect, empty/default return, removed validation, an added
+condition on an input the test varies — apply each in the copy, and run the candidate alone, then
+the suite without it. Same table, same matrix.
+
+**Candidates that kill the same mutants** look like duplicates until a mutant branches on the
+input they differ in. Run that mutant before calling either one redundant.
 
 **Done:** every candidate has a verdict line naming the mutants it kills and, for each, either
 the kept tests that also kill it (per-test data) or `sole killer: yes/no` (leave-one-out).
@@ -129,7 +135,7 @@ Apply the first matching row:
 | **KEEP** | T is the **sole killer** of any mutant in K(T), or *Keep rules* 2–6 apply | leave T; note why; if K(T) is empty, log its behavior under *Gaps* |
 | **MERGE** | T and siblings differ only in input values of one class, and no collapsed case is a sole killer | collapse to one case per distinct input class |
 | **DELETE + GAP** | T killed no mutant at all (a false green), and its smell is not *Text grep* or *Framework test* | remove T; log the behavior its title claims as a gap |
-| **DELETE** | K(T) is empty but T is a text-grep or framework test, or every mutant it killed was a decision or unreachable mutant; or K(T) is non-empty and every mutant in it is also killed by a kept test | remove T |
+| **DELETE** | K(T) is empty but T is a text-grep or framework test, or every mutant it killed was a decision or unreachable mutant; or K(T) is non-empty and every mutant in it is also killed by a kept test | remove T; if a mutant of the guard its title names survived, log that guard under *Gaps* |
 
 Decide removals **as a set**, not one at a time: two tests can each look redundant because the
 other exists. Let U = the union of K(T) over every DELETE and every collapsed MERGE case. Re-run
