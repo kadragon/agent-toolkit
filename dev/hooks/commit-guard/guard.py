@@ -104,12 +104,17 @@ _REDIRECT = re.compile(r"^\d*(?:<<<|<<-?|<>|<&|>>|>&|>\||&>>|&>|<|>)(.*)$")
 _EMPTY_PARAM = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|[1-9!@*])")
 
 
+# A quoted expansion that may expand to no word at all: `"$@"`, `"${a[@]}"`.
+_ALL_WORDS = re.compile(r"^(?:\$@|\$\{@[^}]*\}|\$\{[A-Za-z_][A-Za-z0-9_]*\[@\][^}]*\})$")
+
+
 def _strip_expansions(tok):
     """tok (a word's source text, quotes intact) without the expansions that
     lead it and may be empty: `$!git` is `git` when no job ran, and so is
     `"$x"git`. Returns tok unchanged when none leads it, and when an expansion
     never closes. A quoted empty expansion standing alone is still a word, the
-    empty string: then '""' is what remains."""
+    empty string: then '""' is what remains, except for `"$@"` and
+    `"${a[@]}"`, which expand to no word at all."""
     rest, quoted = tok, False
     while rest:
         m = _EMPTY_PARAM.match(rest)
@@ -120,10 +125,11 @@ def _strip_expansions(tok):
             break
         try:
             if rest[0] == '"':
-                text, end = _double_quoted(rest, 1)
-                if _strip_expansions(text):
+                end = _double_quoted(rest, 1)[1]
+                raw = rest[1:end - 1]  # read before unescaping: `"\$x"` is text
+                if _strip_expansions(raw):
                     break  # text that is not only expansions: never empty
-                quoted = True
+                quoted = quoted or not _ALL_WORDS.match(raw)
             else:
                 end = _expansion_end(rest, 0)
         except (ValueError, RecursionError):
@@ -1698,10 +1704,36 @@ def _block(reason):
     raise SystemExit(2)
 
 
+# A brace expansion, `{a,b}` or `{a..b}`: bash rewrites the word before git
+# reads it (`{main,}` is `main`).
+_BRACE_EXPANSION = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
+
+# git subcommands that cannot move HEAD: one run inside a substitution leaves
+# the chain's branch where it was.
+_HEAD_STILL_SUBCOMMANDS = {
+    "add", "blame", "cat-file", "commit", "config", "describe", "diff", "for-each-ref",
+    "grep", "log", "ls-files", "merge-base", "mv", "name-rev", "remote", "rev-list",
+    "rev-parse", "rm", "show", "show-ref", "status",
+}
+
+
 def _has_expansion(word):
     """True if word (unquoted text) holds an expansion: its value is known
-    only at runtime."""
-    return "$" in word or "`" in word
+    only at runtime, or is not the text written."""
+    return "$" in word or "`" in word or _BRACE_EXPANSION.search(word) is not None
+
+
+def _may_move_head(segment):
+    """True if the segment, read past a leading expansion, runs a git
+    subcommand that may move HEAD."""
+    toks = _tokens(segment, expansions=True)
+    i = 0
+    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
+        i += 1
+    if i >= len(toks) or os.path.basename(toks[i]) != "git":
+        return False
+    i = _git_subcommand_at(toks, i + 1)
+    return i < len(toks) and toks[i] not in _HEAD_STILL_SUBCOMMANDS
 
 
 # How deep command substitutions are read inside one another. Each level
@@ -1720,8 +1752,13 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
 
     A command substitution is a command of its own, run before the segment
     holding it, in that segment's cwd and branch; whatever it changes stays
-    in its subshell. Its commits are read the same way, recursively, to
-    _MAX_SUBST_DEPTH: past it RecursionError, as when the stack runs out.
+    in its subshell, except HEAD, which the repo shares: a body that may move
+    HEAD drops the chain's branch. Its commits are read the same way,
+    recursively, to _MAX_SUBST_DEPTH: past it RecursionError, as when the
+    stack runs out.
+
+    Returns (commits, moved): moved says some git call in command may move
+    HEAD.
     """
     if level > _MAX_SUBST_DEPTH:
         raise RecursionError("command substitutions nest too deep")
@@ -1745,7 +1782,8 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
     proven_created = []      # names created under that proof, absent from the live refs
     fn_depth = 0             # braces and parens open in a function body being defined
     fn_pending = False       # a function head seen alone: its body follows
-    nested = []              # (body, cwds, branch, chain_stack, stack_reliable)
+    nested_commits = []      # commits found in substitution bodies
+    moved = False            # some git call here may move HEAD
 
     def maybe_cwds(path):
         return list(dict.fromkeys(os.path.abspath(os.path.join(c, path)) for c in running_cwds))
@@ -1778,10 +1816,22 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
         guarded = op == ")" or arms[idx] or head or bool(in_body)
         for body in bodies[idx]:
             if guarded:
-                nested.append((body, list(running_cwds), None, [], False))
+                found, body_moved = _commit_segments(
+                    body, running_cwds, None, [], False, True, overrides, level + 1)
             else:
-                nested.append((body, list(running_cwds), running_branch, list(chain_stack),
-                               stack_reliable))
+                found, body_moved = _commit_segments(
+                    body, running_cwds, running_branch, chain_stack, stack_reliable, True,
+                    overrides, level + 1)
+            nested_commits += found
+            if body_moved:
+                # the substitution ran in a subshell, but on the same repo
+                moved = True
+                running_branch = None
+                chain_stack = []
+                carries_semicolon = False
+                stack_reliable = False
+                any_switch_seen = True
+        moved = moved or _may_move_head(stripped)
         toks = _tokens(stripped)
         exp_toks = _tokens(stripped, expansions=True)
         # an expansion that may be empty leads the command: what follows it
@@ -1845,9 +1895,13 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             # the chain toward a protected branch, never off one, and leaves
             # chain_stack's depth unprovable.
             switched = _bare_switch_target(stripped, expansions=True)
+            forced = _new_branch_created(stripped, expansions=True, flag=True)
+            if forced is not None and forced[1] in ("-B", "-C"):
+                switched = forced[0]  # a forced creation resets and switches to an existing branch
             if isinstance(switched, _PrevRef):
                 resolved = _resolve_prev_ref(
-                    switched.n, chain_stack, _git_cwd(stripped, running_cwds[0]), stack_reliable,
+                    switched.n, chain_stack, _git_cwd(stripped, running_cwds[0]),
+                    stack_reliable and len(running_cwds) == 1,
                     branch_override, reflog_override,
                 )
                 if resolved is None:
@@ -1861,7 +1915,7 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             elif switched in ("main", "master"):
                 running_branch = switched
             if (switched is not None or _is_unmodeled_git_segment(stripped, expansions=True)
-                    or _new_branch_created(stripped, expansions=True) is not None):
+                    or forced is not None):
                 any_switch_seen = True
                 stack_reliable = False
         else:
@@ -1947,10 +2001,7 @@ def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
             # -C flag overrides the cd-tracked cwd for this specific git call
             git_cwds = list(dict.fromkeys(_git_cwd(stripped, c) for c in effective_cwd_at[idx]))
             commit_segs.append((stripped, git_cwds, effective_branch_at[idx]))
-    for body, body_cwds, branch, stack, reliable in nested:
-        commit_segs += _commit_segments(body, body_cwds, branch, stack, reliable, True, overrides,
-                                        level + 1)
-    return commit_segs
+    return commit_segs + nested_commits, moved
 
 
 def main(branch_override=None, marker_override=None, reflog_override=None,
@@ -1983,13 +2034,12 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
     env_cwd = data.get("cwd") or os.getcwd()
     overrides = (branch_override, reflog_override, creatable_override)
     try:
-        commit_segs = _commit_segments(command, [env_cwd], None, [], True, False, overrides)
+        commit_segs, _ = _commit_segments(command, [env_cwd], None, [], True, False, overrides)
     except RecursionError:
         # nesting past what the analysis can read: passing it would let a
-        # commit hidden in it through (fail-open)
-        if "commit" in command:
-            _block("commit-guard: blocked — the command nests too deep to check for a commit.")
-        return
+        # commit hidden in it through (fail-open), and its spelling cannot be
+        # trusted (`com\mit`), so nothing past it is read
+        _block("commit-guard: blocked — the command nests too deep to check for a commit.")
 
     if not commit_segs:
         return  # not a git commit invocation → pass through
@@ -3201,6 +3251,26 @@ def _test():
           on_main("case x in @(a|x)) git commit -m wip;; esac") == 2)
     check("an extglob pattern's '|' is no pipe → passes",
           run("case x in @(a|x)) echo;; esac") == 0)
+    check("'\"$@\"' may expand to no word before git → blocked",
+          on_main("\"$@\" git commit -m wip") == 2)
+    check("'\"${a[@]}\"' may expand to no word before git → blocked",
+          on_main("\"${a[@]}\" git commit -m wip") == 2)
+    check("an escaped '\\$x' in quotes is text → passes", on_main("\"\\$x\"git commit -m wip") == 0)
+    check("a checkout inside $( … ) drops the chain's branch → blocked",
+          on_main("git checkout -b feat && x=$(git checkout main) && git commit -m '[FIX] x'") == 2)
+    check("a checkout after ';' inside $( … ) drops the chain's branch → blocked",
+          on_main("git checkout -b feat && echo $(true; git checkout main) && git commit -m '[FIX] x'")
+          == 2)
+    check("a read-only git call inside $( … ) keeps the chain's branch → passes",
+          on_main("git checkout -b feat && x=$(git rev-parse HEAD) && git commit -m '[FIX] x'") == 0)
+    check("a brace-expanded switch target drops the chain's branch → blocked",
+          on_main("git checkout -b feat && git checkout {main,} && git commit -m '[FIX] x'") == 2)
+    check("a forced creation behind an expansion may land on main → blocked",
+          run("$x git checkout -B main && git commit -m '[FIX] x'") == 2)
+    check("a forced switch -C behind an expansion may land on main → blocked",
+          run("$x git switch -C main && git commit -m '[FIX] x'") == 2)
+    check("past the substitution depth cap a respelled commit → blocked",
+          on_main("x=" + "$(echo " * 40 + "y" + ")" * 40 + "; git com\\mit -m wip") == 2)
     deep = 1500  # past the recursion limit wherever the suite's stack stands
     try:
         deep_code = on_main("git commit -m \"" + "$(echo \"" * deep + "x" + "\")" * deep + "\"")

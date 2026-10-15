@@ -13,10 +13,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### commit-guard substitutions + HWPX cellAddr order follow-ups (2026-10-15)
+### PR #326 — commit-guard substitutions + HWPX cellAddr order (2026-10-15)
 
 - [ ] [FIX] commit-guard does not read a backtick substitution inside double quotes, ``echo "`git commit -m wip`"`` (exits 0 from `main`), nor a `$( … )` in a heredoc body under an unquoted delimiter: `_scan`'s `double` and `bodies` mark both as text, so `_split_full` records no body for them (source: integration-check; pre-existing) — dev/hooks/commit-guard/guard.py `_scan`
 - [ ] [debt] `table.py insert`/`delete` still need `colAddr` before `rowAddr` and `colSpan` before `rowSpan`: `CELL_RE` and `TRIPLET_RE` skip a reordered cell, so `delete` neither refuses its rowSpan>1 anchor nor shrinks its span; only the readers `_own_cell_addr`/`_cell_span` were made order-free (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py `TRIPLET_RE`
+- [ ] [debt] a function definition or case arm drops the chain's created branch for every later segment: `git checkout -b feat && f() { true; } && git commit -m '[FIX] x'` blocks from `main` though bash only defines `f`; only a HEAD-moving git call or a `cd` in the body or arm needs to drop it (source: code-review; pre-existing) — dev/hooks/commit-guard/guard.py `_commit_segments`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
