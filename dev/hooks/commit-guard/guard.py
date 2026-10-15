@@ -295,9 +295,17 @@ def _scan(command):
             one that does not, such as `((a) )`, as two subshells."""
             depth = 0
             while j < n:
-                if command[j] == "(":
+                c = command[j]
+                if c == "\\":
+                    j += 1  # an escaped paren counts for neither reading
+                elif c in "'\"":
+                    # bash skips quoted text when it matches the parens
+                    j = command.find(c, j + 1)
+                    if j == -1:
+                        return False
+                elif c == "(":
                     depth += 1
-                elif command[j] == ")":
+                elif c == ")":
                     if depth == 0:
                         return command[j + 1:j + 2] == ")"
                     depth -= 1
@@ -369,7 +377,9 @@ def _scan(command):
                 i += 1
                 word_start = False
                 continue
-            if ch == "(":
+            if ch == "(" and not (opened and opened[-1] == "param"
+                                  and command[i - 1:i] != "$"):
+                # in ${ … } only `$(` opens anything: `${v//(/}` is a pattern
                 before = command[i - 1:i]
                 if command[i + 1:i + 2] == "(" and arith_closes(i + 2):
                     opened += ["subst" if before == "$" else "arith", "arith"]
@@ -2337,6 +2347,14 @@ def _test():
           run("x=( $(cat <<EOF\ngit commit -m wip\nEOF\n) )\ngit status") == 0)
     check("a '#' in $( … ) inside $(( … )) opens a comment → blocked",
           on_main("echo $(( $(echo 1 # \"\n) + 1 ))\ngit commit -m wip\n# \"") == 2)
+    check("a '(' in a ${ … } pattern opens nothing, so '}' closes it → blocked",
+          on_main("echo ${v//(/} # don't\ngit commit -m wip # '") == 2)
+    check("a '(' in a ${ … } pattern leaves a later heredoc as text → passes",
+          run("echo ${v//(/x}\ncat <<'EOF'\ngit commit -m \"wip\"\nEOF") == 0)
+    check("a quoted '))' does not close '((' as arithmetic → blocked",
+          on_main("((echo \"))\") # it's\n) && git commit -m wip # '") == 2)
+    check("a single-quoted '))' does not close '((' either → blocked",
+          on_main("((echo '))') # it's\n) && git commit -m wip # '") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
