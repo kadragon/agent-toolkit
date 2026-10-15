@@ -1,0 +1,10 @@
+[
+  {"query": "our test suite is bloated with meaningless tests, prune the low-value ones", "should_trigger": true},
+  {"query": "these tests only assert on mocks and tautologies, clean them up with mutation evidence", "should_trigger": true},
+  {"query": "too many over-specified edge-case tests, find which ones are redundant and delete them", "should_trigger": true},
+  {"query": "의미 없는 테스트와 과한 엣지 케이스 테스트를 정리해줘", "should_trigger": true},
+
+  {"query": "this endpoint throws intermittently, diagnose the bug", "should_trigger": false},
+  {"query": "write a design doc for the new caching layer", "should_trigger": false},
+  {"query": "rewrite this Korean paragraph so it does not read like a translation", "should_trigger": false}
+]
