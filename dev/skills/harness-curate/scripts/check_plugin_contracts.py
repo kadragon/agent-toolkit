@@ -19,7 +19,8 @@ Usage:
   --project PATH  repo root to check (default: cwd).
 
 Scanned: `backlog.md`, `AGENTS.md`, `CLAUDE.md`, and `docs/*.md` (top level only — `docs/design/`
-holds past specs, not live rules). Fenced code blocks and HTML comments are masked, so a template
+holds past specs, not live rules). A change-record doc (`docs/log.md`, `docs/*-log.md`,
+`docs/changelog.md`, `docs/*-history.md`, `-`/`_`/`.` separators alike) is skipped too: it quotes the rule it retired, so the quote is not a rule. Fenced code blocks and HTML comments are masked, so a template
 sample is not a rule. The masking is imported from `task-next/scripts/backlog_candidates.py` (same
 `dev` plugin, always co-installed) so both scripts agree on what markup is.
 
@@ -44,6 +45,8 @@ _KEEP_RULE_RE = re.compile(r"\[x\].*\bhistory\b|\bhistory\b.*\[x\]", re.IGNORECA
 # A line that forbids keeping them states the plugin contract, not a conflict with it.
 _NEGATION_RE = re.compile(r"\b(?:do not|don't|never|no longer|must not)\b", re.IGNORECASE)
 _PRUNE_RE = re.compile(r"prune-backlog")
+# A dated change record (`harness-log.md`, `changelog.md`) names a rule to say it was removed.
+_RECORD_DOC_RE = re.compile(r"(?:^|[-_.])(?:log|changelog|history)\.md$", re.IGNORECASE)
 MAX_SHOWN = 10
 
 
@@ -73,7 +76,7 @@ def rule_docs(root: Path) -> list[Path]:
     docs = [root / "AGENTS.md", root / "CLAUDE.md"]
     docs_dir = root / "docs"
     if docs_dir.is_dir():
-        docs.extend(sorted(docs_dir.glob("*.md")))
+        docs.extend(p for p in sorted(docs_dir.glob("*.md")) if not _RECORD_DOC_RE.search(p.name))
     return [p for p in docs if p.is_file()]
 
 
@@ -212,6 +215,17 @@ def run_tests() -> int:
         "docs/design/old.md": "keep [x] as history\n",
     }))
     _assert(code == 0, "a doc naming `prune-backlog` alone, or a rule under docs/design/, is not a conflict")
+
+    code, _ = run(_repo({
+        "backlog.md": "## Now\n\n- [ ] open\n",
+        "docs/harness-log.md": "- The thematic-bucket \"keep `[x]` as history\" rule and\n"
+                               "  the \"re-add after `prune-backlog`\" workaround are gone.\n",
+        "docs/conventions.md": "- The `prune-backlog` step deletes every line it covers.\n",
+    }))
+    _assert(code == 0, "a change-record doc quoting the retired rule is not a conflict")
+
+    code, _ = run(_repo({"docs/catalog.md": "- Thematic bucket — keep `[x]` items as history.\n"}))
+    _assert(code == 1, "a doc whose name only ends in the letters `log` (`catalog.md`) is still scanned")
 
     code, _ = run(_repo({"AGENTS.md": "- Done items: do not keep `[x]` lines as history.\n"}))
     _assert(code == 0, "a rule that forbids `[x]` history states the contract → no conflict")
