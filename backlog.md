@@ -13,6 +13,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #328 — hwpx insert/delete nested cells + fail-closed triplet, commit-guard cd rename (2026-10-15)
+
+- [ ] [debt] `_may_move_head` reads an opaque runner (`sh -c`, `bash -c`, `eval`, `./script`) as no HEAD move, top-level or in a substitution body, so `git checkout -b feat && sh -c 'git checkout main' && git commit` passes on main; PR #328's cd rename removed the one case (`$(cd … && sh -c …)`) the old name clash blocked by accident; decide whether a non-inert runner drops the chain's branch everywhere (source: code-review; pre-existing) — dev/hooks/commit-guard/guard.py `_may_move_head`
+- [ ] [debt] `table.py delete` rewrites the table `<hp:sz>` height only when `height=` directly follows `width="N" `; a Hancom file's `widthRelTo` between them leaves the height unchanged and the `subn` count is discarded; match the tag whole and fail closed on no height (source: code-review; pre-existing) — prod/skills/hwpx/scripts/table.py `_delete_rows`
+
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*

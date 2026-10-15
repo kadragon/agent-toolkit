@@ -406,6 +406,11 @@ def _insert_row(xml: str, table_id: str, at_index: int,
     prefix = tbl[:trs[0][0]]
     suffix = tbl[trs[-1][1]:]
     rows = [tbl[s:e] for s, e in trs]
+    for i, row in enumerate(rows):
+        try:
+            _row_cells(row)  # a span that does not parse cannot be proven not to straddle
+        except ValueError as err:
+            raise ValueError(f"row {i}: {err}") from None
     grown = 0
 
     def adjust(m: re.Match) -> str:
@@ -1618,6 +1623,15 @@ def _run_tests() -> None:
                 print(f"AC-TRIPLET-CLOSED-{label} PASS: delete fails closed on an unparseable cell")
             else:
                 failures.append(f"AC-TRIPLET-CLOSED-{label} FAIL: unexpected error {e}")
+        try:
+            row_xml = '<hp:tr>' + _addr_tc(1, 0, 1, 1, 100) + '</hp:tr>'
+            _insert_row(bad_xml, "9", 1, row_xml, set())
+            failures.append(f"AC-TRIPLET-CLOSED-ins-{label} FAIL: insert accepted an unparseable cell")
+        except ValueError as e:
+            if "did not parse" in str(e):
+                print(f"AC-TRIPLET-CLOSED-ins-{label} PASS: insert fails closed on an unparseable cell")
+            else:
+                failures.append(f"AC-TRIPLET-CLOSED-ins-{label} FAIL: unexpected error {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:
