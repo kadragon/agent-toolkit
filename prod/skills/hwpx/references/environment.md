@@ -7,7 +7,7 @@
 | Windows | `python` (system) or `.venv\Scripts\python` | `python3` alias usually absent |
 | macOS/Linux | `python3` or `.venv/bin/python` | |
 
-**Install required packages first** (`validate.py` needs `defusedxml`; the OLE `.hwp` fallback recipe below needs `olefile`):
+**Install required packages first** (`validate.py` and `compare.py` need `defusedxml`; the OLE `.hwp` fallback recipe below needs `olefile`):
 
 ```bash
 python -m pip install olefile defusedxml

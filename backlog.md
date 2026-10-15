@@ -13,6 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
+### PR #325 — HWPX content comparison (2026-10-15)
+
+- [ ] [debt] `table.py replace` misses valid cells when `hp:cellAddr` serializes `rowAddr` before `colAddr`: `_own_cell_addr` requires the opposite attribute order, producing `cell colAddr=0 rowAddr=0 not found`; reproduced during the compare integration check, while the same cell with reordered attributes succeeds (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py:56
+
 ### PR #322 — commit-guard heredoc in arithmetic and ANSI-C quote after a pid (2026-10-15)
 
 - [ ] [FIX] commit-guard allows a commit whose segment `shlex` cannot read: `git commit -m wip $'a\'b'` (a `$'…'` with an escaped quote, or a nested-quote token) makes `_tokens` return `[]` and fail open; a command word built by an expansion (`$()git commit`, `$!git commit`, `${x#a}<<EOF git commit`) also exits 0 from `main` while bash runs the commit — found by the bash-with-stub-git fuzz, 3 seeds, every miss present before PR #321 (source: contract) — dev/hooks/commit-guard/guard.py `_tokens`, `_command_start`

@@ -10,7 +10,7 @@ description: >-
   한국 정부·기업 양식 처리. 첨부된 .hwpx 파일 추출·번역·요약도 지원. 한글 문서 작성,
   표 편집, 양식 변환, 본문 추출, 번역, 요약 작업에 사용. 영어·한국어 요청 모두 지원하며
   HWPX 문서 작업에 필요한 XML 구조와 스타일을 함께 처리.
-version: 1.0.1
+version: 1.1.0
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -46,7 +46,7 @@ Restore-mode page-count/completion-gate rules apply **only to reference restore 
 
 ## Environment
 
-Most scripts use stdlib `xml.etree.ElementTree` only. `validate.py` requires `defusedxml` (XXE/billion-laughs hardening); the OLE `.hwp` fallback recipe in `references/environment.md` needs `olefile`. Install both up front:
+Most scripts use stdlib `xml.etree.ElementTree` only. `validate.py` and `compare.py` require `defusedxml` (XXE/billion-laughs hardening); the OLE `.hwp` fallback recipe in `references/environment.md` needs `olefile`. Install both up front:
 
 ```bash
 python -m pip install olefile defusedxml   # python -m pip, not bare pip — they can bind different interpreters
@@ -121,8 +121,8 @@ python3 "$SKILL_DIR/scripts/office.py" pack ./unpacked/ edited.hwpx
 
 # 4. 검증 (원본 대비)
 python3 "$SKILL_DIR/scripts/validate.py" validate edited.hwpx --baseline document.hwpx
+python3 "$SKILL_DIR/scripts/compare.py" document.hwpx edited.hwpx  # review changes and incomplete scopes
 ```
-
 > **Validate timing when overwriting original**: if planning to overwrite with the original filename, run `validate --baseline` **first**. Order: `pack to temp → validate --baseline original → copy to final`. Overwriting the original first removes the baseline, forcing validation without `--baseline` and risking false-positive duplicate ID reports.
 
 > ⚠️ **`hp:tbl id` collisions**: two unrelated tables can share the same `hp:tbl id` — `--table-id` may still happen to resolve the intended table, but that's not guaranteed. `validate.py validate` now flags duplicate `hp:tbl` ids (see Workflow 4). When uncertain which table `--table-id` resolves to, confirm first with `table.py locate --tag hp:tbl --contains "..."` or `table.py dump --contains "..."` before trusting `--table-id` alone.
@@ -211,7 +211,7 @@ Read `$SKILL_DIR/references/reference-restore.md` first — full command sequenc
 3. **Write section0.xml** — write new content following analyzed structure
 4. **Build** — build with extracted header.xml + new section0.xml
 5. **Validate** — `validate.py validate`
-6. **Page guard** — `validate.py page-guard` (re-fix on failure)
+6. **Page guard, compare, inspect** — `validate.py page-guard` (re-fix on failure), then `compare.py original.hwpx result.hwpx` and Hancom inspection. Rebuilt IDs/members can make restore comparison incomplete; manually review those scopes (CLI and limits: `references/scripts-guide.md` → *compare.py usage*).
 
 ## Critical Rules
 
@@ -225,7 +225,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 4. 🔴 **Preserve namespaces**: keep `hp:`, `hs:`, `hh:`, `hc:` prefixes when editing XML
 5. 🟡 **itemCnt consistency**: header.xml's charProperties/paraProperties/borderFills itemCnt must match actual child count
 6. 🟡 **ID reference consistency**: section0.xml's charPrIDRef/paraPrIDRef must match header.xml definitions
-7. 🔵 **Python version**: any Python 3.8+ works (stdlib only, except `validate.py` which requires `defusedxml` — see `environment.md`)
+7. 🔵 **Python version**: any Python 3.8+ works (stdlib only, except `validate.py` and `compare.py` which require `defusedxml` — see `environment.md`)
 8. 🔵 **References**: XML structure → `hwpx-format.md`; editing traps → `editing-gotchas.md`; XML serialization rules → `xml-integrity.md`; style IDs → `style-maps.md`; XML templates → `section-writing.md`; script CLI → `scripts-guide.md`; bulk edits → `bulk-edit.md`; restore commands → `reference-restore.md`; environment/encoding → `environment.md`
 9. 🔵 **build.py build first**: use `build.py build` for new document creation (avoid calling python-hwpx API directly)
 10. 🔵 **Process attached HWPX after intent judgment**: do not auto-restore on attachment. Judge restore/edit/extract/generate intent first (see "Handling attached HWPX — judge intent first" table). Only when classified as restore, do `build.py analyze` + extracted-XML-based restore/rewrite
