@@ -13,23 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #325 — HWPX content comparison (2026-10-15)
+### commit-guard substitutions + HWPX cellAddr order follow-ups (2026-10-15)
 
-- [ ] [debt] `table.py replace` misses valid cells when `hp:cellAddr` serializes `rowAddr` before `colAddr`: `_own_cell_addr` requires the opposite attribute order, producing `cell colAddr=0 rowAddr=0 not found`; reproduced during the compare integration check, while the same cell with reordered attributes succeeds (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py:56
-
-### PR #324 — commit-guard expansion, case arm, function body (2026-10-15)
-
-- [ ] [FIX] commit-guard does not see a commit inside a command-position substitution: `$(git commit -m wip)` exits 0 from `main` while bash runs the commit — `_command_start` steps over the `$( … )` body without reading it; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start`
-- [ ] [FIX] commit-guard loses a commit behind a substitution that `_split_segments` splits: `x=$(true; echo) git commit`, `x=$(a | b) git commit`, ``x=`true; echo` git commit`` exit 0 from `main` — a `;`, `|` or case `)` inside an unquoted `$( … )` or backticks still ends the segment, so the closing `)` lands in the next one; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_split_segments`
-- [ ] [FIX] commit-guard misses a commit behind a double-quoted empty expansion, `"$x"git commit -m wip`: `_strip_expansions` reads only unquoted expansions; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_strip_expansions`
-- [ ] [FIX] commit-guard does not see a branch switch or `cd` behind an expansion: `git checkout -b feat && $x git checkout main && git commit -m '[FIX] x'` credits `feat` while bash commits on `main`; `_bare_switch_target`, `_is_unmodeled_git_segment` and the `cd` tracking read no expansions, and reading them must not let `$x git checkout feature/y` unblock a commit; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `main`
-- [ ] [FIX] commit-guard misses `$( (true) )git commit -m wip`: on the padded tokens `$ ( (` reads as never-empty `$(( … ))`; tell them apart by raw adjacency, not padded tokens; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start`
-- [ ] [FIX] commit-guard tracks a `cd` in a later statement of a function body or case arm: `f() { true; cd /other; }; git commit` and the multi-line `f() {` + newline + `cd /other` form move `running_cwd` though `f` never runs; only the first segment is guarded — track body/arm nesting to its `}` / `;;` / `esac`; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `main`
-- [ ] [FIX] commit-guard loses a commit behind `$x` when `_words` fails and the posix/non-posix shlex word counts differ (`$x git commit -m"$(cat <<'EOF'` … `it's` … `EOF` + `)"`): `_shlex_raws` returns None and no expansion is stripped; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_shlex_raws`
-- [ ] [debt] `x=$(true)git commit` is one assignment (x=git) then the command `commit`, but the padded tokens read `git` as the command word and block it; rejoin an assignment's value up to the next unquoted blank (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start` (introduced here)
-- [ ] [debt] in `case_pat`, `esac` closes the case after `|`, after `(` and as the subject (`case x in y|esac)`, `case esac in (esac)`); bash reads it as reserved only at a pattern list's start (source: code-review) — dev/hooks/commit-guard/guard.py `_scan` (introduced here)
-- [ ] [debt] a command nesting `"$( … )"` ~500 deep raises RecursionError in `_scan`'s `double`/`code` and the hook exits 0 (fail-open); make the scanner iterative or catch it and block; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_scan`
-- [ ] [debt] an extglob case pattern `@(a|x))` ends at its inner `)` in `_scan`, so the arm's commit is read as text: track paren depth for `[?*+@!](` groups in `case_pat`; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_scan`
+- [ ] [FIX] commit-guard does not read a backtick substitution inside double quotes, ``echo "`git commit -m wip`"`` (exits 0 from `main`), nor a `$( … )` in a heredoc body under an unquoted delimiter: `_scan`'s `double` and `bodies` mark both as text, so `_split_full` records no body for them (source: integration-check; pre-existing) — dev/hooks/commit-guard/guard.py `_scan`
+- [ ] [debt] `table.py insert`/`delete` still need `colAddr` before `rowAddr` and `colSpan` before `rowSpan`: `CELL_RE` and `TRIPLET_RE` skip a reordered cell, so `delete` neither refuses its rowSpan>1 anchor nor shrinks its span; only the readers `_own_cell_addr`/`_cell_span` were made order-free (source: integration-check; pre-existing) — prod/skills/hwpx/scripts/table.py `TRIPLET_RE`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 

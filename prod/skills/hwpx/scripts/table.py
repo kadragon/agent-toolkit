@@ -50,25 +50,29 @@ A4_BODY_WIDTH = 42520
 
 # ── shared table helpers ──────────────────────────────────────────────────────
 
+def _col_row(tag: str, kind: str) -> tuple[int, int] | None:
+    # OWPML does not fix attribute order: rowAddr may precede colAddr.
+    col = re.search(rf'\scol{kind}="(\d+)"', tag)
+    row = re.search(rf'\srow{kind}="(\d+)"', tag)
+    return (int(col.group(1)), int(row.group(1))) if col and row else None
+
+
 def _own_cell_addr(tc: str) -> tuple[int, int] | None:
     tbl_depth = 0
-    for m in re.finditer(
-        r'<hp:tbl\b|</hp:tbl>|<hp:cellAddr colAddr="(\d+)" rowAddr="(\d+)"/>',
-        tc,
-    ):
+    for m in re.finditer(r'<hp:tbl\b|</hp:tbl>|<hp:cellAddr\b[^>]*>', tc):
         g = m.group()
         if g == "<hp:tbl":
             tbl_depth += 1
         elif g == "</hp:tbl>":
             tbl_depth -= 1
         elif tbl_depth == 0:
-            return int(m.group(1)), int(m.group(2))
+            return _col_row(g, "Addr")
     return None
 
 
 def _cell_span(tc: str) -> tuple[int, int]:
-    m = re.search(r'<hp:cellSpan colSpan="(\d+)" rowSpan="(\d+)"/>', tc)
-    return (int(m.group(1)), int(m.group(2))) if m else (1, 1)
+    m = re.search(r'<hp:cellSpan\b[^>]*>', tc)
+    return (m and _col_row(m.group(), "Span")) or (1, 1)
 
 
 def _cell_text(tc: str) -> str:
@@ -1437,6 +1441,24 @@ def _run_tests() -> None:
             print("Regression PASS: _replace_cell --para path intact")
     except Exception as e:
         failures.append(f"Regression FAIL: {e}")
+
+    # AC-ADDR-1: cellAddr/cellSpan attributes may serialize in either order
+    try:
+        reordered = _FIXTURE.replace(
+            '<hp:cellAddr colAddr="0" rowAddr="0"/>',
+            '<hp:cellAddr rowAddr="0" colAddr="0"/><hp:cellSpan rowSpan="3" colSpan="2"/>',
+        )
+        content = _build_para_runs("10", [("5", "위원장")])
+        result, _ = _replace_cell(reordered, "1", 0, 0, content)
+        tc = reordered[reordered.index("<hp:tc>"):]
+        if "위원장" not in result:
+            failures.append("AC-ADDR-1 FAIL: reordered cellAddr cell not replaced")
+        elif _cell_span(tc) != (2, 3):
+            failures.append(f"AC-ADDR-1 FAIL: reordered cellSpan read as {_cell_span(tc)}")
+        else:
+            print("AC-ADDR-1 PASS: cellAddr/cellSpan read regardless of attribute order")
+    except Exception as e:
+        failures.append(f"AC-ADDR-1 FAIL: {e}")
 
     # AC-2a: preserve-style reuses charPr/paraPr from existing cell
     try:

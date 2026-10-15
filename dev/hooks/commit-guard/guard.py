@@ -39,7 +39,10 @@ The hook path applies two guards:
      bare switch to a feature branch from live detection (no in-chain attribution
      yet) stays untrusted (ambiguous pathspec) and does not unblock; a detached
      checkout (`--detach`) never re-attributes (the commit lands on a detached
-     HEAD, not the branch ref).
+     HEAD, not the branch ref). A command substitution, quoted or not, is read
+     as a command of its own; a switch or `cd` behind an expansion that may be
+     empty, in a case arm or in a function body may or may not run, so it can
+     only add a cwd to check or move the chain toward a protected branch.
   2. Type guard: commit message must match ^\\[(TYPE)\\] (with trailing space).
      Skipped for editor-mode commits (no -m/-F), --amend, and --squash flags,
      and for messages carrying shell-expandable command substitution (unquoted
@@ -102,11 +105,12 @@ _EMPTY_PARAM = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|[1-9!@*])")
 
 
 def _strip_expansions(tok):
-    """tok (a word's source text, quotes intact) without the unquoted
-    expansions that lead it and may be empty: `$!git` is `git` when no job ran.
-    Returns tok unchanged when none leads it, and when an expansion never
-    closes."""
-    rest = tok
+    """tok (a word's source text, quotes intact) without the expansions that
+    lead it and may be empty: `$!git` is `git` when no job ran, and so is
+    `"$x"git`. Returns tok unchanged when none leads it, and when an expansion
+    never closes. A quoted empty expansion standing alone is still a word, the
+    empty string: then '""' is what remains."""
+    rest, quoted = tok, False
     while rest:
         m = _EMPTY_PARAM.match(rest)
         if m:
@@ -115,13 +119,19 @@ def _strip_expansions(tok):
         if rest.startswith(("$((", "${#")):
             break
         try:
-            end = _expansion_end(rest, 0)
+            if rest[0] == '"':
+                text, end = _double_quoted(rest, 1)
+                if _strip_expansions(text):
+                    break  # text that is not only expansions: never empty
+                quoted = True
+            else:
+                end = _expansion_end(rest, 0)
         except (ValueError, RecursionError):
             return tok
         if end is None:
             break
         rest = rest[end:]
-    return rest
+    return '""' if quoted and not rest else rest
 
 
 def _command_start(parts, bare=None, expansions=False, raws=None):
@@ -151,11 +161,9 @@ def _command_start(parts, bare=None, expansions=False, raws=None):
         if m:
             i += 1 if m.group(1) else 2  # a bare operator takes the next token
             continue
-        if (tok == "$" and expansions and not is_bare(i + 2, "(")  # `$(( … ))` is never empty
-                or _ENV_ASSIGN.match(tok) and tok.endswith("$")) and is_bare(i + 1, "("):
-            # `$( … )` or `x=$( … )` padded by _split_segments: one word, which
-            # bash may expand to nothing, leaving the word joined after it as
-            # the command
+        if _ENV_ASSIGN.match(tok) and tok.endswith("$") and is_bare(i + 1, "("):
+            # `x=$(( … ))` padded by _split_segments: one assignment word
+            # (a command substitution reaches here as `$()`, unpadded)
             depth, j = 0, i + 1
             while j < n:
                 if is_bare(j, "("):
@@ -196,17 +204,40 @@ def _command_start(parts, bare=None, expansions=False, raws=None):
     return i
 
 
-def _defines_function(segment):
-    """True if the segment opens a function definition (`f() {`, `function
-    f`): its body runs when f is called, not where it is written."""
+def _function_nesting(segment):
+    """(head, depth, bare_head) for a segment: head says it opens a function
+    definition (`f() {`, `function f`), whose body runs when f is called, not
+    where it is written; depth is how many braces and parens it opens less
+    how many it closes, so a body running over later segments (`f() { a;`
+    … `}`) can be followed to its end; bare_head says it is the head alone,
+    its body on a later segment."""
     try:
-        parts, bare, _ = _words(_LEAD_NOISE.sub("", segment))
+        words, bare, _ = _words(segment)
     except (ValueError, RecursionError):
-        return False
-    if parts[:1] == ["function"] and bare[0]:
-        return True
-    return (parts[1:3] == ["(", ")"] and all(bare[:3])
-            and re.match(r"^[A-Za-z_][A-Za-z0-9_.:-]*$", parts[0]) is not None)
+        return False, 0, False
+    n = len(words)
+
+    def is_bare(k, word):
+        return k < n and words[k] == word and bare[k]
+
+    depth = -1 if is_bare(0, "}") else 0
+    j = 0
+    while j < n and bare[j] and words[j] in _SHELL_KEYWORDS:
+        depth += words[j] == "{"  # a '(' is counted below with the rest
+        j += 1
+    k = 0
+    if is_bare(j, "function") and j + 1 < n:
+        k = 4 if is_bare(j + 2, "(") and is_bare(j + 3, ")") else 2
+    elif (is_bare(j + 1, "(") and is_bare(j + 2, ")")
+          and re.match(r"^[A-Za-z_][A-Za-z0-9_.:-]*$", words[j]) is not None):
+        k = 3
+    after = j + k
+    while k and after < n and is_bare(after, "{"):
+        depth += 1
+        after += 1
+    rest = [w for w, b in zip(words[:j] + words[j + k:], bare[:j] + bare[j + k:]) if b]
+    depth += rest.count("(") - rest.count(")")
+    return k > 0, depth, k > 0 and j + k == n
 
 
 def _ansi_c(s, i):
@@ -404,12 +435,23 @@ def _tokens(s, expansions=False):
 
 
 def _shlex_raws(s, count):
-    """Each shlex word's source text, from a posix=False split, when the two
-    splits agree on the word count (see _raw_tokens); else None."""
-    try:
-        raws = shlex.split(s, posix=False)
-    except ValueError:
+    """Each shlex word's source text, split where _scan finds an unquoted
+    blank, when that agrees with shlex on the word count; else None. A
+    posix=False split cannot be used: it reads the apostrophe of a heredoc
+    body inside "$( … )" as a quote and miscounts."""
+    cls, balanced = _scan(s)
+    if not balanced:
         return None
+    raws, begin = [], None
+    for k, ch in enumerate(s):
+        if ch in " \t\n" and cls[k] == _CODE:
+            if begin is not None:
+                raws.append(s[begin:k])
+                begin = None
+        elif begin is None:
+            begin = k
+    if begin is not None:
+        raws.append(s[begin:])
     return raws if len(raws) == count else None
 
 
@@ -448,6 +490,7 @@ _DQ = "d"        # double-quoted: the quotes, and a "$( … )" inside them, incl
 _COMMENT = "#"   # a comment, up to but not including its newline
 _HEREDOC = "h"   # a heredoc body and its delimiter line
 _PATTERN = "p"   # a case pattern's '(', '|' or ')'
+_GLOB = "g"      # an extglob group's '(', '|' or ')' inside a case pattern: text
 
 # A reserved word ending the text before a word: the word is in command position
 # when this one is.
@@ -455,10 +498,23 @@ _RESERVED_BEFORE = re.compile(r"(?:^|(?<=[\s;&|(]))(if|elif|while|until|then|do|
 _JOIN = "j"      # a line continuation: the backslash and its newline
 
 
+# What may follow an `esac` that closes its case.
+_ESAC_AFTER = ("", " ", "\t", "\n", ";", "&", "|", ")")
+
+
 def _scan(command):
+    """(classes, balanced) of _scan_full."""
+    cls, balanced, _, _ = _scan_full(command)
+    return cls, balanced
+
+
+def _scan_full(command):
     """Say what each character of a shell command is. Returns (classes,
-    balanced): one of the constants above per character, and False when a quote
-    or a "$( … )" never closes.
+    balanced, subs, arm): one of the constants above per character; False
+    when a quote or a "$( … )" never closes; each outermost command
+    substitution as (body_start, body_end, quoted), its body being
+    command[body_start:body_end]; and per character, whether it sits in a
+    case arm.
 
     The one place that tracks quoting; _strip_comments, _split_segments,
     _outside_quotes and _has_expandable_subst all read its answer, so they
@@ -473,6 +529,8 @@ def _scan(command):
     n = len(command)
     cls = [_CODE] * n
     balanced = True
+    subs = []
+    arm = [False] * n
 
     def heredoc_word(i):
         """The (delimiter, strip_tabs) a '<<' ending at i announces, or None."""
@@ -523,8 +581,9 @@ def _scan(command):
             i = j
         return i
 
-    def double(i):
-        """From just past an opening '"' to just past the one that closes it."""
+    def double(i, record=False):
+        """From just past an opening '"' to just past the one that closes it.
+        record: note each "$( … )" in it as an outermost substitution."""
         nonlocal balanced
         while i < n:
             ch = command[i]
@@ -537,7 +596,10 @@ def _scan(command):
                 return i + 1
             if ch == "$" and command[i + 1:i + 2] == "(":
                 cls[i + 1] = _DQ
-                i = code(i + 2, True)
+                body = i + 2
+                i = code(body, True)
+                if record and balanced:
+                    subs.append((body, i - 1, True))
                 continue
             i += 1
         balanced = False
@@ -550,22 +612,36 @@ def _scan(command):
         start = i
         # What is open at this level, innermost last: 'cmd' (a subshell),
         # 'subst' (`$(`, `<(`, `>(`), 'tick', 'arith' (`((`), 'array' (`=(`),
-        # 'param' (`${`), 'case_pat' / 'case_body' (`case` to `esac`: reading
-        # a pattern, then the arm after its ')'). `$((` opens 'subst' then
+        # 'param' (`${`), 'extglob' (`@(` in a pattern), and from `case` to
+        # `esac`: 'case_subj' / 'case_word' (the subject, then `in`),
+        # 'case_start' (a pattern list's start), 'case_pat' (in a pattern)
+        # and 'case_body' (the arm after its ')'). `$((` opens 'subst' then
         # 'arith'.
         opened = []
         pending = []  # (delimiter, strip_tabs, len(opened) where announced)
         word_start = True  # the next character would open a word
+        # the outermost unquoted command substitution open at the top level:
+        # (body_start, len(opened) once it opened)
+        rec = None
+
+        def open_subst(kind, body):
+            nonlocal rec
+            opened.append(kind)
+            if not nested and rec is None:
+                rec = (body, len(opened))
 
         def close():
             """Close the innermost construct and return what it was. A
             substitution takes the heredocs announced inside it along: bash
             reads those from its own text, so none of them reaches the lines
             after it."""
-            nonlocal pending
+            nonlocal pending, rec
             kind = opened.pop()
             if kind in ("subst", "tick"):
                 pending = [p for p in pending if p[2] <= len(opened)]
+            if rec is not None and len(opened) < rec[1]:
+                subs.append((rec[0], i, False))
+                rec = None
             return kind
 
         def inner():
@@ -629,6 +705,26 @@ def _scan(command):
 
         while i < n:
             ch = command[i]
+            if not nested:
+                arm[i] = "case_body" in opened
+            top = opened[-1] if opened else None
+            if (top in ("case_subj", "case_start") and ch not in " \t\n"
+                    and not (ch == "#" and word_start)):
+                # bash reads `esac` as reserved only at a pattern list's start:
+                # not as the subject, nor after a pattern's '(' or '|'
+                if (top == "case_start" and word_start and command.startswith("esac", i)
+                        and command[i + 4:i + 5] in _ESAC_AFTER):
+                    opened.pop()
+                    i += 4
+                    word_start = False
+                    continue
+                opened[-1] = "case_word" if top == "case_subj" else "case_pat"
+            elif (top == "case_word" and word_start and command.startswith("in", i)
+                    and command[i + 2:i + 3] in ("", " ", "\t", "\n")):
+                opened[-1] = "case_start"
+                i += 2
+                word_start = False
+                continue
             # in arithmetic and in ${ … }, '#' and '<<' are operators
             here = inner()
             plain = "arith" not in here and "param" not in here
@@ -663,7 +759,7 @@ def _scan(command):
                 continue
             if ch == '"':
                 cls[i] = _DQ
-                i = double(i + 1)
+                i = double(i + 1, not nested and rec is None)
                 word_start = False
                 continue
             if ch == "\n":
@@ -677,7 +773,7 @@ def _scan(command):
                 # a closing backtick ends no word: `` `true`# `` is one word
                 word_start = not (opened and opened[-1] == "tick")
                 if word_start:
-                    opened.append("tick")
+                    open_subst("tick", i + 1)
                 else:
                     close()
                 i += 1
@@ -692,6 +788,22 @@ def _scan(command):
                 i += 1
                 word_start = False
                 continue
+            top = opened[-1] if opened else None
+            if (top in ("case_pat", "extglob") and ch == "(" and i
+                    and command[i - 1] in "?*+@!" and cls[i - 1] == _CODE):
+                # an extglob group, `@(a|b)`: its '|' and ')' end no pattern
+                opened.append("extglob")
+                cls[i] = _GLOB
+                i += 1
+                word_start = False
+                continue
+            if top == "extglob" and ch in "|)":
+                if ch == ")":
+                    opened.pop()
+                cls[i] = _GLOB
+                i += 1
+                word_start = False
+                continue
             case = opened[-1] if opened and opened[-1].startswith("case") else None
             if case == "case_pat" and (ch in "|)" or ch == "(" and command[i - 1:i] not in "$<>"):
                 # a pattern's own punctuation: no subshell, pipe or close
@@ -703,7 +815,11 @@ def _scan(command):
                 word_start = True
                 continue
             if case == "case_body" and ch == ";" and command[i + 1:i + 2] in (";", "&"):
-                opened[-1] = "case_pat"  # `;;` / `;&`: the next pattern follows
+                # `;;`, `;&` or `;;&`: the next pattern list follows
+                opened[-1] = "case_start"
+                i += 3 if command[i + 1:i + 3] == ";&" else 2
+                word_start = True
+                continue
             if ch == "(" and not (opened and opened[-1] == "param"
                                   and command[i - 1:i] != "$"):
                 # in ${ … } only `$(` opens anything: `${v//(/}` is a pattern
@@ -713,7 +829,7 @@ def _scan(command):
                     i += 2
                 else:
                     if before in ("$", "<", ">"):
-                        opened.append("subst")
+                        open_subst("subst", i + 1)
                     else:
                         opened.append("array" if before == "=" else "cmd")
                     i += 1
@@ -749,9 +865,11 @@ def _scan(command):
             if word_start and plain and command[i:i + 4] in ("case", "esac"):
                 after = command[i + 4:i + 5]
                 if command[i] == "c" and after in (" ", "\t") and at_command(i):
-                    opened.append("case_pat")
-                elif (command[i] == "e" and after in ("", " ", "\t", "\n", ";", "&", "|", ")")
-                        and case and (case == "case_pat" or at_command(i))):
+                    opened.append("case_subj")  # the subject, then `in`
+                    i += 4
+                    word_start = False
+                    continue
+                if command[i] == "e" and after in _ESAC_AFTER and case == "case_body" and at_command(i):
                     opened.pop()
             word_start = ch in _COMMENT_PRECEDERS
             i += 1
@@ -761,7 +879,7 @@ def _scan(command):
         return i
 
     code(0, False)
-    return cls, balanced
+    return cls, balanced, subs, arm
 
 
 def _strip_comments(command):
@@ -821,47 +939,78 @@ def _operator_at(command, cls, i):
 
 
 def _split_segments(command):
+    """(segments, operators) of _split_full."""
+    segments, operators, _, _ = _split_full(command)
+    return segments, operators
+
+
+def _split_full(command):
     """Quote-aware split on shell segment separators: ; && || | & and newline.
 
     _scan says which characters are command text; only those can separate.
     Comments, heredoc bodies and line continuations are left out of the
     segments, quoted spans are kept verbatim (downstream _tokens() unquotes
     them), and an unquoted paren is set apart so it never fuses with a word.
+    An unquoted command substitution is a command of its own: its body is cut
+    from the segment, leaving `$()` or two backticks in its place, so nothing
+    inside it can split the segment.
 
-    Returns (segments, operators): a list of stripped segment strings
-    (individual segments may be empty) and a parallel list of the separator
-    operator that PRECEDES each segment (operators[0] is None; the rest are one
-    of '&&' '||' '|' ';' '&', or ')' after a case pattern). Callers use the operator to decide whether state
-    from an earlier segment (e.g. an in-chain branch creation) may carry into a
-    later one — only '&&' guarantees the predecessor ran successfully; main()
-    proves it separately for a creation followed by ';'.
+    Returns (segments, operators, arms, bodies): a list of stripped segment
+    strings (individual segments may be empty); a parallel list of the
+    separator operator that PRECEDES each segment (operators[0] is None; the
+    rest are one of '&&' '||' '|' ';' '&', or ')' after a case pattern); per
+    segment, whether it sits in a case arm; and per segment, the bodies of
+    the command substitutions in it, quoted or not, which run before it.
+    Callers use the operator to decide whether state from an earlier segment
+    (e.g. an in-chain branch creation) may carry into a later one — only '&&'
+    guarantees the predecessor ran successfully; main() proves it separately
+    for a creation followed by ';'.
     """
-    cls, balanced = _scan(command)
+    cls, balanced, subs, arm = _scan_full(command)
     if not balanced:
         # an unclosed quote: split on every separator, attribute nothing
         segs = re.split(r"&&|\|\||[;|\n&]", _strip_comments(command))
-        return segs, [None] * len(segs)
+        return segs, [None] * len(segs), [False] * len(segs), [[] for _ in segs]
 
+    starts = {body: (end, quoted) for body, end, quoted in subs}
+    # the parens of an unquoted `$( … )` stay joined to the word around them
+    joined = {k for body, end, quoted in subs if not quoted for k in (body - 1, end)}
     segments = []
     operators: list = [None]  # operator preceding each segment; first has none
-    current = []
+    arms, bodies = [], []
+    current, in_arm, found = [], False, []
+
+    def end_segment():
+        nonlocal current, in_arm, found
+        segments.append("".join(current).strip())
+        arms.append(in_arm)
+        bodies.append(found)
+        current, in_arm, found = [], False, []
+
     i = 0
     while i < len(command):
+        if i in starts:
+            end, quoted = starts[i]
+            found.append(command[i:end])
+            if not quoted and end > i:
+                i = end  # the body is read on its own
+                continue
         ch, kind = command[i], cls[i]
         if kind in (_COMMENT, _HEREDOC, _JOIN):
             i += 1
             continue
+        in_arm = in_arm or arm[i]
         if kind == _PATTERN:
             if ch == ")":
                 # the arm after a case pattern runs only when it matches
-                segments.append("".join(current).strip())
+                end_segment()
                 operators.append(")")
-                current = []
             i += 1
             continue
         op, width = _operator_at(command, cls, i) if kind == _CODE else (None, 0)
         if op is None:
-            current.append(f" {ch} " if kind == _CODE and ch in "()" else ch)
+            pad = kind == _CODE and ch in "()" and i not in joined
+            current.append(f" {ch} " if pad else ch)
             i += 1
             continue
         i += width
@@ -870,11 +1019,10 @@ def _split_segments(command):
             # a line-end operator (`a &&` + newline, with or without a space
             # or comment between) or an empty line, and separates nothing.
             continue
-        segments.append("".join(current).strip())
+        end_segment()
         operators.append(op)
-        current = []
-    segments.append("".join(current).strip())
-    return segments, operators
+    end_segment()
+    return segments, operators, arms, bodies
 
 
 def _is_git_commit(segment):
@@ -969,15 +1117,17 @@ def _prev_ref_n(tok):
     return 1 if tok == "-" else int(tok[3:-1])
 
 
-def _new_branch_created(segment):
+def _new_branch_created(segment, expansions=False, flag=False):
     """If this segment creates+switches to a new branch, return its name, else None.
 
     Recognizes `git checkout -b/-B <name>` and `git switch -c/-C <name>`.
     A bare `git checkout <name>` (switch to existing) is intentionally NOT
     matched: whether <name> is a branch, path, or commit is statically
     ambiguous, so we do not let it override the live branch detection.
+    expansions: read past a leading expansion that may be empty (_tokens).
+    flag: return (name, the create flag) instead.
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions)
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
         i += 1
@@ -1006,7 +1156,7 @@ def _new_branch_created(segment):
     # the first token after a new-branch flag is the branch name
     while i < len(toks):
         if toks[i] in new_flags and i + 1 < len(toks):
-            return toks[i + 1]
+            return (toks[i + 1], toks[i]) if flag else toks[i + 1]
         i += 1
     return None
 
@@ -1183,7 +1333,7 @@ def _branch_creatable(cwd, name, _override=None):
     )
 
 
-def _bare_switch_target(segment):
+def _bare_switch_target(segment, expansions=False):
     """If this segment is a bare branch switch (no create flag) to a single
     unambiguous branch ref, return that branch name; a _PrevRef(n) if it
     switches to a previous-branch ref ('-', '@{-N}'); else None.
@@ -1209,8 +1359,10 @@ def _bare_switch_target(segment):
     is left for the caller to ignore, so the only false-positive surface is a
     pathspec literally named 'main'/'master' on a non-main branch — contrived and
     strictly safer than mis-attributing a real switch-back to main.
+
+    expansions: read past a leading expansion that may be empty (_tokens).
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions)
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
         i += 1
@@ -1346,7 +1498,7 @@ def _resolve_prev_ref(n, chain_stack, cwd, stack_reliable, branch_override, refl
 _HEAD_NEUTRAL_SUBCOMMANDS = {"commit"}
 
 
-def _is_unmodeled_git_segment(segment):
+def _is_unmodeled_git_segment(segment, expansions=False):
     """True if this segment is a `git` invocation whose effect on HEAD is not
     provably modeled by `_new_branch_created`/`_bare_switch_target` (called
     before this in the attribution loop) or known to be HEAD-neutral.
@@ -1361,8 +1513,10 @@ def _is_unmodeled_git_segment(segment):
     subcommand closes that gap without needing to resolve aliases: a later
     '@{-N}' just falls back to live branch detection instead of trusting a
     chain_stack depth that may not reflect what actually ran.
+
+    expansions: read past a leading expansion that may be empty (_tokens).
     """
-    toks = _tokens(segment)
+    toks = _tokens(segment, expansions)
     i = 0
     while i < len(toks) and toks[i] in _GIT_WRAPPERS:
         i += 1
@@ -1544,6 +1698,261 @@ def _block(reason):
     raise SystemExit(2)
 
 
+def _has_expansion(word):
+    """True if word (unquoted text) holds an expansion: its value is known
+    only at runtime."""
+    return "$" in word or "`" in word
+
+
+# How deep command substitutions are read inside one another. Each level
+# reads its whole body again, so a pathological nesting is cut off here
+# rather than left to run for seconds.
+_MAX_SUBST_DEPTH = 32
+
+
+def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
+                     any_switch_seen, overrides, level=0):
+    """The git commits in command, as (segment, cwds, branch) each: the cwds
+    the commit may run in and the branch an earlier creation in the chain put
+    it on (None: read the live branch). The other arguments are the state the
+    command starts in, as main() tracks it below; overrides are main()'s
+    (branch, reflog, creatable) test hooks.
+
+    A command substitution is a command of its own, run before the segment
+    holding it, in that segment's cwd and branch; whatever it changes stays
+    in its subshell. Its commits are read the same way, recursively, to
+    _MAX_SUBST_DEPTH: past it RecursionError, as when the stack runs out.
+    """
+    if level > _MAX_SUBST_DEPTH:
+        raise RecursionError("command substitutions nest too deep")
+    branch_override, reflog_override, creatable_override = overrides
+    segments, operators, arms, bodies = _split_full(command)
+    effective_cwd_at = {}  # segment_index → the cwds it may run in
+    effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
+    running_cwds = list(cwds)
+    # running_branch: None = no in-chain branch creation seen → use live detection
+    chain_stack = list(chain_stack)  # in-chain "current branch" history, most-recent last
+    # chain_stack / stack_reliable back '@{-N}'/'-' resolution only — they are
+    # independent of running_branch's own trust rules (see _resolve_prev_ref).
+    # stack_reliable: False once chain_stack's depth can no longer be proven exact
+    # any_switch_seen: True once any HEAD-moving switch has appeared in the chain
+    # A heredoc body outside quotes is split into segments like real commands,
+    # so a creation "seen" there may be text. A quoted `"$(cat <<'EOF' ...)"`
+    # commit message stays one token and is no obstacle.
+    has_heredoc = "<<" in _outside_quotes(command)
+    ref_touched = False      # True once an earlier segment was anything but inert
+    carries_semicolon = False  # the attribution comes from a creation proven to succeed
+    proven_created = []      # names created under that proof, absent from the live refs
+    fn_depth = 0             # braces and parens open in a function body being defined
+    fn_pending = False       # a function head seen alone: its body follows
+    nested = []              # (body, cwds, branch, chain_stack, stack_reliable)
+
+    def maybe_cwds(path):
+        return list(dict.fromkeys(os.path.abspath(os.path.join(c, path)) for c in running_cwds))
+
+    for idx, seg in enumerate(segments):
+        # Branch attribution carries across '&&' (predecessor guaranteed to have
+        # succeeded), and across ';' or a newline only from a creation proven to
+        # succeed (carries_semicolon, set below). After '||', '|', '&', or an
+        # unproven ';', the earlier checkout may not have run — drop the
+        # attribution so the commit falls back to live branch detection.
+        op = operators[idx]
+        if op is not None and op != "&&" and not (op == ";" and carries_semicolon):
+            running_branch = None
+            chain_stack = []
+            carries_semicolon = False
+            if any_switch_seen:
+                # an earlier switch (trusted or not) may have run at runtime and
+                # mutated the real reflog — a later '@{-N}' resolved against the
+                # hook-time (pre-chain) reflog would be stale, so stop resolving.
+                stack_reliable = False
+        stripped = seg.strip()
+        # A case arm may not run and a function body runs later, if at all:
+        # they add commit detection, and a cwd they may move to, never a
+        # branch. A function body is followed to the brace or paren closing it.
+        head, depth, bare_head = _function_nesting(stripped)
+        in_body = fn_depth > 0 or (fn_pending and stripped)
+        if in_body or head:
+            fn_pending = bare_head
+            fn_depth = max(fn_depth + depth, 0)
+        guarded = op == ")" or arms[idx] or head or bool(in_body)
+        for body in bodies[idx]:
+            if guarded:
+                nested.append((body, list(running_cwds), None, [], False))
+            else:
+                nested.append((body, list(running_cwds), running_branch, list(chain_stack),
+                               stack_reliable))
+        toks = _tokens(stripped)
+        exp_toks = _tokens(stripped, expansions=True)
+        # an expansion that may be empty leads the command: what follows it
+        # may run, or may not
+        hidden = exp_toks != toks
+        if len(exp_toks) >= 2 and exp_toks[0] == "cd":
+            # cd <path>: update running effective cwd (resolve relative paths).
+            # A cwd change voids branch attribution — the new directory may be a
+            # different repo where the earlier checkout never applied. A cd that
+            # may not run leaves both cwds.
+            moved = maybe_cwds(exp_toks[1])
+            running_cwds = (list(dict.fromkeys(running_cwds + moved)) if guarded or hidden
+                            else moved)
+            running_branch = None
+            chain_stack = []
+            carries_semicolon = False
+            if any_switch_seen:
+                stack_reliable = False
+        if guarded:
+            running_branch = None
+            chain_stack = []
+            carries_semicolon = False
+            stack_reliable = False
+            any_switch_seen = True
+        created, create_flag = (None if guarded else _new_branch_created(stripped, flag=True)) or (None, None)
+        if created is not None and create_flag in ("-B", "-C") and _has_expansion(created):
+            # a forced creation resets a branch that exists: a name known only
+            # at runtime may be a protected one (`-B "$b"`)
+            created = None
+            running_branch = None
+            chain_stack = []
+            stack_reliable = False
+            any_switch_seen = True
+        if created is not None:
+            running_branch = created
+            chain_stack.append(created)
+            any_switch_seen = True
+            # The creation is proven to succeed when it runs unconditionally,
+            # nothing before it could have taken the name, moved to another repo
+            # or opened a compound command around it, it is spelled as a literal `checkout -b`/`switch -c`,
+            # and the branch can be created in the repo as it stands now. Only
+            # then does a following ';' say as much as '&&' would.
+            # A proof still standing (carries_semicolon) means everything before
+            # was inert, a commit or a proven creation: the repo differs from
+            # the live one only by the names in proven_created.
+            carries_semicolon = (
+                not has_heredoc
+                and len(running_cwds) == 1
+                and (not ref_touched or carries_semicolon)
+                and _runs_unconditionally(idx, segments, operators)
+                and _is_provable_creation(stripped, created)
+                and not any(_names_collide(created, earlier) for earlier in proven_created)
+                and _branch_creatable(
+                    _git_cwd(stripped, running_cwds[0]), created, _override=creatable_override,
+                )
+            )
+            if carries_semicolon:
+                proven_created.append(created)
+        elif hidden and not guarded:
+            # A switch behind an expansion may run or may not. It can only move
+            # the chain toward a protected branch, never off one, and leaves
+            # chain_stack's depth unprovable.
+            switched = _bare_switch_target(stripped, expansions=True)
+            if isinstance(switched, _PrevRef):
+                resolved = _resolve_prev_ref(
+                    switched.n, chain_stack, _git_cwd(stripped, running_cwds[0]), stack_reliable,
+                    branch_override, reflog_override,
+                )
+                if resolved is None:
+                    running_branch = None
+                    chain_stack = []
+                elif resolved in ("main", "master"):
+                    running_branch = resolved
+            elif switched is not None and _has_expansion(switched):
+                running_branch = None
+                chain_stack = []
+            elif switched in ("main", "master"):
+                running_branch = switched
+            if (switched is not None or _is_unmodeled_git_segment(stripped, expansions=True)
+                    or _new_branch_created(stripped, expansions=True) is not None):
+                any_switch_seen = True
+                stack_reliable = False
+        else:
+            # A bare switch re-attributes the chain to its target when EITHER:
+            #   (a) the target is a protected branch — `checkout -b X && checkout
+            #       main && commit` lands on main → block (fail-toward-block); OR
+            #   (b) attribution is already being tracked in-chain (running_branch
+            #       non-None) — a later bare switch then updates to the real
+            #       landing branch, so `checkout main && checkout feature/x &&
+            #       commit` is correctly attributed to feature/x (not stuck at
+            #       main), and `checkout -b X && checkout Y && commit` follows to Y.
+            # When running_branch is still None (no in-chain attribution yet), a
+            # bare switch to a NON-protected target is left untrusted (ambiguous
+            # pathspec), preserving the conservative "bare checkout from live main
+            # does not unblock" rule.
+            switched = None if guarded else _bare_switch_target(stripped)
+            if isinstance(switched, _PrevRef):
+                any_switch_seen = True
+                # Resolve against THIS segment's own effective cwd (honors a
+                # `-C <path>` on the switch itself), not the shell-cd-tracked
+                # running_cwd — otherwise a `-C`-scoped switch/commit chain
+                # resolves against the wrong repository's reflog.
+                switch_cwd = _git_cwd(stripped, running_cwds[0])
+                resolved = _resolve_prev_ref(
+                    switched.n, chain_stack, switch_cwd,
+                    stack_reliable and len(running_cwds) == 1,
+                    branch_override, reflog_override,
+                )
+                if resolved is None:
+                    # unresolvable (or resolution proven unreliable) — drop the
+                    # in-chain attribution and stop trusting chain_stack depth,
+                    # so the commit falls back to live branch detection
+                    # (fail-toward-block).
+                    running_branch = None
+                    chain_stack = []
+                    stack_reliable = False
+                else:
+                    running_branch = resolved
+                    chain_stack.append(resolved)
+            elif switched is not None:
+                # bare switch to a statically-known (but branch-vs-pathspec
+                # ambiguous) target — chain_stack's depth can no longer be
+                # proven exact past this point, so poison future '@{-N}'
+                # resolution even though running_branch's own trust rule
+                # (below) is unaffected.
+                any_switch_seen = True
+                stack_reliable = False
+                if _has_expansion(switched):
+                    # a target known only at runtime may be a protected one
+                    running_branch = None
+                    chain_stack = []
+                elif switched in ("main", "master") or running_branch is not None:
+                    running_branch = switched
+            elif _is_unmodeled_git_segment(stripped):
+                # detach / pathspec restore / multi-positional checkout-or-switch
+                # form, an unrecognized subcommand (possibly a git alias for
+                # checkout/switch), or any other unmodeled git invocation —
+                # chain_stack depth is unprovable past this segment.
+                any_switch_seen = True
+                stack_reliable = False
+        if carries_semicolon and created is None:
+            # The proof covers the creation and the repo it ran in, nothing after.
+            if _redirects_git(stripped):
+                # this very git call runs somewhere the creation did not
+                running_branch = None
+                chain_stack = []
+                carries_semicolon = False
+            elif not _is_inert(stripped) and not _is_git_commit(stripped):
+                # a later switch may fail and leave HEAD where it was, and any
+                # other command (`pushd`, a script, a line that does not parse)
+                # may move HEAD or the directory: trusted across '&&' only
+                carries_semicolon = False
+        if not _is_inert(stripped):
+            ref_touched = True
+        effective_cwd_at[idx] = list(running_cwds)
+        effective_branch_at[idx] = running_branch
+
+    # Collect all commit segments with their effective cwds and in-chain branch
+    commit_segs = []
+    for idx, seg in enumerate(segments):
+        stripped = seg.strip()
+        if _is_git_commit(stripped):
+            # -C flag overrides the cd-tracked cwd for this specific git call
+            git_cwds = list(dict.fromkeys(_git_cwd(stripped, c) for c in effective_cwd_at[idx]))
+            commit_segs.append((stripped, git_cwds, effective_branch_at[idx]))
+    for body, body_cwds, branch, stack, reliable in nested:
+        commit_segs += _commit_segments(body, body_cwds, branch, stack, reliable, True, overrides,
+                                        level + 1)
+    return commit_segs
+
+
 def main(branch_override=None, marker_override=None, reflog_override=None,
          creatable_override=None):
     """Main hook logic. branch_override / marker_override / reflog_override /
@@ -1572,187 +1981,38 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
         return
 
     env_cwd = data.get("cwd") or os.getcwd()
-
-    # Build a map of segment-index → effective cwd by tracking cd commands
-    # that appear before commit segments in the same command chain.
-    segments, operators = _split_segments(command)
-    effective_cwd_at = {}  # segment_index → effective cwd
-    effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
-    running_cwd = env_cwd
-    running_branch = None  # None = no in-chain branch creation seen → use live detection
-    # chain_stack / stack_reliable back '@{-N}'/'-' resolution only — they are
-    # independent of running_branch's own trust rules (see _resolve_prev_ref).
-    chain_stack = []       # ordered in-chain "current branch" history, most-recent last
-    stack_reliable = True  # False once chain_stack's depth can no longer be proven exact
-    any_switch_seen = False  # True once any HEAD-moving switch has appeared in the chain
-    # A heredoc body outside quotes is split into segments like real commands,
-    # so a creation "seen" there may be text. A quoted `"$(cat <<'EOF' ...)"`
-    # commit message stays one token and is no obstacle.
-    has_heredoc = "<<" in _outside_quotes(command)
-    ref_touched = False      # True once an earlier segment was anything but inert
-    carries_semicolon = False  # the attribution comes from a creation proven to succeed
-    proven_created = []      # names created under that proof, absent from the live refs
-    for idx, seg in enumerate(segments):
-        # Branch attribution carries across '&&' (predecessor guaranteed to have
-        # succeeded), and across ';' or a newline only from a creation proven to
-        # succeed (carries_semicolon, set below). After '||', '|', '&', or an
-        # unproven ';', the earlier checkout may not have run — drop the
-        # attribution so the commit falls back to live branch detection.
-        op = operators[idx]
-        if op is not None and op != "&&" and not (op == ";" and carries_semicolon):
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            if any_switch_seen:
-                # an earlier switch (trusted or not) may have run at runtime and
-                # mutated the real reflog — a later '@{-N}' resolved against the
-                # hook-time (pre-chain) reflog would be stale, so stop resolving.
-                stack_reliable = False
-        stripped = seg.strip()
-        # A case arm's first command may not run and a function body runs
-        # later, if at all: they add commit detection, never a cwd or branch.
-        guarded = op == ")" or _defines_function(stripped)
-        toks = [] if guarded else _tokens(stripped)
-        if len(toks) >= 2 and toks[0] == "cd":
-            # cd <path>: update running effective cwd (resolve relative paths).
-            # A cwd change voids branch attribution — the new directory may be a
-            # different repo where the earlier checkout never applied.
-            running_cwd = os.path.abspath(os.path.join(running_cwd, toks[1]))
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            if any_switch_seen:
-                stack_reliable = False
-        if guarded:
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            stack_reliable = False
-            any_switch_seen = True
-        created = None if guarded else _new_branch_created(stripped)
-        if created is not None:
-            running_branch = created
-            chain_stack.append(created)
-            any_switch_seen = True
-            # The creation is proven to succeed when it runs unconditionally,
-            # nothing before it could have taken the name, moved to another repo
-            # or opened a compound command around it, it is spelled as a literal `checkout -b`/`switch -c`,
-            # and the branch can be created in the repo as it stands now. Only
-            # then does a following ';' say as much as '&&' would.
-            # A proof still standing (carries_semicolon) means everything before
-            # was inert, a commit or a proven creation: the repo differs from
-            # the live one only by the names in proven_created.
-            carries_semicolon = (
-                not has_heredoc
-                and (not ref_touched or carries_semicolon)
-                and _runs_unconditionally(idx, segments, operators)
-                and _is_provable_creation(stripped, created)
-                and not any(_names_collide(created, earlier) for earlier in proven_created)
-                and _branch_creatable(
-                    _git_cwd(stripped, running_cwd), created, _override=creatable_override,
-                )
-            )
-            if carries_semicolon:
-                proven_created.append(created)
-        else:
-            # A bare switch re-attributes the chain to its target when EITHER:
-            #   (a) the target is a protected branch — `checkout -b X && checkout
-            #       main && commit` lands on main → block (fail-toward-block); OR
-            #   (b) attribution is already being tracked in-chain (running_branch
-            #       non-None) — a later bare switch then updates to the real
-            #       landing branch, so `checkout main && checkout feature/x &&
-            #       commit` is correctly attributed to feature/x (not stuck at
-            #       main), and `checkout -b X && checkout Y && commit` follows to Y.
-            # When running_branch is still None (no in-chain attribution yet), a
-            # bare switch to a NON-protected target is left untrusted (ambiguous
-            # pathspec), preserving the conservative "bare checkout from live main
-            # does not unblock" rule.
-            switched = None if guarded else _bare_switch_target(stripped)
-            if isinstance(switched, _PrevRef):
-                any_switch_seen = True
-                # Resolve against THIS segment's own effective cwd (honors a
-                # `-C <path>` on the switch itself), not the shell-cd-tracked
-                # running_cwd — otherwise a `-C`-scoped switch/commit chain
-                # resolves against the wrong repository's reflog.
-                switch_cwd = _git_cwd(stripped, running_cwd)
-                resolved = _resolve_prev_ref(
-                    switched.n, chain_stack, switch_cwd, stack_reliable,
-                    branch_override, reflog_override,
-                )
-                if resolved is None:
-                    # unresolvable (or resolution proven unreliable) — drop the
-                    # in-chain attribution and stop trusting chain_stack depth,
-                    # so the commit falls back to live branch detection
-                    # (fail-toward-block).
-                    running_branch = None
-                    chain_stack = []
-                    stack_reliable = False
-                else:
-                    running_branch = resolved
-                    chain_stack.append(resolved)
-            elif switched is not None:
-                # bare switch to a statically-known (but branch-vs-pathspec
-                # ambiguous) target — chain_stack's depth can no longer be
-                # proven exact past this point, so poison future '@{-N}'
-                # resolution even though running_branch's own trust rule
-                # (below) is unaffected.
-                any_switch_seen = True
-                stack_reliable = False
-                if switched in ("main", "master") or running_branch is not None:
-                    running_branch = switched
-            elif _is_unmodeled_git_segment(stripped):
-                # detach / pathspec restore / multi-positional checkout-or-switch
-                # form, an unrecognized subcommand (possibly a git alias for
-                # checkout/switch), or any other unmodeled git invocation —
-                # chain_stack depth is unprovable past this segment.
-                any_switch_seen = True
-                stack_reliable = False
-        if carries_semicolon and created is None:
-            # The proof covers the creation and the repo it ran in, nothing after.
-            if _redirects_git(stripped):
-                # this very git call runs somewhere the creation did not
-                running_branch = None
-                chain_stack = []
-                carries_semicolon = False
-            elif not _is_inert(stripped) and not _is_git_commit(stripped):
-                # a later switch may fail and leave HEAD where it was, and any
-                # other command (`pushd`, a script, a line that does not parse)
-                # may move HEAD or the directory: trusted across '&&' only
-                carries_semicolon = False
-        if not _is_inert(stripped):
-            ref_touched = True
-        effective_cwd_at[idx] = running_cwd
-        effective_branch_at[idx] = running_branch
-
-    # Collect all commit segments with their effective cwds and in-chain branch
-    commit_segs = []
-    for idx, seg in enumerate(segments):
-        stripped = seg.strip()
-        if _is_git_commit(stripped):
-            # -C flag overrides the cd-tracked cwd for this specific git call
-            base_cwd = effective_cwd_at[idx]
-            git_effective_cwd = _git_cwd(stripped, base_cwd)
-            commit_segs.append((stripped, git_effective_cwd, effective_branch_at[idx]))
+    overrides = (branch_override, reflog_override, creatable_override)
+    try:
+        commit_segs = _commit_segments(command, [env_cwd], None, [], True, False, overrides)
+    except RecursionError:
+        # nesting past what the analysis can read: passing it would let a
+        # commit hidden in it through (fail-open)
+        if "commit" in command:
+            _block("commit-guard: blocked — the command nests too deep to check for a commit.")
+        return
 
     if not commit_segs:
         return  # not a git commit invocation → pass through
 
     # Check ALL commit segments — any failure blocks the entire command
-    for seg, effective_cwd, created_branch in commit_segs:
+    for seg, effective_cwds, created_branch in commit_segs:
         # --- Branch guard ---------------------------------------------------------
         # A branch created earlier in the same chain (checkout -b/switch -c) is
         # where the commit actually lands — it takes precedence over the live
         # branch, which still reports the pre-checkout branch at PreToolUse time.
-        if created_branch is not None:
-            branch = created_branch
-        else:
-            branch = _current_branch(effective_cwd, _override=branch_override)
-        if branch in ("main", "master"):
-            if not _marker_present(effective_cwd, _override=marker_override):
-                _block(
-                    f"commit-guard: blocked — branch '{branch}' is protected. "
-                    "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
-                )
+        # A cd that may or may not have run leaves more than one cwd: each is
+        # checked.
+        for effective_cwd in effective_cwds:
+            if created_branch is not None:
+                branch = created_branch
+            else:
+                branch = _current_branch(effective_cwd, _override=branch_override)
+            if branch in ("main", "master"):
+                if not _marker_present(effective_cwd, _override=marker_override):
+                    _block(
+                        f"commit-guard: blocked — branch '{branch}' is protected. "
+                        "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
+                    )
 
         # --- Type guard -----------------------------------------------------------
         args = _parse_commit_args(seg)
@@ -2858,6 +3118,95 @@ def _test():
           on_main("$x git commit -m \"$(cat <<'EOF'\n[FIX] it's done\nEOF\n)\"") == 2)
     check("an escaped backtick in a leading substitution → blocked",
           on_main("`echo \\``git commit -m wip") == 2)
+
+    # PR #324 follow-ups: a substitution is a command of its own
+    check("a commit inside a command-position $( … ) → blocked",
+          on_main("$(git commit -m wip)") == 2)
+    check("a commit inside an argument's $( … ) → blocked",
+          on_main("echo $(git commit -m wip)") == 2)
+    check("a commit inside a backtick substitution → blocked",
+          on_main("echo `git commit -m wip`") == 2)
+    check("a commit inside a double-quoted \"$( … )\" → blocked",
+          on_main("echo \"$(git commit -m wip)\"") == 2)
+    check("a commit after ';' inside $( … ) → blocked",
+          on_main("x=$(true; git commit -m wip)") == 2)
+    check("a substitution keeps the branch its chain created → passes",
+          on_main("git checkout -b feat && x=$(git commit -m '[FIX] y')") == 0)
+    check("a commit inside $( … ) is type-checked",
+          run("x=$(git commit -m wip)") == 2)
+    check("a ';' inside a leading assignment's $( … ) → blocked",
+          on_main("x=$(true; echo) git commit -m wip") == 2)
+    check("a '|' inside a leading assignment's $( … ) → blocked",
+          on_main("x=$(a | b) git commit -m wip") == 2)
+    check("a ';' inside a leading assignment's backticks → blocked",
+          on_main("x=`true; echo` git commit -m wip") == 2)
+    check("a case ')' inside a leading assignment's $( … ) → blocked",
+          on_main("x=$(case a in a) echo;; esac) git commit -m wip") == 2)
+    check("_split_segments does not split inside $( … )",
+          _split_segments("x=$(true; echo) git commit") == (["x=$() git commit"], [None]))
+    check("an empty double-quoted expansion before git → blocked",
+          on_main("\"$x\"git commit -m wip") == 2)
+    check("a double-quoted expansion standing alone is the command → passes",
+          run("\"$x\" git commit -m wip") == 0)
+    check("a quoted '$x' before git is text → passes", run("'$x'git commit -m wip") == 0)
+    check("a switch to main behind an expansion → blocked",
+          run("git checkout -b feat && $x git checkout main && git commit -m '[FIX] x'") == 2)
+    check("a switch to a feature branch behind an expansion unblocks nothing → blocked",
+          on_main("$x git checkout feature/y && git commit -m '[FIX] x'") == 2)
+    check("a forced creation of a runtime name credits nothing → blocked",
+          on_main("git checkout -B \"$b\" && git commit -m '[FIX] x'") == 2)
+    check("a creation of a runtime name is credited → passes",
+          on_main("git checkout -b \"$b\" && git commit -m '[FIX] x'") == 0)
+    check("a switch to a runtime name drops the chain's branch → blocked",
+          on_main("git checkout -b feat && git checkout \"$b\" && git commit -m '[FIX] x'") == 2)
+    check("a feature switch behind an expansion keeps the chain's branch → passes",
+          on_main("git checkout -b feat && $x git checkout feature/y && git commit -m '[FIX] x'")
+          == 0)
+    check("a cd behind an expansion may run: both cwds are checked → blocked",
+          run("$x cd /other && git commit -m '[FIX] x'",
+              branch=lambda cwd: "main" if cwd == "/other" else "feature/y") == 2)
+    check("a cd behind an expansion may not run: both cwds are checked → blocked",
+          run("$x cd /other && git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("'$( (true) )' may be empty: the command is git → blocked",
+          on_main("$( (true) )git commit -m wip") == 2)
+    check("a later cd in a function body moves no cwd → blocked",
+          run("f() { true; cd /other; }; git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("a cd in a multi-line function body moves no cwd → blocked",
+          run("f() {\n  cd /other\n}\ngit commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("a later cd in a case arm moves no cwd → blocked",
+          run("case x in y) true; cd /other;; esac; git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("a case arm that runs its cd is checked in both cwds → blocked",
+          run("case x in x) cd /other;; esac; git commit -m '[FIX] x'",
+              branch=lambda cwd: "main" if cwd == "/other" else "feature/y") == 2)
+    check("a cd after a function body still moves the cwd → passes",
+          run("f() { true; }; cd /other; git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 0)
+    check("an expansion before git on the shlex path with differing word counts → blocked",
+          on_main("$x git commit -m\"$(cat <<'EOF'\nit's\nEOF\n)\"") == 2)
+    check("'x=$(true)git' is one assignment; the command is 'commit' → passes",
+          on_main("x=$(true)git commit -m wip") == 0)
+    check("'esac' after '|' in a pattern does not close the case → blocked",
+          on_main("case x in y|esac) git commit -m wip;; esac") == 2)
+    check("'esac' after '(' in a pattern does not close the case → blocked",
+          on_main("case x in (esac) git commit -m wip;; esac") == 2)
+    check("'esac' as the case subject does not close the case → blocked",
+          on_main("case esac in (esac) git commit -m wip;; esac") == 2)
+    check("'esac' at a pattern list's start still closes an empty case → blocked",
+          on_main("case x in\nesac; echo x | git commit -m wip") == 2)
+    check("an extglob pattern's inner ')' does not open the arm → blocked",
+          on_main("case x in @(a|x)) git commit -m wip;; esac") == 2)
+    check("an extglob pattern's '|' is no pipe → passes",
+          run("case x in @(a|x)) echo;; esac") == 0)
+    deep = 1500  # past the recursion limit wherever the suite's stack stands
+    try:
+        deep_code = on_main("git commit -m \"" + "$(echo \"" * deep + "x" + "\")" * deep + "\"")
+    except RecursionError:
+        deep_code = "RecursionError"
+    check("a deeply nested \"$( … )\" commit does not fail open → blocked", deep_code == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
