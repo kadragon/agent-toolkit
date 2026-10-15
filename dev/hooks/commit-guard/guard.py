@@ -256,11 +256,24 @@ def _scan(command):
         `$(`) to just past the ')' that closes it."""
         nonlocal balanced
         start = i
-        depth = 0
-        pending = []
+        # What is open at this level, innermost last: 'cmd' (a subshell),
+        # 'subst' (`$(`), 'tick', 'arith' (`((`), 'array' (`=(`), 'param' (`${`).
+        opened = []
+        pending = []  # (delimiter, strip_tabs, len(opened) where announced)
         word_start = True  # the next character would open a word
+
+        def close():
+            """Close the innermost construct. A substitution takes the heredocs
+            announced inside it along: bash reads those from its own text, so
+            none of them reaches the lines after it."""
+            nonlocal pending
+            if opened.pop() in ("subst", "tick"):
+                pending = [p for p in pending if p[2] <= len(opened)]
+
         while i < n:
             ch = command[i]
+            # in arithmetic and in ${ … }, '#' and '<<' are operators
+            plain = "arith" not in opened and "param" not in opened
             if ch == "\\" and i + 1 < n:
                 if command[i + 1] == "\n":
                     # joins two lines and leaves the word boundary where it was
@@ -270,14 +283,18 @@ def _scan(command):
                     word_start = False
                 i += 2
                 continue
-            if ch == "#" and word_start:
+            if ch == "#" and word_start and plain:
                 while i < n and command[i] != "\n":
                     cls[i] = _COMMENT
                     i += 1
                 continue
             if ch == "'":
-                # in $'…' a backslash escapes; in '…' nothing does
-                ansi = i > 0 and command[i - 1] == "$" and cls[i - 1] == _CODE
+                # in $'…' a backslash escapes; in '…' nothing does. '$$' is the
+                # shell's pid, so only an odd run of '$' leaves one for the quote.
+                k = i
+                while k > 0 and command[k - 1] == "$" and cls[k - 1] == _CODE:
+                    k -= 1
+                ansi = (i - k) % 2 == 1
                 j = i + 1
                 while j < n and command[j] != "'":
                     j += 2 if ansi and command[j] == "\\" else 1
@@ -296,26 +313,63 @@ def _scan(command):
             if ch == "\n":
                 i += 1
                 if pending:
-                    i = bodies(i, pending)
+                    i = bodies(i, [p[:2] for p in pending])
                     pending = []
                 word_start = True
                 continue
-            if (command[i:i + 2] == "<<" and command[i + 2:i + 3] != "<"
-                    and command[i - 1:i] != "<"):
-                announced = heredoc_word(i + 2)
-                if announced:
-                    pending.append(announced)
-                i += 2
+            if ch == "`":
+                if opened and opened[-1] == "tick":
+                    close()
+                else:
+                    opened.append("tick")
+                i += 1
                 word_start = True
                 continue
-            if nested:
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    if depth == 0:
-                        cls[start:i + 1] = [_DQ] * (i + 1 - start)
-                        return i + 1
-                    depth -= 1
+            if ch == "$" and command[i + 1:i + 2] == "{":
+                opened.append("param")
+                i += 2
+                word_start = False  # `${#v}` is a length, not a comment
+                continue
+            if ch == "}" and opened and opened[-1] == "param":
+                opened.pop()
+                i += 1
+                word_start = False
+                continue
+            if ch == "(":
+                if command[i + 1:i + 2] == "(":
+                    opened += ["arith", "arith"]
+                    i += 2
+                else:
+                    if command[i - 1:i] == "$":
+                        opened.append("subst")
+                    else:
+                        opened.append("array" if command[i - 1:i] == "=" else "cmd")
+                    i += 1
+                word_start = True
+                continue
+            if ch == ")":
+                if opened and opened[-1] not in ("param", "tick"):
+                    close()
+                elif nested and not opened:
+                    cls[start:i + 1] = [_DQ] * (i + 1 - start)
+                    return i + 1
+                i += 1
+                word_start = True
+                continue
+            if (command[i:i + 2] == "<<" and command[i + 2:i + 3] != "<"
+                    and command[i - 1:i] != "<" and plain and "array" not in opened):
+                announced = heredoc_word(i + 2)
+                i += 2
+                word_start = True
+                if announced:
+                    pending.append(announced + (len(opened),))
+                    # the delimiter is a word even when it opens with '#'
+                    if command[i:i + 1] == "-":
+                        i += 1
+                    while i < n and command[i] in " \t":
+                        i += 1
+                    word_start = False
+                continue
             word_start = ch in _COMMENT_PRECEDERS
             i += 1
         if nested:
@@ -2192,6 +2246,32 @@ def _test():
           not _has_expandable_subst("'it'\\''s $(x)'"))
     check("a message with an escaped '$(' is type-checked",
           run("git commit -m \"\\$(date) wip\"") == 2)
+
+    # where bash sees no quote or no heredoc, the scanner must see none either
+    check("'$$' before a quote opens no $'…' string → blocked",
+          on_main("echo $$'\\'; git commit -m 'wip'; echo \"'\" #\"") == 2)
+    check("'$$$' before a quote still opens a $'…' string → blocked",
+          on_main("echo $$$'a\\'b # '; git commit -m '[FEAT] y'") == 2)
+    check("'<<' in $(( … )) with a matching later line is no heredoc → blocked",
+          on_main("echo $((1<<EOF))\ngit commit -m 'wip'\nEOF") == 2)
+    check("'<<' in (( … )) is no heredoc → blocked",
+          on_main("(( x = 1 << EOF ))\ngit commit -m 'wip'\nEOF") == 2)
+    check("'<<' in an array literal is no heredoc → blocked",
+          on_main("x=( a <<EOF )\ngit commit -m 'wip'\nEOF") == 2)
+    check("'<<' in ${ … } is no heredoc → blocked",
+          on_main("echo ${x:-<<EOF }\ngit commit -m 'wip'\nEOF") == 2)
+    check("a heredoc announced in $( … ) does not reach past its ')' → blocked",
+          on_main("echo $(cat <<EOF)\ngit commit -m 'wip'\nEOF") == 2)
+    check("a heredoc announced in backticks does not reach past them → blocked",
+          on_main("echo `cat <<EOF`\ngit commit -m 'wip'\nEOF") == 2)
+    check("a heredoc inside an unquoted $( … ) is still text → passes",
+          run("x=$(cat <<EOF\ngit commit -m \"wip\"\nEOF\n)\ngit status") == 0)
+    check("a heredoc in a subshell is still text → passes",
+          run("(cat <<EOF)\ngit commit -m \"wip\"\nEOF\ngit status") == 0)
+    check("a heredoc after a closed $(( … )) is still text → passes",
+          run("echo $((1+2)); cat <<EOF\ngit commit -m \"wip\"\nEOF") == 0)
+    check("a '#' opening a heredoc delimiter is no comment → blocked",
+          on_main("cat <<#X; git commit -m '[FEAT] y'\n#X") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
