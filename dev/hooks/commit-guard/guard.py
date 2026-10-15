@@ -205,7 +205,8 @@ def _defines_function(segment):
         return False
     if parts[:1] == ["function"] and bare[0]:
         return True
-    return parts[1:3] == ["(", ")"] and bare[1] and bare[2]
+    return (parts[1:3] == ["(", ")"] and all(bare[:3])
+            and re.match(r"^[A-Za-z_][A-Za-z0-9_.:-]*$", parts[0]) is not None)
 
 
 def _ansi_c(s, i):
@@ -393,12 +394,23 @@ def _tokens(s, expansions=False):
     s = _LEAD_NOISE.sub("", s or "")
     try:
         parts, bare, raws = _words(s)
-    except ValueError:
+    except (ValueError, RecursionError):
         try:
-            parts, bare, raws = shlex.split(s), None, None
+            parts = shlex.split(s)
         except ValueError:
             return []  # unparseable segment → fail-open (not a commit)
+        bare, raws = None, _shlex_raws(s, len(parts))
     return parts[_command_start(parts, bare, expansions, raws):]
+
+
+def _shlex_raws(s, count):
+    """Each shlex word's source text, from a posix=False split, when the two
+    splits agree on the word count (see _raw_tokens); else None."""
+    try:
+        raws = shlex.split(s, posix=False)
+    except ValueError:
+        return None
+    return raws if len(raws) == count else None
 
 
 def _raw_tokens(s):
@@ -436,6 +448,10 @@ _DQ = "d"        # double-quoted: the quotes, and a "$( … )" inside them, incl
 _COMMENT = "#"   # a comment, up to but not including its newline
 _HEREDOC = "h"   # a heredoc body and its delimiter line
 _PATTERN = "p"   # a case pattern's '(', '|' or ')'
+
+# A reserved word ending the text before a word: the word is in command position
+# when this one is.
+_RESERVED_BEFORE = re.compile(r"(?:^|(?<=[\s;&|(]))(if|elif|while|until|then|do|else|time|!|\{)$")
 _JOIN = "j"      # a line continuation: the backslash and its newline
 
 
@@ -575,14 +591,16 @@ def _scan(command):
             level, or after a separator, an open paren, a case pattern or a
             reserved word that is itself in command position (`echo do case`
             is three words of one command)."""
-            k = i - 1
-            while k >= start and command[k] in " \t":
-                k -= 1
-            if k < start or command[k] in ";&|(\n" or k in pattern_ends:
-                return True
-            m = re.search(r"(?:^|[\s;&|(])(if|elif|while|until|then|do|else|!|\{)$",
-                          command[start:k + 1])
-            return m is not None and at_command(start + m.start(1))
+            while True:
+                k = i - 1
+                while k >= start and command[k] in " \t":
+                    k -= 1
+                if k < start or command[k] in ";&|(\n" or k in pattern_ends:
+                    return True
+                m = _RESERVED_BEFORE.search(command, start, k + 1)
+                if m is None:
+                    return False
+                i = m.start(1)  # a loop, not recursion: `if if if …` has no depth limit
 
         def arith_closes(j):
             """Whether the '((' ending just before j closes as '))'. bash reads
@@ -730,7 +748,7 @@ def _scan(command):
                 if command[i] == "c" and after in (" ", "\t") and at_command(i):
                     opened.append("case_pat")
                 elif (command[i] == "e" and after in ("", " ", "\t", "\n", ";", "&", "|", ")")
-                        and case and at_command(i)):
+                        and case and (case == "case_pat" or at_command(i))):
                     opened.pop()
             word_start = ch in _COMMENT_PRECEDERS
             i += 1
@@ -1588,7 +1606,10 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
                 # hook-time (pre-chain) reflog would be stale, so stop resolving.
                 stack_reliable = False
         stripped = seg.strip()
-        toks = _tokens(stripped)
+        # A case arm's first command may not run and a function body runs
+        # later, if at all: they add commit detection, never a cwd or branch.
+        guarded = op == ")" or _defines_function(stripped)
+        toks = [] if guarded else _tokens(stripped)
         if len(toks) >= 2 and toks[0] == "cd":
             # cd <path>: update running effective cwd (resolve relative paths).
             # A cwd change voids branch attribution — the new directory may be a
@@ -1599,14 +1620,13 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
             carries_semicolon = False
             if any_switch_seen:
                 stack_reliable = False
-        if _defines_function(stripped):
-            # the body runs wherever f is called, after any switch since: no
-            # in-chain branch reaches it
+        if guarded:
             running_branch = None
             chain_stack = []
             carries_semicolon = False
             stack_reliable = False
-        created = _new_branch_created(stripped)
+            any_switch_seen = True
+        created = None if guarded else _new_branch_created(stripped)
         if created is not None:
             running_branch = created
             chain_stack.append(created)
@@ -1644,7 +1664,7 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
             # bare switch to a NON-protected target is left untrusted (ambiguous
             # pathspec), preserving the conservative "bare checkout from live main
             # does not unblock" rule.
-            switched = _bare_switch_target(stripped)
+            switched = None if guarded else _bare_switch_target(stripped)
             if isinstance(switched, _PrevRef):
                 any_switch_seen = True
                 # Resolve against THIS segment's own effective cwd (honors a
@@ -2801,8 +2821,28 @@ def _test():
     check("a function body takes no branch from where it is defined → blocked",
           on_main("git checkout -b feat; f() { git commit -m '[FIX] x'; }; git checkout main; f",
                   creatable=True) == 2)
-    check("a creation and commit both in a function body → passes",
-          on_main("f() { git checkout -b feat && git commit -m '[FIX] x'; }; f") == 0)
+    check("a creation in a function head credits nothing → blocked",
+          on_main("f() { git checkout -b feat && git commit -m '[FIX] x'; }; f") == 2)
+
+    # third review: a case arm or function definition changes no cwd or branch
+    check("a cd in a function never called moves no cwd → blocked",
+          run("f() { cd /other; }; git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("a cd in a case arm that may not match moves no cwd → blocked",
+          run("case x in y) cd /other;; esac; git commit -m '[FIX] x'",
+              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+    check("a creation in a subshell function head credits nothing → blocked",
+          on_main("f() ( git checkout -b feat ) && git commit -m '[FIX] x'") == 2)
+    check("an empty one-line case closes, so '|' still pipes → blocked",
+          on_main("case x in esac; echo x | git commit -m wip") == 2)
+    check("a long run of reserved words does not overflow the scanner → blocked",
+          on_main("if " * 1200 + "case x in x) true;; esac; git commit -m wip") == 2)
+    check("'x=$()' is no function head: the in-chain branch holds → passes",
+          on_main("git checkout -b feat && x=$() && git commit -m '[FIX] y'") == 0)
+    check("a case after `time` opens its arm → blocked",
+          on_main("time case x in x) git commit -m wip;; esac") == 2)
+    check("an expansion before git on the shlex path → blocked",
+          on_main("$x git commit -m \"$(cat <<'EOF'\n[FIX] it's done\nEOF\n)\"") == 2)
     check("an escaped backtick in a leading substitution → blocked",
           on_main("`echo \\``git commit -m wip") == 2)
 
