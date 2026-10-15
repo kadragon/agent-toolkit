@@ -226,9 +226,59 @@ class CompareTests(unittest.TestCase):
             self.assertTrue(result['errors'])
 
     def test_anonymous_anchored_edit(self):
-        a = paragraph('anchor', '0') + paragraph('old', '0')
+        a = paragraph('anchor', '0') + paragraph('old', '0') + paragraph('tail', '0')
         result = self.pair(a, a.replace('old', 'new'))
         self.assertEqual(result['change_count'], 1)
+
+    def test_unbounded_anonymous_region_is_incomplete(self):
+        a = paragraph('anchor', '0') + paragraph('A', '0') + paragraph('B', '0')
+        b = paragraph('anchor', '0') + paragraph('B edited', '0') + paragraph('C', '0')
+        result = self.pair(a, b, 2)
+        self.assertEqual(result['changes'], [])
+        a += paragraph('tail', '0')
+        b += paragraph('tail', '0')
+        self.assertEqual(self.pair(a, b, 2)['changes'], [])
+
+    def test_clear_field_with_blank_spacer(self):
+        a = paragraph('name: Kim') + paragraph('', '1000000002')
+        result = self.pair(a, a.replace('name: Kim', ''))
+        self.assertEqual(result['change_count'], 1)
+        self.assertEqual(result['changes'][0]['after'], '')
+
+    def test_missing_grid_dimensions_and_minutes_template(self):
+        a = paragraph().replace('<hp:t></hp:t>', table([['A', 'B']]))
+        a = a.replace(' rowCnt="1" colCnt="2"', '')
+        result = self.pair(a, a.replace('>B<', '>C<'))
+        self.assertEqual(result['change_count'], 1)
+        template = SCRIPT.parent.parent / 'templates' / 'minutes' / 'section0.xml'
+        self.write(self.a, paragraph(), {'Contents/section0.xml': template.read_bytes()})
+        self.write(self.b, paragraph(), {'Contents/section0.xml': template.read_bytes()})
+        self.run_cli(0)
+
+    def test_usage_and_missing_dependency_are_error_outcomes(self):
+        for args in [[], ['missing.hwpx'], ['--bad-flag']]:
+            r = subprocess.run([sys.executable, str(SCRIPT), *args, '--json'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 3)
+            self.assertEqual(json.loads(r.stdout)['status'], 'error')
+        r = subprocess.run([sys.executable, '-S', str(SCRIPT), str(self.a), str(self.b), '--json'], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn('defusedxml', json.loads(r.stdout)['errors'][0])
+
+    def test_known_editor_and_preview_caches(self):
+        original = {
+            'Preview/PrvText.txt': b'old text', 'Preview/PrvImage.png': b'old image',
+            'settings.xml': b'<ha:HWPApplicationSetting xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app"><ha:CaretPosition pos="1"/></ha:HWPApplicationSetting>',
+            'Contents/content.hpf': b'<opf:package xmlns:opf="http://www.idpf.org/2007/opf"><opf:metadata><opf:meta name="ModifiedDate">old</opf:meta><opf:title>title</opf:title></opf:metadata></opf:package>'}
+        revised = {k: v.replace(b'old', b'new').replace(b'pos="1"', b'pos="2"') for k, v in original.items()}
+        self.write(self.a, paragraph('old'), original)
+        self.write(self.b, paragraph('new'), revised)
+        result = self.run_cli(1)
+        self.assertEqual(result['change_count'], 1)
+        self.assertEqual(len(result['non_content_changes']), 4)
+        self.assertTrue(all(x['kind']=='derived_cache' for x in result['non_content_changes']))
+        revised['Contents/content.hpf'] = revised['Contents/content.hpf'].replace(b'>title<', b'>changed title<')
+        self.write(self.b, paragraph('new'), revised)
+        self.assertTrue(self.run_cli(2)['incomplete_scopes'])
 
     def test_independent_cell_and_body_scopes(self):
         a = paragraph('old') + paragraph('', '1000000002').replace('<hp:t></hp:t>', table([['A'], ['B']]))
@@ -245,10 +295,38 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(len(result['changes'][0]['paragraphs']), 2)
         self.assertEqual(result['changes'][0]['before'], 'A\nB')
 
+    def test_same_shape_tables_reordered_with_duplicate_ids(self):
+        first, second = table([['A']]), table([['B']])
+        a = paragraph().replace('<hp:t></hp:t>', first + second)
+        b = paragraph().replace('<hp:t></hp:t>', second + first)
+        result = self.pair(a, b, 2)
+        self.assertEqual(result['changes'], [])
+        self.assertTrue(result['structural_changes'])
+
+    def test_same_grid_row_and_column_reorder(self):
+        for values in [[['A'], ['B']], [['A', 'B']]]:
+            a = paragraph().replace('<hp:t></hp:t>', table(values))
+            b = a.replace('>A<', '>TEMP<').replace('>B<', '>A<').replace('>TEMP<', '>B<')
+            result = self.pair(a, b, 2)
+            self.assertEqual(result['changes'], [])
+            self.assertTrue(result['structural_changes'])
+
     def test_changed_inline_attribute_is_not_silently_masked(self):
         a = paragraph().replace('<hp:t></hp:t>', '<hp:t>A<hp:tab width="10"/>B</hp:t>')
         result = self.pair(a, a.replace('width="10"', 'width="20"'), 2)
         self.assertEqual(result['changes'], [])
+        self.assertTrue(result['non_content_changes'])
+
+    def test_unsupported_leaf_whitespace_is_significant(self):
+        a = paragraph('text') + paragraph('', '1000000002').replace(
+            '<hp:t></hp:t>', '<hp:equation><hp:script> </hp:script></hp:equation>')
+        result = self.pair(a, a.replace('<hp:script> </hp:script>', '<hp:script>  </hp:script>'), 2)
+        self.assertTrue(result['non_content_changes'])
+        self.assertEqual(result['changes'], [])
+        a = a.replace('<hp:script> </hp:script>', '<hp:script> <hp:unknown/> </hp:script>')
+        result = self.pair(a, a.replace('<hp:script> ', '<hp:script>  '), 2)
+        self.assertTrue(result['non_content_changes'])
+        result = self.pair(a, a.replace('<hp:unknown/> ', '<hp:unknown/>  '), 2)
         self.assertTrue(result['non_content_changes'])
 
     def test_template_roundtrip(self):

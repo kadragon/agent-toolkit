@@ -10,14 +10,15 @@ import argparse
 import json
 import sys
 import xml.etree.ElementTree as ET
-import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZipFile
 
-import defusedxml.ElementTree as DET
-from defusedxml.common import DefusedXmlException
+try:
+    import defusedxml.ElementTree as DET
+except ImportError:
+    DET = None
 
 from _common import NS_HP, NS_HS, PLACEHOLDER_IDS, SECTION_RE, configure_io
 
@@ -26,21 +27,22 @@ def hp(name: str) -> str:
     return f"{{{NS_HP}}}{name}"
 
 
-def canonical(el: ET.Element, *, mask_text=False, skip_cache=False) -> tuple:
+def canonical(el: ET.Element, *, skip_cache=False, preserve_tail=False) -> tuple:
     """Expanded names and sorted attributes remove serialization-only differences.
 
-    Ignore indentation outside text elements, but preserve every character in hp:t.
-    Only explicitly modeled text nodes are masked in a residual comparison.
+    Ignore indentation only in modeled structural containers. Unknown/mixed text
+    remains significant, including whitespace-only content in unsupported objects.
     """
-    if mask_text and el.tag == hp('t'):
-        return (el.tag, tuple(sorted(el.attrib.items())))
-    children = tuple(canonical(c, mask_text=mask_text, skip_cache=skip_cache)
+    structural = {f'{{{NS_HS}}}sec', '{http://www.hancom.co.kr/hwpml/2011/app}HWPApplicationSetting',
+                  '{http://www.idpf.org/2007/opf}package', '{http://www.idpf.org/2007/opf}metadata', *(hp(n) for n in
+                  ('p', 'run', 'tbl', 'tr', 'tc', 'subList', 'linesegarray'))}
+    children = tuple(canonical(c, skip_cache=skip_cache, preserve_tail=el.tag not in structural)
                      for c in el if not (skip_cache and c.tag == hp('linesegarray')))
     text = el.text or ''
     tail = el.tail or ''
     return (el.tag, tuple(sorted(el.attrib.items())),
-            text if text.strip() or el.tag == hp('t') else '',
-            tail if tail.strip() else '', children)
+            text if text.strip() or el.tag not in structural else '',
+            tail if tail.strip() or preserve_tail else '', children)
 
 
 @dataclass
@@ -65,7 +67,7 @@ class Document:
     sections: dict[str, Node]
     members: dict[str, bytes | tuple]
     residuals: dict[str, tuple]
-    caches: dict[str, tuple]
+    caches: dict[str, tuple | bytes]
     exclusions: list[dict]
 
 
@@ -115,12 +117,8 @@ class Reader:
             if child.tag != hp('tr'):
                 self.excluded(child, location, 'table metadata/object outside text coverage')
         try:
-            rows, cols = int(el.attrib['rowCnt']), int(el.attrib['colCnt'])
-            if rows <= 0 or cols <= 0:
-                raise ValueError('non-positive grid dimensions')
+            rows, cols = int(el.get('rowCnt', '0')), int(el.get('colCnt', '0'))
             trs = el.findall(hp('tr'))
-            if len(trs) != rows:
-                raise ValueError('rowCnt does not match serialized rows')
             cells = []
             occupied = []
             for tr in trs:
@@ -133,8 +131,8 @@ class Reader:
                         raise ValueError('cellAddr/cellSpan missing')
                     r, c = int(addr.attrib['rowAddr']), int(addr.attrib['colAddr'])
                     rs, cs = int(span.attrib['rowSpan']), int(span.attrib['colSpan'])
-                    if min(r, c) < 0 or min(rs, cs) <= 0 or r+rs > rows or c+cs > cols:
-                        raise ValueError('cell outside table grid')
+                    if min(r, c) < 0 or min(rs, cs) <= 0:
+                        raise ValueError('negative address or non-positive span')
                     if any(r < rr+rrs and rr < r+rs and c < cc+ccs and cc < c+cs
                            for rr, cc, rrs, ccs in occupied):
                         raise ValueError('overlapping cells')
@@ -155,6 +153,12 @@ class Reader:
                         else:
                             self.excluded(p, loc, 'unsupported cell child')
                     cells.append(cell)
+            if not occupied:
+                raise ValueError('table contains no addressed cells')
+            rows = rows if rows > 0 else max(r+rs for r, _, rs, _ in occupied)
+            cols = cols if cols > 0 else max(c+cs for _, c, _, cs in occupied)
+            if len(trs) != rows or any(r+rs > rows or c+cs > cols for r, c, rs, cs in occupied):
+                raise ValueError('cell grid dimensions do not match rows/addresses')
             if sum(rs*cs for _, _, rs, cs in occupied) != rows * cols:
                 raise ValueError('table grid has uncovered positions')
         except (KeyError, ValueError) as exc:
@@ -176,6 +180,8 @@ class Reader:
 
 
 def read_document(path: Path) -> Document:
+    if DET is None:
+        raise RuntimeError('compare.py requires defusedxml; install with python -m pip install defusedxml')
     reader = Reader()
     sections, members, residuals, caches = {}, {}, {}, {}
     with ZipFile(path) as z:
@@ -195,6 +201,9 @@ def read_document(path: Path) -> Document:
             if name.endswith('/'):
                 continue
             data = z.read(name)
+            if name in {'Preview/PrvText.txt', 'Preview/PrvImage.png'}:
+                caches[name] = data
+                continue
             if name.lower().endswith(('.xml', '.hpf', '.rdf')):
                 root = DET.fromstring(data)
                 if name in section_names:
@@ -219,6 +228,21 @@ def read_document(path: Path) -> Document:
                     residuals[name] = canonical(clone, skip_cache=True)
                     caches[name] = tuple(canonical(e) for e in root.iter(hp('linesegarray')))
                 else:
+                    cache_nodes = []
+                    if name == 'settings.xml' and root.tag == '{http://www.hancom.co.kr/hwpml/2011/app}HWPApplicationSetting':
+                        for child in list(root):
+                            if child.tag == '{http://www.hancom.co.kr/hwpml/2011/app}CaretPosition':
+                                cache_nodes.append(canonical(child))
+                                root.remove(child)
+                    if name == 'Contents/content.hpf':
+                        opf = '{http://www.idpf.org/2007/opf}'
+                        for metadata in root.findall(opf + 'metadata'):
+                            for child in list(metadata):
+                                if child.tag == opf + 'meta' and child.get('name') in {'ModifiedDate', 'lastsaveby'}:
+                                    cache_nodes.append(canonical(child))
+                                    metadata.remove(child)
+                    if cache_nodes:
+                        caches[name] = tuple(cache_nodes)
                     members[name] = canonical(root)
                     reader.exclusions.append({'location': name, 'tag': root.tag,
                                               'reason': 'member XML semantics outside text coverage'})
@@ -261,24 +285,26 @@ class Comparison:
         if len(aa) != len(bb) or any(x.signature() != y.signature() for x, y in zip(aa, bb)):
             self.incomplete(a.location, 'structure changed; child positions are not aligned', structural=True)
             return False
-        if a.kind in {'paragraph', 'table'}:
-            # A verified paragraph identifies its table anchors; an unchanged table grid
-            # identifies cells by their cellAddr rather than serialized order.
-            return True
         if [n.content() for n in aa] == [n.content() for n in bb]:
             return True
         old_contents = [n.content() for n in aa]
         new_contents = [n.content() for n in bb]
         # A value found at a different old position is evidence of movement, even
         # when IDs stayed in position. Never turn it into a list of substitutions.
-        if any(x != y and y in old_contents for x, y in zip(old_contents, new_contents)):
+        if any(x != y and any(n.text.strip() for n in walk(bb[i]))
+               and any(y == old and old != new_contents[j] for j, old in enumerate(old_contents))
+               for i, (x, y) in enumerate(zip(old_contents, new_contents))):
             self.incomplete(a.location, 'content moved or correspondence is ambiguous', structural=True)
             return False
+        if a.kind == 'table':
+            # Grid coordinates identify cells only after ruling out observable
+            # movement between cells (including row/column reorder).
+            return True
         ids_a = [n.element.get('id', '') for n in aa]
         ids_b = [n.element.get('id', '') for n in bb]
         unique_a, unique_b = Counter(ids_a), Counter(ids_b)
         if ids_a != ids_b:
-            self.incomplete(a.location, 'paragraph identity/order changed', structural=True)
+            self.incomplete(a.location, 'child identity/order changed', structural=True)
             return False
         anchors = [i for i, (x, y) in enumerate(zip(aa, bb))
                    if x.content() == y.content() and old_contents.count(x.content()) == 1
@@ -292,11 +318,12 @@ class Comparison:
             # A cell grid plus a single paragraph gives a stable content container.
             if a.kind == 'cell' and len(aa) == 1:
                 continue
-            # Bound anonymous edits by unique unchanged anchors. Repeated old text
-            # cannot establish a paragraph match, even inside an anchored range.
-            if anchors and old_contents.count(x.content()) == new_contents.count(y.content()) == 1:
+            # Two real anchors bound one anonymous edit. Multiple replacements in
+            # one region could hide same-count deletion/insertion and stay incomplete.
+            if (i-1 in anchors and i+1 in anchors
+                    and old_contents.count(x.content()) == new_contents.count(y.content()) == 1):
                 continue
-            self.incomplete(a.location, 'paragraph correspondence cannot be established')
+            self.incomplete(a.location, 'child correspondence cannot be established')
             return False
         return True
 
@@ -343,9 +370,11 @@ def compare_documents(a: Document, b: Document) -> dict:
             report['non_content_changes'].append({'location': name, 'kind': 'uninterpreted_xml',
                                                   'reason': 'non-text structure, attributes or unsupported objects changed'})
             comparison.incomplete(name, 'changed XML outside supported text comparison')
-        if a.caches[name] != b.caches[name]:
-            report['non_content_changes'].append({'location': name, 'kind': 'layout_cache',
-                                                  'reason': 'line layout cache changed; rendering not verified'})
+    for name in sorted(a.caches.keys() | b.caches.keys()):
+        if a.caches.get(name) != b.caches.get(name):
+            report['non_content_changes'].append({'location': name,
+                                                  'kind': 'layout_cache' if name in a.sections else 'derived_cache',
+                                                  'reason': 'known layout/preview/editor cache changed; rendering not verified'})
     for name in sorted(a.members.keys() | b.members.keys()):
         if a.members.get(name) != b.members.get(name):
             report['non_content_changes'].append({'location': name, 'kind': 'package_member',
@@ -372,20 +401,26 @@ def render_text(report: dict) -> str:
     return '\n'.join(lines)
 
 
+class CompareArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError(message)
+
+
 def main(argv=None) -> int:
     configure_io()
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CompareArgumentParser(description=__doc__)
     parser.add_argument('original', type=Path)
     parser.add_argument('revised', type=Path)
     parser.add_argument('--json', action='store_true', help='emit schema-versioned JSON only')
-    args = parser.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    json_mode = '--json' in argv
     try:
+        args = parser.parse_args(argv)
         report = compare_documents(read_document(args.original), read_document(args.revised))
-    except (OSError, BadZipFile, ET.ParseError, DefusedXmlException, ValueError, KeyError, zlib.error,
-            RuntimeError, EOFError, NotImplementedError) as exc:
+    except Exception as exc:
         report = empty_report()
         report.update(status='error', complete=False, errors=[str(exc)])
-    print(json.dumps(report, ensure_ascii=False, indent=2) if args.json else render_text(report))
+    print(json.dumps(report, ensure_ascii=False, indent=2) if json_mode else render_text(report))
     return {'unchanged': 0, 'changed': 1, 'incomplete': 2, 'error': 3}[report['status']]
 
 

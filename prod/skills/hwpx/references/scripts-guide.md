@@ -73,7 +73,8 @@ add `kind`, exclusions add `input` and expanded XML `tag`, errors are strings.
 `complete` refers only to declared text coverage, never whole-document equivalence.
 
 Matching uses unchanged scoped structure, unique non-placeholder paragraph IDs or
-unique unchanged content anchors. Repeated labels/IDs cannot establish identity alone.
+two unique unchanged content anchors enclosing a single edited paragraph. Repeated
+labels/IDs cannot establish identity alone; multi-edit anonymous regions stay incomplete.
 An unanchored single body paragraph with a placeholder ID may be incomplete even when
 it looks like a simple edit; one paragraph in an established cell grid can be compared.
 Inserted/deleted/reordered paragraphs and changed table grids mark the affected scope
@@ -83,7 +84,12 @@ can still report changes. Nested tables are excluded as a whole, without flatten
 ZIP timestamps/order/compression and XML attribute order/prefix spelling do not count
 as content edits. XML-defined newline normalization applies; spaces, tabs, explicit
 line breaks and empty paragraphs remain significant. Changed line-layout caches are
-reported separately. Changed unsupported XML, style attributes/header definitions,
+reported separately. Standard preview text/image members, the settings caret position,
+and `content.hpf` ModifiedDate/lastsaveby metadata are known derived caches: their
+changes remain visible without forcing incomplete text coverage. Other member changes
+retain the conservative incomplete result. Reference restores that rebuild IDs or other
+members can be incomplete even when visually faithful; review those scopes manually.
+Changed unsupported XML, style attributes/header definitions,
 non-section members and binary assets require review and produce incomplete coverage.
 Unchanged unsupported objects are listed as exclusions. A zero content count with
 exclusions or incomplete scopes is not proof of an unchanged document. AI explanations
