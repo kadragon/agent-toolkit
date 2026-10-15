@@ -12,7 +12,7 @@ git worktree add "$SCRATCH/prune-copy" HEAD
 
 Make the copy from a clean working tree (SKILL.md *Ground rules*). Run every mutant there. Install dependencies in the copy itself; a symlinked `node_modules` or
 virtualenv shared with the original can let a mutation run write into the original tree. Remove
-the worktree (`git worktree remove`) after the report.
+the worktree (`git worktree remove "$SCRATCH/prune-copy"`) after the report.
 
 ## Tools
 
@@ -43,7 +43,9 @@ A full run is often thousands of mutants. Sample instead:
 ## Running one mutant
 
 ```
-1. restore the copy to clean (git -C <copy> checkout -- .)
+1. restore only the production file the previous mutant changed
+   (git -C <copy> checkout -- <mutated file>) — a blanket `checkout -- .` would also undo the
+   test removals leave-one-out and the Step 4 joint re-run depend on
 2. run the related tests unmutated → must pass (green baseline)
 3. apply the mutant; print 3 lines of context around the changed span and check it is the
    intended token

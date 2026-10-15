@@ -24,8 +24,8 @@ version: 1.0.0
 
 A test earns its place by **failing when production code breaks**. Test count is not value, and
 reading is not evidence: reading yields *candidates*, only a **kill set** measurement yields a
-*verdict*. The kill set is the set of mutants the suite detects; every removal in this skill must
-leave it unchanged.
+*verdict*. The kill set is the set of mutants the suite detects, excluding decision and
+unreachable mutants (Step 4); every removal in this skill must leave it unchanged.
 
 ## Ground rules
 
@@ -84,8 +84,9 @@ Read `references/mutation-proof.md` before the first run — it holds tool setup
 traps that produced false numbers in practice. In order:
 
 1. **Calibrate.** In the copy, inject one mutant that must be killed and one that must survive
-   (a change in dead code or a comment-equivalent). Proceed only if the tool reports exactly
-   KILLED and SURVIVED for them.
+   (an equivalent mutant on covered code, or one in dead code — where the tool then reports its
+   no-coverage status, e.g. Stryker `NoCoverage`, PIT `NO_COVERAGE`, count that as the survive
+   outcome). Proceed only if the tool tells the two apart without a config change.
 2. **Generate and sample.** Use the repo's mutation tool (Stryker, mutmut, PIT, cargo-mutants…).
    On a large suite, sample per file (about 4%, minimum 3, fixed random seed recorded). Add, for
    every candidate, at least 3 mutants in the code that candidate claims to cover.
@@ -106,8 +107,8 @@ boundary, flipped branch, dropped side effect, empty/default return, removed val
 each in the copy, and run the candidate alone, then the suite without it. Same table, same
 matrix.
 
-**Done:** every candidate has a verdict line naming the mutants it kills and which kept tests
-also kill them.
+**Done:** every candidate has a verdict line naming the mutants it kills and, for each, either
+the kept tests that also kill it (per-test data) or `sole killer: yes/no` (leave-one-out).
 
 ## Step 4 — Classify
 
@@ -125,10 +126,10 @@ Apply the first matching row:
 
 | Verdict | Condition | Action |
 |---|---|---|
-| **DELETE + GAP** | K(T) is empty after the targeted mutants | remove T; log the behavior its title claims as a gap — unless every kill was a decision mutant, then no gap |
-| **KEEP** | T is the **sole killer** of any mutant in K(T), or a *Keep rule* applies | leave T; note why |
+| **KEEP** | T is the **sole killer** of any mutant in K(T), or *Keep rules* 2–6 apply | leave T; note why; if K(T) is empty, log its behavior under *Gaps* |
 | **MERGE** | T and siblings differ only in input values of one class, and no collapsed case is a sole killer | collapse to one case per distinct input class |
-| **DELETE** | K(T) is non-empty and every mutant in it is also killed by a kept test | remove T |
+| **DELETE + GAP** | T killed no mutant at all (a false green), and its smell is not *Text grep* or *Framework test* | remove T; log the behavior its title claims as a gap |
+| **DELETE** | K(T) is empty but T is a text-grep or framework test, or every mutant it killed was a decision or unreachable mutant; or K(T) is non-empty and every mutant in it is also killed by a kept test | remove T |
 
 Decide removals **as a set**, not one at a time: two tests can each look redundant because the
 other exists. Let U = the union of K(T) over every DELETE and every collapsed MERGE case. Re-run
@@ -151,13 +152,17 @@ mutant lost.
 
 Edit the original tree: delete DELETE verdicts, collapse MERGE groups. A merged test keeps every
 distinct input class and a title that says what it checks. Kept tests stay byte-identical except
-for shared fixtures a deletion orphaned — remove those only when nothing else imports them.
+for shared fixtures a deletion orphaned — remove one only when nothing references it by import
+or by name (pytest fixtures are injected by parameter name, with no import). Delete a test file
+left with no tests; some runners fail on an empty suite.
 
 **Done:** every DELETE and MERGE verdict applied, no orphaned fixture left, the suite green once.
 
 ## Step 6 — Verify independently
 
-1. **Re-inject every mutant in U** against the edited tree in one pass. Every one must be KILLED.
+1. **Re-inject each mutant in U, one at a time,** in a fresh worktree carrying the Step 5 edits
+   (`git diff HEAD --binary | git -C <new-copy> apply`) — never in the original tree. Every one
+   must be KILLED.
 2. **Run the full suite at least 3 times** (5 when tests use real timers, concurrency, or
    network) — all green.
 3. **Before/after numbers** — test count, distinct checks, runtime.
@@ -169,10 +174,11 @@ for shared fixtures a deletion orphaned — remove those only when nothing else 
 ## Report
 
 ```
-Removed: <n> tests (<m> merged into <k>) — sampled kill set unchanged: <x>/<x> mutants in U
+Removed: <n> tests (<m> merged into <k>) — sampled kill set (decision/unreachable mutants
+excluded) unchanged: <x>/<x> mutants in U
 re-killed (sample: <n> of <total> mutants, seed <s>; unsampled mutants were not checked)
 Runtime: <before> → <after>; count: <before> → <after>
-| Test | Verdict | Smell | Mutants it killed | Also killed by |
+| Test | Verdict | Smell | Mutants it killed | Also killed by (or sole killer: no) |
 Gaps: <file:line — mutation — behavior unprotected>
 Production bugs: <file:line — what the mutant revealed>
 Equivalent mutants: <id — reason>
