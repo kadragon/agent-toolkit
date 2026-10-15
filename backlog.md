@@ -16,6 +16,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #324 — commit-guard expansion, case arm, function body (2026-10-15)
 
 - [ ] [FIX] commit-guard does not see a commit inside a command-position substitution: `$(git commit -m wip)` exits 0 from `main` while bash runs the commit — `_command_start` steps over the `$( … )` body without reading it; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_command_start`
+- [ ] [FIX] commit-guard loses a commit behind a substitution that `_split_segments` splits: `x=$(true; echo) git commit`, `x=$(a | b) git commit`, ``x=`true; echo` git commit`` exit 0 from `main` — a `;`, `|` or case `)` inside an unquoted `$( … )` or backticks still ends the segment, so the closing `)` lands in the next one; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_split_segments`
+- [ ] [FIX] commit-guard misses a commit behind a double-quoted empty expansion, `"$x"git commit -m wip`: `_strip_expansions` reads only unquoted expansions; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_strip_expansions`
+- [ ] [FIX] commit-guard does not see a branch switch or `cd` behind an expansion: `git checkout -b feat && $x git checkout main && git commit -m '[FIX] x'` credits `feat` while bash commits on `main`; `_bare_switch_target`, `_is_unmodeled_git_segment` and the `cd` tracking read no expansions, and reading them must not let `$x git checkout feature/y` unblock a commit; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `main`
+- [ ] [debt] an extglob case pattern `@(a|x))` ends at its inner `)` in `_scan`, so the arm's commit is read as text: track paren depth for `[?*+@!](` groups in `case_pat`; predates PR #324 (source: code-review) — dev/hooks/commit-guard/guard.py `_scan`
 
 ### PR #313 — mods status band above the prompt (2026-10-11)
 

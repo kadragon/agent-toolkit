@@ -95,21 +95,25 @@ _REDIRECT = re.compile(r"^\d*(?:<<<|<<-?|<>|<&|>>|>&|>\||&>>|&>|<|>)(.*)$")
 
 
 # Expansions that may expand to nothing, at the front of a word: `$x`, `$1`,
-# `$!`, `$@`, `$*`, `${ … }`, `$( … )` and a backtick substitution. `$$`, `$?`
-# and `$#` always expand to something, so they are not here.
-_EMPTY_PARAM = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9!@*])")
+# `$!`, `$@`, `$*`, `${ … }`, `$( … )` and a backtick substitution. `$$`, `$?`,
+# `$#`, `$0`, `${# … }` and `$(( … ))` always expand to something, so they are
+# not here.
+_EMPTY_PARAM = re.compile(r"^\$(?:[A-Za-z_][A-Za-z0-9_]*|[1-9!@*])")
 
 
 def _strip_expansions(tok):
-    """tok without the expansions that lead it and may be empty: `$!git` is
-    `git` when no job ran. Returns tok unchanged when none leads it, and when an
-    expansion never closes."""
+    """tok (a word's source text, quotes intact) without the unquoted
+    expansions that lead it and may be empty: `$!git` is `git` when no job ran.
+    Returns tok unchanged when none leads it, and when an expansion never
+    closes."""
     rest = tok
     while rest:
         m = _EMPTY_PARAM.match(rest)
         if m:
             rest = rest[m.end():]
             continue
+        if rest.startswith(("$((", "${#")):
+            break
         try:
             end = _expansion_end(rest, 0)
         except ValueError:
@@ -120,14 +124,15 @@ def _strip_expansions(tok):
     return rest
 
 
-def _command_start(parts, bare=None, expansions=False):
+def _command_start(parts, bare=None, expansions=False, raws=None):
     """Index of the command word in a token list: past the shell keywords,
     env-assigns (`x=$(true)` too) and redirects (`>log git commit`) that may
     lead it, and a function head (`f()`, `function f`). A case pattern never
     reaches here: _split_segments ends a segment at its `)`.
 
-    With expansions, also past an expansion that may be empty (`$()git`,
-    `$x git`), cut from the word in place. Only commit detection asks for it:
+    With expansions and raws (each token's source text, quotes intact), also
+    past an unquoted expansion that may be empty (`$()git`, `$x git`), cut
+    from the word and its raw in place. Only commit detection asks for it:
     such a word may as well run something else (`x=echo; $x git checkout -b
     f`), so it proves no branch switch.
 
@@ -146,8 +151,8 @@ def _command_start(parts, bare=None, expansions=False):
         if m:
             i += 1 if m.group(1) else 2  # a bare operator takes the next token
             continue
-        if (tok == "$" and expansions or _ENV_ASSIGN.match(tok) and tok.endswith("$")) \
-                and is_bare(i + 1, "("):
+        if (tok == "$" and expansions and not is_bare(i + 2, "(")  # `$(( … ))` is never empty
+                or _ENV_ASSIGN.match(tok) and tok.endswith("$")) and is_bare(i + 1, "("):
             # `$( … )` or `x=$( … )` padded by _split_segments: one word, which
             # bash may expand to nothing, leaving the word joined after it as
             # the command
@@ -173,17 +178,34 @@ def _command_start(parts, bare=None, expansions=False):
         if tok != "$" and is_bare(i + 1, "(") and is_bare(i + 2, ")"):
             i += 3  # `f()`
             continue
-        if not expansions:
+        if not expansions or raws is None:
             break
-        rest = _strip_expansions(tok)
-        if rest != tok:
-            if rest:
-                parts[i] = rest  # read again: a redirect (`${x}<<EOF`) or the command
-            else:
-                i += 1
+        rest = _strip_expansions(raws[i])
+        if rest == raws[i]:
+            break
+        if not rest:
+            i += 1
             continue
-        break
+        try:
+            words = _words(rest)[0]
+        except ValueError:
+            break
+        if len(words) != 1:
+            break
+        parts[i], raws[i] = words[0], rest  # read again: a redirect (`${x}<<EOF`) or the command
     return i
+
+
+def _defines_function(segment):
+    """True if the segment opens a function definition (`f() {`, `function
+    f`): its body runs when f is called, not where it is written."""
+    try:
+        parts, bare, _ = _words(_LEAD_NOISE.sub("", segment))
+    except ValueError:
+        return False
+    if parts[:1] == ["function"] and bare[0]:
+        return True
+    return parts[1:3] == ["(", ")"] and bare[1] and bare[2]
 
 
 def _ansi_c(s, i):
@@ -295,13 +317,14 @@ def _words(s):
     """Split a shell fragment into words as bash reads them, before expansion:
     quotes removed, $'…' decoded, a `$( … )`, `${ … }` or backtick kept whole
     with what is quoted inside it. Returns (words, bare), bare[k] saying word k
-    had no quote or escape. ValueError on an unclosed quote or expansion.
+    had no quote or escape, and raws, each word's source text. ValueError on
+    an unclosed quote or expansion.
 
     shlex cannot do this: it fails on `$'a\\'b'` and on a quote nested in
     "$( … )", and a failed split hid the commit in that segment.
     """
-    words, bare = [], []
-    cur, cur_bare = None, True
+    words, bare, raws = [], [], []
+    cur, cur_bare, begin = None, True, 0
     i, n = 0, len(s)
     while i < n:
         ch = s[i]
@@ -309,10 +332,12 @@ def _words(s):
             if cur is not None:
                 words.append(cur)
                 bare.append(cur_bare)
+                raws.append(s[begin:i])
                 cur, cur_bare = None, True
             i += 1
             continue
-        cur = cur or ""
+        if cur is None:
+            cur, begin = "", i
         if ch == "\\":
             if i + 1 >= n:
                 raise ValueError("no escaped character")
@@ -347,7 +372,8 @@ def _words(s):
     if cur is not None:
         words.append(cur)
         bare.append(cur_bare)
-    return words, bare
+        raws.append(s[begin:])
+    return words, bare, raws
 
 
 def _tokens(s, expansions=False):
@@ -366,13 +392,13 @@ def _tokens(s, expansions=False):
     """
     s = _LEAD_NOISE.sub("", s or "")
     try:
-        parts, bare = _words(s)
+        parts, bare, raws = _words(s)
     except ValueError:
         try:
-            parts, bare = shlex.split(s), None
+            parts, bare, raws = shlex.split(s), None, None
         except ValueError:
             return []  # unparseable segment → fail-open (not a commit)
-    return parts[_command_start(parts, bare, expansions):]
+    return parts[_command_start(parts, bare, expansions, raws):]
 
 
 def _raw_tokens(s):
@@ -392,7 +418,10 @@ def _raw_tokens(s):
         parts = shlex.split(s, posix=False)
     except ValueError:
         return []
-    return parts[_command_start(parts, expansions=True):]
+    # posix=False keeps the quotes, so each token is its own source text and
+    # the expansions _tokens cuts are cut here too: the two lists stay aligned
+    raws = list(parts)
+    return raws[_command_start(parts, expansions=True, raws=raws):]
 
 
 # Characters after which a '#' opens a word, and so a comment: whitespace and
@@ -544,7 +573,8 @@ def _scan(command):
         def at_command(i):
             """Whether the word at i is in command position: first at this
             level, or after a separator, an open paren, a case pattern or a
-            reserved word."""
+            reserved word that is itself in command position (`echo do case`
+            is three words of one command)."""
             k = i - 1
             while k >= start and command[k] in " \t":
                 k -= 1
@@ -552,7 +582,7 @@ def _scan(command):
                 return True
             m = re.search(r"(?:^|[\s;&|(])(if|elif|while|until|then|do|else|!|\{)$",
                           command[start:k + 1])
-            return m is not None
+            return m is not None and at_command(start + m.start(1))
 
         def arith_closes(j):
             """Whether the '((' ending just before j closes as '))'. bash reads
@@ -700,7 +730,7 @@ def _scan(command):
                 if command[i] == "c" and after in (" ", "\t") and at_command(i):
                     opened.append("case_pat")
                 elif (command[i] == "e" and after in ("", " ", "\t", "\n", ";", "&", "|", ")")
-                        and case):
+                        and case and at_command(i)):
                     opened.pop()
             word_start = ch in _COMMENT_PRECEDERS
             i += 1
@@ -1050,13 +1080,17 @@ def _redirects_git(segment):
     `--git-dir`, `--work-tree`) before the subcommand. An unparseable segment
     counts as redirecting.
     """
+    text = _LEAD_NOISE.sub("", segment)
     try:
-        parts = shlex.split(_LEAD_NOISE.sub("", segment))
+        parts, bare, raws = _words(text)
     except ValueError:
-        return True
+        try:
+            parts, bare, raws = shlex.split(text), None, None
+        except ValueError:
+            return True
     # the same prefix _is_git_commit reads past, or a commit it sees behind
     # `{`, `>log` or `$x` would go unexamined here
-    i = _command_start(parts, expansions=True)
+    i = _command_start(parts, bare, expansions=True, raws=raws)
     if any(_ENV_ASSIGN.match(tok) and tok.startswith("GIT_") for tok in parts[:i]):
         return True
     while i < len(parts) and parts[i] in _GIT_WRAPPERS:
@@ -1565,6 +1599,13 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
             carries_semicolon = False
             if any_switch_seen:
                 stack_reliable = False
+        if _defines_function(stripped):
+            # the body runs wherever f is called, after any switch since: no
+            # in-chain branch reaches it
+            running_branch = None
+            chain_stack = []
+            carries_semicolon = False
+            stack_reliable = False
         created = _new_branch_created(stripped)
         if created is not None:
             running_branch = created
@@ -2741,6 +2782,27 @@ def _test():
           on_main("x=echo; $x git checkout -b feature/x && git commit -m '[FIX] x'") == 2)
     check("a quoted '}' in a leading ${ … } does not end it → blocked",
           on_main("${x:+'}'}git commit -m wip") == 2)
+    # second review: no case after an argument, no new false block
+    check("'do' as an argument opens no case, so '|' still pipes → blocked",
+          on_main("echo do case | git commit -m wip") == 2)
+    check("'if' as an argument opens no case, so '||' still separates → blocked",
+          on_main("false if case || git commit -m wip") == 2)
+    check("an 'esac' argument does not end the case → blocked",
+          on_main("case x in x) echo esac;; y) git commit -m wip;; esac") == 2)
+    check("an escaped '$x' is no expansion → passes", run("\\$x git commit -m wip") == 0)
+    check("a quoted '$x' is no expansion → passes", run("'$x' git commit -m wip") == 0)
+    check("'$0' is never empty → passes", run("$0git commit -m wip") == 0)
+    check("'$(( … ))' is never empty → passes", run("$((0))git commit -m wip") == 0)
+    check("'${#x}' is never empty → passes", run("${#x}git commit -m wip") == 0)
+    check("'$x' joined to an empty quote before git → blocked",
+          on_main("$x''git commit -m wip") == 2)
+    check("a commit behind '$x' is type-checked through a '$(' message",
+          run("$x git commit -m 'wip $(x)'") == 2)
+    check("a function body takes no branch from where it is defined → blocked",
+          on_main("git checkout -b feat; f() { git commit -m '[FIX] x'; }; git checkout main; f",
+                  creatable=True) == 2)
+    check("a creation and commit both in a function body → passes",
+          on_main("f() { git checkout -b feat && git commit -m '[FIX] x'; }; f") == 0)
     check("an escaped backtick in a leading substitution → blocked",
           on_main("`echo \\``git commit -m wip") == 2)
 
