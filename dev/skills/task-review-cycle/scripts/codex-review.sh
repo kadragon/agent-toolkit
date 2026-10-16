@@ -428,9 +428,9 @@ emit_blob_tail() {
 }
 
 # Absolute Codex plugin-cache paths the review text names that are gone from disk, one per line.
-# The companion's broker outlives a plugin upgrade and keeps the hook paths it started with; once
-# that version dir is pruned every Codex tool call fails, and the "review" is prose saying so
-# (seen 2026-10-15: broker held dev/4.10.29 after the cache moved to 4.10.30). A missing path is
+# Codex keeps the hook paths it loaded; once that version dir is pruned every Codex tool call
+# fails, and the "review" is prose saying so (seen 2026-10-15: dev/4.10.29 after the cache moved to
+# 4.10.30; 2026-10-16: pruned by the app-server's own startup cache refresh). A missing path is
 # read instead of the prose, whose wording varies. Only `.codex/plugins/cache` is the broker's own:
 # a review may cite a pruned Claude cache path as a finding. A path must start the word (`~/...`
 # and `$HOME/...` are not absolute here) and is cut at the first non-path byte, so a glob or a
@@ -660,6 +660,7 @@ case "$CODEX_MODE" in
     # propagating the exit code — otherwise the caller only sees the generic fallback and
     # loses the diagnostic detail.
     retry_count=0
+    stale_retried=0
     while :; do
       RAW=""
       codex_status=0
@@ -725,6 +726,17 @@ case "$CODEX_MODE" in
         esac
       fi
       if [ -n "$TEXT" ]; then
+        STALE_PATHS=$(missing_plugin_paths "$TEXT")
+        # A fresh Codex app-server loads its plugin hooks, then refreshes its plugin cache at
+        # startup and prunes the version it just loaded (seen 2026-10-16: kadragon/dev 4.11.1 →
+        # 4.11.2 two seconds after load). Only the first run after an upgrade loses that race; by
+        # the second the cache is current, so one re-run recovers instead of failing the source.
+        if [ -n "$STALE_PATHS" ] && [ "$stale_retried" -eq 0 ]; then
+          stale_retried=1
+          printf 'WARN: the review names plugin paths missing on disk (Codex refreshed its plugin cache mid-run); retrying once:\n%s\n' \
+            "$STALE_PATHS" >&2
+          continue
+        fi
         break
       fi
       if [ "$retry_count" -eq 0 ]; then
@@ -743,11 +755,10 @@ case "$CODEX_MODE" in
       publish_result "empty" 1
       exit 1
     done
-    STALE_PATHS=$(missing_plugin_paths "$TEXT")
     if [ -n "$STALE_PATHS" ]; then
-      printf 'ERROR: the review names plugin paths missing on disk, so its tool calls likely failed:\n%s\n' \
+      printf 'ERROR: the review names plugin paths missing on disk on the retry as well, so its tool calls likely failed:\n%s\n' \
         "$STALE_PATHS" >&2
-      printf 'HINT: restart the Codex broker — one started before a plugin upgrade keeps the old cache path. Stop the pid in this workspace'"'"'s codex-companion broker.json, then re-run.\n' >&2
+      printf 'HINT: a startup cache refresh explains one failed run, not two — check that the Codex plugin cache holds the version its config names, then re-run.\n' >&2
       emit_blob_tail "$TEXT" "review text"
       publish_result "failed" 1
       exit 1
