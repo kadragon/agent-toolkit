@@ -13,13 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #329 — commit-guard code runners, hwpx sz height, codex stale broker (2026-10-15)
-
-- [ ] [debt] after a code runner or a HEAD-moving substitution the chain's branch falls back to the live branch read at hook time, which is stale once the runner switched, so `sh -c 'git checkout main' && git commit` on a live feature branch passes; an unknown branch should fail closed instead (source: code-review; pre-existing for `x=$(git checkout main)`) — dev/hooks/commit-guard/guard.py `_commit_segments`
-- [ ] [debt] `eval`/`source` run in this shell and may `cd`, but running_cwds is left unchanged, so `eval 'cd ../B' && git commit` reads repo A's branch (source: code-review) — dev/hooks/commit-guard/guard.py `_runs_code`
-- [ ] [debt] `_runs_code` does not see a runner behind `sudo` or `xargs` (source: code-review) — dev/hooks/commit-guard/guard.py `_RUNNER_WRAPPERS`
-- [ ] [constraint] `source .venv/bin/activate` is a runner by the 2026-10-15 decision, so `git checkout -b feat && source .venv/bin/activate && pytest && git commit` on main now blocks; decide whether an env-activate file is exempt (source: code-review) — dev/hooks/commit-guard/guard.py `_EVAL_COMMANDS`
-
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*

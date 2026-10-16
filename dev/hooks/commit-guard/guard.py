@@ -17,32 +17,20 @@ Both apply the same two guards below and share `_current_branch`,
 The hook path applies two guards:
   1. Branch guard: blocks commits to main/master unless the repo's AGENTS.md
      or CLAUDE.md contains the literal marker <!-- commit-guard: allow-main -->.
-     A branch created earlier in the same chain — `git checkout -b/-B/--orphan
-     <name>` or `git switch -c/-C/--create/--orphan <name>` — is honored: the
-     commit's branch is the newly created one, not the pre-checkout branch the
-     live `rev-parse` still reports. This attribution carries across `&&`
-     (where the creation is guaranteed to have run), and across `;`/newline
-     only when the creation is proven to succeed: it is a literal `git
-     checkout -b <name>` / `git switch -c <name>` that runs unconditionally,
-     follows nothing but inert segments, commits and earlier proven creations,
-     sits in no heredoc, and the branch is creatable in the repo right now
-     (`_branch_creatable`) beside those earlier names. Any later segment
-     that is neither inert nor a commit ends that proof, and a commit aimed at
-     another repo (`-C`, `GIT_DIR=`) is not covered by it. It is dropped across `||`/`|`/`&`,
-     an unproven `;`/newline, or a `cd`, so a commit that may actually land on
-     main is not mis-attributed to an un-run checkout. A bare switch — `git
-     checkout <ref>` / `git switch <ref>` with a single ref, no `--` pathspec
-     and no `--detach` — re-attributes the chain to that ref when either the
-     target is protected (so `checkout -b X && checkout main && commit` blocks)
-     or attribution is already tracked in-chain (so `checkout main && checkout
-     feature/x && commit` follows to feature/x rather than sticking at main). A
-     bare switch to a feature branch from live detection (no in-chain attribution
-     yet) stays untrusted (ambiguous pathspec) and does not unblock; a detached
-     checkout (`--detach`) never re-attributes (the commit lands on a detached
-     HEAD, not the branch ref). A command substitution, quoted or not, is read
-     as a command of its own; a switch or `cd` behind an expansion that may be
-     empty, in a case arm or in a function body may or may not run, so it can
-     only add a cwd to check or move the chain toward a protected branch.
+     The branch is the live one, read with `rev-parse` in each cwd the
+     commit may run in, before the command runs: a `cd` is followed, and a
+     `cd` that may not run (case arm, function body, subshell, behind an
+     expansion that may be empty) adds its directory to the ones checked.
+     A branch the same command creates or switches to is not seen, so
+     `git checkout -b x && git commit` on main blocks: create or switch the
+     branch in a separate command first. The reverse is an accepted
+     residual: a HEAD move the hook does not read (`git checkout main`, a
+     script, `sh -c`, `eval`) passes on a live feature branch. Predicting
+     the branch a command will land on from its text was tried and dropped
+     (2026-10-16): it grew without bound and still blocked common chains.
+     Finding the commit stays thorough: a commit after a heredoc,
+     behind a comment, keyword, redirect or expansion, in a case arm,
+     function body or command substitution is still found.
   2. Type guard: commit message must match ^\\[(TYPE)\\] (with trailing space).
      Skipped for editor-mode commits (no -m/-F), --amend, and --squash flags,
      and for messages carrying shell-expandable command substitution (unquoted
@@ -64,8 +52,7 @@ real argv value that the shell has already expanded, so there is no statically
 undecidable text and none of the `_has_expandable_subst` / raw-token machinery
 applies. Do not "restore" that fail-open branch here — a literal `$(...)` in an
 argv message is exactly the message git will receive. The branch guard is
-likewise simpler: the caller commits at the moment it invokes this, so live
-`rev-parse` is authoritative and no in-chain attribution is needed.
+the same live `rev-parse`: the caller commits at the moment it invokes this.
 """
 
 import json
@@ -148,9 +135,7 @@ def _command_start(parts, bare=None, expansions=False, raws=None):
 
     With expansions and raws (each token's source text, quotes intact), also
     past an unquoted expansion that may be empty (`$()git`, `$x git`), cut
-    from the word and its raw in place. Only commit detection asks for it:
-    such a word may as well run something else (`x=echo; $x git checkout -b
-    f`), so it proves no branch switch.
+    from the word and its raw in place. Only commit detection asks for it.
 
     bare[k] says token k had no quoting: a quoted `(` or `)` is text. Without
     it every token counts as bare.
@@ -244,41 +229,6 @@ def _function_nesting(segment):
     rest = [w for w, b in zip(words[:j] + words[j + k:], bare[:j] + bare[j + k:]) if b]
     depth += rest.count("(") - rest.count(")")
     return k > 0, depth, k > 0 and j + k == n
-
-
-# Words that open or close a compound command around the one inside it.
-_COMPOUND_SYNTAX = _SHELL_KEYWORDS | {"}", ")", "esac", "fi", "done"}
-
-
-def _compound_inert(segment):
-    """True if the segment, inside a function definition or a case, runs
-    nothing but an _is_inert command once the compound's own syntax is set
-    aside: a function head, a brace or paren, a reserved word. Whatever else
-    it runs may move HEAD or the directory, now or when the function is
-    called."""
-    try:
-        words, bare, _ = _words(segment)
-    except (ValueError, RecursionError):
-        return False
-    n = len(words)
-
-    def is_bare(k, word):
-        return k < n and bare[k] and words[k] == word
-
-    i = 0
-    while i < n:
-        if bare[i] and words[i] in _COMPOUND_SYNTAX:
-            i += 1
-        elif is_bare(i + 1, "(") and is_bare(i + 2, ")"):
-            i += 3  # `f ( )`
-        elif is_bare(i, "function") and i + 1 < n:
-            i += 4 if is_bare(i + 2, "(") and is_bare(i + 3, ")") else 2
-        else:
-            break
-    j = n
-    while j > i and bare[j - 1] and words[j - 1] in _COMPOUND_SYNTAX:
-        j -= 1
-    return _is_inert(shlex.join(words[i:j]))
 
 
 def _ansi_c(s, i):
@@ -567,8 +517,8 @@ def _scan_full(command):
     case: "arm" in an arm, "case" elsewhere between `case` and `esac`, else
     False.
 
-    The one place that tracks quoting; _strip_comments, _split_segments,
-    _outside_quotes and _has_expandable_subst all read its answer, so they
+    The one place that tracks quoting; _strip_comments, _split_segments
+    and _has_expandable_subst all read its answer, so they
     cannot disagree on an escape or on where a quote ends.
 
     A `$(` or a backtick inside double quotes opens a command of its own,
@@ -1002,13 +952,6 @@ def _strip_comments(command):
     return "".join(ch for ch, kind in zip(command, cls) if kind != _COMMENT)
 
 
-def _outside_quotes(command):
-    """The unquoted, unescaped command text alone: no quoted span, comment or
-    heredoc body."""
-    cls, _ = _scan(command)
-    return "".join(ch for ch, kind in zip(command, cls) if kind == _CODE)
-
-
 def _has_expandable_subst(raw_arg):
     """True if raw_arg (a message token with its original quotes intact) contains
     a shell-EXPANDABLE command substitution — a '$(' or backtick that is neither
@@ -1050,7 +993,7 @@ def _operator_at(command, cls, i):
 
 def _split_segments(command):
     """(segments, operators) of _split_full."""
-    segments, operators, _, _, _ = _split_full(command)
+    segments, operators, _, _ = _split_full(command)
     return segments, operators
 
 
@@ -1065,25 +1008,18 @@ def _split_full(command):
     from the segment, leaving `$()` or two backticks in its place, so nothing
     inside it can split the segment.
 
-    Returns (segments, operators, arms, bodies, cases): a list of stripped segment
+    Returns (segments, operators, arms, bodies): a list of stripped segment
     strings (individual segments may be empty); a parallel list of the
     separator operator that PRECEDES each segment (operators[0] is None; the
     rest are one of '&&' '||' '|' ';' '&', or ')' after a case pattern); per
-    segment, whether it sits in a case arm; per segment, the bodies of
-    the command substitutions in it, quoted or not, which run before it;
-    and per segment, (in_case, open_after): whether any of it is inside a
-    case, and whether a case is still open where it ends.
-    Callers use the operator to decide whether state from an earlier segment
-    (e.g. an in-chain branch creation) may carry into a later one — only '&&'
-    guarantees the predecessor ran successfully; main() proves it separately
-    for a creation followed by ';'.
+    segment, whether it sits in a case arm; and per segment, the bodies of
+    the command substitutions in it, quoted or not, which run before it.
     """
     cls, balanced, subs, arm = _scan_full(command)
     if not balanced:
-        # an unclosed quote: split on every separator, attribute nothing
+        # an unclosed quote: split on every separator
         segs = re.split(r"&&|\|\||[;|\n&]", _strip_comments(command))
-        return (segs, [None] * len(segs), [False] * len(segs), [[] for _ in segs],
-                [(False, False)] * len(segs))
+        return segs, [None] * len(segs), [False] * len(segs), [[] for _ in segs]
 
     starts = {}
     anchored = {}  # '<<' index → the heredoc body substitutions it announced
@@ -1097,17 +1033,15 @@ def _split_full(command):
     joined = {k for body, (end, quoted, _) in starts.items() if not quoted for k in (body - 1, end)}
     segments = []
     operators: list = [None]  # operator preceding each segment; first has none
-    arms, bodies, cases = [], [], []
+    arms, bodies = [], []
     current, in_arm, found = [], False, []
-    in_case, case_now = False, False
 
     def end_segment():
-        nonlocal current, in_arm, found, in_case
+        nonlocal current, in_arm, found
         segments.append("".join(current).strip())
         arms.append(in_arm)
         bodies.append(found)
-        cases.append((in_case, bool(case_now)))
-        current, in_arm, found, in_case = [], False, [], False
+        current, in_arm, found = [], False, []
 
     i = 0
     while i < len(command):
@@ -1124,8 +1058,6 @@ def _split_full(command):
             i += 1
             continue
         in_arm = in_arm or arm[i] == "arm"
-        case_now = arm[i]
-        in_case = in_case or bool(case_now)
         if kind == _PATTERN:
             if ch == ")":
                 # the arm after a case pattern runs only when it matches
@@ -1148,7 +1080,7 @@ def _split_full(command):
         end_segment()
         operators.append(op)
     end_segment()
-    return segments, operators, arms, bodies, cases
+    return segments, operators, arms, bodies
 
 
 def _is_git_commit(segment):
@@ -1207,337 +1139,6 @@ def _git_cwd(segment, env_cwd):
     return env_cwd
 
 
-# checkout/switch flags that CREATE a new branch (force + long variants included).
-# '--orphan' (unborn branch) creates+switches for both subcommands.
-_CHECKOUT_NEW_FLAGS = {"-b", "-B", "--orphan"}
-_SWITCH_NEW_FLAGS = {"-c", "-C", "--create", "--orphan"}
-
-# checkout/switch options that ALWAYS consume a following separate-token value
-# (conservative: only options whose value is never optional, so skipping the
-# next token can never accidentally swallow the real branch positional).
-_CHECKOUT_SWITCH_VALUE_OPTS = {"--conflict"}
-
-# previous-branch-ref spellings ('-' and '@{-N}') whose actual destination is
-# statically unknown at hook time — see _UNKNOWN_SWITCH_TARGET below.
-_PREV_BRANCH_REF_RE = re.compile(r"^@\{-\d+\}$")
-
-
-def _is_prev_branch_ref(tok):
-    return tok == "-" or bool(_PREV_BRANCH_REF_RE.match(tok))
-
-
-# carrier returned by _bare_switch_target for a switch to a previous-branch ref
-# ('-', '@{-N}') — distinct from None (not a bare switch at all) and from a
-# plain str (a known branch name), so the caller can attempt real resolution
-# (virtual chain-stack + reflog) instead of unconditionally treating it as
-# unresolvable. See _resolve_prev_ref.
-class _PrevRef:
-    __slots__ = ("n",)
-
-    def __init__(self, n):
-        self.n = n
-
-
-def _prev_ref_n(tok):
-    """'-' -> 1; '@{-N}' -> N."""
-    return 1 if tok == "-" else int(tok[3:-1])
-
-
-def _new_branch_created(segment, expansions=False, flag=False):
-    """If this segment creates+switches to a new branch, return its name, else None.
-
-    Recognizes `git checkout -b/-B <name>` and `git switch -c/-C <name>`.
-    A bare `git checkout <name>` (switch to existing) is intentionally NOT
-    matched: whether <name> is a branch, path, or commit is statically
-    ambiguous, so we do not let it override the live branch detection.
-    expansions: read past a leading expansion that may be empty (_tokens).
-    flag: return (name, the create flag) instead.
-    """
-    toks = _tokens(segment, expansions)
-    i = 0
-    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
-        i += 1
-    if i >= len(toks) or os.path.basename(toks[i]) != "git":
-        return None
-    i += 1  # skip 'git'
-    while i < len(toks):  # skip git-level options
-        tok = toks[i]
-        if tok in GIT_VALUE_OPTS:
-            i += 2
-            continue
-        if tok.startswith("-"):
-            i += 1
-            continue
-        break
-    if i >= len(toks):
-        return None
-    sub = toks[i]
-    i += 1
-    if sub == "checkout":
-        new_flags = _CHECKOUT_NEW_FLAGS
-    elif sub == "switch":
-        new_flags = _SWITCH_NEW_FLAGS
-    else:
-        return None
-    # the first token after a new-branch flag is the branch name
-    while i < len(toks):
-        if toks[i] in new_flags and i + 1 < len(toks):
-            return (toks[i + 1], toks[i]) if flag else toks[i + 1]
-        i += 1
-    return None
-
-
-# git subcommands that cannot create, delete or rename a branch ref nor move
-# HEAD to another branch. Deliberately short: anything absent is treated as
-# able to do either.
-_REF_NEUTRAL_SUBCOMMANDS = {"add", "commit", "diff", "log", "mv", "rm", "show", "status"}
-
-# Commands that cannot touch a repository or the working directory. Anything
-# else running before an in-chain creation (a script, `bash -c`, `make`,
-# `pushd`, a bare `cd`) may have taken the branch name or moved to another
-# repo, so the hook-time creatable check no longer describes what will run.
-# The same default covers a creation that may never run: the `if`, `{` or
-# `f() {` that opens a compound command around it is not inert either.
-_INERT_COMMANDS = {":", "[", "echo", "ls", "printf", "pwd", "set", "test", "true"}
-
-# The only creation spelling whose success the creatable check can vouch for:
-# a literal name, no wrapper, env assignment, git-level option (`-C <path>`,
-# `GIT_DIR=`: another repo), start point, quoting or expansion (`"$BRANCH"`:
-# another name at runtime), and neither `--orphan` nor a force flag, which
-# fail or succeed on conditions that check does not read.
-_PROVABLE_CREATION_RE = re.compile(
-    r"^git\s+(?:checkout\s+-b|switch\s+(?:-c|--create))\s+([A-Za-z0-9][A-Za-z0-9._/-]*)$"
-)
-
-
-def _runs_unconditionally(idx, segments, operators):
-    """True if segment idx runs whatever came before it: it opens the command or
-    follows ';'/newline. An operator left at the end of a line (`make lint ||`
-    + newline) stays the next line's operator (_split_segments drops the
-    newline's ';'); the walk back covers an empty segment that still holds one.
-    """
-    j = idx
-    while True:
-        if operators[j] not in (None, ";"):
-            return False
-        if j == 0 or segments[j - 1].strip():
-            return True
-        j -= 1
-
-
-def _git_subcommand_at(toks, i):
-    """Index of the git subcommand, given the index just past the 'git' token."""
-    while i < len(toks):
-        tok = toks[i]
-        if tok in GIT_VALUE_OPTS:
-            i += 2
-            continue
-        if tok.startswith("-"):
-            i += 1
-            continue
-        break
-    return i
-
-
-def _is_inert(segment):
-    """True only if the segment provably leaves branch refs, HEAD and the
-    working directory alone: empty, plain variable assignments, a command in
-    _INERT_COMMANDS, or `git` with a subcommand in _REF_NEUTRAL_SUBCOMMANDS.
-    A command or process substitution, a subshell, a `GIT_*` assignment or an
-    unparseable segment (a trailing line continuation among them) never is.
-    """
-    raw = segment.strip()
-    if not raw:
-        return True
-    if "`" in raw or "(" in raw:
-        return False
-    try:
-        parts = shlex.split(raw)
-    except ValueError:
-        return False
-    i = 0
-    while i < len(parts) and _ENV_ASSIGN.match(parts[i]):
-        if parts[i].startswith("GIT_"):
-            return False
-        i += 1
-    rest = parts[i:]
-    if not rest:
-        return True
-    if rest[0] in _INERT_COMMANDS:
-        return True
-    if rest[0] != "git":
-        return False
-    sub = _git_subcommand_at(rest, 1)
-    return sub < len(rest) and rest[sub] in _REF_NEUTRAL_SUBCOMMANDS
-
-
-def _redirects_git(segment):
-    """True if the segment aims its git call at another repository: a `GIT_*`
-    assignment in front of it, or any git-level option (`-C <path>`,
-    `--git-dir`, `--work-tree`) before the subcommand. An unparseable segment
-    counts as redirecting.
-    """
-    text = _LEAD_NOISE.sub("", segment)
-    try:
-        parts, bare, raws = _words(text)
-    except (ValueError, RecursionError):
-        try:
-            parts, bare, raws = shlex.split(text), None, None
-        except ValueError:
-            return True
-    # the same prefix _is_git_commit reads past, or a commit it sees behind
-    # `{`, `>log` or `$x` would go unexamined here
-    i = _command_start(parts, bare, expansions=True, raws=raws)
-    if any(_ENV_ASSIGN.match(tok) and tok.startswith("GIT_") for tok in parts[:i]):
-        return True
-    while i < len(parts) and parts[i] in _GIT_WRAPPERS:
-        i += 1
-    if i >= len(parts) or os.path.basename(parts[i]) != "git":
-        return False
-    return _git_subcommand_at(parts, i + 1) != i + 1
-
-
-def _is_provable_creation(segment, name):
-    """True if the segment is exactly `git checkout -b <name>` or `git switch
-    -c|--create <name>` — see _PROVABLE_CREATION_RE."""
-    m = _PROVABLE_CREATION_RE.match(segment.strip())
-    return bool(m) and m.group(1) == name
-
-
-# Files and directories a git dir holds while a merge, cherry-pick, revert,
-# rebase or am is under way; `git switch -c` refuses to run during any of them.
-_IN_PROGRESS_MARKERS = (
-    "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply",
-)
-
-
-def _names_collide(a, b):
-    """True if branches a and b cannot both exist: equal, or one sits above the
-    other (`feature` and `feature/x`). Compared case-insensitively, as loose
-    refs are on a case-folding filesystem."""
-    a = a.casefold()
-    b = b.casefold()
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
-
-
-def _branch_creatable(cwd, name, _override=None):
-    """True only when creating and switching to branch <name> in cwd is proven
-    able to succeed: the name is a valid branch name, no existing branch equals
-    it, sits above it or sits below it (`feature` blocks `feature/x` and the
-    reverse, see _names_collide), no merge/rebase/cherry-pick/revert is in
-    progress, and the index holds no unmerged entry. Any git failure (not a
-    repo, timeout, missing git) answers False.
-
-    _override may be a bool, or a callable(cwd, name) → bool, for tests.
-    """
-    if _override is not None:
-        return _override(cwd, name) if callable(_override) else _override
-
-    def git(*args):
-        out = subprocess.run(
-            ["git", "-C", cwd, *args], capture_output=True, text=True, timeout=3,
-        )
-        return out.stdout if out.returncode == 0 else None
-
-    try:
-        # a name git rewrites ('@{-1}' → the previous branch) is not a literal
-        fmt = git("check-ref-format", "--branch", name)
-        # the full name: a short one comes back as 'heads/<name>' beside a same-named tag
-        refs = git("for-each-ref", "--format=%(refname)", "refs/heads/")
-        git_dir = git("rev-parse", "--absolute-git-dir")
-        unmerged = git("ls-files", "--unmerged")
-    except Exception:
-        return False
-    if fmt is None or fmt.strip() != name or refs is None or not git_dir or unmerged is None:
-        return False
-    if unmerged.strip():
-        return False
-    if any(os.path.exists(os.path.join(git_dir.strip(), m)) for m in _IN_PROGRESS_MARKERS):
-        return False
-    return not any(
-        _names_collide(name, ref.strip()[len("refs/heads/"):]) for ref in refs.splitlines()
-    )
-
-
-def _bare_switch_target(segment, expansions=False):
-    """If this segment is a bare branch switch (no create flag) to a single
-    unambiguous branch ref, return that branch name; a _PrevRef(n) if it
-    switches to a previous-branch ref ('-', '@{-N}'); else None.
-
-    Recognizes `git checkout <ref>` and `git switch <ref>` with exactly one
-    positional argument and no `--` separator. Returns None for:
-      - create forms (-b/-c/--orphan/...) — handled by _new_branch_created
-      - a `--` pathspec separator (`checkout <ref> -- <path>` restores files,
-        it does NOT switch branch)
-      - a `--detach`/`-d` flag (`checkout --detach main` lands on a detached
-        HEAD; a commit there does NOT update the protected branch ref)
-      - zero or multiple positionals (`checkout <ref> <path>` is a pathspec
-        restore from <ref>, current branch unchanged)
-
-    Returns _PrevRef(n) for `-`/`@{-n}` (previous-branch refs): the caller
-    resolves the actual destination via _resolve_prev_ref (in-chain virtual
-    stack + real reflog), falling back to unknown (None) attribution — and
-    thus live branch detection — only when that resolution cannot be proven
-    correct (fail-toward-block).
-
-    The caller only acts on a main/master target (re-attributing the chain to a
-    protected branch — the fail-toward-block direction). A non-protected target
-    is left for the caller to ignore, so the only false-positive surface is a
-    pathspec literally named 'main'/'master' on a non-main branch — contrived and
-    strictly safer than mis-attributing a real switch-back to main.
-
-    expansions: read past a leading expansion that may be empty (_tokens).
-    """
-    toks = _tokens(segment, expansions)
-    i = 0
-    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
-        i += 1
-    if i >= len(toks) or os.path.basename(toks[i]) != "git":
-        return None
-    i += 1  # skip 'git'
-    while i < len(toks):  # skip git-level options
-        tok = toks[i]
-        if tok in GIT_VALUE_OPTS:
-            i += 2
-            continue
-        if tok.startswith("-"):
-            i += 1
-            continue
-        break
-    if i >= len(toks):
-        return None
-    sub = toks[i]
-    i += 1
-    if sub == "checkout":
-        new_flags = _CHECKOUT_NEW_FLAGS
-    elif sub == "switch":
-        new_flags = _SWITCH_NEW_FLAGS
-    else:
-        return None
-    positionals = []
-    while i < len(toks):
-        tok = toks[i]
-        if tok == "--":
-            return None  # pathspec restore — not a branch switch
-        if tok in new_flags:
-            return None  # create form — _new_branch_created owns this segment
-        if tok in ("--detach", "-d"):
-            return None  # detached HEAD — commit does not update the branch ref
-        if _is_prev_branch_ref(tok):
-            positionals.append(_PrevRef(_prev_ref_n(tok)))
-            i += 1
-            continue
-        if tok in _CHECKOUT_SWITCH_VALUE_OPTS:
-            i += 2  # skip the option AND its separate-token value
-            continue
-        if tok.startswith("-"):
-            i += 1  # other boolean flag (-f, --track, ...) → skip
-            continue
-        positionals.append(tok)
-        i += 1
-    return positionals[0] if len(positionals) == 1 else None
-
-
 def _current_branch(cwd, _override=None):
     """Return current branch name, or '' on failure.
 
@@ -1558,109 +1159,6 @@ def _current_branch(cwd, _override=None):
     except Exception:
         pass
     return ""
-
-
-def _prev_branch(cwd, n, _override=None):
-    """Return the real reflog '@{-n}' branch name, or '' on failure.
-
-    _override may be a string (returned as-is) or a callable (cwd, n) -> str
-    (used by tests that need per-cwd/per-n reflog injection).
-    """
-    if _override is not None:
-        if callable(_override):
-            return _override(cwd, n)
-        return _override
-    try:
-        out = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", f"@{{-{n}}}"],
-            capture_output=True, text=True, timeout=3,
-        )
-        if out.returncode == 0:
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return ""
-
-
-def _resolve_prev_ref(n, chain_stack, cwd, stack_reliable, branch_override, reflog_override):
-    """Resolve a previous-branch ref ('-'=@{-1}, '@{-n}') to its real target
-    branch, or None if it cannot be proven (caller must fail-toward-block).
-
-    Combines the in-chain simulated switch history (chain_stack, most-recent
-    last) with the real pre-chain state:
-      - n <= depth-1  → chain_stack[depth-1-n]      (statically known)
-      - n == depth    → pre-chain current branch    (_current_branch shell-out)
-      - n > depth     → real reflog '@{-(n-depth)}'  (_prev_branch shell-out)
-
-    stack_reliable must be True — once any bare switch to a known (statically
-    ambiguous) target has occurred, chain_stack's depth can no longer be
-    trusted to match git's real reflog depth, and resolving further would risk
-    a bypass (a commit landing on main getting allowed). Returns None in that
-    case, and also when the resolved target is "HEAD" (detached — a commit
-    there does not update the protected branch, so there is no branch name to
-    trust).
-    """
-    if not stack_reliable:
-        return None
-    depth = len(chain_stack)
-    if n <= depth - 1:
-        resolved = chain_stack[depth - 1 - n]
-    elif n == depth:
-        resolved = _current_branch(cwd, _override=branch_override)
-    else:
-        resolved = _prev_branch(cwd, n - depth, _override=reflog_override)
-    if not resolved or resolved == "HEAD":
-        return None
-    return resolved
-
-
-# git subcommands statically known to never change which branch HEAD points
-# at (so a segment invoking one of these cannot silently move the chain off
-# the depth _resolve_prev_ref assumes). Deliberately conservative and NOT an
-# exhaustive list of "safe" commands — anything absent from it (including an
-# unrecognized token, which may be a configured alias like `co = checkout`
-# that literal "checkout"/"switch" matching can never see) is treated as
-# potentially HEAD-moving and poisons chain-stack reliability instead.
-_HEAD_NEUTRAL_SUBCOMMANDS = {"commit"}
-
-
-def _is_unmodeled_git_segment(segment, expansions=False):
-    """True if this segment is a `git` invocation whose effect on HEAD is not
-    provably modeled by `_new_branch_created`/`_bare_switch_target` (called
-    before this in the attribution loop) or known to be HEAD-neutral.
-
-    Covers: `checkout`/`switch` forms not caught by the two functions above
-    (detach, pathspec restore, multi-positional — already left untrusted for
-    `running_branch`, but chain_stack's DEPTH must also stop being trusted
-    past them); and — critically — any OTHER subcommand, since a git alias
-    (`git -c alias.co=checkout co X`, or a persisted `co = checkout` in
-    .gitconfig) invokes checkout/switch under a name this file's literal
-    token matching cannot recognize. Poisoning on every unrecognized
-    subcommand closes that gap without needing to resolve aliases: a later
-    '@{-N}' just falls back to live branch detection instead of trusting a
-    chain_stack depth that may not reflect what actually ran.
-
-    expansions: read past a leading expansion that may be empty (_tokens).
-    """
-    toks = _tokens(segment, expansions)
-    i = 0
-    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
-        i += 1
-    if i >= len(toks) or os.path.basename(toks[i]) != "git":
-        return False
-    i += 1
-    while i < len(toks):
-        tok = toks[i]
-        if tok in GIT_VALUE_OPTS:
-            i += 2
-            continue
-        if tok.startswith("-"):
-            i += 1
-            continue
-        break
-    if i >= len(toks):
-        return False  # bare 'git', no subcommand — nothing to poison over
-    return toks[i] not in _HEAD_NEUTRAL_SUBCOMMANDS
 
 
 def _marker_present(git_cwd, _override=None):
@@ -1824,409 +1322,59 @@ def _block(reason):
     raise SystemExit(2)
 
 
-# A brace expansion, `{a,b}` or `{a..b}`: bash rewrites the word before git
-# reads it (`{main,}` is `main`).
-_BRACE_EXPANSION = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
-
-# git subcommands that cannot move HEAD: one run inside a substitution leaves
-# the chain's branch where it was.
-_HEAD_STILL_SUBCOMMANDS = {
-    "add", "blame", "cat-file", "commit", "config", "describe", "diff", "for-each-ref",
-    "grep", "log", "ls-files", "merge-base", "mv", "name-rev", "remote", "rev-list",
-    "rev-parse", "rm", "show", "show-ref", "status",
-}
-
-
-def _has_expansion(word):
-    """True if word (unquoted text) holds an expansion: its value is known
-    only at runtime, or is not the text written."""
-    return "$" in word or "`" in word or _BRACE_EXPANSION.search(word) is not None
-
-
-# Commands that run shell code in this shell or a child of it: what that code
-# does to HEAD is not read, so it may move it. A script or build tool
-# (`./run.sh`, `bash run.sh`, `make`) is not one of them: a user decision
-# (2026-10-15) left those trusted, accepting the residual.
-_EVAL_COMMANDS = {"eval", "source", "."}
-_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-
-
-# Words that run the command after them: `command -p`, `env FOO=1`,
-# `timeout -s KILL 5`. Their options are skipped; the value-taking ones
-# below take the next word with them.
-_RUNNER_WRAPPERS = {"builtin", "command", "env", "exec", "nohup", "timeout"}
-_WRAPPER_VALUE_OPTS = {"-s", "--signal", "-k", "--kill-after", "-u", "--unset", "-C", "--chdir"}
-# Shell options whose next word is their value, not a script: `-o pipefail`.
-_SHELL_VALUE_OPTS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
-
-
-def _runs_code(toks):
-    """True if toks, past any _RUNNER_WRAPPERS, run shell code: an
-    _EVAL_COMMANDS word, or a shell given `-c` among its options (alone or in
-    a cluster such as `-lc`)."""
-    i = 0
-    while i < len(toks) and os.path.basename(toks[i]) in _RUNNER_WRAPPERS:
-        wrapper = os.path.basename(toks[i])
-        i += 1
-        while i < len(toks) and (toks[i].startswith("-") or _ENV_ASSIGN.match(toks[i])):
-            i += 2 if toks[i] in _WRAPPER_VALUE_OPTS else 1
-        if wrapper == "timeout" and i < len(toks):
-            i += 1  # the duration
-    if i >= len(toks):
-        return False
-    if toks[i] in _EVAL_COMMANDS:
-        return True
-    if os.path.basename(toks[i]) not in _SHELLS:
-        return False
-    j = i + 1
-    while j < len(toks):
-        tok = toks[j]
-        if tok == "--" or not tok.startswith(("-", "+")):
-            break
-        if tok in _SHELL_VALUE_OPTS:
-            j += 2
-            continue
-        if tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
-            return True
-        j += 1
-    return False
-
-
-def _keep_protected(branch):
-    """The chain's branch after a step that may have switched it: a protected
-    branch it may still be on stays, so a later commit is still blocked;
-    anything else is unknown (None: read the live branch)."""
-    return branch if branch in ("main", "master") else None
-
-
-def _may_move_head(segment):
-    """True if the segment, read past a leading expansion, runs a git
-    subcommand that may move HEAD, or runs shell code (_runs_code)."""
-    toks = _tokens(segment, expansions=True)
-    if _runs_code(toks):
-        return True
-    i = 0
-    while i < len(toks) and toks[i] in _GIT_WRAPPERS:
-        i += 1
-    if i >= len(toks) or os.path.basename(toks[i]) != "git":
-        return False
-    i = _git_subcommand_at(toks, i + 1)
-    return i < len(toks) and toks[i] not in _HEAD_STILL_SUBCOMMANDS
-
-
 # How deep command substitutions are read inside one another. Each level
 # reads its whole body again, so a pathological nesting is cut off here
 # rather than left to run for seconds.
 _MAX_SUBST_DEPTH = 32
 
 
-def _commit_segments(command, cwds, running_branch, chain_stack, stack_reliable,
-                     any_switch_seen, overrides, level=0):
-    """The git commits in command, as (segment, cwds, branch) each: the cwds
-    the commit may run in and the branch an earlier creation in the chain put
-    it on (None: read the live branch). The other arguments are the state the
-    command starts in, as main() tracks it below; overrides are main()'s
-    (branch, reflog, creatable) test hooks.
+def _commit_segments(command, cwds, level=0):
+    """The git commits in command, as (segment, cwds) each: the cwds the
+    commit may run in, followed through `cd`. A `cd` that may not run (in a
+    case arm, a function body, a subshell, or behind an expansion that may be
+    empty) adds its directory to the ones already possible.
 
-    A command substitution is a command of its own, run before the segment
-    holding it, in that segment's cwd and branch; whatever it changes stays
-    in its subshell, except HEAD, which the repo shares: a body that may move
-    HEAD drops the chain's branch. Its commits are read the same way,
-    recursively, to _MAX_SUBST_DEPTH: past it RecursionError, as when the
-    stack runs out.
-
-    Returns (commits, moved): moved says some git call in command may move
-    HEAD.
+    A command substitution is a command of its own, run in the cwd of the
+    segment holding it; its commits are read the same way, recursively, to
+    _MAX_SUBST_DEPTH: past it RecursionError, as when the stack runs out.
     """
     if level > _MAX_SUBST_DEPTH:
         raise RecursionError("command substitutions nest too deep")
-    branch_override, reflog_override, creatable_override = overrides
-    segments, operators, arms, bodies, cases = _split_full(command)
-    effective_cwd_at = {}  # segment_index → the cwds it may run in
-    effective_branch_at = {}  # segment_index → branch created earlier in-chain, or None
+    segments, operators, arms, bodies = _split_full(command)
     running_cwds = list(cwds)
-    # running_branch: None = no in-chain branch creation seen → use live detection
-    chain_stack = list(chain_stack)  # in-chain "current branch" history, most-recent last
-    # chain_stack / stack_reliable back '@{-N}'/'-' resolution only — they are
-    # independent of running_branch's own trust rules (see _resolve_prev_ref).
-    # stack_reliable: False once chain_stack's depth can no longer be proven exact
-    # any_switch_seen: True once any HEAD-moving switch has appeared in the chain
-    # A heredoc body outside quotes is split into segments like real commands,
-    # so a creation "seen" there may be text. A quoted `"$(cat <<'EOF' ...)"`
-    # commit message stays one token and is no obstacle.
-    has_heredoc = "<<" in _outside_quotes(command)
-    ref_touched = False      # True once an earlier segment was anything but inert
-    carries_semicolon = False  # the attribution comes from a creation proven to succeed
-    proven_created = []      # names created under that proof, absent from the live refs
     fn_depth = 0             # braces and parens open in a function body being defined
     fn_pending = False       # a function head seen alone: its body follows
-    nested_commits = []      # commits found in substitution bodies
-    moved = False            # some git call here may move HEAD
-    # A function definition or a case, `case` to `esac`, is one compound: the
-    # chain state on entering it, restored past its end unless something in
-    # it is not provably inert (dirty).
-    compound = None
-    dirty = False
-
-    def maybe_cwds(path):
-        return list(dict.fromkeys(os.path.abspath(os.path.join(c, path)) for c in running_cwds))
-
+    commits = []
     for idx, seg in enumerate(segments):
-        # Branch attribution carries across '&&' (predecessor guaranteed to have
-        # succeeded), and across ';' or a newline only from a creation proven to
-        # succeed (carries_semicolon, set below). After '||', '|', '&', or an
-        # unproven ';', the earlier checkout may not have run — drop the
-        # attribution so the commit falls back to live branch detection.
-        op = operators[idx]
-        if op is not None and op != "&&" and not (op == ";" and carries_semicolon):
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            if any_switch_seen:
-                # an earlier switch (trusted or not) may have run at runtime and
-                # mutated the real reflog — a later '@{-N}' resolved against the
-                # hook-time (pre-chain) reflog would be stale, so stop resolving.
-                stack_reliable = False
         stripped = seg.strip()
-        # A case arm may not run and a function body runs later, if at all:
-        # they add commit detection, and a cwd they may move to, never a
-        # branch. A function body is followed to the brace or paren closing it.
         head, depth, bare_head = _function_nesting(stripped)
         in_body = fn_depth > 0 or (fn_pending and stripped)
         if in_body or head:
             fn_pending = bare_head
             fn_depth = max(fn_depth + depth, 0)
-        guarded = op == ")" or arms[idx] or head or bool(in_body)
-        if compound is None and (head or in_body or cases[idx][0]):
-            compound = (running_branch, list(chain_stack), stack_reliable, any_switch_seen)
-            dirty = False
+        guarded = operators[idx] == ")" or arms[idx] or head or bool(in_body)
         for body in bodies[idx]:
-            if guarded:
-                found, body_moved = _commit_segments(
-                    body, running_cwds, None, [], False, True, overrides, level + 1)
-            else:
-                found, body_moved = _commit_segments(
-                    body, running_cwds, running_branch, chain_stack, stack_reliable, True,
-                    overrides, level + 1)
-            nested_commits += found
-            if body_moved:
-                # the substitution ran in a subshell, but on the same repo
-                dirty = True
-                moved = True
-                running_branch = _keep_protected(running_branch)
-                chain_stack = []
-                carries_semicolon = False
-                stack_reliable = False
-                any_switch_seen = True
-        moved = moved or _may_move_head(stripped)
-        if _runs_code(_tokens(stripped, expansions=True)):
-            # shell code that is not read may have switched: drop the chain's
-            # branch, but not off a protected one it may still be on
-            running_branch = _keep_protected(running_branch)
-            chain_stack = []
-            carries_semicolon = False
-            stack_reliable = False
-            any_switch_seen = True
-        toks = _tokens(stripped)
+            commits += _commit_segments(body, running_cwds, level + 1)
         exp_toks = _tokens(stripped, expansions=True)
-        # an expansion that may be empty leads the command: what follows it
-        # may run, or may not
-        hidden = exp_toks != toks
-        pattern = idx + 1 < len(operators) and operators[idx + 1] == ")"
-        if compound is not None and not pattern and not _compound_inert(stripped):
-            # what may move HEAD or the directory is open-ended (`eval`,
-            # `sh -c`, `pushd`, a function), so only a provably inert command
-            # leaves the compound clean
-            dirty = True
         if len(exp_toks) >= 2 and exp_toks[0] == "cd":
-            # cd <path>: update running effective cwd (resolve relative paths).
-            # A cwd change voids branch attribution — the new directory may be a
-            # different repo where the earlier checkout never applied. A cd that
-            # may not run leaves both cwds.
-            cd_cwds = maybe_cwds(exp_toks[1])
+            cd_cwds = list(dict.fromkeys(
+                os.path.abspath(os.path.join(c, exp_toks[1])) for c in running_cwds))
+            hidden = exp_toks != _tokens(stripped)
             running_cwds = (list(dict.fromkeys(running_cwds + cd_cwds)) if guarded or hidden
                             else cd_cwds)
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            if any_switch_seen:
-                stack_reliable = False
-        if guarded:
-            running_branch = None
-            chain_stack = []
-            carries_semicolon = False
-            stack_reliable = False
-            any_switch_seen = True
-        created, create_flag = (None if guarded else _new_branch_created(stripped, flag=True)) or (None, None)
-        if created is not None and create_flag in ("-B", "-C") and _has_expansion(created):
-            # a forced creation resets a branch that exists: a name known only
-            # at runtime may be a protected one (`-B "$b"`)
-            created = None
-            running_branch = None
-            chain_stack = []
-            stack_reliable = False
-            any_switch_seen = True
-        if created is not None:
-            running_branch = created
-            chain_stack.append(created)
-            any_switch_seen = True
-            # The creation is proven to succeed when it runs unconditionally,
-            # nothing before it could have taken the name, moved to another repo
-            # or opened a compound command around it, it is spelled as a literal `checkout -b`/`switch -c`,
-            # and the branch can be created in the repo as it stands now. Only
-            # then does a following ';' say as much as '&&' would.
-            # A proof still standing (carries_semicolon) means everything before
-            # was inert, a commit or a proven creation: the repo differs from
-            # the live one only by the names in proven_created.
-            carries_semicolon = (
-                not has_heredoc
-                and len(running_cwds) == 1
-                and (not ref_touched or carries_semicolon)
-                and _runs_unconditionally(idx, segments, operators)
-                and _is_provable_creation(stripped, created)
-                and not any(_names_collide(created, earlier) for earlier in proven_created)
-                and _branch_creatable(
-                    _git_cwd(stripped, running_cwds[0]), created, _override=creatable_override,
-                )
-            )
-            if carries_semicolon:
-                proven_created.append(created)
-        elif hidden and not guarded:
-            # A switch behind an expansion may run or may not. It can only move
-            # the chain toward a protected branch, never off one, and leaves
-            # chain_stack's depth unprovable.
-            switched = _bare_switch_target(stripped, expansions=True)
-            forced = _new_branch_created(stripped, expansions=True, flag=True)
-            if forced is not None and forced[1] in ("-B", "-C"):
-                switched = forced[0]  # a forced creation resets and switches to an existing branch
-            if isinstance(switched, _PrevRef):
-                resolved = _resolve_prev_ref(
-                    switched.n, chain_stack, _git_cwd(stripped, running_cwds[0]),
-                    stack_reliable and len(running_cwds) == 1,
-                    branch_override, reflog_override,
-                )
-                if resolved is None:
-                    running_branch = None
-                    chain_stack = []
-                elif resolved in ("main", "master"):
-                    running_branch = resolved
-            elif switched is not None and _has_expansion(switched):
-                running_branch = None
-                chain_stack = []
-            elif switched in ("main", "master"):
-                running_branch = switched
-            if (switched is not None or _is_unmodeled_git_segment(stripped, expansions=True)
-                    or forced is not None):
-                any_switch_seen = True
-                stack_reliable = False
-        else:
-            # A bare switch re-attributes the chain to its target when EITHER:
-            #   (a) the target is a protected branch — `checkout -b X && checkout
-            #       main && commit` lands on main → block (fail-toward-block); OR
-            #   (b) attribution is already being tracked in-chain (running_branch
-            #       non-None) — a later bare switch then updates to the real
-            #       landing branch, so `checkout main && checkout feature/x &&
-            #       commit` is correctly attributed to feature/x (not stuck at
-            #       main), and `checkout -b X && checkout Y && commit` follows to Y.
-            # When running_branch is still None (no in-chain attribution yet), a
-            # bare switch to a NON-protected target is left untrusted (ambiguous
-            # pathspec), preserving the conservative "bare checkout from live main
-            # does not unblock" rule.
-            switched = None if guarded else _bare_switch_target(stripped)
-            if isinstance(switched, _PrevRef):
-                any_switch_seen = True
-                # Resolve against THIS segment's own effective cwd (honors a
-                # `-C <path>` on the switch itself), not the shell-cd-tracked
-                # running_cwd — otherwise a `-C`-scoped switch/commit chain
-                # resolves against the wrong repository's reflog.
-                switch_cwd = _git_cwd(stripped, running_cwds[0])
-                resolved = _resolve_prev_ref(
-                    switched.n, chain_stack, switch_cwd,
-                    stack_reliable and len(running_cwds) == 1,
-                    branch_override, reflog_override,
-                )
-                if resolved is None:
-                    # unresolvable (or resolution proven unreliable) — drop the
-                    # in-chain attribution and stop trusting chain_stack depth,
-                    # so the commit falls back to live branch detection
-                    # (fail-toward-block).
-                    running_branch = None
-                    chain_stack = []
-                    stack_reliable = False
-                else:
-                    running_branch = resolved
-                    chain_stack.append(resolved)
-            elif switched is not None:
-                # bare switch to a statically-known (but branch-vs-pathspec
-                # ambiguous) target — chain_stack's depth can no longer be
-                # proven exact past this point, so poison future '@{-N}'
-                # resolution even though running_branch's own trust rule
-                # (below) is unaffected.
-                any_switch_seen = True
-                stack_reliable = False
-                if _has_expansion(switched):
-                    # a target known only at runtime may be a protected one
-                    running_branch = None
-                    chain_stack = []
-                elif switched in ("main", "master") or running_branch is not None:
-                    running_branch = switched
-            elif _is_unmodeled_git_segment(stripped):
-                # detach / pathspec restore / multi-positional checkout-or-switch
-                # form, an unrecognized subcommand (possibly a git alias for
-                # checkout/switch), or any other unmodeled git invocation —
-                # chain_stack depth is unprovable past this segment.
-                any_switch_seen = True
-                stack_reliable = False
-        if carries_semicolon and created is None:
-            # The proof covers the creation and the repo it ran in, nothing after.
-            if _redirects_git(stripped):
-                # this very git call runs somewhere the creation did not
-                running_branch = None
-                chain_stack = []
-                carries_semicolon = False
-            elif not _is_inert(stripped) and not _is_git_commit(stripped):
-                # a later switch may fail and leave HEAD where it was, and any
-                # other command (`pushd`, a script, a line that does not parse)
-                # may move HEAD or the directory: trusted across '&&' only
-                carries_semicolon = False
-        if not _is_inert(stripped):
-            ref_touched = True
-        effective_cwd_at[idx] = list(running_cwds)
-        effective_branch_at[idx] = running_branch
-        if compound is not None and fn_depth == 0 and not fn_pending and not cases[idx][1]:
-            # the compound ends here: its own separators, and its arms that
-            # may not run, say nothing of the chain around it
-            if not dirty:
-                running_branch, chain_stack, stack_reliable, any_switch_seen = compound
-                chain_stack = list(chain_stack)
-            compound = None
-
-    # Collect all commit segments with their effective cwds and in-chain branch
-    commit_segs = []
-    for idx, seg in enumerate(segments):
-        stripped = seg.strip()
         if _is_git_commit(stripped):
-            # -C flag overrides the cd-tracked cwd for this specific git call
-            git_cwds = list(dict.fromkeys(_git_cwd(stripped, c) for c in effective_cwd_at[idx]))
-            commit_segs.append((stripped, git_cwds, effective_branch_at[idx]))
-    return commit_segs + nested_commits, moved
+            # -C overrides the cd-tracked cwd for this git call
+            commits.append((stripped, list(dict.fromkeys(_git_cwd(stripped, c) for c in running_cwds))))
+    return commits
 
 
-def main(branch_override=None, marker_override=None, reflog_override=None,
-         creatable_override=None):
-    """Main hook logic. branch_override / marker_override / reflog_override /
-    creatable_override (see _branch_creatable) for test injection.
+def main(branch_override=None, marker_override=None):
+    """Main hook logic. branch_override / marker_override for test injection.
 
     branch_override may be:
       - None       → real git subprocess call
       - str        → returned for ALL cwds (legacy test interface)
       - callable   → called as branch_override(cwd) → str (per-cwd injection)
-
-    reflog_override (used to resolve real '@{-n}' refs beyond the in-chain
-    simulated depth) may be:
-      - None       → real git subprocess call
-      - str        → returned for ALL (cwd, n) (legacy test interface)
-      - callable   → called as reflog_override(cwd, n) → str
     """
     try:
         data = json.load(sys.stdin)
@@ -2240,9 +1388,8 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
         return
 
     env_cwd = data.get("cwd") or os.getcwd()
-    overrides = (branch_override, reflog_override, creatable_override)
     try:
-        commit_segs, _ = _commit_segments(command, [env_cwd], None, [], True, False, overrides)
+        commit_segs = _commit_segments(command, [env_cwd])
     except RecursionError:
         # nesting past what the analysis can read: passing it would let a
         # commit hidden in it through (fail-open), and its spelling cannot be
@@ -2253,23 +1400,20 @@ def main(branch_override=None, marker_override=None, reflog_override=None,
         return  # not a git commit invocation → pass through
 
     # Check ALL commit segments — any failure blocks the entire command
-    for seg, effective_cwds, created_branch in commit_segs:
+    for seg, effective_cwds in commit_segs:
         # --- Branch guard ---------------------------------------------------------
-        # A branch created earlier in the same chain (checkout -b/switch -c) is
-        # where the commit actually lands — it takes precedence over the live
-        # branch, which still reports the pre-checkout branch at PreToolUse time.
-        # A cd that may or may not have run leaves more than one cwd: each is
-        # checked.
+        # The live branch, read before the command runs: a branch the same
+        # command creates or switches to is not seen. A cd that may or may
+        # not have run leaves more than one cwd: each is checked.
         for effective_cwd in effective_cwds:
-            if created_branch is not None:
-                branch = created_branch
-            else:
-                branch = _current_branch(effective_cwd, _override=branch_override)
+            branch = _current_branch(effective_cwd, _override=branch_override)
             if branch in ("main", "master"):
                 if not _marker_present(effective_cwd, _override=marker_override):
                     _block(
                         f"commit-guard: blocked — branch '{branch}' is protected. "
-                        "Add <!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
+                        "Create or switch to a feature branch in a separate command first "
+                        "(the branch is read before this command runs), or add "
+                        "<!-- commit-guard: allow-main --> to AGENTS.md or CLAUDE.md to opt in."
                     )
 
         # --- Type guard -----------------------------------------------------------
@@ -2384,12 +1528,8 @@ def _test():
         if not cond:
             fails.append(name)
 
-    def run(command, branch="feature/x", marker=False, cwd=None, tool_name="Bash", reflog=None,
-            creatable=False):
-        """Simulate a hook invocation. Returns exit code (0=allow, 2=block).
-
-        creatable answers _branch_creatable; False by default so no case shells
-        out to git or depends on the directory the suite runs in."""
+    def run(command, branch="feature/x", marker=False, cwd=None, tool_name="Bash"):
+        """Simulate a hook invocation. Returns exit code (0=allow, 2=block)."""
         payload = json.dumps({
             "tool_name": tool_name,
             "tool_input": {"command": command},
@@ -2398,8 +1538,7 @@ def _test():
         old_stdin, sys.stdin = sys.stdin, io.StringIO(payload)
         old_stderr, sys.stderr = sys.stderr, io.StringIO()
         try:
-            main(branch_override=branch, marker_override=marker, reflog_override=reflog,
-                 creatable_override=creatable)
+            main(branch_override=branch, marker_override=marker)
             return 0
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 0
@@ -2444,305 +1583,42 @@ def _test():
     check("chained: git commit in chain detected", run("echo hi && git commit -m 'wip'", branch="feature/x") == 2)
     check("chained: valid git commit in chain passes", run("git status; git commit -m '[FEAT] ok'", branch="feature/x") == 0)
 
-    # in-chain branch creation: checkout -b / switch -c move off main before the commit
-    check("checkout -b then commit on main passes",
-          run("git checkout -b feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("switch -c then commit on main passes",
-          run("git switch -c feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("checkout -B then commit on main passes",
-          run("git checkout -B feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("checkout -b to literal main still blocked",
-          run("git checkout -b main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 2)
-    check("bare checkout (no -b) does not unblock main",
-          run("git checkout feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b then bad-type commit still type-blocked",
-          run("git checkout -b feature/x && git commit -m 'wip'", branch="main", marker=False) == 2)
+    # the branch is the live one, read before the command runs: a branch the
+    # same command creates or switches to is not seen (user decision 2026-10-16)
+    def on_main(command):
+        return run(command, branch="main", marker=False)
 
-    # bare switch-back to a protected branch re-attributes: checkout -b moves off
-    # main, then a bare `checkout main` / `switch main` moves back, so the commit
-    # lands on main → must block even though live detection saw the new branch.
-    check("checkout -b X then bare checkout main then commit → blocked",
-          run("git checkout -b feature/x && git checkout main && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b X then bare switch main then commit → blocked",
-          run("git checkout -b feature/x && git switch main && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b X then bare checkout master then commit → blocked",
-          run("git checkout -b feature/x && git checkout master && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    # bare switch ONTO main from a feature live branch also re-attributes → blocked
-    check("bare checkout main from feature then commit → blocked",
-          run("git checkout main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 2)
-    # bare switch to a NON-protected branch must NOT re-attribute (no false block):
-    # a `checkout main -- file` restore (has '--') keeps the new-branch attribution.
-    check("checkout -b X then checkout main -- file (restore) then commit → passes",
-          run("git checkout -b feature/x && git checkout main -- file.py && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("checkout -b X then checkout main file (pathspec restore) then commit → passes",
-          run("git checkout -b feature/x && git checkout main file.py && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    # bare switch-back attribution only carries across '&&'
-    check("checkout -b X || bare checkout main ; commit → live detection (main) blocks anyway",
-          run("git checkout -b feature/x ; git checkout main ; git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
+    def block_reason(command):
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/tmp"})
+        old_stdin, sys.stdin = sys.stdin, io.StringIO(payload)
+        old_stderr, sys.stderr = sys.stderr, io.StringIO()
+        try:
+            main(branch_override="main", marker_override=False)
+        except SystemExit:
+            pass
+        finally:
+            reason = sys.stderr.getvalue()
+            sys.stdin, sys.stderr = old_stdin, old_stderr
+        return reason
 
-    # bare switch THROUGH main to a feature branch must follow to the landing
-    # branch, not stay stuck at main: `checkout main && checkout feature/x &&
-    # commit` lands on feature/x → allowed even though it transited main.
-    # (live override here stands in for a non-main pre-chain branch; the in-chain
-    # attribution overrides live detection regardless.)
-    check("checkout main then checkout feature/x then commit → passes (follows to feature/x)",
-          run("git checkout main && git checkout feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    # once attribution is tracked in-chain, a bare switch to a non-protected branch
-    # follows: `checkout -b X && checkout Y && commit` lands on Y → allowed.
-    check("checkout -b X then bare checkout Y then commit → passes (follows to Y)",
-          run("git checkout -b feature/x && git checkout feature/y && git commit -m '[FEAT] z'", branch="main", marker=False) == 0)
-    # detached HEAD: `checkout --detach main` / `switch --detach master` lands on a
-    # detached HEAD — a commit there does NOT update the protected branch, so the
-    # switch must NOT re-attribute to main (no false block). Live detection (a
-    # non-main feature branch here, standing in for the real 'HEAD' detached ref)
-    # governs instead.
-    check("checkout --detach main then commit → passes (detached, no re-attribution)",
-          run("git checkout --detach main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
-    check("switch --detach master then commit → passes (detached, no re-attribution)",
-          run("git switch --detach master && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 0)
+    check("live main: checkout -b X && commit → blocked",
+          on_main("git checkout -b feature/x && git commit -m '[FEAT] y'") == 2)
+    check("live main: checkout -qb X && commit → blocked",
+          on_main("git checkout -qb feature/x && git commit -m '[FEAT] y'") == 2)
+    check("live main: switch -c X && commit → blocked",
+          on_main("git switch -c feature/x && git commit -m '[FEAT] y'") == 2)
+    check("live feature: checkout -b X && commit → passes",
+          run("git checkout -b feature/y && git commit -m '[FEAT] y'", branch="feature/x") == 0)
+    check("live feature: a switch to main the hook does not follow → passes (accepted residual)",
+          run("git checkout main && git commit -m '[FEAT] y'", branch="feature/x") == 0)
+    check("live feature: sh -c that may switch → passes (accepted residual)",
+          run("sh -c 'git checkout main' && git commit -m '[FEAT] y'", branch="feature/x") == 0)
+    check("the main block names the separate-command fix",
+          "separate command" in block_reason("git checkout -b x && git commit -m '[FEAT] y'"))
 
-    # option-value desync: `--conflict <style>` takes a separate-token value that
-    # must NOT be miscounted as the switch's positional branch arg — otherwise the
-    # real target ('main') is pushed out of the len==1 positional check and the
-    # switch-back to main is silently missed (bypass).
-    check("checkout -b X then checkout --conflict merge main then commit → blocked",
-          run("git checkout -b feature/x && git checkout --conflict merge main && "
-              "git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout --conflict=merge main (attached form) then commit on main → blocked",
-          run("git checkout --conflict=merge main && git commit -m '[FEAT] y'", branch="feature/x", marker=False) == 2)
 
-    # previous-branch-ref switch-back targets ('-' / '@{-N}') are resolved via
-    # the virtual chain-stack + real reflog (_resolve_prev_ref). At depth 1,
-    # '-'/'@{-1}' resolve through _current_branch (the pre-chain live branch)
-    # — the same value the old always-unknown fallback reached, so these
-    # existing cases keep their original expected outcome unchanged.
-    check("checkout -b X then checkout - then commit (live=main) → blocked",
-          run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b X then checkout @{-1} then commit (live=main) → blocked",
-          run("git checkout -b feature/x && git checkout @{-1} && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b X then checkout - then commit (live=feature/y) → passes (no false block)",
-          run("git checkout -b feature/x && git checkout - && git commit -m '[FEAT] y'", branch="feature/y", marker=False) == 0)
-    # N == depth uses the pre-chain live branch (_current_branch), NOT the real
-    # reflog — a decoy reflog value must not override it.
-    check("checkout -b X then checkout @{-1} then commit (reflog decoy ignored) → blocked",
-          run("git checkout -b feature/x && git checkout @{-1} && git commit -m '[FEAT] y'",
-              branch="main", marker=False, reflog="feature/decoy") == 2)
-
-    # N > depth resolves via the REAL reflog ('@{-(N-depth)}'): the task's
-    # motivating false-block — `checkout -b tmp && checkout @{-2}` — where
-    # @{-2} actually lands on a feature branch must now be allowed instead of
-    # falling back to live (main) detection.
-    check("checkout -b tmp then checkout @{-2} (reflog=feature) → passes (real target, no false block)",
-          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
-              branch="main", marker=False, reflog="feature/z") == 0)
-    check("checkout -b tmp then checkout @{-2} (reflog=main) → still blocked",
-          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
-              branch="main", marker=False, reflog="main") == 2)
-    check("checkout -b tmp then checkout @{-5} (reflog resolution fails) → blocked (fail-toward-block)",
-          run("git checkout -b tmp && git checkout @{-5} && git commit -m '[FEAT] y'",
-              branch="main", marker=False, reflog="") == 2)
-    check("checkout -b tmp then checkout @{-2}/@{-3} (reflog varies by n) → resolves per-n",
-          run("git checkout -b tmp && git checkout @{-2} && git commit -m '[FEAT] y'",
-              branch="main", marker=False,
-              reflog=lambda _cwd, n: "feature/z" if n == 1 else "main") == 0)
-    check("checkout -b tmp then checkout @{-3} (reflog varies by n, n=2→main) → blocked",
-          run("git checkout -b tmp && git checkout @{-3} && git commit -m '[FEAT] y'",
-              branch="main", marker=False,
-              reflog=lambda _cwd, n: "feature/z" if n == 1 else "main") == 2)
-
-    # N <= depth-1 resolves statically from chain_stack — no shell-out at all.
-    # (depth=3 chain; decoy branch/reflog prove the shell-outs are never consulted.)
-    check("checkout -b X, main, Y then checkout @{-2} (chain_stack[0]=X) → passes",
-          run("git checkout -b X && git checkout -b main && git checkout -b Y && "
-              "git checkout @{-2} && git commit -m '[FEAT] z'",
-              branch="feature/decoy-live", marker=False, reflog="feature/decoy-reflog") == 0)
-    check("checkout -b X, main, Y then checkout @{-1} (chain_stack[1]=main) → blocked",
-          run("git checkout -b X && git checkout -b main && git checkout -b Y && "
-              "git checkout @{-1} && git commit -m '[FEAT] z'",
-              branch="feature/decoy-live", marker=False, reflog="feature/decoy-reflog") == 2)
-
-    # Bypass guards: a bare switch to a KNOWN target, or an unmodeled
-    # checkout/switch (detach/pathspec/multi-positional), poisons chain_stack
-    # depth — a later '@{-N}' must NOT trust it (would risk allowing a commit
-    # that actually lands on main).
-    check("checkout -b A then bare checkout main then checkout @{-1} then commit → blocked (poisoned)",
-          run("git checkout -b A && git checkout main && git checkout @{-1} && git commit -m '[FEAT] y'",
-              branch="main", marker=False) == 2)
-    check("checkout -b A ; checkout @{-1} then commit (reflog decoy) → blocked (reset+switch poisons)",
-          run("git checkout -b A ; git checkout @{-1} && git commit -m '[FEAT] y'",
-              branch="main", marker=False, reflog="feature/decoy") == 2)
-
-    # No prior switch in the chain: real reflog is still pristine at hook time,
-    # so '@{-1}' resolves reliably straight from it.
-    check("bare checkout @{-1} then commit (no prior switch, reflog=feature) → passes",
-          run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="feature/w") == 0)
-    check("bare checkout @{-1} then commit (no prior switch, reflog=main) → blocked",
-          run("git checkout @{-1} && git commit -m '[FEAT] y'", branch="feature/x", reflog="main") == 2)
-
-    # A `-C <path>` on the switch/commit segments must be honored when resolving
-    # prev-refs — using the hook's own (unrelated) cwd instead of the segment's
-    # real `-C` target would query the wrong repository's branch/reflog and
-    # could allow a commit that actually lands on main in the REAL target repo.
-    native_repo_a = os.path.abspath(os.path.join("/hostcwd", "/repoA"))
-    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → blocked",
-          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
-              "git -C /repoA commit -m '[FEAT] y'",
-              cwd="/hostcwd",
-              branch=lambda cwd: "main" if cwd == native_repo_a else "decoy-live",
-              reflog=lambda cwd, n: "main" if cwd == native_repo_a else "decoy-reflog") == 2)
-    check("checkout -b tmp then checkout @{-1} via -C /repoA (real target repo honored) → passes when non-main",
-          run("git -C /repoA checkout -b tmp && git -C /repoA checkout @{-1} && "
-              "git -C /repoA commit -m '[FEAT] y'",
-              cwd="/hostcwd",
-              branch=lambda cwd: "feature/real" if cwd == native_repo_a else "decoy-live",
-              reflog=lambda cwd, n: "decoy-reflog") == 0)
-
-    # A git ALIAS for checkout/switch (inline `-c alias.X=checkout` or a
-    # persisted `.gitconfig` alias) is invisible to literal "checkout"/"switch"
-    # token matching — it must poison chain-stack reliability just like an
-    # unmodeled checkout form, so a later '@{-N}' falls back to live detection
-    # instead of resolving against a chain_stack depth the alias may have
-    # silently shifted.
-    check("git alias for checkout (-c alias.co=checkout) poisons stack → blocked",
-          run("git -c alias.co=checkout co feature/foo && git checkout @{-1} && git commit -m '[FEAT] x'",
-              branch="main", reflog="feature/bar") == 2)
-
-    # branch attribution only propagates across '&&' (guaranteed-success predecessor)
-    check("checkout -b || commit on main still blocked (|| not guaranteed)",
-          run("git checkout -b feature/x || git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b ; commit on main still blocked (; not guaranteed)",
-          run("git checkout -b feature/x ; git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-    check("checkout -b && echo && commit on main passes (&&-chain preserved)",
-          run("git checkout -b feature/x && echo ok && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("cd to another repo after checkout -b resets attribution → blocked on main",
-          run("git checkout -b feature/x && cd /other/repo && git commit -m '[FEAT] y'", branch="main", marker=False) == 2)
-
-    # ...and across ';' / newline only from a creation proven to succeed
-    # (PR #111 false-block: `git checkout -b X` on one line, `git commit` on a later one)
-    def on_main(command, creatable=True):
-        return run(command, branch="main", marker=False, creatable=creatable)
-
-    check("newline: checkout -b then commit on a later line passes",
-          on_main("git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 0)
-    check("newline: switch -c, add, then commit passes",
-          on_main("git switch -c feature/x\ngit add -A\ngit commit -m '[FEAT] y'") == 0)
-    check("semicolon: checkout -b ; commit passes when creatable",
-          on_main("git checkout -b feature/x ; git commit -m '[FEAT] y'") == 0)
-    check("semicolon: add before the creation keeps it proven",
-          on_main("git add -A; git checkout -b feature/x; git commit -m '[FEAT] y'") == 0)
-    check("semicolon: creation, then '&&' chain to the commit passes",
-          on_main("git checkout -b feature/x; git add -A && git commit -m '[FEAT] y'") == 0)
     check("semicolon: a bad type is still type-blocked",
           on_main("git checkout -b feature/x\ngit commit -m 'wip'") == 2)
-    # fail-toward-block: every way the creation may not have run, or not landed
-    check("semicolon: branch not creatable → blocked",
-          on_main("git checkout -b feature/x\ngit commit -m '[FEAT] y'", creatable=False) == 2)
-    check("semicolon: creation named main → blocked",
-          on_main("git checkout -b main\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after '&&' is conditional → blocked",
-          on_main("make lint && git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after '||' is conditional → blocked",
-          on_main("make lint || git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation in a pipeline → blocked",
-          on_main("echo x | git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after '&' → blocked",
-          on_main("sleep 1 & git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: commit after '||' runs only if the creation failed → blocked",
-          on_main("git checkout -b feature/x || git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then commit behind a later '||' → blocked",
-          on_main("git checkout -b feature/x; false || git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation with a start point → blocked",
-          on_main("git checkout -b feature/x origin/main\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation with another option → blocked",
-          on_main("git checkout --track -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation aimed at another repo with -C → blocked",
-          on_main("git -C /other checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: earlier `git branch` may have taken the name → blocked",
-          on_main("git branch feature/x\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: second creation of the same name fails at runtime → blocked",
-          on_main("git checkout -b feature/x\ngit checkout main\n"
-                  "git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then bare switch back to main → blocked",
-          on_main("git checkout -b feature/x\ngit checkout main\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then checkout - back to main → blocked",
-          on_main("git checkout -b feature/x\ngit checkout -\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then cd elsewhere → blocked",
-          on_main("git checkout -b feature/x\ncd /other/repo\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation inside an untaken if → blocked",
-          on_main("if false; then\ngit checkout -b feature/x\nfi\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation inside a loop body → blocked",
-          on_main("for f in $LIST; do\ngit checkout -b feature/x\ndone\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation inside an uncalled function → blocked",
-          on_main("mk() {\ngit checkout -b feature/x\n}\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation inside a subshell group → blocked",
-          on_main("(git checkout -b feature/x)\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation as a heredoc body line → blocked",
-          on_main("cat <<EOF\ngit checkout -b feature/x\nEOF\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation as a body line of a `: <<'EOF'` comment block → blocked",
-          on_main(": <<'EOF'\ngit checkout -b feature/x\nEOF\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation that is really a continued echo argument → blocked",
-          on_main("echo hi \\\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: a backtick substitution before the creation → blocked",
-          on_main("echo `git branch feature/x`; git checkout -b feature/x; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: braces inside a quoted message are not grouping",
-          on_main("git checkout -b feature/x\ngit commit -m '[FEAT] use { braces }'") == 0)
-    check("semicolon: a quoted heredoc commit message is no obstacle",
-          on_main("git checkout -b feature/x\ngit add -A\n"
-                  "git commit -m \"$(cat <<'EOF'\n[FEAT] y\n\nbody\nEOF\n)\"") == 0)
-    check("semicolon: '<<' inside a quoted message is not a heredoc",
-          on_main("git checkout -b feature/x\ngit commit -m '[FIX] handle << operator'") == 0)
-    check("semicolon: an assignment line before the creation keeps it proven",
-          on_main("SCOPE='a b'\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 0)
-    check("semicolon: `set -e` and an echo before the creation keep it proven",
-          on_main("set -euo pipefail\necho start\ngit switch --create feature/x\n"
-                  "git commit -m '[FEAT] y'") == 0)
-    # an operator left at the end of a line still governs the next line
-    check("semicolon: creation after a trailing '||' and newline → blocked",
-          on_main("make lint || \ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after a trailing '&&' and newline → blocked",
-          on_main("[ -n \"$CI\" ] && \ngit switch -c feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after a trailing '|' and newline → blocked",
-          on_main("echo x | \ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation after a line continuation → blocked",
-          on_main("make lint && \\\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    # the proof covers the creation alone, never a later switch
-    check("semicolon: creation, main, then a switch that may fail → blocked",
-          on_main("git checkout -b feature/x; git checkout main; git checkout typo; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a bare switch that may fail → blocked",
-          on_main("git checkout -b feature/x; git checkout typo; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a git alias that may switch → blocked",
-          on_main("git checkout -b feature/x; git co main; git commit -m '[FEAT] y'") == 2)
-    # a second creation is proven on top of a first one that still stands
-    check("semicolon: two creations in a row, commit lands on the second → passes",
-          on_main("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'") == 0)
-    check("newline: creation, commit, second creation, commit → passes",
-          on_main("git checkout -b a\ngit commit -m '[FEAT] y'\n"
-                  "git switch -c b\ngit commit -m '[FEAT] z'") == 0)
-    check("semicolon: second creation of the first one's name → blocked",
-          on_main("git checkout -b a; git checkout -b a; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: second creation under the first one's name → blocked",
-          on_main("git checkout -b a; git checkout -b a/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: second creation above the first one's name → blocked",
-          on_main("git checkout -b a/x; git checkout -b A; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: second creation not creatable in the repo → blocked",
-          run("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'", branch="main",
-              creatable=lambda cwd, name: name == "a") == 2)
-    check("semicolon: second creation after an unproven first → blocked",
-          run("git checkout -b a; git checkout -b b; git commit -m '[FEAT] y'", branch="main",
-              creatable=lambda cwd, name: name == "b") == 2)
-    check("semicolon: second creation behind '&&' is conditional → blocked",
-          on_main("git checkout -b a; test -f x && git checkout -b b; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: a script between the two creations → blocked",
-          on_main("git checkout -b a; ./prepare.sh; git checkout -b b; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: a switch between the two creations → blocked",
-          on_main("git checkout -b a; git checkout main; git checkout -b b; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: second creation named main → blocked",
-          on_main("git checkout -b a; git checkout -b main; git commit -m '[FEAT] y'") == 2)
 
     # a comment ends at its own line, never at the end of the command
     check("comment line above a commit on main → blocked",
@@ -2771,12 +1647,6 @@ def _test():
           run("git commit -m '#316 fix'") == 2)
     check("'#' in a double-quoted message survives a comment on the line above",
           run("# note\ngit commit -m \"[FIX] see #316\"") == 0)
-    check("comment between a proven creation and the commit keeps the carry → passes",
-          on_main("git checkout -b feature/x\n# now commit\ngit commit -m '[FEAT] y'") == 0)
-    check("'<<' inside a comment is not a heredoc → passes",
-          on_main("# a << b\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 0)
-    check("a creation that is only a comment proves nothing → blocked",
-          on_main("# git checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
     # an operator at the end of a line still separates the next line
     check("';' then newline does not hide the commit → blocked",
           on_main("git add -A;\ngit commit -m '[FEAT] y'") == 2)
@@ -2790,26 +1660,10 @@ def _test():
           on_main("echo x |\ngit commit -m '[FEAT] y'") == 2)
     check("'&' then newline does not hide the commit → blocked",
           on_main("sleep 1 &\ngit commit -m '[FEAT] y'") == 2)
-    check("'&&' then newline carries a creation like '&&' on one line → passes",
-          on_main("git checkout -b feature/x &&\ngit commit -m '[FEAT] y'",
-                  creatable=False) == 0)
-    check("'||' then newline after a proven creation → blocked",
-          on_main("git checkout -b feature/x ||\ngit commit -m '[FEAT] y'") == 2)
-    check("creation after '||' then newline is conditional → blocked",
-          on_main("make lint ||\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
     check("a redirect operator is still text, not a separator",
           _split_segments("make 2>&1 | tee log")[1] == [None, "|"])
-    check("'&&', a space, then newline carries a creation like '&&' → passes",
-          on_main("git checkout -b feature/x origin/main && \ngit commit -m '[FEAT] y'") == 0)
-    check("'&&', a comment, then newline carries a creation like '&&' → passes",
-          on_main("git checkout -b feature/x origin/main && # go\n"
-                  "git commit -m '[FEAT] y'") == 0)
-    check("'||', a comment, then newline still drops the creation → blocked",
-          on_main("git checkout -b feature/x || # or\ngit commit -m '[FEAT] y'") == 2)
     check("'&&', a comment, then newline does not hide a commit on main → blocked",
           on_main("git add -A && # stage\ngit commit -m '[FEAT] y'") == 2)
-    check("an empty line between a proven creation and the commit keeps the carry",
-          on_main("git checkout -b feature/x\n\ngit commit -m '[FEAT] y'") == 0)
     check("_split_segments: '&&', space, newline is one '&&'",
           _split_segments("a && \nb") == (["a", "b"], [None, "&&"]))
     check("an escaped space before '#' keeps it text → blocked",
@@ -2830,142 +1684,12 @@ def _test():
     check("_split_segments: text after a comment line is its own segment",
           _split_segments("# note\ngit commit -m 'wip'")[0] == ["", "git commit -m 'wip'"])
 
-    check("no creation: bare switches joined by ';' still fall back to live main → blocked",
-          on_main("git checkout main && git checkout typo; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a switch split by a line continuation → blocked",
-          on_main("git checkout -b feature/x\ngit checkout \\\n  main\n"
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then pushd elsewhere → blocked",
-          on_main("git checkout -b feature/x; pushd /other; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a script that may switch → blocked",
-          on_main("git checkout -b feature/x; bash switch.sh; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a commit aimed at another repo with -C → blocked",
-          on_main("git checkout -b feature/x\ngit -C /other commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a commit aimed at another repo with GIT_DIR= → blocked",
-          on_main("git checkout -b feature/x\nGIT_DIR=/other/.git git commit -m '[FEAT] y'") == 2)
-    check("semicolon: two commits after the creation, the first with a heredoc message, both pass",
-          on_main("git checkout -b feature/x\ngit commit -m \"$(cat <<'EOF'\n[FEAT] y\nEOF\n)\"\n"
-                  "git add -A\ngit commit -m '[FEAT] z'") == 0)
-    # a name the shell rewrites is not the name that was checked
-    check("semicolon: creation of a quoted \"$BRANCH\" → blocked",
-          on_main("git checkout -b \"$BRANCH\"\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation of an unquoted $BRANCH → blocked",
-          on_main("git checkout -b $BRANCH\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation of a \"feature/$(whoami)\" name → blocked",
-          on_main("git checkout -b \"feature/$(whoami)\"\ngit commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation of a literal quoted name → blocked (only the bare spelling is proven)",
-          on_main("git checkout -b 'feature/x'\ngit commit -m '[FEAT] y'") == 2)
-    # anything but an inert command before the creation may have taken the name
-    check("semicolon: `bash -c` before the creation → blocked",
-          on_main("bash -c 'git branch feature/x'; git checkout -b feature/x; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: a script before the creation → blocked",
-          on_main("bash create-branch.sh; git checkout -b feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: pushd before the creation → blocked",
-          on_main("pushd /other; git checkout -b feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: a bare cd before the creation → blocked",
-          on_main("cd; git checkout -b feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: a command substitution before the creation → blocked",
-          on_main("echo $(git branch feature/x); git checkout -b feature/x; "
-                  "git commit -m '[FEAT] y'") == 2)
-    check("semicolon: GIT_DIR= on the creation aims at another repo → blocked",
-          on_main("GIT_DIR=/other/.git git checkout -b feature/x; git commit -m '[FEAT] y'") == 2)
     check("semicolon: an earlier `export GIT_DIR` → blocked",
           on_main("export GIT_DIR=/other/.git; git checkout -b feature/x; "
                   "git commit -m '[FEAT] y'") == 2)
     check("semicolon: an earlier GIT_DIR assignment line → blocked",
           on_main("GIT_DIR=/other/.git\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
-    # spellings that fail or succeed on conditions the creatable check does not read
-    check("semicolon: switch --orphan → blocked",
-          on_main("git switch --orphan feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: checkout --orphan → blocked",
-          on_main("git checkout --orphan feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: checkout -B → blocked",
-          on_main("git checkout -B feature/x; git commit -m '[FEAT] y'") == 2)
-    check("semicolon: `command git checkout -b` → blocked",
-          on_main("command git checkout -b feature/x; git commit -m '[FEAT] y'") == 2)
 
-    # _branch_creatable against a real repository
-    def git_in(repo, *args):
-        return subprocess.run(
-            ["git", "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-             "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-            capture_output=True, text=True,
-        )
-
-    repo = tempfile.mkdtemp()
-    git_in(repo, "init", "-q")
-    git_in(repo, "commit", "--allow-empty", "--no-verify", "-q", "-m", "init")
-    git_in(repo, "branch", "taken")
-    git_in(repo, "branch", "topic/deep/leaf")
-    git_in(repo, "checkout", "-q", "-b", "elsewhere")  # so '@{-1}' resolves to a real branch
-    git_in(repo, "branch", "release")
-    git_in(repo, "tag", "release")  # a same-named tag makes the short ref name 'heads/release'
-    check("creatable: an existing branch that shares its name with a tag is not",
-          _branch_creatable(repo, "release") is False)
-    check("creatable: a new name in a real repo", _branch_creatable(repo, "feature/new") is True)
-    check("creatable: an existing branch is not", _branch_creatable(repo, "taken") is False)
-    check("creatable: an existing branch differing only in case is not",
-          _branch_creatable(repo, "Taken") is False)
-    check("creatable: a name under an existing branch is not",
-          _branch_creatable(repo, "taken/sub") is False)
-    check("creatable: a name above an existing branch is not",
-          _branch_creatable(repo, "topic/deep") is False)
-    check("creatable: a sibling of an existing branch is",
-          _branch_creatable(repo, "topic/deep/other") is True)
-    check("creatable: an invalid branch name is not", _branch_creatable(repo, "bad..name") is False)
-    check("creatable: a previous-branch ref is not a literal name",
-          _branch_creatable(repo, "@{-1}") is False)
-    check("creatable: a directory that is no repository answers False",
-          _branch_creatable(tempfile.mkdtemp(), "feature/new") is False)
-    # states in which the creation itself refuses to run
-    busy = tempfile.mkdtemp()
-    git_in(busy, "init", "-q")
-    git_in(busy, "commit", "--allow-empty", "--no-verify", "-q", "-m", "init")
-    check("creatable: a quiet repo is", _branch_creatable(busy, "feature/new") is True)
-    busy_git_dir = git_in(busy, "rev-parse", "--absolute-git-dir").stdout.strip()
-    for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
-        marker_path = os.path.join(busy_git_dir, marker)
-        with open(marker_path, "w", encoding="utf-8") as fh:
-            fh.write("0" * 40 + "\n")
-        check(f"creatable: not while {marker} is present",
-              _branch_creatable(busy, "feature/new") is False)
-        os.remove(marker_path)
-    for marker in ("rebase-merge", "rebase-apply"):
-        marker_path = os.path.join(busy_git_dir, marker)
-        os.mkdir(marker_path)
-        check(f"creatable: not while {marker}/ is present",
-              _branch_creatable(busy, "feature/new") is False)
-        os.rmdir(marker_path)
-    # a real conflict: an unmerged index entry with no marker file left (stash pop)
-    with open(os.path.join(busy, "f.txt"), "w", encoding="utf-8") as fh:
-        fh.write("base\n")
-    git_in(busy, "add", "f.txt")
-    git_in(busy, "commit", "--no-verify", "-q", "-m", "base")
-    with open(os.path.join(busy, "f.txt"), "w", encoding="utf-8") as fh:
-        fh.write("stashed\n")
-    git_in(busy, "stash", "-q")
-    with open(os.path.join(busy, "f.txt"), "w", encoding="utf-8") as fh:
-        fh.write("committed\n")
-    git_in(busy, "commit", "--no-verify", "-q", "-am", "diverge")
-    git_in(busy, "stash", "pop")
-    check("creatable: fixture left an unmerged entry",
-          bool(git_in(busy, "ls-files", "--unmerged").stdout.strip()))
-    check("creatable: not with an unmerged index entry",
-          _branch_creatable(busy, "feature/new") is False)
-
-    check("real repo: checkout -b of a new name then commit on a later line passes",
-          run("git checkout -b feature/new\ngit commit -m '[FEAT] y'", branch="main",
-              cwd=repo, creatable=None) == 0)
-    check("real repo: checkout -b of an existing name then commit → blocked",
-          run("git checkout -b taken\ngit commit -m '[FEAT] y'", branch="main",
-              cwd=repo, creatable=None) == 2)
-
-    # long-flag branch creation: switch --create / checkout|switch --orphan
-    check("switch --create then commit on main passes",
-          run("git switch --create feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
-    check("checkout --orphan then commit on main passes",
-          run("git checkout --orphan feature/x && git commit -m '[FEAT] y'", branch="main", marker=False) == 0)
 
     # command-substitution message: only EXPANDABLE subst (double-quoted/unquoted)
     # is statically undecidable → fail-open. Single-quoted subst is LITERAL — the
@@ -3090,19 +1814,7 @@ def _test():
           run(">log git commit -m 'wip'") == 2)
     check("a keyword as an argument opens no command → passes",
           run("echo then git commit -m 'wip'") == 0)
-    check("creation and commit joined by '&&' in an if body → passes",
-          on_main("if true; then git checkout -b feature/x && git commit -m '[FEAT] y'; fi") == 0)
-    check("creation as an if condition proves nothing for the body → blocked",
-          on_main("if git checkout -b feature/x; then git commit -m '[FEAT] y'; fi") == 2)
 
-    check("semicolon: creation, then a grouped commit aimed at another repo → blocked",
-          on_main("git checkout -b feature/x; { git -C /other commit -m '[FEAT] y'; }") == 2)
-    check("semicolon: creation, then a redirected commit aimed at another repo → blocked",
-          on_main("git checkout -b feature/x; >log git -C /other commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a negated GIT_DIR= commit → blocked",
-          on_main("git checkout -b feature/x; ! GIT_DIR=/o/.git git commit -m '[FEAT] y'") == 2)
-    check("semicolon: creation, then a redirected commit in the same repo → passes",
-          on_main("git checkout -b feature/x\n>log git commit -m '[FEAT] y'") == 0)
 
     # a heredoc body is text, not commands
     check("an apostrophe in a heredoc body does not hide the commit after it → blocked",
@@ -3155,8 +1867,6 @@ def _test():
           on_main("echo it\\'s\ngit commit -m '[FEAT] y'") == 2)
     check("an escaped quote in a $'…' string does not end it → blocked",
           on_main("echo $'it\\'s # x'; git commit -m '[FEAT] y'") == 2)
-    check("_outside_quotes drops a nested \"$( … )\" whole",
-          _outside_quotes("a \"$(b \"c << d\")\" e") == "a  e")
     check("_has_expandable_subst: \"$(x)\" expands",
           _has_expandable_subst("\"$(x)\""))
     check("_has_expandable_subst: an escaped '$(' in double quotes is literal",
@@ -3315,12 +2025,6 @@ def _test():
           on_main("git commit -m '[FIX] x' \"$(printf '%s' $'it\\'s')\"") == 2)
     check("the ')' closing a split $( … ) is no case pattern → blocked",
           on_main("echo $(git add -A; git commit -m wip) done") == 2)
-    check("a creation after a split $( … ) is not credited → blocked",
-          on_main("echo $(true; echo x) git checkout -b feat && git commit -m '[FEAT] y'") == 2)
-    check("a quoted ')' does not hide a -C redirect",
-          _redirects_git("git -C /other commit -m ')' -m '[FEAT] y'"))
-    check("a creation behind an expansion proves no switch → blocked",
-          on_main("x=echo; $x git checkout -b feature/x && git commit -m '[FIX] x'") == 2)
     check("a quoted '}' in a leading ${ … } does not end it → blocked",
           on_main("${x:+'}'}git commit -m wip") == 2)
     # second review: no case after an argument, no new false block
@@ -3340,26 +2044,19 @@ def _test():
     check("a commit behind '$x' is type-checked through a '$(' message",
           run("$x git commit -m 'wip $(x)'") == 2)
     check("a function body takes no branch from where it is defined → blocked",
-          on_main("git checkout -b feat; f() { git commit -m '[FIX] x'; }; git checkout main; f",
-                  creatable=True) == 2)
-    check("a creation in a function head credits nothing → blocked",
-          on_main("f() { git checkout -b feat && git commit -m '[FIX] x'; }; f") == 2)
+          on_main("git checkout -b feat; f() { git commit -m '[FIX] x'; }; git checkout main; f") == 2)
 
-    # third review: a case arm or function definition changes no cwd or branch
+    # third review: a case arm or function definition changes no cwd
     check("a cd in a function never called moves no cwd → blocked",
           run("f() { cd /other; }; git commit -m '[FIX] x'",
               branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
     check("a cd in a case arm that may not match moves no cwd → blocked",
           run("case x in y) cd /other;; esac; git commit -m '[FIX] x'",
               branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
-    check("a creation in a subshell function head credits nothing → blocked",
-          on_main("f() ( git checkout -b feat ) && git commit -m '[FIX] x'") == 2)
     check("an empty one-line case closes, so '|' still pipes → blocked",
           on_main("case x in esac; echo x | git commit -m wip") == 2)
     check("a long run of reserved words does not overflow the scanner → blocked",
           on_main("if " * 1200 + "case x in x) true;; esac; git commit -m wip") == 2)
-    check("'x=$()' is no function head: the in-chain branch holds → passes",
-          on_main("git checkout -b feat && x=$() && git commit -m '[FIX] y'") == 0)
     # fourth review: an escaped separator puts no word in command position
     check("an escaped ';' before 'case' opens no case → blocked",
           on_main("echo \\; case x | git commit -m wip") == 2)
@@ -3388,8 +2085,6 @@ def _test():
           on_main("echo \"$(git commit -m wip)\"") == 2)
     check("a commit after ';' inside $( … ) → blocked",
           on_main("x=$(true; git commit -m wip)") == 2)
-    check("a substitution keeps the branch its chain created → passes",
-          on_main("git checkout -b feat && x=$(git commit -m '[FIX] y')") == 0)
     check("a commit inside $( … ) is type-checked",
           run("x=$(git commit -m wip)") == 2)
     check("a ';' inside a leading assignment's $( … ) → blocked",
@@ -3407,19 +2102,6 @@ def _test():
     check("a double-quoted expansion standing alone is the command → passes",
           run("\"$x\" git commit -m wip") == 0)
     check("a quoted '$x' before git is text → passes", run("'$x'git commit -m wip") == 0)
-    check("a switch to main behind an expansion → blocked",
-          run("git checkout -b feat && $x git checkout main && git commit -m '[FIX] x'") == 2)
-    check("a switch to a feature branch behind an expansion unblocks nothing → blocked",
-          on_main("$x git checkout feature/y && git commit -m '[FIX] x'") == 2)
-    check("a forced creation of a runtime name credits nothing → blocked",
-          on_main("git checkout -B \"$b\" && git commit -m '[FIX] x'") == 2)
-    check("a creation of a runtime name is credited → passes",
-          on_main("git checkout -b \"$b\" && git commit -m '[FIX] x'") == 0)
-    check("a switch to a runtime name drops the chain's branch → blocked",
-          on_main("git checkout -b feat && git checkout \"$b\" && git commit -m '[FIX] x'") == 2)
-    check("a feature switch behind an expansion keeps the chain's branch → passes",
-          on_main("git checkout -b feat && $x git checkout feature/y && git commit -m '[FIX] x'")
-          == 0)
     check("a cd behind an expansion may run: both cwds are checked → blocked",
           run("$x cd /other && git commit -m '[FIX] x'",
               branch=lambda cwd: "main" if cwd == "/other" else "feature/y") == 2)
@@ -3464,19 +2146,6 @@ def _test():
     check("'\"${a[@]}\"' may expand to no word before git → blocked",
           on_main("\"${a[@]}\" git commit -m wip") == 2)
     check("an escaped '\\$x' in quotes is text → passes", on_main("\"\\$x\"git commit -m wip") == 0)
-    check("a checkout inside $( … ) drops the chain's branch → blocked",
-          on_main("git checkout -b feat && x=$(git checkout main) && git commit -m '[FIX] x'") == 2)
-    check("a checkout after ';' inside $( … ) drops the chain's branch → blocked",
-          on_main("git checkout -b feat && echo $(true; git checkout main) && git commit -m '[FIX] x'")
-          == 2)
-    check("a read-only git call inside $( … ) keeps the chain's branch → passes",
-          on_main("git checkout -b feat && x=$(git rev-parse HEAD) && git commit -m '[FIX] x'") == 0)
-    check("a brace-expanded switch target drops the chain's branch → blocked",
-          on_main("git checkout -b feat && git checkout {main,} && git commit -m '[FIX] x'") == 2)
-    check("a forced creation behind an expansion may land on main → blocked",
-          run("$x git checkout -B main && git commit -m '[FIX] x'") == 2)
-    check("a forced switch -C behind an expansion may land on main → blocked",
-          run("$x git switch -C main && git commit -m '[FIX] x'") == 2)
     check("past the substitution depth cap a respelled commit → blocked",
           on_main("x=" + "$(echo " * 40 + "y" + ")" * 40 + "; git com\\mit -m wip") == 2)
     deep = 1500  # past the recursion limit wherever the suite's stack stands
@@ -3503,30 +2172,6 @@ def _test():
           on_main("cat <<EOF\n\\$(git commit -m wip)\nEOF") == 0)
     check("a $( … ) in a heredoc body that never closes is no command → passes",
           on_main("cat <<EOF\n$(git commit -m wip\nEOF\necho ok") == 0)
-    check("a function definition with no switch keeps the chain's branch → passes",
-          on_main("git checkout -b feat && f() { true; } && git commit -m '[FIX] x'") == 0)
-    check("a function body over several lines keeps the chain's branch → passes",
-          on_main("git checkout -b feat && f()\n{\n  true\n} && git commit -m '[FIX] x'") == 0)
-    check("a case with no switch keeps the chain's branch → passes",
-          on_main("git checkout -b feat && case a in a) true;; b) echo;; esac && git commit -m '[FIX] x'")
-          == 0)
-    check("a nested case with no switch keeps the chain's branch → passes",
-          on_main("git checkout -b feat && case a in a) case b in b) true;; esac;; esac"
-                  " && git commit -m '[FIX] x'") == 0)
-    check("a function body that switches drops the chain's branch → blocked",
-          on_main("git checkout -b feat && f() { git checkout main; } && f && git commit -m '[FIX] x'")
-          == 2)
-    check("a function body that cds drops the chain's branch → blocked",
-          on_main("git checkout -b feat && f() { cd /x; } && git commit -m '[FIX] x'") == 2)
-    check("a function body running its arguments drops the chain's branch → blocked",
-          on_main("git checkout -b feat && f() { \"$@\"; } && f git checkout main"
-                  " && git commit -m '[FIX] x'") == 2)
-    check("a case arm that switches drops the chain's branch → blocked",
-          on_main("git checkout -b feat && case a in a) git checkout main;; esac"
-                  " && git commit -m '[FIX] x'") == 2)
-    check("a case subject that switches drops the chain's branch → blocked",
-          on_main("git checkout -b feat && case $(git checkout main) in *) true;; esac"
-                  " && git commit -m '[FIX] x'") == 2)
     check("a commit inside a case arm still reads the live branch → blocked",
           on_main("git checkout -b feat && case a in a) git commit -m '[FIX] x';; esac") == 2)
     check("a commit in a function body still reads the live branch → blocked",
@@ -3537,14 +2182,6 @@ def _test():
         check(f"a case arm running {arm!r} drops the chain's branch → blocked",
               on_main(f"git checkout -b feat && case a in a) {arm};; esac && git commit -m '[FIX] x'")
               == 2)
-    check("a function body running 'eval' drops the chain's branch → blocked",
-          on_main("git checkout -b feat && f() { eval \"$1\"; } && git commit -m '[FIX] x'") == 2)
-    check("an 'if' in a case arm that only echoes keeps the chain's branch → passes",
-          on_main("git checkout -b feat && case a in a) if true; then echo y; fi;; esac"
-                  " && git commit -m '[FIX] x'") == 0)
-    check("a heredoc body's switch runs before a later '&&' commit → blocked",
-          on_main("git checkout -b feat && cat <<EOF && git commit -m '[FIX] x'\n"
-                  "$(git checkout main)\nEOF") == 2)
     check("a heredoc body's commit runs in the cwd before a later cd → blocked",
           run("cat <<EOF && cd /x\n$(git commit -m '[FIX] y')\nEOF",
               branch=lambda cwd: "feature/y" if cwd == "/x" else "main") == 2)
@@ -3554,11 +2191,6 @@ def _test():
           on_main("cat <<EOF\n`echo \\`git commit -m wip\\``\nEOF") == 2)
     check("a nested escaped backtick in an unquoted backtick runs → blocked",
           on_main("echo `echo \\`git commit -m wip\\``") == 2)
-    check("a cd in a substitution body moves no HEAD: the chain's branch holds → passes",
-          on_main("git checkout -b feat && x=$(cd /tmp && ls) && git commit -m '[FIX] x'") == 0)
-    check("a switch after a cd in a substitution body drops the chain's branch → blocked",
-          on_main("git checkout -b feat && x=$(cd /tmp && git checkout main)"
-                  " && git commit -m '[FIX] x'") == 2)
     for runner in ("sh -c 'git checkout main'", "bash -c 'git checkout main'",
                    "/bin/zsh -lc 'git checkout main'", "eval 'git checkout main'",
                    "eval \"$cmd\"", "source ./switch.sh", ". ./switch.sh",
@@ -3575,24 +2207,6 @@ def _test():
                    "timeout -s KILL 5 sh -c 'git checkout main'"):
         check(f"a code runner {runner!r} drops the chain's branch → blocked",
               on_main(f"git checkout -b feat && {runner} && git commit -m '[FIX] x'") == 2)
-    check("a shell given a script after options keeps the chain's branch → passes",
-          on_main("git checkout -b feat && bash -o pipefail ./run.sh && git commit -m '[FIX] x'") == 0)
-    # A runner leaves a protected branch the chain switched to where it may be.
-    for runner in ("sh -c true", "eval true", "x=$(sh -c true)"):
-        check(f"{runner!r} after a switch to main keeps main → blocked",
-              run(f"git checkout main && {runner} && git commit -m '[FIX] x'",
-                  branch="feature/x") == 2)
-    check("a code runner on its own line drops the proven creation's branch → blocked",
-          on_main("git checkout -b feat\nsh -c 'git checkout main'\ngit commit -m '[FIX] x'") == 2)
-    # Residual, by decision: a script or build tool is not read, so it keeps the branch.
-    for cmd in ("npm test", "make lint", "./run-tests.sh", "bash ./run-tests.sh"):
-        check(f"{cmd!r} keeps the chain's branch → passes",
-              on_main(f"git checkout -b feat && {cmd} && git commit -m '[FIX] x'") == 0)
-    check("'||' after a clean case still drops the chain's branch → blocked",
-          on_main("git checkout -b feat || case a in a) true;; esac && git commit -m '[FIX] x'") == 2)
-    check("'||' between two clean compounds still drops the chain's branch → blocked",
-          on_main("git checkout -b feat && case a in a) true;; esac || f() { true; }"
-                  " && git commit -m '[FIX] x'") == 2)
 
     # _cli_precommit(): a malformed invocation is a caller bug (exit 1), which a
     # wrapper must be able to tell apart from a rejected commit (exit 2).
