@@ -7,9 +7,10 @@ records re-verified by the current run); paraphrased, not copied.
 
 ## Where it lives
 
-`~/.test-prune/<repo-name>/run-<N>/`, outside the target, so the target tree stays clean for
-Step 3. `<repo-name>` is the `origin` remote's last path segment, else the top-level directory
-name. Each run gets the next unused `N`; earlier runs are never rewritten.
+`~/.test-prune/<repo-name>-<root>/run-<N>/`, outside the target, so the target tree stays clean
+for Step 3. `<repo-name>` is the `origin` remote's last path segment, else the top-level directory
+name; `<root>` is the first 8 characters of the root commit, so two repos named alike never
+share runs. A `--target` below the repo root resolves to the root. Each run gets the next unused `N`; earlier runs are never rewritten.
 
 - `run-metadata.json` — target, `source_ref` (HEAD at `start`), sample seed (written by
   `record --seed`), prior runs read, prior runs whose ledger is missing or unreadable.
@@ -34,8 +35,9 @@ Paths are repo-relative, as `git ls-tree` prints them (`src/a.ts`, not `./src/a.
 
 - `covered` — the production files the unit's mutants were placed in.
 - `depends` — files outside the test and `covered` that can change its kill outcomes: runner
-  config, setup files, shared fixtures and mocks it imports (`conftest.py` up its path).
-  Leave one out and a change there is invisible to the reuse check.
+  config, setup files, shared fixtures and mocks it imports (`conftest.py` up its path), and the
+  production modules the `covered` files import on the mutated paths. Leave one out and a change
+  there is invisible to the reuse check.
 - `killed_by` — every killing test as `<file>::<test>`, the Step 2 line's identity. A list cut at
   the first killer is not a kill matrix (`mutation-proof.md` → *Tools*).
 - `survivor` — for SURVIVED: `gap`, `equivalent`, `cosmetic` or `bug` (Step 4); else `null`.
@@ -54,7 +56,7 @@ A path that commit does not have is stored as `null` and never matches. A carrie
 | Status | Condition | This run |
 |---|---|---|
 | `same_source` | every recorded blob matches HEAD | carry its candidate lines and kill rows; skip re-reading and re-running them |
-| `changed_source` | any blob differs, or a recorded file is missing now or was then | current work: read and measure as if new |
+| `changed_source` | any blob differs, or a recorded file is missing now or was then | current work: read and measure as if new; pass the result to `record` without `prior_status` |
 | `removed` | the test file is gone from HEAD | nothing to read; drop it from the run |
 
 - A matching `source_ref` alone is not evidence: only the per-file blobs decide.

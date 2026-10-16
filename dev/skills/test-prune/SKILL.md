@@ -59,8 +59,10 @@ and Step 3 does not re-run its mutants; its `open` items, every `changed_source`
 unrecorded test file are current work. Step 4's joint re-run and Step 6 always run fresh.
 
 Before the report — also when an audit-only run stops after Step 4 — write every unit this run
-read, measured or carried, with the Step 3 seed:
-`python3 "$LEDGER" record --run-dir <run_dir> --seed <seed> < <scratch>/units.json`.
+read, measured or carried, with the Step 3 seed (a new shell: resolve the path again):
+`python3 "<skill dir>/scripts/prune_ledger.py" record --run-dir <run_dir> --seed <seed> < <scratch>/units.json`.
+A re-measured `changed_source` unit goes in without its `prior_status`; `record` refuses one
+still tagged.
 
 ## Step 1 — Map where the count comes from
 

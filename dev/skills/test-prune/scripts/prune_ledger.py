@@ -9,7 +9,7 @@ Usage:
   python3 prune_ledger.py --test
 
 `start` refuses a target with tracked changes (the skill measures HEAD), reads every
-prior run, then creates the next `<root>/<repo-name>/run-<N>/` with `run-metadata.json`
+prior run, then creates the next `<root>/<repo-name>-<root-commit>/run-<N>/` with `run-metadata.json`
 and prints JSON: the run dir and the newest prior record of each test file, tagged
 `same_source`, `changed_source` or `removed` (test file gone from HEAD). A unit is
 same_source only when every file it recorded has the same git blob at HEAD; a file
@@ -18,7 +18,8 @@ unreadable is listed as incomplete, never read as empty coverage.
 
 `record` reads the run's units (a JSON array, one unit per test file) on stdin,
 stamps each unit's blobs at the run's `source_ref`, records the sample seed, and
-writes `ledger.json`. Unit shape and reuse rules: ../references/run-ledger.md.
+writes `ledger.json`. It refuses a unit still tagged changed_source or removed: that
+record was never re-measured. Unit shape and reuse rules: ../references/run-ledger.md.
 
 The default root is ~/.test-prune, outside the target, so the target tree stays clean.
 """
@@ -42,7 +43,8 @@ def git(target, *args):
     ).stdout
 
 
-def repo_name(target):
+def repo_key(target):
+    """<name>-<root commit prefix>: two repos sharing a name never share a run sequence."""
     try:
         url = git(target, "remote", "get-url", "origin").strip()
     except subprocess.CalledProcessError:
@@ -50,7 +52,8 @@ def repo_name(target):
     name = url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1] if url else ""
     if name.endswith(".git"):
         name = name[:-4]
-    return name or os.path.basename(git(target, "rev-parse", "--show-toplevel").strip())
+    root = sorted(git(target, "rev-list", "--max-parents=0", "HEAD").split())[0]
+    return f"{name or os.path.basename(target)}-{root[:8]}"
 
 
 def blobs_at(target, ref, paths):
@@ -92,15 +95,21 @@ def write_json(path, data):
     os.replace(tmp, path)
 
 
+def valid_unit(u):
+    blobs = u.get("blobs") if isinstance(u, dict) else None
+    return (isinstance(u, dict) and isinstance(u.get("test_path"), str)
+            and isinstance(blobs, dict)
+            and all(isinstance(k, str) and (v is None or isinstance(v, str))
+                    for k, v in blobs.items()))
+
+
 def read_ledger(run):
     try:
         with open(os.path.join(run, "ledger.json"), encoding="utf-8") as f:
             units = json.load(f)
-        if isinstance(units, list) and all(isinstance(u.get("test_path"), str) for u in units):
-            return units
-    except (OSError, ValueError, AttributeError):
-        pass
-    return None
+    except (OSError, ValueError):
+        return None
+    return units if isinstance(units, list) and all(map(valid_unit, units)) else None
 
 
 def classify(target, prior_runs):
@@ -115,7 +124,7 @@ def classify(target, prior_runs):
             if unit["test_path"] in seen:
                 continue
             seen.add(unit["test_path"])
-            recorded = unit.get("blobs") or {}
+            recorded = unit["blobs"]
             current = blobs_at(target, "HEAD", [unit["test_path"], *recorded])
             if current[unit["test_path"]] is None:
                 status = "removed"
@@ -128,11 +137,12 @@ def classify(target, prior_runs):
 
 
 def cmd_start(args):
-    target = os.path.abspath(args.target)
+    # paths in a ledger are relative to the repo root, whatever directory --target names
+    target = git(os.path.abspath(args.target), "rev-parse", "--show-toplevel").strip()
     if git(target, "status", "--porcelain", "--untracked-files=no"):
         print("target has uncommitted changes; commit or stash first", file=sys.stderr)
         return 1
-    repo_dir = os.path.join(args.root, repo_name(target))
+    repo_dir = os.path.join(args.root, repo_key(target))
     numbered = run_dirs(repo_dir)
     prior = [path for _, path in numbered]
     units, incomplete = classify(target, prior)
@@ -158,6 +168,12 @@ def cmd_record(args):
     with open(meta_path, encoding="utf-8") as f:
         meta = json.load(f)
     units = json.load(sys.stdin)
+    stale = [u["test_path"] for u in units if u.get("prior_status") in ("changed_source", "removed")]
+    if stale:
+        # a changed unit becomes current only once re-measured: drop prior_status when it is
+        print("not re-measured (still tagged changed_source/removed): " + ", ".join(stale),
+              file=sys.stderr)
+        return 1
     for unit in units:
         status, from_run = unit.pop("prior_status", None), unit.pop("from_run", None)
         if status == "same_source":
@@ -200,12 +216,12 @@ def self_test():
         git(repo, "add", ".")
         git(repo, "commit", "-qm", "init")
 
-        def run_start():
+        def run_start(target=repo):
             buf = io.StringIO()
             stderr, sys.stderr = sys.stderr, io.StringIO()
             try:
                 with redirect_stdout(buf):
-                    code = cmd_start(argparse.Namespace(target=repo, root=root))
+                    code = cmd_start(argparse.Namespace(target=target, root=root))
             finally:
                 sys.stderr = stderr
             return code, buf.getvalue()
@@ -227,7 +243,8 @@ def self_test():
             return {u["test_path"]: u["prior_status"] for u in out["prior_units"]}
 
         first = start()
-        assert first["run_dir"].endswith(os.path.join("demo", "run-1")), first["run_dir"]
+        root_sha = git(repo, "rev-list", "--max-parents=0", "HEAD").strip()
+        assert first["run_dir"] == os.path.join(root, f"demo-{root_sha[:8]}", "run-1"), first
         assert first["prior_units"] == []
         record(first["run_dir"], [
             {"test_path": "src/a.test.ts", "covered": ["src/a.ts"]},
@@ -266,6 +283,13 @@ def self_test():
         with open(os.path.join(second["run_dir"], "ledger.json")) as f:
             unit = json.load(f)[0]
         assert unit["carried_from"] == first["run_dir"], unit
+        changed = next(u for u in second["prior_units"] if u["test_path"] == "src/b.test.ts")
+        stdin, sys.stdin = sys.stdin, io.StringIO(json.dumps([changed]))
+        stderr, sys.stderr = sys.stderr, io.StringIO()
+        try:
+            assert cmd_record(argparse.Namespace(run_dir=second["run_dir"], seed=None)) == 1
+        finally:
+            sys.stdin, sys.stderr = stdin, stderr
         third = start()
         assert statuses(third)["src/a.test.ts"] == "changed_source", statuses(third)
         assert len(third["prior_units"]) == 6  # run-2 holds a; run-1 still supplies the rest
@@ -276,6 +300,14 @@ def self_test():
             f.write("{truncated")
         fifth = start()
         assert fifth["incomplete_prior_runs"] == [fourth["run_dir"], third["run_dir"]], fifth
+        with open(os.path.join(fifth["run_dir"], "ledger.json"), "w") as f:
+            json.dump([{"test_path": "src/a.test.ts", "blobs": ["x"]}], f)
+        sixth = start()
+        assert sixth["incomplete_prior_runs"][0] == fifth["run_dir"], sixth
+
+        # a subdirectory target resolves to the repo root: same store, same relative paths
+        code, out = run_start(os.path.join(repo, "src"))
+        assert code == 0 and json.loads(out)["run_dir"].endswith("run-7"), out
 
         write("src/a.ts", "dirty")
         assert run_start()[0] == 1
