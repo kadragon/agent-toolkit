@@ -46,6 +46,13 @@ type World = {
   // How long the next responses take to come back.
   stepMs: number
   isUncached: boolean
+  // What the curate check prints; null makes it fail to start.
+  curateOut: string | null
+  curateRuns: (readonly string[])[]
+  // Set to hold the next curate check open until the test lets it go.
+  curateGate?: Promise<void>
+  // True where only `python` is installed.
+  isPython3Missing: boolean
 }
 
 // The engine beneath the plugin: what the session, the clock, git and the band
@@ -69,6 +76,9 @@ const world = (on: On): World => {
     settingsReads: 0,
     stepMs: 0,
     isUncached: false,
+    curateOut: '',
+    curateRuns: [],
+    isPython3Missing: false,
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -121,7 +131,24 @@ const world = (on: On): World => {
 
     return { value: undefined }
   })
-  on('process.run', async () => {
+  on('fs.exists', async ($, e) => ({
+    value: Object.keys(state.files).some(file => e.path === file || e.path.endsWith(`/${file}`)),
+  }))
+  on('process.run', async ($, e) => {
+    if (e.argv[0] !== 'git') {
+      state.curateRuns.push(e.argv)
+      const out = state.curateOut
+      const gate = state.curateGate
+
+      state.curateGate = undefined
+      await gate
+
+      if (out === null) throw new Error('python is not installed')
+      if (state.isPython3Missing && e.argv[0] === 'python3') throw new Error('no python3')
+
+      return { value: { exitCode: 0, stdout: out, stderr: '' } }
+    }
+
     state.gitCalls += 1
     const branch = state.branch
     const gate = state.gitGate
@@ -693,5 +720,166 @@ test('in a band of two rows the figures stay and the blank row gives way', async
 
   expect(texts[0]).toContain('agent-toolkit')
   expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(0)
+  await ui.unmount()
+})
+
+const DUE = 'HARNESS-CURATE DUE: last run 20d ago, 12 sessions since. At the start of your next reply...\n'
+
+// A harness repo with the dev plugin on, whose curate check prints `out`.
+const curateWorld = (on: On, out: string | null = DUE): World => {
+  const state = world(on)
+  state.settings = { enabledPlugins: { 'dev@kadragon': true } }
+  state.files = {
+    '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({
+      plugins: { 'dev@kadragon': [{ installPath: '/p/dev' }] },
+    }),
+    '/work/agent-toolkit/AGENTS.md': '# agents',
+  }
+  state.curateOut = out
+
+  return state
+}
+
+const curateFlag = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
+  ui.find({ type: 'Text', text: /^harness-curate due$/ })
+
+test('a due curate run shows on the band', async ($, on) => {
+  const state = curateWorld(on)
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(state.curateRuns).toEqual([
+    [
+      'python3',
+      '/p/dev/skills/harness-curate/scripts/record_run.py',
+      '--check-due',
+      '--project',
+      '/work/agent-toolkit',
+    ],
+  ])
+  expect((await curateFlag(ui))?.props.color).toBe('warning')
+  expect(texts[0]).toContain('agent-toolkit')
+  await ui.unmount()
+})
+
+test('a curate run that is not due draws nothing', async ($, on) => {
+  const state = curateWorld(on, '')
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.length).toBe(1)
+  expect(await curateFlag(ui)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('outside a harness repo, or without the dev plugin, the check is not run', async ($, on) => {
+  const state = curateWorld(on)
+  delete state.files['/work/agent-toolkit/AGENTS.md']
+
+  await start($)
+  const bare = await drawn($)
+
+  expect(state.curateRuns.length).toBe(0)
+  expect(await curateFlag(bare.ui)).toBeUndefined()
+  await bare.ui.unmount()
+
+  state.files['/work/agent-toolkit/AGENTS.md'] = '# agents'
+  state.settings = { enabledPlugins: { 'dev@kadragon': false } }
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+
+  expect(state.curateRuns.length).toBe(0)
+})
+
+test('the check runs once in ten minutes, and again after a /clear', async ($, on) => {
+  const state = curateWorld(on)
+
+  await start($)
+  await measure($)
+  state.now = NOW + 9 * MINUTE
+  await measure($)
+
+  expect(state.curateRuns.length).toBe(1)
+
+  state.now = NOW + 10 * MINUTE
+  await measure($)
+
+  expect(state.curateRuns.length).toBe(2)
+
+  // The curate run stamped its record: the next session finds it not due.
+  state.curateOut = ''
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.length).toBe(3)
+  expect(await curateFlag(ui)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a curate check that cannot run fails nothing and keeps the rest of the band', async ($, on) => {
+  const state = curateWorld(on, null)
+
+  const started = await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(started.cwd).toBe('/work/agent-toolkit')
+  // `python3` failed to start, then `python`.
+  expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
+  expect(await curateFlag(ui)).toBeUndefined()
+  expect(texts[1]).toBe('Context █░░░░░░░░░ 12%')
+  await ui.unmount()
+})
+
+test('a due curate run keeps the second row where no other figure is read', async ($, on) => {
+  const state = curateWorld(on)
+  state.percent = undefined
+  state.turns = 2
+  state.rateLimits = []
+
+  await start($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts.slice(1)).toEqual([undefined, undefined])
+  expect((await curateFlag(ui))?.props.color).toBe('warning')
+  await ui.unmount()
+})
+
+test('where only python is installed, the check runs under it', async ($, on) => {
+  const state = curateWorld(on)
+  state.isPython3Missing = true
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
+  expect(await curateFlag(ui)).toBeDefined()
+  await ui.unmount()
+})
+
+test('a slow curate check holds neither the counts nor a /clear', async ($, on) => {
+  const state = curateWorld(on)
+  state.settings = { ...state.settings, hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+  let release = () => {}
+  state.curateGate = new Promise<void>(resolve => (release = resolve))
+
+  await start($)
+  const held = await drawn($)
+
+  expect(held.texts[0]).toContain('│ 1 hook')
+  expect(await curateFlag(held.ui)).toBeUndefined()
+  await held.ui.unmount()
+
+  // The check that was running was the last session's: the new one asks again.
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  release()
+  await settle()
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.length).toBe(2)
+  expect(await curateFlag(ui)).toBeDefined()
   await ui.unmount()
 })
