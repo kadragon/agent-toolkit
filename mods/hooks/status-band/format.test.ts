@@ -5,6 +5,7 @@ import {
   bar,
   cacheText,
   contextText,
+  curateText,
   duration,
   headline,
   headlineSegments,
@@ -207,5 +208,13 @@ describe('segments', () => {
     const colors = limitsSegments(STATUS).flatMap(({ color }) => (color === undefined ? [] : [color]))
 
     expect(colors).toEqual(['warning', 'success'])
+  })
+})
+
+describe('curate', () => {
+  test('names a due harness-curate run and is empty otherwise', () => {
+    expect(curateText({ ...STATUS, curateDue: true })).toBe('harness-curate due')
+    expect(curateText({ ...STATUS, curateDue: false })).toBe('')
+    expect(curateText(STATUS)).toBe('')
   })
 })
