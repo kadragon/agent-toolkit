@@ -10,7 +10,7 @@ import {
   manifestHooks,
   under,
 } from './count'
-import { contextText, headlineSegments, levelOf, limitsSegments } from './format'
+import { contextText, curateText, headlineSegments, levelOf, limitsSegments } from './format'
 import type { Segment } from './format'
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
@@ -19,6 +19,13 @@ const TICK_MS = 60_000
 const GIT_TIMEOUT_MS = 2000
 const MINUTE_MS = 60_000
 const DEFAULT_CACHE_TTL_MINUTES = 60
+// The dev plugin's session-start hook nudges about a due harness-curate run
+// once a day; the band keeps it in sight, asking the same script.
+const CURATE_PLUGIN = 'dev@kadragon'
+const CURATE_SCRIPT = 'skills/harness-curate/scripts/record_run.py'
+const CURATE_DUE_PREFIX = 'HARNESS-CURATE DUE'
+const CURATE_EVERY_MS = 10 * MINUTE_MS
+const CURATE_TIMEOUT_MS = 10_000
 // The surfaces the engine raises the band above the prompt on.
 const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
@@ -42,9 +49,12 @@ type Live = {
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
   setupRead?: Promise<void>
+  // When the curate check last ran; unset, the next read runs it.
+  curateCheckedAt?: number
+  curateRead?: Promise<void>
 }
 
-type Setup = Pick<StatusBand, 'hooks' | 'skills'>
+type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'curateDue'>
 
 // The handlers a plugin's default hooks file, its manifest and the files the
 // manifest names add; a file that is not there adds none.
@@ -65,6 +75,44 @@ const pluginHooks = async ($: EngineInterface, root: string): Promise<number> =>
   return counts.reduce((total, count) => total + count, inline)
 }
 
+// Where the installed-plugins file says each plugin's directory is.
+const readInstallPaths = async ($: EngineInterface): Promise<Record<string, string>> => {
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+
+  const claudeDir = configDir ?? (home === undefined ? undefined : under(home, '.claude'))
+
+  if (claudeDir === undefined) throw new Error('no home directory')
+
+  return installPaths(
+    await $.fs.read(under(claudeDir, 'plugins/installed_plugins.json')),
+    await $.session.cwd(),
+  )
+}
+
+// Whether a harness-curate run is due here, judged as the session-start hook
+// judges it: only in a harness repo, by the installed dev plugin's own script.
+const readCurateDue = async ($: EngineInterface): Promise<boolean> => {
+  if (!enabledPlugins(await $.settings.read()).includes(CURATE_PLUGIN)) return false
+
+  const cwd = await $.session.cwd()
+
+  if (!(await $.fs.exists(under(cwd, 'AGENTS.md')))) return false
+
+  const root = (await readInstallPaths($))[CURATE_PLUGIN]
+
+  if (root === undefined) return false
+
+  const args = [under(root, CURATE_SCRIPT), '--check-due', '--project', cwd]
+  const init = { timeoutMs: CURATE_TIMEOUT_MS }
+  // As the hook does: `python3`, else `python` where only that is installed.
+  const { exitCode, stdout } = await $.process
+    .run(['python3', ...args], init)
+    .catch(() => $.process.run(['python', ...args], init))
+
+  return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
+}
+
 // The hook handlers in force: the settings' own and every enabled plugin's.
 // The engine lists none, so they are counted off the files that declare them.
 const countHooks = async ($: EngineInterface): Promise<number> => {
@@ -81,17 +129,7 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
 
   if (enabled.length === 0) return own
 
-  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
-  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-
-  const claudeDir = configDir ?? (home === undefined ? undefined : under(home, '.claude'))
-
-  if (claudeDir === undefined) throw new Error('no home directory')
-
-  const paths = installPaths(
-    await $.fs.read(under(claudeDir, 'plugins/installed_plugins.json')),
-    await $.session.cwd(),
-  )
+  const paths = await readInstallPaths($)
   const counts = await Promise.all(
     enabled.map(id => (paths[id] === undefined ? 0 : pluginHooks($, paths[id]))),
   )
@@ -126,7 +164,7 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
 
     const setup = { hooks: hooks ?? live.setup.hooks, skills: skills ?? live.setup.skills }
 
-    live.setup = setup
+    live.setup = { ...live.setup, ...setup }
     live.hasSetup = true
     await update($, statusBand, current => (current === null ? null : { ...current, ...setup }))
   })()
@@ -138,11 +176,43 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
     })
 }
 
+// The curate check spawns a scan, so it runs apart from the counts and at most
+// once in a while; between runs, or when a run fails, the last answer stands.
+const loadCurate = ($: EngineInterface, live: Live): void => {
+  if (live.curateRead !== undefined) return
+
+  const epoch = live.setupEpoch
+
+  live.curateRead = (async () => {
+    const now = await $.clock.now()
+
+    if (epoch !== live.setupEpoch) return
+    if (live.curateCheckedAt !== undefined && now - live.curateCheckedAt < CURATE_EVERY_MS) return
+
+    live.curateCheckedAt = now
+    const curateDue = await readCurateDue($).catch(() => undefined)
+
+    if (epoch !== live.setupEpoch || curateDue === undefined) return
+
+    live.setup = { ...live.setup, curateDue }
+    live.hasSetup = true
+    await update($, statusBand, current => (current === null ? null : { ...current, curateDue }))
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      live.curateRead = undefined
+      // A reset came while this read ran: the new session asks again.
+      if (epoch !== live.setupEpoch) loadCurate($, live)
+    })
+}
+
 // The counts were another session's: they are left out until read again.
 const resetSetup = (live: Live): void => {
   live.setup = {}
   live.hasSetup = true
   live.setupEpoch += 1
+  // A run in the last session stamped its record: ask again.
+  live.curateCheckedAt = undefined
 }
 
 // Only a response that read or wrote the prompt cache renews it.
@@ -220,6 +290,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         cacheModel: isCacheGone ? undefined : cacheModel,
         hooks: live.hasSetup ? live.setup.hooks : current?.hooks,
         skills: live.hasSetup ? live.setup.skills : current?.skills,
+        curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
       }
     })
 
@@ -252,6 +323,7 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
     loadSetup($, live)
+    loadCurate($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -390,11 +462,12 @@ export const statusRows = (
   const { Box, Text } = elements
   const context = contextText(status)
   const limits = limitsSegments(status)
+  const curate = curateText(status)
 
   return (
     <Box key="status-band" flexDirection="column" marginTop={hasMargin ? 1 : 0}>
       <Text wrap="truncate-end">{runs(elements, headlineSegments(status))}</Text>
-      {context === '' && limits.length === 0 ? null : (
+      {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
           {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
           {limits.length === 0 ? null : (
@@ -402,6 +475,14 @@ export const statusRows = (
               {context === '' ? null : <Text dimColor> │ </Text>}
               {runs(elements, limits)}
             </Text>
+          )}
+          {curate === '' ? null : (
+            <Box>
+              {context === '' && limits.length === 0 ? null : <Text dimColor> │ </Text>}
+              <Text color="warning" wrap="truncate-end">
+                {curate}
+              </Text>
+            </Box>
           )}
         </Box>
       )}

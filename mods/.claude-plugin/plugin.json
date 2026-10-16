@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "author": {
     "name": "kadragon"
   },
@@ -18,7 +18,7 @@
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
-      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook and skill counts, context fill and rate limits above the prompt.",
+      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook and skill counts, context fill, rate limits and a due harness-curate run above the prompt.",
       "default": true
     },
     "statusBandCacheTtlMinutes": {

@@ -174,4 +174,8 @@ export const limitsSegments = (status: StatusBand): Segment[] =>
     ' | ',
   )
 
+// A harness-curate run the dev plugin judges due; nothing otherwise.
+export const curateText = (status: StatusBand): string =>
+  status.curateDue === true ? 'harness-curate due' : ''
+
 export const limitsText = (status: StatusBand): string => textOf(limitsSegments(status))
