@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] commit-guard reads the live branch only and drops in-chain branch prediction (dev v4.11.2) (2026-10-16) → docs/design/harness-altitude-audit.md
 - [done] status-band drops 8 register tests whose mutants other tests already kill (mods v0.2.4) (2026-10-16)
 - [done] test-prune kills a timed-out run's process group and separates look-alike duplicates with a branching mutant (dev v4.11.1) (2026-10-15)
 - [done] Add test-prune skill: prune low-value tests only when mutation evidence shows the kill set holds (dev v4.11.0) (2026-10-15)

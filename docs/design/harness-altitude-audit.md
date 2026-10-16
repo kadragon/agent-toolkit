@@ -270,6 +270,20 @@ Codex), which run in the background: `late-source-reclaim.md` already separates 
 whose `pid` is alive from one whose `pid` is dead, and both route to the same action (merge; the
 `Reviewers Skipped` line stands). The *Cut* re-file bar therefore applies to panel sources only.
 
+## Superseded (2026-10-16)
+
+**commit-guard's branch guard reads the live branch only.** From 2026-10-11 to 2026-10-15 the hook
+grew from 1,823 to 3,659 lines predicting, from the command text, which branch a chained commit
+would land on (a creation carried across `&&`, `;` and newlines, `@{-N}` and reflog resolution,
+code runners). Each review found a new fail-open, and the hook still blocked the most common real
+chain (`git checkout -qb x && … && git commit`). The user chose to drop the prediction: the guard
+now reads the live branch of each cwd the commit may run in, so a branch created in the same
+command is not seen (create it in a separate call), and a HEAD move the hook does not read passes
+on a live feature branch as an accepted residual. This is a reduction, not the removal the last
+section rules out; commit detection and `--precommit-check` are unchanged. The PR #329 runner
+follow-ups (`sh -c`/`eval`/`sudo`/`xargs`, the venv-activate exemption) went with it. Do not
+re-add chain attribution without a recorded commit that landed on `main` through a chain.
+
 ## Cut — do not re-file without new evidence
 
 Moved here from `backlog.md` (2026-09-08): a cut item is audit state, not queued work.

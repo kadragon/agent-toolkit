@@ -370,69 +370,9 @@ check(
     run_hook("git commit -am '[FEAT] x'", branch="feature/x") == 0,
 )
 
-# --- ';'/newline carry against a real repository -------------------------------
-# run_hook injects the live branch but not the creatable check, so these cases
-# go through guard._branch_creatable's own git calls.
-def _git(repo, *args):
-    return subprocess.run(
-        ["git", "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-         "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-        capture_output=True, text=True,
-    )
-
-
-_carry_repo = tempfile.mkdtemp()
-_git(_carry_repo, "init", "-q")
-_git(_carry_repo, "commit", "--allow-empty", "--no-verify", "-q", "-m", "init")
-_git(_carry_repo, "branch", "taken")
 check(
-    "newline carry: creating a free name in a real repo lets the later commit through",
-    run_hook("git checkout -b feature/new\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=_carry_repo) == 0,
-)
-check(
-    "newline carry: creating an existing name in a real repo still blocks",
-    run_hook("git checkout -b taken\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=_carry_repo) == 2,
-)
-_git(_carry_repo, "branch", "release")
-_git(_carry_repo, "tag", "release")
-check(
-    "newline carry: creating an existing name that is also a tag still blocks",
-    run_hook("git checkout -b release\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=_carry_repo) == 2,
-)
-check(
-    "newline carry: creating a name under an existing branch still blocks",
-    run_hook("git checkout -b taken/sub\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=_carry_repo) == 2,
-)
-check(
-    "newline carry: a directory that is no repository still blocks",
-    run_hook("git checkout -b feature/new\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=tempfile.mkdtemp()) == 2,
-)
-check(
-    "second creation: two free names in a real repo let the later commit through",
-    run_hook("git checkout -b feature/a; git checkout -b feature/b; git commit -m '[FEAT] y'",
-             branch="main", cwd=_carry_repo) == 0,
-)
-check(
-    "second creation: an existing second name in a real repo still blocks",
-    run_hook("git checkout -b feature/a; git checkout -b taken; git commit -m '[FEAT] y'",
-             branch="main", cwd=_carry_repo) == 2,
-)
-check(
-    "comment line above a commit on main in a real repo still blocks",
-    run_hook("# note\ngit commit -m '[FEAT] y'", branch="main", cwd=_carry_repo) == 2,
-)
-with open(os.path.join(_git(_carry_repo, "rev-parse", "--absolute-git-dir").stdout.strip(),
-                       "MERGE_HEAD"), "w", encoding="utf-8") as _fh:
-    _fh.write("0" * 40 + "\n")
-check(
-    "newline carry: a merge in progress still blocks",
-    run_hook("git switch -c feature/new\ngit add -A\ngit commit -m '[FEAT] y'", branch="main",
-             cwd=_carry_repo) == 2,
+    "comment line above a commit on main still blocks",
+    run_hook("# note\ngit commit -m '[FEAT] y'", branch="main") == 2,
 )
 
 print()
