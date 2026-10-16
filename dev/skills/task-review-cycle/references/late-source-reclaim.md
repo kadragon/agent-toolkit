@@ -57,7 +57,8 @@ that fails either check belongs to a different run: leave it alone.
 agy's line is the same minus `mode`. It is the evidence for any future argument about how much
 runway a source needs: elapsed alone cannot separate "the source is reliably slower than the
 cycle" from "that diff was unusual", so diff size is recorded beside it. Argue from this log, not
-from a single cycle's impression. A run killed before it finishes writes no line.
+from a single cycle's impression. agy's own `--print-timeout` expiry still logs a line (status
+`empty` or `failed`); only a process killed from outside writes none.
 
 ## Pre-merge reclaim
 

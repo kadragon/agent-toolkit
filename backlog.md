@@ -19,7 +19,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #272 — review slot shell-out follow-ups
 
-- [ ] [HARNESS] Re-fit `agy-review.sh`'s `--print-timeout` to the reviewer's runway — the Claude slot now holds the foreground for at most 600s and the cycle no longer waits past it, so agy's 15m self-cap means it will almost never report in time; decide the new cap against `timings.log` per `late-source-reclaim.md`, not against one cycle *(deferred: `agy-review.sh` appends to its own `timings.log` from dev 4.11.3, but no agy rows exist yet, and a run the cap kills writes none — revisit once real cycles have logged agy runs)*
+- [ ] [HARNESS] Re-fit `agy-review.sh`'s `--print-timeout` to the reviewer's runway — the Claude slot now holds the foreground for at most 600s and the cycle no longer waits past it, so agy's 15m self-cap means it will almost never report in time; decide the new cap against `timings.log` per `late-source-reclaim.md`, not against one cycle *(deferred: `agy-review.sh` appends to its own `timings.log` from dev 4.11.3, but no agy rows exist yet; a run that hits the cap logs as `status=empty` or `failed` at elapsed≈900s — revisit once real cycles have logged agy runs)*
 
 ### PR #254 — memory-guard follow-ups
 
