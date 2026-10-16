@@ -112,12 +112,32 @@ else
 fi
 [ -n "$RESULT_DIR" ] || echo "WARN: agy result dir unavailable — this review will not be persisted for a late reclaim" >&2
 
+# One line per finished run, appended and never rotated — the evidence for the --print-timeout
+# cap (references/late-source-reclaim.md). Same shape as codex-review.sh's log minus `mode`:
+# elapsed alone cannot separate "agy is slow" from "that diff was unusual", so diff size rides
+# beside it, measured against HEAD_SHA because the cycle keeps committing while agy runs.
+append_timing() {
+  local status="$1" elapsed="$2" shortstat files ins del ts
+  shortstat=$(git diff --shortstat "$BASE_BRANCH"..."$HEAD_SHA" 2>/dev/null || printf '')
+  files=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} file' | grep -o '[0-9]\{1,\}' || true)
+  ins=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} insertion' | grep -o '[0-9]\{1,\}' || true)
+  del=$(printf '%s' "$shortstat" | grep -o '[0-9]\{1,\} deletion' | grep -o '[0-9]\{1,\}' || true)
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')
+  ( umask 077
+    printf '%s elapsed=%ss status=%s files=%s lines=%s branch=%s\n' \
+      "$ts" "$elapsed" "$status" "${files:-0}" "$(( ${ins:-0} + ${del:-0} ))" "$CURRENT_BRANCH" \
+      >>"$RESULT_DIR/timings.log"
+  ) 2>/dev/null || true
+  return 0
+}
+
 # Review file first, meta second, pending removed last — a reader that sees `.meta` is
 # guaranteed the review file beside it is whole.
 publish_result() {
   local status="$1" review_file="" now
   [ -n "$RESULT_DIR" ] || return 0
   now=$(date +%s 2>/dev/null || printf '0')
+  append_timing "$status" "$((now - START_EPOCH))"
   if [ "$status" = "ok" ] && ( umask 077; cp "$AGY_OUT" "$REVIEW_FILE.tmp.$$" ) 2>/dev/null &&
     mv -f "$REVIEW_FILE.tmp.$$" "$REVIEW_FILE" 2>/dev/null; then
     review_file="$REVIEW_FILE"
