@@ -660,7 +660,6 @@ case "$CODEX_MODE" in
     # propagating the exit code — otherwise the caller only sees the generic fallback and
     # loses the diagnostic detail.
     retry_count=0
-    stale_retried=0
     while :; do
       RAW=""
       codex_status=0
@@ -731,10 +730,12 @@ case "$CODEX_MODE" in
         # startup and prunes the version it just loaded (seen 2026-10-16: kadragon/dev 4.11.1 →
         # 4.11.2 two seconds after load). Only the first run after an upgrade loses that race; by
         # the second the cache is current, so one re-run recovers instead of failing the source.
-        if [ -n "$STALE_PATHS" ] && [ "$stale_retried" -eq 0 ]; then
-          stale_retried=1
-          printf 'WARN: the review names plugin paths missing on disk (Codex refreshed its plugin cache mid-run); retrying once:\n%s\n' \
+        # One retry budget shared with the empty-payload retry below: two runs at most, never three.
+        if [ -n "$STALE_PATHS" ] && [ "$retry_count" -eq 0 ]; then
+          retry_count=1
+          printf 'WARN: the review names plugin paths missing on disk (likely a Codex startup cache refresh); retrying once:\n%s\n' \
             "$STALE_PATHS" >&2
+          emit_blob_tail "$TEXT" "first run review text"
           continue
         fi
         break
@@ -758,7 +759,7 @@ case "$CODEX_MODE" in
     if [ -n "$STALE_PATHS" ]; then
       printf 'ERROR: the review names plugin paths missing on disk on the retry as well, so its tool calls likely failed:\n%s\n' \
         "$STALE_PATHS" >&2
-      printf 'HINT: a startup cache refresh explains one failed run, not two — check that the Codex plugin cache holds the version its config names, then re-run.\n' >&2
+      printf 'HINT: a startup cache refresh explains one failed run, not two — check that the Codex plugin cache holds the version its config names; if a Codex broker is still running for this workspace (codex-companion broker.json), stop its pid; then re-run.\n' >&2
       emit_blob_tail "$TEXT" "review text"
       publish_result "failed" 1
       exit 1

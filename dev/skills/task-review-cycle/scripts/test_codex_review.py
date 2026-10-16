@@ -800,6 +800,13 @@ def case_stale_plugin_path_is_failure(tmp: Path, _live: int):
     fields = meta_fields(results_retry / "feat-x.meta") if (results_retry / "feat-x.meta").exists() else {}
     check("stale-once status=ok", fields.get("status") == "ok", str(fields))
 
+    print("\na stale-path retry shares the empty-payload retry budget: two runs at most")
+    proc = run_with_sidecar(repo, tmp, counting_companion(tmp, "comp-stale-empty", [text, ""]),
+                            tmp / "results-prunedpath-empty")
+    check("stale-then-empty exits nonzero", proc.returncode not in (0, 75), f"rc={proc.returncode}")
+    check("stale-then-empty ran twice, not three times", run_count(tmp, "comp-stale-empty") == 2,
+          f"runs={run_count(tmp, 'comp-stale-empty')}")
+
     print("\na review naming a live plugin path, a ~ path or a glob is still a review")
     live = tmp / "home" / ".codex" / "plugins" / "cache" / "kadragon" / "dev" / "4.10.30"
     live.mkdir(parents=True)
