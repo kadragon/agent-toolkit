@@ -51,6 +51,7 @@ type Live = {
   setupRead?: Promise<void>
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
+  curateRead?: Promise<void>
 }
 
 type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'curateDue'>
@@ -102,26 +103,14 @@ const readCurateDue = async ($: EngineInterface): Promise<boolean> => {
 
   if (root === undefined) return false
 
-  const { exitCode, stdout } = await $.process.run(
-    ['python3', under(root, CURATE_SCRIPT), '--check-due', '--project', cwd],
-    { timeoutMs: CURATE_TIMEOUT_MS },
-  )
+  const args = [under(root, CURATE_SCRIPT), '--check-due', '--project', cwd]
+  const init = { timeoutMs: CURATE_TIMEOUT_MS }
+  // As the hook does: `python3`, else `python` where only that is installed.
+  const { exitCode, stdout } = await $.process
+    .run(['python3', ...args], init)
+    .catch(() => $.process.run(['python', ...args], init))
 
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
-}
-
-// The curate check spawns a scan, so it runs at most once in a while; between
-// runs the last answer stands.
-const checkCurate = async ($: EngineInterface, live: Live): Promise<boolean | undefined> => {
-  const now = await $.clock.now()
-
-  if (live.curateCheckedAt !== undefined && now - live.curateCheckedAt < CURATE_EVERY_MS) {
-    return live.setup.curateDue
-  }
-
-  live.curateCheckedAt = now
-
-  return readCurateDue($)
 }
 
 // The hook handlers in force: the settings' own and every enabled plugin's.
@@ -166,21 +155,16 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
   const epoch = live.setupEpoch
 
   live.setupRead = (async () => {
-    const [hooks, skills, curateDue] = await Promise.all([
+    const [hooks, skills] = await Promise.all([
       countHooks($).catch(() => undefined),
       readSkills($).catch(() => undefined),
-      checkCurate($, live).catch(() => undefined),
     ])
 
     if (epoch !== live.setupEpoch) return
 
-    const setup = {
-      hooks: hooks ?? live.setup.hooks,
-      skills: skills ?? live.setup.skills,
-      curateDue: curateDue ?? live.setup.curateDue,
-    }
+    const setup = { hooks: hooks ?? live.setup.hooks, skills: skills ?? live.setup.skills }
 
-    live.setup = setup
+    live.setup = { ...live.setup, ...setup }
     live.hasSetup = true
     await update($, statusBand, current => (current === null ? null : { ...current, ...setup }))
   })()
@@ -189,6 +173,36 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
       live.setupRead = undefined
       // A reset came while this read ran: the counts are the new session's to read.
       if (epoch !== live.setupEpoch) loadSetup($, live)
+    })
+}
+
+// The curate check spawns a scan, so it runs apart from the counts and at most
+// once in a while; between runs, or when a run fails, the last answer stands.
+const loadCurate = ($: EngineInterface, live: Live): void => {
+  if (live.curateRead !== undefined) return
+
+  const epoch = live.setupEpoch
+
+  live.curateRead = (async () => {
+    const now = await $.clock.now()
+
+    if (epoch !== live.setupEpoch) return
+    if (live.curateCheckedAt !== undefined && now - live.curateCheckedAt < CURATE_EVERY_MS) return
+
+    live.curateCheckedAt = now
+    const curateDue = await readCurateDue($).catch(() => undefined)
+
+    if (epoch !== live.setupEpoch || curateDue === undefined) return
+
+    live.setup = { ...live.setup, curateDue }
+    live.hasSetup = true
+    await update($, statusBand, current => (current === null ? null : { ...current, curateDue }))
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      live.curateRead = undefined
+      // A reset came while this read ran: the new session asks again.
+      if (epoch !== live.setupEpoch) loadCurate($, live)
     })
 }
 
@@ -309,6 +323,7 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
     loadSetup($, live)
+    loadCurate($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -464,7 +479,9 @@ export const statusRows = (
           {curate === '' ? null : (
             <Box>
               {context === '' && limits.length === 0 ? null : <Text dimColor> │ </Text>}
-              <Text color="warning">{curate}</Text>
+              <Text color="warning" wrap="truncate-end">
+                {curate}
+              </Text>
             </Box>
           )}
         </Box>

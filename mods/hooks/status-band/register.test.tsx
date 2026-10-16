@@ -49,6 +49,10 @@ type World = {
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
   curateRuns: (readonly string[])[]
+  // Set to hold the next curate check open until the test lets it go.
+  curateGate?: Promise<void>
+  // True where only `python` is installed.
+  isPython3Missing: boolean
 }
 
 // The engine beneath the plugin: what the session, the clock, git and the band
@@ -74,6 +78,7 @@ const world = (on: On): World => {
     isUncached: false,
     curateOut: '',
     curateRuns: [],
+    isPython3Missing: false,
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -132,10 +137,16 @@ const world = (on: On): World => {
   on('process.run', async ($, e) => {
     if (e.argv[0] !== 'git') {
       state.curateRuns.push(e.argv)
+      const out = state.curateOut
+      const gate = state.curateGate
 
-      if (state.curateOut === null) throw new Error('python is not installed')
+      state.curateGate = undefined
+      await gate
 
-      return { value: { exitCode: 0, stdout: state.curateOut, stderr: '' } }
+      if (out === null) throw new Error('python is not installed')
+      if (state.isPython3Missing && e.argv[0] === 'python3') throw new Error('no python3')
+
+      return { value: { exitCode: 0, stdout: out, stderr: '' } }
     }
 
     state.gitCalls += 1
@@ -815,7 +826,8 @@ test('a curate check that cannot run fails nothing and keeps the rest of the ban
   const { ui, texts } = await drawn($)
 
   expect(started.cwd).toBe('/work/agent-toolkit')
-  expect(state.curateRuns.length).toBe(1)
+  // `python3` failed to start, then `python`.
+  expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
   expect(await curateFlag(ui)).toBeUndefined()
   expect(texts[1]).toBe('Context █░░░░░░░░░ 12%')
   await ui.unmount()
@@ -832,5 +844,42 @@ test('a due curate run keeps the second row where no other figure is read', asyn
 
   expect(texts.slice(1)).toEqual([undefined, undefined])
   expect((await curateFlag(ui))?.props.color).toBe('warning')
+  await ui.unmount()
+})
+
+test('where only python is installed, the check runs under it', async ($, on) => {
+  const state = curateWorld(on)
+  state.isPython3Missing = true
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
+  expect(await curateFlag(ui)).toBeDefined()
+  await ui.unmount()
+})
+
+test('a slow curate check holds neither the counts nor a /clear', async ($, on) => {
+  const state = curateWorld(on)
+  state.settings = { ...state.settings, hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+  let release = () => {}
+  state.curateGate = new Promise<void>(resolve => (release = resolve))
+
+  await start($)
+  const held = await drawn($)
+
+  expect(held.texts[0]).toContain('│ 1 hook')
+  expect(await curateFlag(held.ui)).toBeUndefined()
+  await held.ui.unmount()
+
+  // The check that was running was the last session's: the new one asks again.
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+  release()
+  await settle()
+  const { ui } = await drawn($)
+
+  expect(state.curateRuns.length).toBe(2)
+  expect(await curateFlag(ui)).toBeDefined()
   await ui.unmount()
 })
