@@ -48,18 +48,19 @@ Each run records what it read and measured, so the next run does not redo it. Be
 
 ```sh
 LEDGER="<skill dir>/scripts/prune_ledger.py"
-START=$(python3 "$LEDGER" start --target "<repo root>" --seed <seed>)
+START=$(python3 "$LEDGER" start --target "<repo root>") || exit 1   # refuses tracked changes
 ```
 
 `$START` holds the new `run_dir` and every prior unit (one per test file) as `same_source` —
-its test file, covered files and killing tests' files all have the same blob at HEAD — or
-`changed_source`. Read `references/run-ledger.md` for the unit shape and reuse rules. In short:
+its test file, covered, dependency and killing tests' files all have the same blob at HEAD —
+`changed_source`, or `removed`. Read `references/run-ledger.md` for the unit shape and reuse rules. In short:
 a `same_source` unit's candidate lines and kill rows are carried, so Step 2 does not re-read it
 and Step 3 does not re-run its mutants; its `open` items, every `changed_source` unit and every
 unrecorded test file are current work. Step 4's joint re-run and Step 6 always run fresh.
 
 Before the report — also when an audit-only run stops after Step 4 — write every unit this run
-read, measured or carried: `python3 "$LEDGER" record --run-dir <run_dir> < <scratch>/units.json`.
+read, measured or carried, with the Step 3 seed:
+`python3 "$LEDGER" record --run-dir <run_dir> --seed <seed> < <scratch>/units.json`.
 
 ## Step 1 — Map where the count comes from
 
@@ -209,7 +210,7 @@ Removed: <n> tests (<m> merged into <k>) — sampled kill set (decision/unreacha
 excluded) unchanged: <x>/<x> mutants in U
 re-killed (sample: <n> of <total> mutants, seed <s>; unsampled mutants were not checked)
 Runtime: <before> → <after>; count: <before> → <after>
-| Test | Verdict | Smell | Mutants it killed | Also killed by (or sole killer: no) |
+| Test | Verdict | Smell | Mutants it killed | Also killed by (or sole killer: no) | Carried from (run-<N> or —) |
 Gaps: <file:line — mutation — behavior unprotected>
 Production bugs: <file:line — what the mutant revealed>
 Equivalent mutants: <id — reason>
