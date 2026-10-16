@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] codex-review re-runs once when its review names a pruned Codex plugin path (dev v4.11.4) (2026-10-16)
 - [done] agy-review appends elapsed time and diff size to its timings.log (dev v4.11.3) (2026-10-16)
 - [done] commit-guard reads the live branch only and drops in-chain branch prediction (dev v4.11.2) (2026-10-16) → docs/design/harness-altitude-audit.md
 - [done] status-band drops 8 register tests whose mutants other tests already kill (mods v0.2.4) (2026-10-16)

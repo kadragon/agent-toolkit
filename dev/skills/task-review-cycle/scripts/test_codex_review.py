@@ -672,6 +672,27 @@ def ok_companion(tmp: Path, name: str, text: str) -> Path:
     return script
 
 
+def counting_companion(tmp: Path, name: str, texts: list) -> Path:
+    """Emits texts[n] on the n-th run (the last one repeats); the run count lands in <name>.count."""
+    script = tmp / f"{name}.mjs"
+    count = tmp / f"{name}.count"
+    script.write_text(
+        "import fs from 'node:fs';\n"
+        f"const countFile = {json.dumps(str(count))};\n"
+        f"const texts = {json.dumps(texts)};\n"
+        "const n = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, 'utf8')) : 0;\n"
+        "fs.writeFileSync(countFile, String(n + 1));\n"
+        "process.stdout.write(JSON.stringify({codex: {status: 0, stdout: texts[Math.min(n, texts.length - 1)]}}));\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+def run_count(tmp: Path, name: str) -> int:
+    count = tmp / f"{name}.count"
+    return int(count.read_text(encoding="utf-8")) if count.exists() else 0
+
+
 def meta_fields(path: Path) -> dict:
     return dict(
         line.split("=", 1)
@@ -756,13 +777,35 @@ def case_stale_plugin_path_is_failure(tmp: Path, _live: int):
     # The shape seen 2026-10-15: prose verdict, path in backticks, a Korean particle glued on.
     text = (f"검토가 차단되어 정확성을 확인하지 못했습니다. 도구 실행 훅이 누락된 `{missing}`를 "
             "참조하여 요청한 git diff가 실행되지 않았습니다.")
-    proc = run_with_sidecar(repo, tmp, ok_companion(tmp, "comp-stale", text), results)
+    proc = run_with_sidecar(repo, tmp, counting_companion(tmp, "comp-stale", [text]), results)
     check("stale path exits nonzero", proc.returncode not in (0, 75), f"rc={proc.returncode}")
+    check("stale path retried exactly once", run_count(tmp, "comp-stale") == 2, f"runs={run_count(tmp, 'comp-stale')}")
     check("stale path names the missing path", missing in proc.stderr, proc.stderr[-600:])
-    check("stale path hints a broker restart", "restart the Codex broker" in proc.stderr, proc.stderr[-600:])
+    check("stale path says the retry failed too", "on the retry as well" in proc.stderr, proc.stderr[-600:])
     check("stale path review not on stdout", "검토가 차단" not in proc.stdout, proc.stdout[-300:])
     fields = meta_fields(results / "feat-x.meta") if (results / "feat-x.meta").exists() else {}
     check("stale path status=failed", fields.get("status") == "failed", str(fields))
+
+    print("\na pruned path on the first run only is retried, and the retry's review is emitted")
+    # Seen 2026-10-16: a fresh Codex app-server loads plugin hooks, then refreshes its plugin cache
+    # at startup, pruning the version it just loaded — only the first run after an upgrade fails.
+    results_retry = tmp / "results-prunedpath-retry"
+    proc = run_with_sidecar(repo, tmp, counting_companion(tmp, "comp-stale-once", [text, "P2 retry ok\n"]),
+                            results_retry)
+    check("stale-once exits 0", proc.returncode == 0, proc.stderr[-600:])
+    check("stale-once ran twice", run_count(tmp, "comp-stale-once") == 2, f"runs={run_count(tmp, 'comp-stale-once')}")
+    check("stale-once emits the retry's review", "P2 retry ok" in proc.stdout and "검토가 차단" not in proc.stdout,
+          proc.stdout[-300:])
+    check("stale-once warns about the retry", "retrying once" in proc.stderr, proc.stderr[-600:])
+    fields = meta_fields(results_retry / "feat-x.meta") if (results_retry / "feat-x.meta").exists() else {}
+    check("stale-once status=ok", fields.get("status") == "ok", str(fields))
+
+    print("\na stale-path retry shares the empty-payload retry budget: two runs at most")
+    proc = run_with_sidecar(repo, tmp, counting_companion(tmp, "comp-stale-empty", [text, ""]),
+                            tmp / "results-prunedpath-empty")
+    check("stale-then-empty exits nonzero", proc.returncode not in (0, 75), f"rc={proc.returncode}")
+    check("stale-then-empty ran twice, not three times", run_count(tmp, "comp-stale-empty") == 2,
+          f"runs={run_count(tmp, 'comp-stale-empty')}")
 
     print("\na review naming a live plugin path, a ~ path or a glob is still a review")
     live = tmp / "home" / ".codex" / "plugins" / "cache" / "kadragon" / "dev" / "4.10.30"
@@ -777,8 +820,10 @@ def case_stale_plugin_path_is_failure(tmp: Path, _live: int):
         ("claude-cache", f"P2 settings.json points at {bash_path(tmp)}/.claude/plugins/cache/k/dev/1.0.0/x.sh\n"),
         ("semver-build", f"P2 `{bash_path(build)}`, see there\n"),
     ):
-        proc = run_with_sidecar(repo, tmp, ok_companion(tmp, f"comp-{label}", body), results)
+        proc = run_with_sidecar(repo, tmp, counting_companion(tmp, f"comp-{label}", [body]), results)
         check(f"{label} path review exits 0", proc.returncode == 0, proc.stderr[-400:])
+        check(f"{label} path review ran once", run_count(tmp, f"comp-{label}") == 1,
+              f"runs={run_count(tmp, f'comp-{label}')}")
         check(f"{label} path review on stdout", body.strip() in proc.stdout, proc.stdout[-300:])
 
 
