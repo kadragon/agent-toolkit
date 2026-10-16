@@ -13,6 +13,8 @@ Two fixes, one case group each:
 - Every finished run leaves `<key>.pending` → `<key>.review.txt` + `<key>.meta` under
   AGY_REVIEW_RESULT_DIR, the same layout codex-review.sh uses, so the pre-merge reclaim
   (references/late-source-reclaim.md) can collect a late agy review.
+- Every finished run also appends a `timings.log` line (elapsed + diff size), so the
+  `--print-timeout` cap can be argued from data, as codex's is.
 
 The `agy` CLI is stubbed on PATH by a POSIX shebang script, so these cases are skipped on
 Windows; CI runs them on ubuntu.
@@ -21,6 +23,7 @@ Run: python3 dev/skills/task-review-cycle/scripts/test_agy_review.py
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -175,6 +178,22 @@ def case_stale_trio_cleared(tmp):
     check("stale review file removed", not (result_dir / f"{KEY}.review.txt").exists())
 
 
+def case_every_run_appends_timing(tmp):
+    print("\ncase: every finished run appends one timings.log line sized against the reviewed HEAD")
+    for stdout, code, status in (("LGTM\n", 0, "ok"), ("partial", 3, "failed"), ("  \n", 0, "empty")):
+        sub = tmp / status
+        sub.mkdir()
+        _, _, _, result_dir = run(sub, stdout=stdout, exit_code=code)
+        log = result_dir / "timings.log"
+        lines = log.read_text().splitlines() if log.exists() else []
+        check(f"{status}: exactly one line", len(lines) == 1, str(lines))
+        line = lines[0] if lines else ""
+        check(f"{status}: status recorded", f" status={status} " in line, line)
+        check(f"{status}: elapsed recorded", re.search(r" elapsed=\d+s ", line) is not None, line)
+        check(f"{status}: one-file fixture sized", " files=1 lines=1 " in line, line)
+        check(f"{status}: raw branch recorded", line.endswith(f" branch={BRANCH}"), line)
+
+
 def main():
     if os.name == "nt":
         print("POSIX-only (the agy stub uses a shebang) — skipped on Windows")
@@ -189,6 +208,7 @@ def main():
         case_failed_run_records_failure,
         case_empty_run_records_empty,
         case_stale_trio_cleared,
+        case_every_run_appends_timing,
     )
     for case in cases:
         with tempfile.TemporaryDirectory() as raw:

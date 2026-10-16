@@ -52,11 +52,12 @@ left from an earlier cycle on this branch. So before using a result, check that 
 matches the current branch and that `started_at` is later than this cycle's launch. A `.meta`
 that fails either check belongs to a different run: leave it alone.
 
-`timings.log` in the codex directory (codex only) gets one line per run —
-`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<raw branch>`. It is the
-evidence for any future argument about how much runway the companion needs: elapsed alone cannot
-separate "the companion is reliably slower than the cycle" from "that diff was unusual", so diff
-size is recorded beside it. Argue from this log, not from a single cycle's impression.
+`timings.log` in each result directory gets one line per finished run —
+`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<raw branch>` for codex;
+agy's line is the same minus `mode`. It is the evidence for any future argument about how much
+runway a source needs: elapsed alone cannot separate "the source is reliably slower than the
+cycle" from "that diff was unusual", so diff size is recorded beside it. Argue from this log, not
+from a single cycle's impression. A run killed before it finishes writes no line.
 
 ## Pre-merge reclaim
 
