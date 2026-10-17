@@ -13,11 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #335 — test-prune run ledger (2026-10-16)
-
-- [ ] [debt] `record` crashes on `null` covered/depends/mutants/killed_by or a `::test` killer with no file; read them as empty and skip empty paths (source: agy) — dev/skills/test-prune/scripts/prune_ledger.py `unit_paths` (introduced here)
-- [ ] [debt] `classify` runs one `git ls-tree` per prior unit; batch every unit's paths into one call at HEAD (source: agy) — dev/skills/test-prune/scripts/prune_ledger.py `classify` (introduced here)
-
 ### PR #313 — mods status band above the prompt (2026-10-11)
 
 - [ ] [constraint] the band's on-screen look (colors, truncation, the engine's `[-]` mark, wide-character row counts) is checked by mount tests only; nobody has looked at it in a live terminal (source: contract) — mods/hooks/band.tsx *(deferred: needs a person to look at the band in a live terminal; an agent session cannot see it — delete this line once someone has)*

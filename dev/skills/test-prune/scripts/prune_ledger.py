@@ -73,10 +73,11 @@ def blobs_at(target, ref, paths):
 
 
 def unit_paths(unit):
-    paths = [unit["test_path"], *unit.get("covered", []), *unit.get("depends", [])]
-    for m in unit.get("mutants", []):
-        paths += [k.split("::", 1)[0] for k in m.get("killed_by", [])]
-    return paths
+    # a null list reads as empty; a `::test` killer with no file contributes no path
+    paths = [*(unit.get("covered") or []), *(unit.get("depends") or [])]
+    for m in unit.get("mutants") or []:
+        paths += [k.split("::", 1)[0] for k in m.get("killed_by") or []]
+    return [unit["test_path"], *(p for p in paths if p)]
 
 
 def run_dirs(repo_dir):
@@ -114,25 +115,28 @@ def read_ledger(run):
 
 def classify(target, prior_runs):
     """Newest prior record per test file, tagged same_source, changed_source or removed."""
-    seen, units, incomplete = set(), [], []
+    seen, newest, incomplete = set(), [], []
     for run in prior_runs:
         ledger = read_ledger(run)
         if ledger is None:
             incomplete.append(run)
             continue
         for unit in ledger:
-            if unit["test_path"] in seen:
-                continue
-            seen.add(unit["test_path"])
-            recorded = unit["blobs"]
-            current = blobs_at(target, "HEAD", [unit["test_path"], *recorded])
-            if current[unit["test_path"]] is None:
-                status = "removed"
-            elif recorded and all(v is not None and current[p] == v for p, v in recorded.items()):
-                status = "same_source"
-            else:
-                status = "changed_source"
-            units.append({**unit, "prior_status": status, "from_run": run})
+            if unit["test_path"] not in seen:
+                seen.add(unit["test_path"])
+                newest.append((unit, run))
+    # one ls-tree for every unit's paths, not one per unit
+    current = blobs_at(target, "HEAD", [p for u, _ in newest for p in (u["test_path"], *u["blobs"])])
+    units = []
+    for unit, run in newest:
+        recorded = unit["blobs"]
+        if current[unit["test_path"]] is None:
+            status = "removed"
+        elif recorded and all(v is not None and current[p] == v for p, v in recorded.items()):
+            status = "same_source"
+        else:
+            status = "changed_source"
+        units.append({**unit, "prior_status": status, "from_run": run})
     return units, incomplete
 
 
@@ -168,7 +172,11 @@ def cmd_record(args):
     with open(meta_path, encoding="utf-8") as f:
         meta = json.load(f)
     units = json.load(sys.stdin)
-    stale = [u["test_path"] for u in units if u.get("prior_status") in ("changed_source", "removed")]
+    # a ledger holding such a unit would fail every later start's ls-tree or read
+    if any(not isinstance(u.get("test_path"), str) or not u["test_path"] for u in units):
+        print("every unit needs a non-empty test_path", file=sys.stderr)
+        return 1
+    stale =[u["test_path"] for u in units if u.get("prior_status") in ("changed_source", "removed")]
     if stale:
         # a changed unit becomes current only once re-measured: drop prior_status when it is
         print("not re-measured (still tagged changed_source/removed): " + ", ".join(stale),
@@ -235,7 +243,7 @@ def self_test():
             stdin, sys.stdin = sys.stdin, io.StringIO(json.dumps(units))
             try:
                 with redirect_stdout(io.StringIO()):
-                    cmd_record(argparse.Namespace(run_dir=run_dir, seed=seed))
+                    assert cmd_record(argparse.Namespace(run_dir=run_dir, seed=seed)) == 0
             finally:
                 sys.stdin = stdin
 
@@ -275,6 +283,16 @@ def self_test():
             "src/e.test.ts": "removed", "src/f.test.ts": "changed_source",
         }, statuses(second)
 
+        # every prior unit's blobs come from one ls-tree at HEAD, not one per unit
+        calls, real_git = [], git
+        globals()["git"] = lambda t, *a: (calls.append(a[0]), real_git(t, *a))[1]
+        try:
+            batched, _ = classify(repo, [first["run_dir"]])
+        finally:
+            globals()["git"] = real_git
+        assert calls.count("ls-tree") == 1, calls
+        assert {u["test_path"]: u["prior_status"] for u in batched} == statuses(second)
+
         # HEAD moves after start: record stamps the run's source_ref, not the new HEAD
         write("src/a.ts", "a2")
         git(repo, "commit", "-qam", "move head")
@@ -308,6 +326,31 @@ def self_test():
         # a subdirectory target resolves to the repo root: same store, same relative paths
         code, out = run_start(os.path.join(repo, "src"))
         assert code == 0 and json.loads(out)["run_dir"].endswith("run-7"), out
+
+        # null lists read as empty; a `::test` killer with no file records no empty path
+        record(json.loads(out)["run_dir"], [
+            {"test_path": "src/a.test.ts", "covered": None, "depends": None,
+             "mutants": [{"id": "m1", "killed_by": None},
+                         {"id": "m2", "killed_by": ["::t", "src/b.test.ts::x"]}]},
+            {"test_path": "src/c.test.ts", "mutants": None},
+        ])
+        with open(os.path.join(json.loads(out)["run_dir"], "ledger.json")) as f:
+            nulls = json.load(f)
+        assert [sorted(u["blobs"]) for u in nulls] == [
+            ["src/a.test.ts", "src/b.test.ts"], ["src/c.test.ts"]], nulls
+
+        # an empty or null test_path is refused, never written as a ledger later starts trip on
+        for bad in ("", None):
+            stdin, sys.stdin = sys.stdin, io.StringIO(json.dumps(
+                [{"test_path": "src/a.test.ts"}, {"test_path": bad, "covered": ["src/a.ts"]}]))
+            stderr, sys.stderr = sys.stderr, io.StringIO()
+            try:
+                assert cmd_record(argparse.Namespace(
+                    run_dir=json.loads(out)["run_dir"], seed=None)) == 1, bad
+            finally:
+                sys.stdin, sys.stderr = stdin, stderr
+        with open(os.path.join(json.loads(out)["run_dir"], "ledger.json")) as f:
+            assert json.load(f) == nulls, "a refused record overwrote the ledger"
 
         write("src/a.ts", "dirty")
         assert run_start()[0] == 1
