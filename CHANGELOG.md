@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] test-prune ledger reads null unit lists as empty and stamps prior units with one ls-tree (dev v4.11.6) (2026-10-17)
 - [done] test-prune records each run's explored units and reuses the unchanged ones next run (dev v4.11.5) (2026-10-16)
 - [done] status band shows a due harness-curate run until it is run (mods v0.3.0) (2026-10-16)
 - [done] codex-review re-runs once when its review names a pruned Codex plugin path (dev v4.11.4) (2026-10-16)
