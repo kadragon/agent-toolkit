@@ -58,11 +58,15 @@ type World = {
 }
 
 // On Windows the engine hands `fs` a POSIX path made absolute on the drive
-// (`/home/me` as `C:\home\me`), so both sides are compared without one.
+// (`/home/me` as `C:\home\me`), so it is also compared without one. Elsewhere
+// a Windows path arrives under the working directory, matched as written.
 const comparable = (path: string): string => path.replace(/^[A-Za-z]:/, '').replace(/\\/g, '/')
 
 const isFile = (path: string, file: string): boolean =>
-  comparable(path) === comparable(file) || comparable(path).endsWith(`/${comparable(file)}`)
+  path === file ||
+  path.endsWith(`/${file}`) ||
+  comparable(path) === comparable(file) ||
+  comparable(path).endsWith(`/${comparable(file)}`)
 
 // The engine beneath the plugin: what the session, the clock, git and the band
 // answer when no plugin does.
@@ -804,6 +808,17 @@ test(
     await ui.unmount()
   },
 )
+
+test('in a band of three rows with no setup figure yet, the blank row stays', async ($, on) => {
+  world(on)
+
+  await start($)
+  const { ui, texts } = await drawn($, 'terminal', { maxRows: 3 })
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
+  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
+})
 
 test('the MCP figure counts each server once, however many tools it has', async ($, on) => {
   const state = world(on)

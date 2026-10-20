@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { ASCII, UNICODE } from './status-band/format'
+import { ASCII, setupSegments, UNICODE } from './status-band/format'
 import { statusRows } from './status-band/register'
 
 // The same value the mod writes: the loader reads an atom's key off the file
@@ -27,13 +27,11 @@ export const register: Register = (on, options) => {
 
     if (status === null) return next(e)
 
+    const glyphs = options.statusBandAscii === true ? ASCII : UNICODE
     const isSplit = STATUS_ROWS <= e.props.maxRows
-    const rows = isSplit ? STATUS_ROWS : MIN_STATUS_ROWS
+    // A setup with no figure read yet draws no row, leaving room for the blank one.
+    const rows = isSplit && setupSegments(status, glyphs).length > 0 ? STATUS_ROWS : MIN_STATUS_ROWS
 
-    return statusRows($.ui.resolve(e), status, {
-      hasMargin: rows < e.props.maxRows,
-      isSplit,
-      glyphs: options.statusBandAscii === true ? ASCII : UNICODE,
-    })
+    return statusRows($.ui.resolve(e), status, { hasMargin: rows < e.props.maxRows, isSplit, glyphs })
   })
 }
