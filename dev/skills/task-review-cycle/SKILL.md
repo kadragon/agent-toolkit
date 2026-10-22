@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.0.0
+version: 1.0.1
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -163,7 +163,7 @@ confidence or by `--auto`.
 
 Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
 approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
-(format in the guide) — never `tasks.md`.
+(format and the rejected-record check in the guide) — never `tasks.md`.
 
 ## Step 4: Apply
 

@@ -1,7 +1,7 @@
 ---
 name: reference-review
 description: "Review or benchmark our skills, agents, or task cycle against an external reference repo (mattpocock/skills, revfactory/harness, any GitHub URL) or current agentic-coding practice — compare, find what to adopt and what is over-built. NOT for mining our own transcripts → dev:harness-curate."
-version: 1.0.1
+version: 1.0.2
 ---
 
 # Reference review — adopt and cut, against an outside reference
@@ -34,6 +34,11 @@ Done when: every in-scope reference asset has a row `{their path | our path or a
 - **Cut** — something ours carries that the reference achieves without, or a gate/step/prose
   block whose removal would cause no mistake. Cuts count as findings,
   not an afterthought; a leaner harness outranks feature parity.
+
+Before ranking, check each row against the repo's rejected record — `backlog.md` →
+`## Rejected — do not re-file`, plus any cut list it points to. A match stays out unless this
+run's evidence meets that entry's re-file bar; say so in the row. Pattern adapted from
+mattpocock/skills@5beb35b `SCOPE.md` + `.out-of-scope/`.
 
 One ranked table: `| # | Lens | Our asset | Reference evidence | Change | Why (failure prevented or load removed) |`.
 Number the rows — the user answers by number.

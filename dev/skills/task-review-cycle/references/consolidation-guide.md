@@ -47,3 +47,6 @@ path):
 Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing test or rule ·
 `[harness]` tooling/CI. An in-scope P2/P3 line ends with `(introduced here)`. Append to an
 existing section; never overwrite earlier groups.
+
+Before appending, check `backlog.md` → `## Rejected — do not re-file`: a finding that matches an
+entry there is not filed unless this cycle's evidence meets that entry's re-file bar.
