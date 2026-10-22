@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.0.1
+version: 1.0.2
 ---
 
 # Debug
@@ -15,7 +15,10 @@ version: 1.0.1
 > Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) `skills/engineering/diagnosing-bugs`
 > — the feedback-loop-first discipline and its phase gates. Deviations: no `CONTEXT.md`/ADR
 > pipeline (this repo has none), and Phase 5 defers to this repo's own `[FIX]` contract and
-> *Regression Test Rules* instead of restating them.
+> *Regression Test Rules* instead of restating them. The premise check (Phase 3), the
+> benchmark minimums (Phase 4) and the refuted-change revert (Phase 6) come from
+> `cursor/plugins@9b93e81:pstack/skills/principle-attack-the-premise/SKILL.md`,
+> `pstack/skills/benchmark-checklist/SKILL.md` and `pstack/skills/poteto-mode/playbooks/bug-fix.md`.
 
 A discipline for bugs whose cause is not yet known. Skip a phase only when you can say why
 in one line.
@@ -121,6 +124,11 @@ Show the ranked list to the user before testing. They often re-rank it instantly
 deployed a change to #3 yesterday") or have already ruled one out. Do not block on the reply —
 if no user is reachable, proceed with your own ranking and say so.
 
+**Two failed fixes → test the premise.** When two fixes have failed the same check, write
+down the one sentence both assumed, then run the observation that would come out differently
+if that sentence were false. No third fix before that check runs: if it contradicts the
+premise, re-rank from what the failures share; if it confirms it, ask the next "why".
+
 ## Phase 4 — Instrument
 
 Every probe maps to one prediction from Phase 3, and **one variable changes at a time**.
@@ -142,7 +150,16 @@ Untagged logs survive the cleanup; tagged ones die.
 
 **Performance regressions take the other branch.** Logs are usually the wrong instrument:
 establish a baseline measurement first (timing harness, profiler, query plan), then bisect
-against it. Measure first, fix second.
+against it. Measure first, fix second. A before/after number counts only when:
+
+- [ ] each side ran at least 5 times, interleaved (A, B, A, B), reported as median and range —
+      a gap inside the run-to-run range is no measurable difference;
+- [ ] failures and non-success results were counted on both sides (an error is often fast);
+- [ ] the timed region did the work — the rows were written, the request reached the server,
+      the result was used;
+- [ ] the bound is named (CPU, a lock, I/O, the load generator) from a profile, not a guess.
+
+Any box unchecked → report the result as inconclusive and name the gap.
 
 ## Phase 5 — Fix with a regression test
 
@@ -177,6 +194,8 @@ Required before declaring done:
 - [ ] The Phase 1 loop no longer reproduces the bug.
 - [ ] The regression test passes — or the absence of a correct seam is written down.
 - [ ] All tagged instrumentation removed (grep the prefix).
+- [ ] Every code change a refuted hypothesis motivated is reverted — only the change the
+      surviving hypothesis justifies ships.
 - [ ] Throwaway harnesses deleted, or moved under the session scratchpad directory.
 - [ ] The hypothesis that turned out correct is stated in the commit or PR body, so the next
       person debugging this area inherits it.

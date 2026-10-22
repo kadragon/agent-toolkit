@@ -57,7 +57,9 @@ router matches and handoff flags do not authorize Git writes. Reuse established 
 **Lint/test command:** the command that must exit 0
 ```
 
-The Tag is what the reviewer grades a `[FIX]` reproduction criterion against — write it in.
+The Tag is what the reviewer grades a `[FIX]` reproduction criterion or a `[REFACTOR]` behavior
+pin against — write it in. A `[REFACTOR]` contract names the tests that hold the touched behavior,
+green before the first structural edit (a characterization test written first where none exist).
 When the resolved skill-authoring summary includes `Skill slots:`, append its entire seven-slot
 block verbatim to the contract and archive, including sources and explicit N/A values. For
 a queued skill-authoring item, read the cited spec/summary and recover that block before
@@ -102,17 +104,20 @@ reports through its final output, the only channel a role-file agent has
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
 - **Stuck-fix stop** — the same fix attempted twice on one file without the command passing →
-  record what was tried, why it failed, and the next hypothesis (block below; `--tree` prefixes
+  record what was tried, why it failed, the premise both attempts shared with the check that
+  would show it false, and the next hypothesis (block below; `--tree` prefixes
   `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
   session (`/clear`): accumulated failed attempts degrade the context, and `inspect` hands the
-  notes to the next run. A delegated implementer only reports its attempts; the parent records
-  that report as the note. An unknown cause routes to `dev:task-debug`.
+  notes to the next run, which runs the premise check before a third fix
+  (`cursor/plugins@9b93e81:pstack/skills/principle-attack-the-premise/SKILL.md`). A delegated
+  implementer only reports its attempts; the parent records that report as the note. An unknown
+  cause routes to `dev:task-debug`.
 
   ```bash
   CYCLE_DIR="<absolute directory of this cycle.md>"
   STATE="$CYCLE_DIR/../scripts/cycle_state.py"
   python3 "$STATE" note <<'STUCK_NOTE'
-  <what was tried, why it failed, next hypothesis>
+  <what was tried, why it failed, shared premise + the check that would refute it, next hypothesis>
   STUCK_NOTE
   ```
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset

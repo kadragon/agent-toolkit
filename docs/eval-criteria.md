@@ -136,13 +136,18 @@ without it a `[FIX]` contract that silently omits the criterion is indistinguish
 well-formed non-`[FIX]` one, and the omission is exactly what needs detecting. `docs/conventions.md` (the `[FIX]` row of the
 commit-type table) is the owning rule.
 
+**`[REFACTOR]` requires a behavior pin.** When the tag is `[REFACTOR]`, acceptance criteria must
+include one naming the tests that hold the touched behavior, run green before the first structural
+edit. Where the area has no such test, the criterion names a characterization test written first.
+The lint/test command alone is not a pin: a refactor over untested code passes it while behavior
+changes (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/refactoring.md` step 1).
+
 ## Harness Component Assessment
 
 Quarterly: for each harness component, assess whether it still compensates for a real model limitation.
 
 | Component | Assumption | Still load-bearing? |
 |-----------|-----------|---------------------|
-| Trigger router | Descriptions fire ~50% without help | Test: remove router, check fire rate |
 | Version-bump CI | Agents forget to bump version | Test: omit bump intentionally, see if CI catches it |
 | Capture-before-use rule | Agents reference unset vars | Test: omit pattern in docs, observe agent output |
 | Generator-Evaluator separation | Self-eval is lenient | Likely still true across model generations |

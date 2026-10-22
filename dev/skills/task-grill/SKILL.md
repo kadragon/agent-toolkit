@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.3.2
+version: 1.3.3
 ---
 
 # Grill
@@ -15,9 +15,8 @@ version: 1.3.2
 
 Formalizes this repo's existing "Grill" hard-stop convention (`~/.claude/CLAUDE.md`) into a
 reusable skill: **material ambiguity affecting scope, irreversible effects, external
-communication, or expected output → grill, don't guess.** Unlike mattpocock's `grilling`+`domain-modeling` pair, this skill does not
-produce a separate `CONTEXT.md` or ADR artifact — this repo has no such convention. Its output
-feeds directly into whichever document is being built next: a Sprint Contract
+communication, or expected output → grill, don't guess.** Its output feeds directly into
+whichever document is being built next: a Sprint Contract
 (`docs/eval-criteria.md` template) or a `task-spec` document.
 
 ## When to use
@@ -39,7 +38,11 @@ look it up instead of asking.
    This lets the user answer with a single "yes" / "그렇게 해" instead of composing from scratch.
 3. **Look it up before asking.** If a fact is discoverable from the repo (code, config,
    `git log`, existing docs) or environment (installed tools, running services), read it —
-   do not ask the user to restate something you can verify yourself.
+   do not ask the user to restate something you can verify yourself. An empirical fork —
+   does approach A work, which one is faster, what does the output look like — is a fact
+   too: settle it with a throwaway sketch in the session scratchpad and bring the observed
+   result, not the question. Ask only for a product or preference call no run can settle
+   (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/prototype.md`).
 4. **Never act until the user confirms shared understanding.** Do not start implementing,
    writing a spec, or writing tickets mid-interview. The interview ends when the user has
    answered every open question, or declared the question itself irrelevant — not merely
@@ -52,9 +55,8 @@ look it up instead of asking.
    skip the wait — adopt every open question's `Recommended:` answer immediately, mark each as
    an assumption in the four-field summary, announce per that section, and list any question the
    interview could not resolve even with a default in the handoff.
-5. **No ADR/glossary machinery.** Do not create `CONTEXT.md`, a glossary file, or any
-   standalone artifact. Hold the resolved answers in conversation context and hand them
-   directly to the caller (Sprint Contract author, or `task-spec`).
+5. **Hand answers to the caller.** Hold the resolved answers in conversation context and hand
+   them directly to the caller (Sprint Contract author, or `task-spec`).
 
 ## Flow
 
