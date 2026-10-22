@@ -1,7 +1,7 @@
 ---
 name: reference-review
 description: "Review or benchmark our skills, agents, or task cycle against an external reference repo (mattpocock/skills, revfactory/harness, any GitHub URL) or current agentic-coding practice — compare, find what to adopt and what is over-built. NOT for mining our own transcripts → dev:harness-curate."
-version: 1.0.2
+version: 1.1.0
 ---
 
 # Reference review — adopt and cut, against an outside reference

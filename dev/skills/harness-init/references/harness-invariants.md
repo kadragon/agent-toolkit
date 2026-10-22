@@ -15,7 +15,7 @@ value changes here, update both in the same commit.
 | `CLAUDE.md` | Exactly one line: `@AGENTS.md` | init Step 8 | maintenance B (`sync-claude-md.sh`) |
 | `AGENTS.md` | Target ≤100 lines, hard warn >200 | init Step 3 | maintenance F (`check-context-size.sh`) |
 | `.agents/skills` | Symlink → `../.claude/skills` (or regular text file containing `../.claude/skills` on Windows with `core.symlinks=false`) | init Step 8 | maintenance E (`symlink-guard.sh`) |
-| `backlog.md` | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings | init Step 4 | maintenance C + D-1 |
+| `backlog.md` | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings (`## Rejected — do not re-file` holds plain bullets) | init Step 4 | maintenance C + D-1 |
 | `tasks.md` | Fields: `# Title`, `status:`, `Scope`, `Acceptance Criteria`, `Evaluator Feedback` | init Step 4 | maintenance C + D-1 |
 | `docs/architecture.md` etc. | Referenced from AGENTS.md docs index | init Step 4 | `validate-harness.sh` |
 | `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`; `tools` and `model` optional) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria, unless the role declares `spine-exempt: true` | **not init** — created later by `dev:harness-curate` on transcript evidence (init Step 4b creates no roles) | `validate-harness.sh` §11 (presence only — WARN; skipped entirely when no role files exist) |

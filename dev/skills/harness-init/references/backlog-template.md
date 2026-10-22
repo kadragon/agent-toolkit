@@ -10,7 +10,8 @@ whole at sprint close (`tasks-template.md` → *Invariant*).
 
 ## Required Schema
 
-- All items are markdown list items with a checkbox: `- [ ]`, `- [>]`, or `- [x]`
+- All items are markdown list items with a checkbox: `- [ ]`, `- [>]`, or `- [x]` — except
+  under `## Rejected — do not re-file`, whose entries are plain bullets (see that section)
 - Items group under `##` headings by theme / priority (at least one heading)
 - The three checkbox states have exact semantics:
 

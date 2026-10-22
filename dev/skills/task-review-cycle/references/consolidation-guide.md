@@ -49,4 +49,5 @@ Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing t
 existing section; never overwrite earlier groups.
 
 Before appending, check `backlog.md` → `## Rejected — do not re-file`: a finding that matches an
-entry there is not filed unless this cycle's evidence meets that entry's re-file bar.
+entry there is not filed unless this cycle's evidence meets that entry's re-file bar. List each
+withheld finding in the cycle report with the entry it matched, so a near-miss stays visible.
