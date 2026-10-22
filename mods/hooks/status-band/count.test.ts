@@ -123,11 +123,12 @@ describe('connectedServers', () => {
     expect(connectedServers([tool('qmd', 'get'), tool('qmd', 'query'), tool('claude.ai Gmail', 'send')])).toBe(2)
   })
 
+  // The engine names a tool by the server's name normalized, at any length.
   test('leaves out a server that offers only its sign-in', () => {
     expect(
       connectedServers([
-        tool('claude.ai Asana', 'authenticate'),
-        tool('claude.ai Asana', 'complete_authentication'),
+        { name: 'mcp__claude_ai_Foo_Bar__authenticate', serverName: 'claude.ai Foo & Bar' },
+        { name: 'mcp__claude_ai_Foo_Bar__complete_authentication', serverName: 'claude.ai Foo & Bar' },
         tool('qmd', 'get'),
       ]),
     ).toBe(1)

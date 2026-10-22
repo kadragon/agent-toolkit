@@ -124,7 +124,7 @@ const world = (on: On): World => {
                 })),
                 ...state.mcpUnauthed.flatMap(serverName =>
                   ['authenticate', 'complete_authentication'].map(tool => ({
-                    name: `mcp__${serverName}__${tool}`,
+                    name: `mcp__${serverName.replace(/[^\w-]+/g, '_')}__${tool}`,
                     serverName,
                     tokens: 10,
                     isLoaded: false,
