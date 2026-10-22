@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] backlog records rejected items; reviews skip them (dev v4.11.7) (2026-10-23) → dev/skills/harness-init/references/backlog-template.md
 - [done] status band counts the cache in minutes and only connected MCP servers (mods v0.4.1) (2026-10-23)
 - [done] test-prune ledger reads null unit lists as empty and stamps prior units with one ls-tree (dev v4.11.6) (2026-10-17)
 - [done] test-prune records each run's explored units and reuses the unchanged ones next run (dev v4.11.5) (2026-10-16)

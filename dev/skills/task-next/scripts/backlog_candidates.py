@@ -557,6 +557,9 @@ def format_candidates(candidates: list[dict]) -> list[str]:
     return lines
 
 
+REJECTED_HEADING = "rejected — do not re-file"
+
+
 def _prose_only_headings(tokens: list[dict]) -> list[dict]:
     """Headings that directly own prose bullets but not one checkbox — invisible work.
 
@@ -569,6 +572,10 @@ def _prose_only_headings(tokens: list[dict]) -> list[dict]:
     headings = _headings(tokens)
     drifted = []
     for h in headings:
+        # Plain bullets by design (harness-init backlog-template.md → *Rejected*): decisions,
+        # not work, so a checkbox-free region here is the correct shape.
+        if h["title"].strip().lower() == REJECTED_HEADING:
+            continue
         end = _region_end(h, headings)
         has_box = any(
             t["type"] == "checkbox" and h["line"] < t["line"] < end for t in tokens
@@ -1582,6 +1589,26 @@ status: open
     _assert(
         [c["title"] for c in backlog_fast_candidates(tokenize(h4_nested))] == ["Phase 5"],
         "the h4-nested checkbox really does attribute to the enclosing h3",
+    )
+
+    # 8a-ter: `## Rejected — do not re-file` holds plain bullets by design (harness-init
+    # backlog-template.md): a decision record, not invisible work. Flagging it would nudge the
+    # agent to turn rejected entries back into `- [ ]` candidates.
+    rejected_only = """## Open
+- [x] shipped thing
+
+## Rejected — do not re-file
+
+- **gate X** — discarded by the user. Re-file only with a recorded bypass.
+"""
+    _assert(
+        _prose_only_headings(tokenize(rejected_only)) == [],
+        "the Rejected section's plain bullets are not reported as format drift",
+    )
+    _assert(
+        zero_candidate_diagnosis(tokenize(""), tokenize(rejected_only))
+        == ["No candidates found. Why:", "  - backlog.md: no open items (all `[x]`/`[>]`)."],
+        "a backlog holding only done items and rejected entries reads as empty, not drifted",
     )
 
     # 8b: every open item parked by a blocked/deferred marker
