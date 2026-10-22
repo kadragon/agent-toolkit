@@ -160,6 +160,8 @@ describe('duration', () => {
 describe('cache', () => {
   test('reads the time left, and expired once it is past', () => {
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 58 * MINUTE })).toBe('cache 58m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + HOUR })).toBe('cache 60m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 90 * MINUTE })).toBe('cache 90m')
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 30_000 })).toBe('cache <1m')
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW })).toBe('cache expired')
   })

@@ -112,7 +112,10 @@ export const cacheText = (status: StatusBand): string => {
 
   const left = status.cacheExpiresAt - status.now
 
-  return left <= 0 ? 'cache expired' : `cache ${duration(left)}`
+  if (left <= 0) return 'cache expired'
+
+  // Whole minutes alone, so a full hour reads `60m`, not `1h 0m`.
+  return left < MINUTE_MS ? 'cache <1m' : `cache ${Math.floor(left / MINUTE_MS)}m`
 }
 
 const joined = (groups: Segment[][], separator: string): Segment[] =>

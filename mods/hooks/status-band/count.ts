@@ -70,6 +70,18 @@ export const installPaths = (text: string, cwd: string): Record<string, string> 
   )
 }
 
+// The tools a server that needs a sign-in offers in place of its own.
+const SIGN_IN_TOOLS = new Set(['authenticate', 'complete_authentication'])
+
+// The MCP servers connected, by the tools the context carries: a server counts
+// once, however many tools it has, and not at all while it offers only its sign-in.
+export const connectedServers = (tools: readonly { name: string; serverName: string }[]): number =>
+  new Set(
+    tools
+      .filter(tool => !SIGN_IN_TOOLS.has(tool.name.slice(`mcp__${tool.serverName}__`.length)))
+      .map(tool => tool.serverName),
+  ).size
+
 const relative = (path: string): string => path.replace(/^\.\//, '')
 
 // `path` beneath `base`, in the separator `base` is written with: a Windows
