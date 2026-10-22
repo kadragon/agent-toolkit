@@ -3,6 +3,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 
 import type { StatusBand } from '../../types'
 import {
+  connectedServers,
   enabledPlugins,
   hookCommands,
   hooksFileCommands,
@@ -147,7 +148,7 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
 }
 
 // The skill listing and the MCP servers as /context counts them, estimated
-// locally: no request is sent. A server counts once, however many tools it has.
+// locally: no request is sent.
 const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> => {
   const { context } = await $.session.usage({ breakdown: 'summary' })
   const breakdown = context.breakdown
@@ -158,7 +159,7 @@ const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills
 
   return {
     skills: skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens },
-    mcp: new Set(breakdown.mcpTools.map(tool => tool.serverName)).size,
+    mcp: connectedServers(breakdown.mcpTools),
   }
 }
 

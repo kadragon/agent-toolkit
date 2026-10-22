@@ -44,6 +44,8 @@ type World = {
   skills?: { totalSkills: number; tokens: number }
   // The servers of the MCP tools the breakdown carries, one entry per tool.
   mcpServers: string[]
+  // Servers that need a sign-in: they offer only the tools that start one.
+  mcpUnauthed: string[]
   settingsReads: number
   // How long the next responses take to come back.
   stepMs: number
@@ -87,6 +89,7 @@ const world = (on: On): World => {
     files: {},
     env: { HOME: '/home/me' },
     mcpServers: [],
+    mcpUnauthed: [],
     settingsReads: 0,
     stepMs: 0,
     isUncached: false,
@@ -112,12 +115,22 @@ const world = (on: On): World => {
         : {
             breakdown: {
               skills: { ...state.skills, includedSkills: 0, skillFrontmatter: [] },
-              mcpTools: state.mcpServers.map((serverName, index) => ({
-                name: `mcp__${serverName}__t${index}`,
-                serverName,
-                tokens: 10,
-                isLoaded: true,
-              })),
+              mcpTools: [
+                ...state.mcpServers.map((serverName, index) => ({
+                  name: `mcp__${serverName}__t${index}`,
+                  serverName,
+                  tokens: 10,
+                  isLoaded: true,
+                })),
+                ...state.mcpUnauthed.flatMap(serverName =>
+                  ['authenticate', 'complete_authentication'].map(tool => ({
+                    name: `mcp__${serverName.replace(/[^\w-]+/g, '_')}__${tool}`,
+                    serverName,
+                    tokens: 10,
+                    isLoaded: false,
+                  })),
+                ),
+              ],
             },
           }
 
@@ -304,7 +317,7 @@ test("a main-loop step shows its effort and a subagent's does not change it", as
   const { ui, texts } = await drawn($)
 
   expect(result.answer).toBe('ok')
-  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m │ cache 1h 0m')
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m │ cache 60m')
   await ui.unmount()
 })
 
@@ -525,7 +538,7 @@ test('each segment of the rows is drawn in its own color', async ($, on) => {
   expect(await colorOf(ui, /^\[Opus 5\.5 ◔ medium\]$/)).toBe('claude')
   expect(await colorOf(ui, /^agent-toolkit$/)).toBe('suggestion')
   expect(await colorOf(ui, /^ git:\(main\)$/)).toBe('autoAccept')
-  expect(await colorOf(ui, /^cache 1h 0m$/)).toBe('planMode')
+  expect(await colorOf(ui, /^cache 60m$/)).toBe('planMode')
   expect(await colorOf(ui, /^1 hook$/)).toBe('permission')
   expect(await colorOf(ui, /^2 skills$/)).toBe('remember')
   expect(await colorOf(ui, /^1 mcp$/)).toBe('ide')
@@ -571,7 +584,7 @@ test('a /clear takes the cache figure down until the next response', async ($, o
   await step($)
   const renewed = await drawn($)
 
-  expect(renewed.texts[0]).toContain('│ cache 1h 0m')
+  expect(renewed.texts[0]).toContain('│ cache 60m')
   await renewed.ui.unmount()
 })
 
@@ -799,7 +812,7 @@ test(
 
     expect(rows.map(row => row?.text)).toEqual([
       '[Opus 5.5 medium] | agent-toolkit git:(main) | up 5m',
-      'cache 1h 0m | 0 hooks | 2 skills (300)',
+      'cache 60m | 0 hooks | 2 skills (300)',
     ])
     expect(texts.slice(1)).toEqual([
       'Context #--------- 12%',
@@ -820,11 +833,12 @@ test('in a band of three rows with no setup figure yet, the blank row stays', as
   await ui.unmount()
 })
 
-test('the MCP figure counts each server once, however many tools it has', async ($, on) => {
+test('the MCP figure counts each connected server once, however many tools it has', async ($, on) => {
   const state = world(on)
   state.settings = {}
   state.skills = { totalSkills: 2, tokens: 300 }
   state.mcpServers = ['context-mode', 'context-mode', 'qmd', 'claude.ai Gmail']
+  state.mcpUnauthed = ['claude.ai Asana', 'claude.ai Slack']
 
   await start($)
   const { ui, texts } = await drawn($)
