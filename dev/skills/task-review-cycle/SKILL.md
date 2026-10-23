@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.0
+version: 1.1.1
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -62,7 +62,10 @@ Derive `COMMIT_MESSAGE` from `git diff --cached --stat` (empty index: `--stat HE
 `git log -5`; the `[TYPE]` prefix is mandatory (commit-guard in the script rejects otherwise).
 Capture it — and the Step 2 contract — with a **quoted** heredoc delimiter, never an interpolated
 assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if its diff against
-the base is empty and no review remains, report no work and stop here.
+the base is empty and no review remains, report no work and stop here. End the body with a
+`Verification:` line per `cycle_state.py inspect` → `evidence` record, exact command and exit code
+(`none recorded` when empty): `retire` deletes the archive after merge, so the commit and PR body keep
+the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`).
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -245,6 +248,3 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` / `checks-never-registered` | Stop, ask the user |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
-
-Scripts: `preflight.sh`, `commit-and-push.sh`, `claude-review.sh`, `agy-review.sh`,
-`codex-review.sh`, `ci-wait.sh`, `ci-failure-logs.sh`, `merge-and-cleanup.sh`, `hub.sh` (adapter).
