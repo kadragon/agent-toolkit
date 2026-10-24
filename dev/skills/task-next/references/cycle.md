@@ -152,6 +152,8 @@ or backlog line. Cleanup changes are provisional until review and merge succeed.
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
 ambiguous or non-verbatim match — re-read and re-run rather than loosening the input.
+`prune-backlog` also deletes each item's wrapped continuation lines; an item whose body holds a
+fence or comment is refused by line number — delete that one by hand, not its body alone.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"
