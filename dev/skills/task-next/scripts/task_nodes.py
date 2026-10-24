@@ -174,7 +174,7 @@ UNRELEASED_HEADING = "## Unreleased"
 # gets the file's dominant ending. The terminator set is `str.splitlines`'s, not just \r and \n:
 # the masked views index lines by `splitlines()`, so a U+2028 must end a line here too, and a
 # terminator left in the body would get the default ending appended after it.
-_EOL_RE = re.compile(r"(?:\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85  ])\Z")
+_EOL_RE = re.compile(r"(?:\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029])\Z")
 
 
 def _split(text: str) -> tuple[list[str], list[str]]:
@@ -1448,10 +1448,10 @@ Preamble with no h1 wrapper.
     # Every `str.splitlines` boundary is a terminator, not only \n and \r\n. Left in the body with
     # an empty terminator, U+2028 had `_join` write the default newline after it — into a line
     # this run never touched.
-    odd = "a b\x85c\x0cd\re\r\nf\n"
+    odd = "a\u2028b\x85c\x0cd\re\r\nf\n"
     _assert(_join(*_split(odd), "\n") == odd, "_split/_join round-trip every splitlines boundary")
-    out, _ = prune_lines("- [ ] x\n- [ ] see note\n", ["- [ ] x"])
-    _assert(out == "- [ ] see note\n",
+    out, _ = prune_lines("- [ ] x\n- [ ] see\u2028note\n", ["- [ ] x"])
+    _assert(out == "- [ ] see\u2028note\n",
             "REGRESSION: a U+2028 inside an untouched line survives prune_lines byte-for-byte")
 
     crlf_block = "# One\r\n\r\nstatus: active\r\n\r\n# Two\r\n\r\nstatus: open\r\n"
