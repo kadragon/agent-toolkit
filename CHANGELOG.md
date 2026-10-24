@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] prune-backlog and prune-tasks keep a CRLF file CRLF through the CLI (dev v4.11.14) (2026-10-24)
 - [done] prune-backlog prunes a U+2028 line as one target and keeps the masked line count on non-LF breaks (dev v4.11.13) (2026-10-24)
 - [done] prune-backlog keeps U+2028 lines intact, refuses nested checkboxes, and accepts inline comments (dev v4.11.12) (2026-10-24)
 - [done] prune-backlog removes a pruned item's wrapped continuation lines (dev v4.11.11) (2026-10-24)

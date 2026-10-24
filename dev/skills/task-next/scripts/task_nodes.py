@@ -982,7 +982,8 @@ def _write_or_delete(path: Path, text: str, delete_if_empty: bool) -> str:
     if not text.strip() and delete_if_empty:
         os.remove(path)
         return f"{path}: deleted (no content left)"
-    path.write_text(text, encoding="utf-8")
+    # Bytes, not `write_text`: text mode would translate each \n to the platform's ending.
+    path.write_bytes(text.encode("utf-8"))
     return f"{path}: updated"
 
 
@@ -991,7 +992,8 @@ def cmd_prune(argv: list[str], *, delete_if_empty: bool) -> int:
     if not path.is_file():
         sys.stderr.write(f"Error: not a file: {path}\n")
         return 1
-    text = path.read_text(encoding="utf-8")
+    # Bytes, not `read_text`: universal newlines would fold every \r\n to \n before `_split` sees it.
+    text = path.read_bytes().decode("utf-8")
     if delete_if_empty:
         stale = persistent_sections(text)
         if stale:
@@ -1981,6 +1983,22 @@ status: open
             rc == 0 and "- [ ] [debt] two" in bl.read_text(encoding="utf-8"),
             "prune-backlog still prunes a `## Review Backlog` section in backlog.md",
         )
+        # REGRESSION GUARD: `_split`/`_join` keep CRLF, but a universal-newlines read had already
+        # turned every \r\n into \n before they saw the text, so the CLI wrote a CRLF file back LF.
+        crlf = Path(td) / "crlf.md"
+        crlf.write_bytes(b"## A\r\n\r\n- [ ] one\r\n- [ ] two\r\n")
+        real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] one\n")
+        try:
+            rc = main(["prune-backlog", "--file", str(crlf)])
+        finally:
+            sys.stdin = real_stdin
+        _assert(rc == 0 and crlf.read_bytes() == b"## A\r\n\r\n- [ ] two\r\n",
+                "prune-backlog through the CLI keeps a CRLF file's surviving lines CRLF")
+        crlf_tasks = Path(td) / "crlf_tasks.md"
+        crlf_tasks.write_bytes(b"# S1\r\n\r\nstatus: done\r\n\r\n# S2\r\n\r\nstatus: active\r\n")
+        rc = main(["prune-tasks", "--file", str(crlf_tasks), "--block", "S1"])
+        _assert(rc == 0 and crlf_tasks.read_bytes() == b"# S2\r\n\r\nstatus: active\r\n",
+                "prune-tasks through the CLI keeps a CRLF file's surviving block CRLF")
 
         c = Path(td) / "CHANGELOG.md"
         rc = main(["changelog", "--file", str(c), "--title", "t", "--plugin", "dev",
