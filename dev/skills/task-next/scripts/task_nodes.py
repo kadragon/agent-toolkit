@@ -30,7 +30,8 @@ Usage:
                   blank region, or with nothing left but its own intro prose. Refuses (exit 1)
                   on a line that matches nothing, rather than deleting an approximation of it,
                   and on an item whose body is not plain wrapped text (a fence or comment in it,
-                  or an indented checkbox with an indented body) — edit that one by hand. Then warns on stderr (exit stays 0) when a
+                  or text right under an indented checkbox) — edit that one by hand. Then warns
+                  on stderr (exit stays 0) when a
                   surviving `*(blocked by: …)*` marker still names something this run deleted —
                   nothing else would ever clear it, and the marked item is invisible to
                   candidate selection until someone does.
@@ -444,15 +445,10 @@ def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
     return out
 
 
-def _indent(line: str) -> int:
-    expanded = line.expandtabs(4)
-    return len(expanded) - len(expanded.lstrip())
-
-
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets` with its wrapped continuation lines, then any heading
     this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
-    comment in it, or an indented checkbox with an indented body — refuses the whole run instead.
+    comment in it, or text right under an indented checkbox — refuses the whole run instead.
 
     A heading whose region this run drained down to nothing, or down to only its intro prose
     (no surviving item, no surviving child heading), is deleted along with that region — see
@@ -494,19 +490,20 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     # A wrapped item's continuation lines belong to its checkbox — folded by `_line_owners`, which
     # re-walks `tokenize`'s rules so the pruner and the selector agree on where an item ends.
     # Left behind, they read as the body of the item above. Only plain text is deleted this way:
-    # a body touching a fence or comment, or one under an indented checkbox (which `_line_owners`
-    # does not fold), is refused up front rather than cut and checked afterwards.
+    # a body touching a fence or comment, or any text right under an indented checkbox (which
+    # `_line_owners` does not fold), is refused up front rather than cut and checked afterwards.
     owners, _ = _line_owners(text)
     for i in sorted(drop):
         body = [j for j, o in owners.items() if o == i and j != i]
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
         reason = None
-        if lines[i].count("<!--") != lines[i].count("-->"):
-            reason = "opens or closes an HTML comment"
+        if masked[i] != lines[i]:
+            reason = "carries an HTML comment"
         elif any(masked[j] != lines[j] for j in body):
             reason = "has a wrapped body inside a fence or HTML comment"
-        elif i not in owners and nxt.strip() and _indent(nxt) > _indent(lines[i]):
-            reason = "is an indented checkbox with an indented body"
+        elif (i not in owners and nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt)
+              and not nxt.lstrip().startswith("#")):
+            reason = "is an indented checkbox followed by text"
         if reason:
             problems.append(f"line {i + 1} {reason} — edit it by hand: {lines[i].strip()!r}")
         drop.update(body)
@@ -697,24 +694,12 @@ def orphaned_blockers(original: str, removed: list[str], new_text: str, label: s
         silence each other and both stay unselectable.
     """
     subjects: list[tuple[str, list[str]]] = []
-    original_masked = _strip_fenced_blocks(_strip_html_comments(original)).splitlines()
-    original_owner, _ = _line_owners(original)
     for raw in removed:
         m = _CHECKBOX_LINE_RE.match(raw)
         body = m.group(1) if m else raw
-        # The item's indented body was deleted with it, so a marker may name words that sit only
-        # on a wrapped continuation line.
-        # The checkbox line still names the subject in the warning; the body only widens matching.
-        title = body
-        # Located on the masked view, exactly as `prune_lines` matched it.
-        at = [i for i, ln in enumerate(original_masked) if ln.rstrip() == raw.rstrip()]
-        if len(at) == 1:
-            body = " ".join([body, *(_BLOCK_MARKER_RE.sub(" ", original_masked[i]).strip()
-                                     for i, o in original_owner.items()
-                                     if o == at[0] and i != at[0])])
         tokens = _slug_tokens(body)
         if tokens:
-            subjects.append((slugify(title) or slugify(body), tokens))
+            subjects.append((slugify(body), tokens))
     surviving_titles = [h["title"] for h in _headings(tokenize(new_text))]
     for title in (h["title"] for h in _headings(tokenize(original))):
         if title in surviving_titles:
@@ -1462,13 +1447,14 @@ Preamble with no h1 wrapper.
             "an indented checkbox with an indented body is refused, not split from its body")
     out, problems = prune_lines("- [ ] p\n  - [ ] c\n- [ ] q\n", ["  - [ ] c"])
     _assert(problems == [] and out == "- [ ] p\n- [ ] q\n", "a bodiless indented checkbox is pruned")
-    tabbed = "- [ ] p\n\t- [ ] child\n  sibling-of-child-visual\n- [ ] q\n"
-    out, _ = prune_lines(tabbed, ["\t- [ ] child"])
-    _assert("  sibling-of-child-visual" in out, "tab indentation never widens what a prune deletes")
-    separator = "## G\n\nsee\u2028note\n- [ ] a\n  wrapped\n- [ ] b\n"
-    out, problems = prune_lines(separator, ["- [ ] a"])
-    _assert(problems == [] and "- [ ] a" not in out and "wrapped" not in out and "- [ ] b" in out,
-            "a Unicode line separator elsewhere in the file does not block a prune")
+    # Text right under an indented checkbox, at any depth, would reattach to the item above.
+    for src, target in (("- [ ] p\n  - [ ] c\n  body *(deferred: later)*\n- [ ] q\n", "  - [ ] c"),
+                        ("- [ ] p\n\t- [ ] child\n  rest *(blocked by: 1-foo)*\n- [ ] q\n", "\t- [ ] child")):
+        out, problems = prune_lines(src, [target])
+        _assert(out == src and len(problems) == 1 and "followed by text" in problems[0],
+                f"an indented checkbox followed by text is refused: {target!r}")
+    out, problems = prune_lines("- [ ] fix --> arrow\n- [ ] b\n", ["- [ ] fix --> arrow"])
+    _assert(problems == [] and out == "- [ ] b\n", "a literal `-->` in item text is not a comment")
     for name, src in (
         ("an indented fence", "## G\n\n- [ ] [FIX] a\n  ```\n  code\n  ```\n- [ ] [FIX] b\n"),
         ("an indented fence with a blank line", "## G\n\n- [ ] [FIX] b\n- [ ] [FIX] a\n  ```\n  code\n\n  ```\n"),
@@ -1480,15 +1466,7 @@ Preamble with no h1 wrapper.
         out, problems = prune_lines(src, ["- [ ] [FIX] a"])
         _assert(out == src and len(problems) == 1 and "edit it by hand" in problems[0],
                 f"an item carrying {name} is refused up front, deleting nothing")
-    wrapped_subject = ("- [ ] [FIX] add\n      cross process lock\n"
-                       "- [ ] *(blocked by: 1-cross-process-lock)* [FIX] other\n")
-    pruned_ws, _ = prune_lines(wrapped_subject, ["- [ ] [FIX] add"])
-    _assert(orphaned_blockers(wrapped_subject, ["- [ ] [FIX] add"], pruned_ws, "b.md") != [],
-            "a marker naming words on a pruned item's continuation line is still reported")
-    dup = "<!--\n- [ ] [FIX] add\n-->\n" + wrapped_subject
-    pruned_dup, problems = prune_lines(dup, ["- [ ] [FIX] add"])
-    _assert(problems == [] and orphaned_blockers(dup, ["- [ ] [FIX] add"], pruned_dup, "b.md") != [],
-            "a commented duplicate of the pruned line does not hide its continuation from the warning")
+    # The subject is the checkbox line alone; a deleted continuation never widens it.
     noted = "## S\n\n- [ ] [FIX] x\n  - note: auth refactor later\n- [x] [FIX] auth\n- [ ] *(blocked by: 2-auth)* [FIX] y\n"
     pruned_noted, _ = prune_lines(noted, ["- [ ] [FIX] x"])
     _assert(orphaned_blockers(noted, ["- [ ] [FIX] x"], pruned_noted, "b.md") == [],
