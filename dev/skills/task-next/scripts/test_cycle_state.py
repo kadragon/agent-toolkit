@@ -75,6 +75,13 @@ class RecoveryTest(unittest.TestCase):
             self.state("save", "--replace", text=contract() + auth)
             self.state("authorize", "--action", "commit", ok=False)
 
+    def test_unknown_allowed_action_denies(self):
+        # A name outside the known actions means the list was not written to this contract's terms.
+        self.state("save", text=contract() + self.authority(actions="commit, rewrite-history"))
+        self.state("authorize", "--action", "commit", ok=False)
+        self.state("save", "--replace", text=contract() + self.authority(actions="commit"))
+        self.state("authorize", "--action", "commit")
+
     def test_feature_effects_never_authorize_base(self):
         self.state("save", text=contract() + self.authority())
         source = Path(self.state("inspect")["contract_path"])
