@@ -17,10 +17,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [FIX] On Windows in the Wave terminal the band sometimes shows broken glyphs or stale cells (e.g. `559m` where `duration()` can only emit `59m`); macOS renders it correctly, colors included (user check, 2026-10-17). Suspect the ambiguous-width glyphs the row emits — the effort mark (`○◔◑◕●`), the `█░` context bar, `⏱️` with its variation selector — measured at one cell by the engine but drawn at two by the terminal, so a redraw leaves cells behind; unverified — mods/hooks/status-band/format.ts *(deferred: needs a Windows + Wave session to reproduce; this machine is macOS)*
 
-### PR #347 — prune-backlog prunes a U+2028 line as one target and keeps the masked line count on non-LF breaks (2026-10-24)
-
-- [ ] [debt] `cmd_prune` reads with `Path.read_text` (universal newlines) and writes with `write_text`, so a CRLF `backlog.md` comes back LF-only through the CLI; the `_split`/`_join` CRLF preservation holds only when `prune_lines` is called directly (source: task-next implementation) — dev/skills/task-next/scripts/task_nodes.py `cmd_prune`/`_write_or_delete`
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
