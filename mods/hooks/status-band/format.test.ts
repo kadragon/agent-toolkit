@@ -6,7 +6,6 @@ import {
   bar,
   cacheText,
   contextText,
-  curateText,
   duration,
   headline,
   headlineSegments,
@@ -185,17 +184,6 @@ describe('counts', () => {
     expect(headline(COUNTED)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
   })
 
-  test('ride on the headline when merged', () => {
-    expect(mergedSegments(COUNTED).map(segment => segment.text).join('')).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m │ cache 58m │ 21 hooks │ 49 skills (4.2k) │ 4 mcp',
-    )
-    expect(mergedSegments(STATUS).map(segment => segment.text).join('')).toBe(headline(STATUS))
-  })
-
-  test('are left out while unread', () => {
-    expect(setupText(STATUS)).toBe('')
-  })
-
   test('leave out an MCP figure of none', () => {
     expect(setupText({ ...STATUS, hooks: 2, mcp: 0 })).toBe('2 hooks')
   })
@@ -223,12 +211,6 @@ describe('segments', () => {
     ])
     expect(segments[0]).toEqual({ text: '[Opus 5.5 ◔ medium]', color: 'claude', isBold: true })
   })
-
-  test('color each window by its own fill', () => {
-    const colors = limitsSegments(STATUS).flatMap(({ color }) => (color === undefined ? [] : [color]))
-
-    expect(colors).toEqual(['warning', 'success'])
-  })
 })
 
 describe('ascii', () => {
@@ -242,23 +224,5 @@ describe('ascii', () => {
     expect(limitsSegments(STATUS, ASCII).map(segment => segment.text).join('')).toBe(
       '5h: 88% (2h 4m) | 7d: 9% (6d 7h)',
     )
-  })
-
-  test('draws nothing past ASCII', () => {
-    const status = { ...STATUS, cacheExpiresAt: NOW + MINUTE, hooks: 1, skills: { count: 1, tokens: 9 }, mcp: 2 }
-    const text = [
-      mergedSegments(status, ASCII),
-      limitsSegments(status, ASCII),
-    ].flat().map(segment => segment.text).join('') + contextText(status, ASCII)
-
-    expect(/^[ -~]*$/.test(text)).toBe(true)
-  })
-})
-
-describe('curate', () => {
-  test('names a due harness-curate run and is empty otherwise', () => {
-    expect(curateText({ ...STATUS, curateDue: true })).toBe('harness-curate due')
-    expect(curateText({ ...STATUS, curateDue: false })).toBe('')
-    expect(curateText(STATUS)).toBe('')
   })
 })

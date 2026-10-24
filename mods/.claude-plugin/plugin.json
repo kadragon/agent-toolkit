@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": {
     "name": "kadragon"
   },

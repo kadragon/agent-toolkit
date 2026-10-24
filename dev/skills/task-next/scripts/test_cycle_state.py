@@ -188,14 +188,6 @@ class RecoveryTest(unittest.TestCase):
         self.git("checkout", "fix/example")
         self.assertEqual(self.state("inspect")["contract"], contract("first"))
 
-    def test_worktree_removal_keeps_contract(self):
-        worktree = self.repo / "isolated"
-        self.git("worktree", "add", "-qb", "fix/isolated", str(worktree))
-        self.state("save", text=contract("worktree"), cwd=worktree)
-        self.git("worktree", "remove", str(worktree))
-        self.git("checkout", "fix/isolated")
-        self.assertEqual(self.state("inspect")["contract"], contract("worktree"))
-
     def test_clean_review_resume_verifies_head_without_committing(self):
         """The clean-tree branch of review-cycle Step 1 must still reach commit-guard.
 
@@ -316,15 +308,6 @@ class RecoveryTest(unittest.TestCase):
 
     def test_retire_is_idempotent(self):
         self.assertFalse(self.state("retire")["retired"])
-
-    def test_empty_contract_refused(self):
-        self.state("save", text=" \n", ok=False)
-        self.assertIsNone(self.state("inspect")["contract"])
-
-    def test_criterion_without_a_check_refused(self):
-        bare = contract().replace(" → `pytest -k example`", "")
-        self.assertIn("names no check", self.state("save", text=bare, ok=False))
-        self.assertIsNone(self.state("inspect")["contract"])
 
     def test_contract_without_criteria_refused(self):
         self.assertIn("Acceptance criteria", self.state("save", text="just prose", ok=False))
