@@ -482,6 +482,11 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     if problems:
         return text, problems
 
+    # A wrapped item's indented continuation lines belong to its checkbox (`_line_owners` folds
+    # them by `tokenize`'s rules); left behind, they read as the body of the item above.
+    owners, _ = _line_owners(text)
+    drop.update(i for i, o in owners.items() if o in drop)
+
     # Headings whose region this run may have emptied — computed on the ORIGINAL text so a
     # heading that was already empty before the run is left alone (deliberate history).
     levels = _heading_levels(text)
@@ -1388,6 +1393,30 @@ Preamble with no h1 wrapper.
     out, _ = prune_lines(no_final_newline, ["- [ ] x"])
     _assert(out == "## A\n\n- [ ] y\n",
             "a file with no trailing newline gains one from the dominant ending, losing no content")
+
+    # REGRESSION GUARD (prompt-vault PR #114) — a wrapped item's indented continuation lines are
+    # part of that item; deleting only the checkbox line left them stranded, and they then read
+    # as the wrapped body of whichever item preceded them.
+    wrapped = """## G
+
+- [ ] [FIX] first item
+      continues here
+      and here
+- [ ] *(blocked by: x)* [FIX] second item
+      its own body
+"""
+    out, problems = prune_lines(wrapped, ["- [ ] [FIX] first item"])
+    _assert(problems == [] and "continues here" not in out and "and here" not in out,
+            "a pruned item takes its indented continuation lines with it")
+    _assert("- [ ] *(blocked by: x)* [FIX] second item\n      its own body\n" in out,
+            "the neighbouring blocked item and its own continuation survive untouched")
+    out, _ = prune_lines(wrapped, ["- [ ] *(blocked by: x)* [FIX] second item"])
+    _assert(out == "## G\n\n- [ ] [FIX] first item\n      continues here\n      and here\n",
+            "pruning the last item drops its trailing continuation and nothing above it")
+    nested = "## G\n\n- [ ] [FIX] parent\n  - [ ] [FIX] nested child\n    child body\n"
+    out, _ = prune_lines(nested, ["- [ ] [FIX] parent"])
+    _assert("- [ ] [FIX] nested child" in out and "child body" in out,
+            "a nested checkbox is its own item, not the parent's continuation")
 
     # ---- orphaned blockers ----
     print("\nTest 3c: prune-backlog — surviving `*(blocked by: …)*` markers naming a pruned item")
