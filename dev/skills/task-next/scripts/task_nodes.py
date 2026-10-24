@@ -442,6 +442,24 @@ def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
     return out
 
 
+def _item_end(lines: list[str], start: int) -> int:
+    """Index one past the last line indented deeper than the checkbox at `start`.
+
+    Blank lines inside the block belong to it (a loose list's second paragraph, a blank line in
+    an indented fence); trailing blanks do not, so the separator before the next item survives.
+    """
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = start + 1
+    for j in range(start + 1, len(lines)):
+        ln = lines[j]
+        if not ln.strip():
+            continue
+        if len(ln) - len(ln.lstrip()) <= indent:
+            break
+        end = j + 1
+    return end
+
+
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets`, then any heading this run left blank or prose-only.
 
@@ -482,10 +500,17 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     if problems:
         return text, problems
 
-    # A wrapped item's indented continuation lines belong to its checkbox (`_line_owners` folds
-    # them by `tokenize`'s rules); left behind, they read as the body of the item above.
-    owners, _ = _line_owners(text)
-    drop.update(i for i, o in owners.items() if o in drop)
+    # An item owns every line indented deeper than its checkbox — wrapped text, sub-bullets, a
+    # second paragraph, an indented fence. Left behind, they read as the body of the item above.
+    for i in list(drop):
+        drop.update(range(i + 1, _item_end(lines, i)))
+    # A span that ends inside a fence or comment would leave its closer behind as a new opener
+    # and mask the rest of the file; any kept line whose masking changes means exactly that.
+    kept_text = "".join(ln + "\n" for i, ln in enumerate(lines) if i not in drop)
+    kept_masked = _strip_fenced_blocks(_strip_html_comments(kept_text)).splitlines()
+    if kept_masked != [m for i, m in enumerate(masked) if i not in drop]:
+        return text, ["a pruned item's indented body splits a fence or HTML comment — "
+                      "edit this item by hand"]
 
     # Headings whose region this run may have emptied — computed on the ORIGINAL text so a
     # heading that was already empty before the run is left alone (deliberate history).
@@ -671,12 +696,21 @@ def orphaned_blockers(original: str, removed: list[str], new_text: str, label: s
         silence each other and both stay unselectable.
     """
     subjects: list[tuple[str, list[str]]] = []
+    original_lines = original.splitlines()
     for raw in removed:
         m = _CHECKBOX_LINE_RE.match(raw)
         body = m.group(1) if m else raw
+        # The item's indented body was deleted with it, so a marker may name words that sit only
+        # on a wrapped continuation line.
+        # The checkbox line still names the subject in the warning; the body only widens matching.
+        title = body
+        at = [i for i, ln in enumerate(original_lines) if ln.rstrip() == raw.rstrip()]
+        if len(at) == 1:
+            body = " ".join([body, *(ln.strip() for ln in
+                                     original_lines[at[0] + 1:_item_end(original_lines, at[0])])])
         tokens = _slug_tokens(body)
         if tokens:
-            subjects.append((slugify(body), tokens))
+            subjects.append((slugify(title) or slugify(body), tokens))
     surviving_titles = [h["title"] for h in _headings(tokenize(new_text))]
     for title in (h["title"] for h in _headings(tokenize(original))):
         if title in surviving_titles:
@@ -1413,10 +1447,38 @@ Preamble with no h1 wrapper.
     out, _ = prune_lines(wrapped, ["- [ ] *(blocked by: x)* [FIX] second item"])
     _assert(out == "## G\n\n- [ ] [FIX] first item\n      continues here\n      and here\n",
             "pruning the last item drops its trailing continuation and nothing above it")
-    nested = "## G\n\n- [ ] [FIX] parent\n  - [ ] [FIX] nested child\n    child body\n"
+    # A nested checkbox is not a candidate (`backlog_candidates` reads column-0 checkboxes only),
+    # so it is part of its parent's body; pruned itself, it takes only its own deeper lines.
+    nested = "## G\n\n- [ ] [FIX] parent\n  - [ ] [FIX] nested child\n    child body\n- [ ] [FIX] z\n"
     out, _ = prune_lines(nested, ["- [ ] [FIX] parent"])
-    _assert("- [ ] [FIX] nested child" in out and "child body" in out,
-            "a nested checkbox is its own item, not the parent's continuation")
+    _assert(out == "## G\n\n- [ ] [FIX] z\n", "a pruned parent takes its nested checkbox and its body")
+    out, _ = prune_lines(nested, ["  - [ ] [FIX] nested child"])
+    _assert(out == "## G\n\n- [ ] [FIX] parent\n- [ ] [FIX] z\n",
+            "a pruned nested checkbox takes its own body, not the parent's next sibling")
+    subs = "- [ ] [FIX] keep\n- [ ] [FIX] a\n  - sub criterion\n    sub body\n"
+    out, _ = prune_lines(subs, ["- [ ] [FIX] a"])
+    _assert(out == "- [ ] [FIX] keep\n", "a pruned item's sub-bullets do not reattach to the item above")
+    loose = "- [ ] [FIX] keep\n- [ ] [FIX] a\n  wrap\n\n  second para of a\n\n- [ ] [FIX] b\n"
+    out, _ = prune_lines(loose, ["- [ ] [FIX] a"])
+    _assert(out == "- [ ] [FIX] keep\n\n- [ ] [FIX] b\n",
+            "a loose item's second paragraph goes with it, and the blank before the next item stays")
+    fenced_body = "## G\n\n- [ ] [FIX] a\n  ```\n  code\n\n  more\n  ```\n- [ ] [FIX] b\n\n## H\n\n- [ ] [FIX] c\n"
+    out, problems = prune_lines(fenced_body, ["- [ ] [FIX] a"])
+    _assert(problems == [] and out == "## G\n\n- [ ] [FIX] b\n\n## H\n\n- [ ] [FIX] c\n",
+            "an indented fence with a blank line inside goes whole, never leaving a stray opener")
+    split_fence = "- [ ] [FIX] a\n  ```\ncode at column 0\n  ```\n- [ ] [FIX] b\n"
+    out, problems = prune_lines(split_fence, ["- [ ] [FIX] a"])
+    _assert(out == split_fence and len(problems) == 1 and "splits a fence" in problems[0],
+            "a body that would end inside a fence is refused, deleting nothing")
+    commented = "- [ ] [FIX] a\n  <!--\n  - [ ] hidden template\n\n  -->\n- [ ] [FIX] b\n"
+    out, problems = prune_lines(commented, ["- [ ] [FIX] a"])
+    _assert(problems == [] and out == "- [ ] [FIX] b\n",
+            "an indented HTML comment with a blank line inside goes whole")
+    wrapped_subject = ("- [ ] [FIX] add\n      cross process lock\n"
+                       "- [ ] *(blocked by: 1-cross-process-lock)* [FIX] other\n")
+    pruned_ws, _ = prune_lines(wrapped_subject, ["- [ ] [FIX] add"])
+    _assert(orphaned_blockers(wrapped_subject, ["- [ ] [FIX] add"], pruned_ws, "b.md") != [],
+            "a marker naming words on a pruned item's continuation line is still reported")
 
     # ---- orphaned blockers ----
     print("\nTest 3c: prune-backlog — surviving `*(blocked by: …)*` markers naming a pruned item")
