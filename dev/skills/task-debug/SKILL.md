@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.0.2
+version: 1.0.3
 ---
 
 # Debug
@@ -182,7 +182,9 @@ them, and fall back to the inline form when the file or section is absent:
 
 - `docs/conventions.md` → *Regression Test Rules* — the test must fail against the bug it
   names. **No such file or section:** apply the rule directly — remove the guard the test
-  targets, re-run, confirm it goes red, restore.
+  targets, confirm `git diff -- <target file>` changed from its snapshot taken just before,
+  re-run, confirm it goes red on the test's own assertion (not an import or syntax error),
+  restore, and confirm the diff matches the snapshot again — the uncommitted fix stays in it.
 - `docs/eval-criteria.md` → *Sprint Contract* — a `[FIX]` contract must carry an acceptance
   criterion naming this test. **No such file:** name the test in the commit or PR body
   instead, so the reproduction stays gradable.

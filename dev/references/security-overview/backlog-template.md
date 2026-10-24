@@ -69,6 +69,22 @@ Do NOT create a single consolidated file. If a repo has no `backlog.md`, create 
 - Do NOT read or display the secret value.
 - Action is always "Revoke and rotate".
 
+### Rejected Items
+
+Before writing an item, read the target `backlog.md` → `## Rejected — do not re-file`. An alert
+the user already discarded (e.g. as accepted risk) is withheld unless this scan's evidence meets
+that entry's re-file bar. Match only what the user rejected, never a whole package or rule:
+
+| Alert | Matches an entry only on |
+|-------|--------------------------|
+| Dependabot | the same advisory ID (GHSA/CVE) |
+| Code scanning | the same rule **and** file location |
+| Secret scanning | the same secret type **and** location |
+
+A severity higher than the one the entry records also meets the bar. List each withheld alert
+in the summary with the entry it matched. A repo whose alerts are all withheld gets no
+`## Security Fixes` section — remove an existing one — and appears only on the Withheld line.
+
 ### Idempotency
 
 If `backlog.md` already contains a `## Security Fixes` section:
@@ -112,6 +128,7 @@ After updating all backlog.md files, present:
 | api-server | ~/dev/api-server/backlog.md | 2 |
 
 Total: 7 fix items across 2 repos.
+Withheld (matched `## Rejected — do not re-file`): api-server lodash GHSA-xxxx-xxxx-xxxx (MODERATE) — "accepted risk, dev-only dependency".
 
 Suggested next step: Open each repo directory and begin fixing the highest-severity items, or ask to work through a specific repo.
 ```

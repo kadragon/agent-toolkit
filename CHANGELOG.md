@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] security-overview withholds rejected alerts; forced reds prove the mutation landed (2 units) (dev v4.11.10) (2026-10-24)
 - [done] agy-review keeps its 15m print-timeout, re-checked against 32 logged runs (dev v4.11.9) (2026-10-24)
 - [done] dev skills adopt pstack premise check, refactor pin, rejected alternatives, and commit verification (dev v4.11.8) (2026-10-23)
 - [done] backlog records rejected items; reviews skip them (dev v4.11.7) (2026-10-23) → dev/skills/harness-init/references/backlog-template.md

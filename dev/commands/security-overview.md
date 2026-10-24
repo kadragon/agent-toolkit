@@ -101,10 +101,11 @@ Key rules:
 - Order by severity: CRITICAL > HIGH > MODERATE > LOW.
 - Omit empty sections.
 - If an alert's package matches an open Dependabot PR, write the PR-pointer item instead of the manual upgrade item — format → backlog-template.md.
+- An alert matching the repo's `## Rejected — do not re-file` entry is withheld unless its re-file bar is met; list it in the summary — backlog-template.md § Rejected Items.
 
 ### 3-3. Present result
 
-After generating all files, show summary table with repo, path, item count. Include total items and suggest next step.
+After generating all files, show summary table with repo, path, item count. Include total items, the Withheld line for alerts held back by `## Rejected — do not re-file` (it explains any gap from the Phase 1 totals), and suggest next step.
 
 ## Error Handling
 
