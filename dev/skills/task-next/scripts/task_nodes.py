@@ -455,10 +455,36 @@ def _inline_comments_only(raw: str, masked: str) -> bool:
     """True if `raw` differs from its masked view only by comments opened and closed on this line.
 
     A line inside a fence or a multi-line comment masks differently from the line stripped on its
-    own, and an unpaired `<!--`/`-->` survives that strip — both stay refusals.
+    own, and an unpaired `<!--`/`-->` survives that strip — both stay refusals. A line the masking
+    left alone is plain text, a literal `-->` included.
     """
+    if raw == masked:
+        return True
     rest = _HTML_COMMENT_RE.sub("", raw)
     return rest == masked and "<!--" not in rest and "-->" not in rest
+
+
+def _indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip())
+
+
+def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int]) -> bool:
+    """True if a checkbox outside `skip` sits nested under the checkbox at `item`.
+
+    Scans from `start` until the first non-blank line short of the item's content column (its
+    indent + `- `): that line is a sibling or an outer item, so nothing after it is nested here.
+    """
+    content = _indent(masked[item]) + 2
+    for j in range(start, len(masked)):
+        ln = masked[j]
+        if not ln.strip():
+            continue
+        if _indent(ln) < content:
+            return False
+        if j not in skip and _CHECKBOX_LINE_RE.match(ln):
+            return True
+    return False
 
 
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
@@ -512,10 +538,10 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     # not fold), or a nested checkbox after the item (live work that would otherwise render under
     # the item above) is refused up front rather than cut and checked afterwards.
     owners, _ = _line_owners(text)
+    targeted = set(drop)
     for i in sorted(drop):
         body = [j for j, o in owners.items() if o == i and j != i]
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        after = next((j for j in range(max(body, default=i) + 1, len(masked)) if masked[j].strip()), None)
         reason = None
         if masked[i] != lines[i]:
             reason = "carries an HTML comment"
@@ -524,8 +550,7 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         elif (i not in owners and nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt)
               and not nxt.lstrip().startswith("#")):
             reason = "is an indented checkbox followed by text"
-        elif (i in owners and after is not None and masked[after][:1].isspace()
-              and _CHECKBOX_LINE_RE.match(masked[after])):
+        elif _has_nested_checkbox(masked, i, max(body, default=i) + 1, targeted):
             reason = "has a nested checkbox"
         if reason:
             problems.append(f"line {i + 1} {reason} — edit it by hand: {lines[i].strip()!r}")
@@ -1476,6 +1501,18 @@ Preamble with no h1 wrapper.
         out, problems = prune_lines(src, ["- [ ] [FIX] parent"])
         _assert(out == src and len(problems) == 1 and "nested checkbox" in problems[0],
                 "a column-0 item with a nested checkbox is refused, deleting nothing")
+    # REGRESSION (PR #346 review): the whole nested region is scanned, at any target depth.
+    for src, target in (("- [ ] p\n- [ ] a\n  - note\n  - [ ] child\n- [ ] b\n", "- [ ] a"),
+                        ("- [ ] p\n  - [ ] c\n    - [ ] g\n- [ ] b\n", "  - [ ] c")):
+        out, problems = prune_lines(src, [target])
+        _assert(out == src and len(problems) == 1 and "nested checkbox" in problems[0],
+                f"REGRESSION: a nested checkbox anywhere under {target!r} refuses the run")
+    out, problems = prune_lines("- [ ] a\n  - [ ] c\n- [ ] b\n", ["- [ ] a", "  - [ ] c"])
+    _assert(problems == [] and out == "- [ ] b\n",
+            "REGRESSION: a parent pruned together with its nested checkbox is not refused")
+    out, problems = prune_lines("- [ ] a\n - [ ] b\n", ["- [ ] a"])
+    _assert(problems == [] and out == " - [ ] b\n",
+            "REGRESSION: a checkbox short of the parent's content column is a sibling, not nested")
     out, problems = prune_lines(nested, ["  - [ ] [FIX] nested child"])
     _assert(out == nested and len(problems) == 1 and "line 4 is an indented checkbox" in problems[0],
             "an indented checkbox with an indented body is refused, not split from its body")
@@ -1503,6 +1540,7 @@ Preamble with no h1 wrapper.
     for name, src in (
         ("a balanced inline comment", "- [ ] [FIX] a\n  wraps here <!-- note -->\n- [ ] [FIX] b\n"),
         ("a comment-only line", "- [ ] [FIX] a\n  <!-- note --> <!-- two -->\n- [ ] [FIX] b\n"),
+        ("a literal `-->` and no comment (PR #346 review)", "- [ ] [FIX] a\n  flow A --> B\n- [ ] [FIX] b\n"),
     ):
         out, problems = prune_lines(src, ["- [ ] [FIX] a"])
         _assert(problems == [] and out == "- [ ] [FIX] b\n",
