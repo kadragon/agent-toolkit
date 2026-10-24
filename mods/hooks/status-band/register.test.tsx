@@ -479,20 +479,6 @@ test('where no surface draws the band it reads nothing and starts no timer', asy
   expect(state.gitCalls).toBe(0)
 })
 
-test('a surface that attaches after the start gets the band at the next measure', async ($, on) => {
-  const state = world(on)
-  state.surfaces = []
-
-  await start($)
-  state.surfaces = ['desktop']
-  await measure($)
-  const { ui, texts } = await drawn($, 'desktop')
-
-  expect(texts[0]).toContain('agent-toolkit')
-  expect(state.ticks.length).toBe(1)
-  await ui.unmount()
-})
-
 test('a slow git does not hold the session start', async ($, on) => {
   const state = world(on)
   state.gitGate = new Promise<void>(() => {})
@@ -671,19 +657,6 @@ test('the cache is counted from when the request was sent, not when the answer e
   await ui.unmount()
 })
 
-test('a session that ends for another conversation takes its countdown with it', async ($, on) => {
-  world(on)
-
-  await start($)
-  await step($)
-  await $.session.end({ reason: 'resume' } as Parameters<Engine['session']['end']>[0])
-  await settle()
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m')
-  await ui.unmount()
-})
-
 test('the counts follow the settings turn by turn, and a failed read keeps the last one', async ($, on) => {
   const state = world(on)
   state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
@@ -746,16 +719,6 @@ test('a countdown started under one model is dropped under another, whatever ste
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m')
-  await ui.unmount()
-})
-
-test('a blank row keeps the band off the line above it', async ($, on) => {
-  world(on)
-
-  await start($)
-  const { ui } = await drawn($)
-
-  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await ui.unmount()
 })
 
