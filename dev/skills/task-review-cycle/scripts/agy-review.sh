@@ -73,7 +73,9 @@ List findings ordered by priority (P0 first). After all findings, add:
 # --print-timeout is agy's ONLY deadline. Nothing outside this script bounds it: the cycle
 # launches it in the background and moves on without waiting (SKILL.md Step 2), and
 # run_in_background enforces no timeout of its own. Keep the cap here so a slow run fails
-# with a reportable reason instead of running on with no result anyone reads.
+# with a reportable reason instead of running on with no result anyone reads. 15m stays:
+# a lower cap only kills runs the pre-merge reclaim could still collect, and the author's 32
+# logged runs (2026-10-16..24) maxed at 574s, so it never fired (late-source-reclaim.md).
 # Capture stdout and stderr separately so we can detect empty output and report
 # the failure reason (Windows: agy exits non-zero before producing output, which
 # set -euo pipefail would otherwise swallow silently).

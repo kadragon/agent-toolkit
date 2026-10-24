@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] agy-review keeps its 15m print-timeout, re-checked against 32 logged runs (dev v4.11.9) (2026-10-24)
 - [done] dev skills adopt pstack premise check, refactor pin, rejected alternatives, and commit verification (dev v4.11.8) (2026-10-23)
 - [done] backlog records rejected items; reviews skip them (dev v4.11.7) (2026-10-23) → dev/skills/harness-init/references/backlog-template.md
 - [done] status band counts the cache in minutes and only connected MCP servers (mods v0.4.1) (2026-10-23)
