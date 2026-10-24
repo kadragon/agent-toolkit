@@ -920,6 +920,36 @@ test('a curate check that cannot run fails nothing and keeps the rest of the ban
   await ui.unmount()
 })
 
+// The text of the row the curate flag is on: the innermost box that holds it
+// and not the headline.
+const curateRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
+  (await ui.findAll({ type: 'Box', text: /harness-curate due$/ }))
+    .map(box => box.text)
+    .find(text => !/ up (<|\d)/.test(text))
+
+test('a due curate run follows the other figures on its row behind a separator', async ($, on) => {
+  curateWorld(on)
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect(await curateRow(ui)).toBe('Context █░░░░░░░░░ 12% │ 5h: 88% (2h 4m) │ harness-curate due')
+  await ui.unmount()
+})
+
+test('a due curate run alone on its row draws no separator before it', async ($, on) => {
+  const state = curateWorld(on)
+  state.percent = undefined
+  state.turns = 2
+  state.rateLimits = []
+
+  await start($)
+  const { ui } = await drawn($)
+
+  expect(await curateRow(ui)).toBe('harness-curate due')
+  await ui.unmount()
+})
+
 test('a due curate run keeps the second row where no other figure is read', async ($, on) => {
   const state = curateWorld(on)
   state.percent = undefined
