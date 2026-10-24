@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] prune-backlog keeps U+2028 lines intact, refuses nested checkboxes, and accepts inline comments (dev v4.11.12) (2026-10-24)
 - [done] prune-backlog removes a pruned item's wrapped continuation lines (dev v4.11.11) (2026-10-24)
 - [done] security-overview withholds rejected alerts; forced reds prove the mutation landed (2 units) (dev v4.11.10) (2026-10-24)
 - [done] agy-review keeps its 15m print-timeout, re-checked against 32 logged runs (dev v4.11.9) (2026-10-24)

@@ -76,6 +76,7 @@ from backlog_candidates import (  # noqa: E402
     _BULLET_RE,
     _CHECKBOX_RE,
     _HEADING_RE,
+    _HTML_COMMENT_RE,
     _STATUS_RE,
     _headings,
     _is_placeholder_payload,
@@ -170,15 +171,20 @@ UNRELEASED_HEADING = "## Unreleased"
 # LF-pinned in this repo (`docs/conventions.md` → the CRLF note; `bump-version.sh` carries the
 # same guard), so each line's own terminator is carried alongside it and re-emitted verbatim.
 # Only a line that had no terminator at all — the last line of a file with no trailing newline —
-# gets the file's dominant ending.
+# gets the file's dominant ending. The terminator set is `str.splitlines`'s, not just \r and \n:
+# the masked views index lines by `splitlines()`, so a U+2028 must end a line here too, and a
+# terminator left in the body would get the default ending appended after it.
+_EOL_RE = re.compile(r"(?:\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029])\Z")
+
 
 def _split(text: str) -> tuple[list[str], list[str]]:
     """`(bodies, terminators)`, index-aligned. `terminators[i]` is "" only at a newline-less EOF."""
     bodies, eols = [], []
     for raw in text.splitlines(keepends=True):
-        body = raw.rstrip("\r\n")
-        bodies.append(body)
-        eols.append(raw[len(body):])
+        m = _EOL_RE.search(raw)
+        cut = m.start() if m else len(raw)
+        bodies.append(raw[:cut])
+        eols.append(raw[cut:])
     return bodies, eols
 
 
@@ -445,10 +451,47 @@ def _collapse_gap_blanks(lines: list[str], origin: list[int]) -> list[int]:
     return out
 
 
+def _inline_comments_only(raw: str, masked: str) -> bool:
+    """True if `raw` differs from its masked view only by comments opened and closed on this line.
+
+    A line inside a fence or a multi-line comment masks differently from the line stripped on its
+    own, and an unpaired `<!--`/`-->` survives that strip — both stay refusals. A line the masking
+    left alone is plain text, a literal `-->` included.
+    """
+    if raw == masked:
+        return True
+    rest = _HTML_COMMENT_RE.sub("", raw)
+    return rest == masked and "<!--" not in rest and "-->" not in rest
+
+
+def _indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip())
+
+
+def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int]) -> bool:
+    """True if a checkbox outside `skip` sits nested under the checkbox at `item`.
+
+    Scans from `start` until the first non-blank line short of the item's content column (its
+    indent + `- `): that line is a sibling or an outer item, so nothing after it is nested here.
+    """
+    content = _indent(masked[item]) + 2
+    for j in range(start, len(masked)):
+        ln = masked[j]
+        if not ln.strip():
+            continue
+        if _indent(ln) < content:
+            return False
+        if j not in skip and _CHECKBOX_LINE_RE.match(ln):
+            return True
+    return False
+
+
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets` with its wrapped continuation lines, then any heading
     this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
-    comment in it, or text right under an indented checkbox — refuses the whole run instead.
+    multi-line comment in it, text right under an indented checkbox, or a nested checkbox — refuses
+    the whole run instead.
 
     A heading whose region this run drained down to nothing, or down to only its intro prose
     (no surviving item, no surviving child heading), is deleted along with that region — see
@@ -489,21 +532,26 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
 
     # A wrapped item's continuation lines belong to its checkbox — folded by `_line_owners`, which
     # re-walks `tokenize`'s rules so the pruner and the selector agree on where an item ends.
-    # Left behind, they read as the body of the item above. Only plain text is deleted this way:
-    # a body touching a fence or comment, or any text right under an indented checkbox (which
-    # `_line_owners` does not fold), is refused up front rather than cut and checked afterwards.
+    # Left behind, they read as the body of the item above. Only plain text is deleted this way —
+    # a `<!-- … -->` opened and closed on one body line counts as plain. A body touching a fence or
+    # a multi-line comment, any text right under an indented checkbox (which `_line_owners` does
+    # not fold), or a nested checkbox after the item (live work that would otherwise render under
+    # the item above) is refused up front rather than cut and checked afterwards.
     owners, _ = _line_owners(text)
+    targeted = set(drop)
     for i in sorted(drop):
         body = [j for j, o in owners.items() if o == i and j != i]
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
         reason = None
         if masked[i] != lines[i]:
             reason = "carries an HTML comment"
-        elif any(masked[j] != lines[j] for j in body):
+        elif any(not _inline_comments_only(lines[j], masked[j]) for j in body):
             reason = "has a wrapped body inside a fence or HTML comment"
         elif (i not in owners and nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt)
               and not nxt.lstrip().startswith("#")):
             reason = "is an indented checkbox followed by text"
+        elif _has_nested_checkbox(masked, i, max(body, default=i) + 1, targeted):
+            reason = "has a nested checkbox"
         if reason:
             problems.append(f"line {i + 1} {reason} — edit it by hand: {lines[i].strip()!r}")
         drop.update(body)
@@ -696,7 +744,8 @@ def orphaned_blockers(original: str, removed: list[str], new_text: str, label: s
     subjects: list[tuple[str, list[str]]] = []
     for raw in removed:
         m = _CHECKBOX_LINE_RE.match(raw)
-        body = m.group(1) if m else raw
+        # An item's own markers name what it waits on, never what it is.
+        body = _BLOCK_MARKER_RE.sub(" ", m.group(1) if m else raw)
         tokens = _slug_tokens(body)
         if tokens:
             subjects.append((slugify(body), tokens))
@@ -1396,6 +1445,14 @@ Preamble with no h1 wrapper.
     _assert(out == "## A\r\n\r\n- [ ] y\r\n\r\n## B\r\n\r\n- [ ] z\r\n",
             "CRLF survives prune_lines — every surviving line keeps its own terminator")
     _assert("\n" not in out.replace("\r\n", ""), "no bare LF is introduced into a CRLF file")
+    # Every `str.splitlines` boundary is a terminator, not only \n and \r\n. Left in the body with
+    # an empty terminator, U+2028 had `_join` write the default newline after it — into a line
+    # this run never touched.
+    odd = "a\u2028b\x85c\x0cd\re\r\nf\n"
+    _assert(_join(*_split(odd), "\n") == odd, "_split/_join round-trip every splitlines boundary")
+    out, _ = prune_lines("- [ ] x\n- [ ] see\u2028note\n", ["- [ ] x"])
+    _assert(out == "- [ ] see\u2028note\n",
+            "REGRESSION: a U+2028 inside an untouched line survives prune_lines byte-for-byte")
 
     crlf_block = "# One\r\n\r\nstatus: active\r\n\r\n# Two\r\n\r\nstatus: open\r\n"
     out, _ = prune_h1_block(crlf_block, "One")
@@ -1436,12 +1493,26 @@ Preamble with no h1 wrapper.
     out, _ = prune_lines(wrapped, ["- [ ] *(blocked by: x)* [FIX] second item"])
     _assert(out == "## G\n\n- [ ] [FIX] first item\n      continues here\n      and here\n",
             "pruning the last item drops its trailing continuation and nothing above it")
-    # Extent is the selector's: a nested bullet or a blank line ends an item, so what follows is
-    # section prose to `backlog_candidates`, and the pruner leaves it exactly as it found it.
+    # Extent is the selector's: a nested bullet or a blank line ends an item. A nested checkbox
+    # (possibly live work) is never swept away with its parent — nor left behind to render under
+    # the item above — so the whole run is refused, blank lines between or not.
     nested = "## G\n\n- [ ] [FIX] parent\n  - [ ] [FIX] nested child\n    child body\n- [ ] [FIX] z\n"
-    out, _ = prune_lines(nested, ["- [ ] [FIX] parent"])
-    _assert(out == "## G\n\n  - [ ] [FIX] nested child\n    child body\n- [ ] [FIX] z\n",
-            "a nested checkbox (possibly live work) is never swept away with its parent")
+    for src in (nested, nested.replace("parent\n", "parent\n\n")):
+        out, problems = prune_lines(src, ["- [ ] [FIX] parent"])
+        _assert(out == src and len(problems) == 1 and "nested checkbox" in problems[0],
+                "a column-0 item with a nested checkbox is refused, deleting nothing")
+    # REGRESSION (PR #346 review): the whole nested region is scanned, at any target depth.
+    for src, target in (("- [ ] p\n- [ ] a\n  - note\n  - [ ] child\n- [ ] b\n", "- [ ] a"),
+                        ("- [ ] p\n  - [ ] c\n    - [ ] g\n- [ ] b\n", "  - [ ] c")):
+        out, problems = prune_lines(src, [target])
+        _assert(out == src and len(problems) == 1 and "nested checkbox" in problems[0],
+                f"REGRESSION: a nested checkbox anywhere under {target!r} refuses the run")
+    out, problems = prune_lines("- [ ] a\n  - [ ] c\n- [ ] b\n", ["- [ ] a", "  - [ ] c"])
+    _assert(problems == [] and out == "- [ ] b\n",
+            "REGRESSION: a parent pruned together with its nested checkbox is not refused")
+    out, problems = prune_lines("- [ ] a\n - [ ] b\n", ["- [ ] a"])
+    _assert(problems == [] and out == " - [ ] b\n",
+            "REGRESSION: a checkbox short of the parent's content column is a sibling, not nested")
     out, problems = prune_lines(nested, ["  - [ ] [FIX] nested child"])
     _assert(out == nested and len(problems) == 1 and "line 4 is an indented checkbox" in problems[0],
             "an indented checkbox with an indented body is refused, not split from its body")
@@ -1466,6 +1537,21 @@ Preamble with no h1 wrapper.
         out, problems = prune_lines(src, ["- [ ] [FIX] a"])
         _assert(out == src and len(problems) == 1 and "edit it by hand" in problems[0],
                 f"an item carrying {name} is refused up front, deleting nothing")
+    for name, src in (
+        ("a balanced inline comment", "- [ ] [FIX] a\n  wraps here <!-- note -->\n- [ ] [FIX] b\n"),
+        ("a comment-only line", "- [ ] [FIX] a\n  <!-- note --> <!-- two -->\n- [ ] [FIX] b\n"),
+        ("a literal `-->` and no comment (PR #346 review)", "- [ ] [FIX] a\n  flow A --> B\n- [ ] [FIX] b\n"),
+    ):
+        out, problems = prune_lines(src, ["- [ ] [FIX] a"])
+        _assert(problems == [] and out == "- [ ] [FIX] b\n",
+                f"a continuation line with {name} goes with its item, not refused")
+    for name, src in (
+        ("a comment closing an earlier one", "- [ ] [FIX] a\n  x <!-- y\n  z --> w\n- [ ] [FIX] b\n"),
+        ("an inline comment beside an opener", "- [ ] [FIX] a\n  <!-- y --> <!-- z\n  w -->\n- [ ] [FIX] b\n"),
+    ):
+        out, problems = prune_lines(src, ["- [ ] [FIX] a"])
+        _assert(out == src and len(problems) == 1 and "edit it by hand" in problems[0],
+                f"a continuation line with {name} is still refused")
     # The subject is the checkbox line alone; a deleted continuation never widens it.
     noted = "## S\n\n- [ ] [FIX] x\n  - note: auth refactor later\n- [x] [FIX] auth\n- [ ] *(blocked by: 2-auth)* [FIX] y\n"
     pruned_noted, _ = prune_lines(noted, ["- [ ] [FIX] x"])
@@ -1475,6 +1561,11 @@ Preamble with no h1 wrapper.
     pruned_shared, _ = prune_lines(shared, ["- [ ] [FIX] x"])
     _assert(orphaned_blockers(shared, ["- [ ] [FIX] x"], pruned_shared, "b.md") == [],
             "a blocker marker on the pruned item's own body is not part of its subject")
+    inline = "- [ ] [FIX] x *(blocked by: 3-auth-refactor)*\n- [ ] *(blocked by: 3-auth-refactor)* [FIX] y\n"
+    pruned_inline, _ = prune_lines(inline, ["- [ ] [FIX] x *(blocked by: 3-auth-refactor)*"])
+    _assert(orphaned_blockers(inline, ["- [ ] [FIX] x *(blocked by: 3-auth-refactor)*"],
+                              pruned_inline, "b.md") == [],
+            "REGRESSION: a pruned item's own inline marker is not part of its subject")
 
     # ---- orphaned blockers ----
     print("\nTest 3c: prune-backlog — surviving `*(blocked by: …)*` markers naming a pruned item")
