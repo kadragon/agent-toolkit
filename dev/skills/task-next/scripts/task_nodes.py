@@ -189,7 +189,9 @@ def _split(text: str) -> tuple[list[str], list[str]]:
 
 
 def _dominant_eol(eols: list[str]) -> str:
-    return "\r\n" if eols.count("\r\n") > eols.count("\n") else "\n"
+    # A bare \r counts too: the CLI reads bytes, so a CR-only file reaches here unfolded. Ties go to \n.
+    counts = {eol: eols.count(eol) for eol in ("\n", "\r\n", "\r")}
+    return max(counts, key=counts.__getitem__)
 
 
 def _join(bodies: list[str], eols: list[str], default: str) -> str:
@@ -1999,6 +2001,15 @@ status: open
         rc = main(["prune-tasks", "--file", str(crlf_tasks), "--block", "S1"])
         _assert(rc == 0 and crlf_tasks.read_bytes() == b"# S2\r\n\r\nstatus: active\r\n",
                 "prune-tasks through the CLI keeps a CRLF file's surviving block CRLF")
+        cr_only = Path(td) / "cr_only.md"
+        cr_only.write_bytes(b"## A\r\r- [ ] one\r- [ ] two")
+        real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] one\n")
+        try:
+            rc = main(["prune-backlog", "--file", str(cr_only)])
+        finally:
+            sys.stdin = real_stdin
+        _assert(rc == 0 and cr_only.read_bytes() == b"## A\r\r- [ ] two\r",
+                "a CR-only file's newline-less last line gains \\r, not a mixed-in \\n")
 
         c = Path(td) / "CHANGELOG.md"
         rc = main(["changelog", "--file", str(c), "--title", "t", "--plugin", "dev",
