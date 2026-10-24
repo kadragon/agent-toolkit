@@ -515,18 +515,43 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     wanted = [t.rstrip() for t in targets if t.strip()]
     problems = []
     drop: set[int] = set()
+    # A non-newline `splitlines` break (U+2028, say) splits one physical line — the one an editor,
+    # `grep -n` and the caller see — into several lines of this view. A target is matched against
+    # whole physical lines only: a run of fragments whose bodies and inner terminators equal its
+    # own, starting and ending on a real newline (or the file's edges), so a prefix or suffix of a
+    # line never matches. `last` maps each head to the run's final line; `phys` numbers lines the
+    # way the caller does.
+    physical = {"\n", "\r\n", "\r", ""}  # "" ends only the newline-less last line
+    phys = [1]
+    for eol in eols[:-1]:
+        phys.append(phys[-1] + (eol in physical))
+
+    def line_end(j: int) -> int:
+        while eols[j] not in physical:
+            j += 1
+        return j
+
+    last: dict[int, int] = {}
     for target in wanted:
-        hits = [i for i, ln in enumerate(masked) if ln.rstrip() == target]
+        frags, seps = _split(target)
+        n = len(frags)
+        hits = [
+            i for i in range(len(masked) - n + 1)
+            if (i == 0 or eols[i - 1] in physical) and eols[i + n - 1] in physical
+            and masked[i + n - 1].rstrip() == frags[-1]
+            and all(masked[i + k] == frags[k] and eols[i + k] == seps[k] for k in range(n - 1))
+        ]
         if not hits:
             problems.append(f"no line matches verbatim: {target!r}")
         elif len(hits) > 1:
-            where = ", ".join(str(i + 1) for i in hits)
+            where = ", ".join(str(phys[i]) for i in hits)
             problems.append(
                 f"{len(hits)} lines match verbatim (lines {where}) — ambiguous, refusing to guess "
                 f"which one is done; disambiguate the wording first: {target!r}"
             )
         else:
             drop.add(hits[0])
+            last[hits[0]] = hits[0] + n - 1
     if problems:
         return text, problems
 
@@ -538,22 +563,32 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     # not fold), or a nested checkbox after the item (live work that would otherwise render under
     # the item above) is refused up front rather than cut and checked afterwards.
     owners, _ = _line_owners(text)
-    targeted = set(drop)
+    # `_line_owners` ends an item at a line separator's fragment like at any unindented line, so a
+    # body line is extended through the rest of its physical line here, and indented text after a
+    # body that crossed a separator — markdown's continuation, but owned by nothing — is refused.
+    targeted = {j for i in drop for j in range(i, last[i] + 1)}
     for i in sorted(drop):
-        body = [j for j, o in owners.items() if o == i and j != i]
-        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        end = last[i]
+        owned_body = {j for j, o in owners.items() if o == i and j != i} | set(range(i + 1, end + 1))
+        body = sorted({k for j in owned_body for k in range(j, line_end(j) + 1)})
+        stop = max(body, default=i)
+        nxt = lines[stop + 1] if stop + 1 < len(lines) else ""
+        loose = nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt) and not nxt.lstrip().startswith("#")
         reason = None
-        if masked[i] != lines[i]:
+        if any(masked[j] != lines[j] for j in range(i, end + 1)):
             reason = "carries an HTML comment"
         elif any(not _inline_comments_only(lines[j], masked[j]) for j in body):
             reason = "has a wrapped body inside a fence or HTML comment"
-        elif (i not in owners and nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt)
-              and not nxt.lstrip().startswith("#")):
+        elif i not in owners and loose:
             reason = "is an indented checkbox followed by text"
-        elif _has_nested_checkbox(masked, i, max(body, default=i) + 1, targeted):
+        elif (loose and nxt[:1].isspace()
+              and any(eols[k] not in physical for k in range(i, stop))):
+            reason = "is split by a line separator and followed by indented text"
+        elif _has_nested_checkbox(masked, i, stop + 1, targeted):
             reason = "has a nested checkbox"
         if reason:
-            problems.append(f"line {i + 1} {reason} — edit it by hand: {lines[i].strip()!r}")
+            whole = "".join(lines[k] + eols[k] for k in range(i, end)) + lines[end]
+            problems.append(f"line {phys[i]} {reason} — edit it by hand: {whole.strip()!r}")
         drop.update(body)
     if problems:
         return text, problems
@@ -868,7 +903,8 @@ def prune_h1_block(text: str, title: str) -> tuple[str, list[str]]:
 def _read_stdin_lines() -> list[str]:
     if sys.stdin is None or sys.stdin.isatty():
         return []
-    return [ln for ln in sys.stdin.read().splitlines() if ln.strip()]
+    # Newlines only: `splitlines` would cut a target at a U+2028 inside it — see `prune_lines`.
+    return [ln for ln in re.split(r"\r\n|[\r\n]", sys.stdin.read()) if ln.strip()]
 
 
 def _opt(argv: list[str], name: str) -> str | None:
@@ -1453,6 +1489,55 @@ Preamble with no h1 wrapper.
     out, _ = prune_lines("- [ ] x\n- [ ] see\u2028note\n", ["- [ ] x"])
     _assert(out == "- [ ] see\u2028note\n",
             "REGRESSION: a U+2028 inside an untouched line survives prune_lines byte-for-byte")
+    # A target holding U+2028 is one line, not one target per fragment: split up, the fragments
+    # after the first read as stray text under an indented checkbox and the whole run refused.
+    real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] a\u2028b\n\n- [ ] c\n")
+    try:
+        _assert(_read_stdin_lines() == ["- [ ] a\u2028b", "- [ ] c"],
+                "stdin targets split on newlines only, keeping U+2028 inside its line")
+    finally:
+        sys.stdin = real_stdin
+    sep_item = "- [ ] fix `see\u2028note` → `see\u2028\\nnote` here"
+    sep_doc = f"## G\n\n{sep_item}\n- [ ] keep\n"
+    out, problems = prune_lines(sep_doc, [sep_item])
+    _assert(problems == [] and out == "## G\n\n- [ ] keep\n",
+            f"a line holding U+2028 is pruned whole, every fragment with it (got {problems})")
+    out, problems = prune_lines(sep_doc, ["- [ ] fix `see\u2028other"])
+    _assert(out == sep_doc and any("no line matches" in p for p in problems),
+            "a U+2028 target whose last fragment differs is not a match")
+    # Matching is by whole physical line: a prefix or suffix of a U+2028 line never matches, or
+    # the rest of that line is left behind as a stray line (or fused onto the next item).
+    for doc, target, label in (
+        ("## G\n\n- [ ] see\u2028note\n- [ ] keep\n", "- [ ] see", "leading fragment"),
+        ("## G\n\n- [ ] a\u2028- [ ] b\n- [ ] keep\n", "- [ ] b", "trailing fragment"),
+        ("## G\n\n- [ ] a\u2028b\u2028- [ ] keep\n", "- [ ] a\u2028b", "leading fragment run"),
+    ):
+        out, problems = prune_lines(doc, [target])
+        _assert(out == doc and any("no line matches" in p for p in problems),
+                f"REGRESSION: a {label} of a U+2028 line does not match it")
+    out, problems = prune_lines(f"## G\n\n{sep_item}\n  wrapped\n- [ ] keep\n", [sep_item])
+    _assert(bool(problems) and "split by a line separator" in problems[0]
+            and repr(sep_item) in problems[0] and problems[0].startswith("line 3 "),
+            "a U+2028 line followed by indented text is refused, quoting the whole line")
+    out, problems = prune_lines("## G\n\n- [ ] a\u2028b\nProse paragraph.\n", ["- [ ] a\u2028b"])
+    _assert(problems == [] and out == "## G\n\nProse paragraph.\n",
+            "unindented prose after a U+2028 line is not refused — no item would fold it")
+    out, problems = prune_lines("## G\n\n- [ ] a\n  cont\u2028more\n- [ ] keep\n", ["- [ ] a"])
+    _assert(problems == [] and out == "## G\n\n- [ ] keep\n",
+            "REGRESSION: a continuation line holding U+2028 is pruned whole with its item")
+    out, problems = prune_lines("## G\n\n- [ ] a\n  c\u2028m\n  more\n- [ ] k\n", ["- [ ] a"])
+    _assert(bool(problems) and "split by a line separator" in problems[0],
+            "indented text after a U+2028 continuation is refused, not left behind")
+    out, problems = prune_lines("## G\n\nn\u2028m\n- [ ] dup\n- [ ] dup\n", ["- [ ] dup"])
+    _assert(bool(problems) and "lines 4, 5" in problems[0],
+            f"problem line numbers count physical lines, as grep -n does (got {problems})")
+    # The masked view must count lines the way `splitlines` does, or the run refuses outright.
+    out, problems = prune_lines("## G\n\n- [ ] x\n- [ ] keep\u2028", ["- [ ] x"])
+    _assert(problems == [] and out == "## G\n\n- [ ] keep\u2028",
+            f"a file ending in U+2028 still prunes (got {problems})")
+    out, problems = prune_lines("<!-- a\rb -->\n## G\n\n- [ ] x\n- [ ] keep\n", ["- [ ] x"])
+    _assert(problems == [] and out == "<!-- a\rb -->\n## G\n\n- [ ] keep\n",
+            f"a comment holding a bare CR still prunes (got {problems})")
 
     crlf_block = "# One\r\n\r\nstatus: active\r\n\r\n# Two\r\n\r\nstatus: open\r\n"
     out, _ = prune_h1_block(crlf_block, "One")

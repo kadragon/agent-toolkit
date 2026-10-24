@@ -148,6 +148,8 @@ def _is_placeholder_payload(payload: str) -> bool:
 # HTML comments hold format templates (`## Feature Name` / `- [ ] Simplest case`) that must
 # never surface as candidates.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Every character `str.splitlines` ends a line at.
+_LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 # Fenced code blocks hold command samples and markdown examples — same problem as comments, but
 # fences are line-anchored (a span regex is the wrong tool). Up to 3 leading spaces per
 # CommonMark; 4+ makes it an indented code block's content, not a fence opener.
@@ -216,10 +218,32 @@ def _strip_html_comments(text: str) -> str:
 
     Normalizing the input is correct for both classes at once. Guard the empty string, whose
     line count is already 0.
+
+    "Line" means a `str.splitlines` line, as every caller counts them: a file already ending in
+    U+2028 needs no guard, and a comment's breaks include a bare `\\r`, not only `\\n`.
     """
-    if text and not text.endswith("\n"):
+    if text and text[-1] not in _LINE_BREAKS:
         text += "\n"
-    return _HTML_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+    # A bare "\r" left at the end of the output would fuse with a following "\n" — the blank's own
+    # first break, or the text after a single-line comment — into one "\r\n" break. Tracked on
+    # what was emitted, not the source, so back-to-back comments are covered too.
+    out, pos, tail = [], 0, ""
+    for m in _HTML_COMMENT_RE.finditer(text):
+        before = text[pos:m.start()]
+        tail = before[-1:] or tail
+        breaks = len(m.group(0).splitlines()) - 1
+        blank = "\n" * breaks
+        if tail == "\r":
+            if breaks:
+                blank = "\x0b" + blank[1:]
+            elif text[m.end():m.end() + 1] == "\n":
+                blank = " "
+        out += [before, blank]
+        tail = blank[-1:] or tail
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
@@ -1280,6 +1304,14 @@ Some prose before the sample.
         # COMMENT stripper — a comment whose `-->` is the file's last characters. These two do.
         ("comment closing at true EOF", "## Group\n<!--\nx\n-->"),
         ("nothing but a comment at EOF", "<!--\nx\n-->"),
+        # `splitlines` ends a line at more than \n, so counting only \n drifts on these.
+        ("file ending in U+2028", "## Group\n- [ ] item\u2028"),
+        ("bare CR inside a comment", "<!-- a\rb -->\n- [ ] item\n"),
+        ("CRLF inside a comment", "<!-- a\r\nb -->\n- [ ] item\n"),
+        ("bare CR right before a comment", "a\r<!--\nb -->\n- [ ] item\n"),
+        ("bare CR before a one-line comment", "a\r<!-- x -->\nb\n"),
+        ("bare CR before adjacent comments", "a\r<!--x--><!--\ny-->\nb\n"),
+        ("bare CR before adjacent one-line comments", "a\r<!--x--><!--y-->\nb\n"),
     ):
         _assert(
             len(_strip_fenced_blocks(fixture).splitlines()) == len(fixture.splitlines()),
