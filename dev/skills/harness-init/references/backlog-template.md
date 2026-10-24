@@ -10,7 +10,8 @@ whole at sprint close (`tasks-template.md` → *Invariant*).
 
 ## Required Schema
 
-- All items are markdown list items with a checkbox: `- [ ]`, `- [>]`, or `- [x]`
+- All items are markdown list items with a checkbox: `- [ ]`, `- [>]`, or `- [x]` — except
+  under `## Rejected — do not re-file`, whose entries are plain bullets (see that section)
 - Items group under `##` headings by theme / priority (at least one heading)
 - The three checkbox states have exact semantics:
 
@@ -71,6 +72,24 @@ Rules for any such section:
 - Append; never overwrite a sibling group. A rescan replaces only its **own** section.
 - Tags: `[debt]` code quality/refactor · `[doc]` documentation gaps · `[constraint]` missing tests
   or architectural rules · `[harness]` tooling/CI.
+
+## Rejected — do not re-file
+
+When the user discards a queued item, move it here instead of deleting it. A deleted item leaves
+no trace, so the next review or reference scan proposes it again.
+
+```markdown
+## Rejected — do not re-file
+
+- **<item, one phrase>** — <why it was rejected>. Re-file only with <the evidence that would change the call>.
+```
+
+- Plain bullets, never `- [ ]`: an entry here is a decision, not a `task-next` candidate.
+- The re-file bar names a concrete observation (a recorded failure, a reproduction), not
+  "if it becomes important".
+- Reviews and reference scans check this section before filing a new item.
+
+Pattern adapted from mattpocock/skills@5beb35b `SCOPE.md` + `.out-of-scope/`.
 
 ## What NOT to put in backlog.md
 

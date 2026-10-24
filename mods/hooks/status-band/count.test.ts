@@ -5,6 +5,7 @@ import {
   hookCommands,
   hooksFileCommands,
   installPaths,
+  connectedServers,
   manifestHooks,
   under,
 } from './count'
@@ -112,5 +113,24 @@ describe('under', () => {
   test('leaves a base that already mixes in forward slashes on them', () => {
     expect(under('C:/Users/me', '.claude')).toBe('C:/Users/me/.claude')
     expect(under('C:\\Users/me', '.claude')).toBe('C:\\Users/me/.claude')
+  })
+})
+
+describe('connectedServers', () => {
+  const tool = (serverName: string, name: string) => ({ name: `mcp__${serverName}__${name}`, serverName })
+
+  test('counts each server once, however many tools it has', () => {
+    expect(connectedServers([tool('qmd', 'get'), tool('qmd', 'query'), tool('claude.ai Gmail', 'send')])).toBe(2)
+  })
+
+  // The engine names a tool by the server's name normalized, at any length.
+  test('leaves out a server that offers only its sign-in', () => {
+    expect(
+      connectedServers([
+        { name: 'mcp__claude_ai_Foo_Bar__authenticate', serverName: 'claude.ai Foo & Bar' },
+        { name: 'mcp__claude_ai_Foo_Bar__complete_authentication', serverName: 'claude.ai Foo & Bar' },
+        tool('qmd', 'get'),
+      ]),
+    ).toBe(1)
   })
 })

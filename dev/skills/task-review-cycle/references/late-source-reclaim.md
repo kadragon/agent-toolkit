@@ -20,11 +20,11 @@ land in a follow-up PR after the merge. agy returns late too: a measured run on 
 4m12s for a 4-file diff. Do not "fix" this by killing the run at a deadline: that discards
 exactly the findings this step exists to recover.
 
-The 15m cap was re-checked against `timings.log` on 2026-10-24: 32 agy runs across 12 repos
-(2026-10-16 to 10-24) took median 258s, p90 481s, max 574s, and none came near 900s; the one
-`empty` ended at 240s. Every run fit the reviewer's 600s, so a lower cap would remove no lateness
-today and would only discard the rare run past 600s that the pre-merge reclaim collects during the
-CI wait. Keep 15m; revisit only when the log shows runs ending at the cap.
+The 15m cap stays. A cap cannot make agy report sooner; it can only kill a run, and a killed run
+leaves nothing for this reclaim to collect. The toolkit author's `timings.log` files (2026-10-24:
+32 agy runs across 11 repos, 2026-10-16 to 10-24) show median 279s, p90 481s, max 574s, and no
+run near 900s; the one `empty` ended at 240s. So the cap has never fired. Lower it only if your
+own log shows runs ending at about 900s as `empty` or `failed`.
 
 ## Where a late result lands
 

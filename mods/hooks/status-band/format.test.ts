@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { StatusBand } from '../../types'
 import {
+  ASCII,
   bar,
   cacheText,
   contextText,
@@ -12,7 +13,9 @@ import {
   levelOf,
   limitsSegments,
   limitsText,
+  mergedSegments,
   modelLabel,
+  setupText,
   tokens,
 } from './format'
 
@@ -37,28 +40,28 @@ const STATUS: StatusBand = {
 
 describe('headline', () => {
   test('reads model, effort, directory, branch and elapsed time', () => {
-    expect(headline(STATUS)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  <1m')
+    expect(headline(STATUS)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
   })
 
   test('leaves the effort out until a turn reported one', () => {
     expect(headline({ ...STATUS, effort: undefined })).toBe(
-      '[Opus 5.5] │ agent-toolkit git:(main) │ ⏱️  <1m',
+      '[Opus 5.5] │ agent-toolkit git:(main) │ up <1m',
     )
   })
 
   test('leaves the git segment out with no branch', () => {
     expect(headline({ ...STATUS, branch: undefined })).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit │ ⏱️  <1m',
+      '[Opus 5.5 ◔ medium] │ agent-toolkit │ up <1m',
     )
   })
 
   test('draws the branch alone when the directory has no name', () => {
-    expect(headline({ ...STATUS, cwd: '/' })).toBe('[Opus 5.5 ◔ medium] │ git:(main) │ ⏱️  <1m')
-    expect(headline({ ...STATUS, cwd: '', branch: undefined })).toBe('[Opus 5.5 ◔ medium] │ ⏱️  <1m')
+    expect(headline({ ...STATUS, cwd: '/' })).toBe('[Opus 5.5 ◔ medium] │ git:(main) │ up <1m')
+    expect(headline({ ...STATUS, cwd: '', branch: undefined })).toBe('[Opus 5.5 ◔ medium] │ up <1m')
   })
 
   test('leaves the model out when the engine named none', () => {
-    expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main) │ ⏱️  <1m')
+    expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main) │ up <1m')
   })
 
   test('leaves the elapsed time out when the session start is unknown', () => {
@@ -69,7 +72,7 @@ describe('headline', () => {
 
   test('cuts a long branch name so the figures after it stay on the row', () => {
     expect(headline({ ...STATUS, branch: 'feat/status-band-colors-cache-countdown' })).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…) │ ⏱️  <1m',
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…) │ up <1m',
     )
   })
 
@@ -118,7 +121,7 @@ describe('context', () => {
 
 describe('limitsText', () => {
   test('names the five-hour window first, each with its reset', () => {
-    expect(limitsText(STATUS)).toBe('5h: 88% (2h 4m) | 7d: 9% (6d 7h)')
+    expect(limitsText(STATUS)).toBe('5h: 88% (2h 4m) │ 7d: 9% (6d 7h)')
   })
 
   test('is empty off a subscription', () => {
@@ -157,6 +160,8 @@ describe('duration', () => {
 describe('cache', () => {
   test('reads the time left, and expired once it is past', () => {
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 58 * MINUTE })).toBe('cache 58m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + HOUR })).toBe('cache 60m')
+    expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 90 * MINUTE })).toBe('cache 90m')
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW + 30_000 })).toBe('cache <1m')
     expect(cacheText({ ...STATUS, cacheExpiresAt: NOW })).toBe('cache expired')
   })
@@ -167,22 +172,37 @@ describe('cache', () => {
 })
 
 describe('counts', () => {
-  test('follow the timers: the cache, the hooks, then the skills and their size', () => {
-    expect(
-      headline({
-        ...STATUS,
-        cacheExpiresAt: NOW + 58 * MINUTE,
-        hooks: 21,
-        skills: { count: 49, tokens: 4234 },
-      }),
-    ).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ ⏱️  <1m │ cache 58m │ 21 hooks │ 49 skills (4.2k)',
+  const COUNTED: StatusBand = {
+    ...STATUS,
+    cacheExpiresAt: NOW + 58 * MINUTE,
+    hooks: 21,
+    skills: { count: 49, tokens: 4234 },
+    mcp: 4,
+  }
+
+  test('make a row of their own: the cache, the hooks, the skills and their size, the MCP servers', () => {
+    expect(setupText(COUNTED)).toBe('cache 58m │ 21 hooks │ 49 skills (4.2k) │ 4 mcp')
+    expect(headline(COUNTED)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
+  })
+
+  test('ride on the headline when merged', () => {
+    expect(mergedSegments(COUNTED).map(segment => segment.text).join('')).toBe(
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m │ cache 58m │ 21 hooks │ 49 skills (4.2k) │ 4 mcp',
     )
+    expect(mergedSegments(STATUS).map(segment => segment.text).join('')).toBe(headline(STATUS))
+  })
+
+  test('are left out while unread', () => {
+    expect(setupText(STATUS)).toBe('')
+  })
+
+  test('leave out an MCP figure of none', () => {
+    expect(setupText({ ...STATUS, hooks: 2, mcp: 0 })).toBe('2 hooks')
   })
 
   test('name one of a thing in the singular', () => {
-    expect(headline({ ...STATUS, hooks: 1, skills: { count: 1, tokens: 80 } })).toContain(
-      '1 hook │ 1 skill (80)',
+    expect(setupText({ ...STATUS, hooks: 1, skills: { count: 1, tokens: 80 }, mcp: 1 })).toBe(
+      '1 hook │ 1 skill (80) │ 1 mcp',
     )
   })
 
@@ -208,6 +228,30 @@ describe('segments', () => {
     const colors = limitsSegments(STATUS).flatMap(({ color }) => (color === undefined ? [] : [color]))
 
     expect(colors).toEqual(['warning', 'success'])
+  })
+})
+
+describe('ascii', () => {
+  test('draws the separators, the effort, the bar and a cut branch in plain letters', () => {
+    const status = { ...STATUS, branch: 'feat/status-band-colors-cache-countdown', hooks: 2 }
+
+    expect(mergedSegments(status, ASCII).map(segment => segment.text).join('')).toBe(
+      '[Opus 5.5 medium] | agent-toolkit git:(feat/status-band-colors~) | up <1m | 2 hooks',
+    )
+    expect(contextText({ ...STATUS, contextPercent: 42 }, ASCII)).toBe('Context ####------ 42%')
+    expect(limitsSegments(STATUS, ASCII).map(segment => segment.text).join('')).toBe(
+      '5h: 88% (2h 4m) | 7d: 9% (6d 7h)',
+    )
+  })
+
+  test('draws nothing past ASCII', () => {
+    const status = { ...STATUS, cacheExpiresAt: NOW + MINUTE, hooks: 1, skills: { count: 1, tokens: 9 }, mcp: 2 }
+    const text = [
+      mergedSegments(status, ASCII),
+      limitsSegments(status, ASCII),
+    ].flat().map(segment => segment.text).join('') + contextText(status, ASCII)
+
+    expect(/^[ -~]*$/.test(text)).toBe(true)
   })
 })
 

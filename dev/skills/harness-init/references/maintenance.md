@@ -114,7 +114,7 @@ maintained here — that is transcript-driven and lives in `harness-curate`.
 
 Verify **schema** (not content) of harness-related docs. Full schemas in `backlog-template.md` and `tasks-template.md`; minimal assertions below match those templates:
 
-- `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings
+- `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings, except the plain-bullet entries under `## Rejected — do not re-file`
 - `tasks.md` must have: top-level `# Title`, `status:` line, sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.

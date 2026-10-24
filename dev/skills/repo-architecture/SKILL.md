@@ -4,7 +4,7 @@ description: >-
   Scan this repo for deepening opportunities — shallow modules whose complexity should
   collapse behind a smaller interface — and queue the ones you pick as backlog items.
 disable-model-invocation: true
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Repo Architecture
@@ -103,8 +103,9 @@ If the candidate is large enough to span several sessions, call the Skill tool t
 "dev:task-spec" and "dev:task-tickets", instead of writing one oversized item by hand.
 
 When a candidate is **rejected for a load-bearing reason** — a constraint that would make a
-future scan re-propose it — record that reason where the next reader will meet it: a cut
-section in `backlog.md` if the repo keeps one, otherwise a note in the owning `docs/` page.
+future scan re-propose it — record that reason where the next reader will meet it: `backlog.md` →
+`## Rejected — do not re-file` (format: `dev:harness-init`'s backlog template). Check that section
+before filing a candidate, too.
 Skip ephemeral reasons ("not worth it right now") and self-evident ones.
 
 Then tell the user to run `task-next` themselves when they want the queued item built

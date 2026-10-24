@@ -3,6 +3,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 
 import type { StatusBand } from '../../types'
 import {
+  connectedServers,
   enabledPlugins,
   hookCommands,
   hooksFileCommands,
@@ -10,8 +11,17 @@ import {
   manifestHooks,
   under,
 } from './count'
-import { contextText, curateText, headlineSegments, levelOf, limitsSegments } from './format'
-import type { Segment } from './format'
+import {
+  contextText,
+  curateText,
+  headlineSegments,
+  levelOf,
+  limitsSegments,
+  mergedSegments,
+  setupSegments,
+  UNICODE,
+} from './format'
+import type { Glyphs, Segment } from './format'
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
 // The elapsed time and the reset countdowns read in minutes.
@@ -54,7 +64,7 @@ type Live = {
   curateRead?: Promise<void>
 }
 
-type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'curateDue'>
+type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
 
 // The handlers a plugin's default hooks file, its manifest and the files the
 // manifest names add; a file that is not there adds none.
@@ -137,13 +147,20 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
   return counts.reduce((total, count) => total + count, own)
 }
 
-// The skill listing as /context counts it, estimated locally: no request is sent.
-const readSkills = async ($: EngineInterface): Promise<StatusBand['skills']> => {
+// The skill listing and the MCP servers as /context counts them, estimated
+// locally: no request is sent.
+const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> => {
   const { context } = await $.session.usage({ breakdown: 'summary' })
+  const breakdown = context.breakdown
 
-  const skills = context.breakdown?.skills
+  if (breakdown === undefined) return {}
 
-  return skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens }
+  const skills = breakdown.skills
+
+  return {
+    skills: skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens },
+    mcp: connectedServers(breakdown.mcpTools),
+  }
 }
 
 // Reads the counts apart from the other figures, which must not wait for the
@@ -155,14 +172,18 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
   const epoch = live.setupEpoch
 
   live.setupRead = (async () => {
-    const [hooks, skills] = await Promise.all([
+    const [hooks, context] = await Promise.all([
       countHooks($).catch(() => undefined),
-      readSkills($).catch(() => undefined),
+      readContext($).catch(() => undefined),
     ])
 
     if (epoch !== live.setupEpoch) return
 
-    const setup = { hooks: hooks ?? live.setup.hooks, skills: skills ?? live.setup.skills }
+    const setup = {
+      hooks: hooks ?? live.setup.hooks,
+      skills: context?.skills ?? live.setup.skills,
+      mcp: context?.mcp ?? live.setup.mcp,
+    }
 
     live.setup = { ...live.setup, ...setup }
     live.hasSetup = true
@@ -290,6 +311,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         cacheModel: isCacheGone ? undefined : cacheModel,
         hooks: live.hasSetup ? live.setup.hooks : current?.hooks,
         skills: live.hasSetup ? live.setup.skills : current?.skills,
+        mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
       }
     })
@@ -451,34 +473,49 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
   ))
 
 // This mod's rows of the band above the prompt, under a blank row that keeps
-// them off the line above where the band has a row to spare. `hooks/band.tsx`
+// them off the line above where the band has a row to spare. The setup gets a
+// row of its own where `isSplit`, else it rides on the headline; `glyphs` is
+// the set the rows draw beyond plain letters. `hooks/band.tsx`
 // draws them: the engine takes one band hook per plugin, and `$` stays in that
 // hook's file.
 export const statusRows = (
   elements: BandElements,
   status: StatusBand,
-  hasMargin: boolean,
+  {
+    hasMargin,
+    isSplit,
+    glyphs = UNICODE,
+  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs },
 ): RenderElement => {
   const { Box, Text } = elements
-  const context = contextText(status)
-  const limits = limitsSegments(status)
+  const setup = isSplit ? setupSegments(status, glyphs) : []
+  const context = contextText(status, glyphs)
+  const limits = limitsSegments(status, glyphs)
   const curate = curateText(status)
 
   return (
     <Box key="status-band" flexDirection="column" marginTop={hasMargin ? 1 : 0}>
-      <Text wrap="truncate-end">{runs(elements, headlineSegments(status))}</Text>
+      <Text wrap="truncate-end">
+        {runs(
+          elements,
+          isSplit ? headlineSegments(status, glyphs) : mergedSegments(status, glyphs),
+        )}
+      </Text>
+      {setup.length === 0 ? null : <Text wrap="truncate-end">{runs(elements, setup)}</Text>}
       {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
           {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
           {limits.length === 0 ? null : (
             <Text wrap="truncate-end">
-              {context === '' ? null : <Text dimColor> │ </Text>}
+              {context === '' ? null : <Text dimColor>{glyphs.separator}</Text>}
               {runs(elements, limits)}
             </Text>
           )}
           {curate === '' ? null : (
             <Box>
-              {context === '' && limits.length === 0 ? null : <Text dimColor> │ </Text>}
+              {context === '' && limits.length === 0 ? null : (
+                <Text dimColor>{glyphs.separator}</Text>
+              )}
               <Text color="warning" wrap="truncate-end">
                 {curate}
               </Text>

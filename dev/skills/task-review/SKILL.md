@@ -5,19 +5,16 @@ description: >-
   by risk and required checks). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
   (request the merge path), --panel (force agy + Codex; default on every non-lite route).
 disable-model-invocation: true
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Dev Review Cycle
 
 ## Arguments
 
-- `--no-hub` — commit locally, review, apply, stop. No push, PR, CI, or merge.
-- `--auto` — skip the consolidation confirmation; apply every in-scope P0/P1 finding.
-- `--pr` / `--lite` — request PR+CI or direct merge; risk and mandatory CI gates still apply.
-- `--panel` — force the agy + Codex panel, which also forces PR+CI unless `--no-hub`. Without it the panel runs on
-  every PR+CI and `--no-hub` route and stays off on the lite path, where Codex alone reviews
-  (`dev:task-review-cycle`).
+The flags in the description are defined once, in `dev:task-review-cycle` → *Arguments*; pass
+them through unchanged (one definition, not two that drift:
+`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/authoring-a-skill.md`).
 
 Restate the Sprint Contract in the same invocation when the implementation was not yet verified
 against it; the reviewer grades it (on lite, the orchestrator grades it inline — not independent).

@@ -13,6 +13,8 @@ export type StatusBand = {
   cacheModel?: string
   hooks?: number
   skills?: { count: number; tokens: number }
+  // The MCP servers connected: one that needs a sign-in is not counted.
+  mcp?: number
   // A harness-curate run is due in this repo, as the dev plugin judges it.
   curateDue?: boolean
 }

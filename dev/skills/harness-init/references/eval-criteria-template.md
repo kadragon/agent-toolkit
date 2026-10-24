@@ -85,6 +85,12 @@ omits the criterion is indistinguishable from a well-formed one, and the omissio
 detecting. Your repo's commit-convention doc owns the underlying rule; this is the step that makes
 it gradable.
 
+**A refactor contract needs a behavior pin.** When the commit tag is the refactor type, one agreed
+criterion must name the tests that hold the touched behavior, run green before the first structural
+edit. Where the area has no such test, the criterion names a characterization test written first.
+Type check and lint are not a pin: a refactor over untested code passes both while behavior changes
+(`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/refactoring.md` step 1).
+
 For long-running builds where sprint decomposition isn't needed (model can sustain coherent work for hours), the contract still applies — just at the feature level rather than the sprint level.
 
 ## Calibration Examples

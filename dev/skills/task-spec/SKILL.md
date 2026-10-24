@@ -7,7 +7,7 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.2.0
+version: 1.2.1
 ---
 
 # To Spec
@@ -61,6 +61,9 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    ## Implementation Decisions
    {key design/architecture choices and why, resolved via task-grill or conversation}
 
+   ## Alternatives rejected
+   {each structurally different approach weighed, one line each: the approach and why it lost}
+
    ## Testing Decisions
    {how correctness will be verified — test type, lint/test command, manual verification}
 
@@ -85,6 +88,12 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    a spec that is foggier than it is decided is a signal the scope is too large for one
    spec, so say so instead of filling the section.
 
+   **Record what lost.** Implementation starts in a fresh session that holds only this file, so
+   a rejected approach missing here gets proposed again. Name at least one structurally
+   different alternative for each architectural decision; write `None weighed — <reason>` when
+   the approach was forced (`cursor/plugins@9b93e81:pstack/skills/architect/SKILL.md` Phase B,
+   `pstack/skills/poteto-mode/playbooks/multi-phase-plan.md` Appendix B).
+
    **Skill extraction handoff.** When the resolved summary includes `Skill slots:`, append
    `## Skill slots` after Further Notes and copy all seven slots verbatim, including source
    paths and explicit N/A values. Keep runtime checks, decision rules and exceptions there;
@@ -100,6 +109,5 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 ## Boundaries
 
 - Do not write production code from this skill.
-- Do not create any file other than `docs/design/{slug}.md` — no `CONTEXT.md`, no ADRs, no
-  glossary.
+- Write only `docs/design/{slug}.md`.
 - Do not skip user review of the written spec.
