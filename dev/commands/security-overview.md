@@ -105,7 +105,7 @@ Key rules:
 
 ### 3-3. Present result
 
-After generating all files, show summary table with repo, path, item count. Include total items and suggest next step.
+After generating all files, show summary table with repo, path, item count. Include total items, the Withheld line for alerts held back by `## Rejected — do not re-file` (it explains any gap from the Phase 1 totals), and suggest next step.
 
 ## Error Handling
 

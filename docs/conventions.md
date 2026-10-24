@@ -290,9 +290,11 @@ guard the test targets, re-run, and confirm the test goes red — then restore. 
 not evidence; an assertion can hold for both the fixed and the broken behavior and read as
 coverage while providing none.
 
-Prove the mutation landed: `git diff -- <target file>` must be non-empty before you trust the
-red, and empty after the restore. A red from an edit aimed at the wrong file, or one that broke
-the syntax, reads as coverage while the guard was never removed (adapted from
+Prove the mutation landed. Snapshot `git diff -- <target file>` just before removing the guard
+(the uncommitted fix is usually in it); the diff must differ from the snapshot while the guard is
+out and match it again after the restore. And the red must be the test's own assertion failing,
+not a collection, import, or syntax error. Otherwise an edit aimed at the wrong file, or one that
+broke the module, reads as coverage while the guard never left (adapted from
 `mattpocock/skills@5beb35b:skills/engineering/diagnosing-bugs/SKILL.md`).
 
 Typical trap: anchoring an ordering assertion on the wrong landmark. `lines.index("```", 1)`
