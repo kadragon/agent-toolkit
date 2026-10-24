@@ -149,7 +149,7 @@ def _is_placeholder_payload(payload: str) -> bool:
 # never surface as candidates.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # Every character `str.splitlines` ends a line at.
-_LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85  "
+_LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 # Fenced code blocks hold command samples and markdown examples — same problem as comments, but
 # fences are line-anchored (a span regex is the wrong tool). Up to 3 leading spaces per
 # CommonMark; 4+ makes it an indented code block's content, not a fence opener.
@@ -1305,7 +1305,7 @@ Some prose before the sample.
         ("comment closing at true EOF", "## Group\n<!--\nx\n-->"),
         ("nothing but a comment at EOF", "<!--\nx\n-->"),
         # `splitlines` ends a line at more than \n, so counting only \n drifts on these.
-        ("file ending in U+2028", "## Group\n- [ ] item "),
+        ("file ending in U+2028", "## Group\n- [ ] item\u2028"),
         ("bare CR inside a comment", "<!-- a\rb -->\n- [ ] item\n"),
         ("CRLF inside a comment", "<!-- a\r\nb -->\n- [ ] item\n"),
         ("bare CR right before a comment", "a\r<!--\nb -->\n- [ ] item\n"),

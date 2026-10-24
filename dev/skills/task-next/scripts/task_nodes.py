@@ -1491,26 +1491,26 @@ Preamble with no h1 wrapper.
             "REGRESSION: a U+2028 inside an untouched line survives prune_lines byte-for-byte")
     # A target holding U+2028 is one line, not one target per fragment: split up, the fragments
     # after the first read as stray text under an indented checkbox and the whole run refused.
-    real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] a b\n\n- [ ] c\n")
+    real_stdin, sys.stdin = sys.stdin, io.StringIO("- [ ] a\u2028b\n\n- [ ] c\n")
     try:
-        _assert(_read_stdin_lines() == ["- [ ] a b", "- [ ] c"],
+        _assert(_read_stdin_lines() == ["- [ ] a\u2028b", "- [ ] c"],
                 "stdin targets split on newlines only, keeping U+2028 inside its line")
     finally:
         sys.stdin = real_stdin
-    sep_item = "- [ ] fix `see note` → `see \\nnote` here"
+    sep_item = "- [ ] fix `see\u2028note` → `see\u2028\\nnote` here"
     sep_doc = f"## G\n\n{sep_item}\n- [ ] keep\n"
     out, problems = prune_lines(sep_doc, [sep_item])
     _assert(problems == [] and out == "## G\n\n- [ ] keep\n",
             f"a line holding U+2028 is pruned whole, every fragment with it (got {problems})")
-    out, problems = prune_lines(sep_doc, ["- [ ] fix `see other"])
+    out, problems = prune_lines(sep_doc, ["- [ ] fix `see\u2028other"])
     _assert(out == sep_doc and any("no line matches" in p for p in problems),
             "a U+2028 target whose last fragment differs is not a match")
     # Matching is by whole physical line: a prefix or suffix of a U+2028 line never matches, or
     # the rest of that line is left behind as a stray line (or fused onto the next item).
     for doc, target, label in (
-        ("## G\n\n- [ ] see note\n- [ ] keep\n", "- [ ] see", "leading fragment"),
-        ("## G\n\n- [ ] a - [ ] b\n- [ ] keep\n", "- [ ] b", "trailing fragment"),
-        ("## G\n\n- [ ] a b - [ ] keep\n", "- [ ] a b", "leading fragment run"),
+        ("## G\n\n- [ ] see\u2028note\n- [ ] keep\n", "- [ ] see", "leading fragment"),
+        ("## G\n\n- [ ] a\u2028- [ ] b\n- [ ] keep\n", "- [ ] b", "trailing fragment"),
+        ("## G\n\n- [ ] a\u2028b\u2028- [ ] keep\n", "- [ ] a\u2028b", "leading fragment run"),
     ):
         out, problems = prune_lines(doc, [target])
         _assert(out == doc and any("no line matches" in p for p in problems),
@@ -1519,21 +1519,21 @@ Preamble with no h1 wrapper.
     _assert(bool(problems) and "split by a line separator" in problems[0]
             and repr(sep_item) in problems[0] and problems[0].startswith("line 3 "),
             "a U+2028 line followed by indented text is refused, quoting the whole line")
-    out, problems = prune_lines("## G\n\n- [ ] a b\nProse paragraph.\n", ["- [ ] a b"])
+    out, problems = prune_lines("## G\n\n- [ ] a\u2028b\nProse paragraph.\n", ["- [ ] a\u2028b"])
     _assert(problems == [] and out == "## G\n\nProse paragraph.\n",
             "unindented prose after a U+2028 line is not refused — no item would fold it")
-    out, problems = prune_lines("## G\n\n- [ ] a\n  cont more\n- [ ] keep\n", ["- [ ] a"])
+    out, problems = prune_lines("## G\n\n- [ ] a\n  cont\u2028more\n- [ ] keep\n", ["- [ ] a"])
     _assert(problems == [] and out == "## G\n\n- [ ] keep\n",
             "REGRESSION: a continuation line holding U+2028 is pruned whole with its item")
-    out, problems = prune_lines("## G\n\n- [ ] a\n  c m\n  more\n- [ ] k\n", ["- [ ] a"])
+    out, problems = prune_lines("## G\n\n- [ ] a\n  c\u2028m\n  more\n- [ ] k\n", ["- [ ] a"])
     _assert(bool(problems) and "split by a line separator" in problems[0],
             "indented text after a U+2028 continuation is refused, not left behind")
-    out, problems = prune_lines("## G\n\nn m\n- [ ] dup\n- [ ] dup\n", ["- [ ] dup"])
+    out, problems = prune_lines("## G\n\nn\u2028m\n- [ ] dup\n- [ ] dup\n", ["- [ ] dup"])
     _assert(bool(problems) and "lines 4, 5" in problems[0],
             f"problem line numbers count physical lines, as grep -n does (got {problems})")
     # The masked view must count lines the way `splitlines` does, or the run refuses outright.
-    out, problems = prune_lines("## G\n\n- [ ] x\n- [ ] keep ", ["- [ ] x"])
-    _assert(problems == [] and out == "## G\n\n- [ ] keep ",
+    out, problems = prune_lines("## G\n\n- [ ] x\n- [ ] keep\u2028", ["- [ ] x"])
+    _assert(problems == [] and out == "## G\n\n- [ ] keep\u2028",
             f"a file ending in U+2028 still prunes (got {problems})")
     out, problems = prune_lines("<!-- a\rb -->\n## G\n\n- [ ] x\n- [ ] keep\n", ["- [ ] x"])
     _assert(problems == [] and out == "<!-- a\rb -->\n## G\n\n- [ ] keep\n",
