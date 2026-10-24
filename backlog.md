@@ -17,6 +17,13 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [FIX] On Windows in the Wave terminal the band sometimes shows broken glyphs or stale cells (e.g. `559m` where `duration()` can only emit `59m`); macOS renders it correctly, colors included (user check, 2026-10-17). Suspect the ambiguous-width glyphs the row emits — the effort mark (`○◔◑◕●`), the `█░` context bar, `⏱️` with its variation selector — measured at one cell by the engine but drawn at two by the terminal, so a redraw leaves cells behind; unverified — mods/hooks/status-band/format.ts *(deferred: needs a Windows + Wave session to reproduce; this machine is macOS)*
 
+### PR #345 — prune-backlog removes a pruned item's wrapped continuation lines (2026-10-24)
+
+- [ ] [debt] `_split` keeps U+2028 inside a line body with an empty terminator, so `_join` appends a newline into an untouched line (`see note` → `see \nnote`); same on main (source: code-review) — dev/skills/task-next/scripts/task_nodes.py `_split`/`_join`
+- [ ] [debt] `orphaned_blockers` builds the subject from the checkbox line including its own `*(blocked by: …)*` marker, so two items sharing an inline marker raise a false orphan warning; same on main (source: code-review) — dev/skills/task-next/scripts/task_nodes.py `orphaned_blockers`
+- [ ] [debt] Pruning a column-0 item keeps its nested checkboxes, which then render under the previous item; same on main, pinned by the `nested` test (source: code-review) — dev/skills/task-next/scripts/task_nodes.py `prune_lines`
+- [ ] [debt] A continuation line holding a balanced inline `<!-- … -->` is refused as "inside a fence or HTML comment" — a safe false refusal (source: code-review) (introduced here) — dev/skills/task-next/scripts/task_nodes.py `prune_lines`
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
