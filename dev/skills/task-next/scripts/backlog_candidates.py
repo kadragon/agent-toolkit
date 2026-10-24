@@ -225,15 +225,25 @@ def _strip_html_comments(text: str) -> str:
     if text and text[-1] not in _LINE_BREAKS:
         text += "\n"
 
-    def blank(m: re.Match) -> str:
+    # A bare "\r" left at the end of the output would fuse with a following "\n" — the blank's own
+    # first break, or the text after a single-line comment — into one "\r\n" break. Tracked on
+    # what was emitted, not the source, so back-to-back comments are covered too.
+    out, pos, tail = [], 0, ""
+    for m in _HTML_COMMENT_RE.finditer(text):
+        before = text[pos:m.start()]
+        tail = before[-1:] or tail
         breaks = len(m.group(0).splitlines()) - 1
-        if not breaks:
-            return ""
-        # A bare "\r" just before the comment would fuse with a leading "\n" into one break.
-        lead = "\x0b" if text[m.start() - 1 : m.start()] == "\r" else "\n"
-        return lead + "\n" * (breaks - 1)
-
-    return _HTML_COMMENT_RE.sub(blank, text)
+        blank = "\n" * breaks
+        if tail == "\r":
+            if breaks:
+                blank = "\x0b" + blank[1:]
+            elif text[m.end():m.end() + 1] == "\n":
+                blank = " "
+        out += [before, blank]
+        tail = blank[-1:] or tail
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
@@ -1299,6 +1309,9 @@ Some prose before the sample.
         ("bare CR inside a comment", "<!-- a\rb -->\n- [ ] item\n"),
         ("CRLF inside a comment", "<!-- a\r\nb -->\n- [ ] item\n"),
         ("bare CR right before a comment", "a\r<!--\nb -->\n- [ ] item\n"),
+        ("bare CR before a one-line comment", "a\r<!-- x -->\nb\n"),
+        ("bare CR before adjacent comments", "a\r<!--x--><!--\ny-->\nb\n"),
+        ("bare CR before adjacent one-line comments", "a\r<!--x--><!--y-->\nb\n"),
     ):
         _assert(
             len(_strip_fenced_blocks(fixture).splitlines()) == len(fixture.splitlines()),
