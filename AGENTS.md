@@ -43,6 +43,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 2. No tool calls to confirm known facts. Direct answers for simple questions.
 3. Independent tool calls in parallel — never sequential when not dependent.
 4. Do not restate user's message.
+5. A `docs/*.md` from the index: list its `## ` headings first (`grep -n '^## '`), then read the matching `##` section whole, subsections included.
 
 ## Working with Existing Code
 
