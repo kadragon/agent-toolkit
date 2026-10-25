@@ -65,9 +65,11 @@ BOLD_PAIR = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
 UNCLOSED_BOLD = re.compile(r"\*\*(?=[^\s,.)·])")
 # R14 spacing (국립국어원 공공언어 바로 쓰기): stems are listed, not `[가-힣]+시`, because the bare
 # suffix also ends whole words (반드시, 동시, 이내). J admits only an end or a particle after
-# the suffix, so 발생시키다, 이용시설, 3일 간격, 운영중심 stay out.
-J = r"(?=$|[^가-힣]|[에의은는을를이인으로와과만까])"
-NUM = r"(\d|[○OＯ])"
+# the suffix, so 발생시키다, 이용시설, 3일 간격, 운영중심 stay out. Rules whose suffix also
+# starts a common word narrow it further: 경과, 상이, 별로 (없다), A과 B 간 비교.
+J = r"(?=$|[^가-힣]|[에의은는을를이인으로와과만까도나엔]|부터)"
+JS = r"(?=$|[^가-힣]|[의으에은는도])"   # 상 + 이 is the word 상이, not a particle
+NUM = r"(?<![\d○OＯ])([\d○OＯ]+)"     # whole number, so the message quotes `30일`, not `0일`
 SPACING = [
     (re.compile(r"(개최|발생|계약|신청|제출|접수|변경|이용|사용|방문|참석|출장|도착|위반|미납|선정|채용|퇴직)시" + J),
      "dependent noun 시 — space it (`계약 시`, or `계약할 때`)"),
@@ -81,17 +83,18 @@ SPACING = [
      "dependent noun 전 — space it (`경기 전`)"),
     (re.compile(NUM + r"(월|년)(초|말)" + J),
      "dependent noun 초/말 — space it (`10월 말`)"),
-    (re.compile(NUM + r"\s*(일|주|개월|년|시간)\s+간" + J + r"|(이틀|사흘|나흘|며칠)\s+간" + J),
+    (re.compile(r"(?<![과와]\s)" + NUM + r"\s*(일|주|개월|년|시간)\s+간(?!\s*(비교|차이|격차))" + J
+                + r"|(이틀|사흘|나흘|며칠)\s+간" + J),
      "duration 간 is a suffix — attach it (`2개월간`)"),
-    (re.compile(NUM + r"\s*(일|월)\s+경" + J + r"|(초순|중순|하순)\s+경" + J),
+    (re.compile(NUM + r"\s*(일|월)\s+경(?!과)" + J + r"|(초순|중순|하순)\s+경(?!과)" + J),
      "suffix 경 — attach it (`20일경`)"),
     (re.compile(r"\S\s+가량" + J),
      "suffix 가량 — attach it (`1/2가량`)"),
     (re.compile(NUM + r"\s+여\s*(명|년|개|건|곳|일|회|차|가지|만|천|억)"),
      "suffix 여 — attach it to the number (`50여 년`)"),
-    (re.compile(r"(부서|학년|학과|학기|기관|분기|지역|유형|항목|단계|연도|과목|부처|사업|대학)\s+별" + J),
+    (re.compile(r"(부서|학년|학과|학기|기관|분기|지역|유형|항목|단계|연도|과목|부처|사업|대학)\s+별(?!로\s+[^.,]*?(없|않|아니|못))" + J),
      "suffix 별 — attach it (`부서별`)"),
-    (re.compile(r"(영수증|규정|법령|서류|계약서|회계|장부|형식|절차)\s+상" + J),
+    (re.compile(r"(영수증|규정|법령|서류|계약서|회계|장부|형식|절차)\s+상" + JS),
      "suffix 상 — attach it (`영수증상`)"),
     (re.compile(r"(필요|평상|비상|유사)\s+시" + J),
      "dictionary word — write it as one (`필요시`, `평상시`)"),
@@ -288,7 +291,7 @@ def selftest():
         "기한내에 제출", "승인후 집행", "방과후 운영", "10월말까지 완료", "2026년초 시행",
         "2개월 간 운영", "이틀 간 진행", "20일 경 발표", "하순 경 안내", "1/2 가량은 미사용",
         "50 여 년간", "부서 별로 제출", "학년 별 배정", "영수증 상의 금액", "필요 시 연장",
-        "평상 시와 같이",
+        "평상 시와 같이", "계약시부터 적용", "승인후도 유지", "사용중엔 제한",
     ]
     for t in spacing_bad:
         assert "R14" in {r[1] for r in lint([" ○ " + t])}, t
@@ -299,7 +302,9 @@ def selftest():
         "50여 년간", "부서별로 제출", "학년별 배정", "영수증상의 금액", "필요시 연장",
         "평상시와 같이", "반드시 제출", "크래시 발생", "동시 접속", "즉시 조치", "7일 이내 제출",
         "문제를 발생시키는 원인", "이용시설 점검", "3일 간격으로 점검", "필요 시설 확충",
-        "운영중심 대학", "학교 간 협력", "교내 행사",
+        "운영중심 대학", "학교 간 협력", "교내 행사", "납부기한 30일 경과 시 부과",
+        "기관별 규정 상이하여 확인", "기관마다 절차 상이", "계약서 상이 여부 확인",
+        "2024년과 2025년 간 비교 결과", "2025년 간 비교", "2024년과 2025년 간 실적 변화","사업 별로 효과가 없음", "기관내부 회의",
     ]
     for t in spacing_ok:
         assert "R14" not in {r[1] for r in lint([" ○ " + t])}, (t, lint([" ○ " + t]))
@@ -309,6 +314,8 @@ def selftest():
     assert lint(gongmun, gongmun=True) == [], lint(gongmun, gongmun=True)
     got = {r[1] for r in lint(["1. 계약시 2026.10.15. 까지 제출합니다."], gongmun=True)}
     assert got == {"R5", "R14"}, got
+    # the message quotes the whole number, not its last digit
+    assert "`30일 간`" in lint([" ○ 30일 간 운영"])[0][3], lint([" ○ 30일 간 운영"])
     # line numbers count blank lines in a text draft
     import os
     import tempfile
