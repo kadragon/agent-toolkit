@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.2
+version: 1.1.3
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -62,10 +62,10 @@ Derive `COMMIT_MESSAGE` from `git diff --cached --stat` (empty index: `--stat HE
 `git log -5`; the `[TYPE]` prefix is mandatory (commit-guard in the script rejects otherwise).
 Capture it — and the Step 2 contract — with a **quoted** heredoc delimiter, never an interpolated
 assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if its diff against
-the base is empty and no review remains, report no work and stop here. End the body with a
-`Verification:` line per `cycle_state.py inspect` → `evidence` record, exact command and exit code
-(`none recorded` when empty): `retire` deletes the archive after merge, so the commit and PR body keep
-the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`).
+the base is empty and no review remains, report no work and stop here. End the body with
+`Verification:` + the exact command and exit code of the one `cycle_state.py inspect` → `evidence`
+record, only when its `tree_matches_current` is true (else `none recorded`): `retire` deletes the
+archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`).
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -143,8 +143,7 @@ bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTR
 
 It grades requirements and code quality as separate axes in one read-only pass, printing the
 findings array on stdout. It never runs the lint/test command (`--permission-mode plan`); it grades
-an execution-based criterion against the evidence line above, staying silent on one when that line
-is absent rather than failing it. Grading runs outside this session in a foreground shell-out.
+an execution-based criterion against the evidence line above, silent on one when that line is absent.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
@@ -188,7 +187,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
 FILES_TO_STAGE="<exact files changed in Step 4, verified against git status --short>"
 COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
-<[TYPE] message from Step 1>
+<[TYPE] message from Step 1, its Verification: line rebuilt from the Step 4.4 evidence>
 COMMIT_MSG
 )
 # lite or --no-hub:
@@ -197,8 +196,9 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit when Step 4 changed nothing. `--no-hub`, either way: reclaim a late panel source
-(`references/late-source-reclaim.md`), report, end.
+Skip the commit when Step 4 changed nothing. Hub: put the rebuilt body on the PR too (`gh pr edit
+<PR_NUMBER> --body`), as the squash commit takes it. `--no-hub`, either way: reclaim a late panel
+source (`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 

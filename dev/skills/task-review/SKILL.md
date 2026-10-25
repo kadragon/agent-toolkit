@@ -5,7 +5,7 @@ description: >-
   by risk and required checks). Flags: --no-hub (local only), --auto (skip confirmation), --pr / --lite
   (request the merge path), --panel (force agy + Codex; default on every non-lite route).
 disable-model-invocation: true
-version: 1.0.1
+version: 1.0.2
 ---
 
 # Dev Review Cycle
@@ -13,7 +13,8 @@ version: 1.0.1
 ## Arguments
 
 The flags in the description are defined once, in `dev:task-review-cycle` → *Arguments*; pass
-them through unchanged (one definition, not two that drift:
+them through unchanged. The description's `--auto` skips only the review-fix confirmation; it
+grants no Git effect (one definition, not two that drift:
 `cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/authoring-a-skill.md`).
 
 Restate the Sprint Contract in the same invocation when the implementation was not yet verified

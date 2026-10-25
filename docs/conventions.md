@@ -18,7 +18,7 @@ Commit types (mandatory prefix):
 |------|------|
 | `[FEAT]` | New behavior / skill / agent |
 | `[FIX]` | Bug fix — requires reproduction step before fix |
-| `[REFACTOR]` | Structure only, no behavior change — behavior pinned by green tests before the first structural edit |
+| `[REFACTOR]` | Structure only, no behavior change — behavior pinned by green tests before the first structural edit (`docs/eval-criteria.md`; `cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/refactoring.md`) |
 | `[DOCS]` | docs/ or README only |
 | `[CONSTRAINT]` | No production code changed; structural guards only (lint rule, CI check, schema) |
 | `[HARNESS]` | Skill/hook/agent instruction changes; no production code |
