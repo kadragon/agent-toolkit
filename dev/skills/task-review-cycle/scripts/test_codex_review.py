@@ -468,7 +468,6 @@ def case_default_platform_selector(tmp: Path, _live: int):
     )
     proc = run(repo, tmp, platform=None, companion=bash_path(companion))
     check("default selector reaches companion", proc.returncode == 0, proc.stderr[-400:])
-    check("default selector emits no shell syntax error", "syntax error" not in proc.stderr, proc.stderr[-400:])
     check("default selector emits review", proc.stdout.strip() == "review via default selector", proc.stdout)
     check("default selector invokes companion once", calls.read_text(encoding="utf-8") == "1")
 

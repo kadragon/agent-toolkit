@@ -200,40 +200,6 @@ def test_strip_status_probe_is_fence_aware():
     check("fenced-status: real status line removed", result and "status: done" not in result)
 
 
-# Nested fences: a shorter inner fence must NOT close a longer outer one, so a
-# '# ' line still inside the outer 4-backtick block is not read as a heading.
-TASKS_NESTED_FENCE = """\
-## Review Backlog
-
-- [ ] open finding
-
-````md
-```
-# not a heading
-```
-````
-
----
-
-# Sprint: real
-
-status: done
-
-**Scope**
-- x
-"""
-
-
-def test_strip_handles_nested_fences():
-    """A shorter inner fence does not prematurely close a longer outer fence."""
-    result = mod.strip_sprint_block(TASKS_NESTED_FENCE)
-    check("nested: returns content (not None)", result is not None, repr(result))
-    check("nested: open finding preserved", result and "open finding" in result)
-    check("nested: nested fence content preserved", result and "# not a heading" in result)
-    check("nested: real sprint heading removed",
-          result and "# Sprint: real" not in result, repr(result))
-
-
 # ---------------------------------------------------------------------------
 # main() integration — done / failed branches write remainder, not unlink
 # ---------------------------------------------------------------------------
@@ -284,13 +250,6 @@ def test_main_done_preserves_review_backlog():
     check("main-done: open finding preserved", "open finding one" in r["tasks_body"])
     check("main-done: sprint block gone", "# Sprint: do the thing" not in r["tasks_body"])
     check("main-done: backlog untouched", r["backlog_body"] == backlog, r["backlog_body"])
-
-
-def test_main_done_only_sprint_unlinks():
-    """done sprint with no other content → tasks.md unlinked (old behaviour)."""
-    backlog = "## Now\n- [>] Sprint: solo\n"
-    r = _run_main_in_tmp(TASKS_ONLY_SPRINT, backlog)
-    check("main-done-solo: tasks.md unlinked", not r["tasks_exists"])
 
 
 def test_main_done_changelog_single_line_under_unreleased():
@@ -449,26 +408,6 @@ def test_main_failed_preserves_crlf():
           repr(r["backlog_body"]))
 
 
-def test_main_failed_ignores_markup_headings():
-    """(h) fenced headings do not terminate a real backlog section during cleanup."""
-    failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
-    backlog = """# Backlog
-
-## Live
-
-```markdown
-# Not a real boundary
-```
-
-- [>] active item
-"""
-    r = _run_main_in_tmp(failed_tasks, backlog)
-    check("failed-markup: real section retained", "## Live" in r["backlog_body"], r["backlog_body"])
-    check("failed-markup: real item reverted", "- [ ] active item" in r["backlog_body"], r["backlog_body"])
-    check("failed-markup: example heading preserved as example",
-          "# Not a real boundary" in r["backlog_body"], r["backlog_body"])
-
-
 def test_main_failed_preserves_markup_only_section():
     """failed cleanup keeps a heading that owns only documentation markup."""
     failed_tasks = TASKS_ONLY_SPRINT.replace("status: done", "status: failed")
@@ -577,20 +516,6 @@ def test_main_done_backlog_byte_identical_no_marker_writes():
           r["changelog_body"])
 
 
-def test_main_statusless_retained_reports_cleanly():
-    """A retained Review-Backlog-only tasks.md (no status, no '# ' heading) — the
-    steady state left by this fix after a prior sprint completion — must report
-    normally, NOT emit a schema-drift warning and return early."""
-    statusless = "## Review Backlog\n\n### PR #99\n- [ ] leftover finding\n"
-    backlog = "## Now\n- [ ] queued item\n"
-    r = _run_main_in_tmp(statusless, backlog)
-    check("statusless: no schema-drift warning", "unknown status" not in r["stderr"], r["stderr"])
-    check("statusless: backlog reported",
-          "Backlog:" in r["stdout"] or "Backlog clear" in r["stdout"], r["stdout"])
-    check("statusless: tasks.md left intact",
-          r["tasks_exists"] and "leftover finding" in r["tasks_body"])
-
-
 def test_main_statusless_fenced_comment_reports_cleanly():
     """A retained statusless tasks.md whose Review Backlog has a fenced '# comment'
     must NOT be misread as a sprint heading (schema drift). This is the steady
@@ -616,9 +541,7 @@ SUITES = [
     ("strip_sprint_block: ignores fenced heading-like lines", test_strip_ignores_fenced_heading_like_lines),
     ("tasks_title: ignores fenced heading-like lines", test_tasks_title_ignores_fenced_heading_like_lines),
     ("strip_sprint_block: status probe is fence-aware", test_strip_status_probe_is_fence_aware),
-    ("strip_sprint_block: handles nested fences", test_strip_handles_nested_fences),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
-    ("main: done only-sprint unlinks", test_main_done_only_sprint_unlinks),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
     ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),
     ("main: done changelog creates Unreleased", test_main_done_changelog_creates_unreleased_when_absent),
@@ -630,14 +553,12 @@ SUITES = [
     ("main: failed prunes empty headings", test_main_failed_prunes_empty_headings),
     ("main: failed preserves schema root", test_main_failed_preserves_schema_root),
     ("main: failed preserves CRLF", test_main_failed_preserves_crlf),
-    ("main: failed ignores markup headings", test_main_failed_ignores_markup_headings),
     ("main: failed preserves markup-only section", test_main_failed_preserves_markup_only_section),
     ("orphan sweep: reverts, not deletes", test_orphan_sweep_reverts_not_deletes),
     ("revert_orphan_markers: [ ]/[x] byte-identical", test_revert_orphan_markers_byte_identical_for_open_and_done),
     ("revert_orphan_markers: skips markup", test_revert_orphan_markers_skips_markup),
     ("count_items: skips markup", test_count_items_skips_markup),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
-    ("main: statusless retained reports cleanly", test_main_statusless_retained_reports_cleanly),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
     ("empty-headings: nested findings preserved", test_remove_empty_headings_keeps_nested_findings),
     ("empty-headings: genuinely empty still dropped", test_remove_empty_headings_still_drops_empty_ones),

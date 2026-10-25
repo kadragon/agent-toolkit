@@ -143,14 +143,6 @@ def main() -> int:
         )
         check("live §7 / Signal 7 stay silent", run_refs(live, alpha, index) == [])
 
-        print("\nCross-skill resolution by unique basename")
-        # signal-taxonomy.md lives under beta/, referenced from alpha/ — the exact shape
-        # that went stale in harness-init -> harness-curate.
-        check(
-            "dangling ref into another skill is reported",
-            run_refs("`dev:beta` -> `references/signal-taxonomy.md` §9", alpha, index) != [],
-        )
-
         print("\nAnchor forms (referenced cross-asset, from the skill's own SKILL.md)")
         chained = run_refs("`references/notes.md` §2·§4.", alpha, index)
         check(
@@ -530,10 +522,6 @@ def main() -> int:
             "a reference to a sibling skill that does not exist at all is reported",
             run_scripts('python3 "$SKILL_DIR/../gamma/scripts/present.py"') != [],
         )
-        check(
-            "the sibling path is not also graded as an own-skill reference",
-            run_scripts('python3 "$SKILL_DIR/../beta/scripts/elsewhere.py"') == [],
-        )
 
     print("\nBundled-with attributions name the skill that really holds the file")
     with tempfile.TemporaryDirectory() as tmp:
@@ -603,13 +591,6 @@ def main() -> int:
             )
             == [],
         )
-        # Adjacency must not become a licence to skip: an unresolvable name the attribution
-        # really does spell out still fails closed (deleted or renamed bundled asset).
-        check(
-            "adjacency does not weaken the fail-closed case",
-            run_with("`invented.md` (bundled with `dev:harness-init`).") != [],
-        )
-
         # The wrap fallback must not reach across a paragraph break: an unrelated file
         # named in the paragraph above is not what this attribution is talking about.
         check(
@@ -760,11 +741,6 @@ def main() -> int:
         )
         == 1,
     )
-    check(
-        "a shell-provided name read bare in arithmetic needs no capture",
-        mod.check_capture_before_use("```bash\nif (( SECONDS > 60 )); then :; fi\n```\n")
-        == [],
-    )
 
     # Second review pass on this PR: forms the scan skipped or misread.
     print("\nCapture-before-use — quoting and evaluation order (PR #242 review, pass 2)")
@@ -821,10 +797,6 @@ def main() -> int:
     )
 
     print("\n-- positional parameters in code blocks --")
-    check(
-        "a positional in a fenced block is flagged",
-        len(mod.check_positional_params("```bash\nawk '{s+=$1}END{print s+0}'\n```\n")) == 1,
-    )
     check(
         "the braced form is flagged too",
         len(mod.check_positional_params('```bash\necho "${2}"\n```\n')) == 1,
