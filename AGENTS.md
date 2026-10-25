@@ -7,7 +7,7 @@ Plugin marketplace (dev + prod + mods) by kadragon. This repo IS the harness —
 | File | When to read |
 |------|--------------|
 | `docs/architecture.md` | Before adding new skill/agent/hook or modifying plugin structure |
-| `docs/conventions.md` | Before writing shell or Python scripts, commit messages, or bumping versions — `grep -n '^##'` it and read only the matching section |
+| `docs/conventions.md` | Before writing shell or Python scripts, commit messages, or bumping versions |
 | `docs/workflows.md` | When starting implementation; shared approval, recovery, and validation authority |
 | `docs/delegation.md` | When you have decided to delegate — brief format, effort tier, handoff protocol |
 | `docs/eval-criteria.md` | When evaluating skill quality or task-cycle behavior |
@@ -43,6 +43,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 2. No tool calls to confirm known facts. Direct answers for simple questions.
 3. Independent tool calls in parallel — never sequential when not dependent.
 4. Do not restate user's message.
+5. A `docs/*.md` from the index: list its `## ` headings first (`grep -n '^## '`), then read the matching `##` section whole, subsections included.
 
 ## Working with Existing Code
 
