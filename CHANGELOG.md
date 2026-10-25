@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] report-draft lint checks 공문 spacing (R14); gongmun-draft runs it (prod v3.2.12) (2026-10-26) → prod/skills/report-draft/references/style-rules.md
 - [done] pstack review fixes: Verification line only from current-tree evidence, rebuilt onto the PR body (dev v4.11.18) (2026-10-26)
 - [done] Test prune drops 10 redundant checks and closes 2 reconcile gaps; indexed docs are read by section (dev v4.11.17) (2026-10-25)
 - [done] status-band and cycle_state test the curate separator and unknown Git action names (dev v4.11.16, mods v0.4.3) (2026-10-24)
