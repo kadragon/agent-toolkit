@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.0.3
+version: 1.0.4
 ---
 
 # Debug
@@ -174,7 +174,8 @@ Where a correct seam exists:
 1. Turn the minimised repro into a failing test there.
 2. Watch it fail.
 3. Apply the minimal fix.
-4. Watch it pass.
+4. Watch it pass. A second fix that also stays red → back to Phase 3's premise check before
+   any third fix.
 5. Re-run the Phase 1 loop against the original, un-minimised scenario.
 
 Two repo rules own the rest where the repo states them — read them there rather than recalling

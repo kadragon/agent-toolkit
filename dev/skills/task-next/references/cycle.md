@@ -108,7 +108,8 @@ reports through its final output, the only channel a role-file agent has
   would show it false, and the next hypothesis (block below; `--tree` prefixes
   `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
   session (`/clear`): accumulated failed attempts degrade the context, and `inspect` hands the
-  notes to the next run, which runs the premise check before a third fix
+  notes to the next run. A run whose `inspect` returns such a note runs its premise check first,
+  before any fix attempt
   (`cursor/plugins@9b93e81:pstack/skills/principle-attack-the-premise/SKILL.md`). A delegated
   implementer only reports its attempts; the parent records that report as the note. An unknown
   cause routes to `dev:task-debug`.
