@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- [done] harness-init, codex-review and harness-drift tests drop 10 redundant checks; indexed docs are read by section (dev v4.11.17) (2026-10-25)
+- [done] Test prune drops 10 redundant checks and closes 2 reconcile gaps; indexed docs are read by section (dev v4.11.17) (2026-10-25)
 - [done] status-band and cycle_state test the curate separator and unknown Git action names (dev v4.11.16, mods v0.4.3) (2026-10-24)
 - [done] status-band and cycle_state drop 11 tests whose mutants other tests already kill (dev v4.11.15, mods v0.4.2) (2026-10-24)
 - [done] prune-backlog and prune-tasks keep a CRLF file CRLF through the CLI (dev v4.11.14) (2026-10-24)

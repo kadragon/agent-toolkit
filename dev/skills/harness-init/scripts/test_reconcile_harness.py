@@ -531,6 +531,28 @@ def test_main_statusless_fenced_comment_reports_cleanly():
           r["tasks_exists"] and "leftover finding" in r["tasks_body"])
 
 
+def test_main_statusless_nested_fence_reports_cleanly():
+    """A 3-backtick line inside a 4-backtick block does not close it, so the
+    '# comment' after it stays fenced and is not read as a sprint heading."""
+    statusless = ("## Review Backlog\n\n````md\n```sh\n# a shell comment\n```\n````\n"
+                  "- [ ] leftover finding\n")
+    r = _run_main_in_tmp(statusless, "## Now\n- [ ] queued item\n")
+    check("nested-fence: no schema-drift warning",
+          "unknown status" not in r["stderr"], r["stderr"])
+    check("nested-fence: backlog reported",
+          "Backlog:" in r["stdout"] or "Backlog clear" in r["stdout"], r["stdout"])
+
+
+def test_main_sprint_heading_without_status_warns():
+    """A sprint heading with no status line is schema drift: warn, leave intact."""
+    drifted = "# Sprint: half-written\n\n- [ ] step\n"
+    r = _run_main_in_tmp(drifted, "## Now\n- [ ] queued item\n")
+    check("missing-status: schema-drift warning",
+          "unknown status 'missing'" in r["stderr"], r["stderr"])
+    check("missing-status: tasks.md left intact",
+          r["tasks_exists"] and r["tasks_body"] == drifted, repr(r["tasks_body"]))
+
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -560,6 +582,8 @@ SUITES = [
     ("count_items: skips markup", test_count_items_skips_markup),
     ("main: done backlog byte-identical, no marker writes", test_main_done_backlog_byte_identical_no_marker_writes),
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
+    ("main: statusless nested fence reports cleanly", test_main_statusless_nested_fence_reports_cleanly),
+    ("main: sprint heading without status warns", test_main_sprint_heading_without_status_warns),
     ("empty-headings: nested findings preserved", test_remove_empty_headings_keeps_nested_findings),
     ("empty-headings: genuinely empty still dropped", test_remove_empty_headings_still_drops_empty_ones),
 ]
