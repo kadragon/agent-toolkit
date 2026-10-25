@@ -13,10 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #313 — mods status band above the prompt (2026-10-11)
-
-- [ ] [FIX] On Windows in the Wave terminal the band sometimes shows broken glyphs or stale cells (e.g. `559m` where `duration()` can only emit `59m`); macOS renders it correctly, colors included (user check, 2026-10-17). Suspect the ambiguous-width glyphs the row emits — the effort mark (`○◔◑◕●`), the `█░` context bar, `⏱️` with its variation selector — measured at one cell by the engine but drawn at two by the terminal, so a redraw leaves cells behind; unverified — mods/hooks/status-band/format.ts *(deferred: needs a Windows + Wave session to reproduce; this machine is macOS)*
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
