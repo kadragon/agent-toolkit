@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] AGENTS.md drops the missing PR checklist and validates from the working tree (2026-10-26)
 - [done] Test prune drops 10 redundant checks and closes 2 reconcile gaps; indexed docs are read by section (dev v4.11.17) (2026-10-25)
 - [done] status-band and cycle_state test the curate separator and unknown Git action names (dev v4.11.16, mods v0.4.3) (2026-10-24)
 - [done] status-band and cycle_state drop 11 tests whose mutants other tests already kill (dev v4.11.15, mods v0.4.2) (2026-10-24)

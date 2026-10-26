@@ -21,7 +21,7 @@ Plugin marketplace (dev + prod + mods) by kadragon. This repo IS the harness —
 Invariants enforced mechanically. Violations block merges.
 
 1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. `mods/` is Claude Code only: its single `mods/.claude-plugin/plugin.json` must increment. Enforced by CI (`harness-check.yml`) for both platforms. Semver: major is reserved for removing or renaming something invoked **by name** (skill, agent, command); a hook has no invocable name, so hook removal is a patch. Full table: `docs/conventions.md` → Plugin Version Bump Rules.
-2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review + PR checklist.
+2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review.
 3. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
 
 ## Delegation
@@ -51,11 +51,8 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 - Skills are in `{plugin}/skills/{name}/SKILL.md` — `description:` field drives auto-invocation
 - Agent roles in `.claude/agents/*.md` — used both as subagent and Agent Teams teammate
 - Mods (function hooks) live only in `mods/hooks/{name}/`, plus `mods/hooks/band.tsx`, the one hook that draws every mod's rows above the prompt; run `claude plugin validate ./mods && claude plugin test ./mods` locally — CI does not
-- Tests: Python scripts in `{plugin}/skills/{name}/scripts/` — run with `python {script} --test` if `--test` flag exists
-- Validate harness: run `validate-harness.sh` from the installed `dev/harness-init` skill. Resolve the newest cached copy:
-  ```sh
-  bash "$(ls -d ~/.claude/plugins/cache/kadragon/dev/*/skills/harness-init/scripts/validate-harness.sh | sort -V | tail -1)"
-  ```
+- Tests: every `test_*.py` and `--test`/`--selftest` script under `dev/`/`prod/`/`scripts/` has a `python3 <path> [flag]` step in `harness-check.yml` — run the matching one
+- Validate harness from the working tree, not the plugin cache: `bash dev/skills/harness-init/scripts/validate-harness.sh`
 
 ## Platform Pointers
 
@@ -67,7 +64,6 @@ This repo targets two AI coding tools:
 ## Language Policy
 
 - Code, commits, docs: English
-- User responses: Korean (always, even when thinking in English)
 
 ## Maintenance
 
