@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.3
+version: 1.1.4
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -196,9 +196,9 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit when Step 4 changed nothing. Hub: put the rebuilt body on the PR too (`gh pr edit
-<PR_NUMBER> --body`), as the squash commit takes it. `--no-hub`, either way: reclaim a late panel
-source (`references/late-source-reclaim.md`), report, end.
+Skip the commit when Step 4 changed nothing. Hub: after `authorize --action pr-write`, put the
+rebuilt body on the PR too (`gh pr edit <PR_NUMBER> --body`), as the squash commit takes it.
+`--no-hub`, either way: reclaim a late panel source (`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 
@@ -213,22 +213,22 @@ BASE_BRANCH="<from Setup>"
 STATE="<absolute task-next skill directory>/scripts/cycle_state.py"
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-merge || exit 1
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
-git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH"
-git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'"
+git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
+git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'" || { git merge --abort; git checkout "$FEATURE_BRANCH"; exit 1; }
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
-Push rejected → preserve the local merge and feature branch; report the failure. Never
-reset hard automatically. Recover the hub path within established authority; report lite
-completion only after direct base push succeeds.
+Any failed step ends the block — report it. Push rejected → preserve the local merge and feature
+branch. Never reset hard automatically. Recover the hub path within established authority; report
+lite completion only after direct base push succeeds.
 
 **Retire the archive on either path**, only after the merge is confirmed — one left behind
 resurrects this cycle's contract for the next branch deriving the same name: `python3
 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
 **Hub path** — follow `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>`
-(15 min), then reclaim a skipped panel source after CI green
+(under the 600s ceiling), then reclaim a skipped panel source after CI green
 (`references/late-source-reclaim.md`), then:
 
 ```bash
