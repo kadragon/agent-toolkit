@@ -4,8 +4,8 @@ Load this when a lesson could belong to more than one asset, or when a routing d
 tempted toward "later". The always-loaded `SKILL.md` carries the short form of each rule;
 everything here is the reasoning.
 
-**Attribution.** Checking a target's siblings before routing a lesson to one of them is adapted
-from **Task Observer ("One Skill to Rule Them All") by Eoghan Henn, rebelytics.com**,
+**Attribution.** Reflecting from the session's tool record rather than recall, and checking a
+target's siblings before routing a lesson to one of them, are adapted from **Task Observer ("One Skill to Rule Them All") by Eoghan Henn, rebelytics.com**,
 https://github.com/rebelytics/one-skill-to-rule-them-all, licensed **CC BY 4.0**
 (https://creativecommons.org/licenses/by/4.0/).
 

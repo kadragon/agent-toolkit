@@ -141,7 +141,7 @@ repairs the index.
 ## Additional Resources
 
 - **`references/routing.md`** — the sibling/cross-cutting and deferral rules in full, and the
-  CC BY 4.0 attribution for the methodology they adapt.
+  CC BY 4.0 attribution for the parts of this skill adapted from Task Observer.
 - **`hooks/memory-guard/guard.py`** — the `PreToolUse(Write|Edit)` gate behind step 4: blocks a
   memory write carrying a secret pattern, a control/bidi/zero-width character, an over-cap body,
   or a bad `status:`; `--check-file <path|->` is the same policy as a CLI. Fails open on
@@ -149,6 +149,6 @@ repairs the index.
 
 ---
 
-Sibling-check methodology adapted from *Task Observer ("One Skill to Rule Them All")* by
+Tool-record reflection and sibling-check methodology adapted from *Task Observer ("One Skill to Rule Them All")* by
 Eoghan Henn, rebelytics.com — CC BY 4.0. Scope of the adaptation and what was deliberately not
 carried over: `references/routing.md`.

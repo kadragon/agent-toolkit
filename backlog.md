@@ -81,7 +81,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #357 — task-review-cycle lean pass (2026-10-26)
 
-- [ ] [harness] `prune-backlog` deletes the checkbox line but leaves its nested `  - Source:` / `  - Done when:` sub-bullets and the emptied `##` heading; removed by hand in PR #357 (source: cycle) — dev/skills/task-next/scripts/task_nodes.py
+- [ ] [harness] `prune-backlog` deletes the checkbox line but leaves its nested `  - Source:` / `  - Done when:` sub-bullets and the emptied `##` heading; removed by hand in PR #357 and again in PR #358 (source: cycle) — dev/skills/task-next/scripts/task_nodes.py
 
 ## Rejected — do not re-file
 
