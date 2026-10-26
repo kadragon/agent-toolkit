@@ -18,12 +18,17 @@ Rules
   R11 (WARN) vague word (`적극`, `최대한`, `만전`, `가능한 한`, `등등`) — state the concrete action or number
   R12 (WARN) unfilled placeholder (`○○`, `△△`, `[확인 필요]`) — fill or report as open before handoff
   R13 unpaired `**` bold marker (text drafts)
+  R14 spacing — 시·중·내·전·후·초·말 spaced (`계약 시`), 경·가량·여·상·별 and duration 간 attached
+      (`2개월간`), dictionary words as one (`필요시`); listed stems only, so a clean run is not proof
+
+--gongmun keeps only the notation rules (R5, R7, R8, R12, R14) for 공문·회신·메일 drafts,
+which use `1.` items and `~합니다` endings.
 
 Lines after an attachment heading (`[붙임 1]`, `붙임 2`, `[별첨]`) are not checked:
 attachments are forms and quoted documents, not report body.
 
 Usage
-  python3 lint_report.py <file.hwpx|file.txt> [--allow-numbered]
+  python3 lint_report.py <file.hwpx|file.txt> [--allow-numbered | --gongmun]
   python3 lint_report.py --test
 """
 import datetime
@@ -58,6 +63,43 @@ ITEM_MAX = 80
 BULLET = re.compile(r"^\s*(□|○|◦|-|※|\*+)\s*")
 BOLD_PAIR = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
 UNCLOSED_BOLD = re.compile(r"\*\*(?=[^\s,.)·])")
+# R14 spacing (국립국어원 공공언어 바로 쓰기): stems are listed, not `[가-힣]+시`, because the bare
+# suffix also ends whole words (반드시, 동시, 이내). J admits only an end or a particle after
+# the suffix, so 발생시키다, 이용시설, 3일 간격, 운영중심 stay out. Rules whose suffix also
+# starts a common word narrow it further: 경과, 상이, 별로 (없다), A과 B 간 비교.
+J = r"(?=$|[^가-힣]|[에의은는을를이인으로와과만까도나엔]|부터)"
+JS = r"(?=$|[^가-힣]|[의으에은는도])"   # 상 + 이 is the word 상이, not a particle
+NUM = r"(?<![\d○OＯ])([\d○OＯ]+)"     # whole number, so the message quotes `30일`, not `0일`
+SPACING = [
+    (re.compile(r"(개최|발생|계약|신청|제출|접수|변경|이용|사용|방문|참석|출장|도착|위반|미납|선정|채용|퇴직)시" + J),
+     "dependent noun 시 — space it (`계약 시`, or `계약할 때`)"),
+    (re.compile(r"(사용|추진|진행|운영|검토|공사|회의|근무|작업|협의|조사|점검|수업|교육)중" + J),
+     "dependent noun 중 — space it (`사용 중`)"),
+    (re.compile(NUM + r"(일|주|개월|년|시간)내" + J + r"|(기한|기간|학교|범위|예산|부서|기관)내" + J),
+     "dependent noun 내 — space it (`3일 내`, `기한 내`)"),
+    (re.compile(r"(승인|방과|완료|종료|접수|확인|검토|결재|협의|제출|심사|선정|계약)후" + J),
+     "dependent noun 후 — space it (`승인 후`)"),
+    (re.compile(r"(경기|시작|개최|마감|시행|착수)전" + J),
+     "dependent noun 전 — space it (`경기 전`)"),
+    (re.compile(NUM + r"(월|년)(초|말)" + J),
+     "dependent noun 초/말 — space it (`10월 말`)"),
+    (re.compile(r"(?<![과와]\s)" + NUM + r"\s*(일|주|개월|년|시간)\s+간(?!\s*(비교|차이|격차))" + J
+                + r"|(이틀|사흘|나흘|며칠)\s+간" + J),
+     "duration 간 is a suffix — attach it (`2개월간`)"),
+    (re.compile(NUM + r"\s*(일|월)\s+경(?!과)" + J + r"|(초순|중순|하순)\s+경(?!과)" + J),
+     "suffix 경 — attach it (`20일경`)"),
+    (re.compile(r"\S\s+가량" + J),
+     "suffix 가량 — attach it (`1/2가량`)"),
+    (re.compile(NUM + r"\s+여\s*(명|년|개|건|곳|일|회|차|가지|만|천|억)"),
+     "suffix 여 — attach it to the number (`50여 년`)"),
+    (re.compile(r"(부서|학년|학과|학기|기관|분기|지역|유형|항목|단계|연도|과목|부처|사업|대학)\s+별(?!로\s+[^.,]*?(없|않|아니|못))" + J),
+     "suffix 별 — attach it (`부서별`)"),
+    (re.compile(r"(영수증|규정|법령|서류|계약서|회계|장부|형식|절차)\s+상" + JS),
+     "suffix 상 — attach it (`영수증상`)"),
+    (re.compile(r"(필요|평상|비상|유사)\s+시" + J),
+     "dictionary word — write it as one (`필요시`, `평상시`)"),
+]
+GONGMUN_RULES = {"R5", "R7", "R8", "R12", "R14"}   # notation only; 공문 keeps `~합니다` and `1.` items
 
 
 def paragraphs_from_hwpx(path):
@@ -80,7 +122,7 @@ def load(path):
         return [line.rstrip("\n") for line in f]   # blank lines kept so L%d matches the file
 
 
-def lint(lines, allow_numbered=False):
+def lint(lines, allow_numbered=False, gongmun=False):
     """Return list of (level, rule, lineno, message, text)."""
     res = []
     chapter = ""          # current chapter title (after a roman numeral line)
@@ -166,6 +208,13 @@ def lint(lines, allow_numbered=False):
         # footnote marks (`Team**,` / `** 설명`) stay; an opening `**word` with no close is a broken bold
         if UNCLOSED_BOLD.search(BOLD_PAIR.sub("", s)):
             res.append(("FAIL", "R13", i, "unpaired `**` bold marker", s))
+
+        for pat, msg in SPACING:
+            m = pat.search(plain)
+            if m:
+                res.append(("FAIL", "R14", i, "%s: `%s`" % (msg, m.group(0).strip()), s))
+    if gongmun:
+        res = [r for r in res if r[1] in GONGMUN_RULES]
     return res
 
 
@@ -236,6 +285,37 @@ def selftest():
     assert "R13" in {r[1] for r in lint([" ○ **총 예산 확보"])}
     # a short sentence under 향후 is body text, not a label
     assert "R6" in {r[1] for r in lint(["□ 향후 추진 계획", " ○ 실적을 예산에 반영"])}
+    # R14 spacing: each wrong form fails, its corrected form and near-miss words pass
+    spacing_bad = [
+        "계약시 보증금 납부", "오류 발생시에는 연락", "사용중인 계정", "추진중이며", "3일내 제출",
+        "기한내에 제출", "승인후 집행", "방과후 운영", "10월말까지 완료", "2026년초 시행",
+        "2개월 간 운영", "이틀 간 진행", "20일 경 발표", "하순 경 안내", "1/2 가량은 미사용",
+        "50 여 년간", "부서 별로 제출", "학년 별 배정", "영수증 상의 금액", "필요 시 연장",
+        "평상 시와 같이", "계약시부터 적용", "승인후도 유지", "사용중엔 제한",
+    ]
+    for t in spacing_bad:
+        assert "R14" in {r[1] for r in lint([" ○ " + t])}, t
+    spacing_ok = [
+        "계약 시 보증금 납부", "오류 발생 시에는 연락", "사용 중인 계정", "추진 중이며", "3일 내 제출",
+        "기한 내에 제출", "승인 후 집행", "방과 후 운영", "10월 말까지 완료", "2026년 초 시행",
+        "2개월간 운영", "이틀간 진행", "20일경 발표", "하순경 안내", "1/2가량은 미사용",
+        "50여 년간", "부서별로 제출", "학년별 배정", "영수증상의 금액", "필요시 연장",
+        "평상시와 같이", "반드시 제출", "크래시 발생", "동시 접속", "즉시 조치", "7일 이내 제출",
+        "문제를 발생시키는 원인", "이용시설 점검", "3일 간격으로 점검", "필요 시설 확충",
+        "운영중심 대학", "학교 간 협력", "교내 행사", "납부기한 30일 경과 시 부과",
+        "기관별 규정 상이하여 확인", "기관마다 절차 상이", "계약서 상이 여부 확인",
+        "2024년과 2025년 간 비교 결과", "2025년 간 비교", "2024년과 2025년 간 실적 변화","사업 별로 효과가 없음", "기관내부 회의",
+    ]
+    for t in spacing_ok:
+        assert "R14" not in {r[1] for r in lint([" ○ " + t])}, (t, lint([" ○ " + t]))
+    # --gongmun keeps notation rules only: polite endings and numbered items are 공문 form
+    gongmun = ["1. 관련: 학사관리과-1234(2026. 9. 1.)", "2. 위와 관련하여, 자료를 제출합니다.",
+               "3. 필요시 연장합니다.  끝."]
+    assert lint(gongmun, gongmun=True) == [], lint(gongmun, gongmun=True)
+    got = {r[1] for r in lint(["1. 계약시 2026.10.15. 까지 제출합니다."], gongmun=True)}
+    assert got == {"R5", "R14"}, got
+    # the message quotes the whole number, not its last digit
+    assert "`30일 간`" in lint([" ○ 30일 간 운영"])[0][3], lint([" ○ 30일 간 운영"])
     # line numbers count blank lines in a text draft
     import os
     import tempfile
@@ -256,7 +336,7 @@ def main(argv):
     if len(paths) != 1:
         print(__doc__)
         return 2
-    res = lint(load(paths[0]), allow_numbered="--allow-numbered" in argv)
+    res = lint(load(paths[0]), allow_numbered="--allow-numbered" in argv, gongmun="--gongmun" in argv)
     for level, rule, n, msg, text in res:
         print("[%s] %s L%d: %s\n      %s" % (level, rule, n, msg, text))
     fails = sum(1 for r in res if r[0] == "FAIL")
