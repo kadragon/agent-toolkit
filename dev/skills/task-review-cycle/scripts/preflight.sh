@@ -10,14 +10,13 @@
 # and served back when it is still valid, so only the first run in a cycle pays.
 #
 # Only the *expensive* fields are cached: hub type/auth and the repo metadata behind them. The
-# tool probes (agy, codex, claude CLI, native engine) are plain `command -v` calls costing nothing,
-# so they are re-run on every invocation and overlaid onto a cache hit. Caching them would let an
-# entry written under one runtime be served to another within the TTL — the exact case that decides
-# 2-1's launch path, so a stale `native_engine` would silently drop the Claude slot from the panel.
+# tool probes (agy, codex, claude CLI) are plain `command -v` calls costing nothing, so they are
+# re-run on every invocation and overlaid onto a cache hit; a cached probe could report a reviewer
+# that the current runtime does not have.
 #
-# Validity is keyed on the *current branch*, not on time alone: Setup runs before the cycle's
-# Step 0 creates the feature branch, so a Setup-era entry names the wrong `feature_branch` the
-# moment the branch is cut, and must not be reused. A cache hit therefore requires all of:
+# Validity is keyed on the *current branch*, not on time alone: an entry written on the base
+# branch names the wrong `feature_branch` once a branch is cut, and must not be reused. A cache
+# hit therefore requires all of:
 # same feature_branch, same --no-hub mode, has_errors false, and younger than the TTL.
 # An errored result is never written, so a failure always re-surfaces on the next run.
 #
@@ -135,15 +134,7 @@ if command -v codex >/dev/null 2>&1; then
   fi
 fi
 
-# --- Native runtime engine + Claude CLI (cross-runtime Claude review) ---
-# CLAUDECODE is set only when Claude Code is the driver; it does NOT leak into
-# Codex sessions. (The inverse test is unreliable: the codex plugin sets
-# CODEX_COMPANION_SESSION_ID even under Claude Code, so only the positive Claude
-# test can be trusted.) Nothing branches the review slot on this any more:
-# SKILL.md Step 2 shells out to claude-review.sh for every runtime, and reads
-# claude_cli_available alone to decide whether that slot can run.
-NATIVE_ENGINE="other"
-[ -n "${CLAUDECODE:-}" ] && NATIVE_ENGINE="claude"
+# --- Claude CLI (SKILL.md Step 2 shells out to claude-review.sh on every runtime) ---
 CLAUDE_CLI_AVAILABLE=false
 command -v claude >/dev/null 2>&1 && CLAUDE_CLI_AVAILABLE=true
 
@@ -160,8 +151,7 @@ if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; the
        then "yes" else "no" end' "$CACHE_FILE" 2>/dev/null || echo "no")
     if [ "$CACHE_VALID" = "yes" ]; then
       # Overlay the freshly-probed tool availability: those fields are env-derived and free to
-      # re-read, and serving a stale `native_engine` would send 2-1 down the wrong launch path.
-      # Fast-forward the base branch too — it can move while a review panel waits, so that sync
+      # re-read. Fast-forward the base branch too — it can move while a review panel waits, so that sync
       # must not be a side effect only the first run of a cycle performs.
       # --no-hub promises no remote access, and sync_base_branch fetches — so it is gated the
       # same way the live path gates it, not run unconditionally.
@@ -174,13 +164,11 @@ if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; the
         --argjson codex_available "$CODEX_AVAILABLE" \
         --arg codex_mode "$CODEX_MODE" \
         --arg codex_companion_path "$CODEX_COMPANION_PATH" \
-        --arg native_engine "$NATIVE_ENGINE" \
         --argjson claude_cli_available "$CLAUDE_CLI_AVAILABLE" \
         '.agy_available = $agy_available
          | .codex_available = $codex_available
          | .codex_mode = $codex_mode
          | .codex_companion_path = $codex_companion_path
-         | .native_engine = $native_engine
          | .claude_cli_available = $claude_cli_available' "$CACHE_FILE"
       exit 0
     fi
@@ -243,7 +231,6 @@ PREFLIGHT_JSON=$(jq -n \
   --argjson codex_available "$CODEX_AVAILABLE" \
   --arg codex_mode "$CODEX_MODE" \
   --arg codex_companion_path "$CODEX_COMPANION_PATH" \
-  --arg native_engine "$NATIVE_ENGINE" \
   --argjson claude_cli_available "$CLAUDE_CLI_AVAILABLE" \
   --arg feature_branch "$FEATURE_BRANCH" \
   --arg base_branch "$BASE_BRANCH" \
@@ -258,7 +245,6 @@ PREFLIGHT_JSON=$(jq -n \
     codex_available: $codex_available,
     codex_mode: $codex_mode,
     codex_companion_path: $codex_companion_path,
-    native_engine: $native_engine,
     claude_cli_available: $claude_cli_available,
     feature_branch: $feature_branch,
     base_branch: $base_branch,

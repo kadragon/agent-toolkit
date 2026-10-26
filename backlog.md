@@ -11,15 +11,9 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 1 — task-review-cycle lean pass
-
-- [ ] [HARNESS] task-review-cycle lean pass: drop dead `native_engine` (preflight.sh + comments); cut PR-history/timing rationale (SKILL.md "#248 removed the quorum rule…", late-source-reclaim.md *Why a late return is structural*) to one-line rules; guard Step 4.2 `bump-version.sh` with `[[ -f ]]`; delete dead Step 0 branch cut (callers own it; Setup's `FEATURE_BRANCH` predates it); one `checks-never-registered` rule (retry once, then ask) in SKILL table + ci-failure-handling.md; agy-unavailable emits a marker, consolidation reason `locked`; lite Codex timeout → reclaim once; `gh pr edit` stated GitHub-only; `docs/delegation.md` *Role Routing* names lite's Codex-only reviewer
-  - Source: 2026-10-26 four-stage dev cycle review, stage 3 (conversation; no spec)
-  - Done when: SKILL.md ≤ 240 lines; all `scripts/test_*.py` green; `grep native_engine` empty
-
 ## 2 — merge denial hand-off
 
-- [ ] [FIX] task-review-cycle merge denial hand-off: Error-handling row for a merge/push call denied by permission or the auto-mode classifier — never retry another way; hand the user a `! bash …/merge-and-cleanup.sh …` line, then the `cycle_state.py retire` line *(blocked by: 1-task-review-cycle-lean-pass)*
+- [ ] [FIX] task-review-cycle merge denial hand-off: Error-handling row for a merge/push call denied by permission or the auto-mode classifier — never retry another way; hand the user a `! bash …/merge-and-cleanup.sh …` line, then the `cycle_state.py retire` line
   - Source: 2026-10-26 review, stage 3; auto-mode memory (`gh pr merge` classifier-denied, PR #302/#320)
   - Done when: row present; handed-off line cleans local state and retires the archive after the user's merge
 
@@ -31,7 +25,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 4 — retrospect and lite reroute
 
-- [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit *(blocked by: 1-task-review-cycle-lean-pass)* *(blocked by: 3-drop-session-notes-store)*
+- [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit *(blocked by: 3-drop-session-notes-store)*
   - Source: 2026-10-26 review, stages 3–4
   - Done when: a Step 4 fix touching `*/scripts/*.sh` on lite routes to hub (test or executed snippet); Step 4.3 text writes no tracked file
 
@@ -90,6 +84,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   - Done when: `grep -rn prune_ledger dev .github` empty; SKILL.md still refuses a dirty tracked tree
 
 ## Review Backlog
+
+### PR #357 — task-review-cycle lean pass (2026-10-26)
+
+- [ ] [harness] `prune-backlog` deletes the checkbox line but leaves its nested `  - Source:` / `  - Done when:` sub-bullets and the emptied `##` heading; removed by hand in PR #357 (source: cycle) — dev/skills/task-next/scripts/task_nodes.py
 
 ## Rejected — do not re-file
 
