@@ -196,8 +196,8 @@ Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no ed
 PR-only: reclaim late panel results, finish checks, report the reviewed PR, stop before merge.
 Unknown merge authority keeps the PR and archive. Never retire an unmerged cycle.
 
-**Lite path** — the Codex reviewer ran in Step 2; if it timed out, run the codex pre-merge
-reclaim (`references/late-source-reclaim.md`) once now. Then merge locally and push `main`:
+**Lite path** — Codex ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
+merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -232,7 +232,7 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer (a Codex timeout also reclaims once before merge), else review inline; report it |
+| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer, else review inline; report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` | Stop, ask the user |

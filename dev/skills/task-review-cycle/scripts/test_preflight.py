@@ -12,7 +12,7 @@ That invalidation is the case these tests exist to pin, alongside the `--no-hub`
 TTL, `--refresh`, `PREFLIGHT_CACHE=0`, and the rule that an errored probe is never cached.
 
 Two things deliberately survive a cache hit, and both are pinned here because review found them
-missing: the env-derived tool probes (agy/codex/claude CLI/native engine) are re-run and overlaid,
+missing: the env-derived tool probes (agy/codex/claude CLI) are re-run and overlaid,
 since a stale `claude_cli_available` would silently drop the Claude review slot; and the
 base-branch fast-forward still runs, since the base can move while a background review panel runs
 and a stale local base mis-scopes every later `git diff base...HEAD`.
