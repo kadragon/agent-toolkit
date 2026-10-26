@@ -11,12 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 2 — merge denial hand-off
-
-- [ ] [FIX] task-review-cycle merge denial hand-off: Error-handling row for a merge/push call denied by permission or the auto-mode classifier — never retry another way; hand the user a `! bash …/merge-and-cleanup.sh …` line, then the `cycle_state.py retire` line
-  - Source: 2026-10-26 review, stage 3; auto-mode memory (`gh pr merge` classifier-denied, PR #302/#320)
-  - Done when: row present; handed-off line cleans local state and retires the archive after the user's merge
-
 ## 4 — retrospect and lite reroute
 
 - [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit

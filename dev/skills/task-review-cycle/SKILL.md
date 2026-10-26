@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.5
+version: 1.1.6
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -238,3 +238,4 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | CI `rework-cap` / `timeout` | Stop, ask the user |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
+| Merge/push call denied by a permission rule or the auto-mode classifier | Never retry another way; keep PR, branch, archive (no `retire`). Quote the denied command and ask the user to add a narrow `permissions.allow` rule for it to their own settings.json (e.g. `Bash(bash *merge-and-cleanup.sh *)`, lite `Bash(git push origin main)`; auto mode drops broad rules like `Bash(*)`) — never write it yourself; re-run that step once on their go-ahead |
