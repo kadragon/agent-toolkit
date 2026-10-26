@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Cycle Git safety: abandon keeps PR/branch, lite merge stops on failure, base HEAD guard, CI wait under 600s (dev v4.11.19) (2026-10-26)
 - [done] AGENTS.md drops the missing PR checklist and validates from the working tree (2026-10-26)
 - [done] report-draft lint checks 공문 spacing (R14); gongmun-draft runs it (prod v3.2.12) (2026-10-26) → prod/skills/report-draft/references/style-rules.md
 - [done] pstack review fixes: Verification line only from current-tree evidence, rebuilt onto the PR body (dev v4.11.18) (2026-10-26)

@@ -5,7 +5,8 @@
 # Usage: ci-wait.sh <pr_number>
 # Output: JSON to stdout — {passed: bool}
 #
-# The orchestrator enforces a 15-minute background timeout externally.
+# The orchestrator runs this in the foreground under the Bash tool's 600s ceiling, so the
+# default deadline (plus one poll) stays inside it and a `timeout` result always arrives.
 #
 # Rework cap: consecutive REAL CI failures are counted in a per-PR strike file under
 # the repo's git dir. At MAX_STRIKES the script reports reason "rework-cap" so the
@@ -47,9 +48,9 @@ clear_strikes() {
 }
 
 # Env-overridable so the timeout branch is reachable in a test without editing the script.
-TIMEOUT_SECS="${CI_WAIT_TIMEOUT_SECS:-870}"
+TIMEOUT_SECS="${CI_WAIT_TIMEOUT_SECS:-540}"
 POLL_INTERVAL="${CI_WAIT_POLL_INTERVAL:-20}"
-case "$TIMEOUT_SECS" in ''|*[!0-9]*) TIMEOUT_SECS=870 ;; esac
+case "$TIMEOUT_SECS" in ''|*[!0-9]*) TIMEOUT_SECS=540 ;; esac
 case "$POLL_INTERVAL" in ''|*[!0-9]*) POLL_INTERVAL=20 ;; esac
 # The numeric guard above accepts 0, and `sleep 0` on the long tail would busy-loop against the
 # hub API for the whole timeout budget. Floor it before anything reads it.

@@ -119,8 +119,8 @@ Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). I
 ```bash
 SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
-git worktree remove ".worktrees/$SLUG"   # worktree gone; branch $BRANCH still exists
-git checkout "$BRANCH"                   # switch main checkout onto the feature branch
+git worktree remove ".worktrees/$SLUG" || exit 1   # worktree gone; branch $BRANCH still exists
+git checkout "$BRANCH" || exit 1                   # a refusal keeps the tree state below; report it
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
 TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
 rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now belongs to this branch

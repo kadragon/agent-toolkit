@@ -181,8 +181,15 @@ def main():
                     remote_base = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
                 except subprocess.CalledProcessError:
                     remote_base = ""
-                if branch in (*BASE_BRANCHES, remote_base.removeprefix("origin/")):
-                    raise ValueError(f"Git authority denied: {args.action} cannot target base branch '{branch}'")
+                try:
+                    head = git("symbolic-ref", "--quiet", "--short", "HEAD")
+                except subprocess.CalledProcessError:
+                    head = branch
+                bases = (*BASE_BRANCHES, remote_base.removeprefix("origin/"))
+                # --branch only selects the archive; the effect still lands on HEAD, so check both.
+                for target in (branch, head):
+                    if target in bases:
+                        raise ValueError(f"Git authority denied: {args.action} cannot target base branch '{target}'")
             check_authority(path.read_text(encoding="utf-8"), args.action)
             result = {"branch": branch, "action": args.action, "authorized": True}
         elif args.subcommand == "evidence":

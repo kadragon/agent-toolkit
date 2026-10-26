@@ -224,5 +224,8 @@ the saved original rather than infer it from the diff. The review cycle commits,
 against the contract, routes by risk and required CI, applies findings, records out-of-scope items to
 `backlog.md`, and merges.
 
-If the cycle reports CI failure and the PR is abandoned: close the PR and delete the branch —
-`main` never received the cleanup edits, so nothing rolls back.
+If the cycle reports CI failure: preserve the PR, branch, and archive, and report. A failed check
+authorizes no closure or deletion (`git-authorization.md`). Only on an explicit user instruction to
+abandon: first restore any carried `task-spec`/`task-tickets` edits (`docs/design/`, the unpruned
+`backlog.md` tickets) onto the base branch — they exist only on this branch — then close the PR
+after `authorize --action pr-write`, and delete the branch.

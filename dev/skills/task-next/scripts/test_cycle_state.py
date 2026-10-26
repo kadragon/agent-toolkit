@@ -92,6 +92,36 @@ class RecoveryTest(unittest.TestCase):
         for action in ("feature-push", "integrate"):
             self.state("authorize", "--action", action, ok=False)
 
+    def test_named_branch_does_not_lift_the_base_head_guard(self):
+        # `--branch` only picks which archive to read; it must not let a feature effect run on base.
+        self.state("save", text=contract() + self.authority())
+        self.git("checkout", "-q", "main")
+        for action in ("feature-push", "integrate"):
+            self.state("authorize", "--action", action, "--branch", "fix/example", ok=False)
+        self.git("checkout", "-q", "fix/example")
+        self.state("authorize", "--action", "integrate", "--branch", "fix/example")
+
+    def lite_block(self):
+        skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
+        lite = skill.read_text().split("**Lite path**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        lite = lite.replace('FEATURE_BRANCH="<from Setup>"', 'FEATURE_BRANCH="fix/example"')
+        lite = lite.replace('BASE_BRANCH="<from Setup>"', 'BASE_BRANCH="main"')
+        return lite.replace("<absolute task-next skill directory>", str(Path(__file__).parents[1].resolve()))
+
+    def test_lite_checkout_failure_stops_before_merge_and_push(self):
+        # A failed base checkout must not fall through to a no-op merge on the feature branch and
+        # a push of the untouched base, which reads as a completed lite merge.
+        self.state("save", text=contract() + self.authority())
+        (self.repo / "code.txt").write_text("feature\n")
+        self.git("add", ".")
+        self.commit()
+        (self.repo / "code.txt").write_text("dirty\n")   # blocks `git checkout main`
+        result = subprocess.run(["bash", "-x", "-c", self.lite_block()], cwd=self.repo,
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("+ git merge", result.stderr)
+        self.assertNotIn("+ git push", result.stderr)
+
     def test_lite_gates_precede_route_and_effects(self):
         skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
         text = skill.read_text()
@@ -110,12 +140,7 @@ class RecoveryTest(unittest.TestCase):
         self.git("add", ".")
         self.commit()
         before = self.git("rev-parse", "main")
-        skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
-        lite = skill.read_text().split("**Lite path**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
-        lite = lite.replace('FEATURE_BRANCH="<from Setup>"', 'FEATURE_BRANCH="fix/example"')
-        lite = lite.replace('BASE_BRANCH="<from Setup>"', 'BASE_BRANCH="main"')
-        lite = lite.replace("<absolute task-next skill directory>", str(Path(__file__).parents[1].resolve()))
-        result = subprocess.run(["bash", "-c", lite], cwd=self.repo, capture_output=True, text=True)
+        result = subprocess.run(["bash", "-c", self.lite_block()], cwd=self.repo, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.git("branch", "--show-current"), "fix/example")
         self.assertEqual(self.git("rev-parse", "main"), before)

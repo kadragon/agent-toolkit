@@ -29,6 +29,7 @@ Run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -334,6 +335,16 @@ def main() -> int:
         result = run(corrupt)
         check("a non-numeric counter restarts at 1",
               result.get("failures") == 1, f"got {result}")
+
+    print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
+    # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
+    # returns no JSON, so the `timeout` branch never reaches the caller. The last sleep and one
+    # status call can land after the deadline, so both must fit under the ceiling too.
+    source = SCRIPT.read_text(encoding="utf-8")
+    deadline = int(re.search(r'CI_WAIT_TIMEOUT_SECS:-(\d+)', source).group(1))
+    poll = int(re.search(r'CI_WAIT_POLL_INTERVAL:-(\d+)', source).group(1))
+    check("default deadline + one poll + call margin stays under 600s",
+          deadline + poll + 30 <= 600, f"deadline={deadline} poll={poll}")
 
     passed = sum(_results)
     total = len(_results)
