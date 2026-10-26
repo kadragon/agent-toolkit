@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] AGENTS.md drops the missing PR checklist and validates from the working tree (2026-10-26)
 - [done] report-draft lint checks 공문 spacing (R14); gongmun-draft runs it (prod v3.2.12) (2026-10-26) → prod/skills/report-draft/references/style-rules.md
 - [done] pstack review fixes: Verification line only from current-tree evidence, rebuilt onto the PR body (dev v4.11.18) (2026-10-26)
 - [done] Test prune drops 10 redundant checks and closes 2 reconcile gaps; indexed docs are read by section (dev v4.11.17) (2026-10-25)
