@@ -106,8 +106,8 @@ contract and dropping the backticked criteria from the variable; a `"` in the te
 outright instead, so the snippet's own `|| echo '{...}'` fallback never runs. Quoting the delimiter
 also stops bash 3.2 mis-scanning the body (see *Rewriting a Shipped One-Liner: Two Traps*).
 
-The same rule is why `harness-capture` hands `session_notes.py` and `memory-guard` a **file**
-rather than a command line: note text quotes what happened, and what happened contains `$(...)`.
+The same rule is why `harness-capture` hands `memory-guard` a **file** rather than a command
+line: memory text quotes what happened, and what happened contains `$(...)`.
 
 ### No heredoc inside an indented snippet
 

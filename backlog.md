@@ -17,15 +17,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   - Source: 2026-10-26 review, stage 3; auto-mode memory (`gh pr merge` classifier-denied, PR #302/#320)
   - Done when: row present; handed-off line cleans local state and retires the archive after the user's merge
 
-## 3 — drop session notes store
-
-- [ ] [HARNESS] harness-capture drop session notes store: delete *Capture on the spot*, `scripts/session_notes.py`, store parts of `references/session-notes.md` and its `harness-check.yml` step — no loader ever fires it mid-session (no hook/skill/AGENTS.md calls it); also retires the darwin `realpath` test failure (48/49)
-  - Source: 2026-10-26 review, stage 4
-  - Done when: `grep -rn session_notes dev .github` empty; validate-harness passes; dev patch bump
-
 ## 4 — retrospect and lite reroute
 
-- [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit *(blocked by: 3-drop-session-notes-store)*
+- [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit
   - Source: 2026-10-26 review, stages 3–4
   - Done when: a Step 4 fix touching `*/scripts/*.sh` on lite routes to hub (test or executed snippet); Step 4.3 text writes no tracked file
 
@@ -87,7 +81,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #357 — task-review-cycle lean pass (2026-10-26)
 
-- [ ] [harness] `prune-backlog` deletes the checkbox line but leaves its nested `  - Source:` / `  - Done when:` sub-bullets and the emptied `##` heading; removed by hand in PR #357 (source: cycle) — dev/skills/task-next/scripts/task_nodes.py
+- [ ] [harness] `prune-backlog` deletes the checkbox line but leaves its nested `  - Source:` / `  - Done when:` sub-bullets and the emptied `##` heading; removed by hand in PR #357 and again in PR #358 (source: cycle) — dev/skills/task-next/scripts/task_nodes.py
 
 ## Rejected — do not re-file
 

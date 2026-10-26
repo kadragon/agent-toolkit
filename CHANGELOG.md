@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] harness-capture drops the unfired session notes store (dev v4.11.21) (2026-10-26)
 - [done] task-review-cycle lean pass: drops native_engine and Step 0, one never-registered rule, agy unavailable marker (dev v4.11.20) (2026-10-26)
 - [done] Cycle Git safety: abandon keeps PR/branch, lite merge stops on failure, base HEAD guard, CI wait under 600s (dev v4.11.19) (2026-10-26)
 - [done] AGENTS.md drops the missing PR checklist and validates from the working tree (2026-10-26)
