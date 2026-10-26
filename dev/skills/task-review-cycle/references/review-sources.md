@@ -30,7 +30,11 @@ LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
-[[ "$AGY_AVAILABLE" == "true" ]] && { bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || echo '{"agy_review":"failed"}' >&2; }
+if [[ "$AGY_AVAILABLE" == "true" ]]; then
+  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || echo '{"agy_review":"failed"}' >&2
+else
+  echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
+fi
 ```
 
 ```bash
@@ -56,6 +60,6 @@ fi
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
-`unavailable` means preflight found no codex: the block never ran a review.
+`unavailable` (either source) means preflight found no such CLI: the block never ran a review.
 `codex-review.sh` and `agy-review.sh` both persist a result; a run still going when the cycle
 moves on is reclaimed before merge per `late-source-reclaim.md`.

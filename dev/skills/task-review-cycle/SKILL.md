@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.4
+version: 1.1.5
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -53,9 +53,6 @@ MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
 Stop if the bundled scripts cannot be resolved or `has_errors` is `true`. The result is cached per
 branch, so later blocks re-run it for free for the fields they need (shell state does not persist).
 
-## Step 0: Feature branch
-On the base branch: derive a short slug from the diff, then `git checkout -b <type>/<slug>`.
-
 ## Step 1: Commit, route, PR
 
 Derive `COMMIT_MESSAGE` from `git diff --cached --stat` (empty index: `--stat HEAD`) and
@@ -89,10 +86,9 @@ dirt left out (in scope → stage, re-run). Non-zero exit → HEAD rejected; `gu
 
 **Route by risk** — `references/risk-routing.md`, evaluated on every run including explicit path
 flags. Its floor block is mandatory: all four captures force hub with required CI — neither
-`--lite` nor a judgment call may route one lite. The panel follows the path: on for hub and
-`--no-hub`, off for lite, since the codex reclaim's only free runway is `ci-wait.sh`. Judgment
-escalates, never below. `--no-hub` stays local-only and stops before merge; report required remote
-checks as pending. Announce chosen path, rationale, mandatory checks, and panel on/off in one line.
+`--lite` nor a judgment call may route one lite. Panel: on for hub and `--no-hub`, off for lite.
+Judgment escalates, never below. `--no-hub` stays local-only and stops before merge; report required
+remote checks as pending. Announce path, rationale, mandatory checks, and panel on/off in one line.
 
 Before choosing lite, run `cycle_state.py authorize --action base-merge` and `--action
 base-push`; both must pass. PR-only routes hub; no-push already selected local review. Unknown commit
@@ -147,17 +143,12 @@ an execution-based criterion against the evidence line above, silent on one when
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
-coverage, the contract). 600s is the Bash tool's ceiling, not a tuned budget; this fallback and lite's
-contract grading are where independence fails — the author grades their own code. Disclose it; required
-checks stay the only mechanical guard, and inline review cannot satisfy a policy that requires an
-independent reviewer.
+coverage, the contract). This fallback and lite's contract grading are self-grading: disclose it;
+it cannot satisfy a policy that requires an independent reviewer.
 
 **Panel** (every non-lite route) — launch agy + Codex per `references/review-sources.md` in the
-turn *before* the reviewer call, so they run while it holds the foreground. **Never wait on them.**
-
-**Never stop one either** — the panel sidecar `references/late-source-reclaim.md` reclaims before
-the merge is what makes not-waiting safe, and #248 removed the quorum rule because it *killed* a
-source still working. Never bound a wait with a `sleep`: it outlives the cycle (nine orphaned once).
+turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
+reclaim (`references/late-source-reclaim.md`) is what makes not waiting safe.
 
 ## Step 3: Consolidate and confirm
 Follow `references/consolidation-guide.md`. A `contract` finding is in-scope P0, never dropped by
@@ -174,10 +165,10 @@ In this order, because everything before the last step changes the tree the chec
 1. Apply approved findings with focused checks. On failure revert that file (`git restore
    --staged <file> && git restore <file>`), report which failed, ask. A fixed `contract` finding
    → re-run the reviewer once; still failing → stop, never merge.
-2. A fix that newly touched another plugin or skill `SKILL.md` → re-run `scripts/bump-version.sh` for it.
-3. **Retrospect (signal-gated).** Only if this cycle surfaced a user correction, a recurring
-   gotcha, or a reusable workflow: call the Skill tool with "dev:harness-capture" now, so a light
-   memory or `docs/` delta rides into this commit (heavy → `backlog.md`). No signal → skip.
+2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
+   *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
+3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
+   cycle → call the Skill tool with "dev:harness-capture" now (light delta rides this commit).
 4. Run full required checks on the final changed candidate and refresh evidence per the shared
    cycle — last, so the recorded tree is the tree that was checked.
 
@@ -196,16 +187,17 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit when Step 4 changed nothing. Hub: after `authorize --action pr-write`, put the
-rebuilt body on the PR too (`gh pr edit <PR_NUMBER> --body`), as the squash commit takes it.
+Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no edit verb): after
+`authorize --action pr-write`, put the rebuilt body on the PR (`gh pr edit <PR_NUMBER> --body`).
 `--no-hub`, either way: reclaim a late panel source (`references/late-source-reclaim.md`), report, end.
 
 ## Step 6: Merge
 
-PR-only: reclaim late panel results, finish checks and report the reviewed PR; stop before
-merge. Unknown merge authority preserves the PR and archive. Never retire an unmerged cycle.
+PR-only: reclaim late panel results, finish checks, report the reviewed PR, stop before merge.
+Unknown merge authority keeps the PR and archive. Never retire an unmerged cycle.
 
-**Lite path** — the Codex run finished in Step 2, so nothing to reclaim; merge locally and push `main`:
+**Lite path** — the Codex reviewer ran in Step 2; if it timed out, run the codex pre-merge
+reclaim (`references/late-source-reclaim.md`) once now. Then merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -219,17 +211,14 @@ python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
-Any failed step ends the block — report it. Push rejected → preserve the local merge and feature
-branch. Never reset hard automatically. Recover the hub path within established authority; report
-lite completion only after direct base push succeeds.
+A failed step ends the block — report it. Push rejected → keep the local merge and feature branch,
+never reset hard; recover within established authority. Lite is done only once the base push lands.
 
-**Retire the archive on either path**, only after the merge is confirmed — one left behind
-resurrects this cycle's contract for the next branch deriving the same name: `python3
-"<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
+**Retire the archive on either path** once the merge is confirmed (a leftover resurrects for the next
+same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
-**Hub path** — follow `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>`
-(under the 600s ceiling), then reclaim a skipped panel source after CI green
-(`references/late-source-reclaim.md`), then:
+**Hub path** — `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
+ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -243,8 +232,9 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer, else review inline; report it |
+| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer (a Codex timeout also reclaims once before merge), else review inline; report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
-| CI `rework-cap` / `timeout` / `checks-never-registered` | Stop, ask the user |
+| CI `rework-cap` / `timeout` | Stop, ask the user |
+| CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |

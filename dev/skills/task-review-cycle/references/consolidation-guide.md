@@ -30,7 +30,7 @@ route the panel's `agy` and `codex`. Lite has no `code-review` source: `codex` i
 
 Table: Priority · Title · Source · Scope (In/Out) · Gate (Apply/Skip) · Recommendation. Then a
 "Reviewers Skipped" line for any source that did not run or return (reason: sentinel, timeout,
-`codex review already running`, `claude CLI unavailable`).
+`still running`, `failed`, `locked`, `unavailable`, `claude CLI unavailable`).
 
 Without `--auto`: stop and wait for the user. With `--auto`: apply every in-scope P0/P1.
 

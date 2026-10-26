@@ -6,9 +6,8 @@ purely so it reads standalone. Every live run costs two hub.sh round trips plus 
 (~2s measured in this repo). The result is now cached at
 `$(git rev-parse --git-dir)/task-review-cycle-preflight.json` and served back while still valid.
 
-The cache is keyed on the *current branch*, not on time alone: Setup runs before the cycle's
-Step 0 creates the feature branch, so a Setup-era entry names the wrong `feature_branch` the
-moment the branch is cut. Reusing it would hand the reviewer prompt `${FEATURE_BRANCH}=main`.
+The cache is keyed on the *current branch*, not on time alone: an entry written on the base
+branch names the wrong `feature_branch` the moment a branch is cut. Reusing it would hand the reviewer prompt `${FEATURE_BRANCH}=main`.
 That invalidation is the case these tests exist to pin, alongside the `--no-hub` mode key, the
 TTL, `--refresh`, `PREFLIGHT_CACHE=0`, and the rule that an errored probe is never cached.
 
@@ -171,7 +170,7 @@ def main() -> int:
         check("second run returns identical JSON", second == first,
               f"{second} != {first}")
 
-        print("\n-- a branch change invalidates (Setup runs before Step 0 cuts the branch) --")
+        print("\n-- a branch change invalidates (an entry from the base branch) --")
         reset_calls(repo)
         checkout(repo, "feat/thing")
         after = run(repo)
@@ -241,19 +240,29 @@ def main() -> int:
         check("the failure re-surfaces on the next run", call_count(bad) == 2,
               f"calls={call_count(bad)}")
 
-        print("\n-- a cache hit re-probes the env-derived engine fields --")
+        print("\n-- a cache hit re-probes the env-derived tool fields --")
         engine = make_repo(tmp, "engine")
-        under_claude = run(engine, CLAUDECODE="1")
-        check("a Claude-driven run reports native_engine=claude",
-              under_claude.get("native_engine") == "claude", f"got {under_claude}")
-        reset_calls(engine)
-        # Same branch, same mode, inside the TTL: this IS a cache hit. The engine field must
-        # still follow the current environment, or 2-1 launches down the wrong path.
-        under_other = run(engine, CLAUDECODE="")
-        check("the cache is still served (no hub calls)", call_count(engine) == 0,
-              f"calls={call_count(engine)}")
-        check("native_engine follows the current runtime, not the cached one",
-              under_other.get("native_engine") == "other", f"got {under_other}")
+        stub_bin = tmp / "engine-bin"
+        stub_bin.mkdir()
+        (stub_bin / "claude").write_text("#!/bin/sh\nexit 0\n")
+        (stub_bin / "claude").chmod(0o755)
+        no_claude = os.pathsep.join(
+            d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and not (Path(d) / "claude").exists())
+        if not (shutil.which("jq", path=no_claude) and shutil.which("git", path=no_claude)):
+            print("  SKIP: jq/git share a PATH directory with claude")
+        else:
+            with_claude = run(engine, PATH=f"{stub_bin}{os.pathsep}{no_claude}")
+            check("a run with claude on PATH reports claude_cli_available",
+                  with_claude.get("claude_cli_available") is True, f"got {with_claude}")
+            reset_calls(engine)
+            # Same branch, same mode, inside the TTL: this IS a cache hit. The tool field must
+            # still follow the current environment, not the one that wrote the entry.
+            without_claude = run(engine, PATH=no_claude)
+            check("the cache is still served (no hub calls)", call_count(engine) == 0,
+                  f"calls={call_count(engine)}")
+            check("claude_cli_available follows the current PATH, not the cached one",
+                  without_claude.get("claude_cli_available") is False, f"got {without_claude}")
 
         print("\n-- a cache hit still fast-forwards the base branch --")
         synced, origin = make_repo_with_origin(tmp, "synced")

@@ -41,8 +41,9 @@ No row below grants permission. After the applicable checks above pass, match th
 `qa-verifier` never runs on its own output — whoever implemented must not be the one who verifies.
 That constraint holds whenever a verifier runs; it does not by itself mandate spawning one.
 
-**Why the review cycle reviews out-of-process.** `task-review-cycle` always runs one reviewer,
-which runs `code-review` and grades the Sprint Contract. What that buys is **independence** — a
+**Why the review cycle reviews out-of-process.** `task-review-cycle` always runs one reviewer:
+on hub and `--no-hub`, a Claude reviewer that runs `code-review` and grades the Sprint Contract;
+on lite, Codex alone, with the contract graded inline (`risk-routing.md` → *Lite reviewer*). What that buys is **independence** — a
 check by something that did not write the code — which is a correctness property, not a volume
 one: a 1-file fix needs it as much as a 20-file one. It is not a subagent: the cycle shells out to
 a headless `claude -p` (`scripts/claude-review.sh`) in the foreground, because the Bash tool

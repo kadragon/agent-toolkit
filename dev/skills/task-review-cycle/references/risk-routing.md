@@ -61,7 +61,8 @@ a background task would hang the cycle on a lost completion notification (SKILL.
 `timings.log` puts every measured run at 43–228s, well inside the cap. That block always exits 0,
 so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}`,
 `"locked"`, or `"unavailable"` marker, no review text, or the 600s timeout → record `Reviewers
-Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead.
+Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead. A timeout also runs
+the codex pre-merge reclaim once before the lite merge (SKILL.md Step 6).
 
 Codex reviews the diff only and takes no Sprint Contract, so on lite the orchestrator grades each
 acceptance criterion inline against the recorded evidence and reports each unmet one as a

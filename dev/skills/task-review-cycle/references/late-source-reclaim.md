@@ -9,22 +9,12 @@ the step that collects them before the merge closes the window.
 workspace lock) never started one either. For those, a source that never reported leaves nothing
 on disk to come back for — the inline fallback stands.
 
-## Why a late return is structural, not a tail
+## Late returns are expected
 
-`agy-review.sh` caps itself (`--print-timeout 15m`) and so fails reportably on its own.
-`codex-review.sh` has no internal deadline, and the cycle no longer waits on either: it moves on
-as soon as the reviewer's array is in hand, which stops the *cycle* listening but never stops the
-*run*. So a late codex return is the expected shape, not an anomaly — three consecutive cycles
-(PR #260, #263, #264) returned late, and #260's late output named two real defects that had to
-land in a follow-up PR after the merge. agy returns late too: a measured run on agy 1.2.9 took
-4m12s for a 4-file diff. Do not "fix" this by killing the run at a deadline: that discards
-exactly the findings this step exists to recover.
-
-The 15m cap stays. A cap cannot make agy report sooner; it can only kill a run, and a killed run
-leaves nothing for this reclaim to collect. The toolkit author's `timings.log` files (2026-10-24:
-32 agy runs across 11 repos, 2026-10-16 to 10-24) show median 279s, p90 481s, max 574s, and no
-run near 900s; the one `empty` ended at 240s. So the cap has never fired. Lower it only if your
-own log shows runs ending at about 900s as `empty` or `failed`.
+- A late return is the normal shape: the cycle stops listening when the reviewer returns, never
+  the run. Never kill a run at a deadline — that discards the findings this step recovers.
+- `codex-review.sh` has no internal deadline; `agy-review.sh` caps itself at `--print-timeout 15m`.
+  Keep that cap; lower it only if your `timings.log` shows runs ending near 900s as `empty`/`failed`.
 
 ## Where a late result lands
 
