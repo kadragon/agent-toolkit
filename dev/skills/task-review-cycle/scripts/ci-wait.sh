@@ -6,7 +6,8 @@
 # Output: JSON to stdout — {passed: bool}
 #
 # The orchestrator runs this in the foreground under the Bash tool's 600s ceiling, so the
-# default deadline (plus one poll) stays inside it and a `timeout` result always arrives.
+# default deadline (plus one poll) stays inside it; only a status call stalled past the margin
+# is killed with no JSON, which the caller treats as `timeout`.
 #
 # Rework cap: consecutive REAL CI failures are counted in a per-PR strike file under
 # the repo's git dir. At MAX_STRIKES the script reports reason "rework-cap" so the

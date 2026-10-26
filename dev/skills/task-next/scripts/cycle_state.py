@@ -176,6 +176,7 @@ def main():
         elif args.subcommand == "authorize":
             if not path.exists():
                 raise ValueError(f"Git authority denied: no archived contract for '{branch}'")
+            # `commit` is left to commit-guard, which owns base-branch commits and the allow-main opt-in.
             if args.action in {"integrate", "feature-push"}:
                 try:
                     remote_base = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")

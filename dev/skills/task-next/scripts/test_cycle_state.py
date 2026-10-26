@@ -122,6 +122,29 @@ class RecoveryTest(unittest.TestCase):
         self.assertNotIn("+ git merge", result.stderr)
         self.assertNotIn("+ git push", result.stderr)
 
+    def test_lite_merge_conflict_aborts_and_returns_to_feature(self):
+        # A conflicted lite merge must not leave the base checkout half-merged for recovery to trip on.
+        origin = Path(self.temp.name + "-origin.git")
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(origin)]))
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        self.git("remote", "add", "origin", str(origin))
+        self.state("save", text=contract() + self.authority())
+        (self.repo / "code.txt").write_text("feature\n")
+        self.git("add", ".")
+        self.commit()
+        self.git("checkout", "-q", "main")
+        (self.repo / "code.txt").write_text("base moved\n")
+        self.git("add", ".")
+        self.commit()
+        self.git("push", "-q", "origin", "main")
+        self.git("checkout", "-q", "fix/example")
+        before = self.git("rev-parse", "main")
+        result = subprocess.run(["bash", "-c", self.lite_block()], cwd=self.repo, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/example")
+        self.assertEqual(self.git("rev-parse", "main"), before)
+        self.assertFalse((self.repo / ".git" / "MERGE_HEAD").exists())
+
     def test_lite_gates_precede_route_and_effects(self):
         skill = Path(__file__).parents[2] / "task-review-cycle/SKILL.md"
         text = skill.read_text()

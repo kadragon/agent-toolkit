@@ -213,8 +213,8 @@ BASE_BRANCH="<from Setup>"
 STATE="<absolute task-next skill directory>/scripts/cycle_state.py"
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-merge || exit 1
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
-git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH" || exit 1
-git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'" || exit 1
+git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
+git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'" || { git merge --abort; git checkout "$FEATURE_BRANCH"; exit 1; }
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```

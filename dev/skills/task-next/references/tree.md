@@ -119,7 +119,7 @@ Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). I
 ```bash
 SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
-git worktree remove ".worktrees/$SLUG" || exit 1   # worktree gone; branch $BRANCH still exists
+[ ! -d ".worktrees/$SLUG" ] || git worktree remove ".worktrees/$SLUG" || exit 1   # re-runnable; branch $BRANCH stays
 git checkout "$BRANCH" || exit 1                   # a refusal keeps the tree state below; report it
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
 TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
