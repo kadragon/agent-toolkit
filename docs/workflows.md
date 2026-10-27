@@ -87,7 +87,7 @@ State the question → research/prototype → report options and tradeoffs → d
 
 ## Handoff Files
 
-To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent/switching teammates, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). Scratchpad handoffs do not survive a new CLI session. The code cycle separately archives its approved Sprint Contract under the common Git directory via `cycle_state.py`; recover that contract and its validation evidence for cross-session resume.
+To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). Scratchpad handoffs do not survive a new CLI session. The code cycle separately archives its approved Sprint Contract under the common Git directory via `cycle_state.py`; recover that contract and its validation evidence for cross-session resume.
 
 Schema from `references/handoff-template.md`.
 
