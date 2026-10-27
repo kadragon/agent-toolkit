@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review-cycle: review-time retrospect writes auto-memory only; lite re-runs the risk floor after Step 4 fixes (dev v4.11.23) (2026-10-27)
 - [done] task-review-cycle: a denied merge/push asks the user to add a narrow permissions.allow rule (dev v4.11.22) (2026-10-26)
 - [done] harness-capture drops the unfired session notes store (dev v4.11.21) (2026-10-26)
 - [done] task-review-cycle lean pass: drops native_engine and Step 0, one never-registered rule, agy unavailable marker (dev v4.11.20) (2026-10-26)
