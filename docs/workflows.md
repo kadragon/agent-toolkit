@@ -56,7 +56,7 @@ requires it. Sequential `--all` shares one final review; parallel units also get
 Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
 
 **Step 6: PR + review cycle**
-Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by risk and required CI, applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced, so a durable lesson rides into the same commit.
+Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by risk and required CI, applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced; after review it writes auto-memory only and files any doc or skill delta to `backlog.md`.
 
 ## `draft` — Documentation
 

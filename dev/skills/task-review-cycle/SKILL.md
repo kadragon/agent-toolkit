@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.6
+version: 1.2.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -116,7 +116,7 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 **Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
-(Step 1 floor) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
+(latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
 absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
 
@@ -126,7 +126,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
-EFFORT="<high when Step 1's SECURITY_HIT was non-empty or the risk is material, else empty>"
+EFFORT="<high when the latest floor run's SECURITY_HIT was non-empty or the risk is material, else empty>"
 CONTRACT=$(cat <<'SPRINT_CONTRACT'
 <Sprint Contract verbatim, archive path, and validation evidence including commit/tree, command,
  environment, exit code, and log location, prefixed "Lint/test evidence:"; empty only in the
@@ -168,7 +168,8 @@ In this order, because everything before the last step changes the tree the chec
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
-   cycle → call the Skill tool with "dev:harness-capture" now (light delta rides this commit).
+   cycle → call the Skill tool with "dev:harness-capture" now. Review has already run, so it
+   writes auto-memory only and files every docs/`AGENTS.md`/skill delta to `backlog.md`.
 4. Run full required checks on the final changed candidate and refresh evidence per the shared
    cycle — last, so the recorded tree is the tree that was checked.
 
@@ -196,7 +197,10 @@ Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no ed
 PR-only: reclaim late panel results, finish checks, report the reviewed PR, stop before merge.
 Unknown merge authority keeps the PR and archive. Never retire an unmerged cycle.
 
-**Lite path** — Codex ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
+**Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
+re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route
+is hub from here: Step 1's hub block, Step 2's hub review, Steps 3–5, then the hub path below.
+Otherwise Codex ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
 merge locally and push `main`:
 
 ```bash

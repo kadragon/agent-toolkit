@@ -157,6 +157,34 @@ class RecoveryTest(unittest.TestCase):
         for filename in ("batch.md", "tree.md", "edge-cases.md"):
             self.assertIn("git-authorization.md", (Path(__file__).parents[1] / "references" / filename).read_text())
 
+    def test_lite_step4_script_fix_reroutes_to_hub(self):
+        # Lite was routed on the pre-review diff; a review fix adding a shipped script must not
+        # merge on that stale route.
+        skill_dir = Path(__file__).parents[2] / "task-review-cycle"
+        floor = (skill_dir / "references/risk-routing.md").read_text()
+        floor = floor.split("**Floor**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        floor = floor.replace("<absolute parent directory of the loaded SKILL.md>", str(skill_dir.resolve()))
+        floor = floor.replace("<from authorization route: --no-hub or empty>", "--no-hub")
+
+        def floor_hit():
+            result = subprocess.run(["bash", "-c", floor + '\nprintf "%s" "$FLOOR_HIT"'],
+                                    cwd=self.repo, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        (self.repo / "notes.md").write_text("lite-eligible change\n")
+        self.git("add", ".")
+        self.commit()
+        self.assertEqual(floor_hit(), "")
+        script = self.repo / "dev/skills/demo/scripts/fix.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("echo fixed\n")
+        self.git("add", ".")
+        self.commit()
+        self.assertNotEqual(floor_hit(), "")
+        lite = (skill_dir / "SKILL.md").read_text().split("**Lite path**", 1)[1]
+        self.assertLess(lite.index("FLOOR_HIT"), lite.index("git merge --no-ff"))
+
     def test_lite_denial_exits_before_checkout_or_merge(self):
         self.state("save", text=contract() + self.authority("pr-only"))
         (self.repo / "code.txt").write_text("feature\n")

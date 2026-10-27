@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.0.0
+version: 4.0.1
 ---
 
 # Capture Learnings — session retrospective
@@ -78,12 +78,12 @@ pay load for no reach. Longer treatment where present: `docs/writing-for-agents.
 
 ## From the review cycle
 
-You are on a feature branch about to commit, so light in-scope write-backs are welcome: a
-preference or correction → auto-memory (Codex: `AGENTS.md`); a small doc or gotcha tied to this
-change → inline edit to `docs/*.md` / `AGENTS.md`, it rides into the commit. Anything heavy — a
-new skill, a skill overhaul, a multi-file rewrite — goes to `backlog.md` as a follow-up. Under
-`--auto` do not pause for the per-write veto; the review and CI are the safety net, and a
-destructive memory prune is deferred to `backlog.md` rather than blocking.
+The review has already run, so anything you add to the commit lands unreviewed. Write
+auto-memory only: a preference or correction → auto-memory. Every repo-tracked delta — a doc or
+gotcha for `docs/*.md` / `AGENTS.md`, a skill change, Codex's `AGENTS.md` route for a preference
+— goes to `backlog.md` as a follow-up item, which a later reviewed cycle lands. Under `--auto`
+do not pause for the per-write veto; a destructive memory prune is deferred to `backlog.md`
+rather than blocking.
 
 ## Writing to auto-memory
 

@@ -11,12 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 4 — retrospect and lite reroute
-
-- [ ] [FIX] task-review-cycle retrospect and lite reroute: Step 4.3 retrospect writes auto-memory only and files docs/AGENTS.md deltas to `backlog.md` (nothing lands unreviewed); on lite, re-run the risk-routing floor captures after Step 4 changes and switch to hub on any hit
-  - Source: 2026-10-26 review, stages 3–4
-  - Done when: a Step 4 fix touching `*/scripts/*.sh` on lite routes to hub (test or executed snippet); Step 4.3 text writes no tracked file
-
 ## 5 — evidence per command
 
 - [ ] [FIX] cycle_state evidence per command: `evidence` keeps one record per command instead of overwriting; `inspect` treats a `None` tree as a mismatch

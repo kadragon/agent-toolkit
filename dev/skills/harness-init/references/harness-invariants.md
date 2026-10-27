@@ -257,7 +257,7 @@ in a plugin repo it may be a skill's `references/*.md`). No link when no doc hol
 
 | Material | Destination |
 |----------|-------------|
-| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (the write-back the review cycle performs via `harness-capture`), then link it from the changelog line |
+| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (a reviewed cycle lands it; the review cycle's `harness-capture` retrospect queues it to `backlog.md`), then link it from the changelog line |
 | Narrative of what was changed and how | **dropped** — `git log` and the PR body already hold it verbatim |
 
 Never create a changelog-detail file. Moving the bloat to a second file that nobody reads is

@@ -17,7 +17,11 @@ SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|n
 BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | cut -f1,2 | grep -m1 -e '-' || true)
 MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
 SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod|mods)/.*\.(sh|py|ps1|cjs|ts|tsx)$' | head -1 || true)
+FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}"
 ```
+
+`FLOOR_HIT` non-empty means some row below forces hub. A lite route re-runs this block after
+Step 5 commits a Step 4 fix (SKILL.md Step 6): a review fix can add the script the first pass never saw.
 
 | Capture non-empty | Floor |
 |-------------------|-------|
