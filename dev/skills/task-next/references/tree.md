@@ -97,7 +97,7 @@ Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). I
 SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 [ ! -d ".worktrees/$SLUG" ] || git worktree remove ".worktrees/$SLUG" || exit 1   # re-runnable; branch $BRANCH stays
-git checkout "$BRANCH" || exit 1                   # a refusal leaves the main checkout on base; report it
+git checkout "$BRANCH" || exit 1   # refused: base keeps the dirty tasks.md, which the gate reads as in flight; report it
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on

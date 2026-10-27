@@ -11,6 +11,12 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #364 — task-* batch: task-next lean pass, test-prune ledger drop, ci-wait stale head (2026-10-27)
+
+- [ ] [debt] hub.sh ci-status reads `gh pr view --json headRefOid` and `gh pr checks` as two requests; a lagging second read can pair the new head SHA with the previous commit's failure — read both from one `gh pr view --json headRefOid,statusCheckRollup` snapshot (source: code-review) — dev/skills/task-review-cycle/scripts/hub.sh:228
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

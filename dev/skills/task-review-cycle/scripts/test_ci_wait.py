@@ -336,29 +336,79 @@ def main() -> int:
         check("a non-numeric counter restarts at 1",
               result.get("failures") == 1, f"got {result}")
 
-        print("\n-- a stale head's failure is not a strike --")
+        print("\n-- a stale head's status is pending, not an answer --")
         # Right after a push the hub can still describe the previous commit: PR #362 struck one
-        # real failure twice that way. The stub answers for a stale SHA first, then for HEAD.
-        stale = make_repo(tmp, "failure", name="stale_head")
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
-                        "--allow-empty", "-m", "head"], cwd=stale, check=True)
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=stale, check=True,
-                              capture_output=True, text=True).stdout.strip()
-        (stale / "scripts" / "hub.sh").write_text(
-            "#!/usr/bin/env bash\n"
-            'log="$(dirname "${BASH_SOURCE[0]}")/../calls.log"\n'
-            'echo x >> "$log"\n'
-            'if [ "$(wc -l < "$log")" -le 1 ]; then\n'
-            "  echo '{\"status\": \"failure\", \"head_sha\": \"0000000000000000000000000000000000000000\"}'\n"
-            "else\n"
-            f"  echo '{{\"status\": \"success\", \"head_sha\": \"{head}\"}}'\n"
-            "fi\n",
-            encoding="utf-8")
+        # real failure twice that way. Each stub answers for `first` once, then for HEAD.
+        def sha_repo(name, first_status, first_sha, then_status):
+            repo = make_repo(tmp, "pending", name=name)
+            commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                      "--allow-empty", "-m"]
+            subprocess.run(commit + ["previous"], cwd=repo, check=True)
+            previous = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            subprocess.run(commit + ["head"], cwd=repo, check=True)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+            first = previous if first_sha == "previous" else first_sha
+            (repo / "scripts" / "hub.sh").write_text(
+                "#!/usr/bin/env bash\n"
+                'log="$(dirname "${BASH_SOURCE[0]}")/../calls.log"\n'
+                'echo x >> "$log"\n'
+                'if [ "$(wc -l < "$log")" -le 1 ]; then\n'
+                f"  echo '{{\"status\": \"{first_status}\", \"head_sha\": \"{first}\"}}'\n"
+                "else\n"
+                f"  echo '{{\"status\": \"{then_status}\", \"head_sha\": \"{head}\"}}'\n"
+                "fi\n",
+                encoding="utf-8")
+            return repo
+
+        stale = sha_repo("stale_failure", "failure", "previous", "success")
         result = run(stale, CI_WAIT_POLL_INTERVAL=1)
         check("a stale-SHA failure then a head-SHA success passes",
               result.get("passed") is True and call_count(stale) == 2, f"got {result}")
         check("the stale-SHA failure leaves no strike file",
               not strike_file(stale).exists())
+
+        stale_green = sha_repo("stale_success", "success", "previous", "failure")
+        result = run(stale_green, CI_WAIT_POLL_INTERVAL=1)
+        check("a stale-SHA success is not a pass; the head's failure is struck once",
+              result.get("passed") is False and result.get("failures") == 1
+              and call_count(stale_green) == 2, f"got {result}")
+
+        foreign = sha_repo("foreign_sha", "failure", "1" * 40, "success")
+        result = run(foreign, CI_WAIT_POLL_INTERVAL=1)
+        check("a SHA this checkout lacks (a bot's commit) is answered, not waited out",
+              result.get("failures") == 1 and call_count(foreign) == 1, f"got {result}")
+
+        print("\n-- the real hub.sh reports the head SHA its GitHub checks describe --")
+        hub_repo = tmp / "hub_github"
+        hub_repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=hub_repo, check=True)
+        subprocess.run(["git", "remote", "add", "origin", "git@github.com:o/r.git"],
+                       cwd=hub_repo, check=True)
+        bindir = tmp / "gh_bin"
+        bindir.mkdir()
+        (bindir / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            'case "$1 $2" in\n'
+            '  "pr view") echo "$GH_HEAD"; exit 0 ;;\n'
+            "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8")
+        (bindir / "gh").chmod(0o755)
+        proc = subprocess.run(
+            ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
+            capture_output=True, text=True, timeout=30,
+            env=dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
+                     GH_HEAD="a" * 40))
+        try:
+            status = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            status = {"_stdout": proc.stdout, "_stderr": proc.stderr}
+        check("ci-status carries headRefOid as head_sha",
+              status.get("status") == "failure" and status.get("head_sha") == "a" * 40,
+              f"got {status}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and

@@ -44,6 +44,7 @@ Base branch means `main` or `master`.
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
 | on base branch, `task_worktree` non-empty, whatever is dirty | same edge case — a `--tree` or parallel batch run is in flight |
+| on base branch, `task_contract_dirty` non-empty | same edge case — a `--tree` collapse stopped after removing its worktree |
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 

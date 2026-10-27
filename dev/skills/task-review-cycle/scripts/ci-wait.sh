@@ -132,8 +132,10 @@ ci_configured() {
 }
 
 # The pushed head. Right after a push the hub can still describe the previous commit, and its
-# `failure` would be struck a second time (PR #362). A status whose head_sha names any other
-# commit is `pending`; without either SHA the status is taken as-is.
+# `failure` would be struck a second time (PR #362). A status whose head_sha is a strict
+# ancestor of HEAD is that lag: `pending`. Any other SHA (a bot or collaborator commit this
+# checkout lacks) or a missing SHA is taken as-is, so a diverged checkout never waits out the
+# whole deadline on a CI that already finished.
 HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
 
 START=$(date +%s)
@@ -143,7 +145,8 @@ while true; do
   STATUS_JSON=$(bash "$SCRIPT_DIR/hub.sh" ci-status "$PR_NUMBER" 2>/dev/null || echo '{}')
   STATUS=$(jq -r '.status // "error"' <<<"$STATUS_JSON")
   STATUS_SHA=$(jq -r '.head_sha // empty' <<<"$STATUS_JSON" 2>/dev/null || true)
-  if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$HEAD_SHA" ]; then
+  if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$HEAD_SHA" ] \
+    && git merge-base --is-ancestor "$STATUS_SHA" "$HEAD_SHA" 2>/dev/null; then
     STATUS=pending
   fi
   NOW=$(date +%s)

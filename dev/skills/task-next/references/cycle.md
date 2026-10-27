@@ -20,7 +20,9 @@ The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when
 ## Scope
 
 Look yourself first — one or two searches. Research delegation (`explorer`, else the built-in
-`Explore`) follows the repository's delegation policy (`docs/delegation.md` where it exists).
+`Explore`) follows the repository's delegation policy (`docs/delegation.md` where it exists);
+without one, delegate only when the user or an applicable skill directs it. Eligibility never
+mandates a spawn.
 
 ## Plan gate
 
@@ -85,10 +87,10 @@ convergence cleanup.
 
 ## Implement
 
-Inline by default; delegating to `implementer` follows the repository's delegation policy
-(`docs/delegation.md` where it exists). A delegated brief carries the contract, absolute paths of
-every in-scope file, and the lint/test command, and tells the implementer to report through its
-final output, never finishing silently. Rules either way:
+Inline by default; delegating to `implementer` follows the same policy as *Scope*. A delegated
+brief carries the contract, absolute paths of every in-scope file, and the lint/test command, and
+tells the implementer to report through its final output, never finishing silently. Rules either
+way:
 
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
