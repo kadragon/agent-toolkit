@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.7
+version: 1.2.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -116,7 +116,7 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 **Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
-(Step 1 floor) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
+(latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
 absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
 
@@ -126,7 +126,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
-EFFORT="<high when Step 1's SECURITY_HIT was non-empty or the risk is material, else empty>"
+EFFORT="<high when the latest floor run's SECURITY_HIT was non-empty or the risk is material, else empty>"
 CONTRACT=$(cat <<'SPRINT_CONTRACT'
 <Sprint Contract verbatim, archive path, and validation evidence including commit/tree, command,
  environment, exit code, and log location, prefixed "Lint/test evidence:"; empty only in the
