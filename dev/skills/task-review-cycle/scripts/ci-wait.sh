@@ -131,12 +131,21 @@ ci_configured() {
   [ "$CI_CONFIGURED" = yes ]
 }
 
+# The pushed head. Right after a push the hub can still describe the previous commit, and its
+# `failure` would be struck a second time (PR #362). A status whose head_sha names any other
+# commit is `pending`; without either SHA the status is taken as-is.
+HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+
 START=$(date +%s)
 DEADLINE=$(( START + TIMEOUT_SECS ))
 
 while true; do
   STATUS_JSON=$(bash "$SCRIPT_DIR/hub.sh" ci-status "$PR_NUMBER" 2>/dev/null || echo '{}')
   STATUS=$(jq -r '.status // "error"' <<<"$STATUS_JSON")
+  STATUS_SHA=$(jq -r '.head_sha // empty' <<<"$STATUS_JSON" 2>/dev/null || true)
+  if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$HEAD_SHA" ]; then
+    STATUS=pending
+  fi
   NOW=$(date +%s)
 
   case "$STATUS" in

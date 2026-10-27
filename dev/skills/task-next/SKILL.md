@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.6.0
+version: 2.6.1
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -68,12 +68,12 @@ The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items and anything inside
 comments or code fences. **Read stderr every run**: an unbalanced-fence warning makes that file
 untrustworthy; a persistent-section warning means `tasks.md` needs the move above; a
-zero-candidate diagnosis is relayed verbatim (never say "queue clear" on empty stdout alone); a
-truncation note means the fast path hid groups — say how many when offering more.
+zero-candidate diagnosis is relayed verbatim and goes to Step 2's zero-groups report
+(`--full-scan` qualifies groups by the same test, so it finds none either); a truncation note
+means the fast path hid groups — say how many when offering more.
 
 | Fast-path count | Action |
 |-----------------|--------|
-| 0 | relay the diagnosis, then run `--full-scan` |
 | 1 | announce the group → Step 3 |
 | 2–3 | one `AskUserQuestion` (Codex: a numbered list) listing the candidates plus **"더 많은 항목 보기"** as the last option; that option → `--full-scan` → Step 2 |
 
@@ -107,8 +107,8 @@ offer it, do not start it unasked.
 
 ## Step 3 — Run the cycle
 
-Follow `references/cycle.md` end to end with these overrides. Verify the actual user
-invocation and preserve its Git limits per `references/git-authorization.md` before writes:
+Follow `references/cycle.md` end to end with these overrides; Git authority is
+`references/git-authorization.md`:
 
 **Mark active — after the plan gate.**
 - `tasks.md` h1 block (`status: open`) → flip to `status: active`; the block is the contract.

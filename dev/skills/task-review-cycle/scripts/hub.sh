@@ -8,7 +8,7 @@
 #   repo-info                               → {default_branch, merge_strategy:{squash,merge,rebase}}
 #   pr-create --base <b> --title <t> --body <body> → {pr_number, pr_url}
 #   pr-get                                  → {pr_number, pr_url}   (open PR for current branch)
-#   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n}
+#   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n, head_sha?}
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
 #   merge <pr_number> <squash|merge|rebase> → {merge_ok, queued, unconfirmed, merge_output}
 #
@@ -103,7 +103,11 @@ require_forgejo_token() {
 current_branch() { git branch --show-current; }
 
 # Map gh `pr checks` exit/buckets and Forgejo combined status to one vocabulary.
-emit_status() { jq -n --arg s "$1" --argjson n "${2:-0}" '{status: $s, checks: $n}'; }
+# head_sha (ci-status only) names the commit the checks describe; omitted when unknown.
+emit_status() {
+  jq -n --arg s "$1" --argjson n "${2:-0}" --arg sha "${HEAD_SHA:-}" \
+    '{status: $s, checks: $n} + (if $sha == "" then {} else {head_sha: $sha} end)'
+}
 
 case "$SUBCOMMAND" in
 
@@ -219,6 +223,9 @@ case "$SUBCOMMAND" in
   ci-status)
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
+      # `gh pr checks` cannot be pinned to a SHA. Read the head first: checks fetched after it
+      # describe that commit or a newer one, never an older one the caller would misread.
+      HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid 2>/dev/null) || HEAD_SHA=""
       EXIT=0
       CHECKS=$(gh pr checks "$PR_NUMBER" --json bucket 2>/dev/null) || EXIT=$?
       # gh pr checks exits 1 when any check FAILED — while still printing the

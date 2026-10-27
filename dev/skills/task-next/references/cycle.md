@@ -19,12 +19,8 @@ The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when
 
 ## Scope
 
-Look yourself first — one or two searches. Delegate research to `explorer` (or the built-in
-`Explore` when no such role exists) only when the user or an applicable skill directs it,
-higher-level constraints permit it, and applicable repository policy is met. In this Toolkit
-repository, the provisional research threshold is 10+ files to investigate or substantial
-context pressure (`docs/delegation.md`); other repositories use their own applicable policy.
-Eligibility never mandates a spawn.
+Look yourself first — one or two searches. Research delegation (`explorer`, else the built-in
+`Explore`) follows the repository's delegation policy (`docs/delegation.md` where it exists).
 
 ## Plan gate
 
@@ -39,9 +35,7 @@ constraints proceed. A same-session explicit "continue" already authorizes resum
 Unattended runs proceed within approved constraints; unresolved material decisions are reported
 as blocked, never silently approved.
 
-Git effects have a separate boundary: read `git-authorization.md`, verify the originating
-user invocation/instruction and archive its allowed actions and limits. Scope approval,
-router matches and handoff flags do not authorize Git writes. Reuse established permission.
+Git effects have a separate boundary: `git-authorization.md`.
 
 ## Sprint Contract
 
@@ -91,16 +85,10 @@ convergence cleanup.
 
 ## Implement
 
-Inline by default. Delegate to `implementer` only when the user or an applicable skill directs
-it, higher-level constraints permit it, and applicable repository policy is met. In this Toolkit
-repository, the provisional threshold is 10+ files to investigate, 3+ genuinely independent units,
-or substantial context pressure (`docs/delegation.md`); other repositories use their own applicable
-policy. An authorized workflow's independent verification is assessed separately for its
-independence benefit and cost; neither file count nor parallelism alone gates it. Verification
-is optional unless that workflow requires it. When delegation is warranted, pass a brief carrying
-the contract, absolute paths of every in-scope file, and the lint/test command; the implementer runs related checks and
-reports through its final output, the only channel a role-file agent has
-(`docs/delegation.md`); brief it never to finish silently. Rules either way:
+Inline by default; delegating to `implementer` follows the repository's delegation policy
+(`docs/delegation.md` where it exists). A delegated brief carries the contract, absolute paths of
+every in-scope file, and the lint/test command, and tells the implementer to report through its
+final output, never finishing silently. Rules either way:
 
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
@@ -221,8 +209,8 @@ checks on the final changed candidate. Additional reviewers never substitute for
 
 **Do not commit.** Call the Skill tool with "dev:task-review-cycle" and
 `args: --from <task-next|task-new> --auto`, and **restate the Sprint Contract verbatim** in the
-invocation, with the archive path, validation evidence, and all three Git authorization
-fields verbatim. Stop at the authorized boundary per `git-authorization.md`. If the hand-off loses context, recover
+invocation, with the archive path, validation evidence, and the Git authorization fields
+(`git-authorization.md`). If the hand-off loses context, recover
 the saved original rather than infer it from the diff. The review cycle commits, reviews the diff
 against the contract, routes by risk and required CI, applies findings, records out-of-scope items to
 `backlog.md`, and merges.

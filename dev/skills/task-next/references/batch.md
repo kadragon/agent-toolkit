@@ -20,8 +20,8 @@ stay queued; list them in the final report for the next run.
 ### A2 — Decide execution mode
 
 Apply `cycle.md` → *Plan gate* once to unresolved decisions in the selected batch. Reuse approved
-scope, criteria, and approach for each unit. Carry the original approval source, allowed Git
-actions and limits verbatim into aggregate/unit contracts per `git-authorization.md`. Neither `[FEAT]` nor file count excludes a unit.
+scope, criteria, and approach for each unit. Git authority for aggregate/unit contracts:
+`git-authorization.md`. Neither `[FEAT]` nor file count excludes a unit.
 
 **Sequential (default):** small tasks, coupled units, shared-file edits, or work whose preparation
 and hand-off cost outweighs parallel savings. Use one branch and an aggregate Sprint Contract,
@@ -32,7 +32,7 @@ A failed unit stops dependent work; preserve changes and report the unmet criter
 **Parallel:** use only when all selected parallel units have approved scope, independently
 verifiable outcomes, no dependencies on each other, and disjoint file ownership (including
 imports, tests, lockfiles, and generated outputs). Expected implementation effort must justify
-worktrees and separate implementation/QA, and the platform's delegation gate must also pass.
+worktrees and separate implementation/QA, and the delegation policy must also pass.
 Explain the expected benefit and ownership before fan-out. Small tasks remain sequential.
 
 Shared convergence files (`plugin.json` manifests, `backlog.md`, `tasks.md`, `CHANGELOG.md`) are
@@ -42,7 +42,7 @@ More than six parallel units → confirm the implementer + QA cost explicitly. R
 ### A3 — Parallel implementation
 
 The main session owns worktree lifecycle; do not use agent-lifetime worktree isolation.
-Ensure `.worktrees/` is ignored, fetch the base once, and create the integration branch and every
+Ignore `.worktrees/` via `info/exclude` (`tree.md` → Branch step), fetch the base once, and create the integration branch and every
 unit worktree from that same fetched base. Preserve any authorized backlog-only edits on the
 integration checkout. Create a worktree with `git worktree add .worktrees/<slug> -b wt/<slug>
 <captured-base-commit>`; use actual values discovered this run.

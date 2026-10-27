@@ -336,6 +336,30 @@ def main() -> int:
         check("a non-numeric counter restarts at 1",
               result.get("failures") == 1, f"got {result}")
 
+        print("\n-- a stale head's failure is not a strike --")
+        # Right after a push the hub can still describe the previous commit: PR #362 struck one
+        # real failure twice that way. The stub answers for a stale SHA first, then for HEAD.
+        stale = make_repo(tmp, "failure", name="stale_head")
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                        "--allow-empty", "-m", "head"], cwd=stale, check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=stale, check=True,
+                              capture_output=True, text=True).stdout.strip()
+        (stale / "scripts" / "hub.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            'log="$(dirname "${BASH_SOURCE[0]}")/../calls.log"\n'
+            'echo x >> "$log"\n'
+            'if [ "$(wc -l < "$log")" -le 1 ]; then\n'
+            "  echo '{\"status\": \"failure\", \"head_sha\": \"0000000000000000000000000000000000000000\"}'\n"
+            "else\n"
+            f"  echo '{{\"status\": \"success\", \"head_sha\": \"{head}\"}}'\n"
+            "fi\n",
+            encoding="utf-8")
+        result = run(stale, CI_WAIT_POLL_INTERVAL=1)
+        check("a stale-SHA failure then a head-SHA success passes",
+              result.get("passed") is True and call_count(stale) == 2, f"got {result}")
+        check("the stale-SHA failure leaves no strike file",
+              not strike_file(stale).exists())
+
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
     # returns no JSON, so the `timeout` branch never reaches the caller. The last sleep and one
