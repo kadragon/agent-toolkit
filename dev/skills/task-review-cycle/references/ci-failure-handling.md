@@ -70,15 +70,22 @@ Within established merge authority, merge and clean up:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -f "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
+[[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] && echo "$SKILL_DIR/scripts/merge-and-cleanup.sh" || { echo "Bundled script not executable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
+```
+
+Non-zero → stop; do not issue the merge. Otherwise issue the merge as one standalone command
+starting with the path that block printed — no `bash` prefix, no variable assignment — so a
+narrow allow rule matches it in auto mode (`bash`-led wildcard rules are dropped). A direct call
+exiting 126/127 means the helper is not executable or not found: stop and report; never retry
+it as `bash <path>`.
+
+```bash
 # All 4 positional args are REQUIRED. Values come from pre-flight JSON output.
 # merge_strategy must be a JSON object, NOT a bare word like "squash".
-bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
-  <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [worktree_path]
+<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [worktree_path]
 
-# Concrete example:
-bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
-  9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
+# Concrete example (the printed path is wherever this skill is installed):
+<printed path> 9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
 ```
 
 The script selects the best merge strategy (squash > merge > rebase) from the JSON, merges (`hub.sh merge` deletes the remote head only, and reports success only once the PR state is MERGED), then checks out the base branch, fetches and fast-forward merges `FETCH_HEAD` (avoids `git pull` failures when `pull.rebase` is unconfigured; `ff-only` fails gracefully on unpushed local commits instead of discarding them), removes the worktree when a path is provided, then deletes the local feature branch (`-D`: a squash or rebase merge leaves it "not fully merged"). This script is the sole owner of local cleanup. A failed base checkout skips local cleanup with a `WARNING` and still prints the result JSON. Run from inside the worktree it removes, the script first moves to the main worktree; if that checkout is not on the base branch it is left as-is (base not updated, noted in `cleanup_message`) and cleanup continues.
