@@ -223,28 +223,48 @@ case "$SUBCOMMAND" in
   ci-status)
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
-      # `gh pr checks` cannot be pinned to a SHA. Read the head first: checks fetched after it
-      # describe that commit or a newer one, never an older one the caller would misread.
-      HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid 2>/dev/null) || HEAD_SHA=""
-      EXIT=0
-      CHECKS=$(gh pr checks "$PR_NUMBER" --json bucket 2>/dev/null) || EXIT=$?
-      # gh pr checks exits 1 when any check FAILED — while still printing the
-      # check JSON. Trust the JSON over the exit code: parse buckets whenever a
-      # non-empty array came back, regardless of exit status.
-      if jq -e 'type == "array" and length > 0' <<<"${CHECKS:-null}" >/dev/null 2>&1; then
-        TOTAL=$(jq 'length' <<<"$CHECKS")
-        PENDING=$(jq '[.[] | select(.bucket == "pending")] | length' <<<"$CHECKS")
-        FAILED=$(jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' <<<"$CHECKS")
-        if [ "$PENDING" -gt 0 ]; then emit_status "pending" "$TOTAL"
-        elif [ "$FAILED" -gt 0 ]; then emit_status "failure" "$TOTAL"
-        else emit_status "success" "$TOTAL"; fi
-      elif [ "$EXIT" -eq 8 ]; then
-        emit_status "pending" 0
-      else
-        # No parseable checks: gh exits 1 with empty stdout when no checks are
-        # reported on the branch ("none" lets the caller apply its grace logic).
+      # One snapshot for both the head and its checks: two requests could pair a new head SHA
+      # with the previous commit's failure. The query is `gh pr checks`'s own (it cannot be
+      # pinned, and `gh pr view` omits the run event), so buckets and the rerun dedup —
+      # latest run per name/workflow/event — mirror it.
+      VIEW=$(gh api graphql --paginate --slurp -F number="$PR_NUMBER" \
+        -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
+        query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+          repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+            commits(last: 1) { nodes { commit { oid statusCheckRollup {
+              contexts(first: 100, after: $endCursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes {
+                  __typename
+                  ... on StatusContext { context state createdAt }
+                  ... on CheckRun { name status conclusion startedAt
+                    checkSuite { workflowRun { event workflow { name } } } }
+                } } } } } } } } }' 2>/dev/null) || VIEW=""
+      SNAPSHOT=$(jq -c '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
+        | {oids: ([$c[].oid] | unique),
+           buckets: [[$c[].statusCheckRollup.contexts.nodes[]?]
+             | group_by(if .__typename == "CheckRun"
+                 then [.name, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
+                 else [.context] end)[]
+             | max_by(.startedAt // .createdAt // "")
+             | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
+                else .state end) as $s
+             | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
+               elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
+                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" then "fail"
+               else "pending" end]}' <<<"${VIEW:-null}" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
+      HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
+      BUCKETS=$(jq -c '.buckets' <<<"$SNAPSHOT")
+      TOTAL=$(jq 'length' <<<"$BUCKETS")
+      if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
+        # The head moved between pages: no single commit to judge, so poll again.
+        emit_status "pending" "$TOTAL"
+      elif [ "$TOTAL" -eq 0 ]; then
+        # No checks reported (or the query failed): "none" lets the caller apply its grace logic.
         emit_status "none" 0
-      fi
+      elif jq -e 'any(. == "pending")' <<<"$BUCKETS" >/dev/null; then emit_status "pending" "$TOTAL"
+      elif jq -e 'any(. == "fail")' <<<"$BUCKETS" >/dev/null; then emit_status "failure" "$TOTAL"
+      else emit_status "success" "$TOTAL"; fi
     else
       require_forgejo_token
       HEAD_SHA=$(fj_api GET "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}" | jq -r '.head.sha // empty') || true

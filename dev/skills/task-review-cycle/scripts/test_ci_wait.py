@@ -388,27 +388,88 @@ def main() -> int:
                        cwd=hub_repo, check=True)
         bindir = tmp / "gh_bin"
         bindir.mkdir()
+        # `api graphql` answers with the slurped pages in $GH_VIEW (unset → the call fails);
+        # `pr view` and `pr checks` always report a stale head and failure, so reading either
+        # instead of the one snapshot shows up red.
         (bindir / "gh").write_text(
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
-            '  "pr view") echo "$GH_HEAD"; exit 0 ;;\n'
+            '  "api graphql") [ -n "${GH_VIEW:-}" ] || exit 1; printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
+            '  "pr view") echo "' + "b" * 40 + '"; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
             "esac\n"
             "exit 1\n",
             encoding="utf-8")
         (bindir / "gh").chmod(0o755)
-        proc = subprocess.run(
-            ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
-            capture_output=True, text=True, timeout=30,
-            env=dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
-                     GH_HEAD="a" * 40))
-        try:
-            status = json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            status = {"_stdout": proc.stdout, "_stderr": proc.stderr}
+
+        def page(contexts, oid="a" * 40):
+            rollup = None if contexts is None else {"contexts": {"nodes": contexts}}
+            return {"data": {"repository": {"pullRequest": {"commits": {"nodes": [
+                {"commit": {"oid": oid, "statusCheckRollup": rollup}}]}}}}}
+
+        def hub_status(rollup, pages=None):
+            if pages is None and rollup is not None:
+                pages = [page(rollup)]
+            env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
+            env.pop("GH_VIEW", None)
+            if pages is not None:
+                env["GH_VIEW"] = json.dumps(pages)
+            proc = subprocess.run(
+                ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
+                capture_output=True, text=True, timeout=30, env=env)
+            try:
+                return json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                return {"_stdout": proc.stdout, "_stderr": proc.stderr}
+
+        def run_ctx(conclusion, status="COMPLETED", name="test", started="2026-01-01T00:00:00Z",
+                    event="pull_request"):
+            return {"__typename": "CheckRun", "name": name, "status": status,
+                    "conclusion": conclusion, "startedAt": started,
+                    "checkSuite": {"workflowRun": {"event": event, "workflow": {"name": "ci"}}}}
+
+        status = hub_status([run_ctx("FAILURE")])
         check("ci-status carries headRefOid as head_sha",
               status.get("status") == "failure" and status.get("head_sha") == "a" * 40,
               f"got {status}")
+        status = hub_status([run_ctx("", status="IN_PROGRESS")])
+        check("checks come from the same snapshot as the head, not a second request",
+              status.get("status") == "pending" and status.get("head_sha") == "a" * 40,
+              f"got {status}")
+        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+                             run_ctx("SUCCESS", started="2026-01-01T00:05:00Z")])
+        check("a rerun supersedes the older failure of the same check",
+              status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
+        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+                             run_ctx("SUCCESS", started="2026-01-01T00:05:00Z", event="push")])
+        check("a later push run does not hide the pull_request run's failure",
+              status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+                                         page([run_ctx("FAILURE", name="lint")])])
+        check("a failure on a later page counts",
+              status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+                                         page([run_ctx("SUCCESS", name="lint")], oid="c" * 40)])
+        check("pages from two different heads are not judged",
+              status.get("status") == "pending", f"got {status}")
+        status = hub_status([run_ctx("SUCCESS"), run_ctx("SKIPPED", name="lint"),
+                             {"__typename": "StatusContext", "context": "ext", "state": "SUCCESS"}])
+        check("skipped checks and status contexts count as passing",
+              status.get("status") == "success" and status.get("checks") == 3, f"got {status}")
+        status = hub_status([run_ctx("CANCELLED"),
+                             {"__typename": "StatusContext", "context": "ext", "state": "PENDING"}])
+        check("a pending status context outranks a cancelled check",
+              status.get("status") == "pending", f"got {status}")
+        status = hub_status([{"__typename": "StatusContext", "context": "ext", "state": "ERROR"}])
+        check("an errored status context is a failure", status.get("status") == "failure",
+              f"got {status}")
+        status = hub_status(None, pages=[page(None)])
+        check("an empty rollup reports none with the head",
+              status.get("status") == "none" and status.get("head_sha") == "a" * 40,
+              f"got {status}")
+        status = hub_status(None)
+        check("a failed view reports none without a head",
+              status.get("status") == "none" and "head_sha" not in status, f"got {status}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
