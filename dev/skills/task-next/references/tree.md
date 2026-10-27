@@ -19,9 +19,6 @@ SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-# the main checkout is on the local base branch (working-tree gate); bring it level with $BASE
-git merge --ff-only "$BASE" \
-  || { echo "local base cannot fast-forward to $BASE — reconcile it before --tree" >&2; exit 1; }
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
 # Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
@@ -30,6 +27,12 @@ if [[ -e "$TREE_STATE_PATH" || -e "$TREE_SNAPSHOT_PATH" ]]; then
   echo "stale task-next tree cleanup state exists; resolve the previous run first" >&2
   exit 1
 fi
+# bring the local base level with $BASE — only when it is the branch checked out here
+CURRENT=$(git branch --show-current)
+[[ "$CURRENT" == "${BASE#origin/}" ]] \
+  || { echo "checked out '$CURRENT', but origin/HEAD is $BASE — switch to ${BASE#origin/} first" >&2; exit 1; }
+git merge --ff-only "$BASE" \
+  || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
 if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
   if [[ -e .gitignore ]]; then
     cp -- .gitignore "$TREE_SNAPSHOT_PATH"

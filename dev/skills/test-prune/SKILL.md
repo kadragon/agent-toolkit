@@ -222,7 +222,8 @@ Carried: <n> units from <run dirs> (same_source); ledger: <run_dir>/ledger.json
 
 State which checks ran and which did not. A claim with no run behind it goes under *Not measured*.
 
-Append every *Gaps* and *Production bugs* row to `backlog.md`, when the repo has one, as `- [ ]`
-items under a new `## test-prune — <date>` heading: a gap as `[TEST] <file:line> — <behavior
-unprotected> (mutant: <mutation>)`, a production bug as `[FIX] <file:line> — <what the mutant
-revealed>; diagnose with dev:task-debug`. Name that heading in the report.
+Append every *Gaps* and *Production bugs* row to `backlog.md`, when the repo has one, each as
+its own `- [ ]` item under its own `## test-prune <date> — <file:line>` heading (a heading is one
+Sprint Contract): a gap as `[TEST] <behavior unprotected> (mutant: <mutation>)`, a production bug
+as `[FIX] <what the mutant revealed>; diagnose with dev:task-debug`. Name the headings in the
+report. An audit-only run writes nothing: it lists these items in the report as proposed.

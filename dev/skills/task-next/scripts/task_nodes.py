@@ -580,7 +580,9 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         content = _indent(masked[i]) + 2
 
         def nested(j: int) -> bool:
-            return (j < len(lines) and bool(lines[j].strip()) and _indent(masked[j]) >= content
+            # Indent from the RAW line: a masked fence line is blank, which would end the walk and
+            # orphan the fence; taken into the body, it is refused below like any fenced body.
+            return (j < len(lines) and bool(lines[j].strip()) and _indent(lines[j]) >= content
                     and not _CHECKBOX_LINE_RE.match(masked[j]))
 
         if i in owners and nested(stop + 1) and _BULLET_RE.match(masked[stop + 1]):
@@ -1622,6 +1624,10 @@ Preamble with no h1 wrapper.
     out, problems = prune_lines(subbullets, ["- [ ] [FIX] x"])
     _assert(problems == [] and out == "# Backlog\n\n## 6 — live\n\n- [ ] [FIX] y\n  - Source: z\n",
             "REGRESSION: a pruned item's nested sub-bullets and its emptied heading go with it")
+    fenced = "## B\n\n- [ ] x\n  - Example:\n  ```\n  code\n  ```\n- [ ] y\n"
+    out, problems = prune_lines(fenced, ["- [ ] x"])
+    _assert(out == fenced and len(problems) == 1 and "edit it by hand" in problems[0],
+            "REGRESSION: a fence inside a sub-bullet refuses the run instead of orphaning the fence")
     out, problems = prune_lines("- [ ] a\n  - note\n\n  - after blank\n- [ ] b\n", ["- [ ] a"])
     _assert(problems == [] and out == "\n  - after blank\n- [ ] b\n",
             "only sub-bullets contiguous with the item are its body; a blank line ends it")

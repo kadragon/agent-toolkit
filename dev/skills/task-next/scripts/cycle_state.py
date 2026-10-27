@@ -2,7 +2,8 @@
 """Preserve a branch's contract and check evidence across sessions; report clues, never completion.
 
 save [--file PATH] reads the approved contract from PATH or stdin. Existing different
-contracts are refused; --replace is for an explicitly approved scope revision. Every
+contracts are refused; --replace is for an explicitly approved scope revision, and clears the
+old contract's notes and evidence. Every
 **Acceptance criteria:** checkbox must name its check after an arrow (`- [ ] X → pytest -k x`),
 so "done" is decided by a runnable signal rather than by how the diff looks. save is
 refused on main/master: the archive is keyed by branch name, so a contract written from
@@ -178,6 +179,7 @@ def main():
                 if not args.replace:
                     raise ValueError("Saved contract differs; inspect before an approved --replace")
                 notes_path.unlink(missing_ok=True)   # the old cycle's notes do not bind the new one
+                evidence_path.unlink(missing_ok=True)   # nor do checks run against the old scope
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(".tmp")
             temporary.write_text(text, encoding="utf-8")

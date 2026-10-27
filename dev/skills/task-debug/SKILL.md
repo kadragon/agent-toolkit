@@ -207,7 +207,8 @@ Required before declaring done:
 
 End by returning three things to whoever called this loop: the Phase 1 repro command, the
 regression test id (or the missing-seam finding), and the surviving hypothesis. Inside a
-`task-next`/`task-new` cycle — `../task-next/scripts/cycle_state.py inspect` shows an archived
-contract — add the regression test to that contract as an acceptance criterion
-(`save --replace`, which clears the notes), then record all three with `cycle_state.py note`, so
-a fresh session resumes from them.
+`task-next`/`task-new` cycle — `../task-next/scripts/cycle_state.py inspect`, run in the cycle's
+checkout (its worktree under `--tree`), shows an archived contract — record all three there with
+`cycle_state.py note`, so a fresh session resumes from them, and propose the regression test as
+an acceptance criterion. Adding it is a contract revision the cycle owner approves
+(`../task-next/references/cycle.md` → *Plan gate*), never a `save --replace` from this loop.

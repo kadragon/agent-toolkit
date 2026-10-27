@@ -84,9 +84,10 @@ SPRINT_CONTRACT
 The helper prints the archive path under the common Git directory, keyed by branch; it survives
 new sessions and worktree removal. Preserve it through review and merge, including failed or
 abandoned runs. A different existing contract stops the write: inspect it first, and use
-`save --replace` only for an approved scope revision or a confirmed new cycle on a reused branch.
-For `--tree`, save from the implementation worktree; for parallel batches, save the aggregate
-contract on the integration branch before convergence cleanup.
+`save --replace` only for an approved scope revision or a confirmed new cycle on a reused branch;
+it clears the old contract's notes and evidence. For `--tree`, save from the implementation
+worktree; for parallel batches, save the aggregate contract on the integration branch before
+convergence cleanup.
 
 ## Implement
 

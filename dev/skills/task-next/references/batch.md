@@ -76,13 +76,14 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
 
 1. In the integration checkout, run `cycle_state.py authorize --action integrate` before
    merging verified unit branches. Never apply `integrate` authority on a base branch. On conflict,
-   abort that merge and preserve the conflicting branch/worktree for resolution. Record each
-   merged, excluded, and conflicted unit — slug, `wt/<slug>` branch, saved tip, outcome, reason —
-   with `cycle_state.py note` on the integration branch, so a fresh session reads them through
-   `inspect`; do not infer them from post-squash ancestry.
+   abort that merge and preserve the conflicting branch/worktree for resolution. Track each
+   merged, excluded, and conflicted unit — slug, `wt/<slug>` branch, saved tip, outcome, reason;
+   do not infer them from post-squash ancestry.
 2. If nothing integrates, stop with all recoverable work preserved. Otherwise, confirm the
    aggregate contract covers exactly the integrated units; retain excluded unit contracts and
    revise the aggregate with the explicit partial-result scope, without claiming those units done.
+   Then record the step 1 outcomes with `cycle_state.py note` on the integration branch, so a
+   fresh session reads them through `inspect` — after any `save --replace`, which clears notes.
 3. Run the shared cycle from *Version bump* through *Validation evidence*: one bump per touched
    plugin, cleanup only for integrated units, and full required checks on the integrated candidate.
    Pass `--units <N>` to the `changelog` command with the count of integrated units, so the entry
@@ -90,12 +91,14 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
    `tasks.md`.
 4. Hand off once: call the Skill tool with "dev:task-review-cycle" and
    `args: --from task-next --auto`, carrying the aggregate contract, archive, evidence, and unit
-   outcomes. One integration PR, CI, and merge. Failed CI keeps all unit recovery state intact.
+   outcomes for the PR body — the review cycle retires the integration archive, note included, at
+   merge. One integration PR, CI, and merge. Failed CI keeps all unit recovery state intact.
 
 ### A6 — Cleanup and report
 
 After confirmed successful merge, remove only clean worktrees whose units landed. Use the
-integrated-unit list recorded in the A5 note; squash ancestry cannot prove unit identity. Run
+integrated-unit list carried into the hand-off (a later session: the merged PR body); squash
+ancestry cannot prove unit identity. Run
 `cycle_state.py retire --branch wt/<slug>` for each landed unit, so a reused unit branch name
 cannot resurrect its contract. Delete a unit branch only after its saved tip is confirmed
 included in the integrated result; any required force operation follows the user's authorization

@@ -41,7 +41,7 @@ contract for work that does not exist, and do not report blocked.
 | Implementation/version complete; cleanup incomplete | `cycle.md` → *Cleanup* |
 | Required check missing, failed, stale, or bound to different inputs | `cycle.md` → *Validation evidence* |
 | All above complete; review/CI/merge pending | `cycle.md` → *Hand off* |
-| Parallel batch: integration branch `notes` record unit outcomes | `batch.md` → *A5* for the recorded merged units only; excluded/conflicted units stay on their `wt/<slug>` branches |
+| Parallel batch, not yet merged: integration branch `notes` record unit outcomes | `batch.md` → *A5* for the recorded merged units only; excluded/conflicted units stay on their `wt/<slug>` branches |
 
 Read the current branch/PR state before resuming a review; a commit ahead is not proof Step 1 ran.
 If merge is already confirmed complete, report completion rather than rerun cleanup or bump again.

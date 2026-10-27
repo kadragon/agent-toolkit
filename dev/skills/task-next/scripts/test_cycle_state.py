@@ -463,6 +463,13 @@ class RecoveryTest(unittest.TestCase):
         self.state("save", "--replace", text=contract("second"))
         self.assertIsNone(self.state("inspect")["notes"])
 
+    def test_replace_drops_the_previous_cycles_evidence(self):
+        # A command the revised contract dropped would otherwise hold tree_matches_current false.
+        self.state("save", text=contract("first"))
+        self.state("evidence", "--command", "pytest", "--exit", "0")
+        self.state("save", "--replace", text=contract("second"))
+        self.assertIsNone(self.state("inspect")["evidence"])
+
     def test_identical_legacy_contract_resaves_without_checks(self):
         # An archive written before criteria needed a check must still re-save idempotently.
         legacy = "**Acceptance criteria:**\n- [ ] works\n"
