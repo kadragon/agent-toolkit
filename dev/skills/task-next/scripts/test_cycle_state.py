@@ -369,12 +369,54 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(recorded["command"], "pytest -q")
         self.assertEqual(recorded["exit_code"], 0)
         seen = self.state("inspect")
-        self.assertEqual(seen["evidence"]["log"], "/tmp/run.log")
-        self.assertEqual(seen["evidence"]["environment"], "python 3.12")
+        self.assertEqual(seen["evidence"][0]["log"], "/tmp/run.log")
+        self.assertEqual(seen["evidence"][0]["environment"], "python 3.12")
         self.assertTrue(seen["tree_matches_current"])
         (self.repo / "code.txt").write_text("changed after the checks ran\n")
         self.git("add", "code.txt")
         self.assertFalse(self.state("inspect")["tree_matches_current"])
+
+    def test_evidence_keeps_one_record_per_command(self):
+        self.state("save", text=contract())
+        self.state("evidence", "--command", "lint", "--exit", "1")
+        self.state("evidence", "--command", "pytest -q", "--exit", "0")
+        records = self.state("inspect")["evidence"]
+        self.assertEqual([(r["command"], r["exit_code"]) for r in records],
+                         [("lint", 1), ("pytest -q", 0)])
+        # A rerun of the same command replaces its own record only, now the latest.
+        self.state("evidence", "--command", "lint", "--exit", "0")
+        records = self.state("inspect")["evidence"]
+        self.assertEqual([(r["command"], r["exit_code"]) for r in records],
+                         [("pytest -q", 0), ("lint", 0)])
+
+    def test_unwritable_index_tree_is_a_mismatch(self):
+        self.state("save", text=contract())
+        self.git("checkout", "-q", "main")
+        (self.repo / "code.txt").write_text("main side\n")
+        self.git("add", "code.txt")
+        self.commit()
+        self.git("checkout", "-q", "fix/example")
+        (self.repo / "code.txt").write_text("branch side\n")
+        self.git("add", "code.txt")
+        self.commit()
+        # Neutralize ambient config: without an identity git refuses before merging (CI).
+        subprocess.run(["git", "-C", str(self.repo), "-c", "core.hooksPath=/dev/null",
+                        "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                        "merge", "-q", "main"], capture_output=True)
+        self.assertTrue(self.git("ls-files", "-u"), "fixture must leave an unmerged index")
+        recorded = self.state("evidence", "--command", "pytest -q", "--exit", "0")
+        self.assertIsNone(recorded["tree"])   # an unmerged index cannot be written
+        self.assertFalse(self.state("inspect")["tree_matches_current"])
+
+    def test_legacy_single_record_evidence_is_read(self):
+        saved = self.state("save", text=contract())
+        legacy = Path(saved["contract_path"]).with_name("evidence.json")
+        tree = self.git("write-tree")
+        legacy.write_text(json.dumps({"head": "x", "tree": tree, "command": "pytest",
+                                      "exit_code": 0, "log": None, "environment": None}))
+        seen = self.state("inspect")
+        self.assertEqual([r["command"] for r in seen["evidence"]], ["pytest"])
+        self.assertTrue(seen["tree_matches_current"])
 
     def test_evidence_requires_an_archived_contract(self):
         self.assertIn("save it before evidence",
@@ -424,6 +466,13 @@ class RecoveryTest(unittest.TestCase):
         self.state("note", text="old cycle: tried A")
         self.state("save", "--replace", text=contract("second"))
         self.assertIsNone(self.state("inspect")["notes"])
+
+    def test_replace_drops_the_previous_cycles_evidence(self):
+        # A command the revised contract dropped would otherwise hold tree_matches_current false.
+        self.state("save", text=contract("first"))
+        self.state("evidence", "--command", "pytest", "--exit", "0")
+        self.state("save", "--replace", text=contract("second"))
+        self.assertIsNone(self.state("inspect")["evidence"])
 
     def test_identical_legacy_contract_resaves_without_checks(self):
         # An archive written before criteria needed a check must still re-save idempotently.

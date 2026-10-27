@@ -6,7 +6,7 @@ Six workflows. Pick the primary one per cycle. The `code` cycle's step-by-step p
 
 Expand a short prompt into a concrete spec.
 
-1. Expand into `docs/design/{feature}.md`: user stories, high-level design, phased list. No granular implementation details.
+1. Expand into `docs/design/{feature}.md`: user stories, high-level design. No granular implementation details.
 2. Review with user. Do not proceed until approved.
 3. Generate `backlog.md` items from approved spec.
 

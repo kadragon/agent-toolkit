@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.2.0
+version: 1.2.1
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -60,8 +60,8 @@ Derive `COMMIT_MESSAGE` from `git diff --cached --stat` (empty index: `--stat HE
 Capture it — and the Step 2 contract — with a **quoted** heredoc delimiter, never an interpolated
 assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if its diff against
 the base is empty and no review remains, report no work and stop here. End the body with
-`Verification:` + the exact command and exit code of the one `cycle_state.py inspect` → `evidence`
-record, only when its `tree_matches_current` is true (else `none recorded`): `retire` deletes the
+`Verification:` + the exact command and exit code of each `cycle_state.py inspect` → `evidence`
+record, only when `tree_matches_current` is true (else `none recorded`): `retire` deletes the
 archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`).
 
 ```bash

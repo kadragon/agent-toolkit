@@ -6,7 +6,7 @@ description: >-
   order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # To Tickets
@@ -40,11 +40,7 @@ items from approved spec").
    the same spec — delete the graduated line from `## Not yet specified` in the same edit that
    writes its ticket, so it lives only as the ticket. This skill makes no commit of its own:
    the edit rides into whichever commit the caller's cycle makes next. `task-next`'s working-tree
-   gate carves the matching exception — a tree whose only dirty paths are `backlog.md` and `docs/design/`
-   proceeds and announces what it carries — so the hand-off in step 7 does not stall on the edit this step
-   leaves behind. That gate — `task-next`'s specifically — is the authority for what a
-   dirty tree means on the path this skill hands off to; do not add a commit here to work
-   around it. `task-new` also carries a backlog-only edit through its working-tree gate.
+   gate carries a `backlog.md` + `docs/design/`-only tree and owns that rule; never commit here.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
    (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
    behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
@@ -70,14 +66,9 @@ items from approved spec").
    branch — `task-next`/`task-review` merge each ticket through its own PR to `main`, and a
    long-lived integration branch has no slot in that cycle.
 
-   **Renaming a skill, agent or command is NOT expand–contract-able here.** Expand would mean
-   the old and new assets coexisting with near-identical `description:` text, and
-   `scripts/ci/check_skill_triggers.py` hard-fails any description pair at or above its
-   collision threshold — a duplicated description scores ~1.0 against its twin, and the
-   pointer remedy perturbs the corpus enough to pull in unrelated skills, on top of the
-   ratchet demanding an `evals/trigger-eval.json` for the new `SKILL.md`. Write a by-name
-   rename as **one** ticket that renames and updates every caller in a single commit, and take
-   the major bump there (`docs/conventions.md` → *Plugin Version Bump Rules*).
+   **Renaming a skill, agent or command is one ticket, never expand–contract** — two coexisting
+   near-identical `description:` texts collide as triggers. Rename and update every caller in a
+   single commit, with the plugin's major bump.
 
    **Version-bump note for the sequence:** every stage ships under the same plugin, so each
    stage ticket bumps that plugin. No stage of a non-rename wide refactor earns a major bump —
@@ -94,23 +85,33 @@ items from approved spec").
    Cite the approved source in each ticket. Apply `../task-next/references/cycle.md` → *Plan gate*:
    reuse approved granularity/order; ask only about new slicing decisions or changed scope before
    writing. Create `backlog.md` if this authorized ticket-writing path needs it.
-5. **Write to `backlog.md`.** Give each confirmed ticket its **own** new `## ` heading — never
+5. **Write to `backlog.md`.** Give each confirmed ticket its **own** new `## <n> — <short name>`
+   heading — never
    append a task-tickets-generated ticket into an existing heading that already owns other open
    items, and never put two new tickets under one shared heading. `task-next` treats a
    heading as a single candidate whose *entire* open-item set becomes one Sprint Contract, so
    sharing a heading across tickets would silently merge their scope and break the "one ticket
    = one Sprint Contract" guarantee this skill promises. Each heading gets exactly one `- [ ]`
    item — the ticket itself — carrying the `[type]` tag per `docs/conventions.md` (e.g.
-   `[FEAT]`, `[FIX]`).
+   `[FEAT]`, `[FIX]`). Its source citation, acceptance criteria and approach go on indented
+   plain lines under it, no bullet marker, so candidate selection folds them into the item and
+   `prune-backlog` deletes them with it:
+   ```
+   - [ ] [FEAT] <ticket description>
+     Source: docs/design/<slug>.md → <section>
+     Done when: <criterion → check>
+     Approach: <one line>
+   ```
 6. **Mark blocked items.** Any ticket that must not start before another ticket in this same
    batch (or an existing unresolved backlog item) completes gets the marker appended to its
    item line, verbatim format:
    ```
    - [ ] [FEAT] <ticket description> *(blocked by: <n>-<slug>)*
    ```
-   where `<n>` is the blocking ticket's position number in this batch (omit it when blocking on
-   prior work outside this batch — write the slug alone) and `<slug>` is its kebab-case short
-   name. **Never write a number without its slug:** the slug is the identifying half, so a
+   where `<n>-<slug>` is the blocking ticket's heading words in order, lowercased and
+   hyphen-joined (`## 3 — expand foo` → `3-expand-foo`); for prior work outside this batch,
+   use its heading's words the same way. `prune-backlog` matches a marker against the headings
+   it deletes this way. **Never write a number without its slug:** the slug is the identifying half, so a
    number-only marker can never be resolved or cleared and the item stays invisible to candidate
    selection forever. `<n>` is frozen at authoring time and is never
    renumbered as items land or headings are deleted — nothing maintains it, so a marker whose
@@ -123,7 +124,7 @@ items from approved spec").
    `backlog_candidates.py` already skips a heading whose every open item carries a
    `*(deferred: ...)*` or `*(blocked by: ...)*` marker — do not invent a new
    dependency-graph engine or a separate marker syntax.
-7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed (by hand, once the blocking ticket lands).
+7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/dev:task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed — by the blocking ticket's own cycle at cleanup (`../task-next/references/cycle.md` → *Cleanup*), where `prune-backlog` warns on it, not by hand.
 
 ## Boundaries
 

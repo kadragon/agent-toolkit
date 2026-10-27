@@ -2,20 +2,23 @@
 """Preserve a branch's contract and check evidence across sessions; report clues, never completion.
 
 save [--file PATH] reads the approved contract from PATH or stdin. Existing different
-contracts are refused; --replace is for an explicitly approved scope revision. Every
+contracts are refused; --replace is for an explicitly approved scope revision, and clears the
+old contract's notes and evidence. Every
 **Acceptance criteria:** checkbox must name its check after an arrow (`- [ ] X → pytest -k x`),
 so "done" is decided by a runnable signal rather than by how the diff looks. save is
 refused on main/master: the archive is keyed by branch name, so a contract written from
 the base branch (a --tree run whose Bash CWD reset to the main checkout) would be keyed
 where the next cycle looks for its own and would block it.
 evidence --command TEXT --exit N [--log PATH] [--env TEXT] records a validation run beside
-the contract, with HEAD and the index tree, so a later session can judge reuse.
+the contract, with HEAD and the index tree, so a later session can judge reuse. One record is
+kept per command: a rerun replaces that command's record, never another command's failure.
 note reads text from stdin and appends it to the branch's notes, so a stuck or interrupted
 run hands its failed approaches to a fresh session instead of re-trying them.
 authorize --action ACTION [--branch NAME] checks explicit Git authority from the existing
 Markdown contract; missing/legacy or unknown authority denies affected writes.
 inspect reports the current branch, HEAD, all dirty state, the saved contract, the saved
-evidence, the notes, and whether the recorded tree still matches the working index.
+evidence records, the notes, and whether every recorded tree still matches the working index
+(an index that cannot be written matches nothing).
 retire [--branch NAME] deletes a branch's archive after a confirmed merge, so a reused
 branch name cannot resurrect a completed cycle's contract. --branch names the merged
 branch when the caller has already switched back to the base or deleted it.
@@ -125,6 +128,14 @@ def index_tree():
         return None
 
 
+def read_evidence(path):
+    """The per-command records, oldest first; a legacy single-record file reads as one."""
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [data] if isinstance(data, dict) else data
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="subcommand", required=True)
@@ -168,6 +179,7 @@ def main():
                 if not args.replace:
                     raise ValueError("Saved contract differs; inspect before an approved --replace")
                 notes_path.unlink(missing_ok=True)   # the old cycle's notes do not bind the new one
+                evidence_path.unlink(missing_ok=True)   # nor do checks run against the old scope
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(".tmp")
             temporary.write_text(text, encoding="utf-8")
@@ -204,9 +216,11 @@ def main():
                 "log": args.log,
                 "environment": args.env,
             }
+            records = [r for r in read_evidence(evidence_path) if r.get("command") != args.check_command]
             slot.mkdir(parents=True, exist_ok=True)
             temporary = evidence_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.write_text(json.dumps([*records, record], ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
             temporary.replace(evidence_path)
             result = {"branch": branch, "evidence_path": str(evidence_path), **record}
         elif args.subcommand == "note":
@@ -224,7 +238,8 @@ def main():
                 shutil.rmtree(slot)
             result = {"branch": branch, "retired": existed, "contract_path": str(path)}
         else:
-            record = json.loads(evidence_path.read_text(encoding="utf-8")) if evidence_path.exists() else None
+            records = read_evidence(evidence_path)
+            current = index_tree()
             result = {
                 "branch": branch,
                 "head": git("rev-parse", "HEAD"),
@@ -232,9 +247,10 @@ def main():
                 "contract_path": str(path),
                 "contract": path.read_text(encoding="utf-8") if path.exists() else None,
                 "evidence_path": str(evidence_path),
-                "evidence": record,
+                "evidence": records or None,
                 "notes": notes_path.read_text(encoding="utf-8") if notes_path.exists() else None,
-                "tree_matches_current": bool(record) and record.get("tree") == index_tree(),
+                "tree_matches_current": current is not None and bool(records)
+                and all(r.get("tree") == current for r in records),
             }
         print(json.dumps(result, ensure_ascii=False))
         return 0

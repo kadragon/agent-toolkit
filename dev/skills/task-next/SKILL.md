@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.5.5
+version: 2.6.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -28,21 +28,23 @@ A free-text request not yet on the queue is `task-new`'s job.
 ```bash
 dirty=$(git status --porcelain)
 current_branch=$(git branch --show-current)   # every row below reads it, dirty or clean
+task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)   # dirty or clean
 if [[ -n "$dirty" ]]; then
   task_contract_dirty=$(git status --porcelain -- tasks.md)
-  task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)
   non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md' ':(exclude,top)docs/design')   # top: anchor at repo root
   queue_delta=$(git diff --stat HEAD -- backlog.md)                          # HEAD: a staged backlog.md still shows
 fi
 ```
 
+Base branch means `main` or `master`.
+
 | State | Action |
 |-------|--------|
-| clean on base branch | proceed |
+| clean on base branch, `task_worktree` empty | proceed |
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
-| dirty, not on `main`/`master` | *Work already in flight* (`references/edge-cases.md`) |
-| on `main`, `task_contract_dirty` and `task_worktree` both non-empty | same edge case — a `--tree` run is in flight |
-| on `main`, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
+| dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
+| on base branch, `task_worktree` non-empty, whatever is dirty | same edge case — a `--tree` or parallel batch run is in flight |
+| on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
 `tasks.md` is optional. It holds the Sprint Contract and nothing else, exists only when a

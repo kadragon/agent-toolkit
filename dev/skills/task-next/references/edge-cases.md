@@ -41,6 +41,7 @@ contract for work that does not exist, and do not report blocked.
 | Implementation/version complete; cleanup incomplete | `cycle.md` → *Cleanup* |
 | Required check missing, failed, stale, or bound to different inputs | `cycle.md` → *Validation evidence* |
 | All above complete; review/CI/merge pending | `cycle.md` → *Hand off* |
+| Parallel batch, not yet merged: integration branch `notes` record unit outcomes | `batch.md` → *A5* for the recorded merged units only; excluded/conflicted units stay on their `wt/<slug>` branches |
 
 Read the current branch/PR state before resuming a review; a commit ahead is not proof Step 1 ran.
 If merge is already confirmed complete, report completion rather than rerun cleanup or bump again.
@@ -48,8 +49,7 @@ Use `cycle.md` → *Plan gate* for approval: an explicit same-session continuati
 proceeds without another yes/no; ambiguous ownership or scope needs one focused question. An
 archived contract is evidence of *prior* approved scope, not of approval to resume it now — a
 cross-session or unattended run that cannot ask that question stops and reports blocked rather
-than resuming a branch another session or worktree may still own. This is the working-tree gate's
-never-auto-default rule, and it outranks the Plan gate's unattended clause. On a declined resume,
+than resuming a branch another session or worktree may still own. On a declined resume,
 preserve work and ask which action the user wants; do not infer authorization to discard it.
 
 **Deferred backlog item (≥2 candidates)** — surface the blocker and confirm it is resolved; if

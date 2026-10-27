@@ -26,7 +26,7 @@ Usage:
                   An identical line already under `## Unreleased` is left alone (re-run safe).
 
   prune-backlog   Delete the verbatim `- [ ]` lines given on stdin with their wrapped
-                  continuation lines, then delete any heading this run left with an entirely
+                  continuation lines and nested sub-bullets, then delete any heading this run left with an entirely
                   blank region, or with nothing left but its own intro prose. Refuses (exit 1)
                   on a line that matches nothing, rather than deleting an approximation of it,
                   and on an item whose body is not plain wrapped text (a fence or comment in it,
@@ -490,8 +490,8 @@ def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int
 
 
 def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
-    """Delete each verbatim line in `targets` with its wrapped continuation lines, then any heading
-    this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
+    """Delete each verbatim line in `targets` with its wrapped continuation lines and nested
+    sub-bullets, then any heading this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
     multi-line comment in it, text right under an indented checkbox, or a nested checkbox — refuses
     the whole run instead.
 
@@ -574,6 +574,21 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         owned_body = {j for j, o in owners.items() if o == i and j != i} | set(range(i + 1, end + 1))
         body = sorted({k for j in owned_body for k in range(j, line_end(j) + 1)})
         stop = max(body, default=i)
+        # Nested sub-bullets (`  - Source: …`) end the item for the selector but are its body here:
+        # left behind, they read as the item above's and keep an emptied heading alive. Only lines
+        # contiguous with the item and past its content column; a nested checkbox is refused below.
+        content = _indent(masked[i]) + 2
+
+        def nested(j: int) -> bool:
+            # Indent from the RAW line: a masked fence line is blank, which would end the walk and
+            # orphan the fence; taken into the body, it is refused below like any fenced body.
+            return (j < len(lines) and bool(lines[j].strip()) and _indent(lines[j]) >= content
+                    and not _CHECKBOX_LINE_RE.match(masked[j]))
+
+        if i in owners and nested(stop + 1) and _BULLET_RE.match(masked[stop + 1]):
+            while nested(stop + 1):
+                stop = line_end(stop + 1)
+            body = sorted(set(body) | set(range(i + 1, stop + 1)))
         nxt = lines[stop + 1] if stop + 1 < len(lines) else ""
         loose = nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt) and not nxt.lstrip().startswith("#")
         reason = None
@@ -1602,6 +1617,20 @@ Preamble with no h1 wrapper.
     out, problems = prune_lines("- [ ] a\n - [ ] b\n", ["- [ ] a"])
     _assert(problems == [] and out == " - [ ] b\n",
             "REGRESSION: a checkbox short of the parent's content column is a sibling, not nested")
+    # REGRESSION (PR #357, #358): an item's nested sub-bullets are its body — left behind, they
+    # read as the item above's and keep the emptied heading alive (removed by hand twice).
+    subbullets = ("# Backlog\n\n## 5 — done\n\n- [ ] [FIX] x\n  - Source: review\n"
+                  "  - Done when: test\n    wraps on\n\n## 6 — live\n\n- [ ] [FIX] y\n  - Source: z\n")
+    out, problems = prune_lines(subbullets, ["- [ ] [FIX] x"])
+    _assert(problems == [] and out == "# Backlog\n\n## 6 — live\n\n- [ ] [FIX] y\n  - Source: z\n",
+            "REGRESSION: a pruned item's nested sub-bullets and its emptied heading go with it")
+    fenced = "## B\n\n- [ ] x\n  - Example:\n  ```\n  code\n  ```\n- [ ] y\n"
+    out, problems = prune_lines(fenced, ["- [ ] x"])
+    _assert(out == fenced and len(problems) == 1 and "edit it by hand" in problems[0],
+            "REGRESSION: a fence inside a sub-bullet refuses the run instead of orphaning the fence")
+    out, problems = prune_lines("- [ ] a\n  - note\n\n  - after blank\n- [ ] b\n", ["- [ ] a"])
+    _assert(problems == [] and out == "\n  - after blank\n- [ ] b\n",
+            "only sub-bullets contiguous with the item are its body; a blank line ends it")
     out, problems = prune_lines(nested, ["  - [ ] [FIX] nested child"])
     _assert(out == nested and len(problems) == 1 and "line 4 is an indented checkbox" in problems[0],
             "an indented checkbox with an indented body is refused, not split from its body")

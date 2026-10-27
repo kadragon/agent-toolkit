@@ -222,6 +222,14 @@ Stated as its own row because the absence of one is what makes this look like an
 PR #260 added a bundled script to `harness-curate` and shipped `4.7.5 → 4.8.0`, minor, where this
 table says `4.7.6`.
 
+**Why a by-name rename is one ticket, not expand–contract.** Expand would leave the old and new
+assets coexisting with near-identical `description:` text, and `scripts/ci/check_skill_triggers.py`
+hard-fails any description pair at or above its collision threshold — a duplicated description
+scores ~1.0 against its twin, and the pointer remedy perturbs the corpus enough to pull in unrelated
+skills, on top of the ratchet demanding an `evals/trigger-eval.json` for the new `SKILL.md`. So
+`task-tickets` writes a rename as one ticket that renames and updates every caller in one commit,
+and takes the major bump there.
+
 **Why hook removal is a patch, not a major.** Major is reserved for removing or renaming
 something invoked **by name** — a skill, agent, or command a user or another asset calls. That
 call breaks. A hook has no invocable name: removing it changes ambient behavior, not an

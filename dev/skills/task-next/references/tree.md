@@ -2,7 +2,7 @@
 
 Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
 3) is modified so implementation and QA run in an isolated git worktree — the main checkout
-stays on `main` throughout, but `--tree` isolates **code changes** only. The main checkout still
+stays on the base branch throughout, but `--tree` isolates **code changes** only. The main checkout still
 carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
 default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
 
@@ -17,6 +17,8 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
 # Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
@@ -25,6 +27,12 @@ if [[ -e "$TREE_STATE_PATH" || -e "$TREE_SNAPSHOT_PATH" ]]; then
   echo "stale task-next tree cleanup state exists; resolve the previous run first" >&2
   exit 1
 fi
+# bring the local base level with $BASE — only when it is the branch checked out here
+CURRENT=$(git branch --show-current)
+[[ "$CURRENT" == "${BASE#origin/}" ]] \
+  || { echo "checked out '$CURRENT', but origin/HEAD is $BASE — switch to ${BASE#origin/} first" >&2; exit 1; }
+git merge --ff-only "$BASE" \
+  || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
 if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
   if [[ -e .gitignore ]]; then
     cp -- .gitignore "$TREE_SNAPSHOT_PATH"
@@ -40,7 +48,7 @@ if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
   GITIGNORE_ADDED=true
 fi
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
-git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
+git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
 ```
 
 **Mark active:** runs in the main checkout, with one tree-mode exception to the default path's

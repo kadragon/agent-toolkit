@@ -170,6 +170,7 @@ return value / PR body. A silently applied default violates this contract.
 
 | Gate | Default | Rationale |
 |------|---------|-----------|
+| `task-spec` review gate | Write the spec, write no tickets, and report it as awaiting review | The approved spec is the scope every ticket inherits; an unreviewed one cannot be approved by default |
 | `task-grill` interview | Adopt every question's stated `Recommended:` answer, mark each as an assumption in the four-field summary, and list still-open questions in the handoff | task-grill SKILL.md Rule 4 already prescribes this for a non-answering user; the recommendation exists to be the default |
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
 | Code-cycle approval (`task-next` and `task-new`) | Apply `task-next/references/cycle.md` → *Plan gate* | Approved constraints carry forward; unresolved material decisions are not auto-approved |

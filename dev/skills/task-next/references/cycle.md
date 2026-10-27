@@ -84,9 +84,10 @@ SPRINT_CONTRACT
 The helper prints the archive path under the common Git directory, keyed by branch; it survives
 new sessions and worktree removal. Preserve it through review and merge, including failed or
 abandoned runs. A different existing contract stops the write: inspect it first, and use
-`save --replace` only for an approved scope revision or a confirmed new cycle on a reused branch.
-For `--tree`, save from the implementation worktree; for parallel batches, save the aggregate
-contract on the integration branch before convergence cleanup.
+`save --replace` only for an approved scope revision or a confirmed new cycle on a reused branch;
+it clears the old contract's notes and evidence. For `--tree`, save from the implementation
+worktree; for parallel batches, save the aggregate contract on the integration branch before
+convergence cleanup.
 
 ## Implement
 
@@ -153,8 +154,9 @@ or backlog line. Cleanup changes are provisional until review and merge succeed.
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
 ambiguous or non-verbatim match — re-read and re-run rather than loosening the input.
-`prune-backlog` also deletes each item's wrapped continuation lines; an item whose body holds a
-fence or comment is refused by line number — delete that one by hand, not its body alone.
+`prune-backlog` also deletes each item's wrapped continuation lines and nested sub-bullets; an
+item whose body holds a fence or comment is refused by line number — delete that one by hand, not
+its body alone.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"
@@ -205,8 +207,9 @@ python3 "$STATE" evidence --command "<exact command>" --exit <code> \
   [--log "<result/log location>"] [--env "<tool versions relevant to reproducibility>"]
 ```
 
-`inspect` returns that record as `evidence` and compares the recorded tree with the current index
-as `tree_matches_current`; `false` or a null `evidence` means rerun.
+`inspect` returns one record per command as the `evidence` list — a rerun replaces only that
+command's record, so an earlier failure stays visible — and reports `tree_matches_current` true
+only when every record's tree equals the current index; `false` or a null `evidence` means rerun.
 
 A later commit with the same tree (`git rev-parse HEAD^{tree}`) may reuse passing evidence if the
 command, environment, and external inputs remain equivalent. HEAD-sensitive checks (version/trigger

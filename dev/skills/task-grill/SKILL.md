@@ -6,15 +6,14 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.3.3
+version: 1.3.4
 ---
 
 # Grill
 
 > Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
 
-Formalizes this repo's existing "Grill" hard-stop convention (`~/.claude/CLAUDE.md`) into a
-reusable skill: **material ambiguity affecting scope, irreversible effects, external
+A hard stop as a reusable skill: **material ambiguity affecting scope, irreversible effects, external
 communication, or expected output → grill, don't guess.** Its output feeds directly into
 whichever document is being built next: a Sprint Contract
 (`docs/eval-criteria.md` template) or a `task-spec` document.
