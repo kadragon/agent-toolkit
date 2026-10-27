@@ -224,21 +224,43 @@ case "$SUBCOMMAND" in
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
       # One snapshot for both the head and its checks: two requests could pair a new head SHA
-      # with the previous commit's failure. Buckets mirror `gh pr checks`, including its
-      # dedup — a rerun supersedes the earlier run of the same check.
-      VIEW=$(gh pr view "$PR_NUMBER" --json headRefOid,statusCheckRollup 2>/dev/null) || VIEW=""
-      HEAD_SHA=$(jq -r '.headRefOid // empty' <<<"${VIEW:-null}" 2>/dev/null) || HEAD_SHA=""
-      BUCKETS=$(jq -c '[.statusCheckRollup // [] | group_by([.name // .context, .workflowName // ""])[]
-          | max_by(.startedAt // "")
-          | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
-             else .state end) as $s
-          | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
-            elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
-              or $s == "STARTUP_FAILURE" or $s == "CANCELLED" then "fail"
-            else "pending" end]' <<<"${VIEW:-null}" 2>/dev/null) || BUCKETS="[]"
+      # with the previous commit's failure. The query is `gh pr checks`'s own (it cannot be
+      # pinned, and `gh pr view` omits the run event), so buckets and the rerun dedup —
+      # latest run per name/workflow/event — mirror it.
+      VIEW=$(gh api graphql --paginate --slurp -F number="$PR_NUMBER" \
+        -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
+        query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+          repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+            commits(last: 1) { nodes { commit { oid statusCheckRollup {
+              contexts(first: 100, after: $endCursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes {
+                  __typename
+                  ... on StatusContext { context state createdAt }
+                  ... on CheckRun { name status conclusion startedAt
+                    checkSuite { workflowRun { event workflow { name } } } }
+                } } } } } } } } }' 2>/dev/null) || VIEW=""
+      SNAPSHOT=$(jq -c '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
+        | {oids: ([$c[].oid] | unique),
+           buckets: [[$c[].statusCheckRollup.contexts.nodes[]?]
+             | group_by(if .__typename == "CheckRun"
+                 then [.name, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
+                 else [.context] end)[]
+             | max_by(.startedAt // .createdAt // "")
+             | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
+                else .state end) as $s
+             | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
+               elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
+                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" then "fail"
+               else "pending" end]}' <<<"${VIEW:-null}" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
+      HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
+      BUCKETS=$(jq -c '.buckets' <<<"$SNAPSHOT")
       TOTAL=$(jq 'length' <<<"$BUCKETS")
-      if [ "$TOTAL" -eq 0 ]; then
-        # No checks reported (or the view failed): "none" lets the caller apply its grace logic.
+      if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
+        # The head moved between pages: no single commit to judge, so poll again.
+        emit_status "pending" "$TOTAL"
+      elif [ "$TOTAL" -eq 0 ]; then
+        # No checks reported (or the query failed): "none" lets the caller apply its grace logic.
         emit_status "none" 0
       elif jq -e 'any(. == "pending")' <<<"$BUCKETS" >/dev/null; then emit_status "pending" "$TOTAL"
       elif jq -e 'any(. == "fail")' <<<"$BUCKETS" >/dev/null; then emit_status "failure" "$TOTAL"
