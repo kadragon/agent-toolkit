@@ -223,11 +223,15 @@ same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" r
 
 **Hub path** — `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
 ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then
-merge as one standalone command — this skill's resolved absolute path, no `bash` prefix, no
-variable, the only shape a narrow allow rule matches in auto mode (missing/not executable → stop):
+resolve the helper; non-zero → stop, no merge. Then issue the merge as a second, separate command
+starting with the printed path — no `bash` prefix, no variable: the only shape an auto-mode allow
+rule matches. Exit 126/127 → stop and report; never retry as `bash <path>`:
 
 ```bash
-/abs/path/to/task-review-cycle/scripts/merge-and-cleanup.sh <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>'
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+[[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] && echo "$SKILL_DIR/scripts/merge-and-cleanup.sh" || { echo "Bundled merge helper not executable" >&2; exit 1; }
+# second command:
+<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>'
 ```
 
 ## Error handling
@@ -242,5 +246,5 @@ variable, the only shape a narrow allow rule matches in auto mode (missing/not e
 | CI `rework-cap` / `timeout` | Stop, ask the user |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
-| Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued, paths and values resolved, and ask the user to allow it in their own permission config (Claude Code: `permissions.allow` in settings.json) — that exact text survives auto mode; for the merge helper suggest `Bash(<plugin cache>/dev/*/skills/task-review-cycle/scripts/merge-and-cleanup.sh *)`, since a `bash`-led wildcard rule is dropped as an interpreter (code.claude.com/docs/en/permission-modes). Never write the rule yourself. On their go-ahead re-run once as that one literal command; denied again → stop, report |
+| Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued, paths and values resolved, and ask the user to allow it in their own permission config (Claude Code: `permissions.allow` in settings.json) — that exact text survives auto mode; for the merge helper suggest the denied command's script path with its version directory replaced by `*`, plus ` *` (`Bash(/…/dev/*/skills/task-review-cycle/scripts/merge-and-cleanup.sh *)`), since a `bash`-led wildcard rule is dropped as an interpreter (code.claude.com/docs/en/permission-modes). Never write the rule yourself. On their go-ahead re-run once as that one literal command; denied again → stop, report |
 | Merge/push blocked by an explicit deny rule or managed policy | An allow rule cannot override it: stop, report the blocking source; keep PR, branch, archive |
