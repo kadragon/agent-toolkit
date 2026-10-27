@@ -399,7 +399,11 @@ class RecoveryTest(unittest.TestCase):
         (self.repo / "code.txt").write_text("branch side\n")
         self.git("add", "code.txt")
         self.commit()
-        subprocess.run(["git", "-C", str(self.repo), "merge", "-q", "main"], capture_output=True)
+        # Neutralize ambient config: without an identity git refuses before merging (CI).
+        subprocess.run(["git", "-C", str(self.repo), "-c", "core.hooksPath=/dev/null",
+                        "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                        "merge", "-q", "main"], capture_output=True)
+        self.assertTrue(self.git("ls-files", "-u"), "fixture must leave an unmerged index")
         recorded = self.state("evidence", "--command", "pytest -q", "--exit", "0")
         self.assertIsNone(recorded["tree"])   # an unmerged index cannot be written
         self.assertFalse(self.state("inspect")["tree_matches_current"])
