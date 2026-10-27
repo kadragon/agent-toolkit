@@ -20,12 +20,16 @@ After the permission and local-policy checks above pass, select by task shape:
 | Task shape | Route |
 |---|---|
 | One isolated research/verification task with a material context or independence benefit | Subagent eligible; no parallel sibling required |
-| Independent parallel tasks requiring findings to be exchanged during execution | Agent Team eligible where supported |
 | Independent parallel tasks whose results can be combined at completion | Subagents eligible |
 | Tightly coupled/sequential work, or no material isolation benefit | Inline |
 
 These routes describe eligibility, not a requirement to spawn. A sequential workflow may
 still contain an independently useful verification step.
+
+There is no Agent Team route: no skill here uses one. Work whose units must exchange findings
+mid-run is sequenced, and the lead pastes each upstream report into the next brief — siblings
+talk upward only (`cursor/plugins@ab69380:pstack/skills/poteto-mode/playbooks/orchestrate.md`
+→ *Steps*).
 
 ## Role Routing
 
