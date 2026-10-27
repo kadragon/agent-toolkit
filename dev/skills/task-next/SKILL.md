@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.6.0
+version: 2.6.1
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -44,6 +44,7 @@ Base branch means `main` or `master`.
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
 | on base branch, `task_worktree` non-empty, whatever is dirty | same edge case — a `--tree` or parallel batch run is in flight |
+| on base branch, `task_contract_dirty` non-empty | same edge case — a `--tree` collapse stopped after removing its worktree |
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
@@ -68,12 +69,12 @@ The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items and anything inside
 comments or code fences. **Read stderr every run**: an unbalanced-fence warning makes that file
 untrustworthy; a persistent-section warning means `tasks.md` needs the move above; a
-zero-candidate diagnosis is relayed verbatim (never say "queue clear" on empty stdout alone); a
-truncation note means the fast path hid groups — say how many when offering more.
+zero-candidate diagnosis is relayed verbatim and goes to Step 2's zero-groups report
+(`--full-scan` qualifies groups by the same test, so it finds none either); a truncation note
+means the fast path hid groups — say how many when offering more.
 
 | Fast-path count | Action |
 |-----------------|--------|
-| 0 | relay the diagnosis, then run `--full-scan` |
 | 1 | announce the group → Step 3 |
 | 2–3 | one `AskUserQuestion` (Codex: a numbered list) listing the candidates plus **"더 많은 항목 보기"** as the last option; that option → `--full-scan` → Step 2 |
 
@@ -107,8 +108,8 @@ offer it, do not start it unasked.
 
 ## Step 3 — Run the cycle
 
-Follow `references/cycle.md` end to end with these overrides. Verify the actual user
-invocation and preserve its Git limits per `references/git-authorization.md` before writes:
+Follow `references/cycle.md` end to end with these overrides; Git authority is
+`references/git-authorization.md`:
 
 **Mark active — after the plan gate.**
 - `tasks.md` h1 block (`status: open`) → flip to `status: active`; the block is the contract.

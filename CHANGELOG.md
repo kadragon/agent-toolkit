@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-* batch: task-next lean pass, test-prune drops the run ledger, ci-wait ignores a stale head's failure (3 units) (dev v4.11.25) (2026-10-27)
 - [done] task-* batch: prune-backlog drops sub-bullets, per-command evidence, base branch portability, debug hand-back (8 units) (dev v4.11.24) (2026-10-27)
 - [done] delegation drops the unused Agent Team route (2026-10-27) → docs/delegation.md
 - [done] task-review-cycle: review-time retrospect writes auto-memory only; lite re-runs the risk floor after Step 4 fixes (dev v4.11.23) (2026-10-27)

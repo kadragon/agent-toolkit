@@ -5,6 +5,8 @@ Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The 
 stays on the base branch throughout, but `--tree` isolates **code changes** only. The main checkout still
 carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
 default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
+`--tree` is the user's explicit direction to delegate implementation and QA, which satisfies the
+direction requirement of the delegation policy.
 
 **Modified Branch step (replaces `git checkout -b` under `--tree`):**
 
@@ -19,34 +21,16 @@ SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-# ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
-# Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
-TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
-TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
-if [[ -e "$TREE_STATE_PATH" || -e "$TREE_SNAPSHOT_PATH" ]]; then
-  echo "stale task-next tree cleanup state exists; resolve the previous run first" >&2
-  exit 1
-fi
 # bring the local base level with $BASE — only when it is the branch checked out here
 CURRENT=$(git branch --show-current)
 [[ "$CURRENT" == "${BASE#origin/}" ]] \
   || { echo "checked out '$CURRENT', but origin/HEAD is $BASE — switch to ${BASE#origin/} first" >&2; exit 1; }
 git merge --ff-only "$BASE" \
   || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
-if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
-  if [[ -e .gitignore ]]; then
-    cp -- .gitignore "$TREE_SNAPSHOT_PATH"
-    printf '%s\n' restore > "$TREE_STATE_PATH"
-  else
-    printf '%s\n' remove > "$TREE_STATE_PATH"
-  fi
-  if [[ -s .gitignore ]]; then
-    printf '\n.worktrees/\n' >> .gitignore
-  else
-    printf '.worktrees/\n' >> .gitignore
-  fi
-  GITIGNORE_ADDED=true
-fi
+# ignore .worktrees/ locally: info/exclude is untracked, so nothing needs restoring afterwards
+EXCLUDE=$(git rev-parse --git-path info/exclude)
+mkdir -p -- "$(dirname -- "$EXCLUDE")"
+grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"   # leading newline: the file may lack a final one
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
 ```
@@ -81,9 +65,8 @@ The agent works entirely inside the worktree — it must NOT touch `plugin.json`
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
 A stuck report → the parent records it as a `note` from the worktree (`cycle.md` → *Stuck-fix stop*).
 
-Carry all three original Git authorization fields verbatim in both briefs and handoff
-(`git-authorization.md`). Before any worktree commit check `cycle_state.py authorize --action
-commit` there. No commit authority → keep changes and worktree intact; skip collapse and report.
+Git authority for both briefs, worktree commits and the handoff: `git-authorization.md` (run
+`authorize` from the worktree). No commit authority → keep the worktree intact, skip collapse, report.
 
 **QA:** spawn `qa-verifier` pointed at the worktree path, verifying
 against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
@@ -94,28 +77,14 @@ result-handoff instruction too: tell it to put its verdict in its final response
 empty/no-blocking-findings verdict (`docs/delegation.md`).
 
 **If QA fails after one retry:** stop and preserve the worktree, branch, contract archive, and
-main-checkout tracking/ignore state. Report unmet criteria. Destructive abandonment requires
-explicit user authorization; a failed check does not authorize deletion.
+main-checkout tracking state. Report unmet criteria. Destructive abandonment requires explicit
+user authorization; a failed check does not authorize deletion.
 
-Preserved state blocks the Branch step of every later `--tree` run ("stale task-next tree cleanup
-state exists"), which is deliberate — that run must not start on top of this one. Resuming is the
-default: collapse the worktree as below once QA passes. Only when the user explicitly authorizes
-abandoning the run, undo the main-checkout ignore edit and clear the state files, in this order:
-
-```bash
-TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
-TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
-TREE_STATE=$(cat "$TREE_STATE_PATH" 2>/dev/null || true)
-if [[ "$TREE_STATE" == restore && -e "$TREE_SNAPSHOT_PATH" ]]; then
-  cp -- "$TREE_SNAPSHOT_PATH" .gitignore   # the snapshot taken before `.worktrees/` was appended
-elif [[ "$TREE_STATE" == remove ]]; then
-  rm -f -- .gitignore                       # there was no .gitignore before this run
-fi
-rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH"
-```
-
-Then drop the `status: active` block this run wrote to `tasks.md` (it covers work that never
-landed), and remove the worktree and branch only with that same explicit authorization. Leave the
+The preserved worktree routes every later run to *Work already in flight* through the
+`task_worktree` row of the working tree gate — deliberate, so no run starts on top of this one.
+Resuming is the default: collapse the worktree as below once QA passes. Only when the user
+explicitly authorizes abandoning the run, drop the `status: active` block this run wrote to
+`tasks.md` (it covers work that never landed), then remove the worktree and branch. Leave the
 contract archive: `cycle_state.py retire` belongs after a merge, not after an abandonment.
 
 **Version bump (`cycle.md` → *Version bump*):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
@@ -128,10 +97,7 @@ Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). I
 SLUG=<slug>            # same slug used in the Branch step above
 BRANCH=<type>/<slug>   # same branch used in the Branch step above
 [ ! -d ".worktrees/$SLUG" ] || git worktree remove ".worktrees/$SLUG" || exit 1   # re-runnable; branch $BRANCH stays
-git checkout "$BRANCH" || exit 1                   # a refusal keeps the tree state below; report it
-TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
-TREE_SNAPSHOT_PATH="${TREE_STATE_PATH}.gitignore"
-rm -f -- "$TREE_STATE_PATH" "$TREE_SNAPSHOT_PATH" # the added ignore rule now belongs to this branch
+git checkout "$BRANCH" || exit 1   # refused: base keeps the dirty tasks.md, which the gate reads as in flight; report it
 ```
 
 Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on

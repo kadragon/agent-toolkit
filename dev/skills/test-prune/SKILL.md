@@ -8,7 +8,7 @@ description: >-
   "테스트 정리", "의미 없는 테스트 삭제". Reports surviving mutants as gaps
   instead of writing new tests. NOT for a failing test or unknown bug →
   task-debug; NOT for reviewing a diff → code-review.
-version: 1.2.0
+version: 2.0.0
 ---
 
 # Test Prune
@@ -19,9 +19,7 @@ version: 1.2.0
 > (smell catalog; "which production change should fail this test"), Kent Beck's
 > [Test Desiderata](https://testdesiderata.com/) (behavioral vs structure-sensitive), the Stryker,
 > PIT and mutmut docs (equivalent mutants, timeouts, caches), and a user-supplied mutation-sampling
-> methodology (count by checked items, sample ~4% per file, calibrate the tool, green baseline),
-> and [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-> `skills/security-audit` (run ledger outside the target, per-unit source comparison with prior runs).
+> methodology (count by checked items, sample ~4% per file, calibrate the tool, green baseline).
 > Rules are paraphrased; no upstream text is copied.
 
 A test earns its place by **failing when production code breaks**. Test count is not value, and
@@ -32,37 +30,22 @@ unreachable mutants (Step 4); every removal in this skill must leave it unchange
 ## Ground rules
 
 - **Clean tree, then copy.** Step 3 needs a clean working tree — the copy is made from `HEAD`,
-  and measuring `HEAD` while Step 5 edits uncommitted code mixes two codebases. Dirty tree → ask
-  the user to commit or stash first. Every mutation run happens in a disposable `git worktree`
-  under the session scratchpad directory; the original tree receives only the Step 5 edits.
+  and measuring `HEAD` while Step 5 edits uncommitted code mixes two codebases. Before Step 1:
+
+  ```sh
+  dirty=$(git -C "<repo root>" status --porcelain --untracked-files=no)
+  [ -z "$dirty" ] || { echo "Tracked changes present: commit or stash first" >&2; exit 1; }
+  ```
+
+  Dirty tree → ask the user to commit or stash first. Every mutation run happens in a disposable
+  `git worktree` under the session scratchpad directory; the original tree receives only the
+  Step 5 edits.
 - **Delete, merge, or keep — never weaken.** A kept test keeps every assertion it had.
 - **Audit-only requests stop after Step 4** with the report. Edits need a request to clean up.
 - **Gaps are reported, not filled.** Writing new tests is a separate task.
 - **Kept beats deleted when evidence is missing.** No recorded verdict, no removal.
 - **Edit, never commit.** The skill leaves its edits uncommitted; tell the user to run
   `/dev:task-review` before other work.
-
-## Run ledger
-
-Each run records what it read and measured, so the next run does not redo it. Before Step 1:
-
-```sh
-LEDGER="<skill dir>/scripts/prune_ledger.py"
-START=$(python3 "$LEDGER" start --target "<repo root>") || exit 1   # refuses tracked changes
-```
-
-`$START` holds the new `run_dir` and every prior unit (one per test file) as `same_source` —
-its test file, covered, dependency and killing tests' files all have the same blob at HEAD —
-`changed_source`, or `removed`. Read `references/run-ledger.md` for the unit shape and reuse rules. In short:
-a `same_source` unit's candidate lines and kill rows are carried, so Step 2 does not re-read it
-and Step 3 does not re-run its mutants; its `open` items, every `changed_source` unit and every
-unrecorded test file are current work. Step 4's joint re-run and Step 6 always run fresh.
-
-Before the report — also when an audit-only run stops after Step 4 — write every unit this run
-read, measured or carried, with the Step 3 seed (a new shell: resolve the path again):
-`python3 "<skill dir>/scripts/prune_ledger.py" record --run-dir <run_dir> --seed <seed> < <scratch>/units.json`.
-A re-measured `changed_source` unit goes in without its `prior_status`; `record` refuses one
-still tagged.
 
 ## Step 1 — Map where the count comes from
 
@@ -85,9 +68,8 @@ distinct input classes.
 
 ## Step 2 — Read and flag candidates
 
-Run the grep seeds in `references/smells.md` → *Grep seeds*, then **read every hit in full**,
-except hits in a carried `same_source` unit — take its recorded lines instead. Report only tests
-you read or carried. For each candidate, write one line:
+Run the grep seeds in `references/smells.md` → *Grep seeds*, then **read every hit in full**.
+Report only tests you read. For each candidate, write one line:
 
 ```
 <file>::<test> | <smell> | production change that should fail it: <change> | bug or decision: <bug|decision|none>
@@ -137,9 +119,6 @@ the suite without it. Same table, same matrix.
 
 **Candidates that kill the same mutants** look like duplicates until a mutant branches on the
 input they differ in. Run that mutant before calling either one redundant.
-
-Carried units skip 2–4 for their recorded mutants, which join the matrix as recorded; re-run
-their INVALID ones. Calibration (1) runs every run.
 
 **Done:** every candidate has a verdict line naming the mutants it kills and, for each, either
 the kept tests that also kill it (per-test data) or `sole killer: yes/no` (leave-one-out).
@@ -212,12 +191,11 @@ Removed: <n> tests (<m> merged into <k>) — sampled kill set (decision/unreacha
 excluded) unchanged: <x>/<x> mutants in U
 re-killed (sample: <n> of <total> mutants, seed <s>; unsampled mutants were not checked)
 Runtime: <before> → <after>; count: <before> → <after>
-| Test | Verdict | Smell | Mutants it killed | Also killed by (or sole killer: no) | Carried from (run-<N> or —) |
+| Test | Verdict | Smell | Mutants it killed | Also killed by (or sole killer: no) |
 Gaps: <file:line — mutation — behavior unprotected>
 Production bugs: <file:line — what the mutant revealed>
 Equivalent mutants: <id — reason>
 Not measured: <files outside the sample, INVALID count, tool limits>
-Carried: <n> units from <run dirs> (same_source); ledger: <run_dir>/ledger.json
 ```
 
 State which checks ran and which did not. A claim with no run behind it goes under *Not measured*.

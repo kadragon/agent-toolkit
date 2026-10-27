@@ -228,9 +228,6 @@ jobs:
       - name: Run dev/skills/harness-curate/scripts/disable_plugins.py --test
         run: python3 dev/skills/harness-curate/scripts/disable_plugins.py --test
 
-      - name: Run dev/skills/test-prune/scripts/prune_ledger.py --test
-        run: python3 dev/skills/test-prune/scripts/prune_ledger.py --test
-
       - name: Run dev/skills/harness-init/scripts/test_validate_harness.py
         run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
 
