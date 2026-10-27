@@ -70,14 +70,21 @@ Within established merge authority, merge and clean up:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -f "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
+[[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] || { echo "Bundled script not executable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
+```
+
+Issue the merge as one standalone command — the script's resolved absolute path, no `bash`
+prefix, no variable assignment — so a narrow allow rule matches it in auto mode (`bash`-led
+wildcard rules are dropped):
+
+```bash
 # All 4 positional args are REQUIRED. Values come from pre-flight JSON output.
 # merge_strategy must be a JSON object, NOT a bare word like "squash".
-bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
+/abs/path/to/task-review-cycle/scripts/merge-and-cleanup.sh \
   <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [worktree_path]
 
 # Concrete example:
-bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" \
+/Users/me/.claude/plugins/cache/kadragon/dev/4.11.22/skills/task-review-cycle/scripts/merge-and-cleanup.sh \
   9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
 ```
 
