@@ -23,6 +23,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   - Source: 2026-10-26 review, stage 4
   - Done when: `grep -rn prune_ledger dev .github` empty; SKILL.md still refuses a dirty tracked tree
 
+## 14 — ci-wait stale-head strike
+
+- [ ] [FIX] ci-wait.sh counts a stale head's failure as a strike: right after a push, while the new run is still queued, `hub.sh ci-status` (GitHub path: `gh pr checks`, not pinned to a SHA) returns the previous commit's `failure`, so one real failure is struck twice and the 3-strike `rework-cap` fires a round early; pin the status read to the pushed head SHA (the Forgejo path already reads `head.sha`) and treat checks for any other SHA as `pending`
+  - Source: PR #362 review cycle — strike count 2 after 1 real CI failure
+  - Done when: a `ci-wait.sh` regression test with a stale-SHA `failure` followed by a head-SHA `success` leaves the strike file unincremented and passes
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
