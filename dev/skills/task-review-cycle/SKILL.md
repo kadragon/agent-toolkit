@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.1.5
+version: 1.1.6
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -214,7 +214,7 @@ git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 A failed step ends the block — report it. Push rejected → keep the local merge and feature branch,
 never reset hard; recover within established authority. Lite is done only once the base push lands.
 
-**Retire the archive on either path** once the merge is confirmed (a leftover resurrects for the next
+**Retire the archive on either path** once the merge is confirmed, a merge the user ran included (a leftover resurrects for the next
 same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
 **Hub path** — `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
@@ -238,3 +238,5 @@ bash "$SKILL_DIR/scripts/merge-and-cleanup.sh" <PR_NUMBER> <BASE_BRANCH> <FEATUR
 | CI `rework-cap` / `timeout` | Stop, ask the user |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
+| Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued, paths and values resolved, and ask the user to allow it in their own permission config (Claude Code: `permissions.allow` in settings.json) — that exact text survives auto mode; a trailing ` *` for per-run arguments may be dropped as a wildcarded interpreter (code.claude.com/docs/en/permission-modes). Never write the rule yourself. On their go-ahead re-run once as that one literal command; denied again → stop, report |
+| Merge/push blocked by an explicit deny rule or managed policy | An allow rule cannot override it: stop, report the blocking source; keep PR, branch, archive |
