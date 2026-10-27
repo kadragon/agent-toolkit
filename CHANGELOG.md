@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] delegation drops the unused Agent Team route (2026-10-27) → docs/delegation.md
 - [done] task-review-cycle: review-time retrospect writes auto-memory only; lite re-runs the risk floor after Step 4 fixes (dev v4.11.23) (2026-10-27)
 - [done] task-review-cycle: a denied merge/push asks the user to add a narrow permissions.allow rule (dev v4.11.22) (2026-10-26)
 - [done] harness-capture drops the unfired session notes store (dev v4.11.21) (2026-10-26)
