@@ -1,10 +1,11 @@
 ---
 name: task-new
-version: 2.3.0
+version: 2.4.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
-  (possibly direct base-branch merge/push). Already on the queue instead → task-next.
+  (possibly direct base-branch merge/push). Multi-session work goes to a spec plus backlog
+  tickets instead. Already on the queue instead → task-next.
 disable-model-invocation: true
 ---
 
@@ -20,15 +21,13 @@ Read `backlog.md` and `docs/conventions.md` when present. A standalone task need
 nor harness initialization. Require/create `backlog.md` only when this run writes queue tickets
 or deferred findings; a missing queue is not a blocker for a self-contained code cycle.
 
-**Working tree gate** — apply `task-next`'s gate in the same order: inspect any feature branch
-for in-flight work, even when clean, via `../task-next/references/edge-cases.md`. On the base
-branch, a clean tree proceeds; backlog-only edits proceed with the delta announced and carried.
-Other dirty base state requires ownership/recovery diagnosis before new work.
+**Working tree gate** — apply `../task-next/SKILL.md` → *Working tree gate* as written: its
+capture block, then its table rows in order.
 
 ## Step 1 — Classify and size
 
-Infer the tag: adds or changes user-visible behavior → `[FEAT]`; restructures without changing
-behavior → `[REFACTOR]`; fixes broken behavior → `[FIX]`; otherwise untagged.
+Infer the tag from the **Tag:** list in `../task-next/references/cycle.md` → *Sprint Contract* —
+the one that names the change (a docs-only request is `[DOCS]`, a harness change `[HARNESS]`).
 
 Size by independently testable outcome and unresolved decisions. A small feature or mechanical
 multi-file edit may fit one contract. Use `../task-next/references/cycle.md` → *Plan gate* for
@@ -36,18 +35,21 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 
 ## Step 2 — Route
 
-First match wins, so read the rows in order and check the last one against the request first:
-"clear" is not "small", and a fully specified request can still be too large for one contract.
+First match wins. Size comes before clarity: a fully specified request can still be too large
+for one contract.
 
-- **Ambiguous** (scope, requirement, or a design decision unclear) → call the
-  Skill tool with "dev:task-grill"; continue only when it reports the open questions resolved,
-  then re-route on the rows below.
+- **Queue without implementing** (the user asks only to record it) → call the Skill tool with
+  "dev:task-tickets" on the request, then **stop**.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
-  "dev:task-spec" and then "dev:task-tickets"; then **stop** — no cycle runs this invocation.
+  "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
+  "dev:task-tickets"; then **stop** — no cycle runs this invocation.
   Implementation starts in a fresh session that holds the written spec, not the interview that
   produced it: tell the user to `/clear` and run `/dev:task-next`, which picks the first ready
   ticket (in Codex, the `task-next` skill-picker entry in a new session). The uncommitted
   `backlog.md` and `docs/design/` spec are carried by `task-next`'s working tree gate.
+- **Ambiguous** (scope, requirement, or a design decision unclear) → call the
+  Skill tool with "dev:task-grill"; continue only when it reports the open questions resolved,
+  then re-route on these rows.
 - **Clear, bounded, and single-session-sized** → build the Sprint Contract from the request (or
   the grill output), go to Step 3.
 
@@ -60,8 +62,7 @@ Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that re
 directory) with these overrides. Verify the originating user invocation and preserve its
 Git limits per `../task-next/references/git-authorization.md` before writes:
 
-- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1, or omit it when untagged and accept the
-  `fix/` fallback.
+- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`

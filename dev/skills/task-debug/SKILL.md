@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.0.4
+version: 1.1.0
 ---
 
 # Debug
@@ -202,3 +202,12 @@ Required before declaring done:
 - [ ] Throwaway harnesses deleted, or moved under the session scratchpad directory.
 - [ ] The hypothesis that turned out correct is stated in the commit or PR body, so the next
       person debugging this area inherits it.
+
+## Hand back
+
+End by returning three things to whoever called this loop: the Phase 1 repro command, the
+regression test id (or the missing-seam finding), and the surviving hypothesis. Inside a
+`task-next`/`task-new` cycle — `../task-next/scripts/cycle_state.py inspect` shows an archived
+contract — add the regression test to that contract as an acceptance criterion
+(`save --replace`, which clears the notes), then record all three with `cycle_state.py note`, so
+a fresh session resumes from them.

@@ -153,8 +153,9 @@ or backlog line. Cleanup changes are provisional until review and merge succeed.
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
 ambiguous or non-verbatim match — re-read and re-run rather than loosening the input.
-`prune-backlog` also deletes each item's wrapped continuation lines; an item whose body holds a
-fence or comment is refused by line number — delete that one by hand, not its body alone.
+`prune-backlog` also deletes each item's wrapped continuation lines and nested sub-bullets; an
+item whose body holds a fence or comment is refused by line number — delete that one by hand, not
+its body alone.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"
@@ -205,8 +206,9 @@ python3 "$STATE" evidence --command "<exact command>" --exit <code> \
   [--log "<result/log location>"] [--env "<tool versions relevant to reproducibility>"]
 ```
 
-`inspect` returns that record as `evidence` and compares the recorded tree with the current index
-as `tree_matches_current`; `false` or a null `evidence` means rerun.
+`inspect` returns one record per command as the `evidence` list — a rerun replaces only that
+command's record, so an earlier failure stays visible — and reports `tree_matches_current` true
+only when every record's tree equals the current index; `false` or a null `evidence` means rerun.
 
 A later commit with the same tree (`git rev-parse HEAD^{tree}`) may reuse passing evidence if the
 command, environment, and external inputs remain equivalent. HEAD-sensitive checks (version/trigger

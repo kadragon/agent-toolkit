@@ -2,7 +2,7 @@
 
 Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
 3) is modified so implementation and QA run in an isolated git worktree — the main checkout
-stays on `main` throughout, but `--tree` isolates **code changes** only. The main checkout still
+stays on the base branch throughout, but `--tree` isolates **code changes** only. The main checkout still
 carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
 default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
 
@@ -17,6 +17,11 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
+# the main checkout is on the local base branch (working-tree gate); bring it level with $BASE
+git merge --ff-only "$BASE" \
+  || { echo "local base cannot fast-forward to $BASE — reconcile it before --tree" >&2; exit 1; }
 # ensure .worktrees/ is git-ignored — add to .gitignore if missing (edit main checkout, uncommitted)
 # Persist ownership in .git/ because each Bash invocation starts without prior shell variables.
 TREE_STATE_PATH=$(git rev-parse --git-path task-next-tree-state)
@@ -40,7 +45,7 @@ if ! grep -Fxq '.worktrees/' .gitignore 2>/dev/null; then
   GITIGNORE_ADDED=true
 fi
 # if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
-git worktree add ".worktrees/$SLUG" -b "$BRANCH" origin/main
+git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
 ```
 
 **Mark active:** runs in the main checkout, with one tree-mode exception to the default path's

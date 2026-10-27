@@ -4,7 +4,7 @@ description: >-
   Scan this repo for deepening opportunities — shallow modules whose complexity should
   collapse behind a smaller interface — and queue the ones you pick as backlog items.
 disable-model-invocation: true
-version: 1.1.0
+version: 1.1.1
 ---
 
 # Repo Architecture
@@ -109,5 +109,5 @@ before filing a candidate, too.
 Skip ephemeral reasons ("not worth it right now") and self-evident ones.
 
 Then tell the user to run `task-next` themselves when they want the queued item built
-(`/task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no
+(`/dev:task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no
 skill may call it.

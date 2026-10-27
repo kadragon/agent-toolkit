@@ -8,7 +8,7 @@ description: >-
   "테스트 정리", "의미 없는 테스트 삭제". Reports surviving mutants as gaps
   instead of writing new tests. NOT for a failing test or unknown bug →
   task-debug; NOT for reviewing a diff → code-review.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Test Prune
@@ -39,8 +39,8 @@ unreachable mutants (Step 4); every removal in this skill must leave it unchange
 - **Audit-only requests stop after Step 4** with the report. Edits need a request to clean up.
 - **Gaps are reported, not filled.** Writing new tests is a separate task.
 - **Kept beats deleted when evidence is missing.** No recorded verdict, no removal.
-- **Edit, never commit.** The skill leaves its edits uncommitted for the user or the calling
-  workflow to review.
+- **Edit, never commit.** The skill leaves its edits uncommitted; tell the user to run
+  `/dev:task-review` before other work.
 
 ## Run ledger
 
@@ -221,3 +221,8 @@ Carried: <n> units from <run dirs> (same_source); ledger: <run_dir>/ledger.json
 ```
 
 State which checks ran and which did not. A claim with no run behind it goes under *Not measured*.
+
+Append every *Gaps* and *Production bugs* row to `backlog.md`, when the repo has one, as `- [ ]`
+items under a new `## test-prune — <date>` heading: a gap as `[TEST] <file:line> — <behavior
+unprotected> (mutant: <mutation>)`, a production bug as `[FIX] <file:line> — <what the mutant
+revealed>; diagnose with dev:task-debug`. Name that heading in the report.
