@@ -18,6 +18,8 @@ export type Glyphs = {
   filled: string
   empty: string
   ellipsis: string
+  // The mark on evidence whose tree still matches the index.
+  ok: string
 }
 
 export const UNICODE: Glyphs = {
@@ -26,6 +28,7 @@ export const UNICODE: Glyphs = {
   filled: '█',
   empty: '░',
   ellipsis: '…',
+  ok: '✓',
 }
 
 export const ASCII: Glyphs = {
@@ -34,6 +37,7 @@ export const ASCII: Glyphs = {
   filled: '#',
   empty: '-',
   ellipsis: '~',
+  ok: 'ok',
 }
 // The windows the band names, in the order it draws them.
 const WINDOWS: readonly (readonly [kind: string, label: string])[] = [
@@ -219,5 +223,91 @@ export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Se
 // A harness-curate run the dev plugin judges due; nothing otherwise.
 export const curateText = (status: StatusBand): string =>
   status.curateDue === true ? 'harness-curate due' : ''
+
+const CI_COLORS: Record<string, Level | undefined> = {
+  success: 'success',
+  failure: 'error',
+  pending: 'warning',
+}
+
+const criteria = (count: number): string => `${count} ${count === 1 ? 'criterion' : 'criteria'}`
+
+// Where the cycle stands, from what is read: implementing until a PR is
+// open, then by its CI; nothing is claimed past what the scripts report.
+const phaseOf = (cycle: NonNullable<StatusBand['cycle']>): string => {
+  if (cycle.pr === undefined) return cycle.evidence > 0 ? 'verified' : 'implement'
+
+  switch (cycle.pr.ci) {
+    case 'success':
+      return 'merge'
+    case 'failure':
+      return 'rework'
+    case 'pending':
+      return 'ci'
+    default:
+      return 'review'
+  }
+}
+
+// The cycle on the branch: its contract, how its evidence stands, and its PR.
+export const cycleSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] => {
+  const cycle = status.cycle
+
+  if (cycle === undefined || cycle === null) return []
+
+  const name = [cycle.tag, cycle.title].filter(part => part !== undefined).join(' ')
+  const head: Segment[] = [
+    { text: `${phaseOf(cycle)}: `, isDim: true },
+    { text: name === '' ? 'contract' : name, color: 'planMode', isBold: true },
+  ]
+  const evidence: Segment[] =
+    cycle.evidence === 0
+      ? [{ text: `${criteria(cycle.criteria)} · no evidence`, color: 'warning' }]
+      : [
+          { text: `${criteria(cycle.criteria)} · evidence ${cycle.evidence}` },
+          {
+            text: cycle.isEvidenceCurrent ? ` ${glyphs.ok}` : ' stale',
+            color: cycle.isEvidenceCurrent ? 'success' : 'warning',
+          },
+        ]
+  const notes: Segment[] = cycle.hasNotes ? [{ text: 'notes', color: 'remember' }] : []
+  const pr: Segment[] =
+    cycle.pr === undefined
+      ? []
+      : [
+          { text: `PR #${cycle.pr.number} ` },
+          { text: `CI ${cycle.pr.ci}`, color: CI_COLORS[cycle.pr.ci] },
+          ...(cycle.pr.strikes > 0
+            ? [{ text: ` (strike ${cycle.pr.strikes})`, color: 'error' as const }]
+            : []),
+        ]
+
+  return joined([head, evidence, notes, pr], glyphs.separator)
+}
+
+// The queue's depth; a queue read and found empty is a figure.
+export const queueSegments = (status: StatusBand): Segment[] => {
+  const queue = status.queue
+
+  if (queue === undefined || queue === null) return []
+
+  const groups: Segment = {
+    text: `queue ${queue.groups}`,
+    color: queue.groups === 0 ? undefined : 'suggestion',
+    isDim: queue.groups === 0,
+  }
+
+  return queue.parked === 0
+    ? [groups]
+    : [groups, { text: ` (${queue.parked} parked)`, color: 'warning' }]
+}
+
+// The cycle and the queue, on a row of their own where the band has one.
+export const workSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] =>
+  joined([cycleSegments(status, glyphs), queueSegments(status)], glyphs.separator)
+
+export const cycleText = (status: StatusBand): string => textOf(cycleSegments(status))
+
+export const workText = (status: StatusBand): string => textOf(workSegments(status))
 
 export const limitsText = (status: StatusBand): string => textOf(limitsSegments(status))

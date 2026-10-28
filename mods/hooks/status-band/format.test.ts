@@ -6,6 +6,7 @@ import {
   bar,
   cacheText,
   contextText,
+  cycleText,
   duration,
   headline,
   headlineSegments,
@@ -16,6 +17,8 @@ import {
   modelLabel,
   setupText,
   tokens,
+  workSegments,
+  workText,
 } from './format'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
@@ -223,6 +226,69 @@ describe('ascii', () => {
     expect(contextText({ ...STATUS, contextPercent: 42 }, ASCII)).toBe('Context ####------ 42%')
     expect(limitsSegments(STATUS, ASCII).map(segment => segment.text).join('')).toBe(
       '5h: 88% (2h 4m) | 7d: 9% (6d 7h)',
+    )
+  })
+})
+
+describe('work', () => {
+  const CYCLE = {
+    tag: '[FEAT]',
+    title: 'Status band cycle rows',
+    criteria: 3,
+    evidence: 2,
+    isEvidenceCurrent: true,
+    hasNotes: false,
+  }
+
+  test('reads the contract, its evidence and its PR, then the queue', () => {
+    const status: StatusBand = {
+      ...STATUS,
+      cycle: { ...CYCLE, pr: { number: 367, ci: 'pending', strikes: 1 } },
+      queue: { groups: 4, parked: 2 },
+    }
+
+    expect(workText(status)).toBe(
+      'ci: [FEAT] Status band cycle rows │ 3 criteria · evidence 2 ✓ │ PR #367 CI pending (strike 1) │ queue 4 (2 parked)',
+    )
+  })
+
+  test('names the phase by what is read: implementing, verified, then by the CI', () => {
+    expect(cycleText({ ...STATUS, cycle: { ...CYCLE, evidence: 0 } })).toBe(
+      'implement: [FEAT] Status band cycle rows │ 3 criteria · no evidence',
+    )
+    expect(cycleText({ ...STATUS, cycle: CYCLE })).toContain('verified: ')
+    expect(
+      cycleText({ ...STATUS, cycle: { ...CYCLE, pr: { number: 1, ci: 'success', strikes: 0 } } }),
+    ).toBe('merge: [FEAT] Status band cycle rows │ 3 criteria · evidence 2 ✓ │ PR #1 CI success')
+    expect(
+      cycleText({ ...STATUS, cycle: { ...CYCLE, pr: { number: 1, ci: 'failure', strikes: 2 } } }),
+    ).toContain('rework: ')
+    expect(
+      cycleText({ ...STATUS, cycle: { ...CYCLE, pr: { number: 1, ci: 'none', strikes: 0 } } }),
+    ).toContain('review: ')
+  })
+
+  test('marks evidence whose tree moved on, and notes left for a later session', () => {
+    expect(
+      cycleText({ ...STATUS, cycle: { ...CYCLE, isEvidenceCurrent: false, hasNotes: true } }),
+    ).toBe('verified: [FEAT] Status band cycle rows │ 3 criteria · evidence 2 stale │ notes')
+  })
+
+  test('calls a contract with no tag or heading a contract, and one criterion singular', () => {
+    expect(
+      cycleText({ ...STATUS, cycle: { ...CYCLE, tag: undefined, title: undefined, criteria: 1 } }),
+    ).toBe('verified: contract │ 1 criterion · evidence 2 ✓')
+  })
+
+  test('draws an empty queue dim and leaves out an unread or absent one', () => {
+    expect(workText({ ...STATUS, queue: { groups: 0, parked: 0 } })).toBe('queue 0')
+    expect(workText({ ...STATUS, queue: null, cycle: null })).toBe('')
+    expect(workText(STATUS)).toBe('')
+  })
+
+  test('draws the evidence mark in plain letters under ASCII', () => {
+    expect(workSegments({ ...STATUS, cycle: CYCLE }, ASCII).map(s => s.text).join('')).toBe(
+      'verified: [FEAT] Status band cycle rows | 3 criteria · evidence 2 ok',
     )
   })
 })

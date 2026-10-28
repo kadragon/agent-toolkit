@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "author": {
     "name": "kadragon"
   },
@@ -18,7 +18,7 @@
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
-      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts, context fill, rate limits and a due harness-curate run above the prompt.",
+      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts, context fill, rate limits, a due harness-curate run, and — in a harness repo — the task cycle on the branch (contract, evidence, PR and CI, with a toast when CI settles) and the backlog queue depth above the prompt.",
       "default": true
     },
     "statusBandCacheTtlMinutes": {
