@@ -553,6 +553,15 @@ def test_main_sprint_heading_without_status_warns():
           r["tasks_exists"] and r["tasks_body"] == drifted, repr(r["tasks_body"]))
 
 
+def test_main_open_block_left_intact_without_warning():
+    """`status: open` is a queued sprint block task-next selects from: no drift warning."""
+    queued = "# Sprint: queued\n\nstatus: open\n\n- [ ] step\n"
+    r = _run_main_in_tmp(queued, "## Now\n- [ ] queued item\n")
+    check("open-status: no schema-drift warning", "unknown status" not in r["stderr"], r["stderr"])
+    check("open-status: tasks.md left intact",
+          r["tasks_exists"] and r["tasks_body"] == queued, repr(r["tasks_body"]))
+
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -584,6 +593,7 @@ SUITES = [
     ("main: statusless fenced comment reports cleanly", test_main_statusless_fenced_comment_reports_cleanly),
     ("main: statusless nested fence reports cleanly", test_main_statusless_nested_fence_reports_cleanly),
     ("main: sprint heading without status warns", test_main_sprint_heading_without_status_warns),
+    ("main: open block left intact, no warning", test_main_open_block_left_intact_without_warning),
     ("empty-headings: nested findings preserved", test_remove_empty_headings_keeps_nested_findings),
     ("empty-headings: genuinely empty still dropped", test_remove_empty_headings_still_drops_empty_ones),
 ]

@@ -64,18 +64,11 @@ Ask these questions:
 
 ## Delegation Discipline (Cross-Cutting Principle)
 
-Configured roles or an actual delegation workflow can justify delegation guidance. Default
-inline; higher-level prohibitions remain binding. Add objective triggers only for verified
-coordination needs, within choices the higher layers permit. A threshold is a local policy,
-not an assumed global gate; file counts or output length alone do not mandate delegation.
-
-Independent verification can justify a separate reviewer without parallel implementation.
-Name only available roles or supported built-ins. Keep detailed routing in an existing workflow
-or delegation doc when needed; no mandatory table or generic golden principle is required.
-
-Enforce a justified critical-path trigger mechanically only after an observed miss or a
-concrete safety need, using existing hooks/workflow checks. A prose threshold that contradicts
-higher-level authorization cannot grant permission to spawn.
+Default inline. Write delegation guidance only for configured roles or a real delegation workflow;
+its thresholds are local policy derived from evidence, within what higher layers permit (SKILL.md
+Step 0b) — file counts or output length alone never mandate a spawn. Independent verification can
+justify a separate reviewer without parallel implementation. Enforce a critical-path trigger
+mechanically only after an observed miss or a concrete safety need.
 
 ## Agent Integrity Principle (Universal)
 

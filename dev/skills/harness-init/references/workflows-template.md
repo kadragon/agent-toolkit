@@ -16,21 +16,17 @@ Skip for trivial features.
 
 ## `code` — Implementation
 
-The primary cycle for behavioral changes. New repositories run inline by default; init creates
-no roles or orchestrator. Add delegation guidance only for configured roles or an actual workflow,
-within higher-level authorization. Existing workflow guidance may hold the routing details.
+The primary cycle for behavioral changes. Runs inline unless configured roles exist.
 
 **Step 0: Branch**
 Before editing, use a feature branch within the user's Git authorization.
 
 **Step 1: Scope check**
-Inspect the relevant code first. Use verified local delegation thresholds only when higher-level
-instructions permit delegation; do not attribute invented numeric gates to a global policy.
-Independent verification is assessed for its benefit separately from parallel implementation.
-Name only available roles; omit delegation-doc pointers until the doc exists.
+Inspect the relevant code first. Delegate only past this repo's verified thresholds, naming
+only roles that exist.
 
 **Step 1.5: File Ownership Declaration (multi-agent only)**
-If the sprint will spawn ≥2 parallel subagents OR use Agent Teams, the lead MUST declare file-ownership globs per role BEFORE spawning anyone — for plain subagents in `tasks.md` — or inline in the conversation when this cycle wrote no `tasks.md` — for Agent Teams via the native shared task list (`TaskCreate`; `tasks.md` stays read-only during team work). Overlapping globs cause silent overwrites. Cross-boundary edits require explicit lead approval — teammates do not cross globs unilaterally.
+If the sprint will spawn ≥2 parallel subagents, the lead declares file-ownership globs per role before spawning anyone — in `tasks.md`, or inline in the conversation when this cycle wrote no `tasks.md`. Overlapping globs cause silent overwrites; a cross-boundary edit needs the lead's approval.
 
 ```markdown
 ## File Ownership
@@ -117,36 +113,3 @@ While in a primary workflow, these side-effects are allowed without switching:
 | `sweep` | Fix trivial `[doc]` items inline |
 
 **Not permitted:** Writing production code during `draft` or `sweep`.
-
----
-
-## Context Anxiety
-
-Models lose coherence on lengthy tasks as context fills. Some exhibit **context anxiety** — prematurely wrapping up work, cutting corners, or declaring features "done" as they approach perceived context limits. Symptoms:
-
-- Implementing the first 3 of 8 features fully, then stub-implementing the rest
-- Suddenly summarizing remaining work instead of doing it
-- Dropping quality noticeably in later parts of a long session
-
-**Confirm the pattern on your model before installing any countermeasure below.** This section encodes a model limitation, and long-context models (Opus-5 class, ~1M window) are told by their own base instructions that context is summarized and handed back so work continues — explicitly, that they need not wrap up early or hand off mid-task. Forcing resets on such a model subtracts: you pay the handoff write plus a cold reload to solve a behavior it is not exhibiting. Install countermeasures on observed symptoms (the three above, in this repo's own transcripts), not on principle.
-
-### Countermeasures
-
-1. **Context resets over compaction — only for models that show the pattern.** Where the symptoms are real, prefer a full reset with a structured handoff file over in-place compaction: a reset gives a clean slate, while compaction preserves continuity without resolving the anxiety behavior. Where they are not, let the platform summarize and keep working; a mid-task handoff is the more expensive option and loses live context.
-
-2. **Handoff files for multi-session work.** Write `handoff-{feature}.md` at the **start** of multi-session work (when context is fresh and the plan is clear), not when context is already degraded. Delete when the feature is complete.
-
-3. **Sprint decomposition for weaker models.** If the model can't sustain coherent work for >1 hour, decompose into sprints (one feature at a time) with QA gates between them. Stronger models that maintain quality over longer sessions can work in continuous mode.
-
-4. **Monitor for the pattern.** If later features in a backlog consistently have lower quality than earlier ones, that's context anxiety — add more reset points.
-
-## Continuous Session vs Sprint-Based
-
-This is a model-capability-dependent design choice, not a universal rule.
-
-| Approach | When to use | Trade-off |
-|----------|-------------|-----------|
-| **Sprint-based** | Model loses coherence after ~30-60min; complex multi-feature builds | More overhead (contract negotiation, handoffs), but sustained quality |
-| **Continuous** | Model sustains quality for hours; single-feature work | Less overhead, but risks degradation on very long tasks |
-
-**The simplification principle applies:** start with the simplest approach (continuous session) and only add sprint decomposition if quality degrades. Each harness component encodes an assumption about model limitations — when the model improves, strip what's no longer load-bearing.

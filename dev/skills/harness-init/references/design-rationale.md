@@ -6,7 +6,7 @@ Why `harness-init`'s rules are what they are. The rules themselves live in `SKIL
 
 Three sources inform the design:
 
-1. **Anthropic** — Generator-Evaluator separation; every harness component encodes a model-limitation assumption that needs periodic re-examination. (The "context reset over compaction" guidance from the same source is itself one such assumption — re-check it per model; see `workflows-template.md` → Context Anxiety.)
+1. **Anthropic** — Generator-Evaluator separation; every harness component encodes a model-limitation assumption that needs periodic re-examination.
 2. **OpenAI** — AGENTS.md is a map, not an encyclopedia (~100 lines); the repo is the system of record; golden principles are enforced mechanically; garbage collection is automated.
 3. **Practical experience** — progressive disclosure (index → detail), agent-readable lint errors, sub-agent context manifests.
 
@@ -83,9 +83,9 @@ set its delegation boundaries, including the distinct benefit of independent ver
 
 ## Auto-delegation is description-driven
 
-Auto-invocation runs off each `SKILL.md` / agent `description:` field, and field reports put it well below 100% even with good descriptions ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). Anthropic's skill-creator docs report that directive phrasing ("ALWAYS invoke when X — do NOT inline-execute") improved auto-invocation on 5 of 6 public skills over descriptive phrasing ("Triggers on X").
+Auto-invocation runs off each `SKILL.md` / agent `description:` field, and field reports put it well below 100% even with good descriptions ([Scott Spence, "Claude Code Skills Don't Auto-Activate (a workaround)", 2025-11-06](https://scottspence.com/posts/claude-code-skills-dont-auto-activate)). Anthropic's skill-creator docs report that directive phrasing improved auto-invocation on 5 of 6 public skills over descriptive phrasing ("Triggers on X"). That supports naming the trigger condition plainly; it does not make delegation mandatory — eligibility never mandates a spawn.
 
-That is why directive descriptions are the primary mechanism and the trigger router is an evidence-gated fallback: the router costs a hook on every prompt plus a routes file to keep in sync, and a stale router is worse than none. This repo's own harness ships no router and relies on descriptions alone.
+That is why the description is the primary mechanism and the trigger router is an evidence-gated fallback: the router costs a hook on every prompt plus a routes file to keep in sync, and a stale router is worse than none. This repo's own harness ships no router and relies on descriptions alone.
 
 ## Relation to the platform's own `/init`
 

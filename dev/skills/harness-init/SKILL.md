@@ -5,7 +5,7 @@ description: >-
   audit. Proposing or pruning individual assets from session evidence instead → harness-
   curate.
 disable-model-invocation: true
-version: 1.1.2
+version: 2.0.0
 ---
 
 # Harness Init
@@ -44,9 +44,10 @@ broken here — report the upgrade path, let the repo earn it (Level 2 same-sess
 already exists; Level 3 only on demonstrated risk; existing repo: one level per session).
 
 **The operator's own instruction layer is a sizing input.** Read `~/.claude/CLAUDE.md` (Claude
-Code) or `~/.codex/AGENTS.md` (Codex) before writing any delegation wording; never write to it. Higher-level prohibitions remain binding. Local thresholds specialize only choices the
-upper layer permits; derive them from the inspected policy, never an assumed numeric global gate.
-Roles and orchestrators are created at init only on an explicit request (Steps 4b/4c).
+Code) or `~/.codex/AGENTS.md` (Codex) before writing any delegation wording; never write to it.
+Derive local thresholds from the inspected policy, never an assumed numeric global gate; pairing
+rules against it is Step 0b.
+Roles and orchestrators are created at init only on an explicit request (Step 4b).
 
 ## Step 0b: Reconcile with higher-precedence layers
 
@@ -82,11 +83,12 @@ when none apply, with no minimum count. Each must be **mechanically
 enforceable** (lint, test, or hook), **specific to this project**, and **grounded in real pain**.
 Ask: "What rules, if broken, cause the most pain here?" Examples per stack:
 `references/golden-principles-guide.md`. Preserve applicable integrity boundaries: an unread value is
-`[unknown — read {source}]`, never guessed; avoid duplicating verified higher-level guidance.
+`[unknown — read {source}]`, never guessed.
 
 ## Step 3: Create AGENTS.md
 
-A map, not an encyclopedia: target ≤100 lines, hard warn >200. The primary anti-bloat gate is the
+A map, not an encyclopedia: target ≤100 lines (bands: `references/harness-invariants.md` →
+*AGENTS.md Size Policy*). The primary anti-bloat gate is the
 **non-inferability filter** — before writing a descriptive line ask "would the agent already know
 this from the repo?" and delete it if yes. Architecture summaries, linter-owned style, README
 paraphrases all fail it; navigational pointers (the Docs Index) and a non-obvious command pass.
@@ -102,8 +104,7 @@ Adapt `examples/agents-md-example.md`; it demonstrates choices, not a required f
 | Maintenance / edit policy | Concise applicable guidance or a valid pointer to existing policy is sufficient; no fixed heading/count |
 
 Apply the same filter to all sections. Preserve project-specific safety boundaries; generic
-blocks have no verbatim-copy or pruning exemption. Size diagnostics: PASS <=100, WARN 101–200,
-strong WARN >200; size alone never fails validation. Session warnings start above 200.
+blocks have no verbatim-copy or pruning exemption.
 
 **Index only the docs this run creates.** One row per file Step 4 produced; never
 `docs/delegation.md`, which init does not create. The same applies to `docs/*.md` mentions in the
@@ -143,33 +144,25 @@ during an active sprint, holds the Sprint Contract and nothing else, and is dele
 (`references/tasks-template.md`). Both follow the *Reconciliation Contract* in
 `references/harness-invariants.md`.
 
-### Step 4b: Reusable roles — none by default
+### Step 4b: Roles and orchestrator — none by default
 
-Create no `.claude/agents/*.md`. The main thread works inline and uses the built-in `Explore` /
-`general-purpose` subagents for ad-hoc fan-out. Say so in the Step 10 summary: roles arrive via
-`dev:harness-curate` when the transcripts show a delegation recurring.
+Create no `.claude/agents/*.md` and no orchestrator skill. The main thread works inline and uses
+the built-in `Explore` / `general-purpose` subagents for ad-hoc fan-out; roles arrive via
+`dev:harness-curate` when the transcripts show a delegation recurring, an orchestrator only once
+roles exist and a multi-step workflow recurs (route to `skill-creator`).
 
-The one exception: the user asked for a specific role this session. Create that role only, after
-a reachability check — does its trigger fire in this repo's normal work? (`qa-verifier` needs
-editable source; `explorer` needs real modules; `implementer` needs a `backlog.md` flow.) Role
-files carry the spine in `references/harness-invariants.md` → *File Layout Invariants*; omit
-`model:` so spawns inherit the session model. Keep generated docs consistent with the roster —
-never a mandatory gate pointing at an agent that does not exist.
-
-### Step 4c: Orchestrator skill — not at init
-
-An orchestrator routes work to agents; with an empty roster it describes coordination the repo
-cannot perform, and it loads on matching prompts. Build one only on explicit request, or later in
-Extend mode once roles exist and the transcripts show the same multi-step workflow recurring —
-that routes to `skill-creator`. Its body follows the Step 1 language; `CLAUDE.md` stays a pure
-`@AGENTS.md` pointer.
+The one exception: the user asked for a specific role or orchestrator this session. Create that
+only, after a reachability check — does its trigger fire in this repo's normal work?
+(`qa-verifier` needs editable source; `explorer` needs real modules; `implementer` needs a
+`backlog.md` flow.) Role files carry the spine in `references/harness-invariants.md` → *File
+Layout Invariants*; omit `model:` so spawns inherit the session model. Never a generated gate
+pointing at an agent that does not exist.
 
 ## Step 5: Sweep automation — deferred
 
-Do not copy `scripts/sweep.sh` at init; a harness created minutes ago has no drift. Install on
-the first real signal (a stale doc, a violated principle, a model upgrade): copy it into the
-project's `tools/`, adapt the `# ADAPT:` sections per `references/sweep-template.md`, and record
-a trigger policy (manual / SessionStart with a 7-day stamp / weekly CI) in `docs/runbook.md`.
+Not at init — a harness created minutes ago has no drift. On the first real signal (a stale doc, a
+violated principle, a model upgrade), install `scripts/sweep.sh` per `references/sweep-template.md`
+and record its trigger policy in `docs/runbook.md`.
 
 ## Step 6: Lint message readability — on evidence only
 
@@ -181,16 +174,13 @@ At Level 1 ship **Layer 0 only** — `permissions.deny` / `sandbox.enabled` in
 `.claude/settings.json` block destructive actions regardless of what the model decides. Layers
 1–3 (real-time hooks, pre-commit, CI gate; PR template optional) arrive with the maturity level
 or a demonstrated risk. Ladder: must always run → hook; must be blocked no matter what →
-settings-level deny; everything else → `AGENTS.md` or a path-scoped rule. Templates per layer,
-plus the circuit breaker and consent gates: `references/enforcement-template.md`.
+settings-level deny; everything else → `AGENTS.md` or a path-scoped rule. Templates per layer:
+`references/enforcement-template.md`.
 
-### Step 7b: Make delegation non-optional
+### Step 7b: Role and orchestrator descriptions
 
-Applies only once a role or orchestrator exists. Write its `description:` directively ("ALWAYS
-invoke when X — do NOT inline-execute"); that is where auto-delegation is won. A
-`UserPromptSubmit` router or a `PreToolUse` delegation gate (`references/enforcement-template.md`
-→ *Delegation Gate*) is a fallback installed only on a measured miss or a critical path — never
-preemptively, and never with an empty roster.
+Once a role or orchestrator exists, its `description:` names the trigger condition plainly; a
+router or gating hook comes only after a measured miss, never with an empty roster.
 
 ## Step 8: Repo root configs
 
@@ -213,10 +203,8 @@ preemptively, and never with an empty roster.
 
 ## Step 9: Validate
 
-Run `scripts/validate-harness.sh`. Non-zero → halt, show the full report, do not auto-fix. It
-checks required files, the AGENTS.md size band, the `CLAUDE.md` pointer, the symlink, the
-`backlog.md` schema, edit-policy presence, conditional golden principles/delegation, configuration syntax, and enforcement.
-Manual checklist: no generated rule contradicts the operator's global layer (higher-level prohibitions remain honored; unresolved local choices are surfaced); each golden principle has a check; no doc names a role that
+Run `scripts/validate-harness.sh`. Non-zero → halt, show the full report, do not auto-fix.
+Manual checklist (what the script cannot see): no generated rule contradicts the operator's global layer (Step 0b); each golden principle has a check; no doc names a role that
 does not exist; no role pins a model; every skipped doc is named with its trigger; `docs/` files
 do not duplicate each other.
 

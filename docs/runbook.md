@@ -137,8 +137,6 @@ Naming: `{phase:02d}_{agent}_{artifact}.{ext}`
 
 Ephemeral — gone at session end, no cross-session resume.
 
-Separate mechanism: delegation-gate evidence files live in `.claude/tmp/` (gitignored, session_id-stamped — see `references/enforcement-template.md`). Do not conflate the two.
-
 ## Sweep Trigger Policy
 
 **Manual** (default): run `bash tools/sweep.sh` between features or before releases.

@@ -65,7 +65,6 @@ plugin.json
 - Skills within a plugin may reference that plugin's `agents/` and `references/`
 - No cross-plugin imports — `dev/` skill must not reference `prod/` paths
 - Agent artifacts go to the session scratchpad directory (path given in the system prompt) — never committed, never repo-root
-- Delegation-gate evidence files live in `.claude/tmp/` (gitignored, repo-local — see `references/enforcement-template.md`)
 
 ### Boundaries
 
@@ -83,6 +82,6 @@ plugin.json
 ## Key Abstractions
 
 1. **`plugin.json` version** — sole mechanism for marketplace update propagation; missed bump = marketplace not updated
-2. **`SKILL.md` `description:` field** — primary auto-invocation signal; directive phrasing ("ALWAYS invoke when...") outperforms descriptive
+2. **`SKILL.md` `description:` field** — primary auto-invocation signal; name the trigger condition plainly (directive beats descriptive)
 3. **Agent roles** (`.claude/agents/*.md`) — reusable subagent definitions; Markdown body is system prompt; frontmatter controls tools/model
 4. **`backlog.md`** — queue of work not yet in flight; line deletion is owned by `task_nodes.py prune-backlog` at pre-merge cleanup, not by `scripts/reconcile-harness.py` (which closes the `tasks.md` sprint block and reverts orphan or failed-sprint `[>]` markers to `[ ]` while preserving their lines)

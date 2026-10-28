@@ -364,6 +364,11 @@ def main() -> None:
             print(f"Sprint active: {title}")
             return
 
+        elif status == "open":
+            # A queued h1 block that task-next selects and flips to active.
+            print(f"Sprint queued: {title}")
+            return
+
         elif raw_status is None and not _has_sprint_heading(tasks_content):
             # Retained Review-Backlog-only tasks.md: a prior sprint completion
             # stripped the contract block via strip_sprint_block(), leaving no
@@ -380,7 +385,7 @@ def main() -> None:
             shown = raw_status if raw_status is not None else "missing"
             print(
                 f"tasks.md has unknown status '{shown}' -- leaving intact. "
-                "Fix the 'status:' line (active|evaluating|done|failed).",
+                "Fix the 'status:' line (open|active|done|failed).",
                 file=sys.stderr,
             )
             return

@@ -5,7 +5,7 @@ Maintain repo agent instruction files under **minimal-noise policy**.
 > **Session-start recommendation:** Add an explicit call in your `/init` command or SessionStart hook to enable automatic sync.
 
 **Primary goal:**
-- `AGENTS.md` — canonical, minimal operational log (target ≤100 lines, hard warn >200)
+- `AGENTS.md` — canonical, minimal operational log (size: `harness-invariants.md` → *AGENTS.md Size Policy*)
 - `CLAUDE.md` — must contain exactly one line: `@AGENTS.md`
 - `.agents/skills` → `../.claude/skills` symlink
 - `backlog.md` / `tasks.md` — follow reconciliation contract (backlog.md = the only persistent queue; tasks.md = Sprint Contract only)
@@ -33,23 +33,8 @@ Silent unless action taken or error occurs.
 
 ## A) AGENTS.md Update Rules
 
-Apply the filter below when editing AGENTS.md (see `harness-invariants.md` → "AGENTS.md Edit Policy"). Concise applicable guidance or a valid policy pointer suffices; no verbatim copy or fixed heading/count is required.
-
-Update `AGENTS.md` **only** when ALL true:
-
-1. Info not directly discoverable from code / config / manifests / docs
-2. Operationally significant — affects build, test, deploy, or runtime safety
-3. Would likely cause mistakes if undocumented
-4. Stable, not task-specific
-
-**Never add:**
-- Architecture summaries or tech stack descriptions
-- Directory structure overviews
-- Style conventions already enforced by tooling
-- Anything already visible in repo
-- Temporary or task-specific instructions
-
-Edits minimal. Prefer modifying/removing outdated entries over appending.
+Apply `harness-invariants.md` → *AGENTS.md Edit Policy* (the four-condition filter and the
+never-add list) when editing AGENTS.md. Edits minimal. Prefer modifying/removing outdated entries over appending.
 Unsure → add short inline `TODO:` comment, don't invent guidance.
 
 **If edit guidance is absent:** add concise applicable policy or a pointer to an existing policy. Preserve useful safety boundaries; avoid duplicating generic blocks.
@@ -83,11 +68,8 @@ Exit codes:
 
 ## C) Harness Reconciliation
 
-Run silently. Script closes the `tasks.md` sprint block per its `status:` and prints one status line.
-While a sprint is active or evaluating (C-1) it never writes `backlog.md` — deleting covered lines
-is `task_nodes.py prune-backlog`'s job, run by `task-next` at pre-merge cleanup. On `failed`, it
-reverts `[>]` markers back to `[ ]` and prunes empty headings; with `tasks.md` absent (C-2), it
-does the same orphan cleanup. It never removes an item line.
+Run silently. The script closes the `tasks.md` sprint block per its `status:` and prints one
+status line; what it writes for each status: `harness-invariants.md` → *Reconciliation Contract*.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -96,7 +78,7 @@ python3 "$SKILL_DIR/scripts/reconcile-harness.py"
 ```
 
 Output:
-- `Sprint active: <title>` — tasks.md active or evaluating; leave intact
+- `Sprint active: <title>` / `Sprint queued: <title>` — leave intact
 - `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
 - `Sprint '<title>' failed. Sprint block closed; backlog items reverted to [ ].` — sprint returned to queue
 - `Backlog: N queued, M active` — backlog has pending items
@@ -115,7 +97,7 @@ maintained here — that is transcript-driven and lives in `harness-curate`.
 Verify **schema** (not content) of harness-related docs. Full schemas in `backlog-template.md` and `tasks-template.md`; minimal assertions below match those templates:
 
 - `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings, except the plain-bullet entries under `## Rejected — do not re-file`
-- `tasks.md` must have: top-level `# Title`, `status:` line, sections `Scope`, `Acceptance Criteria`, `Evaluator Feedback` — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
+- `tasks.md` must have: top-level `# Title`, `status:` line, the Sprint Contract fields — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
@@ -123,8 +105,8 @@ Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 
-The C script removes a `done` item from `backlog.md` mechanically — git history
-becomes its record. Before that record is the *only* trace, judge whether the
+The cycle deletes a finished item's `backlog.md` line at cleanup — git history and the
+`CHANGELOG.md` title become its only record. Before that happens, judge whether the
 shipped work established something future work must respect: a constraint, an
 invariant, a behavior contract, a design decision. The script cannot make this
 call; you must.

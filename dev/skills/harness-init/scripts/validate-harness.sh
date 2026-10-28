@@ -16,7 +16,7 @@
 #   8. .agents/skills → ../.claude/skills symlink (sync E invariant)
 #   9. backlog.md schema (checkbox items under ## headings; sync D-1)
 #  10. AGENTS.md carries a concise edit policy or a valid policy pointer
-#  11. .claude/agents/*.md carry the role-template spine (Step 4b resync)
+#  11. .claude/agents/*.md carry the role spine (File Layout Invariants)
 #
 # A clean run means the maintenance routine will be a no-op on first invocation.
 # Performance: Sections 1–5 and 7–11 use [[ =~ ]] bash builtins, no grep
@@ -70,7 +70,7 @@ fi
 for skill_root in .claude/skills .agents/skills; do
     if [[ -d "$skill_root" ]]; then
         while IFS= read -r -d '' skill; do
-            if grep -qiE '(ALWAYS invoke|orchestrator|do NOT inline)' "$skill" 2>/dev/null; then
+            if grep -qiE 'orchestrator' "$skill" 2>/dev/null; then
                 has_orchestrator=true
                 break
             fi
@@ -418,20 +418,14 @@ if [[ -f "AGENTS.md" ]]; then
     fi
 fi
 
-# ── 11. Agent role spine (Step 4b template resync) ─────────
+# ── 11. Agent role spine ───────────────────────────────────
 # Role files carry a spine (harness-invariants.md → File Layout Invariants). This is the
 # resync report — it never edits a role file.
 #
-# Scope is deliberately narrow. Only two layers are template-owned: frontmatter-field
-# presence and presence of the four spine sections. NOT checked, by design:
-#   - section contents (test commands, path globs, thresholds — repo-owned)
-#   - sections a repo adds (## Checks (always run) etc. — intended specialization)
-#   - opt-in non-spine template sections (## Multi-pass Rule,
-#     ## Team Communication Protocol — absence is not staleness)
-# `tools` is not required either: the template allows omitting it for roles that
-# take the full tool set. Neither is `model`: the template now says to omit it so
-# the role inherits the session model and the caller overrides per spawn — a
-# pinned tier is the exception, not the schema.
+# Scope is deliberately narrow: frontmatter-field presence and presence of the four spine
+# sections. Section contents and sections a repo adds are repo-owned and NOT checked.
+# `tools` and `model` are optional: a role may take the full tool set, and an omitted
+# `model` inherits the session model.
 #
 # Escape hatch: a role that is deliberately lean (pure role-play spawned in bulk,
 # where four stub sections cost real per-spawn tokens) declares
@@ -441,7 +435,7 @@ fi
 # knowledge into a mechanical, greppable claim.
 if $has_agents; then
     echo ""
-    echo "--- Agent Role Spine (Step 4b template resync) ---"
+    echo "--- Agent Role Spine ---"
 
     while IFS= read -r role_file; do
         [[ -n "$role_file" ]] || continue
@@ -499,7 +493,7 @@ if $has_agents; then
         fi
     done < <(find ".claude/agents" -maxdepth 1 -type f -name "*.md" 2>/dev/null | sort)
 
-    info "Spine presence only — section contents, repo-added sections, and the opt-in ## Multi-pass Rule / ## Team Communication Protocol sections are out of scope by design."
+    info "Spine presence only — section contents and repo-added sections are out of scope by design."
 fi
 
 # ── Maturity Level Assessment ─────────────────────────────────

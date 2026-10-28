@@ -85,19 +85,9 @@ State the question → research/prototype → report options and tradeoffs → d
 
 ---
 
-## Handoff Files
+## Cross-session resume
 
-To combat context anxiety within a session (including across compaction) or before spawning a fresh subagent, write `handoff-{feature}.md` to your scratchpad dir at the START (when context is fresh). Scratchpad handoffs do not survive a new CLI session. The code cycle separately archives its approved Sprint Contract under the common Git directory via `cycle_state.py`; recover that contract and its validation evidence for cross-session resume.
-
-Schema from `references/handoff-template.md`.
-
-## Context Anxiety
-
-Models prematurely wrap up work as context fills. Countermeasures:
-
-1. Context resets over compaction for large tasks
-2. Handoff files — write early, not when degraded
-3. Sprint decomposition if quality drops mid-session
+The code cycle archives its approved Sprint Contract under the common Git directory via `cycle_state.py`; recover that contract and its validation evidence to resume in a new session.
 
 ## Permitted Side-Effects
 

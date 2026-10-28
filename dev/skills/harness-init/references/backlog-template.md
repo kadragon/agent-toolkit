@@ -1,12 +1,8 @@
 # backlog.md Template
 
 `backlog.md` is the **only** persistent queue: work not yet in flight, plus every finding that
-outlives the cycle that produced it — review findings, security findings, deferred follow-ups. The
-maintenance routine section C reports its state every session; line transitions are written by
-`task_nodes.py prune-backlog` at `task-next` pre-merge cleanup, not by reconcile.
-
-Nothing persistent belongs in `tasks.md`; that file is the current Sprint Contract and is deleted
-whole at sprint close (`tasks-template.md` → *Invariant*).
+outlives the cycle that produced it — review findings, security findings, deferred follow-ups.
+Who writes which transition: `harness-invariants.md` → *Reconciliation Contract*.
 
 ## Required Schema
 
@@ -15,17 +11,11 @@ whole at sprint close (`tasks-template.md` → *Invariant*).
 - Items group under `##` headings by theme / priority (at least one heading)
 - The three checkbox states have exact semantics:
 
-| State | Meaning | Set by |
-|-------|---------|--------|
-| `[ ]` | Queued — nothing active | Human |
-| `[>]` | Legacy/manual active marker for the current `tasks.md` sprint | Human or a prior workflow (current `task-next` leaves selected items `[ ]` until verbatim pre-merge deletion). `reconcile-harness.py` reverts a leftover `[>]` back to `[ ]` — on `status: failed`, and on any orphan sweep (`tasks.md` absent) — it never deletes the line |
-| `[x]` | Done — not written by the cycle: `prune-backlog` deletes the closed item's `[ ]` line at cleanup, and the `CHANGELOG.md` entry is the closure record. Do not keep `[x]` lines as history; delete a legacy one by hand once `CHANGELOG.md` or git history records its closure | Human (no automated writer — `reconcile-harness.py` only closes the `tasks.md` sprint block; backlog line deletion is owned by `task_nodes.py prune-backlog`) |
-
-Exactly **one** `[>]` at a time is normal for single-item sprints. Zero `[>]`
-means the repo is idle. Multiple `[>]` is valid when `tasks.md` has a `## Covers`
-section listing each covered item — that is a **bundle sprint**. Without a
-`## Covers` section, multiple `[>]` indicates broken reconciliation — fix before
-starting new work.
+| State | Meaning |
+|-------|---------|
+| `[ ]` | Queued. The cycle leaves selected items `[ ]` and deletes the line at cleanup; the `CHANGELOG.md` entry is the closure record |
+| `[>]` | Legacy active marker — the current cycle never writes it; reconcile reverts a leftover to `[ ]` |
+| `[x]` | Legacy done marker — never written; delete one by hand once `CHANGELOG.md` or git history records the closure |
 
 ## Minimal Template to Copy
 
@@ -96,12 +86,3 @@ Pattern adapted from mattpocock/skills@5beb35b `SCOPE.md` + `.out-of-scope/`.
 - Long task descriptions (keep to one line; expand in `tasks.md` when promoted)
 - Assignees, dates, estimates (if you need those, use an issue tracker instead)
 - Sub-task trees (flatten or promote the sub-tree into its own sprint)
-
-## Related
-
-- Schema enforced by `scripts/validate-harness.sh` (init) and `sync D-1`
-- State transitions handled by `task_nodes.py prune-backlog` (`task-next` pre-merge cleanup);
-  `scripts/reconcile-harness.py` (sync C) reverts `[>]` → `[ ]` on `status: failed` and on any
-  orphan sweep (`tasks.md` absent) — it never removes a backlog line; line deletion is
-  `prune-backlog`'s exclusive job
-- Invariants: `harness-invariants.md` → "Reconciliation Contract"
