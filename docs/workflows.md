@@ -21,42 +21,16 @@ requests go directly to a contract; unresolved material decisions go through `ta
 
 ## `code` — Implementation
 
-Primary cycle for behavioral changes.
+Primary cycle for behavioral changes. The procedure — branch (`task_nodes.py branch`), scope,
+Sprint Contract (template and approval), implement, version bump, validation evidence, hand-off —
+is `dev:task-next` → `references/cycle.md`. Repo-specific points:
 
-**Step 0: Branch**
-Ensure you're on a feature branch. `git checkout -b <type>/<slug>` if on `main`.
-
-**Step 1: Scope check**
-Establish what the change touches. Look yourself first (1–2 searches). Spawn `explorer` only when
-the user or an applicable skill directs it and higher-level constraints permit it, **and** the
-survey meets this repository's provisional research threshold — 10+ files to investigate or
-substantial context pressure (`docs/delegation.md`). Eligibility never mandates a spawn.
-
-**Step 2: Sprint Contract**
-Before writing, define "done" in concrete, testable terms. Template in `docs/eval-criteria.md`.
-Approval reuse and durable contract ownership live in `dev:task-next` → `references/cycle.md`;
-intake, tickets, and resume follow that same authority.
-
-**Step 3: Implement**
-Implement directly. Delegate to `implementer` (with spec + conventions) only when the user or an
-applicable skill directs it, higher-level constraints permit it, and this repository's provisional
-threshold is met: 10+ files to investigate, 3+ genuinely independent units, or substantial context
-pressure (`docs/delegation.md`).
-
-**Step 4: QA**
-Implementers run focused checks; independent review separately grades requirements and
-code quality and never replaces required checks; full required checks run on
-the completed candidate after version bump and cleanup. Both rules are owned by `dev:task-next` →
-`references/cycle.md`, under *Implement* and *Validation evidence*. Independent verification is
-assessed separately for its independence benefit and cost,
-without a file-count or parallelism gate; it remains optional unless an authorized workflow
-requires it. Sequential `--all` shares one final review; parallel units also get worktree QA.
-
-**Step 5: Version bump**
-Bump `plugin.json` patch/minor/major per `docs/conventions.md`. Do this AFTER all skill changes, BEFORE committing.
-
-**Step 6: PR + review cycle**
-Call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill name> --auto`, restating the Sprint Contract verbatim (the model-invoked half; `/task-review` is the human entry point and no skill may call it). The `--from` token is required — see `dev:task-review-cycle` → *Caller gate*. The cycle commits, reviews the diff against the contract, routes by risk and required CI, applies findings, and merges. Do NOT inline-manage it. It runs a signal-gated retrospect (`dev:harness-capture`) only when a correction or gotcha surfaced; after review it writes auto-memory only and files any doc or skill delta to `backlog.md`.
+- **Delegation** — default inline; thresholds in AGENTS.md → *Delegation*, briefs in
+  `docs/delegation.md`. Eligibility never mandates a spawn.
+- **Version bump** — per `docs/conventions.md`, after all skill changes, before committing.
+- **Review** — call the Skill tool with "dev:task-review-cycle" and `args: --from <your skill
+  name> --auto`, restating the Sprint Contract verbatim. `/task-review` is the human entry point;
+  no skill calls it. Do not inline-manage the cycle.
 
 ## `draft` — Documentation
 

@@ -29,9 +29,8 @@ Step 5 commits a Step 4 fix (SKILL.md Step 6): a review fix can add the script t
 | `SECURITY_HIT` | also `EFFORT="high"` in Step 2 |
 | `SCRIPT_HIT` | **hub** with required CI; `--lite` cannot bypass |
 
-A shipped script is where the non-Claude engines earn their slot — quoting, shell expansion and
-interpreter-shim defects a prose reviewer has no reason to look for (PR #267). Forcing hub keeps
-the panel on for every such diff.
+A shipped script forces hub so the panel reviews it: quoting, shell-expansion and interpreter-shim
+defects are where the non-Claude engines earn their slot.
 
 **Judgment** — escalate above the floor, never below it. Inspect the diff for execution rules,
 deletion, permissions, deployment, state transitions, security, and how well the changed behavior
@@ -48,21 +47,19 @@ it chooses neither a route nor a reviewer count alone.
 `--no-hub` remains local-only and stops before merge; report required remote checks as pending.
 Unknown risk defaults to hub.
 
-**Panel** — the agy + Codex sources run by default on every hub route and on `--no-hub`. A route
-judged lite runs one reviewer only, Codex (*Lite reviewer* below). The reason is runway: `late-source-reclaim.md`'s
-pre-merge reclaim waits out `ci-wait.sh`, which lite skips, so a lite panel run reaches the
-reclaim with the panel sources still `.pending` every time, and its findings land post-merge,
-reported and never applied. An explicit `--panel` therefore forces hub, even on a diff whose
-captures are all empty — except under `--no-hub`, which always wins and stays local. `--no-hub`
-has no merge, so it runs the panel reclaim once at its stop point instead. An engine that
-preflight reports unavailable is skipped, not waited for.
+**Panel** — the agy + Codex sources run by default on every hub route and on `--no-hub` (PR #277);
+announce panel on/off with the route. A route judged lite runs one reviewer only, Codex (*Lite
+reviewer* below): lite skips `ci-wait.sh`, so a panel there would still be `.pending` at the
+pre-merge reclaim. An explicit `--panel` therefore forces hub, even on a diff whose captures are
+all empty — except under `--no-hub`, which always wins, stays local, and runs the reclaim once at
+its stop point. An engine preflight reports unavailable is skipped, not waited for.
 
 **Lite reviewer** — lite runs Codex as its one reviewer instead of the Claude reviewer, so a
 low-risk diff spends no Claude tokens on review (user-approved trade, 2026-10-05). Run the codex
 block from `review-sources.md` in the **foreground** with Bash `timeout: 600000`, the same shape as
 the Claude reviewer: lite has no `ci-wait.sh` runway, so the findings must land before Step 3, and
 a background task would hang the cycle on a lost completion notification (SKILL.md Step 2).
-`timings.log` puts every measured run at 43–228s, well inside the cap. That block always exits 0,
+That block always exits 0,
 so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}`,
 `"locked"`, or `"unavailable"` marker, no review text, or the 600s timeout → record `Reviewers
 Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead. A timeout kills the
@@ -71,6 +68,4 @@ foreground run, leaving no sidecar result, so lite has no pre-merge reclaim.
 Codex reviews the diff only and takes no Sprint Contract, so on lite the orchestrator grades each
 acceptance criterion inline against the recorded evidence and reports each unmet one as a
 `contract` finding. Step 4's "re-run the reviewer once" after a fixed `contract` finding is the
-same inline re-grade. Both are self-grading by the author: disclose in the report that contract
-grading was not independent. Lite already requires a readily verified, low-risk diff; anything
-less routes hub, where the Claude reviewer grades the contract.
+same inline re-grade; disclose it as self-grading (SKILL.md Step 2).

@@ -35,26 +35,16 @@ trailing `-` stripped. Both sources use the same three files:
 | `<key>.review.txt` | the full, untruncated review text (stdout may have been head/tail truncated) |
 | `<key>.meta` | written last, so its presence means the review file beside it is complete |
 
-`.meta` fields: `pid`, `started_at`, `mode`, `branch`, `base`, `head_sha`, `status`, `exit_code`,
-`finished_at`, `elapsed_seconds`, `review_file`. `status` is `ok` (a review was produced),
-`failed` (the companion exited non-zero, or its review named a `.codex/plugins/cache` path missing
-on disk on both runs — the script re-runs once, since Codex's startup cache refresh can prune the
-plugin version it just loaded) or `empty` (it ran but produced no extractable review).
-agy's `.meta` has the same fields except `mode`; `failed` there means agy exited non-zero after
-partial output.
+`.meta` carries `branch`, `started_at`, `head_sha`, `status` (`ok` · `failed` · `empty`) and
+`review_file`.
 
 The key is lossy — `feat/x-2` and `feat-x-2` sanitize to the same name — and a file can also be
 left from an earlier cycle on this branch. So before using a result, check that its `branch`
 matches the current branch and that `started_at` is later than this cycle's launch. A `.meta`
 that fails either check belongs to a different run: leave it alone.
 
-`timings.log` in each result directory gets one line per finished run —
-`<iso8601> elapsed=<N>s mode=<...> status=<...> files=<N> lines=<N> branch=<raw branch>` for codex;
-agy's line is the same minus `mode`. It is the evidence for any future argument about how much
-runway a source needs: elapsed alone cannot separate "the source is reliably slower than the
-cycle" from "that diff was unusual", so diff size is recorded beside it. Argue from this log, not
-from a single cycle's impression. agy's own `--print-timeout` expiry still logs a line (status
-`empty` or `failed`); only a process killed from outside writes none.
+`timings.log` in each result directory gets one line per finished run (elapsed, status, diff
+size); argue about runway from it, not from one cycle's impression.
 
 ## Pre-merge reclaim
 
@@ -94,6 +84,5 @@ already be closed; re-read the diff before applying, per the consolidation guide
 A result that surfaces after the merge is **reported, never auto-filed**. Name the `.meta` and
 `.review.txt` paths and the branch they reviewed, and let the user route it.
 
-Do not append it to `## Review Backlog` automatically. The branch is merged, so the findings are
-unverified against current `main`, and PR #263 is the recorded case where every late finding had
-already been closed by the fix round — auto-filing would have queued two dead items.
+Do not append it to `## Review Backlog` automatically: the branch is merged, so the findings are
+unverified against current `main` and often already closed by the fix round.

@@ -31,7 +31,7 @@ name when the brief's own lint/test command already covers it.
 Mirrored in `dev:harness-init` → `references/harness-invariants.md` → *Verifier Standing-Checks
 Floor*, which role-less repos brief their fallback verifier from. Change both in the same commit.
 
-1. `plugin.json` version bumped — inspect the complete working-tree change set, including committed, staged, unstaged, and untracked files; do not rely only on `git diff origin/main...HEAD`. Required **iff any changed path is under `dev/`** (bump `dev`) **or `prod/`** (bump `prod`). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count. Repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees → record N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
+1. `plugin.json` version bumped — inspect the complete working-tree change set, including committed, staged, unstaged, and untracked files; do not rely only on `git diff origin/main...HEAD`. Required **iff any changed path is under `dev/`** (bump `dev`), **`prod/`** (bump `prod`) **or `mods/`** (bump `mods`, Claude manifest only). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count. Repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees → record N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
 3. Lint/test command from Sprint Contract exits 0
 4. No new `$var` references without visible `var=$(cmd)` capture

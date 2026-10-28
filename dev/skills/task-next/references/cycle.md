@@ -88,9 +88,9 @@ convergence cleanup.
 ## Implement
 
 Inline by default; delegating to `implementer` follows the same policy as *Scope*. A delegated
-brief carries the contract, absolute paths of every in-scope file, and the lint/test command, and
-tells the implementer to report through its final output, never finishing silently. Rules either
-way:
+brief carries the contract, absolute paths of every in-scope file, the lint/test command and the
+rules below, and tells the agent to put its full result in its final response — never finishing
+silently, even when the result is empty or the run failed. Rules either way:
 
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
@@ -114,6 +114,9 @@ way:
   ```
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset
   --hard`, `git clean -f`/`-fd`, or `git branch -D` while implementing. Stop and ask instead.
+- **Worktree briefs** (`--tree`, batch) — the absolute worktree path; every Bash command begins
+  with `cd <absolute-worktree-path> &&` (CWD resets to the main checkout each call); file tools use
+  absolute paths under the worktree; nothing in the main checkout is read or edited.
 - An implementer that fails or returns unusable output → stop and report.
 
 Before leaving implementation, account for every acceptance criterion with a concrete result;
