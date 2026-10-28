@@ -6,7 +6,7 @@ description: >-
   order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.3.0
+version: 1.3.1
 ---
 
 # To Tickets
@@ -14,12 +14,7 @@ version: 1.3.0
 > Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
 
 Breaks a spec (or a resolved conversation) into `backlog.md` items sized for individual Sprint
-Contracts, ordered so dependencies land before dependents. Deliberately does **not** build a
-Wayfinder-style ticket-graph/map system — this repo's backlog is a single markdown file, not
-an issue tracker, and a full dependency-graph engine would be over-engineering for that scale.
-The only dependency mechanism is the lightweight `*(blocked by: <n>-<slug>)*` marker, which
-reuses and generalizes the `*(deferred: ...)*` skip pattern already present in
-`backlog_candidates.py`.
+Contracts, ordered so dependencies land before dependents.
 
 ## When to use
 
@@ -38,50 +33,27 @@ items from approved spec").
    section in the spec, and say in the Step 4 draft which ticket is expected to clear it. When
    a ticket lands and its answer sharpens a foggy line, that is a fresh `task-tickets` run on
    the same spec — delete the graduated line from `## Not yet specified` in the same edit that
-   writes its ticket, so it lives only as the ticket. This skill makes no commit of its own:
-   the edit rides into whichever commit the caller's cycle makes next. `task-next`'s working-tree
-   gate carries a `backlog.md` + `docs/design/`-only tree and owns that rule; never commit here.
+   writes its ticket, so it lives only as the ticket. Never commit here: the edit rides into
+   the caller's next cycle commit.
 2. **Slice vertically.** Each ticket must be sized for exactly one Sprint Contract
-   (`docs/eval-criteria.md` template) — a self-contained, independently mergeable unit of
-   behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
+   (`../task-next/references/cycle.md` → *Sprint Contract*) — a self-contained,
+   independently mergeable unit of behavior, not a horizontal layer (e.g. not "write all the models" then "write all the
    UI"). Prefer an independently verifiable and mergeable result. File count is a review-cost
    signal, not a cap. Split when outcomes can land independently or the review surface no longer
    fits one contract; retain coupled mechanical changes when splitting would break validation.
-   **Wide mechanical refactors are the exception to vertical slicing.** A *wide refactor* is
-   one mechanical change — move a bundled script, retype a shared field, change a marker
-   format every skill writes — whose blast radius fans across the repo, so a single edit breaks every call site at once
-   and no vertical slice lands green. Do not force it into a tracer bullet; sequence it
-   **expand–contract**, one ticket per stage:
-   1. **Expand** — add the new form beside the old, nothing breaks, nothing migrates.
-   2. **Migrate** — call sites in batches sized by blast radius (per plugin, per skill
-      directory), each batch its own ticket carrying `*(blocked by: <n>-expand-<slug>)*`.
-      Each batch stays green on its own because the old form still exists.
-   3. **Contract** — delete the old form once no caller remains, blocked by *every* migrate
-      batch.
-
-   Judge review surface **per batch**, not across the sequence; identical substitutions
-   do not accumulate review cost the way distinct changes do. Split by subsystem anyway when a batch stops being reviewable at a
-   glance. If a migrate batch cannot stay green alone, the change is not expand–contract-able
-   in this repo: say so and keep it as one ticket rather than inventing a shared integration
-   branch — `task-next`/`task-review` merge each ticket through its own PR to `main`, and a
-   long-lived integration branch has no slot in that cycle.
-
-   **Renaming a skill, agent or command is one ticket, never expand–contract** — two coexisting
-   near-identical `description:` texts collide as triggers. Rename and update every caller in a
-   single commit, with the plugin's major bump.
-
-   **Version-bump note for the sequence:** every stage ships under the same plugin, so each
-   stage ticket bumps that plugin. No stage of a non-rename wide refactor earns a major bump —
-   nothing invoked by name is removed.
+   **Wide mechanical refactors** (one mechanical change whose blast radius breaks every call
+   site at once) sequence **expand–contract**, one ticket per stage: Expand (new form beside the
+   old), Migrate (call-site batches, each `*(blocked by: <n>-expand-<slug>)*` and green alone),
+   Contract (delete the old form, blocked by every migrate batch). A batch that cannot stay
+   green alone stays one ticket — no shared integration branch. **Renaming a skill, agent or
+   command is one ticket**: rename and update every caller in one commit.
 
 3. **Order topologically.** Determine which tickets depend on others (e.g. a schema change
    before the feature that reads it). Sort the ticket list so a dependency's ticket always
    precedes its dependents.
 4. **Draft numbered ticket titles + scope, acceptance criteria, approach, and dependencies.**
-   For skill-authoring tickets whose source contains Skill slots, cite that section's path
-   (or preserve the conversation's block verbatim under the ticket) so the contract author
-   can recover all seven slots unchanged. Acceptance criteria check the authored skill's
-   runtime rules; the source slots retain those rules, sources and N/A values.
+   A skill-authoring source with Skill slots carries them per
+   `../task-grill/references/skill-extraction.md` → *Carrying the slots*.
    Cite the approved source in each ticket. Apply `../task-next/references/cycle.md` → *Plan gate*:
    reuse approved granularity/order; ask only about new slicing decisions or changed scope before
    writing. Create `backlog.md` if this authorized ticket-writing path needs it.
@@ -122,13 +94,12 @@ items from approved spec").
    stays invisible to candidate selection until the **last** marker is removed, so clear them
    one at a time as each blocker lands. This is the existing syntax repeated, not a new one.
    `backlog_candidates.py` already skips a heading whose every open item carries a
-   `*(deferred: ...)*` or `*(blocked by: ...)*` marker — do not invent a new
-   dependency-graph engine or a separate marker syntax.
+   `*(deferred: ...)*` or `*(blocked by: ...)*` marker.
 7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/dev:task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed — by the blocking ticket's own cycle at cleanup (`../task-next/references/cycle.md` → *Cleanup*), where `prune-backlog` warns on it, not by hand.
 
 ## Boundaries
 
 - Do not write production code from this skill.
-- Do not build a ticket-graph/map file — the `blocked by` marker on the item line is the only
-  dependency mechanism.
+- Do not build a Wayfinder-style ticket-graph/map file or a new marker syntax — the
+  `blocked by` marker on the item line is the only dependency mechanism.
 - Write only within approved scope and slicing decisions; approval rules live in the shared cycle.

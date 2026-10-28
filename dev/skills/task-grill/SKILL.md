@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.3.4
+version: 1.3.5
 ---
 
 # Grill
@@ -16,7 +16,7 @@ version: 1.3.4
 A hard stop as a reusable skill: **material ambiguity affecting scope, irreversible effects, external
 communication, or expected output → grill, don't guess.** Its output feeds directly into
 whichever document is being built next: a Sprint Contract
-(`docs/eval-criteria.md` template) or a `task-spec` document.
+(`../task-next/references/cycle.md` → *Sprint Contract*) or a `task-spec` document.
 
 ## When to use
 
