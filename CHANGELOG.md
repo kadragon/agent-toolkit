@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] hwpx diet: dead script names, duplicate rules, one work dir; kr_audit + lint_report fixes (prod v3.2.13) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] status band draws the branch's task cycle (contract, evidence, PR, CI with a toast) and the queue depth (mods v0.5.0) (2026-10-28)
 - [done] hub.sh ci-status reads head and checks from one GraphQL snapshot (dev v4.11.27) (2026-10-27)
 - [done] task-review-cycle: hub merge runs merge-and-cleanup.sh by absolute path, no bash prefix, so an auto-mode allow rule matches (dev v4.11.26) (2026-10-27)

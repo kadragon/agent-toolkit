@@ -38,7 +38,6 @@ that page layout is unchanged, or that the file opens successfully in Hancom.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 python3 "$SKILL_DIR/scripts/compare.py" original.hwpx revised.hwpx
 python3 "$SKILL_DIR/scripts/compare.py" original.hwpx revised.hwpx --json
 ```
@@ -55,56 +54,19 @@ corrupt document, or discard a report because it found changes.
 | 3 | `error` | Invalid/unreadable input or processing failure |
 
 The exit table applies to comparison runs; `--help` prints usage and exits 0.
-Both inputs remain unchanged. Section paths retain the archive's section filename;
-paragraph/table ordinals in paths are one-based within their parent. Cell rows and
-columns are one-based versions of `cellAddr`, with `span.rows`/`span.columns` retained.
-For example, `Contents/section0.xml/paragraph[4]/table[1]/row[3]/col[2]` identifies
-the first table anchored in body paragraph 4, at grid row 3 and column 2. This is
-not a document-global table number. Empty paragraphs count. Cell child paragraphs
-have their own scoped paths. Each changed body paragraph or cell counts once;
-cell paragraph details do not increase the summary count. Complete paragraph strings
-are shown rather than inferred sentence matches. Quotes escape tabs/newlines visibly.
+Location paths are one-based and scoped by parent (`Contents/section0.xml/paragraph[4]/table[1]/row[3]/col[2]`
+is the first table anchored in body paragraph 4, not a document-global table number); cell
+rows/columns are one-based `cellAddr`. `--json` emits one `schema_version: 1` object.
 
-JSON stdout contains one object with `schema_version: 1`, `status`, `complete`,
-`coverage`, `change_count`, `changes`, `structural_changes`, `non_content_changes`,
-`exclusions`, `incomplete_scopes` and `errors`. A content change has `kind`,
-`original_location`, `revised_location`, `before` and `after`; cell changes also have
-`span` and `paragraphs`. Findings contain `location` and `reason`; non-content findings
-add `kind`, exclusions add `input` and expanded XML `tag`, errors are strings.
-`complete` refers only to declared text coverage, never whole-document equivalence.
-
-Matching uses unchanged scoped structure, unique non-placeholder paragraph IDs or
-two unique unchanged content anchors enclosing a single edited paragraph. Repeated
-labels/IDs cannot establish identity alone; multi-edit anonymous regions stay incomplete.
-An unanchored single body paragraph with a placeholder ID may be incomplete even when
-it looks like a simple edit; one paragraph in an established cell grid can be compared.
-Anonymous table-host paragraphs can be matched using unique stable table IDs and
-unchanged grids. Rewritten single-paragraph cells retain their grid location even if
-their paragraph ID changes. Same text redistributed between runs/anchored objects
-is reported separately as uninterpreted placement change, not passed as unchanged.
-Inserted/deleted/reordered paragraphs and changed table grids mark the affected scope
-incomplete rather than generating positional replacement cascades. Independent scopes
-can still report changes. Nested tables are excluded as a whole, without flattening.
-
-ZIP timestamps/order/compression and XML attribute order/prefix spelling do not count
-as content edits. XML-defined newline normalization applies; spaces, tabs, explicit
-line breaks and empty paragraphs remain significant. Changed line-layout caches are
-reported separately. Standard preview text/image members, the settings caret position,
-and `content.hpf` ModifiedDate/lastsaveby metadata are known derived caches: their
-changes remain visible without forcing incomplete text coverage. Other member changes
-retain the conservative incomplete result. Reference restores that rebuild IDs or other
-members can be incomplete even when visually faithful; review those scopes manually.
-Changed unsupported XML, style attributes/header definitions,
-non-section members and binary assets require review and produce incomplete coverage.
-Unchanged unsupported objects are listed as exclusions. A zero content count with
-exclusions or incomplete scopes is not proof of an unchanged document. AI explanations
-must retain these qualifications and must not invent correspondence or intent judgments.
+A zero content count with exclusions or incomplete scopes is not proof of an unchanged
+document. Reference restores that rebuild IDs or other members can be incomplete even
+when visually faithful; review those scopes manually. When explaining a report, keep its
+qualifications and do not invent correspondence or intent judgments.
 
 ## build.py build usage
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 빈 문서 (base 템플릿)
 python3 "$SKILL_DIR/scripts/build.py" build --output result.hwpx
 
@@ -127,7 +89,6 @@ python3 "$SKILL_DIR/scripts/build.py" build --template report --section my.xml \
 ```bash
 set -euo pipefail
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # 1. section0.xml을 임시파일로 작성 (per-session unique dir — parallel-safe)
 HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
 trap 'rm -rf "$HWPX_WORK"' EXIT  # error-path cleanup: fires on any set -e trigger or normal exit
@@ -160,7 +121,6 @@ rm -rf "$HWPX_WORK"
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 # Batch extraction from folder list (bash)
 for f in ./folder1/*.hwpx ./folder2/*.hwpx ./folder3/*.hwpx; do
   echo "=== $f ==="
@@ -184,64 +144,13 @@ Get-ChildItem -Recurse -Filter "*.hwpx" | ForEach-Object {
 }
 ```
 
-## Safe text replacement (text.py patch)
+## Text patch, lineseg strip, widths, next ID
 
-Use instead of raw `str.replace()` for text edits in existing HWPX. Handles str.replace + linesegarray removal + ID duplicate check as one atomic operation.
+`text.py patch` (outside tables), `table.py strip-lineseg`, `table.py calc-widths` and `build.py next-id`:
+flags in each subcommand's `--help`. Gotchas:
 
-```bash
-# 기본 (첫 번째 일치만 교체)
-python3 "$SKILL_DIR/scripts/text.py" patch input.hwpx "기존 텍스트" "새 텍스트" --output result.hwpx
-
-# 전체 교체
-python3 "$SKILL_DIR/scripts/text.py" patch input.hwpx "기존" "새" --count 0 --output result.hwpx
-
-# 앵커 지정 (같은 텍스트 여러 개일 때)
-python3 "$SKILL_DIR/scripts/text.py" patch input.hwpx "기존" "새" --after "앵커 텍스트" --output result.hwpx
-
-# 미리보기 (파일 미수정)
-python3 "$SKILL_DIR/scripts/text.py" patch input.hwpx "기존" "새" --dry-run
-```
-
-## Bulk linesegarray removal (table.py strip-lineseg)
-
-Run after **any** text substitution in an existing section — not only heavy edits. A carried-over cache makes Hancom refuse to load the file (blank `빈 문서`) whenever the new text occupies fewer lines than the cache describes.
-
-```bash
-python3 "$SKILL_DIR/scripts/table.py" strip-lineseg result.hwpx --output clean.hwpx
-# 또는 in-place
-python3 "$SKILL_DIR/scripts/table.py" strip-lineseg result.hwpx --inplace
-# unpack된 디렉토리에서 pack 전에 (권장)
-python3 "$SKILL_DIR/scripts/table.py" strip-lineseg ./unpacked/Contents/section0.xml --inplace
-```
-
-`--output`/`--inplace` 중 하나는 필수. 이 실수를 스크립트로 잡으려면 `validate.py validate <out> --baseline <원본>` — baseline 대비 텍스트가 바뀐 문단에 캐시가 그대로 남아 있으면 ERROR로 보고한다.
-
-## Column-width calculation (table.py calc-widths)
-
-```bash
-# 3열 균등
-python3 "$SKILL_DIR/scripts/table.py" calc-widths 3
-# → 14174 14173 14173
-
-# 비율 지정 (라벨:내용 = 1:4)
-python3 "$SKILL_DIR/scripts/table.py" calc-widths 1:4
-# → 8504 34016
-
-# 검증
-python3 "$SKILL_DIR/scripts/table.py" calc-widths --verify 14174 14173 14173
-```
-
-## Next hp:p ID lookup (build.py next-id)
-
-Always confirm ID collision before inserting new paragraph.
-
-```bash
-python3 "$SKILL_DIR/scripts/build.py" next-id document.hwpx
-# → 1000000023
-
-python3 "$SKILL_DIR/scripts/build.py" next-id document.hwpx --count 5
-# → 1000000023 1000000024 1000000025 1000000026 1000000027
-```
+- `text.py patch` replaces the first match only; `--count 0` replaces all, `--after "anchor"` scopes it, `--dry-run` previews.
+- `strip-lineseg` needs `--inplace` or `--output`; run it once on `./unpacked/Contents/section0.xml` after the last text edit, before `office.py pack` (why: SKILL.md Critical Rule 13).
 
 ## Table editing helpers
 
@@ -285,7 +194,7 @@ Show paraPr, charPr, runs, and linesegarray presence for a single cell:
 python3 "$SKILL_DIR/scripts/table.py" dump doc.hwpx --table-id 1000000003 --cell 2,1
 ```
 
-Output shows: paragraphs with their paraPrIDRef, each run's charPrIDRef and text, and whether linesegarray is present (relevant for rule #24).
+Output shows: paragraphs with their paraPrIDRef, each run's charPrIDRef and text, and whether linesegarray is present (relevant for SKILL.md Critical Rule 16).
 
 Note: `table.py dump` output lists addresses as `row col` but `table.py replace --cell` expects `col,row`. Hint printed at bottom of dump output.
 
@@ -321,9 +230,9 @@ python3 "$SKILL_DIR/scripts/table.py" locate ./unpacked/ --tag hp:tc --contains 
 python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tbl --contains "항목명" --contains "열제목"
 
 # 매치 요소를 파일로 추출 (clone 원본 확보용)
-# Note: create .hwpx_work/ before using --extract-dir (it will fail if missing)
-mkdir -p .hwpx_work
-python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tr --contains "항목코드" --extract-dir .hwpx_work --pretty
+# --extract-dir must already exist
+HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)
+python3 "$SKILL_DIR/scripts/table.py" locate doc.hwpx --tag hp:tr --contains "항목코드" --extract-dir "$HWPX_WORK" --pretty
 ```
 
 ### 2) Insert table row (table.py insert)

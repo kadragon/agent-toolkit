@@ -78,7 +78,7 @@ plugin.json
 - The engine takes one unmatched hook per event from a plugin, and one per `ui.render` site. Mods that
   draw above the prompt each export a row builder, and `mods/hooks/band.tsx` holds the single band hook
   that stacks them; `$` and an atom's key never cross an import, so both are spelled in that file.
-- `dev/skills/harness-init/references/` is internal to harness-init; do not reference from other skills
+- `dev/skills/harness-init/references/` owns shared templates (backlog schema, harness invariants); other skills, agents and scripts cite a file there (`dev:harness-init` → `references/<file>`) instead of copying its content
 
 ## Key Abstractions
 

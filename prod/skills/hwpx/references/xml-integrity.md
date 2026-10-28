@@ -27,9 +27,9 @@ xml_str = raw.decode("utf-8")
 xml_str = xml_str.replace('기존 텍스트', '새 텍스트', 1)
 ```
 
-> **Run-split caution**: sentence visible as one on screen often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If replace target crosses run boundary, `str.replace()`/`patch_section.py` **silently fails with 0 matches**. Count 0 → suspect run splitting — extract element with `locate.py`, check structure, replace only **substring fitting within single `<hp:t>`**.
+> **Run-split caution**: sentence visible as one on screen often split across multiple `<hp:run>`/`<hp:t>` (format boundaries, standalone comma/parenthesis runs, etc.). If replace target crosses run boundary, `str.replace()`/`text.py patch` **silently fails with 0 matches**. Count 0 → suspect run splitting — extract the element with `table.py locate`, check structure, replace only **substring fitting within single `<hp:t>`**.
 >
-> **Fixing a run-split**: after `locate.py --extract-dir ./_work`, open the extracted file to see the `<hp:run>` structure. Find the `<hp:t>` within a single `<hp:run>` that contains the target text, replace only that element's text. If the target text spans multiple runs, edit each run's `<hp:t>` separately — never merge or reorder runs.
+> **Fixing a run-split**: after `table.py locate --extract-dir "$HWPX_WORK"`, open the extracted file to see the `<hp:run>` structure. Find the `<hp:t>` within a single `<hp:run>` that contains the target text, replace only that element's text. If the target text spans multiple runs, edit each run's `<hp:t>` separately — never merge or reorder runs.
 
 > **Substring-collision caution**: replace target inside longer string hits unintended places (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**; when target is full text of paragraph/cell, match with tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
 
@@ -83,7 +83,7 @@ Every `<hp:p id="...">` in document must be unique. Duplicate ID → HWP crash.
 ## linesegarray removal
 
 When modifying text in existing `section0.xml`, remove `<hp:linesegarray>` elements.
-`linesegarray` = layout engine's line-break cache; stale values after a text edit trigger a "document corrupted or modified" warning — and when the new text is shorter than the cached geometry (2 lines → 1), HWP silently fails to load the file and opens an empty `빈 문서` instead. Prefer `table.py strip-lineseg <section0.xml> --inplace` over the regex below (same effect, handles `.hwpx` and unpacked dirs, idempotent).
+Why: SKILL.md Critical Rule 13. Prefer `table.py strip-lineseg <section0.xml> --inplace` over the regex below (same effect, handles `.hwpx` and unpacked dirs, idempotent).
 
 ```python
 import re
@@ -94,11 +94,11 @@ HWP auto-recalculates linesegarray on open. Documents with no `<hp:linesegarray>
 
 ## SKILL.md Workflow 2 (unpack → Edit → pack) caution
 
-`unpack.py` extracts raw bytes as-is (no lxml re-serialization). Editing must be direct text modification:
+`office.py unpack` extracts raw bytes as-is (no lxml re-serialization). Editing must be direct text modification:
 
 ```
-✅ unpack.py → Read/Edit 도구로 텍스트 직접 수정 → pack.py
-❌ unpack.py → lxml parse → etree.tostring() → pack.py  (크래시)
+✅ office.py unpack → Read/Edit 도구로 텍스트 직접 수정 → office.py pack
+❌ office.py unpack → lxml parse → etree.tostring() → office.py pack  (크래시)
 ```
 
 **Same rule applies to `content.hpf`** — contains 14 Hancom namespace declarations; lxml re-serialization corrupts it.
