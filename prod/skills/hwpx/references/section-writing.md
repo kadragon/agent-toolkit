@@ -176,11 +176,11 @@ Floating table (`treatAsChar="0"`) — same anchor structure, different attribut
 - e.g. 3 equal columns → 14173 + 14173 + 14174 = 42520
 - e.g. 2 columns (label:content = 1:4) → 8504 + 34016 = 42520
 - **Row height**: usually 2400–3600 HWPUNIT per cell
-- Use `calc_col_widths.py` for ratio-based width calc
+- Use `table.py calc-widths` for ratio-based width calc
 
 ## ID rules
 
 - Paragraph id: sequential from `1000000001`
-- Table id: same sequential namespace as paragraphs — use `next_id.py` to get the next available ID. No two elements (paragraph or table) may share an ID.
+- Table id: same sequential namespace as paragraphs — use `build.py next-id` to get the next available ID. No two elements (paragraph or table) may share an ID.
 - Every id unique within document
-- Use `next_id.py` to get next safe ID before inserting paragraphs or tables
+- Use `build.py next-id` to get next safe ID before inserting paragraphs or tables

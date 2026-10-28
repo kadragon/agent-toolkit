@@ -27,7 +27,7 @@ which use `1.` items and `~합니다` endings.
 Lines after an attachment heading (`[붙임 1]`, `붙임 2`, `[별첨]`) are not checked:
 attachments are forms and quoted documents, not report body.
 
-Usage
+Usage (a .hwpx input needs `python -m pip install defusedxml`; text drafts do not)
   python3 lint_report.py <file.hwpx|file.txt> [--allow-numbered | --gongmun]
   python3 lint_report.py --test
 """
@@ -35,8 +35,6 @@ import datetime
 import re
 import sys
 import zipfile
-
-import defusedxml.ElementTree as ET
 
 HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 ROMAN = re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]$")
@@ -103,6 +101,7 @@ GONGMUN_RULES = {"R5", "R7", "R8", "R12", "R14"}   # notation only; 공문 keeps
 
 
 def paragraphs_from_hwpx(path):
+    import defusedxml.ElementTree as ET  # only .hwpx input needs it; text drafts lint without it
     out = []
     with zipfile.ZipFile(path) as z:
         names = sorted(n for n in z.namelist() if re.match(r"Contents/section\d+\.xml$", n))
@@ -323,6 +322,14 @@ def selftest():
         f.write("□ 개요\n\n ○ 지원하였습니다.\n")
     try:
         assert [r[2] for r in lint(load(f.name))] == [3], lint(load(f.name))
+        # a text draft lints without defusedxml installed (it is only needed for .hwpx)
+        import subprocess
+        probe = ("import sys, runpy; sys.modules['defusedxml'] = None; "
+                 "sys.argv = [sys.argv[1], sys.argv[2], '--gongmun']; "
+                 "runpy.run_path(sys.argv[0], run_name='__main__')")
+        r = subprocess.run([sys.executable, "-c", probe, __file__, f.name],
+                           capture_output=True, text=True)
+        assert r.returncode in (0, 1) and "Error" not in r.stderr, r.stderr
     finally:
         os.unlink(f.name)
     print("selftest ok")
