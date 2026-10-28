@@ -208,48 +208,8 @@ Held in first run of first paragraph:
 - Body width (A4 minus left/right margins): 42520 (≈ 150mm)
 - Default margin (top): 5668 (≈ 20mm)
 - Default margin (bottom): 4252 (≈ 15mm)
+- B5 paper (`<hp:pagePr>`): width=51592, height=72850
 
-## python-hwpx API mapping
-
-> **Deprecated** — Do NOT use python-hwpx API directly. Use `build.py build` (SKILL.md Workflow 1) or direct XML editing instead. See SKILL.md Critical Rule 9. This section is retained for reference only.
-
-| Operation | python-hwpx method | Note |
-|------|---------------------|------|
-| New document | `HwpxDocument.new()` | Uses empty Skeleton template |
-| Open file | `HwpxDocument.open(path)` | Accepts path, bytes, BinaryIO |
-| Add paragraph | `doc.add_paragraph(text, section=)` | Format settable via charPrIDRef |
-| Add table | `doc.add_table(rows, cols, section=)` | borderFillIDRef auto-generated |
-| Cell text | `table.set_cell_text(row, col, text)` | 0-indexed |
-| Header | `doc.set_header_text(text, section=)` | |
-| Footer | `doc.set_footer_text(text, section=)` | |
-| Memo | `doc.add_memo_with_anchor(text, ...)` | MEMO field auto-generated |
-| Bold/italic run style | `doc.ensure_run_style(bold=True)` | Returns charPrIDRef |
-| Text extraction | `TextExtractor(path).extract_text()` | Table-include option |
-| Save | `doc.save_to_path(path)` | |
-| Return bytes | `doc.to_bytes()` | |
-
-## Low-level XML access
-
-When python-hwpx high-level API insufficient:
-
-1. Use **unpack** → edit XML directly → **pack** workflow
-2. Access low-level XML tree via `doc.oxml` property
-3. Manipulate lxml Element directly via `doc.sections[0].element`
-
-### Example: change paper size (A4 → B5)
-
-```python
-# unpack 후 section0.xml 편집
-# <hp:pagePr> 의 width, height 속성 변경
-# B5: width=51592, height=72850
-```
-
-### Example: change font (header.xml)
-
-```python
-# <hh:charPr id="0"> 의 <hh:fontRef> 속성 변경
-# hangul="맑은 고딕" latin="Arial"
-```
 
 ---
 

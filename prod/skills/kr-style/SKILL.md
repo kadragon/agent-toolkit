@@ -6,7 +6,7 @@ description: >-
   verifies with a script that exits 0. Use before handing over Korean prose
   longer than a few paragraphs. NOT for typo/spacing fixes, translation between
   languages, or changing what the text claims.
-version: 1.0.1
+version: 1.0.2
 allowed-tools: Bash Read Edit Write Grep
 ---
 

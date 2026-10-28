@@ -57,7 +57,7 @@ s = s.replace("<hp:t>조직</hp:t>", "<hp:t>조직의 구성</hp:t>")
 
 `<hp:t>X</hp:t>` form matches only when X is exactly the full text of one paragraph/cell, so there is no substring collision.
 
-**Run-split case**: visible text may be split across multiple `<hp:run>` elements (format boundaries, standalone punctuation runs, etc.). If the target text spans runs, `locate.py` output will show multiple `<hp:t>` elements inside separate `<hp:run>` blocks. Fix each run separately — do not concatenate runs. Example: "홍길동 과장" stored as `<hp:run><hp:t>홍길동 </hp:t></hp:run><hp:run charPrIDRef="1"><hp:t>과장</hp:t></hp:run>` — replace each `<hp:t>` independently.
+**Run-split case**: visible text may be split across multiple `<hp:run>` elements (format boundaries, standalone punctuation runs, etc.). If the target text spans runs, `table.py locate` output will show multiple `<hp:t>` elements inside separate `<hp:run>` blocks. Fix each run separately — do not concatenate runs. Example: "홍길동 과장" stored as `<hp:run><hp:t>홍길동 </hp:t></hp:run><hp:run charPrIDRef="1"><hp:t>과장</hp:t></hp:run>` — replace each `<hp:t>` independently.
 
 ## 3. Assert a count on every replacement
 
@@ -117,7 +117,7 @@ assert s.count(old) == 1
 s = s.replace(old, new)
 ```
 
-**Detection**: `locate.py --tag hp:tc --contains ""` 또는 `--extract-dir`로 추출 후 self-closing run 확인. `replace_cell.py` 사용 시에는 이 변환이 자동 처리됨.
+**Detection**: `table.py locate --tag hp:tc --contains ""` 또는 `--extract-dir`로 추출 후 self-closing run 확인. `table.py replace` 사용 시에는 이 변환이 자동 처리됨.
 
 ## 8. `<hp:t>` regex — `<hp:t[^>]*>` over-matching trap
 
@@ -150,20 +150,20 @@ assert s.count(target) == 1, f"not unique: {s.count(target)} occurrences"
 
 # 2. paraPrIDRef 포함 run 교체
 old = '<hp:p id="1000000005" paraPrIDRef="42" ...'
-# → locate.py --tag hp:p 로 exact 스팬 추출 후 교체
+# → table.py locate --tag hp:p 로 exact 스팬 추출 후 교체
 ```
 
-`paraPrIDRef`는 단락 스타일 ID — 같은 스타일을 공유하는 단락이 여러 개면 유일하지 않음. **count 확인 선행 필수**. 불유일 시 위치 기반(rfind/index 앵커) 또는 `locate.py --tag hp:tc` 로 상위 셀 먼저 특정 후 내부 탐색.
+`paraPrIDRef`는 단락 스타일 ID — 같은 스타일을 공유하는 단락이 여러 개면 유일하지 않음. **count 확인 선행 필수**. 불유일 시 위치 기반(rfind/index 앵커) 또는 `table.py locate --tag hp:tc` 로 상위 셀 먼저 특정 후 내부 탐색.
 
 ## 10. Single empty paragraph → multiple paragraph replacement
 
-`replace_cell.py` 대신 raw str.replace로 빈 paragraph 1개를 2개로 늘려야 할 때:
+`table.py replace` 대신 raw str.replace로 빈 paragraph 1개를 2개로 늘려야 할 때:
 
 ```python
 # 원본: 빈 단락 1개 (paraPrIDRef="5"로 특정)
 old = '<hp:p id="1000000010" paraPrIDRef="5" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:t/></hp:run></hp:p>'
 
-# 교체: 2개 단락 (두 번째 id는 next_id.py로 확보)
+# 교체: 2개 단락 (두 번째 id는 build.py next-id로 확보)
 new = (
     '<hp:p id="1000000010" paraPrIDRef="5" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">'
     '<hp:run charPrIDRef="0"><hp:t>첫 번째 내용</hp:t></hp:run></hp:p>'
