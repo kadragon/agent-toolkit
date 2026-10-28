@@ -21,7 +21,7 @@ Produce a structured map of the target plugin area: key files, entry points, dat
 
 ## Effort Tier
 
-Default **simple** (≤10 tool calls). If the area needs >10 calls to map, return a partial report with "further exploration needed" and stop.
+Default **simple**: map what the brief names. An area larger than the brief implies → return a partial report marked "further exploration needed" and stop.
 
 ## Exit Criteria
 

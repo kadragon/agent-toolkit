@@ -42,24 +42,10 @@ carried onto `$BRANCH` by the collapse `git checkout` below the same way the ver
 **Version bump** further down), so a second invocation sees the run as in flight.
 
 **Implement (`cycle.md` → *Implement*):** archive the approved contract per `cycle.md` →
-*Sprint Contract*, prefixing that command with `cd ".worktrees/$SLUG" &&` — the Bash tool's CWD
-resets to the main checkout on every call, and the archive is keyed by the branch of the checkout
-it runs in, so an un-prefixed save keys this cycle's contract to the base branch (`cycle_state.py`
-refuses that outright). Then spawn `implementer` agent. The implementer runs focused checks. Brief must include the **absolute
-worktree path** AND these explicit CWD instructions (the Bash tool is stateless — CWD resets
-to the main checkout on every call; a standalone `cd` has no persistent effect):
-
-> "Your spawn CWD is the main checkout. The Bash tool is stateless — CWD resets each call.
-> Every Bash command must begin with `cd <absolute-worktree-path> &&`
-> (e.g. `cd /path/to/worktree && git status`, `cd /path/to/worktree && npm test`).
-> Read/Edit/Write tool calls must use absolute paths under `<absolute-worktree-path>/`.
-> Do NOT read or edit any file in the main checkout.
-> Never run `git push --force`/`--force-with-lease`, `git reset --hard`, `git clean -f`/`-fd`,
-> or `git branch -D` — if a fix seems to need one, stop and ask the user instead.
-> If the same fix is attempted twice on the same file without the lint/test command
-> passing, stop and report what you tried and why it failed instead of continuing to retry.
-> When you finish (or get stuck), put your full result in your final response — never finish
-> silently, even when the result is empty or the run failed; a silent finish loses the result."
+*Sprint Contract*, prefixing that command with `cd ".worktrees/$SLUG" &&` — the archive is keyed by
+the branch of the checkout it runs in, and an un-prefixed save keys it to the base branch, which
+`cycle_state.py` refuses. Then spawn `implementer`; its brief carries the rules in `cycle.md` →
+*Implement*, worktree briefs included.
 
 The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
 `backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
@@ -68,13 +54,9 @@ A stuck report → the parent records it as a `note` from the worktree (`cycle.m
 Git authority for both briefs, worktree commits and the handoff: `git-authorization.md` (run
 `authorize` from the worktree). No commit authority → keep the worktree intact, skip collapse, report.
 
-**QA:** spawn `qa-verifier` pointed at the worktree path, verifying
-against the Sprint Contract. Include the same CWD instructions in the brief: every Bash command
-must begin with `cd <absolute-worktree-path> &&`; Read/Edit/Write use absolute paths under the
-worktree; the same destructive-command guard applies — QA must not run
-`git reset --hard`/`push --force`/`clean -f`/`branch -D` either. One fix-and-re-verify retry. Same
-result-handoff instruction too: tell it to put its verdict in its final response, including an
-empty/no-blocking-findings verdict (`docs/delegation.md`).
+**QA:** spawn `qa-verifier` pointed at the worktree path, verifying against the Sprint Contract,
+with the same brief rules (its verdict goes in its final response, an empty one included). One
+fix-and-re-verify retry.
 
 **If QA fails after one retry:** stop and preserve the worktree, branch, contract archive, and
 main-checkout tracking state. Report unmet criteria. Destructive abandonment requires explicit

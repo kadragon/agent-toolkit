@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] review-cycle diet: one owner for panel, brief and merge rules; agent role drift fixed (dev v4.11.29) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] harness-init diet: core-layer enforcement, self-negating refs cut, one owner per rule (dev v4.11.28) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] hwpx diet: dead script names, duplicate rules, one work dir; kr_audit + lint_report fixes (prod v3.2.13) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] status band draws the branch's task cycle (contract, evidence, PR, CI with a toast) and the queue depth (mods v0.5.0) (2026-10-28)

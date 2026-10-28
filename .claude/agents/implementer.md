@@ -23,7 +23,7 @@ All four fields required. Missing any → return control to lead.
 
 ## Effort Tier
 
-Default **simple**. Escalate to **comparison** if the task spans ≥3 skill directories — in that case, stop and ask lead to scope.
+Default **simple**. The task outgrows the listed files → stop and ask the lead to re-scope.
 
 ## Exit Criteria
 

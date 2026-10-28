@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.6.1
+version: 2.6.2
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -89,8 +89,7 @@ report). A group whose every open item is deferred/blocked is not a candidate �
 blocker.
 
 **All groups blocked → report the blockers, then stop.** Run `--parked` and end the report with
-every item it lists: the item, its marker, and one label. The user should not have to ask what
-the blockers are or which ones this session could clear.
+every item it lists: the item, its marker, and one label.
 
 - **agent can clear** — the blocker is work this session can do, such as a check to run or a
   change no queue item covers. Say what the work is.

@@ -46,17 +46,12 @@ The script identifies failed checks and returns JSON with logs for each failure 
 - **Trivial fix** (lint, type error, formatting, flaky test retry): Apply the fix directly.
 - **Logic change** (behavioral modification, new/changed code paths): Apply the fix, then re-run Step 2-3 (collect reviews and get user approval) before pushing.
 
-### 3. Verify Locally
+### 3. Commit and Push
 
-Run tests locally to confirm the fix works.
+Reference the PR number in the message. Use `commit-and-push.sh` with the exact fix paths so
+commit/push authority is checked; never bypass it with raw Git writes.
 
-### 4. Commit and Push
-
-Determine the commit message yourself based on the fix just applied (you have full context). Reference the PR number in the message. Use `commit-and-push.sh` with the exact fix paths so commit/push authority is checked;
-never bypass it with raw Git writes. Retain the original approval source/actions/limits;
-`--auto` permits in-scope fixes, not expanded Git authority. No subagent is needed for one file.
-
-### 5. Re-check CI
+### 4. Re-check CI
 
 Return to the CI wait step. `ci-wait.sh` counts consecutive real failures itself and switches to
 `reason: "rework-cap"` on the 3rd — that is the stop signal, and it is an exit condition you read,
@@ -65,31 +60,7 @@ increment it (they route to the user-escalation branch in "Wait for CI" instead)
 
 ## Merge and Clean Up
 
-After CI passes, check `base-merge` authority; PR-only stops with the reviewed PR.
-Within established merge authority, merge and clean up:
-
-```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] && echo "$SKILL_DIR/scripts/merge-and-cleanup.sh" || { echo "Bundled script not executable: $SKILL_DIR/scripts/merge-and-cleanup.sh" >&2; exit 1; }
-```
-
-Non-zero → stop; do not issue the merge. Otherwise issue the merge as one standalone command
-starting with the path that block printed — no `bash` prefix, no variable assignment — so a
-narrow allow rule matches it in auto mode (`bash`-led wildcard rules are dropped). A direct call
-exiting 126/127 means the helper is not executable or not found: stop and report; never retry
-it as `bash <path>`.
-
-```bash
-# All 4 positional args are REQUIRED. Values come from pre-flight JSON output.
-# merge_strategy must be a JSON object, NOT a bare word like "squash".
-<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [worktree_path]
-
-# Concrete example (the printed path is wherever this skill is installed):
-<printed path> 9 main feat/add-login '{"squash":true,"merge":true,"rebase":true}'
-```
-
-The script selects the best merge strategy (squash > merge > rebase) from the JSON, merges (`hub.sh merge` deletes the remote head only, and reports success only once the PR state is MERGED), then checks out the base branch, fetches and fast-forward merges `FETCH_HEAD` (avoids `git pull` failures when `pull.rebase` is unconfigured; `ff-only` fails gracefully on unpushed local commits instead of discarding them), removes the worktree when a path is provided, then deletes the local feature branch (`-D`: a squash or rebase merge leaves it "not fully merged"). This script is the sole owner of local cleanup. A failed base checkout skips local cleanup with a `WARNING` and still prints the result JSON. Run from inside the worktree it removes, the script first moves to the main worktree; if that checkout is not on the base branch it is left as-is (base not updated, noted in `cleanup_message`) and cleanup continues.
-
-**Common mistake:** `merge-and-cleanup.sh 9 squash` — this passes only 2 args. The script requires 4: pr_number, base_branch, feature_branch, and merge_strategy as JSON.
-
-If `merge_ok` is false in the output, report the error (e.g., merge conflicts, branch protection) and suggest the user resolve manually. `queued: true` means the PR entered a merge queue and is not merged yet; `unconfirmed: true` means gh could not report the post-merge state — check the PR before retrying the merge. If cleanup warnings appear, report them but do not block.
+SKILL.md Step 6 → *Hub path* issues the merge. In the helper's JSON, `merge_ok: false` → report
+the error (conflicts, branch protection) and suggest the user resolve it; `queued: true` = in a
+merge queue, not merged yet; `unconfirmed: true` = state unknown, check the PR before retrying.
+Cleanup warnings are reported, never blocking.

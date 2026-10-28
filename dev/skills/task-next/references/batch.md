@@ -50,13 +50,9 @@ integration checkout. Create a worktree with `git worktree add .worktrees/<slug>
 Archive the aggregate contract from the integration branch before spawning. Each implementer
 gets its approved unit contract, absolute worktree path, owned files, and relevant test commands.
 Follow `docs/delegation.md` when present; otherwise include objective, output format, tools, and
-boundaries in each brief. Every shell call must set its worktree CWD; file tools use absolute
-paths. Agents may edit only their owned files, never the main checkout or convergence files.
-No force push, hard reset, force clean, or force branch deletion. The same fix attempted twice
-on one file without the checks passing → stop and report what was tried and why it failed; the `Agent` tool has no timeout, so this cap
-is the only bound on a looping unit. A stuck agent reports the failure in its final output, never
-finishing silently; it cannot ask the user directly. The integration session records that
-report as a `note` on the unit's branch (`cycle.md` → *Stuck-fix stop*) so a fresh run sees it.
+boundaries in each brief, plus the brief rules in `cycle.md` → *Implement* (worktree briefs
+included). Agents may edit only their owned files, never convergence files. The integration
+session records a stuck report as a `note` on the unit's branch so a fresh run sees it.
 
 Each implementer archives its unit contract in the worktree, implements and runs focused checks,
 then checks `cycle_state.py authorize --action commit` from its own worktree before
@@ -67,7 +63,7 @@ that worktree/branch; exclude them from integration and report why.
 
 ### A4 — Unit QA
 
-Use a separate `qa-verifier` per successful unit, with the same CWD/ownership restrictions.
+Use a separate `qa-verifier` per successful unit, with the same brief rules and ownership limits.
 Grade requirements and code quality against the unit contract; reuse eligible test evidence per
 `cycle.md` → *Validation evidence*. One fix-and-QA retry for a blocking finding. Still blocked
 or verifier unavailable → preserve the unit and exclude it from integration; report the limit.

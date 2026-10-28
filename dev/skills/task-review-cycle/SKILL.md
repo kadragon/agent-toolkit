@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.2.3
+version: 1.2.4
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -20,7 +20,7 @@ Missing legacy authority denies affected actions; flags never expand approval.
 - `--auto` — approve in-scope P0/P1 review fixes, not Git effects.
 - `--no-hub` — local commit/review only; still requires commit permission.
 - `--lite` / `--pr` — request a path within authority and mandatory CI/risk gates.
-- `--panel` — force agy + Codex and hub unless `--no-hub`; default on non-lite routes.
+- `--panel` — force the panel (`references/risk-routing.md` → *Panel*).
 
 **Sprint Contract.** Recover the archived original and evidence before writes:
 
@@ -35,9 +35,8 @@ without an original may grade the diff alone; archive its verified authority and
 limit. Preserve the archive through merge. Check reuse: shared cycle's *Validation evidence*.
 ## Prerequisites and Setup
 
-GitHub remote → `gh` authenticated. Forgejo/Gitea → `FORGEJO_TOKEN` or `GITEA_TOKEN` set
-(`DRC_HUB_API_URL` overrides the API base). `--no-hub` needs no auth. `SKILL_DIR` is the absolute
-parent directory of the `SKILL.md` loaded this turn.
+Hub auth problems surface in preflight `errors[]`; `--no-hub` needs no auth. `SKILL_DIR` is the
+absolute parent directory of the `SKILL.md` loaded this turn.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -50,8 +49,8 @@ CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
 ```
 
-Stop if the bundled scripts cannot be resolved or `has_errors` is `true`. The result is cached per
-branch, so later blocks re-run it for free for the fields they need (shell state does not persist).
+Stop if the bundled scripts cannot be resolved or `has_errors` is `true`. Shell state does not
+persist: later blocks paste these values where they show `<from Setup>`.
 
 ## Step 1: Commit, route, PR
 
@@ -80,14 +79,12 @@ else
 fi
 ```
 
-`--prefer-staged` commits a non-empty index alone; an empty index ahead of the base runs `--verify-head`:
-no commit, HEAD guarded (the only check on outside commits), `resumed` returned. `unstaged_left` lists
-dirt left out (in scope → stage, re-run). Non-zero exit → HEAD rejected; `guard_skipped: true` → report.
+`unstaged_left` lists dirt left out (in scope → stage, re-run). Non-zero exit → HEAD rejected;
+`guard_skipped: true` → report.
 
 **Route by risk** — `references/risk-routing.md`, evaluated on every run including explicit path
 flags. Its floor block is mandatory: all four captures force hub with required CI — neither
-`--lite` nor a judgment call may route one lite. Panel: on for hub and `--no-hub`, off for lite.
-Judgment escalates, never below. `--no-hub` stays local-only and stops before merge; report required
+`--lite` nor a judgment call may route one lite. Judgment escalates, never below. `--no-hub` stays local-only and stops before merge; report required
 remote checks as pending. Announce path, rationale, mandatory checks, and panel on/off in one line.
 
 Before choosing lite, run `cycle_state.py authorize --action base-merge` and `--action
@@ -97,9 +94,7 @@ Hub path — push and open the PR before any review:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-LOCAL_FLAG="<from authorization route: --no-hub or empty>"
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
-BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
+BASE_BRANCH="<from Setup>"
 COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
 <[TYPE] message from above>
 COMMIT_MSG
@@ -122,10 +117,7 @@ absent required result blocks merge, even if the reviewer cannot assess it. Bash
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-[[ -f "$SKILL_DIR/scripts/claude-review.sh" ]] || { echo "Bundled claude-review unavailable: $SKILL_DIR/scripts/claude-review.sh" >&2; exit 1; }
-LOCAL_FLAG="<from authorization route: --no-hub or empty>"
-PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
-BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
+BASE_BRANCH="<from Setup>"
 EFFORT="<high when the latest floor run's SECURITY_HIT was non-empty or the risk is material, else empty>"
 CONTRACT=$(cat <<'SPRINT_CONTRACT'
 <Sprint Contract verbatim, archive path, and validation evidence including commit/tree, command,
@@ -146,8 +138,8 @@ an execution-based criterion against the evidence line above, silent on one when
 coverage, the contract). This fallback and lite's contract grading are self-grading: disclose it;
 it cannot satisfy a policy that requires an independent reviewer.
 
-**Panel** (every non-lite route) — launch agy + Codex per `references/review-sources.md` in the
-turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
+**Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
+`references/review-sources.md` in the turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
 reclaim (`references/late-source-reclaim.md`) is what makes not waiting safe.
 
 ## Step 3: Consolidate and confirm
@@ -246,5 +238,5 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 | CI `rework-cap` / `timeout` | Stop, ask the user |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
-| Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued, paths and values resolved, and ask the user to allow it in their own permission config (Claude Code: `permissions.allow` in settings.json) — that exact text survives auto mode; for the merge helper suggest the denied command's script path with its version directory replaced by `*`, plus ` *` (`Bash(/…/dev/*/skills/task-review-cycle/scripts/merge-and-cleanup.sh *)`), since a `bash`-led wildcard rule is dropped as an interpreter (code.claude.com/docs/en/permission-modes). Never write the rule yourself. On their go-ahead re-run once as that one literal command; denied again → stop, report |
+| Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued (paths and values resolved) and ask the user to allow it in their own permission config; for the merge helper suggest `Bash(/…/dev/*/skills/task-review-cycle/scripts/merge-and-cleanup.sh *)` (version directory as `*`; a `bash`-led rule is dropped). Never write the rule yourself. On their go-ahead re-run once as that literal command; denied again → stop, report |
 | Merge/push blocked by an explicit deny rule or managed policy | An allow rule cannot override it: stop, report the blocking source; keep PR, branch, archive |
