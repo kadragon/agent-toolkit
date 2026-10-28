@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] status band draws the task cycle on the branch (contract, evidence, PR, CI with a toast when it settles) and the backlog queue depth (mods v0.5.0) (2026-10-28)
 - [done] hub.sh ci-status reads head and checks from one GraphQL snapshot (dev v4.11.27) (2026-10-27)
 - [done] task-review-cycle: hub merge runs merge-and-cleanup.sh by absolute path, no bash prefix, so an auto-mode allow rule matches (dev v4.11.26) (2026-10-27)
 - [done] task-* batch: task-next lean pass, test-prune drops the run ledger, ci-wait ignores a stale head's failure (3 units) (dev v4.11.25) (2026-10-27)
