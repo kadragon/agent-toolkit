@@ -42,7 +42,7 @@ Before writing code, define done in concrete, testable terms and preserve alread
 criteria, and approach. Independent grading later uses that contract; a separate evaluator
 approval is not a prerequisite to implementation.
 
-See `docs/eval-criteria.md` → "Sprint Contract" for the template.
+Template: `dev:task-next` → `references/cycle.md` → *Sprint Contract*.
 
 Adapt testing approach to the project:
 - **Projects with test frameworks:** Red → Green → Refactor (TDD cycle)

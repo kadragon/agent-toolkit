@@ -5,7 +5,7 @@ description: >-
   audit. Proposing or pruning individual assets from session evidence instead → harness-
   curate.
 disable-model-invocation: true
-version: 2.0.0
+version: 2.0.1
 ---
 
 # Harness Init

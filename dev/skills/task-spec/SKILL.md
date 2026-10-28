@@ -7,7 +7,7 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.2.1
+version: 1.2.2
 ---
 
 # To Spec
@@ -94,11 +94,8 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    the approach was forced (`cursor/plugins@9b93e81:pstack/skills/architect/SKILL.md` Phase B,
    `pstack/skills/poteto-mode/playbooks/multi-phase-plan.md` Appendix B).
 
-   **Skill extraction handoff.** When the resolved summary includes `Skill slots:`, append
-   `## Skill slots` after Further Notes and copy all seven slots verbatim, including source
-   paths and explicit N/A values. Keep runtime checks, decision rules and exceptions there;
-   Testing Decisions states how the authored skill's handling of them will be verified.
-   Omit this section for summaries without extraction.
+   **Skill extraction handoff.** A summary with `Skill slots:` gets `## Skill slots` after
+   Further Notes, per `../task-grill/references/skill-extraction.md` → *Carrying the slots*.
 
 4. **Review with user.** Present the written spec (or a summary + file path) and wait for
    explicit approval before any downstream skill (`task-tickets`, or direct implementation)

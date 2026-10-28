@@ -29,3 +29,13 @@ there too, not in `Success:`/`Constraint:`: those two stay the building PR's own
 criterion ("SKILL.md checks/handles <item>"), so none is lost before a caller reads
 `Skill slots:`. List all seven, including repo-resolved ones (with the source path) and "N/A" ones. A slot with no default left
 unanswered in a non-interactive run goes to the handoff as unresolved (SKILL.md Rule 4), never as "N/A".
+
+## Carrying the slots
+
+Every later artifact that receives this summary — a `task-spec` doc (`## Skill slots` after
+Further Notes), a `task-tickets` ticket (cite that section, or carry the block under the
+ticket), the Sprint Contract and its archive, the `skill-creator` call — carries the entire
+`Skill slots:` block verbatim: all seven, with source paths and explicit N/A values. The
+runtime rules stay in the slots; that artifact's own criteria (Testing Decisions, acceptance
+criteria) check that the authored skill implements them, never restate them. A summary with
+no extraction carries no block.

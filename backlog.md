@@ -17,7 +17,6 @@ Source: `docs/design/skill-diet-audit.md`. Removal only — no new gates, teleme
 rationale prose. Decisions resolved 2026-10-28: D1 keep PR #277 panel default; D2 cut harness-init Step 7b
 to one line and drop its validator grep.
 
-- [ ] **skill-diet-task-planning** — Slice 4: task-debug to ~150 (keep contract + stop rules); Sprint Contract single source in `cycle.md` (eval-criteria.md, grill, tickets, spec repoint; `[FIX]`/`[REFACTOR]` rule once); skill-slots carry owned by `skill-extraction.md`; task-tickets Wayfinder ×3 / version-bump note / expand–contract trim; test-prune dedupe vs `mutation-proof.md`, drop Step 6.4 (~130 lines)
 - [ ] **skill-diet-prod-and-meta** — Slice 5: persona-debate `debate-method.md` to why + template; repo-quiz `state-reference.md` mechanics; kr-style loop one line in gongmun Step 4 / report G2, dead `$LINT` block; harness-capture repo-specific text + `routing.md`; harness-curate 2nd/3rd copies; task-grill / task-spec triple copies (trigger check before touching grill description); `skill-evaluator` / `qa-verifier` no-ops (~250 lines)
 
 ## Rejected — do not re-file

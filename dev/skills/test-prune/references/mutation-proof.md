@@ -80,11 +80,14 @@ the without-T rerun.
    kill is an assertion failing on changed behavior.
 4. **KILLED counts only over a green baseline.** A test file half-edited by a parallel agent, or a
    flaky test, fails regardless of the mutant. Check the baseline before every mutant, not once.
-5. **Calibrate the tool before use.** One mutant that must be killed, one that must survive; the
-   tool must tell them apart. Re-calibrate after changing tool config.
+5. **Calibrate the tool before use.** The must-survive mutant is an equivalent mutant on covered
+   code, or one in dead code — where the tool reports its no-coverage status (Stryker
+   `NoCoverage`, PIT `NO_COVERAGE`), count that as the survive outcome. Re-calibrate after
+   changing tool config.
 6. **Timeouts flip between runs.** A mutant that times out (often counted as detected) may be
-   killed or survive on a calmer machine. Re-run timeouts before they decide a verdict; an
-   unresolved one is INVALID.
+   killed or survive on a calmer machine. Re-run timeouts before they decide a verdict. A timeout
+   counts as KILLED only when the test asserts that the code does not block or hang; any other,
+   or an unresolved one, is INVALID.
 7. **Caches go stale.** Incremental tools re-test only changed functions; a change outside source
    (fixtures, config) leaves old results. Clear the cache when inputs outside the mutated code
    change.

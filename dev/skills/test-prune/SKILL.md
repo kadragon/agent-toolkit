@@ -8,7 +8,7 @@ description: >-
   "테스트 정리", "의미 없는 테스트 삭제". Reports surviving mutants as gaps
   instead of writing new tests. NOT for a failing test or unknown bug →
   task-debug; NOT for reviewing a diff → code-review.
-version: 2.0.0
+version: 3.0.0
 ---
 
 # Test Prune
@@ -49,16 +49,10 @@ unreachable mutants (Step 4); every removal in this skill must leave it unchange
 
 ## Step 1 — Map where the count comes from
 
-Export per-file test counts in machine-readable form and sort descending:
-
-| Runner | Command |
-|---|---|
-| vitest | `vitest run --reporter=json --outputFile=<scratch>/counts.json` |
-| jest | `jest --json --outputFile=<scratch>/counts.json` |
-| pytest | `pytest --collect-only -q` (group the node ids by file) |
-| go | `go test -json ./...` — count `pass`/`fail` events per `Test`, including `t.Run` subtests (`-list` shows top-level functions only) |
-
-Look for runner flags in the repo's own config before assuming these. For every parametrized
+Export per-file test counts in machine-readable form (the runner's JSON reporter or
+collect-only listing, per the repo's own config) and sort descending. For Go, count
+`go test -json ./...` `pass`/`fail` events per `Test`, including `t.Run` subtests — `-list`
+shows top-level functions only. For every parametrized
 block (`it.each`, `test.each`, `@pytest.mark.parametrize`, table tests) record **generated cases**
 and **distinct input classes** — a key × locale matrix that generates 400 cases may check two
 behaviors. Data-driven volume is counted by what it checks, not by what it generates.
@@ -87,26 +81,21 @@ nothing it did not read.
 
 ## Step 3 — Measure the kill set
 
-Read `references/mutation-proof.md` before the first run — it holds tool setup, sampling, and the
-traps that produced false numbers in practice. In order:
+Read `references/mutation-proof.md` before the first run — it owns tool setup, calibration,
+sampling rates, the per-mutant run (green baseline, timeouts) and the traps that produced false
+numbers in practice. In order:
 
-1. **Calibrate.** In the copy, inject one mutant that must be killed and one that must survive
-   (an equivalent mutant on covered code, or one in dead code — where the tool then reports its
-   no-coverage status, e.g. Stryker `NoCoverage`, PIT `NO_COVERAGE`, count that as the survive
-   outcome). Proceed only if the tool tells the two apart without a config change.
-2. **Generate and sample.** Use the repo's mutation tool (Stryker, mutmut, PIT, cargo-mutants…).
-   On a large suite, sample per file (about 4%, minimum 3, fixed random seed recorded). Add, for
-   every candidate, at least 3 mutants in the code that candidate claims to cover.
-3. **Run each mutant** against the related tests only, with a **green baseline** confirmed first:
+1. **Calibrate** — one mutant that must be killed, one that must survive; proceed only if the
+   tool tells the two apart without a config change.
+2. **Generate and sample** with the repo's mutation tool (Stryker, mutmut, PIT, cargo-mutants…),
+   plus at least 3 targeted mutants in the code each candidate claims to cover.
+3. **Run each mutant** against the related tests and record one outcome:
 
    | Outcome | Meaning |
    |---|---|
    | KILLED | an assertion failed |
    | SURVIVED | all related tests passed |
    | INVALID | compile error, import error, crash before any assertion, or unreviewed timeout — excluded |
-
-   A timeout is reviewed as KILLED only when the test asserts that the code does not block or
-   hang; any other timeout stays INVALID.
 
 4. **Record the kill matrix** — each mutant → the tests that killed it. Use the tool's per-test
    output only when it lists every killing test, not just the first; otherwise rerun with the
@@ -179,8 +168,6 @@ left with no tests; some runners fail on an empty suite.
 2. **Run the full suite at least 3 times** (5 when tests use real timers, concurrency, or
    network) — all green.
 3. **Before/after numbers** — test count, distinct checks, runtime.
-4. When another agent did Steps 4–5, a reviewer that took no part checks: no assertion weakened,
-   every title matches its body, no new flakiness from real timers.
 
 **Done:** every mutant in U re-killed, every repeated full run green, numbers recorded.
 

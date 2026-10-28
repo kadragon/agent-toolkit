@@ -100,47 +100,15 @@ separately from trigger ranking and unit tests; timing/token savings require mea
 
 ## Sprint Contract (Pre-Implementation Agreement)
 
-Before any implementation cycle, agree on "done":
-
-```markdown
-### Sprint Contract: {feature/fix name}
-
-**Tag:** {[FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]}
-**Scope:** {specific files or skills to modify}
-**Acceptance criteria:**
-- [ ] {criterion 1 — concrete} → {test, command, or observation that proves it}
-- [ ] {criterion 2} → {check}
-**Out of scope:** {explicit exclusions}
-**Lint/test command:** {command to run to verify}
-```
-
-For new or substantially rewritten skills, append `Skill slots:` after the contract only
-when extraction was used. Carry all seven slots verbatim from the resolved summary, including
-source paths and explicit N/A values: Triggers, Inputs, Steps, Decision rules,
-Done / verification, Exceptions, Toolbox. Runtime checks and branches stay in those slots;
-acceptance criteria separately verify that the authored skill implements them. Ordinary
-development contracts omit this block.
-
-Reuse approved criteria before coding; no separate evaluator approval is required. The evaluator
-grades against this contract. Approval rules live in the shared code cycle.
+The template, its fields (the ones `cycle_state.py` parses), the `[FIX]` reproduction criterion,
+the `[REFACTOR]` behavior pin and approval all live in
+`dev/skills/task-next/references/cycle.md` → *Sprint Contract*; the commit-type rules in
+`docs/conventions.md`. The evaluator grades against that contract.
 
 **Standing checks are inherited, not restated.** Every contract inherits the floor in
 `.claude/agents/qa-verifier.md` → `## Checks (always run)`. Do not copy those gates into acceptance
 criteria — criteria state what is specific to *this* change, and a second copy of the floor drifts
 from the first.
-
-**`[FIX]` requires a reproduction criterion.** When the tag is `[FIX]`, acceptance criteria must
-include one naming the test that fails before the fix and passes after — that is what makes the
-reproduction gradable rather than asserted. The **Tag** field is what carries this to the verifier:
-without it a `[FIX]` contract that silently omits the criterion is indistinguishable from a
-well-formed non-`[FIX]` one, and the omission is exactly what needs detecting. `docs/conventions.md` (the `[FIX]` row of the
-commit-type table) is the owning rule.
-
-**`[REFACTOR]` requires a behavior pin.** When the tag is `[REFACTOR]`, acceptance criteria must
-include one naming the tests that hold the touched behavior, run green before the first structural
-edit. Where the area has no such test, the criterion names a characterization test written first.
-The lint/test command alone is not a pin: a refactor over untested code passes it while behavior
-changes (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/refactoring.md` step 1).
 
 ## Harness Component Assessment
 

@@ -56,11 +56,9 @@ Git effects have a separate boundary: `git-authorization.md`.
 The Tag is what the reviewer grades a `[FIX]` reproduction criterion or a `[REFACTOR]` behavior
 pin against — write it in. A `[REFACTOR]` contract names the tests that hold the touched behavior,
 green before the first structural edit (a characterization test written first where none exist).
-When the resolved skill-authoring summary includes `Skill slots:`, append its entire seven-slot
-block verbatim to the contract and archive, including sources and explicit N/A values. For
-a queued skill-authoring item, read the cited spec/summary and recover that block before
-implementation. Keep runtime rules in the slots and make acceptance criteria check that the
-authored skill implements them. With no extraction summary, omit the block.
+A skill-authoring summary's `Skill slots:` block rides along per
+`../../task-grill/references/skill-extraction.md` → *Carrying the slots*; for a queued item,
+recover it from the cited spec/summary before implementation.
 `cycle_state.py save` refuses a criterion with no `→ <check>`. When the check is a test and test
 infrastructure exists, write it first and watch it fail before implementing — for `[FEAT]` as
 well as `[FIX]`, whose contract names the test that fails before and passes after. A multi-item

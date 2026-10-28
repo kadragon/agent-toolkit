@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.0.1
+version: 4.0.2
 ---
 
 # Capture Learnings — session retrospective
@@ -60,7 +60,8 @@ Not for cross-project audits, unused-skill cleanup, or building a named asset �
    **Skill-authoring handoff.** For a confirmed new skill or substantial rewrite outside the
    review-cycle heavy-work deferral below, resolve unsettled extraction slots by calling the
    Skill tool with "dev:task-grill", then call the Skill tool with "skill-creator" carrying
-   the four-field summary and entire `Skill slots:` block verbatim. Reuse already resolved
+   the four-field summary and its `Skill slots:` block
+   (`../task-grill/references/skill-extraction.md` → *Carrying the slots*). Reuse already resolved
    slots from the conversation/repo; a complete summary goes directly to the creator.
    Small wording or trigger fixes use the existing creator brief without extraction.
 
