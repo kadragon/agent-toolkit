@@ -62,6 +62,19 @@ import shlex
 import subprocess
 import sys
 
+# ---- SECTION MAP ----
+# This file is too large to read whole. Find a function with `grep -n '^def <name>'` and
+# read only its range. Module constants (regexes, character classes) sit just above the
+# functions that use them. The names below are checked against the real top-level defs by
+# test_guard.py.
+#   shell words and tokens: _strip_expansions, _command_start, _function_nesting, _ansi_c, _skip_group, _skip_backtick, _expansion_end, _double_quoted, _words, _tokens, _shlex_raws, _raw_tokens
+#   character classifier (_scan_full is the core per-character loop): _tick_text, _scan, _scan_full, _strip_comments, _has_expandable_subst
+#   segment splitting: _operator_at, _split_segments, _split_full
+#   commit detection and arguments: _is_git_commit, _git_cwd, _parse_commit_args, _commit_segments
+#   branch guard inputs: _current_branch, _marker_present
+#   verdicts and entry points: _block, main, precommit_check, _cli_precommit
+#   inline self-test for --test (the last ~740 lines; skip unless editing it): _test
+
 ALLOW_MAIN_MARKER = "<!-- commit-guard: allow-main -->"
 TYPE_PATTERN = re.compile(r"^\[(FEAT|REFACTOR|FIX|TEST|CONSTRAINT|DOCS|HARNESS|PLAN)\] ")
 

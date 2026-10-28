@@ -375,6 +375,34 @@ check(
     run_hook("# note\ngit commit -m '[FEAT] y'", branch="main") == 2,
 )
 
+
+# The SECTION MAP comment names exactly guard.py's top-level functions. Agents grep the
+# map, then read only the range they need; a def the map omits (or a stale name it keeps)
+# sends them back to reading the whole file.
+def _section_map_names():
+    import ast
+
+    src = open(os.path.join(HERE, "guard.py"), encoding="utf-8").read()
+    defs = {n.name for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
+    lines = src.splitlines()
+    if "# ---- SECTION MAP ----" not in lines:
+        return defs, None
+    mapped = set()
+    for line in lines[lines.index("# ---- SECTION MAP ----") + 1:]:
+        if not line.startswith("#"):
+            break
+        if line.startswith("#   ") and ":" in line:
+            mapped |= {n.strip() for n in line.split(":", 1)[1].split(",") if n.strip()}
+    return defs, mapped
+
+
+_defs, _mapped = _section_map_names()
+check("section map block present", _mapped is not None)
+check(f"section map names every top-level def (missing: {sorted(_defs - (_mapped or set()))})",
+      _mapped is not None and _defs <= _mapped)
+check(f"section map names no stale def (stale: {sorted((_mapped or set()) - _defs)})",
+      _mapped is not None and _mapped <= _defs)
+
 print()
 if fails:
     print(f"{len(fails)} FAILED: {fails}")
