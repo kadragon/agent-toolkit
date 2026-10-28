@@ -11,6 +11,21 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Harness — skill diet (over-engineering / over-instruction for Claude 5)
+
+Source: `docs/design/skill-diet-audit.md`. Removal only — no new gates, telemetry, or
+rationale prose. Decisions resolved 2026-10-28: D1 keep PR #277 panel default; D2 cut harness-init Step 7b
+to one line and drop its validator grep.
+
+- [ ] **skill-diet-harness-init** — Slice 1: cut `enforcement-template.md` to Layer 0 + ladder + signaling; delete `handoff-template.md`, *Context Anxiety* / *Continuous vs Sprint* / Agent Teams leftovers, `power-user-settings.md` except *Auto-memory*; one owner for prune-backlog ownership, size band, precedence hedge, edit filter; fix false `maintenance.md` D-2; collapse generic template catalogs; align `tasks-template.md` / `backlog-template.md` to what `cycle.md` writes; reword stale `validate-harness.sh` §11 (~1,300 lines)
+- [ ] **skill-diet-review-cycle** — Slice 2: `ci-failure-handling.md` merge section → pointer; drop script-description and evidence prose in `late-source-reclaim.md` / `review-sources.md` / `risk-routing.md`; preflight `<from Setup>` placeholder; one copy of destructive-git guard / never-finish-silently / CWD reset in task-next; hand-off and `--from`/`--auto` rules to their owners; `docs/workflows.md` drop *Context Anxiety*, repoint Sprint Contract template, collapse `code` steps; fix `qa-verifier` `mods/` gap, `implementer` / `explorer` threshold conflicts (~230 lines)
+- [ ] **skill-diet-hwpx** — Slice 3: delete Rules 7/10/11/12/13/20/23; collapse WF1 lineseg, Rule 24 CLI, WF4 validation; guard once; resolve `.hwpx_work` convention; fix 18 dead script names; delete deprecated python-hwpx API sections; trim `scripts-guide.md` compare internals + `--help` echoes; lineseg explanation once (~235 lines)
+- [ ] **skill-diet-task-planning** — Slice 4: task-debug to ~150 (keep contract + stop rules); Sprint Contract single source in `cycle.md` (eval-criteria.md, grill, tickets, spec repoint; `[FIX]`/`[REFACTOR]` rule once); skill-slots carry owned by `skill-extraction.md`; task-tickets Wayfinder ×3 / version-bump note / expand–contract trim; test-prune dedupe vs `mutation-proof.md`, drop Step 6.4 (~130 lines)
+- [ ] **skill-diet-prod-and-meta** — Slice 5: persona-debate `debate-method.md` to why + template; repo-quiz `state-reference.md` mechanics; kr-style loop one line in gongmun Step 4 / report G2, dead `$LINT` block; harness-capture repo-specific text + `routing.md`; harness-curate 2nd/3rd copies; task-grill / task-spec triple copies (trigger check before touching grill description); `skill-evaluator` / `qa-verifier` no-ops (~250 lines)
+- [ ] **kr_audit P1 regex misses `분석되어집니다`** — `되어[지졌진]` does not match `집`; its own documented example passes with exit 0. Add the example as a test fixture, fix the class
+- [ ] **lint_report.py ImportError without defusedxml** — module-level import breaks text-only `--gongmun` lint; lazy-import or declare the dependency in report-draft / gongmun-draft
+- [ ] **`docs/architecture.md` "harness-init/references/ is internal" is stale** — task-grill, qa-verifier, `backlog_candidates.py`, security-overview already reference it; rewrite the rule to describe the real boundary
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
