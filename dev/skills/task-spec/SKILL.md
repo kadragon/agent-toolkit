@@ -7,7 +7,7 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.2.2
+version: 1.2.3
 ---
 
 # To Spec
@@ -15,9 +15,7 @@ version: 1.2.2
 > Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
 
 Synthesizes an approved scope into a spec document. This skill does **not** ask the user
-questions — if scope is still ambiguous when this skill is invoked, call the Skill tool with
-"dev:task-grill" first (or let the caller, e.g. `task-new`, do so) and only
-invoke `task-spec` once the open questions are resolved.
+questions — open questions go to `dev:task-grill` (Step 2).
 
 ## When to use
 
@@ -32,12 +30,8 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 ## Flow
 
 1. **Determine the slug.** Derive a short kebab-case slug from the feature/change name
-   (matches the branch-naming convention in `docs/conventions.md`).
-   ```bash
-   SLUG="<short-kebab-case-slug derived from the feature name>"
-   DESIGN_DIR="docs/design"
-   [[ -d "$DESIGN_DIR" ]] || mkdir -p "$DESIGN_DIR"
-   ```
+   (matches the branch-naming convention in `docs/conventions.md`); create `docs/design/` if
+   it is missing.
 2. **Synthesize, do not interview.** Gather everything already known: the conversation so
    far, any output already resolved by a Skill tool call with "dev:task-grill", and relevant
    existing code/docs. If a genuine open question surfaces during synthesis, stop and call the
@@ -99,7 +93,7 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 
 4. **Review with user.** Present the written spec (or a summary + file path) and wait for
    explicit approval before any downstream skill (`task-tickets`, or direct implementation)
-   proceeds. This mirrors `plan` workflow step 2 — do not skip it.
+   proceeds (`plan` workflow step 2).
 5. **Hand off.** Once approved, the caller (typically `task-new`) proceeds by calling the Skill
    tool with "dev:task-tickets" to break the spec into backlog items.
 
@@ -107,4 +101,3 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
 
 - Do not write production code from this skill.
 - Write only `docs/design/{slug}.md`.
-- Do not skip user review of the written spec.

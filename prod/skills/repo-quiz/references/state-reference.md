@@ -2,15 +2,7 @@
 
 Moved out of SKILL.md. `$Q` below is `<dir-of-the-repo-quiz-SKILL.md>/scripts/quiz_state.py`; re-capture it at the top of every shell block (capture-before-use), and always pass `--repo`.
 
-## Commands
-
-| Command | Use |
-|---------|-----|
-| `init` | First run: creates `.repo-quiz/` and adds it to `.gitignore`. Idempotent. |
-| `status` | Dashboard JSON: xp, level, xp_to_next, streak, freezes, total_concepts, due_count, due[], `config` (persona, daily_goal), `achievements`, `scheduler` (`fsrs`\|`sm2`), `fsrs_available`, `fsrs_notice_seen`. |
-| `due --count N` | Concepts due for review today, most-overdue first (JSON). |
-| `record --concept SLUG --correct true\|false [--grade again\|hard\|good\|easy] [--type TYPE] [--title T] [--note N] [--session ID]` | Apply one answer: schedule + XP + streak + achievements + logs. Prints the new schedule/score. |
-| `config [--get] [--set-persona junior\|mid\|senior] [--set-daily-goal N] [--seen-fsrs-notice]` | Read or update persona/daily goal, or mark the one-time FSRS install notice as shown. With no flags, prints current config. |
+## Flags
 
 `--type` is the question-type slug (SKILL.md § "Question types"); defaults to `mc` if omitted. `--grade`
 overrides the correct/wrong → schedule-quality mapping for self-graded free-recall answers
@@ -26,9 +18,7 @@ progress, not a team artifact):
 
 ## Recording examples
 
-On a **wrong** answer, pass a `--note` that will land in `mistakes.md`: state the correct
-answer, *why*, and a file pointer — that note is what the user rereads later, so make it
-teach.
+Wrong answer, with a teaching `--note`:
 
 ```sh
 Q=<dir-of-the-repo-quiz-SKILL.md>/scripts/quiz_state.py
@@ -39,8 +29,7 @@ python3 "$Q" --repo <repo-root> record \
   --session <round-id>
 ```
 
-For a self-graded free-recall question, pass the user's self-rating as `--grade` (still pass
-`--correct` too — `true` unless the user says they got it flatly wrong):
+Self-graded free-recall:
 
 ```sh
 Q=<dir-of-the-repo-quiz-SKILL.md>/scripts/quiz_state.py
@@ -60,16 +49,8 @@ set it once instead of re-asking every round.
 
 ## Gamification
 
-- **Type-weighted XP.** Correct answers pay more for higher-demand types, so grinding easy MC
-  yields little: `mc`=1.0×, `fill-blank`=1.2×, `code-trace`/`bug-hunt`/`why`=1.5×,
-  `free-recall`=2.0× (× 10 XP, rounded). Wrong answers always pay a flat 3 XP
-  (participation credit). Level = 1 + xp // 100. (Duolingo gamification case study.)
-- **Streak-freeze.** The user starts with 1 freeze. Missing exactly one day auto-consumes a
-  freeze and preserves the streak instead of resetting it; missing more than one day resets it
-  regardless. `status.freezes` shows the remaining count.
-- **Achievements.** Modest, difficulty-tiered milestones tracked in `status.achievements`
-  (e.g. `first-correct`, `first-bug-hunt`, `streak-3`/`streak-7`/`streak-30`). Call out a new
-  one in the round recap — that's the whole point of tracking it.
+XP (type-weighted), level, streak-freeze and achievements are computed by the script; read
+them from `status` and call out a newly unlocked achievement in the round recap.
 
 ## Explanation example
 

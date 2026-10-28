@@ -5,7 +5,7 @@ description: >-
   message, product, pricing, or policy — outputs consensus, disagreements,
   minority report. Also fits "how would ordinary people react". NOT for real
   survey/interview analysis or fictional dialogue. Korean output.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Persona Debate
@@ -14,8 +14,8 @@ Surface the **spread** of how ordinary Koreans would argue about the user's
 question — not one answer. Sample real personas, debate in rounds built to
 defeat false consensus, synthesize honestly.
 
-`references/debate-method.md` — round structure, anti-sycophancy/anti-caricature
-levers, output template, the why. Read it before running.
+`references/debate-method.md` — the why behind each step and the output template.
+Read it before running.
 `references/dataset.md` — fields + exact Korean filter literals.
 All deterministic steps (sampling, depth→plan, roster) are in this skill's
 `scripts/sample_personas.py` (no project install, no local dataset — queries HF
@@ -47,7 +47,7 @@ Returns a JSON array. Check stderr: if matched-rows < N, the filter is too narro
 
 ### 3. Round 0 — independent openings (parallel subagents)
 Spawn the **`prod:persona-actor`** agent (tool-less → far fewer per-spawn tokens; falls back to `general-purpose` if unavailable), one **per persona, same turn, isolated** — each sees ONLY its own persona + the question, never the others (seeing others first manufactures consensus). For each spawn:
-- **Frame the role-play cleanly** (see debate-method.md) — `아래 인물이 되어 1인칭으로 답해줘…`. Do NOT tell it to "ignore inherited instructions"; that phrasing makes haiku refuse.
+- **Frame the role-play cleanly** — `아래 인물이 되어 1인칭으로 답해줘. [페르소나]. [질문]. [출력 형식].` Do NOT tell it to "ignore inherited instructions"; measured: that phrasing reads as a jailbreak and makes haiku refuse.
 - **Trim the persona to the topic** (use `--fields`, or drop irrelevant narrative fields) to cut per-spawn tokens.
 - Set `model` to the plan's `opening_model`.
 Ask for: position, the 1–2 reasons that move *this* person (rooted in their life), confidence (low/med/high).

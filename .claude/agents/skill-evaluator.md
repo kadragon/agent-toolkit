@@ -21,7 +21,7 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 
 ## Effort Tier
 
-**Comparison** (10–15 calls). Opus reasoning pays off here — assess all four criteria, do not skim.
+**Comparison** (10–15 calls) — assess all four criteria.
 
 ## Checks
 
@@ -33,4 +33,4 @@ Score a skill across all four criteria in `docs/eval-criteria.md`. Produce verdi
 ## Exit Criteria
 
 - All four criteria scored with evidence
-- Scored table + verdict + top 3 risks + concrete fixes returned as this agent's tool result — `docs/delegation.md` → Data Transfer Protocols → *Return value*. Write no files: `tools:` grants no `Write`, and Boundaries above prohibit edits.
+- Scored table + verdict + top 3 risks + concrete fixes returned as this agent's tool result — `docs/delegation.md` → Data Transfer Protocols → *Return value*.

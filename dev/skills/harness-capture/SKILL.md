@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.0.2
+version: 4.0.3
 ---
 
 # Capture Learnings — session retrospective
@@ -47,9 +47,8 @@ Not for cross-project audits, unused-skill cleanup, or building a named asset �
    | Workflow misunderstanding | `skill-creator` improvement to that skill | the `description:` line |
    | Lesson true of every asset of a kind | the owning cross-cutting doc — `docs/writing-for-agents.md` for agent-facing writing, `docs/conventions.md` for shell/commit rules | one doc, not one copy per skill |
 
-   **Check the target's siblings before routing to one of them.** This repo has families — the
-   `task-*` cycle skills, the `harness-*` skills, the `scripts/ci/check_*.py` checkers, the
-   hooks under `dev/hooks/`. Fast test: could the sentence survive having the asset's name
+   **Check the target's siblings before routing to one of them.** Assets come in families — a
+   cycle of skills, a set of CI checkers, a hooks directory. Fast test: could the sentence survive having the asset's name
    removed? If yes, widen the delta to every sibling it fits or say in one line why it does not;
    if it fits them all, it is the cross-cutting row above, not a per-skill edit.
 
@@ -141,7 +140,7 @@ repairs the index.
 
 ## Additional Resources
 
-- **`references/routing.md`** — the sibling/cross-cutting and deferral rules in full, and the
+- **`references/routing.md`** — two edge cases of the sibling and deferral rules, and the
   CC BY 4.0 attribution for the parts of this skill adapted from Task Observer.
 - **`hooks/memory-guard/guard.py`** — the `PreToolUse(Write|Edit)` gate behind step 4: blocks a
   memory write carrying a secret pattern, a control/bidi/zero-width character, an over-cap body,

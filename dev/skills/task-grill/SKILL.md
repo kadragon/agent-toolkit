@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.3.5
+version: 1.3.6
 ---
 
 # Grill
@@ -22,19 +22,15 @@ whichever document is being built next: a Sprint Contract
 
 Use this skill — whether fired directly, or by `task-new`/`task-spec` calling the Skill tool
 with "dev:task-grill" — only when there is **genuine, non-trivial ambiguity** — not to rubber-stamp already-clear scope.
-If the answer is discoverable by reading a file, running a command, or checking a manifest,
-look it up instead of asking.
 
 ## Rules
 
-1. **One question at a time.** Never batch multiple open questions into a single message —
-   the user can't hold five decisions in flight at once.
+1. **One question at a time.** Never batch multiple open questions into a single message.
 2. **Every question carries a recommended answer + rationale.** Format:
    ```
    Q: <question>
    Recommended: <answer> — <one-line rationale>
    ```
-   This lets the user answer with a single "yes" / "그렇게 해" instead of composing from scratch.
 3. **Look it up before asking.** If a fact is discoverable from the repo (code, config,
    `git log`, existing docs) or environment (installed tools, running services), read it —
    do not ask the user to restate something you can verify yourself. An empirical fork —

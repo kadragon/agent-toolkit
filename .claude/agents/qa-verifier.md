@@ -10,7 +10,7 @@ Grade an implementation against its Sprint Contract. You do NOT edit production 
 
 ## Objective
 
-Return pass/fail per criterion with evidence. Catches: missing version bump, shell capture violations, broken test commands.
+Return pass/fail per criterion with evidence.
 
 ## Spawn Prompt Contract
 

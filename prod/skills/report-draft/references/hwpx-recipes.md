@@ -1,16 +1,10 @@
 # 보고서 hwpx 편집 레시피
 
-prod:hwpx 스킬의 Workflow 2(수정)·5(참조 기반 생성) 위에서 쓰는 보고서 전용 조각이다. 일반 규칙(lineseg 제거, validate, 한글 열기 확인)은 prod:hwpx를 따른다. Call the Skill tool with "prod:hwpx" for document operations below. Resolve its scripts from the loaded hwpx SKILL.md; report-draft makes no assumption about its installation directory.
+prod:hwpx 스킬의 Workflow 2(수정)·5(참조 기반 생성) 위에서 쓰는 보고서 전용 조각이다. 일반 규칙(lineseg 제거, validate, 한글 열기 확인)은 prod:hwpx를 따른다. Call the Skill tool with "prod:hwpx" for every document operation below; resolve its scripts from the loaded hwpx SKILL.md, not from an assumed install directory.
 
 ## 1. 수정 대상 파악
 
-```bash
-SKILL_DIR="<absolute parent directory of the loaded report-draft SKILL.md>"
-LINT="$SKILL_DIR/scripts/lint_report.py"
-[[ -r "$LINT" ]] || { echo "Bundled report linter unavailable: $LINT" >&2; exit 1; }
-```
-
-Call the Skill tool with "prod:hwpx" to analyze the original via Workflow 5 (`build.py analyze`).
+prod:hwpx Workflow 5(`build.py analyze`)로 원본을 분석한다.
 
 - 본문 문단은 `" ○ "` 런(charPr 보통체) + 내용 런 여러 개로 나뉜다. 한 줄에 맞추려고 자간·장평을 줄인 charPr이 섞여 있다(analyze 출력의 `spacing=`·`ratio=`).
 - 장 제목(Ⅰ~Ⅴ)은 1행 3열 표다. 표 안 텍스트는 건드리지 않는다.
@@ -49,9 +43,9 @@ s = s[:i] + P.format(pp="52", runs=R(39, "□ 현황")) + s[i:]
 
 ## 5. 저장 순서
 
-1. Call the Skill tool with "prod:hwpx" for Workflow 2: copy the original to scratch, unpack, apply the approved edits with replacement assertions, and strip stale lineseg caches with `table.py strip-lineseg` before packing.
-2. Within the hwpx workflow, pack and run Workflow 4 validation with the original as `--baseline`; require VALID.
-3. Run report-draft lint on the result; resolve the linter again in this shell block and require exit 0:
+1. prod:hwpx Workflow 2: copy the original to scratch, unpack, apply the approved edits with replacement assertions, and strip stale lineseg caches with `table.py strip-lineseg` before packing.
+2. Within that workflow, pack and run prod:hwpx Workflow 4 validation with the original as `--baseline`; require VALID.
+3. Run report-draft lint on the result; resolve the linter in this shell block and require exit 0:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded report-draft SKILL.md>"
