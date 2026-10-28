@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] prod + meta diet: one owner per rule in 11 skills and 2 agent roles (dev v4.11.31, prod v3.2.14) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] task-planning diet: one Sprint Contract + Skill slots owner; 3 skills trimmed (dev v4.11.30) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] review-cycle diet: one owner for panel, brief and merge rules; agent role drift fixed (dev v4.11.29) (2026-10-28) → docs/design/skill-diet-audit.md
 - [done] harness-init diet: core-layer enforcement, self-negating refs cut, one owner per rule (dev v4.11.28) (2026-10-28) → docs/design/skill-diet-audit.md

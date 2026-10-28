@@ -89,7 +89,7 @@ thumb — restated by the user or rediscovered by the agent in **≥2** sessions
 in the auto-memory store is the same finding from the other side: it is invisible to Codex and
 every `AGENTS.md` reader.
 
-**Classify first** (*Classify before routing*, below): a constraint an exit code can decide is
+**Classify first** (SKILL.md Step 3): a constraint an exit code can decide is
 a check, not a doc. Only a plain fact, or a judgement the check cannot carry, becomes prose.
 
 **Brief:** the fact quoted with its sessions (or the memory file and line), the target
@@ -115,28 +115,6 @@ leading word, one trigger per branch.
 reached. Acceptance: re-run one of the sessions' opening prompts (`--session` on the fresh
 transcript) and the call shrinks or the hunt shortens.
 
-## Classify before routing
-
-A rule or constraint surfaced by Signals 3 or 5 is sorted before it is written anywhere:
-
-| Kind | Test | Route |
-|------|------|-------|
-| Mechanical | an exit code can decide it — a fixed pattern, a banned API, an import shape, a file location | a hook, lint rule, or CI job — whichever the repo's guardrail makes cheapest |
-| Judgement | needs the diff and taste — cross-file consistency, "matches the surrounding style" | the review-time asset: a `code-review` rule or the reviewer agent's brief |
-| Pre-context fact | the agent must hold it before anything asks | one `CLAUDE.md` / `AGENTS.md` line — the highest bar, paid every turn |
-
-The reviewer receives a diff and carries the least context pressure, so judgement rules go
-there rather than to the implementer's always-loaded files.
-
-## Thresholds
-
-| Signal | Threshold |
-|--------|-----------|
-| 1 New asset | ≥3 sessions |
-| 2 Triggering miss | ≥2 sessions |
-| 3 Underperforming / over-firing | ≥2 sessions, or ≥2 same-cause verifier failures |
-| 4 Unused | ≈0 lifetime, both platforms, adversarial check passed |
-| 5 Domain knowledge | ≥2 sessions, or 1 repo-scoped memory |
-| 6 Tool cost | ≥2 sessions, same call shape or same churn target |
+## Near-misses
 
 Near-misses (one short of the threshold) go on the report's `Watch:` line, never silently dropped.

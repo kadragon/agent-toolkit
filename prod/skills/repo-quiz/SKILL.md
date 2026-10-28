@@ -5,7 +5,7 @@ description: >-
   conventions, data flow, gotchas — plus the wrong-answer log and XP/streak
   progress persisted in `.repo-quiz/`. NOT for writing docs or an onboarding
   guide, NOT for general programming trivia.
-version: 1.1.4
+version: 1.1.5
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 
@@ -16,24 +16,13 @@ from the *actual code*, and their progress — what they've been asked, what the
 and a running XP/streak/achievements — persists in `.repo-quiz/` so understanding compounds
 over sessions instead of resetting every time.
 
-The point is **retrieval practice against ground truth**: every question must be answerable
-by reading files in this repo, and every answer is checked against what the code actually
-says — never against your own assumptions. A quiz that rewards plausible-but-wrong answers
-teaches the wrong thing, so grounding each question in a file you've read is the whole game.
+The point is **retrieval practice against ground truth** — see the grounding rule in step 2.
 
 ## Language
 
-Ask in **Korean**. Everything you present to the user — question stems, `mc` options,
-free-recall prompts, the reveal, and the post-answer explanation — is user-facing text, so
-write it in Korean. Keep code, identifiers, file paths, and quoted snippets verbatim in their
-original language (English): a `fill-blank` cloze or a `code-trace` still shows the real code
-untranslated; only the surrounding prose is Korean. Internal state stays English — the
-`--concept` concept slug, the `--type` question-type slug (`mc`/`code-trace`/…, never a concept
-slug), and the other `record`/`config` flag values are never shown to the user. The one
-exception is the human-readable text you pass to `--title` and `--note`: it lands in
-`mistakes.md`, which the user rereads, so write it in Korean too (keeping any code, paths, and
-identifiers inside it verbatim). The illustrative examples below are written in Korean for this
-reason; mirror that.
+Ask in **Korean** — every question, option, reveal, explanation, and the `--title`/`--note`
+text that lands in `mistakes.md`. Code, identifiers, paths and quoted snippets stay verbatim;
+concept and type slugs and other flag values stay English and are never shown.
 
 Design credits (CodebaseQA, py-fsrs, Duolingo, Understand-Anything, retrieval-practice literature): `references/credits.md`.
 
@@ -57,7 +46,7 @@ Never do the date math or scheduler arithmetic yourself — call the script (`--
 self-checks it). FSRS is used when `py-fsrs` is importable; otherwise (or on a review error)
 the script falls back to SM-2 for that review.
 
-Subcommands: `init` (first run, idempotent) · `status` (dashboard JSON incl. due[], config, achievements, scheduler, fsrs flags) · `due --count N` · `record --concept SLUG --correct true|false [--grade again|hard|good|easy] [--type TYPE] [--title T] [--note N] [--session ID]` · `config [--get] [--set-persona junior|mid|senior] [--set-daily-goal N] [--seen-fsrs-notice]`. Full table, flag semantics, state files under `.repo-quiz/` (gitignored, personal progress), recording examples, difficulty, and gamification rules: `references/state-reference.md`.
+Subcommands: `init` (first run, idempotent) · `status` (dashboard JSON incl. due[], config, achievements, scheduler, fsrs flags) · `due --count N` · `record --concept SLUG --correct true|false [--grade again|hard|good|easy] [--type TYPE] [--title T] [--note N] [--session ID]` · `config [--get] [--set-persona junior|mid|senior] [--set-daily-goal N] [--seen-fsrs-notice]` (`--help` for the rest). `--grade` semantics, state files under `.repo-quiz/` (gitignored, personal progress), recording examples and difficulty: `references/state-reference.md`.
 
 ### Concepts and slugs
 
@@ -77,7 +66,7 @@ by what the fact *is*, not by the wording of one question.
 Vary the type per question — mixing types (CodebaseQA) exercises different depths of
 understanding than multiple-choice alone, and free recall in particular produces stronger
 retention than recognition-based formats (retrieval-practice literature: the "testing
-effect"). Every type still requires the grounding rule below — no exceptions.
+effect").
 
 | Type (`--type`) | What it asks | When to use |
 |---|---|---|
@@ -208,10 +197,8 @@ teaching, so a right answer still adds something and a wrong one doesn't just st
    current tooling/practice handles the same problem. This is where a recent-trend or
    best-practice note belongs.
 
-Keep the tip **honest and separable** from the graded fact. If it's general knowledge rather
-than something this repo settles, mark it as such ("Broader context: …") so the user can tell
-repo-ground-truth from your added color — and if you're not sure a claim is current, say so
-rather than asserting it. One good pointer beats a paragraph of filler; don't pad.
+Label general knowledge "Broader context: …" so it stays separable from the graded fact, and
+say so when you are not sure a claim is current.
 
 Example spoken follow-up: `references/state-reference.md` § "Explanation example".
 
@@ -237,8 +224,7 @@ what schedules the concept to come back until it sticks.
 
 ## Guardrails
 
-- **Never invent facts.** If you haven't read the file that settles a question this session,
-  don't ask it. A quiz graded against a guess is worse than no quiz.
+- **Never invent facts** — the step 2 grounding rule has no exceptions.
 - **Stay in this repo — for the graded fact.** Questions and their correct answers are about
   the code at `<repo-root>`, not general trivia. The post-answer *widen-the-lens tip* may
   reach beyond the repo (industry practice, recent tooling/trends), but keep it clearly

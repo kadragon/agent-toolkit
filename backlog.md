@@ -11,14 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Harness — skill diet (over-engineering / over-instruction for Claude 5)
-
-Source: `docs/design/skill-diet-audit.md`. Removal only — no new gates, telemetry, or
-rationale prose. Decisions resolved 2026-10-28: D1 keep PR #277 panel default; D2 cut harness-init Step 7b
-to one line and drop its validator grep.
-
-- [ ] **skill-diet-prod-and-meta** — Slice 5: persona-debate `debate-method.md` to why + template; repo-quiz `state-reference.md` mechanics; kr-style loop one line in gongmun Step 4 / report G2, dead `$LINT` block; harness-capture repo-specific text + `routing.md`; harness-curate 2nd/3rd copies; task-grill / task-spec triple copies (trigger check before touching grill description); `skill-evaluator` / `qa-verifier` no-ops (~250 lines)
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
