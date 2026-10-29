@@ -687,7 +687,19 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
         elif not drifted:
             # Headings or plain bullets but not one checkbox: say so, or the caller falls back
             # to "no headings or items at all" — false about a file that has them.
-            msgs.append(f"{label}: no `- [ ]` item at all.")
+            unheaded = [t for t in bullets if first is None or t["line"] < first]
+            if label == "tasks.md":
+                # tasks.md is selected by h1 status, never by checkbox.
+                msgs.append("tasks.md: no h1 block with `status: open`.")
+            elif unheaded:
+                # Per-heading drift detection cannot see bullets no heading owns.
+                msgs.append(
+                    f"{label}: {len(unheaded)} prose bullet(s) sit above the first `#`–`###` "
+                    "heading and no `- [ ]` item exists — only checkbox lines are selectable, "
+                    "and a `####`-or-deeper line does not count as a heading."
+                )
+            else:
+                msgs.append(f"{label}: no `- [ ]` item at all.")
     return msgs
 
 
@@ -1813,6 +1825,25 @@ Nothing from this group is queued.
     _assert(
         out == ["No candidates found. Why:", "  - backlog.md: no `- [ ]` item at all."],
         "a backlog with headings but no checkbox says so, not 'no headings or items at all'",
+    )
+
+    # 8h: tasks.md is never selected by checkbox, so its empty-queue line names its own rule.
+    prose_sprint = "# Sprint: fix X\nstatus: active\n\nContract written as prose.\n"
+    out = zero_candidate_diagnosis(tokenize(prose_sprint), tokenize(""))
+    _assert(
+        out == ["No candidates found. Why:", "  - tasks.md: no h1 block with `status: open`."],
+        "tasks.md's empty-queue line names the h1 `status: open` rule, not checkboxes",
+    )
+
+    # 8i: prose bullets with no `#`–`###` heading above them (none at all, or `####` only) are
+    # drift too — `_prose_only_headings` judges per heading, so it never sees them.
+    unheaded_prose = "- loose prose ticket one\n#### TICKET-2\n- prose two\n"
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(unheaded_prose))
+    _assert(
+        len(out) == 2
+        and out[1].startswith("  - backlog.md: 2 prose bullet(s) sit above the first `#`–`###`")
+        and "`####`-or-deeper" in out[1],
+        "unheaded prose bullets get the drift explanation, not a bare 'no item' line",
     )
 
     # ---- Test 9: parked_items — the blockers an all-blocked stop has to report ----
