@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] backlog_candidates: headings-only backlog no longer diagnosed as having no headings (dev v4.11.34) (2026-10-29)
 - [done] task-next --parked clips item text to 140 chars, markers kept (dev v4.11.33) (2026-10-29)
 - [done] commit-guard: test-enforced SECTION MAP in guard.py for range reads (dev v4.11.32) (2026-10-28)
 - [done] prod + meta diet: one owner per rule in 11 skills and 2 agent roles (dev v4.11.31, prod v3.2.14) (2026-10-28) → docs/design/skill-diet-audit.md
