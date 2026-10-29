@@ -684,6 +684,10 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
             )
         elif boxes and not drifted:
             msgs.append(f"{label}: no open items (all `[x]`/`[>]`).")
+        elif not drifted:
+            # Headings or plain bullets but not one checkbox: say so, or the caller falls back
+            # to "no headings or items at all" — false about a file that has them.
+            msgs.append(f"{label}: no `- [ ]` item at all.")
     return msgs
 
 
@@ -1791,6 +1795,24 @@ status: open
     _assert(
         len(out) == 1 and "no headings or items at all" in out[0],
         "empty-in still yields one explanatory line, never an empty diagnosis",
+    )
+
+    # 8g: headings and Rejected bullets but not one checkbox — the queue is empty, but the
+    # file is not; "no headings or items at all" would be a false statement about it.
+    headings_no_boxes = """# Backlog
+
+## Harness
+
+Nothing from this group is queued.
+
+## Rejected — do not re-file
+
+- **gate X** — discarded by the user. Re-file only with a recorded bypass.
+"""
+    out = zero_candidate_diagnosis(tokenize(""), tokenize(headings_no_boxes))
+    _assert(
+        out == ["No candidates found. Why:", "  - backlog.md: no `- [ ]` item at all."],
+        "a backlog with headings but no checkbox says so, not 'no headings or items at all'",
     )
 
     # ---- Test 9: parked_items — the blockers an all-blocked stop has to report ----
