@@ -17,7 +17,8 @@ Usage:
                    --json, an array carrying each marker's kind and payload). The text is the
                    tokenizer's folded form — checkbox prefix dropped, wrapped lines joined,
                    comments and fences blanked — so open the line before editing the item; it is
-                   not a verbatim match string. tasks.md is not listed: its checkboxes are never
+                   not a verbatim match string. A body over 140 chars is clipped with `…` and its
+                   markers kept after it; --json carries the full text. tasks.md is not listed: its checkboxes are never
                    selectable, so nothing there is parked queue work. This is what an all-blocked
                    stop reports, so the user does not have to ask what the blockers are.
 
@@ -729,9 +730,32 @@ def parked_items(label: str, tokens: list[dict]) -> list[dict]:
     return out
 
 
+# A parked item's prose can run to several hundred chars, and the all-blocked stop needs the
+# blocker, not the prose: the plain-text line clips the body and keeps every marker. --json and
+# the line number still give the full item.
+PARKED_TEXT_WIDTH = 140
+
+
+def _clip_parked_text(text: str) -> str:
+    # Placeholder markers are prose quoting the syntax, so they stay in the body and clip with it.
+    markers: list[str] = []
+
+    def _lift(m: re.Match) -> str:
+        if m.group(1).lower() == "blocked by" and _is_placeholder_payload(m.group(2)):
+            return m.group(0)
+        markers.append(m.group(0))
+        return " "
+
+    body = " ".join(_BLOCK_MARKER_RE.sub(_lift, text).split())
+    if len(body) <= PARKED_TEXT_WIDTH:
+        return text
+    return " ".join([body[:PARKED_TEXT_WIDTH] + "…", *markers])
+
+
 def format_parked(items: list[dict]) -> list[str]:
     return [
-        f"{it['source']}:{it['line']} [{it['heading'] or 'no heading'}] {it['text']}" for it in items
+        f"{it['source']}:{it['line']} [{it['heading'] or 'no heading'}] {_clip_parked_text(it['text'])}"
+        for it in items
     ]
 
 
@@ -1882,6 +1906,31 @@ Nothing from this group is queued.
             "docs/backlog.md:4 [Auth] add login *(blocked by: 3-upstream-api)*",
         ],
         "the plain-text line carries the given source path, line, heading and item text",
+    )
+    long_body = "x" * 300
+    long_item = f"- [ ] {long_body} *(deferred: needs ops values)* *(blocked by: sink-lock)*\n"
+    long_got = parked_items("backlog.md", tokenize(long_item))
+    long_line = format_parked(long_got)[0]
+    _assert(
+        long_line
+        == f"backlog.md:1 [no heading] {'x' * PARKED_TEXT_WIDTH}… "
+        "*(deferred: needs ops values)* *(blocked by: sink-lock)*",
+        "a long item's body is clipped to PARKED_TEXT_WIDTH and every marker still follows it",
+    )
+    _assert(
+        long_got[0]["text"].startswith(long_body),
+        "--json keeps the full item text; only the plain-text line is clipped",
+    )
+    short_body_long_marker = f"short prose *(deferred: {'y' * 150})* tail"
+    _assert(
+        _clip_parked_text(short_body_long_marker) == short_body_long_marker,
+        "a body within the width is left verbatim, however long its markers run",
+    )
+    quoted = f"{'a ' * 40}quotes *(blocked by: <slug>)* syntax {'b ' * 60}*(deferred: x)*"
+    _assert(
+        _clip_parked_text(quoted).startswith(f"{'a ' * 40}quotes *(blocked by: <slug>)* syntax")
+        and _clip_parked_text(quoted).endswith("… *(deferred: x)*"),
+        "a placeholder marker stays in the body as prose; only real markers move after the clip",
     )
     _assert(
         got[2]["text"] == "wrapped item continues here *(deferred: needs ops values)* *(blocked by: sink-lock)*",
