@@ -17,7 +17,8 @@ Usage:
                    --json, an array carrying each marker's kind and payload). The text is the
                    tokenizer's folded form — checkbox prefix dropped, wrapped lines joined,
                    comments and fences blanked — so open the line before editing the item; it is
-                   not a verbatim match string. tasks.md is not listed: its checkboxes are never
+                   not a verbatim match string. A body over 140 chars is clipped with `…` and its
+                   markers kept after it; --json carries the full text. tasks.md is not listed: its checkboxes are never
                    selectable, so nothing there is parked queue work. This is what an all-blocked
                    stop reports, so the user does not have to ask what the blockers are.
 
@@ -713,9 +714,30 @@ def parked_items(label: str, tokens: list[dict]) -> list[dict]:
     return out
 
 
+# A parked item's prose can run to several hundred chars, and the all-blocked stop needs the
+# blocker, not the prose: the plain-text line clips the body and keeps every marker. --json and
+# the line number still give the full item.
+PARKED_TEXT_WIDTH = 140
+
+
+def _clip_parked_text(text: str) -> str:
+    if len(text) <= PARKED_TEXT_WIDTH:
+        return text
+    markers = [
+        m.group(0)
+        for m in _BLOCK_MARKER_RE.finditer(text)
+        if not (m.group(1).lower() == "blocked by" and _is_placeholder_payload(m.group(2)))
+    ]
+    body = " ".join(_BLOCK_MARKER_RE.sub(" ", text).split())
+    if len(body) > PARKED_TEXT_WIDTH:
+        body = body[:PARKED_TEXT_WIDTH] + "…"
+    return " ".join([body, *markers])
+
+
 def format_parked(items: list[dict]) -> list[str]:
     return [
-        f"{it['source']}:{it['line']} [{it['heading'] or 'no heading'}] {it['text']}" for it in items
+        f"{it['source']}:{it['line']} [{it['heading'] or 'no heading'}] {_clip_parked_text(it['text'])}"
+        for it in items
     ]
 
 
@@ -1829,6 +1851,20 @@ status: open
             "docs/backlog.md:4 [Auth] add login *(blocked by: 3-upstream-api)*",
         ],
         "the plain-text line carries the given source path, line, heading and item text",
+    )
+    long_body = "x" * 300
+    long_item = f"- [ ] {long_body} *(deferred: needs ops values)* *(blocked by: sink-lock)*\n"
+    long_got = parked_items("backlog.md", tokenize(long_item))
+    long_line = format_parked(long_got)[0]
+    _assert(
+        long_line
+        == f"backlog.md:1 [no heading] {'x' * PARKED_TEXT_WIDTH}… "
+        "*(deferred: needs ops values)* *(blocked by: sink-lock)*",
+        "a long item's body is clipped to PARKED_TEXT_WIDTH and every marker still follows it",
+    )
+    _assert(
+        long_got[0]["text"].startswith(long_body),
+        "--json keeps the full item text; only the plain-text line is clipped",
     )
     _assert(
         got[2]["text"] == "wrapped item continues here *(deferred: needs ops values)* *(blocked by: sink-lock)*",
