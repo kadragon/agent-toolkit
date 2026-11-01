@@ -120,11 +120,13 @@ log_findings() {
     if length == 0 then "== claude findings: no blocking findings"
     else
       "== claude findings: \(length) finding(s)",
-      (.[] | "[\(.severity // .priority // "?")] \(.file // "?"):\(.line // "?")"
+      (.[] | if type != "object" then "[?] \(tostring)" else
+               "[\(.severity // .priority // "?")] \(.file // "?"):\(.line // "?")"
                + (if .source == "contract" then " (contract)" else "" end)
                + " \(.problem // .summary // .title // "")",
-             (if (.failure // "") != "" then "    fails: \(.failure)" else empty end),
-             (if (.fix // "") != "" then "    fix: \(.fix)" else empty end))
+               (if (.failure // "") != "" then "    fails: \(.failure)" else empty end),
+               (if (.fix // "") != "" then "    fix: \(.fix)" else empty end)
+             end)
     end' <<<"$1" 2>/dev/null)"
 }
 if [ -z "${REVIEW_PROGRESS_LOG:-}" ]; then
@@ -152,7 +154,9 @@ else
       .message.content[]?
       | if .type == "text" then
           # The closing findings array is printed in full by log_findings; skip the raw copy.
-          if (.text | test("^\\s*(```|\\[)")) then empty else "  " + (.text | one) end
+          if (.text | sub("^\\s*```[a-z]*\\s*"; "") | sub("\\s*```\\s*$"; "")
+                    | (try fromjson catch null) | type) == "array"
+          then empty else "  " + (.text | one) end
         elif .type == "tool_use" then
           "> " + .name + " " + ((.input.command // .input.file_path // .input.pattern // .input.skill // .input.description // "") | one)
         else empty end

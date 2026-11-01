@@ -388,8 +388,8 @@ def case_stream_logs_subagents_and_findings(tmp):
     text = log.read_text() if log.exists() else ""
     check("exit 0", proc.returncode == 0, proc.stderr)
     check("stdout unchanged (the array)", json.loads(proc.stdout) == findings, proc.stdout)
-    check("subagent start logged", "/code-review" in text and "started" in text, text)
-    check("subagent finish logged", "completed" in text, text)
+    check("subagent start logged", "+ subagent started: /code-review" in text, text)
+    check("subagent finish logged", "- subagent completed: /code-review" in text, text)
     check("finding count stated", "2 finding" in text, text)
     check("first finding: severity, location, problem", "P0" in text and "a.sh:7" in text and "unquoted var" in text, text)
     check("first finding: how it fails", "a path with a space breaks" in text, text)
@@ -407,6 +407,24 @@ def case_stream_logs_empty_and_sentinel(tmp):
     run(tmp, ["main", ""], stdout=stream(stream_result("I could not read the diff.")), progress_log=log)
     text = log.read_text() if log.exists() else ""
     check("unparseable result stated", "no parseable findings" in text, text)
+
+
+def case_stream_board_edge_shapes(tmp):
+    """Non-object findings still print; only the closing array copy is hidden from the board."""
+    print("\ncase: string findings print; in-progress '[' text kept, final array copy dropped")
+    log = tmp / "progress.log"
+    log.unlink(missing_ok=True)
+    out = stream(
+        assistant({"type": "text", "text": "[P0] a.sh:7 looks unquoted, checking"}),
+        assistant({"type": "text", "text": '```json\n["a.sh:7 unquoted var"]\n```'}),
+        stream_result('["a.sh:7 unquoted var"]'),
+    )
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    text = log.read_text() if log.exists() else ""
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("in-progress text starting with [ is shown", "[P0] a.sh:7 looks unquoted, checking" in text, text)
+    check("the fenced final array copy is not echoed", "```" not in text, text)
+    check("a string finding is still printed", text.count("a.sh:7 unquoted var") == 1, text)
 
 
 def case_stream_unwritable_log_still_reviews(tmp):
@@ -466,6 +484,7 @@ def main():
             case_stream_error_result_is_sentinel,
             case_stream_logs_subagents_and_findings,
             case_stream_logs_empty_and_sentinel,
+            case_stream_board_edge_shapes,
             case_stream_unwritable_log_still_reviews,
             case_stream_truncated_last_line,
             case_stream_cli_failure_propagates,

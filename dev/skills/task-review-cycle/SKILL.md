@@ -109,8 +109,8 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 ## Step 2: Review
 
-**Review pane** — first, open the optional Herdr results board; keep it through Step 3, close it
-there or at any earlier stop (`references/review-sources.md` → *Review pane*). No output → no pane.
+**Review pane** — first, open the optional Herdr results board; keep it through Step 3 and close
+it on leaving Step 3 or an earlier abort (`references/review-sources.md` → *Review pane*).
 
 **Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
@@ -153,7 +153,7 @@ confidence or by `--auto`.
 Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
 approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
 (format and the rejected-record check in the guide) — never `tasks.md`.
-Then close the review pane, if Step 2 opened one.
+Leaving Step 3 by any path, an abort at confirmation included, closes the review pane.
 
 ## Step 4: Apply
 

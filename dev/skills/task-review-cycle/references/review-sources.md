@@ -21,9 +21,12 @@ start/finish lines, then writes each finding (severity, place, problem, how it f
 Codex run in print mode, so their blocks write a started line, then their review text once done.
 
 Keep it open through Step 3, so the person can read the findings while they are consolidated and
-confirmed; close it when Step 3 ends, or wherever the cycle stops before it — reviewer sentinel,
-600s timeout and inline fallback included — so no exit path leaves a stale pane. A panel source
-that finishes later still writes to the log; its result comes through the sidecar reclaim:
+confirmed. A reviewer sentinel, the 600s timeout and the inline fallback do not end the cycle, so
+the pane stays: append one line saying which happened (a killed reviewer writes none), then the
+inline findings, so the board never looks still running. Close it on any exit from Step 3 — done,
+or the person aborting at confirmation — or when the cycle aborts before Step 3, so no exit path
+leaves a stale pane. A panel source that finishes later still writes to the log; its result comes
+through the sidecar reclaim:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -58,6 +61,7 @@ BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 PROGRESS_LOG="<log from the Review pane open, or empty>"
 agy_outcome=ok
+AGY_OUT=""
 if [[ "$AGY_AVAILABLE" == "true" ]]; then
   [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
   AGY_OUT=$(bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}") || { agy_outcome=failed; echo '{"agy_review":"failed"}' >&2; }
@@ -66,7 +70,7 @@ else
   agy_outcome=unavailable
   echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
-[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review finished: $agy_outcome" "${AGY_OUT:-}"; } 2>/dev/null >>"$PROGRESS_LOG" || true
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review finished: $agy_outcome" "$AGY_OUT"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 ```bash
@@ -81,6 +85,7 @@ CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
 PROGRESS_LOG="<log from the Review pane open, or empty>"
 codex_status=0
 codex_outcome=ok
+CODEX_OUT=""
 if [[ "$CODEX_AVAILABLE" == "true" ]]; then
   [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
   CODEX_OUT=$(bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}") || codex_status=$?
@@ -96,7 +101,7 @@ elif [ "$codex_status" -ne 0 ]; then
   codex_outcome="failed (exit $codex_status)"
   echo '{"codex_review":"failed"}' >&2
 fi
-[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review finished: $codex_outcome" "${CODEX_OUT:-}"; } 2>/dev/null >>"$PROGRESS_LOG" || true
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review finished: $codex_outcome" "$CODEX_OUT"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
