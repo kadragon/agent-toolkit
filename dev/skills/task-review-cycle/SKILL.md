@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.3.0
+version: 1.3.1
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -109,8 +109,8 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 ## Step 2: Review
 
-**Review pane** — first, open the optional Herdr view and close it on every Step 2 exit
-(`references/review-sources.md` → *Review pane*); empty output means no pane, review unchanged.
+**Review pane** — first, open the optional Herdr results board; keep it through Step 3, close it
+there or at any earlier stop (`references/review-sources.md` → *Review pane*). No output → no pane.
 
 **Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
@@ -153,6 +153,7 @@ confidence or by `--auto`.
 Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
 approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
 (format and the rejected-record check in the guide) — never `tasks.md`.
+Then close the review pane, if Step 2 opened one.
 
 ## Step 4: Apply
 

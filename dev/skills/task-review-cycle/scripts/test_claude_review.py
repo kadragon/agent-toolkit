@@ -368,6 +368,47 @@ def case_stream_error_result_is_sentinel(tmp):
     )
 
 
+def case_stream_logs_subagents_and_findings(tmp):
+    """The pane is a results board: subagent lifecycle while running, every finding at the end."""
+    print("\ncase: subagent start/finish and each finding land in the log")
+    log = tmp / "progress.log"
+    log.unlink(missing_ok=True)
+    findings = [
+        {"file": "a.sh", "line": 7, "severity": "P0", "confidence": 90, "problem": "unquoted var",
+         "failure": "a path with a space breaks", "fix": "quote", "source": "code-review"},
+        {"file": "b.md", "line": 2, "severity": "P0", "confidence": 100, "problem": "criterion 3 unmet",
+         "failure": "", "fix": "add test", "source": "contract"},
+    ]
+    out = stream(
+        {"type": "system", "subtype": "task_started", "description": "/code-review", "task_type": "local_agent"},
+        {"type": "system", "subtype": "task_notification", "status": "completed", "summary": "/code-review"},
+        stream_result(json.dumps(findings)),
+    )
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    text = log.read_text() if log.exists() else ""
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("stdout unchanged (the array)", json.loads(proc.stdout) == findings, proc.stdout)
+    check("subagent start logged", "/code-review" in text and "started" in text, text)
+    check("subagent finish logged", "completed" in text, text)
+    check("finding count stated", "2 finding" in text, text)
+    check("first finding: severity, location, problem", "P0" in text and "a.sh:7" in text and "unquoted var" in text, text)
+    check("first finding: how it fails", "a path with a space breaks" in text, text)
+    check("contract finding marked", "b.md:2" in text and "contract" in text, text)
+
+
+def case_stream_logs_empty_and_sentinel(tmp):
+    print("\ncase: [] and the sentinel are both stated in the log, never left silent")
+    log = tmp / "progress.log"
+    log.unlink(missing_ok=True)
+    run(tmp, ["main", ""], stdout=stream(stream_result("[]")), progress_log=log)
+    text = log.read_text() if log.exists() else ""
+    check("empty review stated", "no blocking findings" in text, text)
+    log.unlink(missing_ok=True)
+    run(tmp, ["main", ""], stdout=stream(stream_result("I could not read the diff.")), progress_log=log)
+    text = log.read_text() if log.exists() else ""
+    check("unparseable result stated", "no parseable findings" in text, text)
+
+
 def case_stream_unwritable_log_still_reviews(tmp):
     print("\ncase: an unwritable progress log never fails the review")
     log = tmp / "missing-dir" / "progress.log"
@@ -423,6 +464,8 @@ def main():
             case_stream_writes_progress_and_parses_result,
             case_stream_without_result_is_sentinel,
             case_stream_error_result_is_sentinel,
+            case_stream_logs_subagents_and_findings,
+            case_stream_logs_empty_and_sentinel,
             case_stream_unwritable_log_still_reviews,
             case_stream_truncated_last_line,
             case_stream_cli_failure_propagates,

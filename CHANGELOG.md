@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-review pane becomes a results board: each reviewer's findings, kept open through Step 3 (dev v4.11.36) (2026-11-01)
 - [done] task-review opens a live Herdr side pane tailing reviewer progress under hc (dev v4.11.35) (2026-11-01)
 - [done] backlog_candidates: headings-only backlog no longer diagnosed as having no headings (dev v4.11.34) (2026-10-29)
 - [done] task-next --parked clips item text to 140 chars, markers kept (dev v4.11.33) (2026-10-29)

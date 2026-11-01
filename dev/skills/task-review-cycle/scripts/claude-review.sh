@@ -107,6 +107,26 @@ fi
 # argument, so there is nothing to read.
 RAW=""
 status=0
+# The progress log is the Herdr results board (review-pane.sh). Unset -> every write is a
+# no-op; a write that fails is ignored, never failing the review.
+log_line() {
+  [ -n "${REVIEW_PROGRESS_LOG:-}" ] || return 0
+  { printf '%s\n' "$1"; } 2>/dev/null >>"$REVIEW_PROGRESS_LOG" || true
+}
+# Each finding as the person will read it: severity, place, problem, then how it fails.
+log_findings() {
+  [ -n "${REVIEW_PROGRESS_LOG:-}" ] || return 0
+  log_line "$(jq -r '
+    if length == 0 then "== claude findings: no blocking findings"
+    else
+      "== claude findings: \(length) finding(s)",
+      (.[] | "[\(.severity // .priority // "?")] \(.file // "?"):\(.line // "?")"
+               + (if .source == "contract" then " (contract)" else "" end)
+               + " \(.problem // .summary // .title // "")",
+             (if (.failure // "") != "" then "    fails: \(.failure)" else empty end),
+             (if (.fix // "") != "" then "    fix: \(.fix)" else empty end))
+    end' <<<"$1" 2>/dev/null)"
+}
 if [ -z "${REVIEW_PROGRESS_LOG:-}" ]; then
   RAW=$(claude -p --permission-mode plan --output-format json "$PROMPT" </dev/null) || status=$?
   if [ "$status" -ne 0 ]; then
@@ -125,16 +145,21 @@ else
   STREAM_FILE=$(mktemp "${REVIEW_PROGRESS_LOG}.stream.XXXXXX" 2>/dev/null) \
     || STREAM_FILE=$(mktemp -t claude-review-stream.XXXXXX) || { echo "ERROR: mktemp failed" >&2; exit 1; }
   trap 'rm -f "$STREAM_FILE"' EXIT
-  log_line() { { printf '%s\n' "$1"; } 2>/dev/null >>"$REVIEW_PROGRESS_LOG" || true; }
   # One summary line per assistant text / tool call; everything else is left out.
   PROGRESS_FILTER='
     def one: tostring | gsub("[\r\n\t]+"; " ") | .[0:200];
     if .type == "assistant" then
       .message.content[]?
-      | if .type == "text" then "  " + (.text | one)
+      | if .type == "text" then
+          # The closing findings array is printed in full by log_findings; skip the raw copy.
+          if (.text | test("^\\s*(```|\\[)")) then empty else "  " + (.text | one) end
         elif .type == "tool_use" then
           "> " + .name + " " + ((.input.command // .input.file_path // .input.pattern // .input.skill // .input.description // "") | one)
         else empty end
+    elif .type == "system" and .subtype == "task_started" then
+      "+ subagent started: " + ((.description // .task_type // "task") | one)
+    elif .type == "system" and .subtype == "task_notification" then
+      "- subagent " + (.status // "finished") + ": " + ((.summary // "") | one)
     elif .type == "result" then "== claude review finished (" + (.subtype // "unknown") + ")"
     else empty end'
   log_line "== claude review started"
@@ -164,7 +189,7 @@ else
     RAW=""
   fi
   if [ -z "$RAW" ]; then
-    log_line "== claude review returned no usable result event"
+    log_line "== claude findings: no parseable findings (no usable result event)"
     echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh found no result event in the stream-json output"}'
     exit 0
   fi
@@ -177,7 +202,7 @@ RESULT=$(jq -r '.result // empty' <<<"$RAW" 2>/dev/null || true)
 [ -z "$RESULT" ] && RESULT="$RAW"
 RESULT=$(printf '%s' "$RESULT" | sed -E 's/^```[a-zA-Z]*[[:space:]]*//; s/[[:space:]]*```$//')
 
-emit_if_array() { jq -e 'type == "array"' <<<"$1" >/dev/null 2>&1 && { printf '%s\n' "$1"; return 0; }; return 1; }
+emit_if_array() { jq -e 'type == "array"' <<<"$1" >/dev/null 2>&1 && { printf '%s\n' "$1"; log_findings "$1"; return 0; }; return 1; }
 
 # Prefer the clean case: the whole result is the array. If not — a headless
 # session can wrap the array in prose (e.g. a repo Stop hook injects a nudge the
@@ -193,4 +218,5 @@ if [ -n "$EXTRACTED" ] && emit_if_array "$EXTRACTED"; then
   exit 0
 fi
 printf 'WARN: claude review did not return a parseable JSON array:\n%s\n' "$RESULT" >&2
+log_line "== claude findings: no parseable findings (reviewer output unreadable)"
 echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh could not parse a findings array from the run output"}'

@@ -16,12 +16,14 @@ bash "$SKILL_DIR/scripts/review-pane.sh" open
 
 Output is `{"pane":"…","log":"…"}` or nothing. Paste `log` as `PROGRESS_LOG` into every Step 2
 reviewer block (Claude, lite Codex, panel agy/Codex); nothing printed → `PROGRESS_LOG` empty and
-no pane. The Claude reviewer streams its tool calls and text into the log; agy and Codex run in
-print mode, so their blocks log one started and one finished line each.
+no pane. The pane is a results board: the Claude reviewer streams its tool calls and subagent
+start/finish lines, then writes each finding (severity, place, problem, how it fails); agy and
+Codex run in print mode, so their blocks write a started line, then their review text once done.
 
-Close it once Step 2 has the reviewer's result — array, sentinel, 600s timeout, or the inline
-fallback alike — so no exit path leaves a stale pane. Panel sources still running keep writing to
-the log; their results come through the sidecar reclaim, never the pane:
+Keep it open through Step 3, so the person can read the findings while they are consolidated and
+confirmed; close it when Step 3 ends, or wherever the cycle stops before it — reviewer sentinel,
+600s timeout and inline fallback included — so no exit path leaves a stale pane. A panel source
+that finishes later still writes to the log; its result comes through the sidecar reclaim:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -58,12 +60,13 @@ PROGRESS_LOG="<log from the Review pane open, or empty>"
 agy_outcome=ok
 if [[ "$AGY_AVAILABLE" == "true" ]]; then
   [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
-  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || { agy_outcome=failed; echo '{"agy_review":"failed"}' >&2; }
+  AGY_OUT=$(bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}") || { agy_outcome=failed; echo '{"agy_review":"failed"}' >&2; }
+  printf '%s\n' "$AGY_OUT"
 else
   agy_outcome=unavailable
   echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
-[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review finished: $agy_outcome"; } 2>/dev/null >>"$PROGRESS_LOG" || true
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review finished: $agy_outcome" "${AGY_OUT:-}"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 ```bash
@@ -80,7 +83,8 @@ codex_status=0
 codex_outcome=ok
 if [[ "$CODEX_AVAILABLE" == "true" ]]; then
   [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
-  bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" || codex_status=$?
+  CODEX_OUT=$(bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}") || codex_status=$?
+  printf '%s\n' "$CODEX_OUT"
 else
   codex_outcome=unavailable
   echo '{"codex_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
@@ -92,7 +96,7 @@ elif [ "$codex_status" -ne 0 ]; then
   codex_outcome="failed (exit $codex_status)"
   echo '{"codex_review":"failed"}' >&2
 fi
-[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review finished: $codex_outcome"; } 2>/dev/null >>"$PROGRESS_LOG" || true
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review finished: $codex_outcome" "${CODEX_OUT:-}"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
