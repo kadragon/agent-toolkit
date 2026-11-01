@@ -120,7 +120,10 @@ else
   # The log is a convenience: every write to it is allowed to fail, and the reader loop
   # always drains the pipe, so a bad log can never SIGPIPE the reviewer. The pipeline runs
   # with errexit off so PIPESTATUS is read before set -e can end the script.
-  STREAM_FILE=$(mktemp -t claude-review-stream.XXXXXX) || { echo "ERROR: mktemp failed" >&2; exit 1; }
+  # Beside the log when possible: the 600s Bash timeout kills this shell before the EXIT trap
+  # runs, and review-pane.sh prunes that directory, so a killed run leaves nothing in TMPDIR.
+  STREAM_FILE=$(mktemp "${REVIEW_PROGRESS_LOG}.stream.XXXXXX" 2>/dev/null) \
+    || STREAM_FILE=$(mktemp -t claude-review-stream.XXXXXX) || { echo "ERROR: mktemp failed" >&2; exit 1; }
   trap 'rm -f "$STREAM_FILE"' EXIT
   log_line() { { printf '%s\n' "$1"; } 2>/dev/null >>"$REVIEW_PROGRESS_LOG" || true; }
   # One summary line per assistant text / tool call; everything else is left out.
@@ -155,8 +158,13 @@ else
   # sentinel — never the prose recovery below, which could lift an intermediate [] out of
   # the transcript and pass it off as a clean review. -R + fromjson? skips a truncated line.
   RAW=$(jq -cR 'fromjson? | select(type == "object" and .type == "result")' "$STREAM_FILE" 2>/dev/null | tail -n 1 || true)
+  # An error result carries no .result; the fallback below would then run the bracket
+  # recovery over the envelope itself and lift one of its own arrays out as a review.
+  if [ -n "$RAW" ] && ! jq -e '.is_error != true and (.result | type == "string")' <<<"$RAW" >/dev/null 2>&1; then
+    RAW=""
+  fi
   if [ -z "$RAW" ]; then
-    log_line "== claude review returned no result event"
+    log_line "== claude review returned no usable result event"
     echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh found no result event in the stream-json output"}'
     exit 0
   fi

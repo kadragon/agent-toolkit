@@ -47,8 +47,16 @@ with open(os.environ["HERDR_STUB_CALLS"], "a") as fh:
 if os.environ.get("HERDR_STUB_SLEEP"):
     time.sleep(float(os.environ["HERDR_STUB_SLEEP"]))
 if sys.argv[1] == "ls":
-    sys.stdout.write(os.environ["HERDR_STUB_LS"])
+    data = json.loads(os.environ["HERDR_STUB_LS"])
+    created = os.environ.get("HERDR_STUB_CREATED", "")
+    if created and os.path.exists(created):
+        data["spaces"][0]["tabs"][0]["terminals"].append({"terminal": "t9", "pane": "pNEW"})
+    sys.stdout.write(json.dumps(data))
     sys.exit(0)
+if sys.argv[1:3] == ["do", "pane.split"] and os.environ.get("HERDR_STUB_SPLIT_SLOW"):
+    # Herdr creates the pane, but the reply comes after the caller stopped waiting.
+    open(os.environ["HERDR_STUB_CREATED"], "w").close()
+    time.sleep(float(os.environ["HERDR_STUB_SPLIT_SLOW"]))
 if os.environ.get("HERDR_STUB_FAIL"):
     sys.stdout.write('{"error": "boom"}')
     sys.exit(1)
@@ -86,7 +94,7 @@ def run(tmp, args, hc_id: "str | None" = "t5", with_app=True, ls=LS_FIXTURE, ext
     # Keep the real toolchain reachable without a real herdr-app shadowing the stub's absence.
     nobin = tmp / "nobin"
     nobin.mkdir(exist_ok=True)
-    for tool in ("bash", "jq", "git", "mktemp", "find", "sleep", "kill", "date", "dirname", "mkdir", "python3", "env", "cat", "rm"):
+    for tool in ("bash", "jq", "git", "mktemp", "find", "sleep", "kill", "pgrep", "pkill", "date", "dirname", "mkdir", "python3", "env", "cat", "rm"):
         found = shutil.which(tool)
         link = nobin / tool
         if found and not link.exists():
@@ -183,6 +191,41 @@ def case_hung_app_is_bounded(tmp):
     check("no stdout", proc.stdout == "", proc.stdout)
 
 
+def case_slow_split_is_closed(tmp):
+    """A split that outlives the bound may still create the pane; nothing could close it later."""
+    print("\ncase: split times out after Herdr created the pane -> that pane is closed")
+    created = tmp / "created"
+    created.unlink(missing_ok=True)
+    proc, seen = run(tmp, ["open"], extra_env={
+        "HERDR_STUB_SPLIT_SLOW": "5", "HERDR_STUB_CREATED": str(created), "REVIEW_PANE_TIMEOUT": "1",
+    })
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("no stdout", proc.stdout == "", proc.stdout)
+    check("the orphaned pane is closed", ["do", "pane.close", "--pane", "pNEW"] in seen, str(seen))
+    check("no pre-existing pane is closed",
+          not any(c[:2] == ["do", "pane.close"] and c[-1] in ("pOWN", "pOTHER") for c in seen), str(seen))
+
+
+def case_exact_terminal_match_wins(tmp):
+    print("\ncase: a remote terminal with the same local id never wins over the exact match")
+    ls = {"spaces": [
+        {"id": "remote", "tabs": [{"id": "tbR", "terminals": [{"terminal": "k-server/t5", "pane": "k-server/pX"}]}]},
+        LS_FIXTURE["spaces"][0],
+    ]}
+    _, seen = run(tmp, ["open"], ls=ls)
+    split = [c for c in seen if c[:2] == ["do", "pane.split"]]
+    check("splits the exact match", bool(split) and split[0][split[0].index("--pane") + 1] == "pOWN", str(seen))
+
+
+def case_no_orphaned_watcher(tmp):
+    print("\ncase: the bound's watcher leaves no sleep process behind")
+    run(tmp, ["close", "pNEW"], extra_env={"REVIEW_PANE_TIMEOUT": "73"})
+    left = subprocess.run(["pgrep", "-f", "sleep 73"], capture_output=True, text=True)
+    check("no 'sleep 73' left running", left.stdout.strip() == "", left.stdout)
+    if left.stdout.strip():
+        subprocess.run(["pkill", "-f", "sleep 73"])
+
+
 def case_close(tmp):
     print("\ncase: close passes the pane id and never fails")
     proc, seen = run(tmp, ["close", "pNEW"])
@@ -214,6 +257,9 @@ def main():
             case_own_pane_missing,
             case_split_failure_fails_open,
             case_hung_app_is_bounded,
+            case_slow_split_is_closed,
+            case_exact_terminal_match_wins,
+            case_no_orphaned_watcher,
             case_close,
         ):
             case(tmp)

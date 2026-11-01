@@ -350,6 +350,24 @@ def case_stream_without_result_is_sentinel(tmp):
     )
 
 
+def case_stream_error_result_is_sentinel(tmp):
+    """A result event without .result must not fall back to bracket recovery on the envelope."""
+    print("\ncase: error result event (no .result) -> sentinel, never a recovered []")
+    log = tmp / "progress.log"
+    out = stream({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                  "permission_denials": []})
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    try:
+        parsed = json.loads(proc.stdout)
+    except ValueError:
+        parsed = None
+    check(
+        "sentinel on stdout",
+        isinstance(parsed, dict) and parsed.get("code_review_slot") == "inner-run-unavailable",
+        proc.stdout,
+    )
+
+
 def case_stream_unwritable_log_still_reviews(tmp):
     print("\ncase: an unwritable progress log never fails the review")
     log = tmp / "missing-dir" / "progress.log"
@@ -404,6 +422,7 @@ def main():
             case_no_log_keeps_json_path,
             case_stream_writes_progress_and_parses_result,
             case_stream_without_result_is_sentinel,
+            case_stream_error_result_is_sentinel,
             case_stream_unwritable_log_still_reviews,
             case_stream_truncated_last_line,
             case_stream_cli_failure_propagates,

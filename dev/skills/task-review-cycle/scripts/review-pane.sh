@@ -31,7 +31,12 @@ bounded() {
   out_file=$(mktemp -t review-pane.XXXXXX) || return 1
   "$@" >"$out_file" 2>/dev/null &
   pid=$!
-  ( sleep "$LIMIT"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  # The watcher forwards its own TERM to its sleep, so stopping it leaves no orphan behind.
+  (
+    trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+    sleep "$LIMIT" & sleeper=$!
+    wait "$sleeper" && kill "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
   watcher=$!
   wait "$pid"
   rc=$?
@@ -52,15 +57,34 @@ case "$ACTION" in
     log=$(mktemp "$log_dir/progress.XXXXXX") || exit 0
 
     bounded herdr-app ls || { rm -f "$log"; exit 0; }
+    before="$BOUNDED_OUT"
+    # Exact id first; a machine-prefixed id ("k-server/t5") only when it is the sole match,
+    # so a remote terminal sharing the local id never wins.
     own_pane=$(jq -r --arg t "$HC_TERMINAL_ID" '
-      [.. | objects | select(has("terminal") and has("pane"))
-          | select(.terminal == $t or (.terminal | tostring | endswith("/" + $t)))
-          | .pane] | first // empty' <<<"$BOUNDED_OUT" 2>/dev/null)
+      [.. | objects | select(has("terminal") and has("pane"))] as $all
+      | ([$all[] | select(.terminal == $t) | .pane]) as $exact
+      | ([$all[] | select(.terminal | tostring | endswith("/" + $t)) | .pane]) as $suffix
+      | if ($exact | length) > 0 then $exact[0]
+        elif ($suffix | length) == 1 then $suffix[0]
+        else empty end' <<<"$before" 2>/dev/null)
     [ -n "$own_pane" ] || { rm -f "$log"; exit 0; }
 
     tail_argv=$(jq -cn --arg log "$log" '["tail", "-n", "+1", "-F", $log]')
-    bounded herdr-app do pane.split --direction right --pane "$own_pane" --argv "$tail_argv" \
-      || { rm -f "$log"; exit 0; }
+    if ! bounded herdr-app do pane.split --direction right --pane "$own_pane" --argv "$tail_argv"; then
+      # Herdr may have created the pane after the bound cut the reply off; nobody holds its id,
+      # so close any pane that appeared beside ours since the lookup above.
+      if bounded herdr-app ls; then
+        jq -r --argjson before "$before" --arg own "$own_pane" '
+          def panes: [.. | objects | select(has("tabs")) | .tabs[]
+                      | select([.terminals[]?.pane] | index($own)) | .terminals[]?.pane];
+          ($before | panes) as $old | panes - $old | .[]' <<<"$BOUNDED_OUT" 2>/dev/null |
+          while IFS= read -r orphan; do
+            [ -n "$orphan" ] && bounded herdr-app do pane.close --pane "$orphan"
+          done
+      fi
+      rm -f "$log"
+      exit 0
+    fi
     new_pane=$(jq -r '.pane // empty' <<<"$BOUNDED_OUT" 2>/dev/null)
     [ -n "$new_pane" ] || { rm -f "$log"; exit 0; }
     jq -cn --arg pane "$new_pane" --arg log "$log" '{pane: $pane, log: $log}'
