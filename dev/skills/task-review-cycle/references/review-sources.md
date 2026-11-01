@@ -55,16 +55,15 @@ PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
 PROGRESS_LOG="<log from the Review pane open, or empty>"
-progress() { if [[ -n "$PROGRESS_LOG" ]]; then { printf '%s\n' "$1"; } 2>/dev/null >>"$PROGRESS_LOG" || true; fi; }   # never fails the block
 agy_outcome=ok
 if [[ "$AGY_AVAILABLE" == "true" ]]; then
-  progress "== agy review started"
+  [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
   bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || { agy_outcome=failed; echo '{"agy_review":"failed"}' >&2; }
 else
   agy_outcome=unavailable
   echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
-progress "== agy review finished: $agy_outcome"
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== agy review finished: $agy_outcome"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 ```bash
@@ -77,11 +76,10 @@ CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
 PROGRESS_LOG="<log from the Review pane open, or empty>"
-progress() { if [[ -n "$PROGRESS_LOG" ]]; then { printf '%s\n' "$1"; } 2>/dev/null >>"$PROGRESS_LOG" || true; fi; }   # never fails the block
 codex_status=0
 codex_outcome=ok
 if [[ "$CODEX_AVAILABLE" == "true" ]]; then
-  progress "== codex review started"
+  [[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review started"; } 2>/dev/null >>"$PROGRESS_LOG" || true
   bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" || codex_status=$?
 else
   codex_outcome=unavailable
@@ -94,7 +92,7 @@ elif [ "$codex_status" -ne 0 ]; then
   codex_outcome="failed (exit $codex_status)"
   echo '{"codex_review":"failed"}' >&2
 fi
-progress "== codex review finished: $codex_outcome"
+[[ -z "$PROGRESS_LOG" ]] || { printf '%s\n' "== codex review finished: $codex_outcome"; } 2>/dev/null >>"$PROGRESS_LOG" || true
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
