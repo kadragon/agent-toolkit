@@ -107,67 +107,10 @@ fi
 # argument, so there is nothing to read.
 RAW=""
 status=0
-if [ -z "${REVIEW_PROGRESS_LOG:-}" ]; then
-  RAW=$(claude -p --permission-mode plan --output-format json "$PROMPT" </dev/null) || status=$?
-  if [ "$status" -ne 0 ]; then
-    printf '%s\n' "${RAW:-claude CLI exited $status with no stdout}" >&2
-    exit "$status"
-  fi
-else
-  # Progress path, taken only when review-pane.sh opened a Herdr pane tailing this log
-  # (SKILL.md Step 2). stream-json emits one event per line as the run goes; each line is
-  # kept verbatim for parsing and summarised into the log for the person watching.
-  # The log is a convenience: every write to it is allowed to fail, and the reader loop
-  # always drains the pipe, so a bad log can never SIGPIPE the reviewer. The pipeline runs
-  # with errexit off so PIPESTATUS is read before set -e can end the script.
-  # Beside the log when possible: the 600s Bash timeout kills this shell before the EXIT trap
-  # runs, and review-pane.sh prunes that directory, so a killed run leaves nothing in TMPDIR.
-  STREAM_FILE=$(mktemp "${REVIEW_PROGRESS_LOG}.stream.XXXXXX" 2>/dev/null) \
-    || STREAM_FILE=$(mktemp -t claude-review-stream.XXXXXX) || { echo "ERROR: mktemp failed" >&2; exit 1; }
-  trap 'rm -f "$STREAM_FILE"' EXIT
-  log_line() { { printf '%s\n' "$1"; } 2>/dev/null >>"$REVIEW_PROGRESS_LOG" || true; }
-  # One summary line per assistant text / tool call; everything else is left out.
-  PROGRESS_FILTER='
-    def one: tostring | gsub("[\r\n\t]+"; " ") | .[0:200];
-    if .type == "assistant" then
-      .message.content[]?
-      | if .type == "text" then "  " + (.text | one)
-        elif .type == "tool_use" then
-          "> " + .name + " " + ((.input.command // .input.file_path // .input.pattern // .input.skill // .input.description // "") | one)
-        else empty end
-    elif .type == "result" then "== claude review finished (" + (.subtype // "unknown") + ")"
-    else empty end'
-  log_line "== claude review started"
-  set +e
-  claude -p --permission-mode plan --output-format stream-json --verbose "$PROMPT" </dev/null |
-    while IFS= read -r line || [ -n "$line" ]; do
-      printf '%s\n' "$line" >>"$STREAM_FILE"
-      summary=$(jq -r "$PROGRESS_FILTER" <<<"$line" 2>/dev/null)
-      [ -n "$summary" ] && log_line "$summary"
-    done
-  pipe_status=("${PIPESTATUS[@]}")
-  set -e
-  status="${pipe_status[0]}"
-  if [ "$status" -ne 0 ]; then
-    log_line "== claude review failed (exit $status)"
-    printf 'claude CLI exited %s; last stream lines:\n' "$status" >&2
-    tail -n 5 "$STREAM_FILE" >&2 || true
-    exit "$status"
-  fi
-  # Only the final result event carries the review. Without one, the run is unread: the
-  # sentinel — never the prose recovery below, which could lift an intermediate [] out of
-  # the transcript and pass it off as a clean review. -R + fromjson? skips a truncated line.
-  RAW=$(jq -cR 'fromjson? | select(type == "object" and .type == "result")' "$STREAM_FILE" 2>/dev/null | tail -n 1 || true)
-  # An error result carries no .result; the fallback below would then run the bracket
-  # recovery over the envelope itself and lift one of its own arrays out as a review.
-  if [ -n "$RAW" ] && ! jq -e '.is_error != true and (.result | type == "string")' <<<"$RAW" >/dev/null 2>&1; then
-    RAW=""
-  fi
-  if [ -z "$RAW" ]; then
-    log_line "== claude review returned no usable result event"
-    echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh found no result event in the stream-json output"}'
-    exit 0
-  fi
+RAW=$(claude -p --permission-mode plan --output-format json "$PROMPT" </dev/null) || status=$?
+if [ "$status" -ne 0 ]; then
+  printf '%s\n' "${RAW:-claude CLI exited $status with no stdout}" >&2
+  exit "$status"
 fi
 
 # --output-format json wraps the run in an envelope; .result holds the model's
