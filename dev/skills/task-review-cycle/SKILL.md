@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.2.4
+version: 1.2.5
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -109,6 +109,9 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 ## Step 2: Review
 
+**Review pane** — first, open the optional Herdr view and close it on every Step 2 exit
+(`references/review-sources.md` → *Review pane*); empty output means no pane, review unchanged.
+
 **Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
@@ -125,7 +128,8 @@ CONTRACT=$(cat <<'SPRINT_CONTRACT'
  one case the Sprint Contract paragraph above allows>
 SPRINT_CONTRACT
 )
-bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTRACT}" \
+PROGRESS_LOG="<log from the Review pane open, or empty>"
+REVIEW_PROGRESS_LOG="$PROGRESS_LOG" bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTRACT}" \
   || echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh exited non-zero"}'
 ```
 

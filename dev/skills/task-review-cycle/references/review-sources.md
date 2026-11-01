@@ -1,6 +1,32 @@
 # Panel Review Sources
 
-The non-Claude engines (agy, Codex).
+The non-Claude engines (agy, Codex), and the optional pane that shows every reviewer's progress.
+
+## Review pane
+
+Inside herdr-core (`$HC_TERMINAL_ID` set, `herdr-app` on PATH) Step 2 opens a read-only split
+beside the agent's own pane that tails a per-run progress log, so the person can watch the review.
+It is a view only: reviewers run, time out, and are reclaimed exactly as without it. Open it
+first in Step 2, before the panel launch or the reviewer call:
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+bash "$SKILL_DIR/scripts/review-pane.sh" open
+```
+
+Output is `{"pane":"…","log":"…"}` or nothing. Paste `log` as `PROGRESS_LOG` into every Step 2
+reviewer block (Claude, lite Codex, panel agy/Codex); nothing printed → `PROGRESS_LOG` empty and
+no pane. The Claude reviewer streams its tool calls and text into the log; agy and Codex run in
+print mode, so their blocks log one started and one finished line each.
+
+Close it once Step 2 has the reviewer's result — array, sentinel, 600s timeout, or the inline
+fallback alike — so no exit path leaves a stale pane. Panel sources still running keep writing to
+the log; their results come through the sidecar reclaim, never the pane:
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+bash "$SKILL_DIR/scripts/review-pane.sh" close "<pane from the open, or empty>"
+```
 
 ## Panel source launch
 
@@ -28,11 +54,17 @@ LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
+PROGRESS_LOG="<log from the Review pane open, or empty>"
+progress() { if [[ -n "$PROGRESS_LOG" ]]; then { printf '%s\n' "$1"; } 2>/dev/null >>"$PROGRESS_LOG" || true; fi; }   # never fails the block
+agy_outcome=ok
 if [[ "$AGY_AVAILABLE" == "true" ]]; then
-  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || echo '{"agy_review":"failed"}' >&2
+  progress "== agy review started"
+  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || { agy_outcome=failed; echo '{"agy_review":"failed"}' >&2; }
 else
+  agy_outcome=unavailable
   echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
+progress "== agy review finished: $agy_outcome"
 ```
 
 ```bash
@@ -44,17 +76,25 @@ BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 CODEX_AVAILABLE=$(jq -r '.codex_available' <<<"$PREFLIGHT")
 CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
 CODEX_COMPANION_PATH=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
+PROGRESS_LOG="<log from the Review pane open, or empty>"
+progress() { if [[ -n "$PROGRESS_LOG" ]]; then { printf '%s\n' "$1"; } 2>/dev/null >>"$PROGRESS_LOG" || true; fi; }   # never fails the block
 codex_status=0
+codex_outcome=ok
 if [[ "$CODEX_AVAILABLE" == "true" ]]; then
+  progress "== codex review started"
   bash "$SKILL_DIR/scripts/codex-review.sh" "${CODEX_MODE}" "${BASE_BRANCH}" "${CODEX_COMPANION_PATH}" || codex_status=$?
 else
+  codex_outcome=unavailable
   echo '{"codex_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
 fi
 if [ "$codex_status" -eq 75 ]; then
+  codex_outcome=locked
   echo '{"codex_review":"locked"}' >&2      # another cycle holds the workspace slot — skipped, not failed
 elif [ "$codex_status" -ne 0 ]; then
+  codex_outcome="failed (exit $codex_status)"
   echo '{"codex_review":"failed"}' >&2
 fi
+progress "== codex review finished: $codex_outcome"
 ```
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.

@@ -46,9 +46,12 @@ FAIL = "\033[91mFAIL\033[0m"
 _results = []
 
 STUB = """#!/usr/bin/env python3
-import os, sys
+import json, os, sys
 with open(os.environ["CLAUDE_STUB_CAPTURE"], "w") as fh:
     fh.write(sys.argv[-1])
+if os.environ.get("CLAUDE_STUB_ARGV"):
+    with open(os.environ["CLAUDE_STUB_ARGV"], "w") as fh:
+        fh.write(json.dumps(sys.argv[1:]))
 sys.stdout.write(os.environ.get("CLAUDE_STUB_STDOUT", ""))
 sys.exit(int(os.environ.get("CLAUDE_STUB_EXIT", "0")))
 """
@@ -65,8 +68,11 @@ def envelope(result_text):
     return json.dumps({"result": result_text})
 
 
-def run(tmp, args, stdout="", exit_code=0, with_cli=True):
-    """Run claude-review.sh with a stubbed `claude`. Returns (completed_process, prompt_seen)."""
+def run(tmp, args, stdout="", exit_code=0, with_cli=True, progress_log=None):
+    """Run claude-review.sh with a stubbed `claude`. Returns (completed_process, prompt_seen).
+
+    The argv the stub saw is left in tmp/argv.json. `progress_log` sets REVIEW_PROGRESS_LOG.
+    """
     bin_dir = tmp / "bin"
     bin_dir.mkdir(exist_ok=True)
     capture = tmp / "prompt.txt"
@@ -83,7 +89,11 @@ def run(tmp, args, stdout="", exit_code=0, with_cli=True):
         "CLAUDE_STUB_CAPTURE": str(capture),
         "CLAUDE_STUB_STDOUT": stdout,
         "CLAUDE_STUB_EXIT": str(exit_code),
+        "CLAUDE_STUB_ARGV": str(tmp / "argv.json"),
     }
+    env.pop("REVIEW_PROGRESS_LOG", None)
+    if progress_log is not None:
+        env["REVIEW_PROGRESS_LOG"] = str(progress_log)
     proc = subprocess.run(
         ["bash", str(SCRIPT), *args],
         capture_output=True,
@@ -262,6 +272,110 @@ def case_cli_failure_propagates(tmp):
     check("nothing on stdout", proc.stdout.strip() == "", proc.stdout)
 
 
+def stream(*events, tail=""):
+    """A `--output-format stream-json` transcript: one JSON event per line."""
+    return "".join(json.dumps(e) + "\n" for e in events) + tail
+
+
+def assistant(*content):
+    return {"type": "assistant", "message": {"content": list(content)}}
+
+
+def stream_result(text):
+    return {"type": "result", "subtype": "success", "is_error": False, "result": text}
+
+
+def argv_seen(tmp):
+    return json.loads((tmp / "argv.json").read_text())
+
+
+def case_no_log_keeps_json_path(tmp):
+    """Without a pane there is no progress log, and the run must be byte-for-byte the old one."""
+    print("\ncase: REVIEW_PROGRESS_LOG unset -> unchanged --output-format json run")
+    proc, _ = run(tmp, ["main", ""], stdout=envelope("[]"))
+    argv = argv_seen(tmp)
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("json output format", argv[argv.index("--output-format") + 1] == "json", str(argv[:6]))
+    check("no --verbose", "--verbose" not in argv, str(argv[:6]))
+    check("read-only plan mode kept", argv[argv.index("--permission-mode") + 1] == "plan", str(argv[:6]))
+
+
+def case_stream_writes_progress_and_parses_result(tmp):
+    print("\ncase: REVIEW_PROGRESS_LOG set -> stream-json, progress lines, result parsed")
+    log = tmp / "progress.log"
+    log.unlink(missing_ok=True)
+    findings = '[{"file":"a.py","line":3,"severity":"P1","confidence":90,' \
+               '"problem":"p","failure":"f","fix":"x","source":"code-review"}]'
+    out = stream(
+        {"type": "system", "subtype": "init"},
+        assistant({"type": "tool_use", "name": "Bash", "input": {"command": "git diff main...HEAD --name-only"}}),
+        assistant({"type": "text", "text": "Reading the changed script\nnow"}),
+        stream_result(findings),
+    )
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    argv = argv_seen(tmp)
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("stream-json output format", argv[argv.index("--output-format") + 1] == "stream-json", str(argv[:7]))
+    check("--verbose passed (stream-json requires it)", "--verbose" in argv, str(argv[:7]))
+    check("read-only plan mode kept", argv[argv.index("--permission-mode") + 1] == "plan", str(argv[:7]))
+    try:
+        parsed = json.loads(proc.stdout)
+    except ValueError:
+        parsed = None
+    check("stdout is the result array", parsed == json.loads(findings), proc.stdout)
+    text = log.read_text() if log.exists() else ""
+    check("tool call logged", "Bash" in text and "git diff main...HEAD --name-only" in text, text)
+    check("assistant text logged on one line", "Reading the changed script now" in text, text)
+    check("raw JSON events stay out of the log", '"type"' not in text, text)
+
+
+def case_stream_without_result_is_sentinel(tmp):
+    """An intermediate `[]` must never be recovered as a clean review."""
+    print("\ncase: stream with no result event -> sentinel, never []")
+    log = tmp / "progress.log"
+    out = stream(
+        assistant({"type": "text", "text": "[]"}),
+        assistant({"type": "tool_use", "name": "Read", "input": {"file_path": "/x/[].py"}}),
+    )
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    try:
+        parsed = json.loads(proc.stdout)
+    except ValueError:
+        parsed = None
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check(
+        "sentinel on stdout",
+        isinstance(parsed, dict) and parsed.get("code_review_slot") == "inner-run-unavailable",
+        proc.stdout,
+    )
+
+
+def case_stream_unwritable_log_still_reviews(tmp):
+    print("\ncase: an unwritable progress log never fails the review")
+    log = tmp / "missing-dir" / "progress.log"
+    out = stream(assistant({"type": "text", "text": "hi"}), stream_result("[]"))
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("stdout is []", proc.stdout.strip() == "[]", proc.stdout)
+
+
+def case_stream_truncated_last_line(tmp):
+    print("\ncase: a truncated trailing event does not hide the result")
+    log = tmp / "progress.log"
+    out = stream(stream_result("[]"), tail='{"type":"assistant","mess')
+    proc, _ = run(tmp, ["main", ""], stdout=out, progress_log=log)
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("stdout is []", proc.stdout.strip() == "[]", proc.stdout)
+
+
+def case_stream_cli_failure_propagates(tmp):
+    print("\ncase: stream path -> a non-zero claude run propagates, even after a result")
+    log = tmp / "progress.log"
+    proc, _ = run(tmp, ["main", ""], stdout=stream(stream_result("[]")), exit_code=4, progress_log=log)
+    check("exit code propagates", proc.returncode == 4, str(proc.returncode))
+    check("nothing on stdout", proc.stdout.strip() == "", proc.stdout)
+
+
 def main():
     if os.name == "nt":
         print("POSIX-only (the claude stub uses a shebang) — skipped on Windows")
@@ -287,6 +401,12 @@ def main():
             case_unparseable_emits_sentinel,
             case_missing_cli_exits_nonzero,
             case_cli_failure_propagates,
+            case_no_log_keeps_json_path,
+            case_stream_writes_progress_and_parses_result,
+            case_stream_without_result_is_sentinel,
+            case_stream_unwritable_log_still_reviews,
+            case_stream_truncated_last_line,
+            case_stream_cli_failure_propagates,
         ):
             case(tmp)
     failed = _results.count(False)
