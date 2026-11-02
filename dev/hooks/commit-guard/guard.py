@@ -21,13 +21,21 @@ The hook path applies two guards:
      commit may run in, before the command runs: a `cd` is followed, and a
      `cd` that may not run (case arm, function body, subshell, behind an
      expansion that may be empty) adds its directory to the ones checked.
-     A branch the same command creates or switches to is not seen, so
-     `git checkout -b x && git commit` on main blocks: create or switch the
-     branch in a separate command first. The reverse is an accepted
-     residual: a HEAD move the hook does not read (`git checkout main`, a
-     script, `sh -c`, `eval`) passes on a live feature branch. Predicting
-     the branch a command will land on from its text was tried and dropped
-     (2026-10-16): it grew without bound and still blocked common chains.
+     One in-chain move is read (_chain_branch): `git switch -c|-C b` or
+     `git checkout -b|-B b` followed, through `&&`/`;` and plain
+     `git add|rm|mv|status|commit` alone, by a plain `git commit` — the commit
+     lands on b, so `git switch -c x && git add a && git commit` on main
+     passes and `git switch -c main && git commit` blocks. Only plain git
+     commands or a literal `cd` may come before the creation. Anything else
+     anywhere up to the commit (`||`, a subshell or group, a case arm, a
+     function, a substitution, an expansion, a redirect, `-C`, an env prefix
+     or assignment) falls back to the live branch: create or switch the
+     branch in a separate command first. This
+     is an allowlist on purpose: open-ended prediction of every HEAD move
+     was tried and dropped (2026-10-16), as it grew without bound. The
+     reverse is an accepted residual: a HEAD move the hook does not read
+     (`git checkout main`, a script, `sh -c`, `eval`) passes on a live
+     feature branch, as does a `-b` that fails before a `;`.
      Finding the commit stays thorough: a commit after a heredoc,
      behind a comment, keyword, redirect or expansion, in a case arm,
      function body or command substitution is still found.
@@ -71,6 +79,7 @@ import sys
 #   character classifier (_scan_full is the core per-character loop): _tick_text, _scan, _scan_full, _strip_comments, _has_expandable_subst
 #   segment splitting: _operator_at, _split_segments, _split_full
 #   commit detection and arguments: _is_git_commit, _git_cwd, _parse_commit_args, _commit_segments
+#   in-chain branch creation: _plain_git, _plain_words, _runs_only_text, _chain_branch
 #   branch guard inputs: _current_branch, _marker_present
 #   verdicts and entry points: _block, main, precommit_check, _cli_precommit
 #   inline self-test for --test (the last ~740 lines; skip unless editing it): _test
@@ -1377,8 +1386,143 @@ def _commit_segments(command, cwds, level=0):
                             else cd_cwds)
         if _is_git_commit(stripped):
             # -C overrides the cd-tracked cwd for this git call
-            commits.append((stripped, list(dict.fromkeys(_git_cwd(stripped, c) for c in running_cwds))))
+            predicted = (None if level or guarded or in_body
+                         else _chain_branch(segments, operators, arms, bodies, idx))
+            commits.append((stripped, list(dict.fromkeys(_git_cwd(stripped, c) for c in running_cwds)),
+                            predicted))
     return commits
+
+
+# git subcommands that may stand between an in-chain branch creation and the
+# commit it names: they touch the index or only read, never HEAD.
+_HEAD_NEUTRAL = {"add", "rm", "mv", "status"}  # not diff: `--output=<file>` writes
+# what a commit message substitution may run: `-m "$(cat <<'EOF' … EOF)"`
+_MESSAGE_RUNNERS = {"cat", "printf", "echo"}
+# the creation flags read: `git switch -c|-C b`, `git checkout -b|-B b`
+_CREATE_FLAGS = {"switch": ("-c", "-C"), "checkout": ("-b", "-B")}
+
+
+def _plain_git(segment):
+    """Words of a plain `git <subcommand> …` segment, else None: `git` is its
+    first word, unquoted, with nothing before it (env-assign, wrapper,
+    keyword, group, redirect) and no git-level option (`-C`, `-c`) after it."""
+    try:
+        words, bare, _ = _words(segment)
+    except (ValueError, RecursionError):
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return None
+        bare = [segment.split(None, 1)[:1] == ["git"]] * len(words)
+    if len(words) < 2 or words[0] != "git" or not bare[0] or words[1].startswith("-"):
+        return None
+    return words
+
+
+# A word that may expand, group, redirect output or chain is not plain: a
+# '>' could rewrite .git/HEAD, a '$' or '(' runs or hides a command.
+_NOT_PLAIN = set("$`(){}<>|;&*?[]")
+# a branch name read as written: no expansion, no redirect, no ref syntax
+# git rejects (`..`, `@{`, `//`, a leading '-' '.' '/', a trailing '.' '/'
+# or `.lock` on any component, `HEAD`), so a name that would make the
+# creation fail is never read
+_REF_NAME = re.compile(
+    r"^(?!HEAD$)(?![-./])(?!.*(?:\.\.|@\{|//|/\.|\.lock(?:/|$)))[A-Za-z0-9._/-]+(?<![./])$")
+# quoted spans of a raw word, cut before looking for shell syntax
+_QUOTED = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+
+
+def _plain_words(segment):
+    """The words of segment when no unquoted shell syntax is in any, else
+    None. A quoted span is text: `-m '[FEAT] a'` stays plain."""
+    try:
+        words, _, raws = _words(segment)
+    except (ValueError, RecursionError):
+        return None
+    if any(c in _NOT_PLAIN for raw in raws for c in _QUOTED.sub("", raw)):
+        return None
+    return words
+
+
+def _runs_only_text(found):
+    """True when every command in the substitution bodies found only prints
+    text (`cat`, `printf`, `echo`): no unquoted shell syntax (redirect,
+    group, function definition, expansion), no substitution of its own. A
+    heredoc's `<<` is input and stays allowed; quoted text (`'a -> b'`) is
+    text."""
+    for body in found:
+        try:
+            segs, _, _, subs = _split_full(body)
+        except RecursionError:
+            return False
+        for seg, sub in zip(segs, subs):
+            if not seg:
+                continue
+            try:
+                words, _, raws = _words(seg)
+            except (ValueError, RecursionError):
+                return False
+            if sub or not words or words[0] not in _MESSAGE_RUNNERS:
+                return False
+            for raw in raws:
+                rest = _QUOTED.sub("", raw)
+                if rest in ("<<", "<<-"):
+                    continue  # a heredoc whose quoted word is cut above
+                if rest.startswith(("<<", "<<-")) and _REF_NAME.match(rest.lstrip("<-")):
+                    continue  # an unquoted heredoc word (`<<EOF`)
+                if any(c in _NOT_PLAIN for c in rest):
+                    return False
+    return True
+
+
+def _chain_branch(segments, operators, arms, bodies, idx):
+    """The branch the commit at segments[idx] lands on when the same plain
+    chain creates it first, else None (the live branch decides).
+
+    Read only when the whole command up to the commit is plain: every
+    segment is a plain `git …` (or a literal `cd`, before the creation
+    only), joined by `&&` or `;`, none in a case arm or holding a
+    substitution, expansion or redirect — so no function, alias or PATH
+    change can rename git. The creation is `git switch -c|-C b` or
+    `git checkout -b|-B b` [start-point]; between it and the commit stand
+    only HEAD-neutral git commands; the commit is a plain `git commit`
+    whose substitutions only print text. Behind a `;` the creation must run
+    unconditionally (first, or after a `;`) and take no start point. A
+    creation that still fails before a `;` (b exists, or is checked out in
+    another worktree) leaves the commit on the live branch: an accepted
+    residual.
+    """
+    words = _plain_git(segments[idx])
+    if words is None or words[1] != "commit" or arms[idx] or not _runs_only_text(bodies[idx]):
+        return None
+    semi, name, j = False, None, idx
+    while j > 0 and name is None:
+        if operators[j] not in ("&&", ";"):
+            return None
+        semi = semi or operators[j] == ";"
+        j -= 1
+        words = _plain_words(segments[j]) if not (arms[j] or bodies[j]) else None
+        if not words or len(words) < 2 or words[0] != "git":
+            return None
+        flags = _CREATE_FLAGS.get(words[1])
+        if flags and len(words) in (4, 5) and words[2] in flags:
+            if not _REF_NAME.match(words[3]) or (len(words) == 5 and (semi or words[4].startswith("-"))):
+                return None
+            if operators[j] == "&&" and semi:
+                return None  # the creation may be skipped while the commit still runs
+            name = words[3]
+        elif words[1] not in _HEAD_NEUTRAL and words[1] != "commit":  # a commit keeps the branch
+            return None
+    if name is None:
+        return None
+    for k in range(j):
+        if operators[k + 1] not in ("&&", ";") or arms[k] or bodies[k]:
+            return None
+        words = _plain_words(segments[k])
+        if not words or not ((len(words) >= 2 and words[0] == "git" and not words[1].startswith("-"))
+                             or (len(words) == 2 and words[0] == "cd")):
+            return None
+    return name
 
 
 def main(branch_override=None, marker_override=None):
@@ -1413,12 +1557,24 @@ def main(branch_override=None, marker_override=None):
         return  # not a git commit invocation → pass through
 
     # Check ALL commit segments — any failure blocks the entire command
-    for seg, effective_cwds in commit_segs:
+    for seg, effective_cwds, predicted in commit_segs:
         # --- Branch guard ---------------------------------------------------------
-        # The live branch, read before the command runs: a branch the same
-        # command creates or switches to is not seen. A cd that may or may
-        # not have run leaves more than one cwd: each is checked.
+        # The live branch, read before the command runs, unless the same plain
+        # chain creates the commit's branch first (_chain_branch). A cd that
+        # may or may not have run leaves more than one cwd: each is checked.
         for effective_cwd in effective_cwds:
+            if predicted is not None:
+                # case-folded: a loose ref on a case-insensitive filesystem
+                # makes refs/heads/Main the same file as refs/heads/main
+                if (predicted.lower() in ("main", "master")
+                        and not _marker_present(effective_cwd, _override=marker_override)):
+                    _block(
+                        f"commit-guard: blocked — this command creates branch '{predicted}' "
+                        "and commits to it, and that branch is protected. Create a feature "
+                        "branch instead, or add <!-- commit-guard: allow-main --> to "
+                        "AGENTS.md or CLAUDE.md to opt in."
+                    )
+                continue
             branch = _current_branch(effective_cwd, _override=branch_override)
             if branch in ("main", "master"):
                 if not _marker_present(effective_cwd, _override=marker_override):
@@ -1614,12 +1770,119 @@ def _test():
             sys.stdin, sys.stderr = old_stdin, old_stderr
         return reason
 
-    check("live main: checkout -b X && commit → blocked",
-          on_main("git checkout -b feature/x && git commit -m '[FEAT] y'") == 2)
-    check("live main: checkout -qb X && commit → blocked",
+    # A branch created earlier in the same plain chain is the commit's branch:
+    # `git switch -c|-C b` / `git checkout -b|-B b`, then only `&&`/`;` and the
+    # HEAD-neutral git add/rm/mv/status/commit up to a plain `git commit`.
+    check("live main: switch -c X && add && commit → passes",
+          on_main("git switch -c feat/x && git add a && git commit -m '[FEAT] m'") == 0)
+    check("live main: checkout -b X; commit → passes",
+          on_main("git checkout -b docs/y; git commit -m '[DOCS] m'") == 0)
+    check("live main: checkout -b X newline commit → passes",
+          on_main("git checkout -b docs/y\ngit commit -m '[DOCS] m'") == 0)
+    check("live main: switch -C / checkout -B X && commit → passes",
+          on_main("git switch -C feat/x && git commit -m '[FEAT] m'") == 0
+          and on_main("git checkout -B feat/x && git commit -m '[FEAT] m'") == 0)
+    check("live main: checkout -b X <start-point> && commit → passes",
+          on_main("git checkout -b feat/x origin/main && git commit -m '[FEAT] m'") == 0)
+    check("live main: cat-heredoc message after an in-chain switch -c → passes",
+          on_main("git switch -c feat/x && git add -A && git commit -m \"$(cat <<'EOF'\n"
+                  "[FEAT] m\nEOF\n)\"") == 0)
+    check("live main: a substitution message that runs more than cat → blocked",
+          on_main("git switch -c feat/x && git commit -m \"$(git checkout main)\"") == 2)
+    check("live main: plain commit → blocked",
+          on_main("git commit -m '[FEAT] m'") == 2)
+    check("live main: commit && switch -c X (creation after the commit) → blocked",
+          on_main("git commit -m '[FEAT] m' && git switch -c feat/x") == 2)
+    check("switch -c main && commit → blocked",
+          on_main("git switch -c main && git commit -m '[FEAT] m'") == 2)
+    check("checkout -B master; commit → blocked even on a live feature branch",
+          run("git checkout -B master; git commit -m '[FEAT] m'", branch="feature/x") == 2)
+    check("switch -c main && commit + allow-main marker → passes",
+          run("git switch -c main && git commit -m '[FEAT] m'", branch="main", marker=True) == 0)
+    check("live main: creation after || → blocked",
+          on_main("false || git switch -c feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: commit after || → blocked",
+          on_main("git switch -c feat/x || git commit -m '[FEAT] m'") == 2)
+    check("live main: creation in a subshell → blocked",
+          on_main("(git switch -c feat/x) && git commit -m '[FEAT] m'") == 2)
+    check("live main: creation and commit in one subshell → blocked",
+          on_main("(git switch -c feat/x && git commit -m '[FEAT] m')") == 2)
+    check("live main: creation in a brace group → blocked",
+          on_main("{ git switch -c feat/x; } && git commit -m '[FEAT] m'") == 2)
+    check("live main: skippable creation then ';' → blocked",
+          on_main("false && git switch -c feat/x; git commit -m '[FEAT] m'") == 2)
+    check("live main: creation in the background → blocked",
+          on_main("git switch -c feat/x & git commit -m '[FEAT] m'") == 2)
+    check("live main: checkout main between creation and commit → blocked",
+          on_main("git switch -c feat/x && git checkout main && git commit -m '[FEAT] m'") == 2)
+    check("live main: cd between creation and commit → blocked",
+          on_main("git switch -c feat/x && cd /x && git commit -m '[FEAT] m'") == 2)
+    check("live main: commit behind git -C after creation → blocked",
+          on_main("git switch -c feat/x && git -C /x commit -m '[FEAT] m'") == 2)
+    check("live main: creation behind git -C → blocked",
+          on_main("git -C /x switch -c feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: env-prefixed creation → blocked",
+          on_main("GIT_DIR=/o/.git git switch -c feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: env-prefixed commit → blocked",
+          on_main("git switch -c feat/x && GIT_DIR=/o/.git git commit -m '[FEAT] m'") == 2)
+    check("live main: expanded branch name → blocked",
+          on_main("git switch -c \"$b\" && git commit -m '[FEAT] m'") == 2)
+    check("live main: git add carrying a substitution → blocked",
+          on_main("git switch -c feat/x && git add $(git checkout main) && git commit -m '[FEAT] m'")
+          == 2)
+    check("live main: plain switch (no -c) && commit → blocked",
+          on_main("git switch feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: checkout -qb (combined flags) is not read → blocked",
           on_main("git checkout -qb feature/x && git commit -m '[FEAT] y'") == 2)
-    check("live main: switch -c X && commit → blocked",
-          on_main("git switch -c feature/x && git commit -m '[FEAT] y'") == 2)
+    check("live main: second commit after a checkout main → blocked",
+          on_main("git switch -c feat/x && git commit -m '[FEAT] m' && git checkout main && "
+                  "git commit -m '[FEAT] m'") == 2)
+    check("live main: plain git and a literal cd before the creation → passes",
+          on_main("cd /repo && git fetch origin && git switch -c feat/x && git commit -m '[FEAT] m'")
+          == 0)
+    check("live main: a redirect glued to the branch name → blocked",
+          on_main("git switch -C main>/dev/null && git commit -m '[FEAT] m'") == 2
+          and on_main("git checkout -B master>x && git commit -m '[FEAT] m'") == 2)
+    check("live main: a ref name git rejects → blocked",
+          on_main("git switch -c a..b && git commit -m '[FEAT] m'") == 2
+          and on_main("git switch -c x.lock && git commit -m '[FEAT] m'") == 2)
+    check("live main: a message substitution that writes a file → blocked",
+          on_main("git switch -c feat/x && git commit -m \"$(echo 'ref: refs/heads/main' "
+                  "> .git/HEAD; echo '[FEAT] m')\"") == 2)
+    check("live main: a redirect on a HEAD-neutral command → blocked",
+          on_main("git switch -c feat/x && git status >.git/HEAD && git commit -m '[FEAT] m'") == 2)
+    check("live main: an earlier function redefining git → blocked",
+          on_main("git() { command git checkout main; command git \"$@\"; }; "
+                  "git switch -c feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: an earlier function redefining cat → blocked",
+          on_main("cat() { command git checkout main; }; git switch -c feat/x && "
+                  "git commit -m \"$(cat <<'EOF'\n[FEAT] m\nEOF\n)\"") == 2)
+    check("live main: an earlier alias or PATH change → blocked",
+          on_main("alias git=x; git switch -c feat/x && git commit -m '[FEAT] m'") == 2
+          and on_main("export PATH=/e:$PATH; git switch -c feat/x && git commit -m '[FEAT] m'") == 2)
+    check("live main: HEAD or a .lock component as the name → blocked",
+          on_main("git checkout -b HEAD; git commit -m '[FEAT] m'") == 2
+          and on_main("git switch -c a.lock/b; git commit -m '[FEAT] m'") == 2)
+    check("live main: a function named cat in the message substitution → blocked",
+          on_main("git switch -c feat/x && git commit -m \"$(cat() ( git checkout main ); cat; "
+                  "echo '[FEAT] m')\"") == 2)
+    check("live main: a quoted '>' in an echoed message is text → passes",
+          on_main("git switch -c feat/x && git commit -m \"$(echo '[FIX] a -> b')\"") == 0)
+    check("live main: an unquoted heredoc word in the message → passes",
+          on_main("git switch -c feat/x && git commit -m \"$(cat <<EOF\n[FEAT] m\nEOF\n)\"") == 0)
+    check("live main: switch -C Main (case-folded main) → blocked",
+          on_main("git switch -C Main && git commit -m '[FEAT] m'") == 2)
+    check("live main: git diff --output between creation and commit → blocked",
+          on_main("git switch -c feat/x && git diff --output=.git/HEAD && git commit -m '[FEAT] m'")
+          == 2)
+    check("live main: two commits after one creation → passes",
+          on_main("git switch -c feat/x && git commit -m '[FEAT] a' && git commit -m '[FEAT] b'") == 0)
+    check("an in-chain protected creation names the creation, not a separate command",
+          "creates branch 'main'" in block_reason("git switch -c main && git commit -m '[FEAT] m'"))
+    check("live main: a start point behind ';' → blocked",
+          on_main("git checkout -b feat/x does-not-exist; git commit -m '[FEAT] m'") == 2)
+    check("live main: a predicted branch still type-checks the message → blocked",
+          on_main("git switch -c feat/x && git commit -m 'wip'") == 2)
     check("live feature: checkout -b X && commit → passes",
           run("git checkout -b feature/y && git commit -m '[FEAT] y'", branch="feature/x") == 0)
     check("live feature: a switch to main the hook does not follow → passes (accepted residual)",
@@ -1627,7 +1890,7 @@ def _test():
     check("live feature: sh -c that may switch → passes (accepted residual)",
           run("sh -c 'git checkout main' && git commit -m '[FEAT] y'", branch="feature/x") == 0)
     check("the main block names the separate-command fix",
-          "separate command" in block_reason("git checkout -b x && git commit -m '[FEAT] y'"))
+          "separate command" in block_reason("git checkout -qb x && git commit -m '[FEAT] y'"))
 
 
     check("semicolon: a bad type is still type-blocked",
@@ -1702,6 +1965,9 @@ def _test():
                   "git commit -m '[FEAT] y'") == 2)
     check("semicolon: an earlier GIT_DIR assignment line → blocked",
           on_main("GIT_DIR=/other/.git\ngit checkout -b feature/x\ngit commit -m '[FEAT] y'") == 2)
+    check("semicolon: an `export GIT_DIR` between creation and commit → blocked",
+          on_main("git checkout -b feature/x; export GIT_DIR=/other/.git; "
+                  "git commit -m '[FEAT] y'") == 2)
 
 
     # command-substitution message: only EXPANDABLE subst (double-quoted/unquoted)
