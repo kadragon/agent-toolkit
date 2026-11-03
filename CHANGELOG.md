@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] pr-recap side pane shows the last merged PRs: tabs, diffstat, files by directory (mods v0.6.0) (2026-11-03)
 - [done] commit-guard reads an in-chain switch -c/checkout -b before a plain commit (dev v4.11.37) (2026-11-02)
 - [done] Revert the task-review live Herdr pane (#378); reviews run without a side pane again (dev v4.11.36) (2026-11-01)
 - [done] backlog_candidates: headings-only backlog no longer diagnosed as having no headings (dev v4.11.34) (2026-10-29)

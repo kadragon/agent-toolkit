@@ -51,8 +51,51 @@ export type StatusBand = {
   queue?: Queue | null
 }
 
+export type FileKind = 'code' | 'test' | 'docs' | 'config'
+
+export type FileChange = {
+  path: string
+  added: number
+  deleted: number
+  isBinary: boolean
+  kind: FileKind
+}
+
+// The files of one PR under one directory, with their totals.
+export type PrGroup = { dir: string; files: FileChange[]; added: number; deleted: number }
+
+// One merged PR as the first-parent git log of HEAD records it.
+export type Pr = {
+  number: number
+  sha: string
+  // The `[FEAT]`-style tag the title opens with, without brackets.
+  tag?: string
+  title: string
+  author: string
+  mergedAt: number
+  // The commit body's paragraphs, trailers dropped.
+  summary: string[]
+  files: FileChange[]
+}
+
+// What the pr-recap pane read last; `error` when git could not answer.
+export type PrRecap = { prs: Pr[]; readAt: number; error?: string }
+
+// What the person picked in the pane.
+export type PrRecapView = {
+  // The PR shown, by number; the newest when unset or gone.
+  selected?: number
+  // Directories opened to their files, keyed `<pr>:<dir>`.
+  open: string[]
+  isSummaryOpen: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    mods: { statusBand: StatusBand | null }
+    mods: {
+      statusBand: StatusBand | null
+      prRecap: Shaped<PrRecap | null>
+      prRecapView: Shaped<PrRecapView>
+    }
   }
 }

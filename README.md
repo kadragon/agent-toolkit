@@ -34,6 +34,7 @@ build and may break on an update; `dev` and `prod` do not depend on it.
 | Mod | Description | Setting |
 |---|---|---|
 | `status-band` | Two rows above the prompt, each figure in its own color: model and effort, directory and git branch, session time, prompt-cache time left, hook count and skill count with the size of the skill listing, then context fill and the 5-hour and 7-day rate limits with their resets. A figure the engine has no reading for is left out. | `Status band` (on by default), `Status band cache TTL (minutes)` (`60`) |
+| `pr-recap` | A side pane, about a fifth of the terminal, with the last merged PRs of the branch history: a tab per PR (`1`–`3`), its tag, title, author and age, `+/-` totals and a code/test/docs/config file count, the commit body as a summary (`s` opens it whole), and its files grouped by directory with a diffstat bar, a group opened to its files on a press. It rereads after a Bash `git merge`/`pull`/`checkout`/`gh pr merge` and on `r`; `/pr-recap` opens it again. Local git only, no network. | `PR recap pane` (on by default), `PR recap count` (`3`) |
 
 `status-band` shows what a `statusLine` command such as claude-hud
 (github.com/jarrodwatts/claude-hud, whose layout it follows) shows, so running both draws the same
