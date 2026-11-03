@@ -186,12 +186,12 @@ const gated = () => {
   return { gate, release }
 }
 
-test('the first band drawing opens the pane at a fifth of the terminal with the latest PR explained', async ($, on) => {
+test('the first band drawing opens the pane at a quarter of the terminal with the latest PR explained', async ($, on) => {
   const state = world(on)
 
   await boot($)
 
-  expect(state.opens).toEqual([{ id: 'pr-recap', columns: 40 }])
+  expect(state.opens).toEqual([{ id: 'pr-recap', columns: 50 }])
   expect(state.commands).toEqual(['pr-recap'])
   expect(state.diffRuns).toEqual([['git', '-c', 'core.quotePath=false', '--no-pager', 'diff', '--no-color', '--unified=1', `${LATEST}^1`, LATEST]])
   expect(state.modelCalls).toHaveLength(1)
@@ -202,7 +202,7 @@ test('the first band drawing opens the pane at a fifth of the terminal with the 
     const ui = await $.ui.mount({ ...PANE, surface })
     const drawn = await texts(ui)
 
-    expect(await ui.findAll({ type: 'Button' })).toEqual([])
+    expect((await ui.findAll({ type: 'Button' })).map(found => found.key)).toEqual(['older'])
     expect(drawn).toContain('#381 [HARNESS] commit-guard reads a switch')
     expect(drawn).toContain('+54 -4 · 파일 3개 · 30분 전')
     expect(drawn).toContain('커밋 가드가 새 브랜치를 미리 알아본다.')
@@ -211,9 +211,68 @@ test('the first band drawing opens the pane at a fifth of the terminal with the 
     expect(drawn).toContain('커밋 가드 ✎')
     expect(drawn).toContain('예측 로직 추가')
     expect(drawn).toContain('이전: #380 Revert the side pane · 30분 전')
+    expect(drawn).toContain(' 1/3 ')
     expect(drawn.filter(text => text === '   ▼')).toHaveLength(1)
     await ui.unmount()
   }
+})
+
+test('p and n step through older and newer PRs, each explained once by its commit', async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  state.reply = JSON.stringify(OTHER_EXPLAIN)
+  await $.ui.press({ plugin: 'mods', key: 'older' })
+  await settle()
+  let drawn = await texts(ui)
+
+  expect(drawn).toContain('#380 [HARNESS] Revert the side pane')
+  expect(drawn).toContain(' 2/3 ')
+  expect(drawn).toContain('다른 PR 요약.')
+  expect(drawn).toContain('이전: #377 backlog · 30분 전')
+  expect((await ui.findAll({ type: 'Button' })).map(found => found.key)).toEqual(['older', 'newer'])
+
+  await $.ui.press({ plugin: 'mods', key: 'older' })
+  await settle()
+  drawn = await texts(ui)
+  expect(drawn).toContain('#377 [FIX] backlog')
+  expect(drawn).toContain(' 3/3 ')
+  expect((await ui.findAll({ type: 'Button' })).map(found => found.key)).toEqual(['newer'])
+
+  await $.ui.press({ plugin: 'mods', key: 'newer' })
+  await $.ui.press({ plugin: 'mods', key: 'newer' })
+  await settle()
+  drawn = await texts(ui)
+  expect(drawn).toContain('#381 [HARNESS] commit-guard reads a switch')
+  expect(drawn).toContain('커밋 가드가 새 브랜치를 미리 알아본다.')
+  // The latest came back from the store: one call for each PR seen.
+  expect(state.modelCalls).toHaveLength(3)
+  await ui.unmount()
+})
+
+test('a reread keeps an older PR shown; a newly merged PR takes the pane', async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  await $.ui.press({ plugin: 'mods', key: 'older' })
+  await $.tool.call({ tool: 'Bash', command: 'git fetch' })
+  await settle()
+  expect(await texts(ui)).toContain('#380 [HARNESS] Revert the side pane')
+  await ui.unmount()
+
+  state.log = OTHER_LOG + LOG
+  await $.tool.call({ tool: 'Bash', command: 'git pull' })
+  await settle()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const drawn = await texts(ui)
+
+  expect(drawn).toContain('#390 [FEAT] other work')
+  expect(drawn).toContain(' 1/4 ')
+  await ui.unmount()
 })
 
 test('while the model runs the pane says so over the commit summary', async ($, on) => {
@@ -362,7 +421,7 @@ test('a wider terminal re-asks the open pane its share; the same width does not'
   await settle()
   await wide.unmount()
 
-  expect(state.opens.map(open => open.columns)).toEqual([40, 60])
+  expect(state.opens.map(open => open.columns)).toEqual([50, 75])
 })
 
 test('a Bash command that moves the history reads the PRs again; another does not', async ($, on) => {
@@ -414,10 +473,10 @@ test('a boot that fails is tried again on the next band drawing', async ($, on) 
 
   await boot($)
   expect(state.commands).toEqual(['pr-recap'])
-  expect(state.opens).toEqual([{ id: 'pr-recap', columns: 40 }])
+  expect(state.opens).toEqual([{ id: 'pr-recap', columns: 50 }])
 })
 
-test('/pr-recap opens the pane at a fifth of the width it runs at', async ($, on) => {
+test('/pr-recap opens the pane at a quarter of the width it runs at', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -428,7 +487,7 @@ test('/pr-recap opens the pane at a fifth of the width it runs at', async ($, on
   } as never)
 
   expect(ran).toMatchObject({ text: 'PR recap pane opened.' })
-  expect(state.opens.map(open => open.columns)).toEqual([40, 32])
+  expect(state.opens.map(open => open.columns)).toEqual([50, 40])
   expect(state.logRuns).toBe(2)
 })
 

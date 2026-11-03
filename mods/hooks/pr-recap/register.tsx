@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain } from '../../types'
+import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain, PrRecapView } from '../../types'
 import {
   count,
   diffArgv,
@@ -15,19 +15,19 @@ import {
 } from './explain'
 import { ago, logArgv, parseLog, totalsOf } from './recap'
 
-// The latest merged PR, read without a key: its numbers, a plain summary and a
-// top-to-bottom diagram of the parts it touches, both made once per commit by a
-// small model; the PR before it as one line.
+// A merged PR: its numbers, a plain summary and a top-to-bottom diagram of the
+// parts it touches, both made once per commit by a small model. The latest is
+// shown first; the pane's p and n step to the older and newer ones.
 export const PANE = 'pr-recap'
 const TITLE = 'PR recap'
 const COMMAND = 'pr-recap'
-// The latest PR and the one before it.
-const PR_COUNT = 2
+// The PRs the pane steps through, newest first.
+const PR_COUNT = 20
 // First-parent commits read to find them among direct commits.
-const LOG_WINDOW = 60
+const LOG_WINDOW = 120
 const GIT_TIMEOUT_MS = 5000
 // The share of the terminal the docked pane asks, and the dock's own floor.
-const SHARE = 0.2
+const SHARE = 0.25
 const MIN_COLUMNS = 24
 const MAX_BOX_COLUMNS = 34
 const STORE_PREFIX = 'pr-recap:explain:'
@@ -46,10 +46,11 @@ const recapAtom = atom({ plugin: 'mods', key: 'prRecap' } as const, null, { shap
 const explainAtom = atom({ plugin: 'mods', key: 'prRecapExplain' } as const, null, {
   shape: 'pr-recap-explain-1',
 })
+const viewAtom = atom({ plugin: 'mods', key: 'prRecapView' } as const, null, { shape: 'pr-recap-view-1' })
 
 // What the module keeps between hooks; a reload starts it over and boots again.
 // `terminalColumns` is the width the band last drew at, handed over by band.tsx:
-// the only drawing that spans the whole terminal. `latest` is the commit the
+// the only drawing that spans the whole terminal. `shown` is the commit the
 // pane shows: only its explanation is published. `asking` holds the commits a
 // model call runs for, so a reread does not ask twice; a failed one leaves it,
 // and the next reread asks again.
@@ -59,7 +60,7 @@ const live = {
   isBooted: false,
   isEnabled: false,
   isExplainOn: true,
-  latest: '',
+  shown: '',
   asking: new Set<string>(),
 }
 
@@ -74,11 +75,11 @@ function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: TITLE, ...(columns === undefined ? {} : { columns }) })
 }
 
-// The latest PR explained: from the store when an earlier session made it, else
+// The PR shown explained: from the store when an earlier session made it, else
 // by the model over the commit, its files and its capped diff.
 async function publish($: EngineInterface, state: PrRecapExplain): Promise<void> {
   // A call that outlived its PR leaves the pane to the PR it shows now.
-  if (state.sha === live.latest) await update($, explainAtom, () => state)
+  if (state.sha === live.shown) await update($, explainAtom, () => state)
 }
 
 async function explain($: EngineInterface, pr: Pr): Promise<void> {
@@ -148,12 +149,38 @@ async function readOnce($: EngineInterface): Promise<void> {
     next = { prs: [], readAt: await $.clock.now(), error: String(error) }
   }
 
+  const before = await read($, recapAtom)
+  const view = await read($, viewAtom)
   const latest = next.prs[0]
+  // A new latest PR takes the pane; otherwise the PR shown stays while it is listed.
+  const isNewLatest = latest?.sha !== before?.prs[0]?.sha
+  const shown = (!isNewLatest && next.prs.find(pr => pr.sha === view?.sha)) || latest
 
-  live.latest = latest?.sha ?? ''
   await update($, recapAtom, () => next)
-  if (latest !== undefined && live.isExplainOn) void explain($, latest).catch(() => undefined)
+  await show($, shown)
 }
+
+async function show($: EngineInterface, pr: Pr | undefined): Promise<void> {
+  live.shown = pr?.sha ?? ''
+  await update($, viewAtom, () => (pr === undefined ? null : { sha: pr.sha }))
+  if (pr !== undefined && live.isExplainOn) void explain($, pr).catch(() => undefined)
+}
+
+// The PR `step` places from the one shown: +1 older, -1 newer.
+async function step($: EngineInterface, by: number): Promise<void> {
+  const recap = await read($, recapAtom)
+  const prs = recap?.prs ?? []
+  const at = prs.findIndex(pr => pr.sha === live.shown)
+  const pr = prs[Math.max(0, at) + by]
+
+  if (pr !== undefined) await show($, pr)
+}
+
+const indexOf = (prs: readonly Pr[], view: PrRecapView | null): number =>
+  Math.max(
+    0,
+    prs.findIndex(pr => pr.sha === view?.sha),
+  )
 
 let loading: Promise<void> | undefined
 // A read asked for while one runs: that one may have started before HEAD moved,
@@ -240,15 +267,17 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const recap = await read($, recapAtom)
     const state = await read($, explainAtom)
+    const view = await read($, viewAtom)
     const now = await $.clock.now()
     const boxColumns = Math.min(MAX_BOX_COLUMNS, Math.max(MIN_COLUMNS - 2, e.props.bodyColumns))
 
     if (recap === null) return <Text dimColor>git 이력을 읽는 중…</Text>
 
-    const pr = recap.prs[0]
+    const at = indexOf(recap.prs, view)
+    const pr = recap.prs[at]
 
     if (recap.error !== undefined || pr === undefined) {
       return (
@@ -259,7 +288,8 @@ export const register: Register = (on, options) => {
     }
 
     const totals = totalsOf(pr.files)
-    const previous = recap.prs[1]
+    const older = recap.prs[at + 1]
+    const newer = at > 0 ? recap.prs[at - 1] : undefined
     const made = state?.sha === pr.sha ? state : undefined
     const fallback = pr.summary[0] ?? ''
 
@@ -329,11 +359,30 @@ export const register: Register = (on, options) => {
             </Box>
           )}
         </Box>
-        {previous !== undefined && (
-          <Box marginTop={1}>
-            <Text dimColor wrap="truncate-end">
-              이전: #{String(previous.number)} {previous.title} · {ago(previous.mergedAt, now)}
-            </Text>
+        {recap.prs.length > 1 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Box flexDirection="row">
+              {older !== undefined && (
+                <Button key="older" hotkey="p" plain onPress={() => step($, 1)}>
+                  ◀ 이전
+                </Button>
+              )}
+              <Text dimColor>
+                {' '}
+                {String(at + 1)}/{String(recap.prs.length)}{' '}
+              </Text>
+              {newer !== undefined && (
+                <Button key="newer" hotkey="n" plain onPress={() => step($, -1)}>
+                  다음 ▶
+                </Button>
+              )}
+            </Box>
+            {older !== undefined && (
+              <Text dimColor wrap="truncate-end">
+                이전: #{String(older.number)} {older.title} · {ago(older.mergedAt, now)}
+              </Text>
+            )}
+            {!e.props.isFocused && <Text dimColor>포커스 후 p 이전 · n 다음</Text>}
           </Box>
         )}
       </Box>
