@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { ago, fit, groupsOf, kindOf, kindsOf, landedPath, logArgv, parseLog, statBar, summaryOf, totalsOf } from './recap'
+import { ago, landedPath, logArgv, parseLog, summaryOf, totalsOf } from './recap'
 
 const RS = '\x1e'
 const US = '\x1f'
@@ -37,15 +37,15 @@ describe('parseLog', () => {
       mergedAt: 1793589760 * 1000,
       summary: ['The hook only read the live branch.\nNow it predicts it.'],
     })
-    expect(prs[0]?.files.map(file => [file.path, file.added, file.deleted, file.kind])).toEqual([
-      ['dev/hooks/commit-guard/guard.py', 12, 3, 'code'],
-      ['dev/hooks/commit-guard/test_guard.py', 40, 0, 'test'],
-      ['CHANGELOG.md', 2, 1, 'docs'],
+    expect(prs[0]?.files.map(file => [file.path, file.added, file.deleted])).toEqual([
+      ['dev/hooks/commit-guard/guard.py', 12, 3],
+      ['dev/hooks/commit-guard/test_guard.py', 40, 0],
+      ['CHANGELOG.md', 2, 1],
     ])
     expect(prs[1]).toMatchObject({ tag: 'FEAT', title: 'Add x', summary: ['Why x.'] })
     expect(prs[1]?.files).toEqual([
-      { path: 'assets/icon.png', added: 0, deleted: 0, isBinary: true, kind: 'code' },
-      { path: 'src/new/x.ts', added: 5, deleted: 0, isBinary: false, kind: 'code' },
+      { path: 'assets/icon.png', added: 0, deleted: 0, isBinary: true },
+      { path: 'src/new/x.ts', added: 5, deleted: 0, isBinary: false },
     ])
   })
 
@@ -74,7 +74,6 @@ describe('parseLog', () => {
     expect(logArgv(60).slice(0, 3)).toEqual(['git', '-c', 'core.quotePath=false'])
     expect(parseLog(record('eeee', '[DOCS] 한글 (#9)', 1, '', ['3\t0\tdocs/한글.md']), 1)[0]?.files[0]).toMatchObject({
       path: 'docs/한글.md',
-      kind: 'docs',
     })
   })
 
@@ -89,48 +88,17 @@ test('a rename lands on its new path', () => {
   expect(landedPath('a.ts => b.ts')).toBe('b.ts')
 })
 
-test('a file kind is read off its path', () => {
-  expect(kindOf('mods/hooks/pr-recap/recap.test.ts')).toBe('test')
-  expect(kindOf('dev/hooks/commit-guard/test_guard.py')).toBe('test')
-  expect(kindOf('tests/fixtures/data.py')).toBe('test')
-  expect(kindOf('docs/conventions.md')).toBe('docs')
-  expect(kindOf('mods/.claude-plugin/plugin.json')).toBe('config')
-  expect(kindOf('.gitignore')).toBe('config')
-  expect(kindOf('mods/hooks/band.tsx')).toBe('code')
-})
-
 test('a summary drops trailers, rules and the title bullet', () => {
   expect(summaryOf('* [FIX] title\n\nbody one\n\nSigned-off-by: me\n', 'title')).toEqual(['body one'])
   expect(summaryOf('', 'title')).toEqual([])
 })
 
-test('files group by directory, most changed first, with totals and kinds', () => {
-  const files = parseLog(LOG, 1)[0]?.files ?? []
-  const groups = groupsOf(files)
-
-  expect(groups.map(group => [group.dir, group.files.length, group.added, group.deleted])).toEqual([
-    ['dev/hooks/commit-guard', 2, 52, 3],
-    ['.', 1, 2, 1],
-  ])
-  expect(totalsOf(files)).toEqual({ added: 54, deleted: 4 })
-  expect(kindsOf(files)).toEqual([
-    { kind: 'code', files: 1 },
-    { kind: 'test', files: 1 },
-    { kind: 'docs', files: 1 },
-  ])
+test('totals add up every file', () => {
+  expect(totalsOf(parseLog(LOG, 1)[0]?.files ?? [])).toEqual({ added: 54, deleted: 4 })
 })
 
-test('the stat bar scales to the largest and keeps each side visible', () => {
-  expect(statBar(52, 3, 55, 8)).toEqual({ plus: '+++++++', minus: '-' })
-  expect(statBar(2, 1, 55, 8)).toEqual({ plus: '+', minus: '-' })
-  expect(statBar(0, 10, 10, 4)).toEqual({ plus: '', minus: '----' })
-  expect(statBar(0, 0, 10, 4)).toEqual({ plus: '', minus: '' })
-})
-
-test('fit keeps the tail and ago reads in minutes, hours and days', () => {
-  expect(fit('dev/hooks/commit-guard/', 10)).toBe('…it-guard/')
-  expect(fit('short', 10)).toBe('short')
-  expect(ago(0, 5 * 60_000)).toBe('5m ago')
-  expect(ago(0, 3 * 3_600_000)).toBe('3h ago')
-  expect(ago(0, 72 * 3_600_000)).toBe('3d ago')
+test('ago reads in minutes, hours and days', () => {
+  expect(ago(0, 5 * 60_000)).toBe('5분 전')
+  expect(ago(0, 3 * 3_600_000)).toBe('3시간 전')
+  expect(ago(0, 72 * 3_600_000)).toBe('3일 전')
 })

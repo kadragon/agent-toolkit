@@ -1,4 +1,4 @@
-import type { FileChange, FileKind, Pr, PrGroup } from '../../types'
+import type { FileChange, Pr } from '../../types'
 
 // Field and record marks for the git log the recap reads: a record opens with
 // RS, its fields part on US, and GS ends the message so the numstat after it
@@ -39,16 +39,6 @@ export const logArgv = (window: number): string[] => [
 export const landedPath = (path: string): string =>
   path.replace(/\{[^{}]*? => ([^{}]*)\}/g, '$1').replace(/^.* => /, '').replace(/\/{2,}/g, '/')
 
-export const kindOf = (path: string): FileKind => {
-  const name = path.split('/').pop() ?? path
-
-  if (/(^|\/)(tests?|__tests__)\//.test(path) || /^test_|[._-](test|spec)\.[^.]+$/.test(name)) return 'test'
-  if (/\.(md|mdx|txt|rst)$/i.test(name)) return 'docs'
-  if (/\.(json|ya?ml|toml|ini|cfg|lock)$/i.test(name) || name.startsWith('.')) return 'config'
-
-  return 'code'
-}
-
 const numstat = (line: string): FileChange | undefined => {
   const match = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line)
 
@@ -62,7 +52,6 @@ const numstat = (line: string): FileChange | undefined => {
     added: isBinary ? 0 : Number(match[1]),
     deleted: isBinary ? 0 : Number(match[2]),
     isBinary,
-    kind: kindOf(path),
   }
 }
 
@@ -134,79 +123,16 @@ export const parseLog = (stdout: string, count: number, isTruncated = false): Pr
   return prs
 }
 
-const dirOf = (path: string): string => {
-  const cut = path.lastIndexOf('/')
-
-  return cut < 0 ? '.' : path.slice(0, cut)
-}
-
-// Files by the directory they sit in, the most changed first; within one, by path.
-export const groupsOf = (files: readonly FileChange[]): PrGroup[] => {
-  const groups = new Map<string, FileChange[]>()
-
-  for (const file of files) {
-    const dir = dirOf(file.path)
-
-    groups.set(dir, [...(groups.get(dir) ?? []), file])
-  }
-
-  return [...groups.entries()]
-    .map(([dir, list]) => ({
-      dir,
-      files: [...list].sort((a, b) => a.path.localeCompare(b.path)),
-      added: list.reduce((sum, file) => sum + file.added, 0),
-      deleted: list.reduce((sum, file) => sum + file.deleted, 0),
-    }))
-    .sort((a, b) => b.added + b.deleted - (a.added + a.deleted) || a.dir.localeCompare(b.dir))
-}
-
 export const totalsOf = (files: readonly FileChange[]) => ({
   added: files.reduce((sum, file) => sum + file.added, 0),
   deleted: files.reduce((sum, file) => sum + file.deleted, 0),
 })
 
-const KINDS: readonly FileKind[] = ['code', 'test', 'docs', 'config']
-
-// How many files of each kind, the kinds with none left out.
-export const kindsOf = (files: readonly FileChange[]): { kind: FileKind; files: number }[] =>
-  KINDS.map(kind => ({ kind, files: files.filter(file => file.kind === kind).length })).filter(
-    entry => entry.files > 0,
-  )
-
-// A diffstat bar `width` cells wide at most, scaled to `scale` lines: the share
-// added in `+`, deleted in `-`, as `git diff --stat` draws it.
-export const statBar = (
-  added: number,
-  deleted: number,
-  scale: number,
-  width: number,
-): { plus: string; minus: string } => {
-  const total = added + deleted
-
-  if (total === 0 || width <= 0) return { plus: '', minus: '' }
-
-  const cells = Math.max(1, Math.round((Math.min(total, scale) / Math.max(scale, 1)) * width))
-  // Each side that changed keeps a cell, so a bar of one draws both.
-  const plus =
-    added === 0
-      ? 0
-      : deleted === 0
-        ? cells
-        : Math.min(Math.max(1, cells - 1), Math.max(1, Math.round((added / total) * cells)))
-  const minus = deleted === 0 ? 0 : Math.max(1, cells - plus)
-
-  return { plus: '+'.repeat(plus), minus: '-'.repeat(minus) }
-}
-
-// A path cut from the left to `width` cells, its tail kept: the name matters most.
-export const fit = (text: string, width: number): string =>
-  text.length <= width ? text : width <= 1 ? text.slice(-width) : `…${text.slice(text.length - width + 1)}`
-
 export const ago = (then: number, now: number): string => {
   const minutes = Math.max(0, Math.floor((now - then) / 60_000))
 
-  if (minutes < 60) return `${minutes}m ago`
-  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}h ago`
+  if (minutes < 60) return `${minutes}분 전`
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}시간 전`
 
-  return `${Math.floor(minutes / (24 * 60))}d ago`
+  return `${Math.floor(minutes / (24 * 60))}일 전`
 }

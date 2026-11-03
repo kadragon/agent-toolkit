@@ -51,18 +51,12 @@ export type StatusBand = {
   queue?: Queue | null
 }
 
-export type FileKind = 'code' | 'test' | 'docs' | 'config'
-
 export type FileChange = {
   path: string
   added: number
   deleted: number
   isBinary: boolean
-  kind: FileKind
 }
-
-// The files of one PR under one directory, with their totals.
-export type PrGroup = { dir: string; files: FileChange[]; added: number; deleted: number }
 
 // One merged PR as the first-parent git log of HEAD records it.
 export type Pr = {
@@ -81,13 +75,26 @@ export type Pr = {
 // What the pr-recap pane read last; `error` when git could not answer.
 export type PrRecap = { prs: Pr[]; readAt: number; error?: string }
 
-// What the person picked in the pane.
-export type PrRecapView = {
-  // The PR shown, by number; the newest when unset or gone.
-  selected?: number
-  // Directories opened to their files, keyed `<pr>:<dir>`.
-  open: string[]
-  isSummaryOpen: boolean
+export type NodeChange = 'added' | 'changed' | 'removed' | 'same'
+
+// One box of the structure diagram, top to bottom in the order work flows.
+export type ExplainNode = {
+  name: string
+  // What the PR did to it, or what it does here.
+  note: string
+  change: NodeChange
+  // How it hands over to the next box; empty on the last.
+  link: string
+}
+
+// What the model made of a PR: plain sentences and the diagram's boxes.
+export type PrExplain = { summary: string; nodes: ExplainNode[] }
+
+// The explanation of the latest PR, by its commit, as far as it has got.
+export type PrRecapExplain = {
+  sha: string
+  status: 'pending' | 'ready' | 'failed'
+  explain?: PrExplain
 }
 
 declare module 'claude-code' {
@@ -95,7 +102,7 @@ declare module 'claude-code' {
     mods: {
       statusBand: StatusBand | null
       prRecap: Shaped<PrRecap | null>
-      prRecapView: Shaped<PrRecapView>
+      prRecapExplain: Shaped<PrRecapExplain | null>
     }
   }
 }
