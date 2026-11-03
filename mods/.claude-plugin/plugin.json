@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": {
     "name": "kadragon"
   },
@@ -32,6 +32,18 @@
       "title": "Status band in plain ASCII",
       "description": "Draw the status band's separators, effort mark, context bar and cut branch names in ASCII, for a terminal that leaves stale cells or broken glyphs behind on redraw (Wave on Windows).",
       "default": false
+    },
+    "prRecapEnabled": {
+      "type": "boolean",
+      "title": "PR recap pane",
+      "description": "Open a side pane (about a fifth of the terminal) with the last merged PRs of the branch history: a tab per PR, its tag, title, summary and diffstat, and its files grouped by directory, each group opened to its files on a press. /pr-recap opens it again.",
+      "default": true
+    },
+    "prRecapCount": {
+      "type": "number",
+      "title": "PR recap count",
+      "description": "How many of the last merged PRs the PR recap pane shows: 1 to 3.",
+      "default": 3
     }
   }
 }
