@@ -275,6 +275,33 @@ test('a reread keeps an older PR shown; a newly merged PR takes the pane', async
   await ui.unmount()
 })
 
+test('a step taken while git reads is kept; a failed read keeps the PR shown', async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  await $.ui.press({ plugin: 'mods', key: 'older' })
+  await $.ui.press({ plugin: 'mods', key: 'older' })
+  const git = gated()
+
+  state.gitGate = git.gate
+  await $.tool.call({ tool: 'Bash', command: 'git fetch' })
+  await $.ui.press({ plugin: 'mods', key: 'newer' })
+  git.release()
+  await settle()
+  expect(await texts(ui)).toContain(' 2/3 ')
+
+  state.log = null
+  await $.tool.call({ tool: 'Bash', command: 'git pull' })
+  await settle()
+  state.log = LOG
+  await $.tool.call({ tool: 'Bash', command: 'git pull' })
+  await settle()
+  expect(await texts(ui)).toContain(' 2/3 ')
+  await ui.unmount()
+})
+
 test('while the model runs the pane says so over the commit summary', async ($, on) => {
   const state = world(on)
   const model = gated()

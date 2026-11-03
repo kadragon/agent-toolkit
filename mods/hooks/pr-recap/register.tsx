@@ -61,6 +61,8 @@ const live = {
   isEnabled: false,
   isExplainOn: true,
   shown: '',
+  // The latest PR of the last read that succeeded: only a new one moves the pane.
+  latestSeen: '',
   asking: new Set<string>(),
 }
 
@@ -149,29 +151,40 @@ async function readOnce($: EngineInterface): Promise<void> {
     next = { prs: [], readAt: await $.clock.now(), error: String(error) }
   }
 
-  const before = await read($, recapAtom)
-  const view = await read($, viewAtom)
+  await update($, recapAtom, () => next)
+  // A failed read leaves the PR shown where it was.
+  if (next.error !== undefined) return
+
+  // After a reload the module's memory is empty: the state kept from before fills it.
+  if (live.latestSeen === '' || live.shown === '') {
+    const view = await read($, viewAtom)
+
+    live.shown ||= view?.sha ?? ''
+    live.latestSeen ||= live.shown === '' ? '' : (view?.latest ?? '')
+  }
+
   const latest = next.prs[0]
   // A new latest PR takes the pane; otherwise the PR shown stays while it is listed.
-  const isNewLatest = latest?.sha !== before?.prs[0]?.sha
-  const shown = (!isNewLatest && next.prs.find(pr => pr.sha === view?.sha)) || latest
+  // `live.shown` is read with no wait before show() sets it, so a step taken
+  // while git ran is the one kept.
+  const isNewLatest = latest?.sha !== live.latestSeen
+  const shown = (!isNewLatest && next.prs.find(pr => pr.sha === live.shown)) || latest
 
-  await update($, recapAtom, () => next)
+  live.latestSeen = latest?.sha ?? ''
   await show($, shown)
 }
 
 async function show($: EngineInterface, pr: Pr | undefined): Promise<void> {
   live.shown = pr?.sha ?? ''
-  await update($, viewAtom, () => (pr === undefined ? null : { sha: pr.sha }))
+  await update($, viewAtom, () => (pr === undefined ? null : { sha: pr.sha, latest: live.latestSeen }))
   if (pr !== undefined && live.isExplainOn) void explain($, pr).catch(() => undefined)
 }
 
-// The PR `step` places from the one shown: +1 older, -1 newer.
+// The PR `step` places from the one drawn: +1 older, -1 newer.
 async function step($: EngineInterface, by: number): Promise<void> {
   const recap = await read($, recapAtom)
   const prs = recap?.prs ?? []
-  const at = prs.findIndex(pr => pr.sha === live.shown)
-  const pr = prs[Math.max(0, at) + by]
+  const pr = prs[indexOf(prs, await read($, viewAtom)) + by]
 
   if (pr !== undefined) await show($, pr)
 }
