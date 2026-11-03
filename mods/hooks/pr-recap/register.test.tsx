@@ -52,14 +52,23 @@ type World = {
   gitRuns: (readonly string[])[]
   opens: { id: string; columns?: number }[]
   commands: string[]
+  // Registrations that fail before one goes through.
+  registerFailures: number
+  // Set to hold the next git run open until the test lets it go.
+  gitGate?: Promise<void>
 }
 
 const world = (on: On): World => {
-  const state: World = { log: LOG, gitRuns: [], opens: [], commands: [] }
+  const state: World = { log: LOG, gitRuns: [], opens: [], commands: [], registerFailures: 0 }
 
   on('clock.now', async () => ({ value: NOW }))
   on('clock.sleep', async () => ({ value: undefined }))
   on('command.register', async ($, e) => {
+    if (state.registerFailures > 0) {
+      state.registerFailures -= 1
+      throw new Error('register is down')
+    }
+
     state.commands.push(e.name)
 
     return { value: { command: e.name } }
@@ -74,6 +83,11 @@ const world = (on: On): World => {
   }) as never)
   on('process.run', async ($, e) => {
     state.gitRuns.push(e.argv)
+
+    const gate = state.gitGate
+
+    state.gitGate = undefined
+    await gate
 
     const run = { isStdoutTruncated: false, isStderrTruncated: false }
 
@@ -182,6 +196,43 @@ test('a Bash command that moves the history reads the PRs again; another does no
   await $.tool.call({ tool: 'Bash', command: 'gh pr merge 12 --squash' })
   await settle()
   expect(state.gitRuns).toHaveLength(3)
+
+  // The dev plugin's merge helper runs gh and git inside its own script.
+  await $.tool.call({ tool: 'Bash', command: '/x/task-review-cycle/scripts/merge-and-cleanup.sh 12 main feat/x {}' })
+  await settle()
+  expect(state.gitRuns).toHaveLength(4)
+})
+
+test('a reread asked for while one runs follows it, once', async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  let release = () => {}
+
+  state.gitGate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await $.tool.call({ tool: 'Bash', command: 'git fetch origin' })
+  await $.tool.call({ tool: 'Bash', command: 'git merge FETCH_HEAD' })
+  await $.tool.call({ tool: 'Bash', command: 'git pull' })
+  await settle()
+  expect(state.gitRuns).toHaveLength(2)
+
+  release()
+  await settle()
+  expect(state.gitRuns).toHaveLength(3)
+})
+
+test('a boot that fails is tried again on the next band drawing', async ($, on) => {
+  const state = world(on)
+
+  state.registerFailures = 1
+  await boot($)
+  expect(state.opens).toEqual([])
+
+  await boot($)
+  expect(state.commands).toEqual(['pr-recap'])
+  expect(state.opens).toEqual([{ id: 'pr-recap', columns: 40 }])
 })
 
 test('/pr-recap opens the pane at a fifth of the width it runs at', async ($, on) => {

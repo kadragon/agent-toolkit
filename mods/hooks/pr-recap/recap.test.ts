@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { ago, fit, groupsOf, kindOf, kindsOf, landedPath, parseLog, statBar, summaryOf, totalsOf } from './recap'
+import { ago, fit, groupsOf, kindOf, kindsOf, landedPath, logArgv, parseLog, statBar, summaryOf, totalsOf } from './recap'
 
 const RS = '\x1e'
 const US = '\x1f'
@@ -55,6 +55,27 @@ describe('parseLog', () => {
     expect(prs.map(pr => pr.number)).toEqual([381])
     expect(prs[0]?.files).toHaveLength(3)
     expect(prs[0]?.summary).toEqual(['The hook only read the live branch.\nNow it predicts it.'])
+  })
+
+  test('a merge commit with no body takes its subject as the title', () => {
+    const prs = parseLog(record('dddd', 'Merge pull request #12 from x/y', 1, '', ['1\t0\ta.ts']), 3)
+
+    expect(prs[0]).toMatchObject({ number: 12, title: 'Merge pull request #12 from x/y', summary: [] })
+  })
+
+  test('cut-short output drops its partial last record', () => {
+    const cut = LOG.slice(0, LOG.lastIndexOf('1\t0\ta.ts'))
+
+    expect(parseLog(cut, 3, true).map(pr => pr.number)).toEqual([381, 379])
+    expect(parseLog(LOG, 3, false).map(pr => pr.number)).toEqual([381, 379, 377])
+  })
+
+  test('the log asks git for paths unquoted', () => {
+    expect(logArgv(60).slice(0, 3)).toEqual(['git', '-c', 'core.quotePath=false'])
+    expect(parseLog(record('eeee', '[DOCS] 한글 (#9)', 1, '', ['3\t0\tdocs/한글.md']), 1)[0]?.files[0]).toMatchObject({
+      path: 'docs/한글.md',
+      kind: 'docs',
+    })
   })
 
   test('an empty log has no PRs', () => {

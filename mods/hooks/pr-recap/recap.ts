@@ -20,6 +20,9 @@ const MAX_PARAGRAPHS = 6
 // against the branch they landed on, a window wide enough to skip direct commits.
 export const logArgv = (window: number): string[] => [
   'git',
+  // Paths as written, not C-quoted with octal escapes for non-ASCII bytes.
+  '-c',
+  'core.quotePath=false',
   '--no-pager',
   'log',
   '--first-parent',
@@ -88,11 +91,12 @@ export const summaryOf = (body: string, title: string): string[] => {
 }
 
 // The PRs in a git log, newest first, at most `count`; commits that name no PR
-// are passed over.
-export const parseLog = (stdout: string, count: number): Pr[] => {
+// are passed over. Output cut short leaves its last record partial: it is dropped.
+export const parseLog = (stdout: string, count: number, isTruncated = false): Pr[] => {
   const prs: Pr[] = []
+  const records = stdout.split(RS).slice(1)
 
-  for (const record of stdout.split(RS).slice(1)) {
+  for (const record of isTruncated ? records.slice(0, -1) : records) {
     const end = record.indexOf(GS)
 
     if (end < 0) continue
@@ -105,7 +109,7 @@ export const parseLog = (stdout: string, count: number): Pr[] => {
     const body = rest.join(US)
     // A merge commit's subject names the branch; its body's first line is the PR title.
     const isMerge = MERGE.test(subject)
-    const heading = isMerge ? (body.trim().split('\n')[0] ?? subject) : subject.replace(SQUASH, '')
+    const heading = isMerge ? (body.trim().split('\n')[0] || subject) : subject.replace(SQUASH, '')
     const tag = TAG.exec(heading)?.[1]
     const title = heading.replace(TAG, '').trim()
     const files = record

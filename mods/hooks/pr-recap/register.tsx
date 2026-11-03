@@ -18,8 +18,10 @@ const GIT_TIMEOUT_MS = 5000
 const SHARE = 0.2
 const MIN_COLUMNS = 24
 const BAR_CELLS = 8
-// A Bash command that may move HEAD's history.
-const MOVES_HISTORY = /\bgit\b[^\n|;&]*\b(merge|pull|checkout|switch|rebase|reset|fetch)\b|\bgh\s+pr\s+merge\b/
+// A Bash command that may move HEAD's history: git or gh directly, or the dev
+// plugin's merge helper, which runs them inside its own script.
+const MOVES_HISTORY =
+  /\bgit\b[^\n|;&]*\b(merge|pull|checkout|switch|rebase|reset|fetch)\b|\bgh\s+pr\s+merge\b|merge-and-cleanup\.sh\b/
 
 const recapAtom = atom({ plugin: 'mods', key: 'prRecap' } as const, null, { shape: 'pr-recap-1' })
 const viewAtom = atom(
@@ -44,26 +46,42 @@ function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: TITLE, ...(columns === undefined ? {} : { columns }) })
 }
 
+async function readOnce($: EngineInterface): Promise<void> {
+  let next: PrRecap
+
+  try {
+    const { exitCode, stdout, stderr, isStdoutTruncated } = await $.process.run(logArgv(LOG_WINDOW), {
+      timeoutMs: GIT_TIMEOUT_MS,
+    })
+
+    next =
+      exitCode === 0
+        ? { prs: parseLog(stdout, live.count, isStdoutTruncated), readAt: await $.clock.now() }
+        : { prs: [], readAt: await $.clock.now(), error: stderr.trim().split('\n')[0] || `git exited ${exitCode}` }
+  } catch (error) {
+    next = { prs: [], readAt: await $.clock.now(), error: String(error) }
+  }
+
+  await update($, recapAtom, () => next)
+}
+
 let loading: Promise<void> | undefined
+// A read asked for while one runs: that one may have started before HEAD moved,
+// so one more follows it.
+let isStale = false
 
 function load($: EngineInterface): Promise<void> {
-  loading ??= (async () => {
-    let next: PrRecap
+  if (loading !== undefined) {
+    isStale = true
 
-    try {
-      const { exitCode, stdout, stderr } = await $.process.run(logArgv(LOG_WINDOW), {
-        timeoutMs: GIT_TIMEOUT_MS,
-      })
+    return loading
+  }
 
-      next =
-        exitCode === 0
-          ? { prs: parseLog(stdout, live.count), readAt: await $.clock.now() }
-          : { prs: [], readAt: await $.clock.now(), error: stderr.trim().split('\n')[0] || `git exited ${exitCode}` }
-    } catch (error) {
-      next = { prs: [], readAt: await $.clock.now(), error: String(error) }
-    }
-
-    await update($, recapAtom, () => next)
+  loading = (async () => {
+    do {
+      isStale = false
+      await readOnce($)
+    } while (isStale)
   })().finally(() => {
     loading = undefined
   })
@@ -101,7 +119,13 @@ export function noteTerminalColumns($: EngineInterface, columns: number | undefi
   void $.clock
     .sleep(0)
     .then(() => (isBoot ? boot($) : resize($)))
-    .catch(() => undefined)
+    .catch(() => {
+      // A boot that failed is tried again on the next band drawing.
+      if (isBoot) {
+        live.isBooted = false
+        live.terminalColumns = 0
+      }
+    })
 }
 
 const selectedOf = (prs: readonly Pr[], view: PrRecapView): Pr | undefined =>
