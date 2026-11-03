@@ -67,6 +67,14 @@ test('fields are clipped and the boxes capped at five', () => {
   expect(parsed?.nodes[0]?.name.endsWith('…')).toBe(true)
 })
 
+test('braces in the prose around the JSON are passed over', () => {
+  const json = JSON.stringify({ summary: '요약 {중괄호}', nodes: [{ name: 'A', note: '', change: 'added', link: '' }] })
+  const expected = { summary: '요약 {중괄호}', nodes: [{ name: 'A', note: '', change: 'added', link: '' }] }
+
+  expect(parseExplain(`${json}\n\nNote: nodes use {name} roles.`)).toEqual(expected)
+  expect(parseExplain(`Roles look like {name}. Here:\n${json}`)).toEqual(expected)
+})
+
 test('a reply with no usable JSON is no explanation', () => {
   expect(parseExplain('sorry, I cannot')).toBeUndefined()
   expect(parseExplain('{not json}')).toBeUndefined()

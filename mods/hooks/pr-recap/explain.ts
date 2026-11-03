@@ -53,23 +53,54 @@ const clip = (value: unknown, cells: number): string => {
   return text.length <= cells ? text : `${text.slice(0, cells - 1)}…`
 }
 
+// The end of the brace group opening at `start`, strings skipped; -1 when open.
+const closingOf = (text: string, start: number): number => {
+  let depth = 0
+  let isInString = false
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+
+    if (isInString) {
+      if (char === '\\') index += 1
+      else if (char === '"') isInString = false
+    } else if (char === '"') isInString = true
+    else if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+
+  return -1
+}
+
+// The first balanced brace group in the text that parses as a JSON object:
+// prose around it, braces in that prose included, is passed over.
+const firstObject = (text: string): Record<string, unknown> | undefined => {
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    const end = closingOf(text, start)
+
+    if (end < 0) continue
+
+    try {
+      const raw: unknown = JSON.parse(text.slice(start, end + 1))
+
+      if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) return raw as Record<string, unknown>
+    } catch {
+      // Not JSON from here: try the next brace.
+    }
+  }
+
+  return undefined
+}
+
 // The model's reply as an explanation, or undefined when it holds none: the
 // first JSON object in the text, fields clipped to what the pane can draw.
 export const parseExplain = (text: string): PrExplain | undefined => {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
+  const raw = firstObject(text)
 
-  if (start < 0 || end <= start) return undefined
-
-  let raw: unknown
-
-  try {
-    raw = JSON.parse(text.slice(start, end + 1))
-  } catch {
-    return undefined
-  }
-
-  if (typeof raw !== 'object' || raw === null) return undefined
+  if (raw === undefined) return undefined
 
   const { summary, nodes } = raw as { summary?: unknown; nodes?: unknown }
   const parsed: ExplainNode[] = (Array.isArray(nodes) ? nodes : [])

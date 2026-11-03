@@ -38,6 +38,12 @@
       "title": "PR recap pane",
       "description": "Open a side pane (about a fifth of the terminal) with the latest merged PR of the branch history: its numbers, a plain-language summary and a top-to-bottom diagram of the parts it touches, made once per commit by a small model (Haiku) and kept, and the PR before it as one line. No keys; it rereads after a git merge, pull or checkout. /pr-recap opens it again.",
       "default": true
+    },
+    "prRecapExplain": {
+      "type": "boolean",
+      "title": "PR recap summary by Haiku",
+      "description": "Let the PR recap pane send the latest PR's commit message, file list and diff (cut at 16k characters) to Haiku through your Claude account, once per commit, for its plain summary and diagram. Off, nothing leaves the machine and the pane shows the commit message instead.",
+      "default": true
     }
   }
 }

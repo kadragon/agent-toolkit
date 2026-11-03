@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { NodeChange, Pr, PrExplain, PrRecap } from '../../types'
+import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain } from '../../types'
 import {
   count,
   diffArgv,
@@ -49,14 +49,18 @@ const explainAtom = atom({ plugin: 'mods', key: 'prRecapExplain' } as const, nul
 
 // What the module keeps between hooks; a reload starts it over and boots again.
 // `terminalColumns` is the width the band last drew at, handed over by band.tsx:
-// the only drawing that spans the whole terminal. `asked` holds the commits an
-// explanation was started for, so a failure is not asked again in a loop.
+// the only drawing that spans the whole terminal. `latest` is the commit the
+// pane shows: only its explanation is published. `asking` holds the commits a
+// model call runs for, so a reread does not ask twice; a failed one leaves it,
+// and the next reread asks again.
 const live = {
   terminalColumns: 0,
   askedColumns: 0,
   isBooted: false,
   isEnabled: false,
-  asked: new Set<string>(),
+  isExplainOn: true,
+  latest: '',
+  asking: new Set<string>(),
 }
 
 export const columnsFor = (terminalColumns: number): number =>
@@ -72,9 +76,15 @@ function openPane($: EngineInterface) {
 
 // The latest PR explained: from the store when an earlier session made it, else
 // by the model over the commit, its files and its capped diff.
+async function publish($: EngineInterface, state: PrRecapExplain): Promise<void> {
+  // A call that outlived its PR leaves the pane to the PR it shows now.
+  if (state.sha === live.latest) await update($, explainAtom, () => state)
+}
+
 async function explain($: EngineInterface, pr: Pr): Promise<void> {
-  if (live.asked.has(pr.sha)) return
-  live.asked.add(pr.sha)
+  const shown = await read($, explainAtom)
+
+  if (shown?.sha === pr.sha && shown.status === 'ready') return
 
   const key = `${STORE_PREFIX}${pr.sha}`
   const stored = await $.store.get(key).catch(() => undefined)
@@ -82,12 +92,14 @@ async function explain($: EngineInterface, pr: Pr): Promise<void> {
   const kept = stored === undefined || stored === null ? undefined : parseExplain(JSON.stringify(stored))
 
   if (kept !== undefined) {
-    await update($, explainAtom, () => ({ sha: pr.sha, status: 'ready' as const, explain: kept }))
+    await publish($, { sha: pr.sha, status: 'ready', explain: kept })
 
     return
   }
 
-  await update($, explainAtom, () => ({ sha: pr.sha, status: 'pending' as const }))
+  await publish($, { sha: pr.sha, status: 'pending' })
+  if (live.asking.has(pr.sha)) return
+  live.asking.add(pr.sha)
 
   let made: PrExplain | undefined
 
@@ -109,14 +121,15 @@ async function explain($: EngineInterface, pr: Pr): Promise<void> {
     made = undefined
   }
 
+  live.asking.delete(pr.sha)
   if (made === undefined) {
-    await update($, explainAtom, () => ({ sha: pr.sha, status: 'failed' as const }))
+    await publish($, { sha: pr.sha, status: 'failed' })
 
     return
   }
 
   await $.store.set(key, made).catch(() => undefined)
-  await update($, explainAtom, () => ({ sha: pr.sha, status: 'ready' as const, explain: made }))
+  await publish($, { sha: pr.sha, status: 'ready', explain: made })
 }
 
 async function readOnce($: EngineInterface): Promise<void> {
@@ -135,11 +148,11 @@ async function readOnce($: EngineInterface): Promise<void> {
     next = { prs: [], readAt: await $.clock.now(), error: String(error) }
   }
 
-  await update($, recapAtom, () => next)
-
   const latest = next.prs[0]
 
-  if (latest !== undefined) void explain($, latest).catch(() => undefined)
+  live.latest = latest?.sha ?? ''
+  await update($, recapAtom, () => next)
+  if (latest !== undefined && live.isExplainOn) void explain($, latest).catch(() => undefined)
 }
 
 let loading: Promise<void> | undefined
@@ -207,6 +220,7 @@ export function noteTerminalColumns($: EngineInterface, columns: number | undefi
 
 export const register: Register = (on, options) => {
   live.isEnabled = options.prRecapEnabled !== false
+  live.isExplainOn = options.prRecapExplain !== false
   if (!live.isEnabled) return
 
   on('command.run', { command: COMMAND }, async ($, e) => {
@@ -307,9 +321,11 @@ export const register: Register = (on, options) => {
                   {fallback}
                 </Text>
               )}
-              <Text dimColor wrap="wrap">
-                {made?.status === 'failed' ? '(구조도를 만들지 못했습니다)' : '요약과 구조도를 만드는 중…'}
-              </Text>
+              {live.isExplainOn && (
+                <Text dimColor wrap="wrap">
+                  {made?.status === 'failed' ? '(구조도를 만들지 못했습니다)' : '요약과 구조도를 만드는 중…'}
+                </Text>
+              )}
             </Box>
           )}
         </Box>

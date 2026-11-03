@@ -19,6 +19,12 @@ const LOG = [
   record('4a0c69c0000000000000000000000000000000000', '[HARNESS] Revert the side pane (#380)', '', ['0\t9\tdev/x.sh']),
   record('77426d3000000000000000000000000000000000', '[FIX] backlog (#377)', '', ['1\t0\tb.py']),
 ].join('')
+const OTHER = '9999999000000000000000000000000000000000'
+const OTHER_LOG = record(OTHER, '[FEAT] other work (#390)', 'Other body.\n', ['5\t0\tsrc/o.ts'])
+const OTHER_EXPLAIN = {
+  summary: '다른 PR 요약.',
+  nodes: [{ name: '다른 부분', note: '추가', change: 'added', link: '' }],
+}
 const DIFF = 'diff --git a/dev/hooks/commit-guard/guard.py b/dev/hooks/commit-guard/guard.py\n+predict()\n'
 const EXPLAIN = {
   summary: '커밋 가드가 새 브랜치를 미리 알아본다.',
@@ -245,6 +251,79 @@ test('an unreadable reply falls back the same way', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
   expect(await texts(ui)).toContain('(구조도를 만들지 못했습니다)')
+  await ui.unmount()
+})
+
+test('a failed explanation is asked again on the next reread', async ($, on) => {
+  const state = world(on)
+
+  state.reply = null
+  await boot($)
+  state.reply = JSON.stringify(EXPLAIN)
+  await $.tool.call({ tool: 'Bash', command: 'git pull' })
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect(state.modelCalls).toHaveLength(2)
+  expect(await texts(ui)).toContain('커밋 가드가 새 브랜치를 미리 알아본다.')
+  await ui.unmount()
+})
+
+test('back on a branch whose PR was explained, its explanation shows again', async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  state.log = OTHER_LOG
+  state.reply = JSON.stringify(OTHER_EXPLAIN)
+  await $.tool.call({ tool: 'Bash', command: 'git checkout feature' })
+  await settle()
+  state.log = LOG
+  await $.tool.call({ tool: 'Bash', command: 'git checkout main' })
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect(state.modelCalls).toHaveLength(2)
+  expect(await texts(ui)).toContain('커밋 가드가 새 브랜치를 미리 알아본다.')
+  await ui.unmount()
+})
+
+test('a model reply that outlives its PR does not replace the one shown', async ($, on) => {
+  const state = world(on)
+  const model = gated()
+
+  state.modelGate = model.gate
+  await boot($)
+  // While the first PR's call runs, HEAD moves to a PR an earlier session explained.
+  state.store.set(`pr-recap:explain:${OTHER}`, OTHER_EXPLAIN)
+  state.log = OTHER_LOG
+  await $.tool.call({ tool: 'Bash', command: 'git checkout feature' })
+  await settle()
+  model.release()
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const drawn = await texts(ui)
+
+  expect(drawn).toContain('다른 PR 요약.')
+  expect(drawn).not.toContain('요약과 구조도를 만드는 중…')
+  // The late reply is still kept for when that PR is shown again.
+  expect(state.store.has(`pr-recap:explain:${LATEST}`)).toBe(true)
+  await ui.unmount()
+})
+
+test('with the summary switched off, nothing goes to the model', { options: { prRecapExplain: false } }, async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const drawn = await texts(ui)
+
+  expect(state.modelCalls).toEqual([])
+  expect(state.diffRuns).toEqual([])
+  expect(drawn).toContain('Why one.')
+  expect(drawn).not.toContain('요약과 구조도를 만드는 중…')
   await ui.unmount()
 })
 
