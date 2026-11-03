@@ -1,39 +1,67 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Pr, PrRecap, PrRecapView } from '../../types'
-import { ago, fit, groupsOf, kindsOf, logArgv, parseLog, statBar, totalsOf } from './recap'
+import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain } from '../../types'
+import {
+  count,
+  diffArgv,
+  EXPLAIN_MAX_TOKENS,
+  EXPLAIN_MODEL,
+  EXPLAIN_SYSTEM,
+  EXPLAIN_TIMEOUT_MS,
+  explainPrompt,
+  MARKS,
+  parseExplain,
+} from './explain'
+import { ago, logArgv, parseLog, totalsOf } from './recap'
 
-// After diffnav's file tree and CodeRabbit's walkthrough table: the last merged
-// PRs as tabs, each one's files grouped by directory with a diffstat bar, the
-// commit body as its summary, and a group opened to its files on a press.
+// The latest merged PR, read without a key: its numbers, a plain summary and a
+// top-to-bottom diagram of the parts it touches, both made once per commit by a
+// small model; the PR before it as one line.
 export const PANE = 'pr-recap'
 const TITLE = 'PR recap'
 const COMMAND = 'pr-recap'
-const DEFAULT_COUNT = 3
-// First-parent commits read to find that many PRs among direct commits.
+// The latest PR and the one before it.
+const PR_COUNT = 2
+// First-parent commits read to find them among direct commits.
 const LOG_WINDOW = 60
 const GIT_TIMEOUT_MS = 5000
 // The share of the terminal the docked pane asks, and the dock's own floor.
 const SHARE = 0.2
 const MIN_COLUMNS = 24
-const BAR_CELLS = 8
+const MAX_BOX_COLUMNS = 34
+const STORE_PREFIX = 'pr-recap:explain:'
 // A Bash command that may move HEAD's history: git or gh directly, or the dev
 // plugin's merge helper, which runs them inside its own script.
 const MOVES_HISTORY =
   /\bgit\b[^\n|;&]*\b(merge|pull|checkout|switch|rebase|reset|fetch)\b|\bgh\s+pr\s+merge\b|merge-and-cleanup\.sh\b/
+const BORDERS: Record<NodeChange, 'success' | 'warning' | 'error' | undefined> = {
+  added: 'success',
+  changed: 'warning',
+  removed: 'error',
+  same: undefined,
+}
 
 const recapAtom = atom({ plugin: 'mods', key: 'prRecap' } as const, null, { shape: 'pr-recap-1' })
-const viewAtom = atom(
-  { plugin: 'mods', key: 'prRecapView' } as const,
-  { open: [], isSummaryOpen: false },
-  { shape: 'pr-recap-view-1' },
-)
+const explainAtom = atom({ plugin: 'mods', key: 'prRecapExplain' } as const, null, {
+  shape: 'pr-recap-explain-1',
+})
 
 // What the module keeps between hooks; a reload starts it over and boots again.
 // `terminalColumns` is the width the band last drew at, handed over by band.tsx:
-// the only drawing that spans the whole terminal.
-const live = { terminalColumns: 0, askedColumns: 0, count: DEFAULT_COUNT, isBooted: false, isEnabled: false }
+// the only drawing that spans the whole terminal. `latest` is the commit the
+// pane shows: only its explanation is published. `asking` holds the commits a
+// model call runs for, so a reread does not ask twice; a failed one leaves it,
+// and the next reread asks again.
+const live = {
+  terminalColumns: 0,
+  askedColumns: 0,
+  isBooted: false,
+  isEnabled: false,
+  isExplainOn: true,
+  latest: '',
+  asking: new Set<string>(),
+}
 
 export const columnsFor = (terminalColumns: number): number =>
   Math.max(MIN_COLUMNS, Math.round(terminalColumns * SHARE))
@@ -46,6 +74,64 @@ function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: TITLE, ...(columns === undefined ? {} : { columns }) })
 }
 
+// The latest PR explained: from the store when an earlier session made it, else
+// by the model over the commit, its files and its capped diff.
+async function publish($: EngineInterface, state: PrRecapExplain): Promise<void> {
+  // A call that outlived its PR leaves the pane to the PR it shows now.
+  if (state.sha === live.latest) await update($, explainAtom, () => state)
+}
+
+async function explain($: EngineInterface, pr: Pr): Promise<void> {
+  const shown = await read($, explainAtom)
+
+  if (shown?.sha === pr.sha && shown.status === 'ready') return
+
+  const key = `${STORE_PREFIX}${pr.sha}`
+  const stored = await $.store.get(key).catch(() => undefined)
+  // A stored value passes the same checks a reply does.
+  const kept = stored === undefined || stored === null ? undefined : parseExplain(JSON.stringify(stored))
+
+  if (kept !== undefined) {
+    await publish($, { sha: pr.sha, status: 'ready', explain: kept })
+
+    return
+  }
+
+  await publish($, { sha: pr.sha, status: 'pending' })
+  if (live.asking.has(pr.sha)) return
+  live.asking.add(pr.sha)
+
+  let made: PrExplain | undefined
+
+  try {
+    const diff = await $.process
+      .run(diffArgv(pr.sha), { timeoutMs: GIT_TIMEOUT_MS })
+      .then(run => (run.exitCode === 0 ? run.stdout : ''))
+      .catch(() => '')
+    const reply = await $.model.complete({
+      model: EXPLAIN_MODEL,
+      system: EXPLAIN_SYSTEM,
+      prompt: explainPrompt(pr, diff),
+      maxTokens: EXPLAIN_MAX_TOKENS,
+      timeoutMs: EXPLAIN_TIMEOUT_MS,
+    })
+
+    made = reply.isAnswered ? parseExplain(reply.text) : undefined
+  } catch {
+    made = undefined
+  }
+
+  live.asking.delete(pr.sha)
+  if (made === undefined) {
+    await publish($, { sha: pr.sha, status: 'failed' })
+
+    return
+  }
+
+  await $.store.set(key, made).catch(() => undefined)
+  await publish($, { sha: pr.sha, status: 'ready', explain: made })
+}
+
 async function readOnce($: EngineInterface): Promise<void> {
   let next: PrRecap
 
@@ -56,13 +142,17 @@ async function readOnce($: EngineInterface): Promise<void> {
 
     next =
       exitCode === 0
-        ? { prs: parseLog(stdout, live.count, isStdoutTruncated), readAt: await $.clock.now() }
+        ? { prs: parseLog(stdout, PR_COUNT, isStdoutTruncated), readAt: await $.clock.now() }
         : { prs: [], readAt: await $.clock.now(), error: stderr.trim().split('\n')[0] || `git exited ${exitCode}` }
   } catch (error) {
     next = { prs: [], readAt: await $.clock.now(), error: String(error) }
   }
 
+  const latest = next.prs[0]
+
+  live.latest = latest?.sha ?? ''
   await update($, recapAtom, () => next)
+  if (latest !== undefined && live.isExplainOn) void explain($, latest).catch(() => undefined)
 }
 
 let loading: Promise<void> | undefined
@@ -95,7 +185,7 @@ function load($: EngineInterface): Promise<void> {
 // later re-asks the open pane's share. Both run after the drawing: a render
 // may not open a pane or write state.
 async function boot($: EngineInterface) {
-  await $.command.register({ name: COMMAND, description: 'Show the last merged PRs in a side pane' })
+  await $.command.register({ name: COMMAND, description: 'Show the latest merged PR in a side pane' })
   await load($)
   await openPane($)
 }
@@ -128,19 +218,10 @@ export function noteTerminalColumns($: EngineInterface, columns: number | undefi
     })
 }
 
-const selectedOf = (prs: readonly Pr[], view: PrRecapView): Pr | undefined =>
-  prs.find(pr => pr.number === view.selected) ?? prs[0]
-
-const toggle = (list: readonly string[], key: string): string[] =>
-  list.includes(key) ? list.filter(one => one !== key) : [...list, key]
-
 export const register: Register = (on, options) => {
   live.isEnabled = options.prRecapEnabled !== false
+  live.isExplainOn = options.prRecapExplain !== false
   if (!live.isEnabled) return
-
-  const asked = Math.round(Number(options.prRecapCount ?? DEFAULT_COUNT))
-
-  live.count = Number.isFinite(asked) ? Math.min(DEFAULT_COUNT, Math.max(1, asked)) : DEFAULT_COUNT
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     if (e.presentation.columns > 0) live.terminalColumns = e.presentation.columns
@@ -159,129 +240,102 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
     const recap = await read($, recapAtom)
-    const view = await read($, viewAtom)
+    const state = await read($, explainAtom)
     const now = await $.clock.now()
-    const width = Math.max(MIN_COLUMNS - 2, e.props.bodyColumns)
+    const boxColumns = Math.min(MAX_BOX_COLUMNS, Math.max(MIN_COLUMNS - 2, e.props.bodyColumns))
 
-    if (recap === null) return <Text dimColor>Reading git log…</Text>
+    if (recap === null) return <Text dimColor>git 이력을 읽는 중…</Text>
 
-    const refresh = (
-      <Button key="refresh" hotkey="r" plain onPress={() => void load($)}>
-        refresh <Text dimColor>· read {ago(recap.readAt, now)}</Text>
-      </Button>
-    )
+    const pr = recap.prs[0]
 
-    if (recap.error !== undefined || recap.prs.length === 0) {
+    if (recap.error !== undefined || pr === undefined) {
       return (
-        <Box flexDirection="column">
-          <Text dimColor wrap="wrap">
-            {recap.error ?? 'No merged PR in this branch history.'}
-          </Text>
-          {refresh}
-        </Box>
+        <Text dimColor wrap="wrap">
+          {recap.error ?? '이 브랜치 이력에 머지된 PR이 없습니다.'}
+        </Text>
       )
     }
 
-    const pr = selectedOf(recap.prs, view) as Pr
     const totals = totalsOf(pr.files)
-    const groups = groupsOf(pr.files)
-    const scale = Math.max(1, ...groups.map(group => group.added + group.deleted))
-    const kinds = kindsOf(pr.files)
-      .map(entry => `${entry.kind} ${entry.files}`)
-      .join(' · ')
-    const select = (number: number) => () =>
-      void update($, viewAtom, current => ({ ...current, selected: number }))
+    const previous = recap.prs[1]
+    const made = state?.sha === pr.sha ? state : undefined
+    const fallback = pr.summary[0] ?? ''
 
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" gap={1}>
-          {recap.prs.map((one, index) => (
-            <Button
-              key={`pr:${one.number}`}
-              hotkey={String(index + 1)}
-              variant={one.number === pr.number ? 'primary' : 'secondary'}
-              onPress={select(one.number)}
-            >
-              #{String(one.number)}
-            </Button>
-          ))}
-        </Box>
         <Text bold wrap="wrap">
-          {pr.tag === undefined ? '' : `[${pr.tag}] `}
+          #{String(pr.number)} {pr.tag === undefined ? '' : `[${pr.tag}] `}
           {pr.title}
         </Text>
-        <Text dimColor wrap="truncate-end">
-          {pr.author} · {ago(pr.mergedAt, now)} · {pr.sha.slice(0, 7)}
-        </Text>
         <Text wrap="truncate-end">
-          <Text color="success">+{String(totals.added)}</Text> <Text color="error">-{String(totals.deleted)}</Text>
+          <Text color="success">+{count(totals.added)}</Text> <Text color="error">-{count(totals.deleted)}</Text>
           <Text dimColor>
             {' '}
-            · {String(pr.files.length)} files{kinds === '' ? '' : ` · ${kinds}`}
+            · 파일 {String(pr.files.length)}개 · {ago(pr.mergedAt, now)}
           </Text>
         </Text>
-        {pr.summary.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Button
-              key="summary"
-              hotkey="s"
-              plain
-              onPress={() => void update($, viewAtom, current => ({ ...current, isSummaryOpen: !current.isSummaryOpen }))}
-            >
-              {view.isSummaryOpen ? '▾' : '▸'} summary
-            </Button>
-            {view.isSummaryOpen ? (
-              pr.summary.map(paragraph => (
+        <Box flexDirection="column" marginTop={1}>
+          {made?.status === 'ready' && made.explain !== undefined ? (
+            <Box flexDirection="column">
+              {made.explain.summary !== '' && <Text wrap="wrap">{made.explain.summary}</Text>}
+              {made.explain.nodes.map((node, index) => (
+                <Box flexDirection="column" marginTop={index === 0 ? 1 : 0}>
+                  <Box
+                    flexDirection="column"
+                    borderStyle="round"
+                    width={boxColumns}
+                    paddingX={1}
+                    {...(BORDERS[node.change] === undefined
+                      ? { borderDimColor: true }
+                      : { borderColor: BORDERS[node.change] })}
+                  >
+                    <Text bold wrap="truncate-end">
+                      {node.name}
+                      {MARKS[node.change] === '' ? '' : ` ${MARKS[node.change]}`}
+                    </Text>
+                    {node.note !== '' && (
+                      <Text dimColor wrap="truncate-end">
+                        {node.note}
+                      </Text>
+                    )}
+                  </Box>
+                  {index < (made.explain?.nodes.length ?? 0) - 1 && (
+                    <Box flexDirection="column">
+                      <Text dimColor wrap="truncate-end">
+                        {'   │ '}
+                        {node.link}
+                      </Text>
+                      <Text dimColor>{'   ▼'}</Text>
+                    </Box>
+                  )}
+                </Box>
+              ))}
+              {made.explain.nodes.length > 0 && <Text dimColor>★ 새로 추가 ✎ 수정 ✕ 제거</Text>}
+            </Box>
+          ) : (
+            <Box flexDirection="column">
+              {fallback !== '' && (
                 <Text wrap="wrap" dimColor>
-                  {paragraph}
+                  {fallback}
                 </Text>
-              ))
-            ) : (
-              <Text dimColor wrap="truncate-end">
-                {(pr.summary[0] ?? '').split('\n')[0]}
-              </Text>
-            )}
+              )}
+              {live.isExplainOn && (
+                <Text dimColor wrap="wrap">
+                  {made?.status === 'failed' ? '(구조도를 만들지 못했습니다)' : '요약과 구조도를 만드는 중…'}
+                </Text>
+              )}
+            </Box>
+          )}
+        </Box>
+        {previous !== undefined && (
+          <Box marginTop={1}>
+            <Text dimColor wrap="truncate-end">
+              이전: #{String(previous.number)} {previous.title} · {ago(previous.mergedAt, now)}
+            </Text>
           </Box>
         )}
-        <Box flexDirection="column" marginTop={1}>
-          {groups.map(group => {
-            const key = `${pr.number}:${group.dir}`
-            const isOpen = view.open.includes(key)
-            const bar = statBar(group.added, group.deleted, scale, BAR_CELLS)
-            const stat = `${group.files.length}f`
-            const room = Math.max(4, width - 2 - stat.length - 1 - bar.plus.length - bar.minus.length - 1)
-
-            return (
-              <Box flexDirection="column">
-                <Button
-                  key={`dir:${key}`}
-                  plain
-                  onPress={() => void update($, viewAtom, current => ({ ...current, open: toggle(current.open, key) }))}
-                >
-                  {isOpen ? '▾' : '▸'} {fit(`${group.dir}/`, room)} <Text dimColor>{stat}</Text>{' '}
-                  <Text color="success">{bar.plus}</Text>
-                  <Text color="error">{bar.minus}</Text>
-                </Button>
-                {isOpen &&
-                  group.files.map(file => {
-                    const name = file.path.slice(group.dir === '.' ? 0 : group.dir.length + 1)
-                    const delta = file.isBinary ? 'bin' : `+${file.added} -${file.deleted}`
-
-                    return (
-                      <Text wrap="truncate-end">
-                        {'   '}
-                        {fit(name, Math.max(4, width - 4 - delta.length))}{' '}
-                        <Text dimColor>{delta}</Text>
-                      </Text>
-                    )
-                  })}
-              </Box>
-            )
-          })}
-        </Box>
-        <Box marginTop={1}>{refresh}</Box>
       </Box>
     )
   })
