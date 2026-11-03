@@ -97,12 +97,17 @@ export type PrRecapExplain = {
   explain?: PrExplain
 }
 
+// The PR the pane shows, by its commit, and the latest PR when it was chosen;
+// the latest is shown when unset.
+export type PrRecapView = { sha: string; latest: string }
+
 declare module 'claude-code' {
   interface PluginState {
     mods: {
       statusBand: StatusBand | null
       prRecap: Shaped<PrRecap | null>
       prRecapExplain: Shaped<PrRecapExplain | null>
+      prRecapView: Shaped<PrRecapView | null>
     }
   }
 }

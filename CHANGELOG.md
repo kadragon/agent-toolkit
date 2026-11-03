@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] pr-recap pane takes a quarter of the terminal; p/n step through the last 20 PRs (mods v0.8.0) (2026-11-03)
 - [done] pr-recap shows the latest PR alone: plain summary and diagram by Haiku, no keys (mods v0.7.0) (2026-11-03)
 - [done] pr-recap side pane shows the last merged PRs: tabs, diffstat, files by directory (mods v0.6.0) (2026-11-03)
 - [done] commit-guard reads an in-chain switch -c/checkout -b before a plain commit (dev v4.11.37) (2026-11-02)
