@@ -5,7 +5,7 @@ description: >-
   conventions, data flow, gotchas — plus the wrong-answer log and XP/streak
   progress persisted in `.repo-quiz/`. NOT for writing docs or an onboarding
   guide, NOT for general programming trivia.
-version: 1.1.5
+version: 1.1.6
 allowed-tools: Bash AskUserQuestion Read Grep Glob Edit
 ---
 
@@ -100,11 +100,8 @@ different standing default.
 
 ### 2. Build the whole round up front — all N questions before asking any
 
-Do **all** the exploration and question-writing first, in one batch, and only then start
-asking. Don't interleave "explore → ask → explore → ask": that stalls the user between every
-question while you go read another file. Read what you need, draft the full set of N
-questions (stem, type, options-if-any, correct answer, concept slug for each), *then* move to
-step 3 and fire them one at a time with no research gaps in between.
+Prepare the round's N questions (stem, type, options-if-any, correct answer, concept slug)
+before asking the first, so there are no research gaps between questions.
 
 Fill the round in this order so spaced repetition actually works:
 

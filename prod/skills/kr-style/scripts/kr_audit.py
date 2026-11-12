@@ -7,7 +7,9 @@ numbers. Two severities:
   S1  always a defect regardless of frequency (double passive, `에 의해` passive,
       `가지고 있다`, comma after a connective ending)
   S2  a defect only past a density threshold (`를 통해`, sentence-initial
-      conjunctions, `것이다` endings)
+      conjunctions, `것이다` endings). Each S2 allowance is per
+      SENTENCES_PER_ALLOWANCE sentences, so a long report is held to the same
+      density as a short note rather than to one fixed count per document.
 
 Exit 0 = clean, 1 = at least one S1 hit or one S2 threshold breach. That exit
 code is the completion criterion for the `kr-style` skill: rewrite, re-run,
@@ -76,6 +78,9 @@ SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+|\n+")
 # A run of identical sentence endings — the rhythm tell no single regex catches.
 ENDING = re.compile(r"(습니다|입니다|합니다|된다|한다|이다)[.!?]?\s*$")
 MAX_SAME_ENDING_RUN = 3
+# S2 allowances scale with length: limit × ceil(sentences / this). A text at or
+# under this many sentences keeps the base allowance.
+SENTENCES_PER_ALLOWANCE = 10
 MAX_COMMA_RATIO = 0.40
 
 
@@ -90,6 +95,10 @@ class Hit:
 class Report:
     hits: list[Hit] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    scale: int = 1
+
+    def allowance(self, rule: Rule) -> int | None:
+        return None if rule.limit is None else rule.limit * self.scale
 
     @property
     def failed(self) -> bool:
@@ -98,7 +107,8 @@ class Report:
             counts[hit.rule.id] = counts.get(hit.rule.id, 0) + 1
         for rule_id, count in counts.items():
             rule = next(r for r in RULES if r.id == rule_id)
-            if rule.limit is None or count > rule.limit:
+            allowed = self.allowance(rule)
+            if allowed is None or count > allowed:
                 return True
         return bool(self.notes)
 
@@ -111,6 +121,7 @@ def scan(text: str) -> Report:
                 report.hits.append(Hit(rule, lineno, match.group(0).strip()))
 
     sentences = [s.strip() for s in SENTENCE_SPLIT.split(text) if s.strip()]
+    report.scale = max(1, -(-len(sentences) // SENTENCES_PER_ALLOWANCE))
     if sentences:
         run, prev = 1, None
         for sentence in sentences:
@@ -149,8 +160,9 @@ def render(report: Report, source: str) -> str:
         found = counts.get(rule.id)
         if not found:
             continue
-        over = rule.limit is None or len(found) > rule.limit
-        allowance = "" if rule.limit is None else f" (허용 {rule.limit})"
+        allowed = report.allowance(rule)
+        over = allowed is None or len(found) > allowed
+        allowance = "" if allowed is None else f" (허용 {allowed})"
         mark = "FAIL" if over else "ok"
         lines.append(
             f"  [{mark}] {rule.severity} {rule.id} {rule.name} ×{len(found)}{allowance} — {rule.fix}"
@@ -187,11 +199,22 @@ def selftest() -> int:
     if clean_hits.failed:
         failures.append(f"clean sample flagged: {render(clean_hits, 'clean')}")
 
+    # Density, not count: two '-적 N' in a short note breach the allowance, the
+    # same two spread over a 20-sentence report do not.
+    short = "효율적 운영을 검토한다. 안정적 관리를 이어 간다."
+    if not scan(short).failed:
+        failures.append("short text with 2× P21 passed; allowance should be 1")
+    filler = " ".join(f"{n}번 항목을 확인했다." for n in range(18))
+    long_text = short + " " + filler
+    long_report = scan(long_text)
+    if long_report.failed:
+        failures.append(f"20-sentence text with 2× P21 failed: {render(long_report, 'long')}")
+
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"ok: {len(cases)} detections + 1 clean sample")
+    print(f"ok: {len(cases)} detections + 1 clean sample + 2 density samples")
     return 0
 
 

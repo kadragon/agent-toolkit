@@ -7,16 +7,15 @@
 | Windows | `python` (system) or `.venv\Scripts\python` | `python3` alias usually absent |
 | macOS/Linux | `python3` or `.venv/bin/python` | |
 
-**Install required packages first** (`validate.py` and `compare.py` need `defusedxml`; the OLE `.hwp` fallback recipe below needs `olefile`):
+**Install required packages first** (`validate.py` and `compare.py` need `defusedxml`; the OLE `.hwp` fallback recipe below also needs `olefile`, installed there):
 
 ```bash
-python -m pip install olefile defusedxml
+python -m pip install defusedxml
 ```
 
 > ⚠️ **Use `python -m pip install`, not bare `pip install`.** `python` and `pip` can resolve to *different* interpreters (e.g. a Windows Store Python alias for `pip` vs. a separately-installed `python`) — a reported-successful `pip install` can still leave the `python` you actually run with `ModuleNotFoundError`. `python -m pip install ...` guarantees the install target matches the interpreter that will import it. If this recurs, cross-check with `pip --version` (shows which interpreter it's bound to) vs. `where.exe python` / `which python3`.
 
-- venv optional. If `python -c "import lxml"` succeeds, use as-is. Otherwise `python -m pip install lxml`.
-- Workflow examples use `python3` / `source "$VENV"`. **On Windows, use `python` and omit `source` line.**
+- Workflow examples use `python3`. **On Windows, use `python`.**
 
 ## SKILL_DIR
 
@@ -80,9 +79,7 @@ Quote variants (`ʹ` U+02B9 vs U+0374), PUA (U+F0E8), dash/middle-dot variants, 
 
 ## Non-ASCII Matching Logic — No `python -c`
 
-Putting non-ASCII characters (`■`, `○`, Korean) into `python -c "..."` source and running via Bash can corrupt them in transit through shell encoding, causing silent failure where `str.index()`/`rfind()` returns `-1`.
-
-**Write check/replace code with non-ASCII matching to a `.py` file** using the Write tool, then run via `python script.py`.
+See `editing-gotchas.md` §5: non-ASCII match strings go in a `.py` file, never `python -c`.
 
 ## Temp Files
 

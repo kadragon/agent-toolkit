@@ -31,7 +31,7 @@ xml_str = xml_str.replace('기존 텍스트', '새 텍스트', 1)
 >
 > **Fixing a run-split**: after `table.py locate --extract-dir "$HWPX_WORK"`, open the extracted file to see the `<hp:run>` structure. Find the `<hp:t>` within a single `<hp:run>` that contains the target text, replace only that element's text. If the target text spans multiple runs, edit each run's `<hp:t>` separately — never merge or reorder runs.
 
-> **Substring-collision caution**: replace target inside longer string hits unintended places (e.g. `"조직"` inside `"조직의 구성"`). **Put `assert s.count(old) == expected` on every `str.replace()`**; when target is full text of paragraph/cell, match with tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
+> **Substring-collision caution**: replace target inside longer string hits unintended places (e.g. `"조직"` inside `"조직의 구성"`). Count-assert each replacement (SKILL.md Rule 15); when target is full text of paragraph/cell, match with tags like `<hp:t>X</hp:t>`. Detail — `editing-gotchas.md` §2·§3.
 
 ## Safe new-paragraph insertion — compact then string-insert
 

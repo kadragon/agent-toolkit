@@ -59,7 +59,9 @@ native construction.
 | P13 | 이중 조사 (S1) | 주점 2층에서의 살림을 그만두고 | 주점 2층에서 시작한 살림을 그만두고 |
 
 Allowances above 0 are deliberate: each of these is grammatical Korean, and the defect is
-density. One `~를 통해` in a document reads fine; four in a paragraph is the trace.
+density. One `~를 통해` in a document reads fine; four in a paragraph is the trace. The count in
+parentheses is per 10 sentences: the script multiplies it by `ceil(sentences / 10)`, so a long
+report gets proportionally more room and the report prints the scaled allowance.
 
 ## AI-tell 표면 습관
 
