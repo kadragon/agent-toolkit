@@ -1,6 +1,7 @@
 import type { Register } from 'claude-code'
 
 import { register as band } from './band'
+import { register as contractPane } from './contract-pane/register'
 import { register as prRecap } from './pr-recap/register'
 import { register as statusBand } from './status-band/register'
 
@@ -9,5 +10,6 @@ import { register as statusBand } from './status-band/register'
 export const register: Register = (on, options) => {
   statusBand(on, options)
   prRecap(on, options)
+  contractPane(on, options)
   band(on, options)
 }

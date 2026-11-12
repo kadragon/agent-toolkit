@@ -101,9 +101,44 @@ export type PrRecapExplain = {
 // the latest is shown when unset.
 export type PrRecapView = { sha: string; latest: string }
 
+// One validation run recorded beside the contract.
+export type ContractEvidence = { command: string; exitCode: number }
+
+// One `**Acceptance criteria:**` checkbox, split at its arrow.
+export type ContractCriterion = {
+  text: string
+  // What follows the arrow: the test, command or observation that proves it.
+  check: string
+  isChecked: boolean
+  // The evidence records of the commands its check names, one per command found.
+  evidence: number[]
+  // The commands its check names that have no record.
+  missing: number
+}
+
+// The branch's archived Sprint Contract as the contract pane draws it.
+export type Contract = {
+  branch: string
+  title?: string
+  tag?: string
+  criteria: ContractCriterion[]
+  evidence: ContractEvidence[]
+  // Indexes of the records no criterion's check names.
+  unnamed: number[]
+  // Every recorded run's tree still matches the index: false with none recorded.
+  isEvidenceCurrent: boolean
+  hasNotes: boolean
+}
+
+// What the contract section read last: `contract` null with none archived,
+// `reason` why there is none; `error` why the last reread failed, the
+// contract before it kept.
+export type ContractPane = { contract: Contract | null; readAt: number; reason?: string; error?: string }
+
 declare module 'claude-code' {
   interface PluginState {
     mods: {
+      contractPane: Shaped<ContractPane | null>
       statusBand: StatusBand | null
       prRecap: Shaped<PrRecap | null>
       prRecapExplain: Shaped<PrRecapExplain | null>
