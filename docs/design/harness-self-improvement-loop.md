@@ -118,7 +118,8 @@ A new curate step (after Step 2 inventory) reads the target repo's
 `docs/harness-log.md`, loads rows with `Verified: pending`, and checks each
 prediction against this run's scan output. Prediction held → stamp date +
 evidence. Prediction failed → surface as a prune/rework candidate in the
-Step 6 report (adversarial check before delete, as with Signal 4 demote).
+Step 6 report (keep case before delete, as with Signal 4 demote — the adversarial
+reviewer spawn was replaced in `docs/design/model-upgrade-deconstrain.md`).
 Same scope limitation as Signal 7 (needs a resolvable repo path); no state
 file changes — the log itself is the state.
 

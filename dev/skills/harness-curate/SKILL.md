@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.4.3
+version: 2.5.0
 disable-model-invocation: true
 ---
 
@@ -96,7 +96,7 @@ Detection rules and the delegate brief per signal: `references/signal-taxonomy.m
 | **1. New-asset candidate** | a prompt shape recurring ≥3 times that no inventory asset covers | `skill-creator` / `plugin-dev:agent-creator` / `update-config` (hook) |
 | **2. Triggering miss** | prompts in an existing asset's domain while it is absent or low in `SKILLS-ACTIVE` / `AGENTS-USED` (≥2) | skill → `skill-creator` description optimizer; agent → `plugin-dev:agent-development` |
 | **3. Underperforming or over-firing asset** | `CORRECTION-SIGNALS`, `HARNESS-FRICTION`, or ≥2 same-cause `VERIFIER-FAILURES` on one asset | skill → `skill-creator` modify; agent → `plugin-dev:agent-development`; hook → loosen via `hookify` / `update-config`; a `CLAUDE.md`/`AGENTS.md` line → classify, below |
-| **4. Unused asset** | ~0 across lifetime in `SKILLS-ACTIVE` / `AGENTS-USED` | delete, after the adversarial check in Step 7 |
+| **4. Unused asset** | ~0 across lifetime in `SKILLS-ACTIVE` / `AGENTS-USED` | delete, after the keep case in Step 7 |
 | **5. Domain knowledge candidate** | a fact or constraint restated in ≥2 sessions, not a workflow | classify, below; a plain fact → `docs/<topic>.md`, `AGENTS.md` gets the index row only |
 | **6. Tool cost** | `TOOL-COST` — the same oversized call or the same search-churn target in ≥2 sessions | oversized → a bounded command or script (`--jq`, a line range, a summary flag); churn → a **navigation pointer** from a file the agent already reads |
 
@@ -162,7 +162,7 @@ files (`~/.claude/CLAUDE.md`, the project's `CLAUDE.md` / `AGENTS.md`, every in-
    behavior difference → no-op.
 3. **Guardrails:** scan twice — `--since <upgrade date>` and the lifetime default — and compare
    `VERIFIER-FAILURES`. A hook or check whose failure mode the `--since` window shows zero times is a `Watch:` row, never a deletion on this evidence alone — a quiet guardrail may be
-   the reason the failure is absent. Delete only through the Signal 4 adversarial check.
+   the reason the failure is absent. Delete only through the Signal 4 keep case.
 
 Done when: every in-scope sentence is marked keep, delete, or disputed (with its run result),
 and every row lands in the Step 6 table with Signal `upgrade: no-op` — a mode row, not a
@@ -201,10 +201,9 @@ skill with a brief — goal · constraint · **the objective check that accepts 
 hook). Failing the check means revert, not retry-until-green. No check available → the edit may
 land on confirmation, disclosed as unverified.
 
-- **Delete an unused asset** — adversarial check first: spawn one independent reviewer
-  (`Explore` / `general-purpose`) to argue why removal is unsafe (a rare critical path, a
-  slash-command or hook route the scanner cannot see, a backstop for a failure not yet recurred).
-  A real reason → downgrade to `Watch:`. Otherwise confirm, remove, and remind the user to bump the
+- **Delete an unused asset** — argue the keep case first (a rare critical path, a slash-command
+  or hook route the scanner cannot see, a backstop for a failure not yet recurred); grep for those
+  routes rather than assuming. A real reason → downgrade to `Watch:`. Otherwise confirm, remove, and remind the user to bump the
   owning plugin's version.
 - **Domain knowledge** — write `docs/<topic>.md` and one `AGENTS.md` Docs Index row; the fact
   itself never goes into `AGENTS.md`/`CLAUDE.md`. A repo-scoped fact that lives in auto-memory

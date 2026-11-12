@@ -6,7 +6,7 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.3.6
+version: 2.0.0
 ---
 
 # Grill
@@ -76,16 +76,12 @@ with "dev:task-grill" — only when there is **genuine, non-trivial ambiguity** 
    Omit a field only if the interview genuinely surfaced nothing for it — do not leave it
    blank silently. Only when `references/skill-extraction.md` was used, append its `Skill slots:`
    block after the four fields. It is part of the summary, not a file (Rule 5).
-6. **Implementer check.** Read the draft as an implementer who has only this block. List the
-   questions that implementer would ask before building. Look up each one the repo answers
-   (Rule 3) and fold the fact into the draft. Each remaining question is still open: go back
-   to step 2 with it (in a non-interactive run, Rule 4's non-interactive branch). Run this check
-   once per interview. After those questions are resolved, go to step 7 without a second check.
-7. Hand the summary back to the caller (or continue inline if invoked standalone). This summary
+6. Hand the summary back to the caller (or continue inline if invoked standalone). This summary
    is the only output; there is no file to write.
 
 ## Exit
 
-Stop and hand off when the step 6 questions are resolved: an implementer could build from the
-summary without asking a question. Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
+Stop and hand off when an implementer could build from the summary without asking a question —
+look up the gaps the repo answers (Rule 3); each remaining gap goes back to step 2 (in a
+non-interactive run, Rule 4's non-interactive branch). Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
 mode (over-interviewing trivial decisions).

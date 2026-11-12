@@ -8,7 +8,7 @@ description: >-
   "테스트 정리", "의미 없는 테스트 삭제". Reports surviving mutants as gaps
   instead of writing new tests. NOT for a failing test or unknown bug →
   task-debug; NOT for reviewing a diff → code-review.
-version: 3.0.0
+version: 3.1.0
 ---
 
 # Test Prune
@@ -165,11 +165,11 @@ left with no tests; some runners fail on an empty suite.
 1. **Re-inject each mutant in U, one at a time,** in a fresh worktree carrying the Step 5 edits
    (`git diff HEAD --binary | git -C <new-copy> apply`) — never in the original tree. Every one
    must be KILLED.
-2. **Run the full suite at least 3 times** (5 when tests use real timers, concurrency, or
-   network) — all green.
+2. **Run the full suite** — green. Repeat it (3–5 runs) when tests share state or use real
+   timers, concurrency, or network.
 3. **Before/after numbers** — test count, distinct checks, runtime.
 
-**Done:** every mutant in U re-killed, every repeated full run green, numbers recorded.
+**Done:** every mutant in U re-killed, every full run green, numbers recorded.
 
 ## Report
 

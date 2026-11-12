@@ -14,7 +14,8 @@ Produce a minimal diff that satisfies the Sprint Contract's acceptance criteria.
 
 ## Spawn Prompt Contract
 
-All four fields required. Missing any → return control to lead.
+Objective and Boundaries are required — missing either → return control to lead. A missing
+Output format or Tools field defaults to the values below.
 
 - **Objective:** which backlog item, which acceptance criteria
 - **Output format:** code diff + one-line summary per changed file + required version-bump report

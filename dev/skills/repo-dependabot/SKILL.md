@@ -4,7 +4,7 @@ description: >-
   Bulk dependabot PR triage across owned repos — batch merge, grouped-update config, status
   audit. Not for a single-PR rebase (use `@dependabot rebase`).
 disable-model-invocation: true
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Dependabot Manager
@@ -89,7 +89,7 @@ Rebase timing, PR replacement, auto-merge risk tiers, same-repo merge ordering, 
 
 ## Subagents
 
-Spawn `sonnet` subagents only for read+reasoning work (CI log analysis, fix-PR creation, consolidation) — scripts handle the rest. A subagent's fix is a hypothesis, not a fix: it must re-run the actual failing command and confirm exit 0 before pushing. Never push an analysis-only proposal. See `references/actions.md` §3e Step 2.
+Scripts handle triage and polling. Read+reasoning work (CI log analysis, fix-PR creation, consolidation) may go to `sonnet` subagents when several independent repos need it. A fix is a hypothesis until verified: whoever applies it must re-run the actual failing command and confirm exit 0 before pushing. Never push an analysis-only proposal. See `references/actions.md` §3e Step 2.
 
 ## Scripts
 

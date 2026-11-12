@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.0.3
+version: 4.1.0
 ---
 
 # Capture Learnings — session retrospective
@@ -82,8 +82,7 @@ The review has already run, so anything you add to the commit lands unreviewed. 
 auto-memory only: a preference or correction → auto-memory. Every repo-tracked delta — a doc or
 gotcha for `docs/*.md` / `AGENTS.md`, a skill change, Codex's `AGENTS.md` route for a preference
 — goes to `backlog.md` as a follow-up item, which a later reviewed cycle lands. Under `--auto`
-do not pause for the per-write veto; a destructive memory prune is deferred to `backlog.md`
-rather than blocking.
+a destructive memory prune is deferred to `backlog.md` rather than blocking.
 
 ## Writing to auto-memory
 
@@ -93,8 +92,9 @@ the same lesson to `AGENTS.md` with the same rules, and skip hygiene.
 1. **Read the index first** for an entry that already covers the fact or sits next to it.
 2. **Update over create.** Two files saying almost the same thing is the failure mode.
 3. **Earn the entry** — reusable, non-obvious from the repo, not a one-off.
-4. **Show the write before applying** — name the file, quote the fact — then write with the
-   `Write`/`Edit` tool (a shell redirect bypasses the guard) and refresh the `MEMORY.md` line.
+4. **Write, then report** — write with the `Write`/`Edit` tool (a shell redirect bypasses the
+   guard), refresh the `MEMORY.md` line, and report the file and the quoted fact in one line.
+   Deletes and prunes still wait for approval (*Memory hygiene*).
    Pre-check the draft so it can land: write it to a scratch file outside the store, then
 
    ```sh
@@ -112,7 +112,7 @@ the same lesson to `AGENTS.md` with the same rules, and skip hygiene.
 
 **`metadata.status`** — `active` (write on every new memory; absent reads as active),
 `superseded` (replaced by a later memory; kept until the prune is confirmed), `rejected`
-(vetoed or disproved; kept so the lesson is not re-learned). The hook denies any other value or
+(disproved, or reverted by the user; kept so the lesson is not re-learned). The hook denies any other value or
 a `status:` outside `metadata:`. Never backfill for its own sake.
 
 ## Memory hygiene

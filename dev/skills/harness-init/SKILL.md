@@ -5,7 +5,7 @@ description: >-
   audit. Proposing or pruning individual assets from session evidence instead → harness-
   curate.
 disable-model-invocation: true
-version: 2.0.2
+version: 2.1.0
 ---
 
 # Harness Init
@@ -203,7 +203,8 @@ router or gating hook comes only after a measured miss, never with an empty rost
 
 ## Step 9: Validate
 
-Run `scripts/validate-harness.sh`. Non-zero → halt, show the full report, do not auto-fix.
+Run `scripts/validate-harness.sh`. Non-zero → one fix pass on failures in files this run wrote, then re-run;
+still failing, or a failure in a pre-existing file → report it and leave the file untouched.
 Manual checklist (what the script cannot see): no generated rule contradicts the operator's global layer (Step 0b); each golden principle has a check; no doc names a role that
 does not exist; no role pins a model; every skipped doc is named with its trigger; `docs/` files
 do not duplicate each other.
