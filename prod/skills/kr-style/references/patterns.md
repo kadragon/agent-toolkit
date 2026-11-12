@@ -60,8 +60,9 @@ native construction.
 
 Allowances above 0 are deliberate: each of these is grammatical Korean, and the defect is
 density. One `~를 통해` in a document reads fine; four in a paragraph is the trace. The count in
-parentheses is per 10 sentences: the script multiplies it by `ceil(sentences / 10)`, so a long
-report gets proportionally more room and the report prints the scaled allowance.
+parentheses is the most allowed inside any 10 consecutive sentences, so a long report gets room
+in proportion to its length while a cluster in one paragraph still fails. A period after a digit
+(`2026. 9. 22.`, `1.`) does not end a sentence for this count.
 
 ## AI-tell 표면 습관
 

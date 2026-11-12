@@ -2,8 +2,12 @@
 
 Status: shipped in prod v3.2.15. The user approved all 16 rows of the prod table.
 
-This pass applies the rule and the Keep list from `docs/design/model-upgrade-deconstrain.md` to
-`prod/`. That file also lists the Anthropic references.
+This pass applies the dev pass's rule (PR #387, `docs/design/model-upgrade-deconstrain.md`) to
+`prod/`. A rule is cut when three things hold. It stops or delegates on a routine step. Its
+introducing commit records no failure behind it. It is not on the Keep list: irreversible or
+remote effects, mechanical gates, and incident-born rules whose cause still holds. References
+are Anthropic's `agent-skills/best-practices` and `prompting-claude-fable-5-2`, fetched
+2026-11-12.
 
 ## What changed
 
@@ -12,9 +16,10 @@ This pass applies the rule and the Keep list from `docs/design/model-upgrade-dec
     `에 대한` and P21 `-적 N` were each allowed once.
   - The pattern table describes density, so a long report kept failing the exit-0 gate that
     gongmun-draft and report-draft require. The draft then had to be bent to fit a count.
-  - The allowance is now `limit × ceil(sentences / 10)`.
-  - New self-test cases cover both sides: two `-적 N` in a short note fail, and the same two
-    across 20 sentences pass. The 20-sentence case fails on the old code.
+  - The allowance now caps the hits inside any 10 consecutive sentences. A period after a digit
+    does not end a sentence, so dates and item numbers don't inflate the count.
+  - Self-test cases cover four shapes: a short note fails, the same two hits spread over 20
+    sentences pass, two hits clustered inside 40 sentences fail, and dated 공문 lines fail.
 - **Stop-and-ask steps on routine drafts become stated defaults.**
   - report-draft A1: skeleton approval happens only when the form, type, or audience cannot be
     inferred.

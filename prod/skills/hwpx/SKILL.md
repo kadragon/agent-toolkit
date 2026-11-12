@@ -187,7 +187,7 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 ### Same page count (100%) criteria — restore mode only
 
 - Result document's final page count must match reference
-- If content won't fit, choose how (tighten wording, or tell the user what overflows) — page-guard is the gate
+- If content won't fit, choose how to tighten it; page-guard failure means not complete — fix and rebuild, or stop and tell the user what overflows (a stop, not a finish)
 - Do not change `hp:p`, `hp:tbl`, `rowCnt`, `colCnt`, `pageBreak`, `secPr` without explicit user request
 - Do not mark complete on `validate.py validate` pass alone. `validate.py page-guard` must also pass
 - If possible, confirm final page count in Hancom, recheck against reference
@@ -228,7 +228,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 > Rules 8–13 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.
 
 14. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
-15. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every hand-written `str.replace()` (`text.py patch` and `table.py replace` already fail on 0 matches) — catches run splitting (0 matches) and substring collision (excess) before silent failure
+15. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every hand-written `str.replace()`, and check the match count before `text.py patch` (it fails on 0 matches but replaces only the first of several by default; `table.py replace --set-text` refuses both) — catches run splitting (0 matches) and substring collision (excess) before silent failure
 16. 🟡 **Table cell text edit → table.py replace only**: any text change inside `<hp:tc>` uses `table.py replace`, not `str.replace()` or `text.py patch` — it strips the cell's per-subList `<hp:linesegarray>` and checks ID collisions. `--set-text OLD NEW` keeps run styling, but `OLD` must be the whole content of one `<hp:t>` (a substring fails like a run-split); run-split text or a style-preserving rewrite → `--preserve-style --text`; many cells → `table.py fill`. Flags: `table.py replace --help`, `references/scripts-guide.md`.
 17. 🔴 **Floating table must be anchored in `<hp:p><hp:run>`**: `treatAsChar="0"` (floating) tables must be a direct child of `<hp:run>` inside `<hp:p>` — never a bare sibling of `<hs:sec>` or `<hp:p>`. Bare-sibling floating tables are not rendered by Hancom. See `section-writing.md` § "Table placement patterns" for both placement forms.
 18. 🟡 **Escape angle brackets in text nodes**: Korean legal/administrative text commonly contains `<개정 2026. 6.>` or similar angle-bracket spans — always write as `&lt;개정 2026. 6.&gt;`. Unescaped `<` inside `<hp:t>` causes XML parse failure at document load.

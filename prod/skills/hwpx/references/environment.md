@@ -16,6 +16,7 @@ python -m pip install defusedxml
 > ⚠️ **Use `python -m pip install`, not bare `pip install`.** `python` and `pip` can resolve to *different* interpreters (e.g. a Windows Store Python alias for `pip` vs. a separately-installed `python`) — a reported-successful `pip install` can still leave the `python` you actually run with `ModuleNotFoundError`. `python -m pip install ...` guarantees the install target matches the interpreter that will import it. If this recurs, cross-check with `pip --version` (shows which interpreter it's bound to) vs. `where.exe python` / `which python3`.
 
 - Workflow examples use `python3`. **On Windows, use `python`.**
+- `lxml` is needed only by `xml-integrity.md` → *Safe new-paragraph insertion*; `python -m pip install lxml` if that import fails.
 
 ## SKILL_DIR
 
