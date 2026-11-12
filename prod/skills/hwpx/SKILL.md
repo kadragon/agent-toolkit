@@ -10,7 +10,7 @@ description: >-
   한국 정부·기업 양식 처리. 첨부된 .hwpx 파일 추출·번역·요약도 지원. 한글 문서 작성,
   표 편집, 양식 변환, 본문 추출, 번역, 요약 작업에 사용. 영어·한국어 요청 모두 지원하며
   HWPX 문서 작업에 필요한 XML 구조와 스타일을 함께 처리.
-version: 1.1.4
+version: 1.2.0
 ---
 
 # HWPX Document Skill — XML-first Workflow
@@ -30,7 +30,7 @@ When user attaches `.hwpx`, do not auto-restore. Judge **request intent** first,
 | Attachment is style reference only, content written fresh | Reference-based generation | Workflow 5 |
 | No attachment | New creation | Workflow 1 |
 
-Intent unclear → ask user, do not assume restore.
+Intent unclear → take the mode the request most implies and say which. Ask first only when restore and fresh generation would produce materially different files.
 
 ### Per-mode page-count rules / completion gates
 
@@ -45,10 +45,10 @@ Reference restore: page count and completion gate are the **Workflow 5** checkli
 
 ## Environment
 
-Most scripts use stdlib `xml.etree.ElementTree` only. `validate.py` and `compare.py` require `defusedxml` (XXE/billion-laughs hardening); the OLE `.hwp` fallback recipe in `references/environment.md` needs `olefile`. Install both up front:
+Most scripts use stdlib `xml.etree.ElementTree` only. `validate.py` and `compare.py` require `defusedxml` (XXE/billion-laughs hardening); the OLE `.hwp` fallback recipe in `references/environment.md` installs its own `olefile`. Install `defusedxml` up front:
 
 ```bash
-python -m pip install olefile defusedxml   # python -m pip, not bare pip — they can bind different interpreters
+python -m pip install defusedxml   # python -m pip, not bare pip — they can bind different interpreters
 ```
 
 - `SKILL_DIR` = absolute parent directory of the `SKILL.md` loaded this turn (`.../skills/hwpx`). Resolve the concrete path from the loaded file, not from a plugin-root environment variable. Set it at the top of every bash block that references it; run the guard once, in the first block:
@@ -124,7 +124,7 @@ python3 "$SKILL_DIR/scripts/compare.py" document.hwpx edited.hwpx  # review chan
 
 ### Bulk edits
 
-Many items, many cells, or N files → read `$SKILL_DIR/references/bulk-edit.md` first: stage-by-stage pack → validate → open in Hancom with `assert s.count(old) == expected` on every `str.replace()`; `table.py replace` directly on an unpacked dir for multi-cell edits (`--preserve-style --text` keeps run styling — `--para 0 0 ""` resets charPrIDRef to 0); the N-file loop (slugged unpack dirs, `strip-lineseg` after every text change, `validate --baseline` before overwriting).
+Many items, many cells, or N files → read `$SKILL_DIR/references/bulk-edit.md` first: stage-by-stage pack → `validate --baseline`, one Hancom open at the end, count-asserted hand-written `str.replace()` (Rule 15); `table.py replace` directly on an unpacked dir for multi-cell edits (`--preserve-style --text` keeps run styling — `--para 0 0 ""` resets charPrIDRef to 0); the N-file loop (slugged unpack dirs, `strip-lineseg` after every text change, `validate --baseline` before overwriting).
 
 ### Hancom-open verification (content-edit completion gate)
 
@@ -148,7 +148,7 @@ Deleting a table row (`table.py delete`) removes that `<hp:tr>` only — the sam
 
 ## Workflow 3: read / text extraction
 
-**When skill receives a filepath argument** (e.g. `read path/to/file.hwpx`, bare `path/to/file.hwpx`, or user requests "read file.hwpx" / "file.hwpx 읽어줘"): interpret any filepath as a text-extraction request regardless of the `read` keyword → run `text.py extract`.
+**When skill receives a filepath argument** (e.g. `read path/to/file.hwpx`, bare `path/to/file.hwpx`, or user requests "read file.hwpx" / "file.hwpx 읽어줘"): a bare filepath, or "read X" with no other instruction, is a text-extraction request → run `text.py extract`. A path that comes with an edit or restore request follows that request's workflow.
 
 > If `text.py extract` fails with a ZIP error, the same magic-bytes check from Workflow 2 applies — the `.hwpx`-named file may actually be a legacy OLE `.hwp` binary; see the note there and the olefile-based fallback in `references/environment.md`.
 
@@ -187,10 +187,9 @@ Workflow to analyze attached HWPX and (a) make restored copy with only values/fi
 ### Same page count (100%) criteria — restore mode only
 
 - Result document's final page count must match reference
-- If page count likely to grow, compress/summarize text to fit existing layout first
+- If content won't fit, choose how to tighten it; page-guard failure means not complete — fix and rebuild, or stop and tell the user what overflows (a stop, not a finish)
 - Do not change `hp:p`, `hp:tbl`, `rowCnt`, `colCnt`, `pageBreak`, `secPr` without explicit user request
 - Do not mark complete on `validate.py validate` pass alone. `validate.py page-guard` must also pass
-- On `validate.py page-guard` failure, do not submit as complete — fix cause (excess length / structure change) and rebuild
 - If possible, confirm final page count in Hancom, recheck against reference
 
 > For reference-based **generation** (style reference only, content written fresh), page-count criteria above do not apply — like new creation, `validate.py` is only gate.
@@ -229,7 +228,7 @@ Severity: 🔴 crash/data corruption · 🟡 silent failure/bad output · 🔵 s
 > Rules 8–13 — code examples and safe patterns: `$SKILL_DIR/references/xml-integrity.md`.
 
 14. 🟡 **FORMULA field caution**: if table's sum/calculation cell is `type="FORMULA"` field, modifying cached `<hp:t>` value = no-op — Hancom recalculates and overwrites on open. Replace whole `fieldBegin`~`fieldEnd` span with static text, or fix formula input cell (`references/editing-gotchas.md` §1)
-15. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every `str.replace()` — catches run splitting (0 matches) and substring collision (excess) before silent failure
+15. 🟡 **Assert count on every replacement**: when editing existing document, put `assert s.count(old) == expected` before every hand-written `str.replace()`, and check the match count before `text.py patch` (it fails on 0 matches but replaces only the first of several by default; `table.py replace --set-text` refuses both) — catches run splitting (0 matches) and substring collision (excess) before silent failure
 16. 🟡 **Table cell text edit → table.py replace only**: any text change inside `<hp:tc>` uses `table.py replace`, not `str.replace()` or `text.py patch` — it strips the cell's per-subList `<hp:linesegarray>` and checks ID collisions. `--set-text OLD NEW` keeps run styling, but `OLD` must be the whole content of one `<hp:t>` (a substring fails like a run-split); run-split text or a style-preserving rewrite → `--preserve-style --text`; many cells → `table.py fill`. Flags: `table.py replace --help`, `references/scripts-guide.md`.
 17. 🔴 **Floating table must be anchored in `<hp:p><hp:run>`**: `treatAsChar="0"` (floating) tables must be a direct child of `<hp:run>` inside `<hp:p>` — never a bare sibling of `<hs:sec>` or `<hp:p>`. Bare-sibling floating tables are not rendered by Hancom. See `section-writing.md` § "Table placement patterns" for both placement forms.
 18. 🟡 **Escape angle brackets in text nodes**: Korean legal/administrative text commonly contains `<개정 2026. 6.>` or similar angle-bracket spans — always write as `&lt;개정 2026. 6.&gt;`. Unescaped `<` inside `<hp:t>` causes XML parse failure at document load.

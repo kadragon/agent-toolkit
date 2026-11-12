@@ -5,7 +5,7 @@ description: >-
   message, product, pricing, or policy — outputs consensus, disagreements,
   minority report. Also fits "how would ordinary people react". NOT for real
   survey/interview analysis or fictional dialogue. Korean output.
-version: 1.0.1
+version: 2.0.0
 ---
 
 # Persona Debate
@@ -28,8 +28,9 @@ first, then `… plan …`.
 
 ## Flow
 
-### 1. Propose the panel (don't pick silently — it's the user's ask)
-Tell the user your plan in one short message, recommend a default, let them adjust:
+### 1. Choose the panel
+Use the recommended default below and state it in the output's 패널 구성 line. Ask first only
+when the target group is ambiguous (representative vs. targeted would answer different questions):
 - **Composition** — the honest first fork:
   - **Representative random** (unfiltered) — roughly population-accurate. Default for general-public questions.
   - **Targeted** (a WHERE filter) — default when the question implicitly concerns a specific group. Say plainly: a targeted panel no longer represents the public and raises caricature risk.

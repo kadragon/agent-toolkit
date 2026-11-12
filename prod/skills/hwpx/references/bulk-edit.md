@@ -4,11 +4,11 @@ Moved out of SKILL.md Workflow 2. Read before a multi-item, multi-cell, or N-fil
 
 ## Bulk / multi-stage edits
 
-Many items → split into stages to catch silent failures early, verify each stage in Hancom.
+Many items → split into stages to catch silent failures early: `validate --baseline` each stage, open Hancom once at the end.
 
 1. **unpack once** — run **`HWPX_WORK=$(mktemp -d .hwpx_work_XXXXXX)`** first, then `python3 "$SKILL_DIR/scripts/office.py" unpack document.hwpx "$HWPX_WORK/unpacked/"`. Stage 3 packs into `$HWPX_WORK/step_N.hwpx`. Unique dir per session avoids `.hwpx_work/` and `./unpacked/` collisions when two sessions run concurrently in the same CWD. All later stages cumulatively modify `$HWPX_WORK/unpacked/Contents/section0.xml`.
-2. **Per-stage scripts**: write each stage as small `.py`, put **`assert s.count(old) == expected`** on every `str.replace()`. Count off → aborts before corrupted file produced (`editing-gotchas.md` §3).
-3. **Each stage: pack → validate → confirm opens in Hancom**, then proceed. Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
+2. **Per-stage scripts**: write each stage as small `.py`, count-assert every `str.replace()` (SKILL.md Rule 15, `editing-gotchas.md` §3).
+3. **Each stage: pack → `validate --baseline`**, then proceed; open the final file in Hancom once (SKILL.md *Hancom-open verification*). Package per-stage output as `$HWPX_WORK/step_N.hwpx` to avoid file-lock conflicts.
 4. After all stages pass, apply final version to real file. Clean up: `rm -rf "$HWPX_WORK"`. On failure, the dir is preserved for artifact inspection — clean manually when done.
 
 **Multi-cell dir-mode**: when replacing many cells in one file, use `table.py replace` directly on the unpacked dir — reads/writes section0.xml in-place, no zip overhead per call:
@@ -80,4 +80,4 @@ finally:
 - Include slug in `unpack_dir` — prevents directory collision in N-file parallel runs
 - `validate --baseline` first, overwrite second — maintain order (see SKILL.md Workflow 2 "Validate timing when overwriting original")
 - `--baseline` is what makes the stale-linesegarray check run at all: it flags paragraphs whose text changed while the line-break cache was carried over unchanged. Without it that failure is invisible to `validate.py`
-- After each stage, open at least one file in Hancom to verify — `validate.py` checks structure only
+- `validate.py` checks structure only — the final Hancom open is still the load check

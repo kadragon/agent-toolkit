@@ -114,7 +114,6 @@ python3 "$SKILL_DIR/scripts/build.py" build --section "$SECTION" --output result
 
 # 3. 정리 (trap이 처리; 명시적 제거도 가능)
 rm -rf "$HWPX_WORK"
-# 사용자에게 알림: "result.hwpx 완성. 임시 폴더 정리했습니다."
 ```
 
 ## Batch text extraction

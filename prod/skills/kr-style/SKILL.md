@@ -6,7 +6,7 @@ description: >-
   verifies with a script that exits 0. Use before handing over Korean prose
   longer than a few paragraphs. NOT for typo/spacing fixes, translation between
   languages, or changing what the text claims.
-version: 1.0.2
+version: 1.1.0
 allowed-tools: Bash Read Edit Write Grep
 ---
 
@@ -72,8 +72,8 @@ not what to avoid.
   anything contrasted, takes `은/는`. Mechanically mapping every English subject to `은/는` is
   the single most common transfer and the audit cannot see it.
 - **핵어 후치** — Korean is head-final: the load-bearing information lands at the end of the
-  sentence, and a modifier that runs three 어절 or longer in front of its noun belongs in its
-  own sentence.
+  sentence, and a long modifier that delays its head noun is a candidate to split into its own sentence
+  (or its own `-` item in 개조식), where the register allows.
 
 ## Register
 
