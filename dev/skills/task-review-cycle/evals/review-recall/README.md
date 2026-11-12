@@ -5,9 +5,11 @@ PR shipped and a later `[FIX]` PR repaired. The reviewer sees the bug inside its
 full-size introducing diff, which is mostly benign code. That is the regime
 `../security-effort/RESULTS.md` names as untested: a planted bug inside a large diff.
 
-Use it to compare the two review slots: the Claude reviewer (`claude-review.sh`) and Codex
-(`codex-review.sh`, which is also the lite path's only reviewer). Re-run it on every
-reviewer-prompt change or routing change.
+Use it to compare the two review engines: the Claude reviewer (`claude-review.sh`) and Codex
+(`codex-review.sh`). On the lite path, only one of them runs: the engine that did not drive the
+cycle (`../../references/risk-routing.md` → *Lite reviewer*). That is Codex when Claude Code
+drives and Claude when Codex drives. Re-run it on every reviewer-prompt change or routing
+change.
 
 ## Fixtures
 
@@ -31,7 +33,8 @@ the introducing commit.
 | f11 | 419b332 #144 | b60c9b0 #145 | `quiz_state.py` `_fsrs_review` L287 | With the default `fsrs.Scheduler()` learning steps, a correct card is due again the same day |
 | f12 | 8ad14b3 #198 | c890389 #288 | `scan_transcripts.py` `HOOK_DENY_RE` L137–139, L604 | The regex is unanchored and runs over the whole tool_result, so ordinary output counts as a hook deny |
 
-f03 and f08 each carry two plants in one diff.
+f03 and f08 each carry two plants in one diff. The plant ids (f03a, f03b, f08a, f08b) are for
+scoring only; `run.sh` takes the fixture ids from `fixtures.tsv` (f03, f08).
 
 These fixtures were selected with `git blame -w -M -C <fix>^` on the line each fix changed.
 Near-misses that were rejected, and why:
@@ -46,13 +49,16 @@ Near-misses that were rejected, and why:
 
 ```bash
 OUT_DIR=$(mktemp -d -t review-recall-out.XXXXXX)
-[[ -d "$OUT_DIR" ]] || exit 1
-bash dev/skills/task-review-cycle/evals/review-recall/run.sh "$OUT_DIR"        # all fixtures
+echo "$OUT_DIR"
+bash dev/skills/task-review-cycle/evals/review-recall/run.sh "$OUT_DIR"           # all fixtures
 bash dev/skills/task-review-cycle/evals/review-recall/run.sh "$OUT_DIR" f01 f07   # a subset
 ```
 
-Run it from a checkout of this repo, with `claude`, `codex`, `jq` and `gh` set up as they are
-for a review cycle. Fixtures run in parallel, one worktree each. The 2026-11-12 run took about 5
-minutes in parallel. The same run done one fixture at a time took about 3 minutes per fixture.
+Run it from a checkout of this repo, with `claude`, `codex` and `jq` set up as they are for a
+review cycle. Each fixture runs in its own throwaway clone, fetched at depth 2 by commit sha, so
+the reviewer cannot reach the fix commit or this table, and the source repo's refs are not
+touched. Fixtures run in parallel. The Claude arm's effort is pinned by
+`REVIEW_RECALL_EFFORT` (default `medium`) and recorded in each `<id>-meta.txt`.
+`run.sh` exits 1 if any fixture produced no output.
 Score each output by hand against the table above, then add a dated section to `RESULTS.md`.
 Raw outputs from earlier runs are kept in `runs/`; worktree paths are replaced with `<worktree>/`.
