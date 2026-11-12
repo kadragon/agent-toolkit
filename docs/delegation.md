@@ -119,7 +119,8 @@ Every `Agent(...)` call must include:
 - Boundaries: {files/modules this spawn must NOT touch}
 ```
 
-Missing any field → reject and rewrite the spawn prompt.
+Missing Objective or Boundaries → rewrite the spawn prompt before sending. Output format and
+Tools may be left to the role file's defaults when one exists.
 
 ## Effort Tier
 

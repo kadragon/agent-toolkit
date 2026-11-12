@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.4.0
+version: 1.4.1
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -134,8 +134,8 @@ findings array on stdout. It never runs the lint/test command (`--permission-mod
 an execution-based criterion against the evidence line above, silent on one when that line is absent.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
-`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review inline
-(diff, correctness, naming, error handling, coverage, the contract). Inline review and lite's
+`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review the
+diff against the contract inline. Inline review and lite's
 inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
 
 **Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
@@ -154,8 +154,9 @@ approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## 
 
 In this order, because everything before the last step changes the tree the checks must run on:
 
-1. Apply approved findings with focused checks. On failure revert that file (`git restore
-   --staged <file> && git restore <file>`), report which failed, ask. A fixed `contract` finding
+1. Apply approved findings with focused checks. A check fails → fix forward within that finding's
+   scope once; still failing → revert that file (`git restore --staged <file> && git restore
+   <file>`), file the finding under `backlog.md` → `## Review Backlog`, and continue. A fixed `contract` finding
    → re-run the reviewer once; still failing → stop, never merge.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).

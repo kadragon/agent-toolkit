@@ -23,7 +23,7 @@ Return pass/fail per criterion with evidence.
 
 Default **simple** (≤15 tool calls — the six standing checks plus the contract's criteria). At the
 cap, stop and return the table: every criterion not yet graded gets `unverified` with the reason.
-If failures > passes, stop at 3 failures and return early. Never start a check the brief did not
+Never start a check the brief did not
 name when the brief's own lint/test command already covers it.
 
 ## Checks (always run)
@@ -40,5 +40,5 @@ Floor*, which role-less repos brief their fallback verifier from. Change both in
 
 ## Exit Criteria
 
-- All Sprint Contract criteria graded OR early-stop at 3 failures OR budget cap reached (ungraded → `unverified`)
+- All Sprint Contract criteria graded OR budget cap reached (ungraded → `unverified`)
 - Table written with evidence paths

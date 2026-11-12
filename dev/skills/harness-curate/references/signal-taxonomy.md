@@ -61,7 +61,7 @@ unless the event it matches no longer exists.
 
 **Age decides between delete and watch.** An asset first committed under 60 days ago has not
 had the chance to fire — ≈0 makes it `Watch:`, not unused. Untouched for 60+ days *and* ≈0 is
-the strong delete case the adversarial check then tests. Both dates, from the asset's *own*
+the strong delete case the keep case then tests. Both dates, from the asset's *own*
 repo:
 
 ```bash
@@ -74,11 +74,10 @@ if [ -n "$repo_root" ]; then
 fi
 ```
 
-**Adversarial check (mandatory before any delete):** one independent reviewer argues for keeping
-it — a rare-but-critical path, a slash-command or hook route the scanner cannot see, a backstop
+**Keep case before any delete:** argue for keeping it, grepping for routes the scanner cannot see — a rare-but-critical path, a slash-command or hook route the scanner cannot see, a backstop
 for a failure that has not recurred yet. A real reason → `Watch:`.
 
-**Brief:** the usage counts per platform, the last commit date, the reviewer's verdict. Route:
+**Brief:** the usage counts per platform, the last commit date, the keep-case verdict. Route:
 remove the file(s), bump the owning plugin. Acceptance: the plugin's validate/CI passes without it.
 
 ## 5. Domain knowledge candidate

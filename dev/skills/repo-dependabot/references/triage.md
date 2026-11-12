@@ -22,11 +22,8 @@ Empty result + active dependabot PRs → report as "no committed config (possibl
 
 ## 2b. PR Status Check
 
-```bash
-gh pr view {number} -R {owner}/{repo} --json number,title,mergeable,mergeStateStatus,statusCheckRollup,headRefName
-```
-
-See SKILL.md category table for the full emoji/category/condition mapping.
+`scripts/triage.sh` returns each PR's category, `mergeStateStatus`, and failed checks; the SKILL.md
+category table maps them.
 
 ## 2c. Auto-Merge Readiness Audit
 

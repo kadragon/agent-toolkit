@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.1.1
+version: 1.1.2
 ---
 
 # Debug
@@ -63,19 +63,18 @@ Run the loop and watch it go red. Confirm all three:
 - [ ] It reproduces across multiple runs (or at a high enough rate, for a flaky bug).
 - [ ] The exact symptom is captured — error text, wrong value, measured timing.
 
-Then shrink the repro to the **smallest scenario that still goes red**, cutting one element
-at a time and re-running. Done when removing any remaining element turns the loop green.
+Then shrink the repro while its size hides the cause — re-run after each cut. Done when the
+failing path is evident from the repro.
 
 ## Phase 3 — Hypothesise
 
-Generate **3–5 ranked hypotheses before testing any of them**. Each states its prediction:
+Before probing, rank the plausible causes. Each states the prediction that tells it apart:
 
 ```
 If <cause> is it, then <change X> makes the bug disappear / <change Y> makes it worse.
 ```
 
-Show the ranked list to the user before testing; if no user is reachable, proceed with your
-own ranking and say so.
+Share the ranking in your progress update and proceed.
 
 **Two failed fixes → test the premise.** When two fixes have failed the same check, write
 down the one sentence both assumed, then run the observation that would come out differently
@@ -112,14 +111,9 @@ Write the regression test **before** the fix, at a **correct seam** — one wher
 exercises the real bug pattern as it occurs at the call site. If no such seam exists, **that
 absence is the finding**: report it rather than shipping a test that cannot fail on the bug.
 
-Where a correct seam exists:
-
-1. Turn the minimised repro into a failing test there.
-2. Watch it fail.
-3. Apply the minimal fix.
-4. Watch it pass. A second fix that also stays red → back to Phase 3's premise check before
-   any third fix.
-5. Re-run the Phase 1 loop against the original, un-minimised scenario.
+Where a correct seam exists, land the regression test there red before the fix and green
+after it (a second fix that also stays red → Phase 3's premise check before any third), then
+re-run the Phase 1 loop against the original, un-minimised scenario.
 
 Two repo rules own the rest where the repo states them — read them there rather than recalling
 them, and fall back to the inline form when the file or section is absent:

@@ -114,27 +114,17 @@ gh run list --repo {owner}/{repo} --branch {head-branch} --limit 3 --json databa
 gh run view {run-id} --repo {owner}/{repo} --log-failed 2>&1 | head -100
 ```
 
-Spawn parallel `sonnet` subagents for repos with different failure patterns. For repos with the same root cause, analyze one and apply the pattern to the rest.
+For repos with the same root cause, analyze one and apply the pattern to the rest. Several repos with different failure patterns may be analyzed in parallel `sonnet` subagents.
 
 Before proposing a fix strategy, check `gotchas.md` — some failures (e.g. a downstream plugin's `peerDependencies` not yet supporting a just-bumped core tool's new major) aren't fixable by a config change at all; a fix-PR cycle spent on those is wasted.
 
 **Analysis alone is not a fix — it is a hypothesis.** Reading logs and the dependency changelog tells you what *probably* broke, but the new tool version is the only authority on its own config schema and rule set. A confident, well-reasoned proposal can still be wrong: a config key placed at the wrong nesting level, or a real error masked behind the one you spotted. So whoever applies the fix must verify it against the actual tool (see Step 2) before pushing — never push an analysis-only proposal.
 
-Common failure patterns:
-
-| Pattern | Likely cause |
-|---------|-------------|
-| Runtime version mismatch | Tool upgraded its minimum engine requirement (e.g., wrangler requires Node 22) |
-| Type errors | Breaking API change in dependency |
-| Test failures | Behavioral change in dependency |
-| Build failures | Peer dependency mismatch |
-| Lint failures | New rules introduced by dependency |
-
 ### Step 2: Fix Pipeline (once user approves fix approach)
 
 After the user confirms the fix strategy, execute this pipeline autonomously without re-asking:
 
-1. **Create fix PRs** — spawn `sonnet` subagents in parallel, one per repo needing the fix. **The subagent must verify the fix against the real tool before pushing**, using the failing job's own command (from the workflow YAML) as the exit criterion:
+1. **Create fix PRs** — one per repo needing the fix (several repos may run as parallel `sonnet` subagents). **Whoever applies the fix must verify it against the real tool before pushing**, using the failing job's own command (from the workflow YAML) as the exit criterion:
    - For config/schema migrations, run the upgraded tool's own migration helper when it has one (e.g. `biome migrate --write`, `eslint --migrate`) rather than hand-editing — the tool writes the canonical config and won't guess the wrong key level.
    - Re-run the **exact failing command** (e.g. `bun run lint`, `npm test`) against the new dependency version and confirm it exits 0. A clean migration can still leave a real error the analysis missed (e.g. a rule promoted to error-level in the new major) — that error must be resolved too, not just the config.
    - Only push once the failing command is green locally. If it can't be made green (needs secrets, env, or a design decision), stop and report — do not push a still-red branch.
