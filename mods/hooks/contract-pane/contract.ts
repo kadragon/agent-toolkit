@@ -44,22 +44,31 @@ const itemsOf = (contract: string): Item[] => {
   return items
 }
 
-// Backticks and runs of whitespace do not change which command a check names.
-const normalize = (text: string): string => text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
+// A command a check names, and the form a record's command is compared in.
+type Named = { command: string; form: (text: string) => string }
+
+// A backticked span is the command verbatim: whitespace inside it, quoted or
+// not, is part of what ran. An unquoted check is prose that may have wrapped,
+// so there backticks and runs of whitespace do not change the command.
+const verbatim = (text: string): string => text.trim()
+const collapsed = (text: string): string => text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
 
 // The commands a check names: each backticked span, else the whole check.
-const commandsOf = (check: string): string[] => {
+const commandsOf = (check: string): Named[] => {
   const spans = Array.from(check.matchAll(/`([^`]+)`/g), match => match[1] ?? '')
+  const form = spans.length > 0 ? verbatim : collapsed
 
-  return (spans.length > 0 ? spans : [check]).map(normalize).filter(Boolean)
+  return (spans.length > 0 ? spans : [check])
+    .map(text => ({ command: form(text), form }))
+    .filter(named => named.command !== '')
 }
 
 // The record of one command: the one whose command is exactly it. A narrower
 // or wider run is another check, never this one's proof. The last record
 // wins, as a rerun replaces its own.
-const recordOf = (command: string, evidence: readonly ContractEvidence[]): number | undefined => {
+const recordOf = ({ command, form }: Named, evidence: readonly ContractEvidence[]): number | undefined => {
   for (let index = evidence.length - 1; index >= 0; index -= 1) {
-    if (normalize(evidence[index]?.command ?? '') === command) return index
+    if (form(evidence[index]?.command ?? '') === command) return index
   }
 
   return undefined
@@ -79,7 +88,7 @@ const splitAtArrow = (text: string): [string, string] => {
 const criterionOf = (item: Item, evidence: readonly ContractEvidence[]): ContractCriterion => {
   const [text, rest] = splitAtArrow(item.text)
   const check = rest.trim()
-  const found = commandsOf(check).map(command => recordOf(command, evidence))
+  const found = commandsOf(check).map(named => recordOf(named, evidence))
   const records = found.filter((index): index is number => index !== undefined)
 
   return {

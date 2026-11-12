@@ -11,14 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Review Backlog
-
-### PR #386 — pr-recap pane opens with the branch's Sprint Contract on top (2026-11-12)
-
-- [ ] [harness] `task_nodes.py branch` warns on stderr when the checkout it runs in sits on a branch with commits not on the base, naming `git worktree add .worktrees/<slug>` — a user had to stop an in-place `checkout -b` that would have switched an unmerged cycle's checkout out from under it (source: harness-capture) — dev/skills/task-next/scripts/task_nodes.py
-- [ ] [debt] contract section's command match collapses whitespace runs, so `--expected 'a  b'` matches a record of `--expected 'a b'`; compare backticked spans verbatim (source: codex) — mods/hooks/contract-pane/contract.ts `normalize` (introduced here)
-- [ ] [debt] contract section draws its `r` reread button only when a contract is shown, so a folded line (no contract, failed first read) can be refreshed only by a cycle command or reopening the pane (source: codex) — mods/hooks/contract-pane/register.tsx `contractSection` (introduced here)
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

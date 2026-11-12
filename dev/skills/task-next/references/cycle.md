@@ -16,6 +16,8 @@ git checkout -b "$BRANCH"
 ```
 
 The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when it falls back.
+It also warns when this checkout is on a branch with commits not on the base — a cycle in
+flight: skip the `checkout -b` and run the `git worktree add .worktrees/<slug>` it names.
 
 ## Scope
 
