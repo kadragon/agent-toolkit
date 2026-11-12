@@ -16,8 +16,8 @@ orchestrator's inline grading.
    empty `failure` — no input, state, test, command, or unmet User Story that shows it fails. Panel findings carry
    no `failure` field and skip that check. Also drop: purely theoretical risk
    (DoS, timing), style a linter owns, missing rate limiting / audit logs / monitoring,
-   requests for redundant defensive code (a guard, retry, or validation for a state no caller can
-   reach — it makes the author code defensively, not correctly),
+   requests to add redundant defensive code (a new guard, retry, or validation for a state the
+   diff itself shows no caller can reach — cite that evidence; never a removed existing guard),
    third-party vulnerabilities, test-file nits unless the test is wrong, doc gaps in untouched
    files.
 4. **Conflicts** between sources: prefer the project convention (`AGENTS.md` / `CLAUDE.md`), else

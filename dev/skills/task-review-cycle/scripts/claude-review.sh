@@ -61,7 +61,7 @@ List only problems you would block the merge for. For each one, give the file an
    The array IS the \`${SLOT_ID}\` run's merge-blocking findings — every one of them, as it reported them. Leave out only what cannot block a merge (reuse, simplification, efficiency, altitude or style cleanups); never re-rank, re-judge, merge, summarize or drop a blocking finding. \`[]\` means the reviewer ran and found nothing blocking; it never means you could not read its output.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
 Only flag issues introduced or made significantly worse by this branch's diff.
-Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, style nits, or a missing guard, retry or validation for a state no caller can reach.
+Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, style nits, or a request to add a guard, retry or validation for a state the diff itself shows no caller can reach (removing an existing guard is still flaggable).
 If there are no findings, return [].
 EOF
 
