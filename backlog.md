@@ -13,11 +13,20 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #386 — mods: /contract side pane marks each acceptance criterion by its recorded run (2026-11-12)
+### PR #386 — pr-recap pane opens with the branch's Sprint Contract on top (2026-11-12)
 
 - [ ] [harness] `task_nodes.py branch` warns on stderr when the checkout it runs in sits on a branch with commits not on the base, naming `git worktree add .worktrees/<slug>` — a user had to stop an in-place `checkout -b` that would have switched an unmerged cycle's checkout out from under it (source: harness-capture) — dev/skills/task-next/scripts/task_nodes.py
 - [ ] [debt] contract section's command match collapses whitespace runs, so `--expected 'a  b'` matches a record of `--expected 'a b'`; compare backticked spans verbatim (source: codex) — mods/hooks/contract-pane/contract.ts `normalize` (introduced here)
 - [ ] [debt] contract section draws its `r` reread button only when a contract is shown, so a folded line (no contract, failed first read) can be refreshed only by a cycle command or reopening the pane (source: codex) — mods/hooks/contract-pane/register.tsx `contractSection` (introduced here)
+
+## Review benchmark
+
+- [ ] [harness] Build a review-recall fixture set from this repo's real escaped defects — the
+  `[FIX]` PRs that repaired a bug a merged PR shipped (e.g. #260's late Codex findings), each a
+  `base/` + `vuln/` pair buried in its original full-size diff — and score `claude-review.sh` and
+  the Codex lite reviewer on it as `evals/security-effort/` does. Closes the regime its
+  `RESULTS.md` names as untested (a plant inside a large, mostly benign diff); re-run on every
+  reviewer-prompt or routing change.
 
 ## Rejected — do not re-file
 

@@ -48,24 +48,32 @@ it chooses neither a route nor a reviewer count alone.
 Unknown risk defaults to hub.
 
 **Panel** — the agy + Codex sources run by default on every hub route and on `--no-hub` (PR #277);
-announce panel on/off with the route. A route judged lite runs one reviewer only, Codex (*Lite
+announce panel on/off with the route. A route judged lite runs one reviewer only (*Lite
 reviewer* below): lite skips `ci-wait.sh`, so a panel there would still be `.pending` at the
 pre-merge reclaim. An explicit `--panel` therefore forces hub, even on a diff whose captures are
 all empty — except under `--no-hub`, which always wins, stays local, and runs the reclaim once at
 its stop point. An engine preflight reports unavailable is skipped, not waited for.
 
-**Lite reviewer** — lite runs Codex as its one reviewer instead of the Claude reviewer, so a
-low-risk diff spends no Claude tokens on review (user-approved trade, 2026-10-05). Run the codex
-block from `review-sources.md` in the **foreground** with Bash `timeout: 600000`, the same shape as
-the Claude reviewer: lite has no `ci-wait.sh` runway, so the findings must land before Step 3, and
-a background task would hang the cycle on a lost completion notification (SKILL.md Step 2).
-That block always exits 0,
-so read its outcome from the output, not the exit status: a `{"codex_review":"failed"}`,
-`"locked"`, or `"unavailable"` marker, no review text, or the 600s timeout → record `Reviewers
-Skipped: <reason>` and run SKILL.md Step 2's Claude reviewer block instead. A timeout kills the
-foreground run, leaving no sidecar result, so lite has no pre-merge reclaim.
+**Lite reviewer** — lite runs one reviewer: the engine that did **not** drive this cycle, so the
+diff is never graded by the model that wrote it (model inversion: each model family misses
+different defect classes, and a same-model review shares the author's blind spots).
 
-Codex reviews the diff only and takes no Sprint Contract, so on lite the orchestrator grades each
-acceptance criterion inline against the recorded evidence and reports each unmet one as a
-`contract` finding. Step 4's "re-run the reviewer once" after a fixed `contract` finding is the
-same inline re-grade; disclose it as self-grading (SKILL.md Step 2).
+| Orchestrator | Lite reviewer | Fallback when it fails |
+|---|---|---|
+| Claude Code | Codex — the codex block from `review-sources.md`; a low-risk diff spends no Claude tokens on review (user-approved trade, 2026-10-05) | SKILL.md Step 2's Claude reviewer block |
+| Codex | SKILL.md Step 2's Claude reviewer block (user-approved, 2026-11-12) | the codex block, disclosed as a same-engine review |
+
+Run it in the **foreground** with Bash `timeout: 600000`: lite has no `ci-wait.sh` runway, so
+the findings must land before Step 3, and a background task would hang the cycle on a lost
+completion notification (SKILL.md Step 2). The codex block always exits 0, so read its outcome
+from the output, not the exit status: a `{"codex_review":"failed"}`, `"locked"`, or
+`"unavailable"` marker, no review text, or the 600s timeout is a failure; so is the Claude
+reviewer's sentinel or timeout. Record `Reviewers Skipped: <reason>` and run the fallback; both
+failed → review inline (SKILL.md Step 2). A timeout kills the foreground run, leaving no sidecar
+result, so lite has no pre-merge reclaim.
+
+The Claude reviewer grades the Sprint Contract itself. Codex reviews the diff only and takes no
+contract, so when Codex is the lite reviewer the orchestrator grades each acceptance criterion
+inline against the recorded evidence and reports each unmet one as a `contract` finding. Step 4's
+"re-run the reviewer once" after a fixed `contract` finding is the same inline re-grade; disclose
+it as self-grading (SKILL.md Step 2).
