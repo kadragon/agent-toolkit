@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.5.0
+version: 1.6.0
 ---
 # Dev Review Cycle
 ## Caller gate

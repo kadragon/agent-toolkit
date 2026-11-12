@@ -1,0 +1,12 @@
+새 기록 기능에 동시 쓰기 유실과 저장 위치 변경 문제가 있으며, 최종 결과가 나오기 전에 성공 여부를 확정합니다. 읽기 전용 환경이므로 파일을 생성하는 자체 테스트는 실행하지 않았습니다.
+
+Full review comments:
+
+- [P2] append와 trim을 같은 잠금으로 보호하세요 — <worktree>/f06/dev/skills/harness-curate/scripts/record_skill_run.py:112-115
+  같은 저장소에서 두 에이전트가 동시에 기록하고 보존 한도를 넘으면, 한 프로세스가 파일을 읽은 뒤 다른 프로세스가 추가한 행이 `os.replace()`에서 사라집니다. 임시 파일의 원자적 교체는 파일 손상만 막으며 동시 기록 유실은 막지 못합니다. `_append()`부터 `_trim()`까지 전체 구간을 동일한 프로세스 간 잠금으로 보호해야 합니다.
+
+- [P2] 최초 선택한 기록 저장 경로를 유지하세요 — <worktree>/f06/dev/skills/harness-curate/scripts/record_skill_run.py:61-63
+  `state_path()`가 사용하는 `resolve_project_dir()`는 transcript 개수에 따라 디렉터리를 선택합니다. 따라서 fuzzy sibling에 기록한 이후 정확히 인코딩된 디렉터리에 transcript가 생기면 다음 기록부터 다른 파일에 저장됩니다. 기존 이력은 이전 위치에 남고 프로젝트의 기록이 분리되므로, 최초 저장 위치를 고정하거나 위치 변경 시 기존 이력을 함께 처리해야 합니다.
+
+- [P2] CI와 병합 결과가 확정된 뒤 실행 결과를 기록하세요 — <worktree>/f06/dev/skills/harness-capture/SKILL.md:180-182
+  이 기록은 Step 4.5에서 수행되지만 CI 확인과 병합은 Step 6에 있습니다. QA를 통과한 뒤 CI가 최종 실패하거나 PR을 포기하면 이미 저장된 `success`가 수정되지 않아 실제 결과와 달라집니다. 또한 Step 6의 논리 변경 대응으로 Steps 2–3부터 재실행하면 같은 사이클이 다시 기록될 수 있습니다. 완료 시점에 한 번 기록하거나 사이클 식별자로 기존 행의 결과를 갱신해야 합니다.
