@@ -46,6 +46,7 @@ test('a criterion takes the record its check names; the rest are listed apart', 
         { command: 'ruff  check .', exit_code: 0 },
         { command: 'bash scripts/other.sh', exit_code: 0 },
         { command: 'pytest -k wrapped --maxfail=1', exit_code: 0 },
+        { command: 'pytest', exit_code: 0 },
       ],
       notes: 'tried X\n',
       tree_matches_current: true,
@@ -54,8 +55,9 @@ test('a criterion takes the record its check names; the rest are listed apart', 
 
   if (contract === null) throw new Error('no contract')
 
-  expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['fail', 'pass', 'pass', 'none'])
-  expect(contract.unnamed).toEqual([2])
+  // A wider run (`--maxfail=1` added) or a narrower one (`pytest`) is not the check's own.
+  expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['fail', 'pass', 'none', 'none'])
+  expect(contract.unnamed).toEqual([2, 3, 4])
   expect(contract.isEvidenceCurrent).toBe(true)
   expect(contract.hasNotes).toBe(true)
 })
@@ -75,6 +77,41 @@ test('a rerun of the same command is the record that counts', () => {
   expect(markOf(contract, contract.criteria[0]!)).toBe('pass')
 })
 
+test('a check splits at the last arrow and keeps an arrow inside it verbatim', () => {
+  const contract = parseContract(
+    JSON.stringify({
+      contract: [
+        '**Acceptance criteria:**',
+        "- [ ] Pipe a -> b works → python3 s.py --map 'a -> b'",
+        '- [ ] Only ascii -> `make check`',
+      ].join('\n'),
+      evidence: [
+        { command: "python3 s.py --map 'a -> b'", exit_code: 0 },
+        { command: 'make check', exit_code: 1 },
+      ],
+    }),
+  )
+
+  if (contract === null) throw new Error('no contract')
+
+  expect(contract.criteria.map(criterion => [criterion.text, criterion.check])).toEqual([
+    ['Pipe a -> b works', "python3 s.py --map 'a -> b'"],
+    ['Only ascii', '`make check`'],
+  ])
+  expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['pass', 'fail'])
+})
+
+test('a contract saved with CRLF line endings reads the same', () => {
+  const contract = parseContract(report({ contract: CONTRACT.replace(/\n/g, '\r\n') }))
+
+  expect(contract?.criteria.map(criterion => criterion.check)).toEqual([
+    '`claude plugin test ./mods`',
+    'ruff check .',
+    'pytest -k wrapped',
+    'observation in the pane',
+  ])
+})
+
 test('the state helper, its delimiters and a branch change reread the contract', () => {
   for (const command of [
     'python3 "$STATE" evidence --command x --exit 0',
@@ -82,6 +119,10 @@ test('the state helper, its delimiters and a branch change reread the contract',
     "python3 \"$STATE\" save <<'SPRINT_CONTRACT'",
     'git switch main',
     'git worktree add .worktrees/x feat/x',
+    'git add -A',
+    'git commit -m x',
+    'git stash push -u -m tag',
+    'bash scripts/commit-and-push.sh --pr',
   ]) {
     expect(isContractCommand(command)).toBe(true)
   }

@@ -186,7 +186,7 @@ test('runs that match the tree read as current; none recorded says so', ALONE, a
   expect(found).not.toContain('⚑ 막힌 기록 있음 (cycle_state.py inspect)')
 })
 
-test('with no contract, on the base branch, outside git or without the dev plugin the pane says why', ALONE, async ($, on) => {
+test('with no contract, on the base branch, on a detached HEAD, outside git or without the dev plugin the pane says why', ALONE, async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -198,6 +198,10 @@ test('with no contract, on the base branch, outside git or without the dev plugi
   state.branch = 'main'
   await open($)
   expect(await drawn($)).toEqual(['기본 브랜치 (main)에는 계약이 없습니다.'])
+
+  state.branch = ''
+  await open($)
+  expect(await drawn($)).toEqual(['HEAD가 브랜치에 있지 않습니다 (detached HEAD).'])
 
   state.branch = null
   await open($)
@@ -226,10 +230,15 @@ test('while open, a command of the cycle rereads the contract; another does not'
   await settle()
   expect(state.inspects).toBe(1)
 
+  // Staging moves the index the evidence is matched against.
+  await $.tool.call({ tool: 'Bash', command: 'git add -A' } as never)
+  await settle()
+  expect(state.inspects).toBe(2)
+
   state.report = { ...REPORT, tree_matches_current: true }
   await $.tool.call({ tool: 'Bash', command: 'python3 "$STATE" evidence --command x --exit 0' } as never)
   await settle()
-  expect(state.inspects).toBe(2)
+  expect(state.inspects).toBe(3)
   expect(await drawn($)).toContain('검증 3건 · 현재 트리와 일치')
 })
 

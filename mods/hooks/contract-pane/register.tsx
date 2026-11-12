@@ -36,8 +36,9 @@ async function readOnce($: EngineInterface): Promise<ContractPane> {
     .catch(() => undefined)
 
   if (branch === undefined) return { contract: null, readAt, reason: 'git 저장소가 아닙니다.' }
+  if (branch === '') return { contract: null, readAt, reason: 'HEAD가 브랜치에 있지 않습니다 (detached HEAD).' }
   if (!isFeatureBranch(branch)) {
-    return { contract: null, readAt, reason: `기본 브랜치${branch === '' ? '' : ` (${branch})`}에는 계약이 없습니다.` }
+    return { contract: null, readAt, reason: `기본 브랜치 (${branch})에는 계약이 없습니다.` }
   }
 
   const root = await readDevRoot($).catch(() => undefined)

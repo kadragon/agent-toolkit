@@ -11,6 +11,12 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #386 — mods: /contract side pane marks each acceptance criterion by its recorded run (2026-11-12)
+
+- [ ] [harness] `task_nodes.py branch` warns on stderr when the checkout it runs in sits on a branch with commits not on the base, naming `git worktree add .worktrees/<slug>` — a user had to stop an in-place `checkout -b` that would have switched an unmerged cycle's checkout out from under it (source: harness-capture) — dev/skills/task-next/scripts/task_nodes.py
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

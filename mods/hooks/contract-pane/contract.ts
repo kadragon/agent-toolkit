@@ -10,13 +10,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const CRITERIA_START = /^(?:\*\*Acceptance criteria(?::\*\*|\*\*:?)|#{1,6}\s+Acceptance criteria:?\s*$)/i
 const FIELD = /^\*\*[^*]+:\*\*/
 const CHECKBOX = /^\s*[-*+] \[([ xX])\]\s*(.*)$/
-// The check is a separate segment: whitespace before the arrow.
-const ARROW = /\s(?:→|->)\s*/
+// The check follows the last arrow, whitespace before it: `→`, else the ASCII
+// `->` cycle_state.py also takes, so an arrow inside a check stays verbatim
+// where the contract uses `→` to start it.
+const ARROWS = [/\s→\s*/g, /\s->\s*/g]
 
 type Item = { text: string; isChecked: boolean }
 
 const itemsOf = (contract: string): Item[] => {
-  const lines = contract.split('\n')
+  // As cycle_state.py's splitlines(): a CRLF contract reads the same.
+  const lines = contract.split(/\r?\n/)
   const items: Item[] = []
 
   lines.forEach((line, index) => {
@@ -43,29 +46,41 @@ const itemsOf = (contract: string): Item[] => {
 // Backticks and runs of whitespace do not change which command a check names.
 const normalize = (text: string): string => text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
 
-// The record a check names: its command inside the check, or the check inside
-// its command. The last record wins, as a rerun replaces its own.
-const matchOf = (check: string, evidence: readonly ContractEvidence[]): number | undefined => {
-  const wanted = normalize(check)
+// The commands a check names: the whole check, and each backticked span in it.
+const commandsOf = (check: string): string[] =>
+  [check, ...Array.from(check.matchAll(/`([^`]+)`/g), match => match[1] ?? '')].map(normalize).filter(Boolean)
 
-  if (wanted === '') return undefined
+// The record a check names: one whose command is exactly a command the check
+// names. A narrower or wider run is another check, never this one's proof.
+// The last record wins, as a rerun replaces its own.
+const matchOf = (check: string, evidence: readonly ContractEvidence[]): number | undefined => {
+  const wanted = commandsOf(check)
 
   for (let index = evidence.length - 1; index >= 0; index -= 1) {
-    const command = normalize(evidence[index]?.command ?? '')
-
-    if (command !== '' && (wanted.includes(command) || command.includes(wanted))) return index
+    if (wanted.includes(normalize(evidence[index]?.command ?? ''))) return index
   }
 
   return undefined
 }
 
+// The criterion's text and its check, split at the last arrow.
+const splitAtArrow = (text: string): [string, string] => {
+  for (const arrow of ARROWS) {
+    const last = Array.from(text.matchAll(arrow)).pop()
+
+    if (last?.index !== undefined) return [text.slice(0, last.index), text.slice(last.index + last[0].length)]
+  }
+
+  return [text, '']
+}
+
 const criterionOf = (item: Item, evidence: readonly ContractEvidence[]): ContractCriterion => {
-  const [text, ...rest] = item.text.split(ARROW)
-  const check = rest.join(' → ').trim()
+  const [text, rest] = splitAtArrow(item.text)
+  const check = rest.trim()
   const index = matchOf(check, evidence)
 
   return {
-    text: (text ?? '').trim(),
+    text: text.trim(),
     check,
     isChecked: item.isChecked,
     ...(index === undefined ? {} : { evidence: index }),
@@ -114,9 +129,10 @@ export const markOf = (contract: Contract, criterion: ContractCriterion): Mark =
   return record.exitCode === 0 ? 'pass' : 'fail'
 }
 
-// A Bash command after which the contract, its evidence or the branch may have
-// moved: the state helper itself, its delimiters, or a branch change.
+// A Bash command after which the contract, its evidence, the branch or the
+// index the evidence is matched against may have moved: the state helper, its
+// delimiters, a branch change, or a command that writes the index.
 const CONTRACT_COMMAND =
-  /cycle_state\.py|\$\{?STATE\b|SPRINT_CONTRACT|STUCK_NOTE|task_nodes\.py|merge-and-cleanup\.sh|\bgit\s+(checkout|switch|merge|worktree)\b/
+  /cycle_state\.py|\$\{?STATE\b|SPRINT_CONTRACT|STUCK_NOTE|task_nodes\.py|commit-and-push\.sh|merge-and-cleanup\.sh|\bgit\s+(checkout|switch|merge|worktree|add|rm|mv|commit|stash|reset|restore|rebase|cherry-pick|pull)\b/
 
 export const isContractCommand = (command: string): boolean => CONTRACT_COMMAND.test(command)
