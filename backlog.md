@@ -11,6 +11,15 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review benchmark
+
+- [ ] [harness] Build a review-recall fixture set from this repo's real escaped defects — the
+  `[FIX]` PRs that repaired a bug a merged PR shipped (e.g. #260's late Codex findings), each a
+  `base/` + `vuln/` pair buried in its original full-size diff — and score `claude-review.sh` and
+  the Codex lite reviewer on it as `evals/security-effort/` does. Closes the regime its
+  `RESULTS.md` names as untested (a plant inside a large, mostly benign diff); re-run on every
+  reviewer-prompt or routing change.
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

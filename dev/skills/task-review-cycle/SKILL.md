@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.3.1
+version: 1.4.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -109,7 +109,7 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 
 ## Step 2: Review
 
-**Lite → Codex alone (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
+**Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
@@ -134,9 +134,9 @@ findings array on stdout. It never runs the lint/test command (`--permission-mod
 an execution-based criterion against the evidence line above, silent on one when that line is absent.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
-`Reviewers Skipped: <reason>` and review inline (diff, correctness, naming, error handling,
-coverage, the contract). This fallback and lite's contract grading are self-grading: disclose it;
-it cannot satisfy a policy that requires an independent reviewer.
+`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review inline
+(diff, correctness, naming, error handling, coverage, the contract). Inline review and lite's
+inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
 
 **Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
 `references/review-sources.md` in the turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
@@ -192,7 +192,7 @@ Unknown merge authority keeps the PR and archive. Never retire an unmerged cycle
 **Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
 re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route
 is hub from here: Step 1's hub block, Step 2's hub review, Steps 3–5, then the hub path below.
-Otherwise Codex ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
+Otherwise the lite reviewer ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
 merge locally and push `main`:
 
 ```bash
@@ -232,7 +232,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 | Bundled script unresolvable, or preflight `has_errors` | Stop, report |
 | Commit rejected by commit-guard (`{"error": "commit blocked…"}`) | Fix the branch or the `[TYPE]`; never retry the same call |
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
-| Reviewer sentinel, non-zero exit, or 600s timeout (lite: Codex marker/empty/timeout) | Record `Reviewers Skipped`; lite → Claude reviewer, else review inline; report it |
+| Reviewer sentinel, non-zero exit, or 600s timeout (Codex: marker/empty output) | Record `Reviewers Skipped`; lite → its fallback (*Lite reviewer*); hub, or both lite reviewers failed → review inline (self-grading, disclosed); report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
 | CI `rework-cap` / `timeout` | Stop, ask the user |

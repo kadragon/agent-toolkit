@@ -2,8 +2,9 @@
 
 Step 3 of `task-review-cycle`. Sources tag their findings: `code-review` (the reviewer's
 `code-review` run), `contract` (the reviewer's Sprint Contract grading), and on every non-lite
-route the panel's `agy` and `codex`. Lite has no `code-review` source: `codex` is its reviewer and
-`contract` comes from the orchestrator's inline grading (`risk-routing.md` → *Lite reviewer*).
+route the panel's `agy` and `codex`. Lite has one source, the engine that did not drive the cycle
+(`risk-routing.md` → *Lite reviewer*): when that is `codex`, `contract` comes from the
+orchestrator's inline grading.
 
 ## Procedure
 
@@ -15,6 +16,8 @@ route the panel's `agy` and `codex`. Lite has no `code-review` source: `codex` i
    empty `failure` — no input, state, test, command, or unmet User Story that shows it fails. Panel findings carry
    no `failure` field and skip that check. Also drop: purely theoretical risk
    (DoS, timing), style a linter owns, missing rate limiting / audit logs / monitoring,
+   requests to add redundant defensive code (a new guard, retry, or validation for a state the
+   diff itself shows no caller can reach — cite that evidence; never a removed existing guard),
    third-party vulnerabilities, test-file nits unless the test is wrong, doc gaps in untouched
    files.
 4. **Conflicts** between sources: prefer the project convention (`AGENTS.md` / `CLAUDE.md`), else
