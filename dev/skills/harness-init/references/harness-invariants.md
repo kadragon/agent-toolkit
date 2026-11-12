@@ -55,8 +55,9 @@ a short inline `TODO:` comment rather than inventing guidance.
 
 ## Spawn Prompt Contract (shared invariant)
 
-Every subagent/teammate spawn MUST carry all four fields:
-**Objective**, **Output format**, **Tools to use**, **Boundaries**.
+Every subagent/teammate spawn carries four fields: **Objective**, **Output format**, **Tools to
+use**, **Boundaries**. Objective and Boundaries are required; a role file may supply defaults for
+the other two.
 
 Stated in `docs/delegation.md` → *Spawn Prompt Contract* (this marketplace); when this contract
 changes, update both.
@@ -173,10 +174,13 @@ return value / PR body. A silently applied default violates this contract.
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
 | Code-cycle approval (`task-next` and `task-new`) | Apply `task-next/references/cycle.md` → *Plan gate* | Approved constraints carry forward; unresolved material decisions are not auto-approved |
 | `task-next --all` selection | Take ready units within approved scope; execution mode per `task-next/references/batch.md` | Batch selection does not authorize parallel-agent cost |
+| `task-next` large group (>8 open items) | Take the first 8 open items in document order; name the remainder in the hand-off | A fixed cut is decidable; the remainder stays in `backlog.md` for the next run |
+| Version-bump level, repo states no release policy | Choose by semver; state level and reason in the hand-off and PR body | A local, reviewed edit — the PR review sees it before anything ships |
+| Review-cycle CI `reason:"timeout"` | Re-run `ci-wait.sh` once | A slow run is not a failure and counts no strike; a second timeout is a stop below |
 
 **Never auto-default (abort and report instead):** the working-tree gate, the destructive-command
-guard, an open contract finding after the reviewer's one retry, the version-bump level when the
-repo states no release policy, `task-next`'s large-group guard (>8 open items), and the review cycle's CI stops (`reason:"rework-cap"`, `reason:"timeout"`).
+guard, an open contract finding after the reviewer's one retry, and the review cycle's CI stops
+(`reason:"rework-cap"`, a second `reason:"timeout"`).
 These protect against irreversible or unreviewable outcomes; there is no safe default.
 Unapproved parallel cost prevents parallel execution; the sequential fallback in
 `task-next/references/batch.md` remains available within approved scope.

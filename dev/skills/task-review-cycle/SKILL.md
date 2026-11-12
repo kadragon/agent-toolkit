@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.4.0
+version: 1.5.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -134,8 +134,8 @@ findings array on stdout. It never runs the lint/test command (`--permission-mod
 an execution-based criterion against the evidence line above, silent on one when that line is absent.
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
-`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review inline
-(diff, correctness, naming, error handling, coverage, the contract). Inline review and lite's
+`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review the
+diff against the contract inline. Inline review and lite's
 inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
 
 **Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
@@ -154,9 +154,12 @@ approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## 
 
 In this order, because everything before the last step changes the tree the checks must run on:
 
-1. Apply approved findings with focused checks. On failure revert that file (`git restore
-   --staged <file> && git restore <file>`), report which failed, ask. A fixed `contract` finding
-   → re-run the reviewer once; still failing → stop, never merge.
+1. Apply approved findings with focused checks. A check fails → fix forward within that finding's
+   scope once. Still failing: a `contract` finding → stop, never merge; any other → undo that
+   finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
+   applied finding touched the file), file it under `backlog.md` → `## Review Backlog`, and
+   continue. A fixed `contract` finding → re-run the reviewer once; still failing → stop, never
+   merge.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
@@ -235,7 +238,8 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 | Reviewer sentinel, non-zero exit, or 600s timeout (Codex: marker/empty output) | Record `Reviewers Skipped`; lite → its fallback (*Lite reviewer*); hub, or both lite reviewers failed → review inline (self-grading, disclosed); report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
 | Contract finding still open after the one retry | Stop; no Step 5, no merge |
-| CI `rework-cap` / `timeout` | Stop, ask the user |
+| CI `rework-cap`, or a second consecutive `timeout` | Stop, ask the user |
+| CI first `timeout` | Re-run `ci-wait.sh` once |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |
 | Merge fails (`merge_ok: false`; `queued` = enqueued, `unconfirmed` = state unknown) | Report; never force-delete |
 | Merge/push denied by the auto-mode classifier or a missing allow rule | Never retry another way; keep PR, branch, archive. Quote the denied command as issued (paths and values resolved) and ask the user to allow it in their own permission config; for the merge helper suggest `Bash(/…/dev/*/skills/task-review-cycle/scripts/merge-and-cleanup.sh *)` (version directory as `*`; a `bash`-led rule is dropped). Never write the rule yourself. On their go-ahead re-run once as that literal command; denied again → stop, report |

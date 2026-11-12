@@ -59,9 +59,9 @@ green before the first structural edit (a characterization test written first wh
 A skill-authoring summary's `Skill slots:` block rides along per
 `../../task-grill/references/skill-extraction.md` → *Carrying the slots*; for a queued item,
 recover it from the cited spec/summary before implementation.
-`cycle_state.py save` refuses a criterion with no `→ <check>`. When the check is a test and test
-infrastructure exists, write it first and watch it fail before implementing — for `[FEAT]` as
-well as `[FIX]`, whose contract names the test that fails before and passes after. A multi-item
+`cycle_state.py save` refuses a criterion with no `→ <check>`. A `[FIX]` contract names the test that
+fails before and passes after; for other tags, write the test first where that sharpens the
+criterion. A multi-item
 group gets one checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
 approval source and exact selected backlog lines. `tasks.md` remains the optional queue-facing
 copy when the caller needs a `## Covers` deletion list.
@@ -93,13 +93,10 @@ silently, even when the result is empty or the run failed. Rules either way:
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
   Reserve full required checks for the completed integration, not every item. Do not commit per item.
 - **Stuck-fix stop** — the same fix attempted twice on one file without the command passing →
-  record what was tried, why it failed, the premise both attempts shared with the check that
-  would show it false, and the next hypothesis (block below; `--tree` prefixes
+  record what was tried, why it failed, and the next hypothesis (block below; `--tree` prefixes
   `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
   session (`/clear`): accumulated failed attempts degrade the context, and `inspect` hands the
-  notes to the next run. A run whose `inspect` returns such a note runs its premise check first,
-  before any fix attempt
-  (`cursor/plugins@9b93e81:pstack/skills/principle-attack-the-premise/SKILL.md`). A delegated
+  notes to the next run. A delegated
   implementer only reports its attempts; the parent records that report as the note. An unknown
   cause routes to `dev:task-debug`.
 
@@ -107,7 +104,7 @@ silently, even when the result is empty or the run failed. Rules either way:
   CYCLE_DIR="<absolute directory of this cycle.md>"
   STATE="$CYCLE_DIR/../scripts/cycle_state.py"
   python3 "$STATE" note <<'STUCK_NOTE'
-  <what was tried, why it failed, shared premise + the check that would refute it, next hypothesis>
+  <what was tried, why it failed, next hypothesis>
   STUCK_NOTE
   ```
 - **Destructive-command guard** — never `git push --force`/`--force-with-lease`, `git reset
@@ -134,8 +131,8 @@ After all changes, before hand-off. Judge *which* plugin and *which* level; the 
 Pass `--skill` when the change touched that skill's own `SKILL.md`; the script takes one `--skill`
 per run, so a second skill's `version:` is edited by hand. Rules: the script header, or
 `docs/conventions.md` → *Plugin Version Bump Rules* where it exists. No script → edit the
-manifests by hand; no `plugin.json` → skip; neither script nor conventions doc → ask the user
-for the level (never default it, even unattended).
+manifests by hand; no `plugin.json` → skip; neither script nor conventions doc → choose the level
+by semver and state it, with the reason, in the hand-off and PR body.
 
 ## Cleanup
 

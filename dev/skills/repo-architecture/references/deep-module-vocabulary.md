@@ -5,7 +5,7 @@ Condensed from [mattpocock/skills](https://github.com/mattpocock/skills)
 reference rather than a skill: this repo needs the *language* for architecture proposals, not a
 second design-discipline entry point.
 
-Use these terms exactly. Do not substitute "component", "service", "API", or "boundary" —
+Prefer these terms over generic nouns ("component", "service", "API", "boundary") —
 consistent language is the whole point, and a proposal that drifts into generic nouns cannot be
 compared against another one.
 

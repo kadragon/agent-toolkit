@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.6.3
+version: 2.7.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -84,8 +84,8 @@ Unattended run: no question — run `--full-scan`, take `[1]`, announce.
 
 Print every group as `[N] <source>: <title> (<M> items)` and wait for a number (unattended:
 `[1]`). Zero groups → read stderr first; report "backlog and tasks are clear" only when nothing
-was hidden. A group of >8 open items → confirm all-or-subset with the user (unattended: abort and
-report). A group whose every open item is deferred/blocked is not a candidate — surface the
+was hidden. A group of >8 open items → offer all-or-subset (unattended: take the first 8 open items in
+document order and name the remainder). A group whose every open item is deferred/blocked is not a candidate — surface the
 blocker.
 
 **All groups blocked → report the blockers, then stop.** Run `--parked` and end the report with

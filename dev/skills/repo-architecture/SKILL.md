@@ -4,7 +4,7 @@ description: >-
   Scan this repo for deepening opportunities — shallow modules whose complexity should
   collapse behind a smaller interface — and queue the ones you pick as backlog items.
 disable-model-invocation: true
-version: 1.1.1
+version: 1.1.2
 ---
 
 # Repo Architecture
@@ -19,7 +19,7 @@ version: 1.1.1
 Surface architectural friction and propose **deepening opportunities**: changes that turn
 shallow modules into deep ones. The aim is testability and agent-navigability, not tidiness.
 
-Read `references/deep-module-vocabulary.md` before scanning, and use its terms exactly —
+Read `references/deep-module-vocabulary.md` before scanning, and use its terms —
 **module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**, the
 **deletion test**. A proposal written in generic nouns ("refactor the service layer") cannot be
 compared against another one.

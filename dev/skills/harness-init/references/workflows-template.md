@@ -59,9 +59,8 @@ code quality; it does not replace implementer checks. For task-cycle runs, appro
 persistence, and check reuse are owned by `dev:task-next` → `references/cycle.md`. Without that
 skill, preserve the approved contract through completion and reuse checks only for proven
 equivalent inputs, commands, and environment; disclose unavailable independent evaluation.
-
-**Step 5: Feature-complete evaluation (mandatory — same rule)**
-When the feature is done, grade it against the done-when criteria and `docs/eval-criteria.md`. Delegate to an evaluator role if one exists. Generator-Evaluator separation is the goal wherever a separate evaluator is available; where it is not, the written criteria are what keep the self-grade honest.
+When the last item of a multi-item feature lands, this grading also covers the feature's
+done-when criteria.
 
 **`backlog.md` format:**
 
