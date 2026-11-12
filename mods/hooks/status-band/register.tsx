@@ -132,7 +132,8 @@ const readInstallPaths = async ($: EngineInterface): Promise<Record<string, stri
 }
 
 // Where the dev plugin is installed, when the settings switch it on.
-const readDevRoot = async ($: EngineInterface): Promise<string | undefined> => {
+// A function declaration: the contract pane calls it with `$` past an import.
+export async function readDevRoot($: EngineInterface): Promise<string | undefined> {
   if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
 
   return (await readInstallPaths($))[DEV_PLUGIN]
