@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": {
     "name": "kadragon"
   },
@@ -37,6 +37,12 @@
       "type": "boolean",
       "title": "PR recap pane",
       "description": "Open a side pane (about a quarter of the terminal) with the latest merged PR of the branch history: its numbers, a plain-language summary and a top-to-bottom diagram of the parts it touches, made once per commit by a small model (Haiku) and kept. With the pane focused, p and n step to the older and newer of the last 20 PRs. It rereads after a git merge, pull or checkout. /pr-recap opens it again.",
+      "default": true
+    },
+    "contractPaneEnabled": {
+      "type": "boolean",
+      "title": "Sprint Contract pane",
+      "description": "Let /contract open a side pane with this branch's Sprint Contract, as the dev plugin archived it: each acceptance criterion marked passed, failed or unchecked by the recorded validation run its check names, whether those runs still match the working tree, and a flag when a stuck note is kept. It rereads after a command of the cycle's own while open. Needs the dev plugin.",
       "default": true
     },
     "prRecapExplain": {

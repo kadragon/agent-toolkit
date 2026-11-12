@@ -40,6 +40,7 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
     band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows, hands pr-recap the width
     status-band/               # one directory per mod: register.tsx, pure logic, *.test.ts(x)
     pr-recap/                  # side pane of the latest PR, model-made summary + diagram; boots off the band's first drawing
+    contract-pane/             # /contract side pane: the branch's Sprint Contract criteria marked by recorded evidence
   types/index.d.ts             # $.state contract for every mod
 
 .claude/

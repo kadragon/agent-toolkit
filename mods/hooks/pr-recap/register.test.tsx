@@ -100,7 +100,8 @@ const world = (on: On): World => {
       throw new Error('register is down')
     }
 
-    state.commands.push(e.name)
+    // Other mods of the plugin register their own commands: only this one's are kept.
+    if (e.name === 'pr-recap') state.commands.push(e.name)
 
     return { value: { command: e.name } }
   })

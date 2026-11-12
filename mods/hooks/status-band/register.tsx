@@ -132,19 +132,21 @@ const readInstallPaths = async ($: EngineInterface): Promise<Record<string, stri
 }
 
 // Where the dev plugin is installed, when the settings switch it on.
-const readDevRoot = async ($: EngineInterface): Promise<string | undefined> => {
+// A function declaration: the contract pane calls it with `$` past an import.
+export async function readDevRoot($: EngineInterface): Promise<string | undefined> {
   if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
 
   return (await readInstallPaths($))[DEV_PLUGIN]
 }
 
 // As the hooks do: `python3`, else `python` where only that is installed.
-const python = (
+export function python(
   $: EngineInterface,
   args: string[],
   init: { timeoutMs: number; cwd?: string },
-): Promise<{ exitCode: number; stdout: string }> =>
-  $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+): Promise<{ exitCode: number; stdout: string }> {
+  return $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+}
 
 // Whether a harness-curate run is due here, judged as the session-start hook
 // judges it: only in a harness repo, by the installed dev plugin's own script.
