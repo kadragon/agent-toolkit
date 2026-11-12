@@ -4,7 +4,7 @@ The non-Claude engines (agy, Codex).
 
 ## Panel source launch
 
-Lite reuses the codex block below as its one reviewer, run in the foreground (`risk-routing.md` → *Lite
+Lite under a Claude Code orchestrator reuses the codex block below as its one reviewer, run in the foreground (`risk-routing.md` → *Lite
 reviewer*); the rest of this section is the panel. Launch the panel sources (when
 `risk-routing.md` → *Panel* runs it) in the turn **before** the reviewer call, `run_in_background:
 true`, so they run while the reviewer holds the foreground for up to its 600s.
