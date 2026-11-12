@@ -6,7 +6,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 // The criteria section, as `cycle_state.py` bounds it: from the heading up to
-// the next `**Field:**` line or heading; a wrapped item continues indented.
+// the next `**Field:**` line or heading, or the next criteria heading, so two
+// sections never count one item twice; a wrapped item continues indented.
 const CRITERIA_START = /^(?:\*\*Acceptance criteria(?::\*\*|\*\*:?)|#{1,6}\s+Acceptance criteria:?\s*$)/i
 const FIELD = /^\*\*[^*]+:\*\*/
 const CHECKBOX = /^\s*[-*+] \[([ xX])\]\s*(.*)$/
@@ -28,7 +29,7 @@ const itemsOf = (contract: string): Item[] => {
     const section: Item[] = []
 
     for (const item of lines.slice(index + 1)) {
-      if (FIELD.test(item.trim()) || item.startsWith('#')) break
+      if (FIELD.test(item.trim()) || item.startsWith('#') || CRITERIA_START.test(item.trim())) break
 
       const match = CHECKBOX.exec(item)
       const last = section[section.length - 1]
@@ -46,18 +47,19 @@ const itemsOf = (contract: string): Item[] => {
 // Backticks and runs of whitespace do not change which command a check names.
 const normalize = (text: string): string => text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
 
-// The commands a check names: the whole check, and each backticked span in it.
-const commandsOf = (check: string): string[] =>
-  [check, ...Array.from(check.matchAll(/`([^`]+)`/g), match => match[1] ?? '')].map(normalize).filter(Boolean)
+// The commands a check names: each backticked span, else the whole check.
+const commandsOf = (check: string): string[] => {
+  const spans = Array.from(check.matchAll(/`([^`]+)`/g), match => match[1] ?? '')
 
-// The record a check names: one whose command is exactly a command the check
-// names. A narrower or wider run is another check, never this one's proof.
-// The last record wins, as a rerun replaces its own.
-const matchOf = (check: string, evidence: readonly ContractEvidence[]): number | undefined => {
-  const wanted = commandsOf(check)
+  return (spans.length > 0 ? spans : [check]).map(normalize).filter(Boolean)
+}
 
+// The record of one command: the one whose command is exactly it. A narrower
+// or wider run is another check, never this one's proof. The last record
+// wins, as a rerun replaces its own.
+const recordOf = (command: string, evidence: readonly ContractEvidence[]): number | undefined => {
   for (let index = evidence.length - 1; index >= 0; index -= 1) {
-    if (wanted.includes(normalize(evidence[index]?.command ?? ''))) return index
+    if (normalize(evidence[index]?.command ?? '') === command) return index
   }
 
   return undefined
@@ -77,13 +79,15 @@ const splitAtArrow = (text: string): [string, string] => {
 const criterionOf = (item: Item, evidence: readonly ContractEvidence[]): ContractCriterion => {
   const [text, rest] = splitAtArrow(item.text)
   const check = rest.trim()
-  const index = matchOf(check, evidence)
+  const found = commandsOf(check).map(command => recordOf(command, evidence))
+  const records = found.filter((index): index is number => index !== undefined)
 
   return {
     text: text.trim(),
     check,
     isChecked: item.isChecked,
-    ...(index === undefined ? {} : { evidence: index }),
+    evidence: records,
+    missing: found.length - records.length,
   }
 }
 
@@ -104,7 +108,7 @@ export const parseContract = (stdout: string): Contract | null => {
   const contract = report.contract
   const evidence = evidenceOf(report.evidence)
   const criteria = itemsOf(contract).map(item => criterionOf(item, evidence))
-  const named = new Set(criteria.flatMap(criterion => (criterion.evidence === undefined ? [] : [criterion.evidence])))
+  const named = new Set(criteria.flatMap(criterion => criterion.evidence))
 
   return {
     branch: typeof report.branch === 'string' ? report.branch : '',
@@ -120,19 +124,20 @@ export const parseContract = (stdout: string): Contract | null => {
 
 export type Mark = 'pass' | 'fail' | 'none'
 
-// A criterion's mark: its named record's result, else none.
+// A criterion's mark: failed when any command it names failed; passed only
+// when every one it names has a passing record; else none.
 export const markOf = (contract: Contract, criterion: ContractCriterion): Mark => {
-  const record = criterion.evidence === undefined ? undefined : contract.evidence[criterion.evidence]
+  const results = criterion.evidence.map(index => contract.evidence[index]?.exitCode)
 
-  if (record === undefined) return 'none'
+  if (results.some(code => code !== 0)) return 'fail'
 
-  return record.exitCode === 0 ? 'pass' : 'fail'
+  return results.length > 0 && criterion.missing === 0 ? 'pass' : 'none'
 }
 
 // A Bash command after which the contract, its evidence, the branch or the
 // index the evidence is matched against may have moved: the state helper, its
 // delimiters, a branch change, or a command that writes the index.
 const CONTRACT_COMMAND =
-  /cycle_state\.py|\$\{?STATE\b|SPRINT_CONTRACT|STUCK_NOTE|task_nodes\.py|commit-and-push\.sh|merge-and-cleanup\.sh|\bgit\s+(checkout|switch|merge|worktree|add|rm|mv|commit|stash|reset|restore|rebase|cherry-pick|pull)\b/
+  /cycle_state\.py|\$\{?STATE\b|SPRINT_CONTRACT|STUCK_NOTE|task_nodes\.py|commit-and-push\.sh|merge-and-cleanup\.sh|\bgit\b[^\n|;&]*\b(checkout|switch|merge|worktree|add|rm|mv|commit|stash|reset|restore|rebase|cherry-pick|pull)\b/
 
 export const isContractCommand = (command: string): boolean => CONTRACT_COMMAND.test(command)

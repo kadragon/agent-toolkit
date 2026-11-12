@@ -110,8 +110,10 @@ export type ContractCriterion = {
   // What follows the arrow: the test, command or observation that proves it.
   check: string
   isChecked: boolean
-  // The index of the evidence record its check names, when one does.
-  evidence?: number
+  // The evidence records of the commands its check names, one per command found.
+  evidence: number[]
+  // The commands its check names that have no record.
+  missing: number
 }
 
 // The branch's archived Sprint Contract as the contract pane draws it.
@@ -128,9 +130,10 @@ export type Contract = {
   hasNotes: boolean
 }
 
-// What the contract pane read last: `contract` null with none archived,
-// `reason` why nothing could be read.
-export type ContractPane = { contract: Contract | null; readAt: number; reason?: string }
+// What the contract section read last: `contract` null with none archived,
+// `reason` why there is none; `error` why the last reread failed, the
+// contract before it kept.
+export type ContractPane = { contract: Contract | null; readAt: number; reason?: string; error?: string }
 
 declare module 'claude-code' {
   interface PluginState {

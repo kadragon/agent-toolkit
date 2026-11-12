@@ -140,13 +140,12 @@ export async function readDevRoot($: EngineInterface): Promise<string | undefine
 }
 
 // As the hooks do: `python3`, else `python` where only that is installed.
-export function python(
+const python = (
   $: EngineInterface,
   args: string[],
   init: { timeoutMs: number; cwd?: string },
-): Promise<{ exitCode: number; stdout: string }> {
-  return $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
-}
+): Promise<{ exitCode: number; stdout: string }> =>
+  $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
 
 // Whether a harness-curate run is due here, judged as the session-start hook
 // judges it: only in a harness repo, by the installed dev plugin's own script.

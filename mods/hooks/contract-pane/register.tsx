@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 import type { ContractPane } from '../../types'
 import { under } from '../status-band/count'
 import { isFeatureBranch } from '../status-band/cycle'
-import { python, readDevRoot } from '../status-band/register'
+import { readDevRoot } from '../status-band/register'
 import { isContractCommand, markOf, parseContract } from './contract'
 import type { Mark } from './contract'
 
@@ -44,9 +44,13 @@ async function readOnce($: EngineInterface): Promise<ContractPane> {
 
   if (root === undefined) return { contract: null, readAt, reason: 'dev 플러그인 꺼짐' }
 
-  const inspect = await python($, [under(root, CYCLE_SCRIPT), 'inspect'], { timeoutMs: READ_TIMEOUT_MS })
+  const inspect = await $.process
+    .run(['python3', under(root, CYCLE_SCRIPT), 'inspect'], { timeoutMs: READ_TIMEOUT_MS })
+    .catch(() => $.process.run(['python', under(root, CYCLE_SCRIPT), 'inspect'], { timeoutMs: READ_TIMEOUT_MS }))
 
-  if (inspect.exitCode !== 0) return { contract: null, readAt, reason: 'cycle_state.py inspect 실패' }
+  // A failed or cut read is an error, not a reading: the contract before it stays.
+  if (inspect.exitCode !== 0) throw new Error('cycle_state.py inspect 실패')
+  if (inspect.isStdoutTruncated) throw new Error('cycle_state.py inspect 출력이 잘림')
 
   return { contract: parseContract(inspect.stdout), readAt }
 }
@@ -72,13 +76,16 @@ export function loadContract($: EngineInterface): Promise<void> {
     do {
       isStale = false
 
-      const next = await readOnce($).catch(async error => ({
-        contract: null,
-        readAt: await $.clock.now(),
-        reason: String(error),
-      }))
+      const next = await readOnce($).catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
 
-      await update($, paneAtom, () => next)
+      // A reread that failed keeps the contract shown, with the error beside it.
+      await update($, paneAtom, current =>
+        typeof next !== 'string'
+          ? next
+          : current?.contract
+            ? { ...current, error: next }
+            : { contract: null, readAt: current?.readAt ?? 0, reason: next },
+      )
     } while (isStale)
   })().finally(() => {
     loading = undefined
@@ -130,6 +137,7 @@ export async function contractSection(
         <Text color="warning">검증 {String(records)}건 · 트리가 바뀜, 다시 실행 필요</Text>
       )}
       {contract.hasNotes && <Text color="warning">⚑ 막힌 기록 있음 (cycle_state.py inspect)</Text>}
+      {pane.error !== undefined && <Text color="error">다시 읽기 실패: {pane.error}</Text>}
       <Box flexDirection="column" marginTop={1}>
         {contract.criteria.map((criterion, index) => {
           const mark = MARKS[marks[index] ?? 'none']
@@ -167,7 +175,7 @@ export async function contractSection(
         </Box>
       )}
       <Box>
-        <Button key="reload" hotkey="r" plain onPress={() => loadContract($)}>
+        <Button key="reload" hotkey="r" plain onPress={() => void loadContract($).catch(() => undefined)}>
           계약 다시 읽기
         </Button>
       </Box>

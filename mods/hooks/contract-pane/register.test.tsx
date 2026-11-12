@@ -54,6 +54,8 @@ const PANE = {
 
 type World = {
   branch: string | null
+  // Set to make inspect fail (exit 1) or come back cut.
+  inspectFault?: 'exit' | 'truncated'
   report: Record<string, unknown>
   isDevOn: boolean
   inspects: number
@@ -100,6 +102,10 @@ const world = (on: On): World => {
 
     if (e.argv.some(arg => arg.endsWith('/p/dev/skills/task-next/scripts/cycle_state.py')) && e.argv.includes('inspect')) {
       state.inspects += 1
+      if (state.inspectFault === 'exit') return { value: { ...run, exitCode: 1, stdout: '' } }
+      if (state.inspectFault === 'truncated') {
+        return { value: { ...run, isStdoutTruncated: true, exitCode: 0, stdout: JSON.stringify(state.report).slice(0, 40) } }
+      }
 
       return { value: { ...run, exitCode: 0, stdout: JSON.stringify(state.report) } }
     }
@@ -234,6 +240,32 @@ test('a command of the cycle rereads the section; another does not, nor one befo
   await bash($, 'python3 "$STATE" evidence --command x --exit 0')
   expect(state.inspects).toBe(3)
   expect(await drawn($)).toContain('검증 3건 · 현재 트리와 일치')
+})
+
+test('a reread that fails or comes back cut keeps the contract shown, with the error', ALONE, async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  state.inspectFault = 'truncated'
+  await bash($, 'git add -A')
+
+  let found = await drawn($)
+
+  expect(found).toContain('[FEAT] mods: contract pane')
+  expect(found).toContain('다시 읽기 실패: cycle_state.py inspect 출력이 잘림')
+
+  state.inspectFault = undefined
+  await bash($, 'git add -A')
+  found = await drawn($)
+  expect(found.some(text => text?.startsWith('다시 읽기 실패') === true)).toBe(false)
+})
+
+test('a first read that fails folds to one line saying why', ALONE, async ($, on) => {
+  const state = world(on)
+
+  state.inspectFault = 'exit'
+  await boot($)
+  expect((await drawn($)).slice(0, 1)).toEqual(['Sprint Contract · cycle_state.py inspect 실패'])
 })
 
 test('r rereads the section by hand', ALONE, async ($, on) => {

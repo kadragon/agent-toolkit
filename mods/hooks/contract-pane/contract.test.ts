@@ -77,6 +77,47 @@ test('a rerun of the same command is the record that counts', () => {
   expect(markOf(contract, contract.criteria[0]!)).toBe('pass')
 })
 
+test('a check naming several commands passes only when each has a passing record', () => {
+  const contract = (evidence: { command: string; exit_code: number }[]) =>
+    parseContract(
+      JSON.stringify({
+        contract: ['**Acceptance criteria:**', '- [ ] Both pass → `python3 a.py --test` and `python3 b.py --test`'].join('\n'),
+        evidence,
+      }),
+    )
+  const markFor = (evidence: { command: string; exit_code: number }[]) => {
+    const read = contract(evidence)
+
+    if (read === null) throw new Error('no contract')
+
+    return [markOf(read, read.criteria[0]!), read.unnamed]
+  }
+
+  expect(markFor([{ command: 'python3 a.py --test', exit_code: 0 }])).toEqual(['none', []])
+  expect(
+    markFor([
+      { command: 'python3 b.py --test', exit_code: 1 },
+      { command: 'python3 a.py --test', exit_code: 0 },
+    ]),
+  ).toEqual(['fail', []])
+  expect(
+    markFor([
+      { command: 'python3 b.py --test', exit_code: 0 },
+      { command: 'python3 a.py --test', exit_code: 0 },
+    ]),
+  ).toEqual(['pass', []])
+})
+
+test('a second criteria section does not count the first one twice', () => {
+  const contract = parseContract(
+    JSON.stringify({
+      contract: ['**Acceptance criteria:**', '- [ ] one → a', '**Acceptance criteria**', '- [ ] two → b'].join('\n'),
+    }),
+  )
+
+  expect(contract?.criteria.map(criterion => criterion.text)).toEqual(['one', 'two'])
+})
+
 test('a check splits at the last arrow and keeps an arrow inside it verbatim', () => {
   const contract = parseContract(
     JSON.stringify({
@@ -123,6 +164,9 @@ test('the state helper, its delimiters and a branch change reread the contract',
     'git commit -m x',
     'git stash push -u -m tag',
     'bash scripts/commit-and-push.sh --pr',
+    'git -C .worktrees/x add -A',
+    'git --no-pager checkout feat/y',
+    'git -c core.hooksPath=/dev/null commit -m x',
   ]) {
     expect(isContractCommand(command)).toBe(true)
   }
