@@ -1,0 +1,12 @@
+두 스크립트가 일반 명령 출력과 JSON을 섞어 반환하여 새 워크플로의 JSON 파싱이 실패합니다. 자동 파일 감지에서도 공백·한글 경로를 보존하지 못합니다.
+
+Full review comments:
+
+- [P1] 커밋 명령의 일반 출력을 stderr로 보내세요 — <worktree>/f08/kadragon-tools/skills/dev-review-cycle/scripts/commit-and-push.sh:57-58
+  `git commit`의 커밋 요약과 `git push -u`의 추적 브랜치 안내가 JSON과 함께 stdout에 출력됩니다. 따라서 새 Step 1에서 `RESULT`를 `jq`로 읽으면 정상적으로 커밋·PR 생성이 끝나도 파싱 오류가 발생하여 리뷰가 중단됩니다. 커밋 출력을 모사한 실행에서도 오류를 확인했습니다. stdout에는 최종 JSON만 남기도록 Git 명령의 일반 출력을 stderr로 보내야 합니다.
+
+- [P1] CI 상태 출력을 JSON 출력과 분리하세요 — <worktree>/f08/kadragon-tools/skills/dev-review-cycle/scripts/ci-wait.sh:14-17
+  `gh pr checks --watch`는 검사 목록과 상태를 stdout에 출력하므로, 스크립트 결과는 JSON 단독 문서가 아닙니다. 변경된 `ci-failure-handling.md`의 `jq -r '.passed'`가 파싱에 실패하여 CI가 성공해도 병합 단계로 정상 진행할 수 없습니다. 상태 출력을 모사한 실행에서도 파싱 오류가 확인되므로, `gh`의 stdout을 stderr로 보내고 JSON만 stdout에 반환해야 합니다.
+
+- [P2] 자동 감지한 파일 경로를 분할하지 않고 보존하세요 — <worktree>/f08/kadragon-tools/skills/dev-review-cycle/scripts/commit-and-push.sh:44-47
+  변경 파일명이 `docs/my notes.md`처럼 공백을 포함하면 자동 감지 결과가 두 인자로 분리되어 `git add`가 실패합니다. 기본 Git 설정에서 한글 파일명은 따옴표와 이스케이프가 포함된 형태로 출력되므로 이 역시 실제 경로로 전달되지 않습니다. 자동 감지 경로는 `-z` 출력과 배열로 보존하고, 배열 요소별로 인용하여 staging해야 합니다.

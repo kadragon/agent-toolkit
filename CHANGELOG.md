@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Review-recall benchmark on 12 escaped defects (dev v4.11.40) (2026-11-12) → dev/skills/task-review-cycle/evals/review-recall/RESULTS.md
 - [done] Deconstrain prod skills; kr_audit allowances per 10-sentence window (prod v3.2.15) (2026-11-12) → docs/design/prod-deconstrain.md
 - [done] Deconstrain dev skills for current models (dev v4.11.39) (2026-11-12) → docs/design/model-upgrade-deconstrain.md
 - [done] pr-recap pane opens with the branch's Sprint Contract on top, each criterion marked by its recorded run (mods v0.9.0) (2026-11-12)

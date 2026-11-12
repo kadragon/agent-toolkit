@@ -1,0 +1,6 @@
+스케줄러 전환 시 상태가 혼합되어 복습 간격이 정상적으로 증가하지 않는 문제가 있습니다. FSRS 패키지가 설치되지 않았고 파일시스템이 읽기 전용이므로 실제 FSRS 연동과 파일 기반 전체 테스트는 검증하지 못했습니다.
+
+Review comment:
+
+- [P2] FSRS에서 SM-2로 전환할 때 이전 SM-2 상태를 초기화하세요 — <worktree>/f11/dev-tools/skills/repo-quiz/scripts/quiz_state.py:316-318
+  SM-2에서 두 번 이상 정답을 기록한 개념을 FSRS로 전환한 뒤 다시 fallback하면, 기존 `reps`·`ef`와 FSRS가 덮어쓴 `interval`이 섞입니다. 특히 FSRS의 당일 복습으로 `interval=0`이 된 경우, 이후 SM-2는 정답마다 `round(0 * ef)`를 계산하므로 복습 간격이 영구적으로 0에 머뭅니다. FSRS 반환값을 대체한 메모리 내 실행으로 이 경로를 재현했습니다. 스케줄러 전환을 감지해 SM-2 상태를 초기화하거나 명시적으로 변환해야 합니다.

@@ -1,0 +1,6 @@
+캐시 재사용 조건이 기존 비-killer 테스트의 변경을 놓쳐 오래된 KEEP 판정이 유지됩니다. 읽기 전용 환경이므로 파일 생성을 요구하는 자체 테스트는 실행하지 않았습니다.
+
+Review comment:
+
+- [P2] 기존 테스트 변경 시에도 sole-killer 판정을 재검증하세요 — <worktree>/f10/dev/skills/test-prune/references/run-ledger.md:65-67
+  이미 기록된 다른 테스트 파일에 assertion이나 테스트 케이스가 추가되어 기존 mutant를 죽이게 된 경우에도 재검증이 필요합니다. 해당 파일은 이전 `killed_by`에 없으므로 기존 sole-killer unit은 계속 `same_source`로 분류되며, 이 조건은 새 파일만 대상으로 하므로 재실행하지 않습니다. 결과적으로 중복 테스트를 계속 유일한 killer로 보고 KEEP 처리합니다. 새 파일뿐 아니라 기존 비-killer 테스트의 변경도 관련 sole-killer 판정을 무효화하도록 조건을 확장하세요.

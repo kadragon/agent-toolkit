@@ -1,0 +1,6 @@
+새로 추가한 SHA 정보가 실제 검사 결과의 커밋과 일치한다고 보장할 수 없어, 해결하려는 실패 중복 집계 문제가 남습니다. 읽기 전용 환경에서 코드를 검토했으며 테스트는 실행하지 않았습니다.
+
+Review comment:
+
+- [P2] CI 결과와 HEAD SHA를 같은 응답에서 읽으세요 — <worktree>/f05/dev/skills/task-review-cycle/scripts/hub.sh:226-230
+  푸시 직후 첫 번째 요청이 새 HEAD를 반환하고 두 번째 요청이 아직 이전 커밋의 실패를 반환하면, 이전 실패에 새 SHA가 붙습니다. 그러면 `ci-wait.sh`의 SHA 비교를 통과해 동일한 실패를 다시 집계하고 `rework-cap`에 조기 도달할 수 있습니다. 요청 순서만으로 두 응답의 일관성이 보장되지는 않습니다. `gh pr view --json headRefOid,statusCheckRollup`처럼 SHA와 검사 결과를 한 응답에서 읽어야 합니다. 현재 테스트는 두 응답이 일치하는 경우만 검증합니다.
