@@ -260,12 +260,23 @@ test('a reread that fails or comes back cut keeps the contract shown, with the e
   expect(found.some(text => text?.startsWith('다시 읽기 실패') === true)).toBe(false)
 })
 
-test('a first read that fails folds to one line saying why', ALONE, async ($, on) => {
+test('a first read that fails folds to one line saying why, and r rereads it', ALONE, async ($, on) => {
   const state = world(on)
 
   state.inspectFault = 'exit'
   await boot($)
   expect((await drawn($)).slice(0, 1)).toEqual(['Sprint Contract · cycle_state.py inspect 실패'])
+
+  state.inspectFault = undefined
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect((await ui.find({ key: 'reload' }))?.props).toMatchObject({ hotkey: 'r' })
+  await $.ui.press({ plugin: 'mods', key: 'reload' })
+  await settle()
+  expect(state.inspects).toBe(2)
+  await ui.unmount()
+  expect(await drawn($)).toContain('[FEAT] mods: contract pane')
 })
 
 test('r rereads the section by hand', ALONE, async ($, on) => {

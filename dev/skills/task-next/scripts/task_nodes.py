@@ -19,7 +19,9 @@ Usage:
   branch          Print `<type>/<slug>`. Item lines on stdin supply the `[TYPE]` tag: all items
                   sharing one tag give that prefix (lowercased); mixed or absent tags fall back
                   to `fix` and say so on stderr. `--tag` skips stdin derivation entirely.
-                  Does NOT run git — the caller does `git checkout -b "$(...)"`.
+                  Creates no branch — the caller does `git checkout -b "$(...)"`. Reads git
+                  only to warn on stderr when this checkout is on a branch with commits not on
+                  the base (a cycle in flight), naming the `git worktree add` to use instead.
 
   changelog       Compose one entry and insert it as the FIRST line under `## Unreleased`,
                   creating that section (and the file) when absent. Prints the inserted line.
@@ -153,6 +155,42 @@ def branch_name(title: str, item_lines: list[str], tag: str | None = None, max_s
     if not slug:
         return "", "Title produced an empty slug — pass a title with at least one alphanumeric character"
     return f"{tag.lower()}/{slug}", warning
+
+
+def _git_out(*args: str) -> str | None:
+    """Stdout of one git command in the cwd, or None on any failure (advisory callers fail open)."""
+    try:
+        run = subprocess.run(["git", *args], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return run.stdout.strip() if run.returncode == 0 else None
+
+
+def in_flight_warning(name: str) -> str | None:
+    """Warn when this checkout sits on a branch with commits not on the base.
+
+    That branch is a cycle in flight: `git checkout -b` here would switch its checkout out from
+    under it, so the new cycle belongs in a worktree. Advisory only — any git failure is silence.
+    """
+    current = _git_out("branch", "--show-current")
+    if not current:
+        return None
+    base = _git_out("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if not base:
+        base = next((b for b in ("main", "master")
+                     if _git_out("rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None), None)
+    if not base or current == base.split("/", 1)[-1]:
+        return None
+    ahead = _git_out("rev-list", "--count", f"{base}..HEAD")
+    if not ahead or not ahead.isdigit() or int(ahead) == 0:
+        return None
+    slug = name.split("/", 1)[-1]
+    return (
+        f"this checkout is on `{current}` with {ahead} commit(s) not on `{base}` — a cycle in flight. "
+        f"Do not `git checkout -b` here; start the new cycle in a worktree: "
+        f"git worktree add .worktrees/{slug} -b {name} {base}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -955,6 +993,9 @@ def cmd_branch(argv: list[str]) -> int:
         return 1
     if warning:
         sys.stderr.write(f"Warning: {warning}\n")
+    in_flight = in_flight_warning(name)
+    if in_flight:
+        sys.stderr.write(f"Warning: {in_flight}\n")
     print(name)
     return 0
 
@@ -1140,6 +1181,43 @@ def run_tests() -> int:
             _assert(False, "--tag short-circuits the stdin read — no hang on an inherited open pipe")
         finally:
             os.close(_w)
+
+    # A checkout sitting on a branch with commits not on the base is a cycle in flight: an
+    # in-place `checkout -b` would switch it out from under that cycle. The command still
+    # prints the name (advisory), and stays silent on the base branch and outside git.
+    with tempfile.TemporaryDirectory() as _td:
+        _git = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-C", _td]
+
+        def _commit(msg: str) -> None:
+            subprocess.run(_git + ["commit", "--no-verify", "-q", "--allow-empty", "-m", msg], check=True)
+
+        def _branch_run(cwd: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, __file__, "branch", "--title", "next thing", "--tag", "FIX"],
+                cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30,
+            )
+
+        subprocess.run(_git + ["init", "-q", "-b", "main"], check=True)
+        _commit("base")
+        _on_base = _branch_run(_td)
+        _assert(_on_base.stdout.strip() == "fix/next-thing" and "worktree" not in _on_base.stderr,
+                "on the base branch the branch command prints the name and does not warn")
+        subprocess.run(_git + ["checkout", "-q", "-b", "feat/in-flight"], check=True)
+        _clean_feature = _branch_run(_td)
+        _assert("worktree" not in _clean_feature.stderr,
+                "a feature branch with no commits past the base does not warn")
+        _commit("unmerged work")
+        _in_flight = _branch_run(_td)
+        _assert(_in_flight.returncode == 0 and _in_flight.stdout.strip() == "fix/next-thing",
+                "a checkout with unmerged commits still prints the name — the warning is advisory")
+        _assert("feat/in-flight" in _in_flight.stderr
+                and "git worktree add .worktrees/next-thing -b fix/next-thing main" in _in_flight.stderr,
+                f"a checkout with unmerged commits warns and names the worktree command (got {_in_flight.stderr!r})")
+    with tempfile.TemporaryDirectory() as _td:
+        _outside = _branch_run(_td)
+        _assert(_outside.returncode == 0 and _outside.stderr == "",
+                "outside a git repository the branch command prints the name with no warning")
     _assert(slugify("[HARNESS] Leading tag is dropped") == "leading-tag-is-dropped",
             "a leading [TYPE] tag is not repeated in the slug")
     _assert(slugify("a" * 80) == "a" * DEFAULT_MAX_SLUG,

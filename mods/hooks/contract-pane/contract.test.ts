@@ -142,6 +142,27 @@ test('a check splits at the last arrow and keeps an arrow inside it verbatim', (
   expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['pass', 'fail'])
 })
 
+test('a backticked span is the command verbatim; an unquoted check still collapses whitespace', () => {
+  const contract = parseContract(
+    JSON.stringify({
+      contract: [
+        '**Acceptance criteria:**',
+        "- [ ] Two spaces kept → `python3 s.py --expected 'a  b'`",
+        "- [ ] One space kept → `python3 s.py --expected 'a b'`",
+        '- [ ] Unquoted → ruff  check .',
+      ].join('\n'),
+      evidence: [
+        { command: "python3 s.py --expected 'a b'", exit_code: 0 },
+        { command: 'ruff check .', exit_code: 0 },
+      ],
+    }),
+  )
+
+  if (contract === null) throw new Error('no contract')
+
+  expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['none', 'pass', 'pass'])
+})
+
 test('a contract saved with CRLF line endings reads the same', () => {
   const contract = parseContract(report({ contract: CONTRACT.replace(/\n/g, '\r\n') }))
 

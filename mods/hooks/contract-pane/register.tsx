@@ -11,7 +11,8 @@ import type { Mark } from './contract'
 // The branch's Sprint Contract, drawn on top of the PR recap pane: each
 // acceptance criterion with the recorded validation run its check names, read
 // off the dev plugin's own state helper. Read when the pane boots and again
-// after a command of the cycle's own; with no contract it folds to one line.
+// after a command of the cycle's own; with no contract it folds to one line,
+// which keeps the reread button.
 const LABEL = 'Sprint Contract'
 const CYCLE_SCRIPT = 'skills/task-next/scripts/cycle_state.py'
 const GIT_TIMEOUT_MS = 2000
@@ -107,12 +108,22 @@ export async function contractSection(
   if (pane === null) return <Text dimColor>{LABEL} · 읽는 중…</Text>
 
   const contract = pane.contract
+  // On the folded line too: a failed first read is otherwise refreshed only by
+  // a cycle command or reopening the pane.
+  const reload = (
+    <Button key="reload" hotkey="r" plain onPress={() => void loadContract($).catch(() => undefined)}>
+      계약 다시 읽기
+    </Button>
+  )
 
   if (contract === null) {
     return (
-      <Text dimColor wrap="truncate-end">
-        {LABEL} · {pane.reason ?? '저장된 계약 없음'}
-      </Text>
+      <Box flexDirection="row">
+        <Text dimColor wrap="truncate-end">
+          {LABEL} · {pane.reason ?? '저장된 계약 없음'}
+        </Text>
+        <Box marginLeft={1}>{reload}</Box>
+      </Box>
     )
   }
 
@@ -174,11 +185,7 @@ export async function contractSection(
           })}
         </Box>
       )}
-      <Box>
-        <Button key="reload" hotkey="r" plain onPress={() => void loadContract($).catch(() => undefined)}>
-          계약 다시 읽기
-        </Button>
-      </Box>
+      <Box>{reload}</Box>
     </Box>
   )
 }
