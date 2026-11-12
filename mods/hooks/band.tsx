@@ -1,7 +1,6 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { noteContractBand } from './contract-pane/register'
 import { noteTerminalColumns } from './pr-recap/register'
 import { ASCII, setupSegments, UNICODE, workSegments } from './status-band/format'
 import { statusRows } from './status-band/register'
@@ -24,15 +23,12 @@ export const register: Register = (on, options) => {
   // last value there: the option decides, not the value.
   const isStatusBandOn = options.statusBandEnabled !== false
   const isPrRecapOn = options.prRecapEnabled !== false
-  const isContractPaneOn = options.contractPaneEnabled !== false
 
-  if (!isStatusBandOn && !isPrRecapOn && !isContractPaneOn) return
+  if (!isStatusBandOn && !isPrRecapOn) return
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // The band spans the terminal: the pr-recap pane sizes its dock off it.
     if (isPrRecapOn) noteTerminalColumns($, e.viewport?.columns)
-    // The first drawing registers /contract, as the plugin's session.start is taken.
-    if (isContractPaneOn) noteContractBand($)
     if (!isStatusBandOn || e.props.hasSurvey || MIN_STATUS_ROWS > e.props.maxRows) return next(e)
 
     const status = await read($, statusBand)

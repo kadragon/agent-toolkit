@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- [done] mods: /contract side pane marks each acceptance criterion by its recorded run (mods v0.9.0) (2026-11-12)
+- [done] pr-recap pane opens with the branch's Sprint Contract on top, each criterion marked by its recorded run (mods v0.9.0) (2026-11-12)
 - [done] pr-recap pane takes a quarter of the terminal; p/n step through the last 20 PRs (mods v0.8.0) (2026-11-03)
 - [done] pr-recap shows the latest PR alone: plain summary and diagram by Haiku, no keys (mods v0.7.0) (2026-11-03)
 - [done] pr-recap side pane shows the last merged PRs: tabs, diffstat, files by directory (mods v0.6.0) (2026-11-03)

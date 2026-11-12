@@ -41,9 +41,9 @@ const BAND = {
 const PANE = {
   plugin: 'mods',
   component: 'Pane',
-  requestId: 'contract',
+  requestId: 'pr-recap',
   props: {
-    title: 'Sprint Contract',
+    title: 'PR recap',
     isFocused: false,
     bodyColumns: 60,
     placement: 'dock',
@@ -89,7 +89,7 @@ const world = (on: On): World => {
     return { value: { isPlaced: true } }
   })
   on('ui.panes', async () => ({
-    value: state.opens.map(id => ({ id, title: 'Sprint Contract', isShown: true, isFocused: false, isPlaced: true })),
+    value: state.opens.map(id => ({ id, title: 'PR recap', isShown: true, isFocused: false, isPlaced: true })),
   }) as never)
   on('process.run', async ($, e) => {
     if (e.argv[0] === 'git' && e.argv.includes('--show-current')) {
@@ -116,12 +116,12 @@ const world = (on: On): World => {
   return state
 }
 
-// The other mods read the same contract and register their own commands: off here.
-const ALONE = { options: { statusBandEnabled: false, prRecapEnabled: false } }
+// The status band reads the same contract with the same script: off here.
+const ALONE = { options: { statusBandEnabled: false } }
 
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 20))
 
-// The first band drawing registers /contract, as a session's first frame does.
+// The first band drawing boots the PR recap pane, which reads the section first.
 const boot = async ($: Engine) => {
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
 
@@ -129,8 +129,15 @@ const boot = async ($: Engine) => {
   await band.unmount()
 }
 
-const open = ($: Engine) =>
-  $.command.run({ command: 'contract', args: '', presentation: { isFullscreen: true, columns: 160 } } as never)
+const reopen = async ($: Engine) => {
+  await $.command.run({ command: 'pr-recap', args: '', presentation: { isFullscreen: true, columns: 160 } } as never)
+  await settle()
+}
+
+const bash = async ($: Engine, command: string) => {
+  await $.tool.call({ tool: 'Bash', command } as never)
+  await settle()
+}
 
 const texts = async (ui: { findAll: (query: { type: 'Text' }) => Promise<{ text?: string }[]> }) =>
   (await ui.findAll({ type: 'Text' })).map(found => found.text)
@@ -144,28 +151,32 @@ const drawn = async ($: Engine) => {
   return found
 }
 
-test('/contract opens the pane with each criterion marked by the run its check names', ALONE, async ($, on) => {
+const RULE = '─'.repeat(60)
+
+test('the PR recap pane opens with the contract on top, each criterion marked by the run its check names', ALONE, async ($, on) => {
   const state = world(on)
 
   await boot($)
-  expect(state.commands).toEqual(['contract'])
-  expect(state.inspects).toBe(0)
-
-  expect(await open($)).toMatchObject({ text: 'Sprint Contract pane opened.' })
-  expect(state.opens).toEqual(['contract'])
+  expect(state.opens).toEqual(['pr-recap'])
+  expect(state.inspects).toBe(1)
 
   const found = await drawn($)
 
-  expect(found).toContain('[FEAT] mods: contract pane')
-  expect(found).toContain('기준 3개 · 통과 1 · 실패 1 · 미확인 1')
-  expect(found).toContain('검증 3건 · 트리가 바뀜, 다시 실행 필요')
-  expect(found).toContain('⚑ 막힌 기록 있음 (cycle_state.py inspect)')
+  expect(found.slice(0, 4)).toEqual([
+    '[FEAT] mods: contract pane',
+    '기준 3개 · 통과 1 · 실패 1 · 미확인 1',
+    '검증 3건 · 트리가 바뀜, 다시 실행 필요',
+    '⚑ 막힌 기록 있음 (cycle_state.py inspect)',
+  ])
   expect(found).toContain('✓ Parser reads the report')
   expect(found).toContain('✗ Lint is clean')
   expect(found).toContain('· Seen by eye')
   expect(found).toContain('  → observation in the pane')
   expect(found).toContain('기준에 이어지지 않은 실행')
   expect(found).toContain('✓ bash scripts/other.sh')
+  // The PR recap follows one rule below: here git has no log to give.
+  expect(found.indexOf(RULE)).toBeGreaterThan(found.indexOf('✓ bash scripts/other.sh'))
+  expect(found.slice(found.indexOf(RULE) + 1)).toEqual(['git exited 1'])
 })
 
 test('runs that match the tree read as current; none recorded says so', ALONE, async ($, on) => {
@@ -173,11 +184,10 @@ test('runs that match the tree read as current; none recorded says so', ALONE, a
 
   state.report = { ...REPORT, tree_matches_current: true, notes: null }
   await boot($)
-  await open($)
   expect(await drawn($)).toContain('검증 3건 · 현재 트리와 일치')
 
   state.report = { ...REPORT, evidence: null, notes: null }
-  await open($)
+  await reopen($)
 
   const found = await drawn($)
 
@@ -186,70 +196,76 @@ test('runs that match the tree read as current; none recorded says so', ALONE, a
   expect(found).not.toContain('⚑ 막힌 기록 있음 (cycle_state.py inspect)')
 })
 
-test('with no contract, on the base branch, on a detached HEAD, outside git or without the dev plugin the pane says why', ALONE, async ($, on) => {
+test('with no contract the section folds to one line above the PR recap', ALONE, async ($, on) => {
   const state = world(on)
+  const cases: [Partial<World>, string][] = [
+    [{ report: { branch: 'feat/x', contract: null } }, 'Sprint Contract · 저장된 계약 없음'],
+    [{ branch: 'main' }, 'Sprint Contract · 없음 (main)'],
+    [{ branch: '' }, 'Sprint Contract · detached HEAD'],
+    [{ branch: null }, 'Sprint Contract · git 저장소 아님'],
+    [{ isDevOn: false }, 'Sprint Contract · dev 플러그인 꺼짐'],
+  ]
 
   await boot($)
-
-  state.report = { branch: 'feat/x', contract: null }
-  await open($)
-  expect(await drawn($)).toEqual(['이 브랜치에 저장된 Sprint Contract가 없습니다.'])
-
-  state.branch = 'main'
-  await open($)
-  expect(await drawn($)).toEqual(['기본 브랜치 (main)에는 계약이 없습니다.'])
-
-  state.branch = ''
-  await open($)
-  expect(await drawn($)).toEqual(['HEAD가 브랜치에 있지 않습니다 (detached HEAD).'])
-
-  state.branch = null
-  await open($)
-  expect(await drawn($)).toEqual(['git 저장소가 아닙니다.'])
-
-  state.branch = 'feat/x'
-  state.isDevOn = false
-  await open($)
-  expect(await drawn($)).toEqual(['dev 플러그인이 켜져 있지 않습니다.'])
+  for (const [change, line] of cases) {
+    Object.assign(state, { branch: 'feat/x', report: REPORT, isDevOn: true }, change)
+    await reopen($)
+    expect((await drawn($)).slice(0, 3)).toEqual([line, RULE, 'git exited 1'])
+  }
 })
 
-test('while open, a command of the cycle rereads the contract; another does not', ALONE, async ($, on) => {
+test('a command of the cycle rereads the section; another does not, nor one before the pane boots', ALONE, async ($, on) => {
   const state = world(on)
 
-  await boot($)
-
-  // Closed, nothing is read.
-  await $.tool.call({ tool: 'Bash', command: 'python3 "$STATE" evidence --command x --exit 0' } as never)
-  await settle()
+  await bash($, 'python3 "$STATE" evidence --command x --exit 0')
   expect(state.inspects).toBe(0)
 
-  await open($)
+  await boot($)
   expect(state.inspects).toBe(1)
 
-  await $.tool.call({ tool: 'Bash', command: 'ls -la' } as never)
-  await settle()
+  await bash($, 'ls -la')
   expect(state.inspects).toBe(1)
 
   // Staging moves the index the evidence is matched against.
-  await $.tool.call({ tool: 'Bash', command: 'git add -A' } as never)
-  await settle()
+  await bash($, 'git add -A')
   expect(state.inspects).toBe(2)
 
   state.report = { ...REPORT, tree_matches_current: true }
-  await $.tool.call({ tool: 'Bash', command: 'python3 "$STATE" evidence --command x --exit 0' } as never)
-  await settle()
+  await bash($, 'python3 "$STATE" evidence --command x --exit 0')
   expect(state.inspects).toBe(3)
   expect(await drawn($)).toContain('검증 3건 · 현재 트리와 일치')
 })
 
-test('switched off, /contract is not registered and the pane does not draw', { options: { contractPaneEnabled: false, prRecapEnabled: false } }, async ($, on) => {
+test('r rereads the section by hand', ALONE, async ($, on) => {
   const state = world(on)
 
   await boot($)
-  expect(state.commands).toEqual([])
+  state.report = { ...REPORT, tree_matches_current: true }
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
-  expect(await ui.find({ key: 'engine-empty' })).toBeDefined()
+  expect((await ui.find({ key: 'reload' }))?.props).toMatchObject({ hotkey: 'r' })
+  await $.ui.press({ plugin: 'mods', key: 'reload' })
+  await settle()
+  expect(state.inspects).toBe(2)
   await ui.unmount()
+  expect(await drawn($)).toContain('검증 3건 · 현재 트리와 일치')
+})
+
+test('switched off, the section is gone and nothing is read', { options: { statusBandEnabled: false, contractPaneEnabled: false } }, async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  await bash($, 'git add -A')
+  expect(state.inspects).toBe(0)
+  expect(await drawn($)).toEqual(['git exited 1'])
+})
+
+test('with the PR recap pane off, no pane opens and nothing is read', { options: { statusBandEnabled: false, prRecapEnabled: false } }, async ($, on) => {
+  const state = world(on)
+
+  await boot($)
+  await bash($, 'git add -A')
+  expect(state.opens).toEqual([])
+  expect(state.inspects).toBe(0)
 })

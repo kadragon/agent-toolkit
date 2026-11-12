@@ -41,8 +41,8 @@
     },
     "contractPaneEnabled": {
       "type": "boolean",
-      "title": "Sprint Contract pane",
-      "description": "Let /contract open a side pane with this branch's Sprint Contract, as the dev plugin archived it: each acceptance criterion marked passed, failed or unchecked by the recorded validation run its check names, whether those runs still match the working tree, and a flag when a stuck note is kept. It rereads after a command of the cycle's own while open. Needs the dev plugin.",
+      "title": "Sprint Contract in the PR recap pane",
+      "description": "Draw this branch's Sprint Contract, as the dev plugin archived it, on top of the PR recap pane: each acceptance criterion marked passed, failed or unchecked by the recorded validation run whose command is exactly its check, whether those runs still match the working tree, and a flag when a stuck note is kept; one line where the branch has none. It rereads after a command of the cycle's own, and r rereads it. Needs the dev plugin and the PR recap pane.",
       "default": true
     },
     "prRecapExplain": {

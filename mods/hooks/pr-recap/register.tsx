@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain, PrRecapView } from '../../types'
+import { contractSection, loadContract } from '../contract-pane/register'
 import {
   count,
   diffArgv,
@@ -17,7 +18,8 @@ import { ago, logArgv, parseLog, totalsOf } from './recap'
 
 // A merged PR: its numbers, a plain summary and a top-to-bottom diagram of the
 // parts it touches, both made once per commit by a small model. The latest is
-// shown first; the pane's p and n step to the older and newer ones.
+// shown first; the pane's p and n step to the older and newer ones. Above it,
+// under one rule, the contract-pane mod draws the branch's Sprint Contract.
 export const PANE = 'pr-recap'
 const TITLE = 'PR recap'
 const COMMAND = 'pr-recap'
@@ -226,6 +228,7 @@ function load($: EngineInterface): Promise<void> {
 // may not open a pane or write state.
 async function boot($: EngineInterface) {
   await $.command.register({ name: COMMAND, description: 'Show the latest merged PR in a side pane' })
+  void loadContract($).catch(() => undefined)
   await load($)
   await openPane($)
 }
@@ -265,6 +268,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     if (e.presentation.columns > 0) live.terminalColumns = e.presentation.columns
+    void loadContract($).catch(() => undefined)
     await load($)
     await openPane($)
 
@@ -280,125 +284,148 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const recap = await read($, recapAtom)
-    const state = await read($, explainAtom)
-    const view = await read($, viewAtom)
-    const now = await $.clock.now()
-    const boxColumns = Math.min(MAX_BOX_COLUMNS, Math.max(MIN_COLUMNS - 2, e.props.bodyColumns))
+    const elements = $.ui.resolve(e)
+    const section = await contractSection($, elements)
+    const recap = await drawRecap($, elements, e.props)
 
-    if (recap === null) return <Text dimColor>git 이력을 읽는 중…</Text>
+    if (section === null) return recap
 
-    const at = indexOf(recap.prs, view)
-    const pr = recap.prs[at]
-
-    if (recap.error !== undefined || pr === undefined) {
-      return (
-        <Text dimColor wrap="wrap">
-          {recap.error ?? '이 브랜치 이력에 머지된 PR이 없습니다.'}
-        </Text>
-      )
-    }
-
-    const totals = totalsOf(pr.files)
-    const older = recap.prs[at + 1]
-    const newer = at > 0 ? recap.prs[at - 1] : undefined
-    const made = state?.sha === pr.sha ? state : undefined
-    const fallback = pr.summary[0] ?? ''
+    const { Box, Text } = elements
 
     return (
       <Box flexDirection="column">
-        <Text bold wrap="wrap">
-          #{String(pr.number)} {pr.tag === undefined ? '' : `[${pr.tag}] `}
-          {pr.title}
-        </Text>
-        <Text wrap="truncate-end">
-          <Text color="success">+{count(totals.added)}</Text> <Text color="error">-{count(totals.deleted)}</Text>
-          <Text dimColor>
-            {' '}
-            · 파일 {String(pr.files.length)}개 · {ago(pr.mergedAt, now)}
-          </Text>
-        </Text>
-        <Box flexDirection="column" marginTop={1}>
-          {made?.status === 'ready' && made.explain !== undefined ? (
-            <Box flexDirection="column">
-              {made.explain.summary !== '' && <Text wrap="wrap">{made.explain.summary}</Text>}
-              {made.explain.nodes.map((node, index) => (
-                <Box flexDirection="column" marginTop={index === 0 ? 1 : 0}>
-                  <Box
-                    flexDirection="column"
-                    borderStyle="round"
-                    width={boxColumns}
-                    paddingX={1}
-                    {...(BORDERS[node.change] === undefined
-                      ? { borderDimColor: true }
-                      : { borderColor: BORDERS[node.change] })}
-                  >
-                    <Text bold wrap="truncate-end">
-                      {node.name}
-                      {MARKS[node.change] === '' ? '' : ` ${MARKS[node.change]}`}
-                    </Text>
-                    {node.note !== '' && (
-                      <Text dimColor wrap="truncate-end">
-                        {node.note}
-                      </Text>
-                    )}
-                  </Box>
-                  {index < (made.explain?.nodes.length ?? 0) - 1 && (
-                    <Box flexDirection="column">
-                      <Text dimColor wrap="truncate-end">
-                        {'   │ '}
-                        {node.link}
-                      </Text>
-                      <Text dimColor>{'   ▼'}</Text>
-                    </Box>
-                  )}
-                </Box>
-              ))}
-              {made.explain.nodes.length > 0 && <Text dimColor>★ 새로 추가 ✎ 수정 ✕ 제거</Text>}
-            </Box>
-          ) : (
-            <Box flexDirection="column">
-              {fallback !== '' && (
-                <Text wrap="wrap" dimColor>
-                  {fallback}
-                </Text>
-              )}
-              {live.isExplainOn && (
-                <Text dimColor wrap="wrap">
-                  {made?.status === 'failed' ? '(구조도를 만들지 못했습니다)' : '요약과 구조도를 만드는 중…'}
-                </Text>
-              )}
-            </Box>
-          )}
-        </Box>
-        {recap.prs.length > 1 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Box flexDirection="row">
-              {older !== undefined && (
-                <Button key="older" hotkey="p" plain onPress={() => step($, 1)}>
-                  ◀ 이전
-                </Button>
-              )}
-              <Text dimColor>
-                {' '}
-                {String(at + 1)}/{String(recap.prs.length)}{' '}
-              </Text>
-              {newer !== undefined && (
-                <Button key="newer" hotkey="n" plain onPress={() => step($, -1)}>
-                  다음 ▶
-                </Button>
-              )}
-            </Box>
-            {older !== undefined && (
-              <Text dimColor wrap="truncate-end">
-                이전: #{String(older.number)} {older.title} · {ago(older.mergedAt, now)}
-              </Text>
-            )}
-            {!e.props.isFocused && <Text dimColor>포커스 후 p 이전 · n 다음</Text>}
-          </Box>
-        )}
+        {section}
+        <Text dimColor>{'─'.repeat(Math.max(1, e.props.bodyColumns))}</Text>
+        {recap}
       </Box>
     )
   })
+}
+
+// The PR recap under the contract section: the latest merged PR, or the one
+// p and n stepped to.
+async function drawRecap(
+  $: EngineInterface,
+  { Box, Button, Text }: Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>,
+  props: { bodyColumns: number; isFocused: boolean },
+): Promise<RenderElement> {
+  const recap = await read($, recapAtom)
+  const state = await read($, explainAtom)
+  const view = await read($, viewAtom)
+  const now = await $.clock.now()
+  const boxColumns = Math.min(MAX_BOX_COLUMNS, Math.max(MIN_COLUMNS - 2, props.bodyColumns))
+
+  if (recap === null) return <Text dimColor>git 이력을 읽는 중…</Text>
+
+  const at = indexOf(recap.prs, view)
+  const pr = recap.prs[at]
+
+  if (recap.error !== undefined || pr === undefined) {
+    return (
+      <Text dimColor wrap="wrap">
+        {recap.error ?? '이 브랜치 이력에 머지된 PR이 없습니다.'}
+      </Text>
+    )
+  }
+
+  const totals = totalsOf(pr.files)
+  const older = recap.prs[at + 1]
+  const newer = at > 0 ? recap.prs[at - 1] : undefined
+  const made = state?.sha === pr.sha ? state : undefined
+  const fallback = pr.summary[0] ?? ''
+
+  return (
+    <Box flexDirection="column">
+      <Text bold wrap="wrap">
+        #{String(pr.number)} {pr.tag === undefined ? '' : `[${pr.tag}] `}
+        {pr.title}
+      </Text>
+      <Text wrap="truncate-end">
+        <Text color="success">+{count(totals.added)}</Text> <Text color="error">-{count(totals.deleted)}</Text>
+        <Text dimColor>
+          {' '}
+          · 파일 {String(pr.files.length)}개 · {ago(pr.mergedAt, now)}
+        </Text>
+      </Text>
+      <Box flexDirection="column" marginTop={1}>
+        {made?.status === 'ready' && made.explain !== undefined ? (
+          <Box flexDirection="column">
+            {made.explain.summary !== '' && <Text wrap="wrap">{made.explain.summary}</Text>}
+            {made.explain.nodes.map((node, index) => (
+              <Box flexDirection="column" marginTop={index === 0 ? 1 : 0}>
+                <Box
+                  flexDirection="column"
+                  borderStyle="round"
+                  width={boxColumns}
+                  paddingX={1}
+                  {...(BORDERS[node.change] === undefined
+                    ? { borderDimColor: true }
+                    : { borderColor: BORDERS[node.change] })}
+                >
+                  <Text bold wrap="truncate-end">
+                    {node.name}
+                    {MARKS[node.change] === '' ? '' : ` ${MARKS[node.change]}`}
+                  </Text>
+                  {node.note !== '' && (
+                    <Text dimColor wrap="truncate-end">
+                      {node.note}
+                    </Text>
+                  )}
+                </Box>
+                {index < (made.explain?.nodes.length ?? 0) - 1 && (
+                  <Box flexDirection="column">
+                    <Text dimColor wrap="truncate-end">
+                      {'   │ '}
+                      {node.link}
+                    </Text>
+                    <Text dimColor>{'   ▼'}</Text>
+                  </Box>
+                )}
+              </Box>
+            ))}
+            {made.explain.nodes.length > 0 && <Text dimColor>★ 새로 추가 ✎ 수정 ✕ 제거</Text>}
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            {fallback !== '' && (
+              <Text wrap="wrap" dimColor>
+                {fallback}
+              </Text>
+            )}
+            {live.isExplainOn && (
+              <Text dimColor wrap="wrap">
+                {made?.status === 'failed' ? '(구조도를 만들지 못했습니다)' : '요약과 구조도를 만드는 중…'}
+              </Text>
+            )}
+          </Box>
+        )}
+      </Box>
+      {recap.prs.length > 1 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="row">
+            {older !== undefined && (
+              <Button key="older" hotkey="p" plain onPress={() => step($, 1)}>
+                ◀ 이전
+              </Button>
+            )}
+            <Text dimColor>
+              {' '}
+              {String(at + 1)}/{String(recap.prs.length)}{' '}
+            </Text>
+            {newer !== undefined && (
+              <Button key="newer" hotkey="n" plain onPress={() => step($, -1)}>
+                다음 ▶
+              </Button>
+            )}
+          </Box>
+          {older !== undefined && (
+            <Text dimColor wrap="truncate-end">
+              이전: #{String(older.number)} {older.title} · {ago(older.mergedAt, now)}
+            </Text>
+          )}
+          {!props.isFocused && <Text dimColor>포커스 후 p 이전 · n 다음</Text>}
+        </Box>
+      )}
+    </Box>
+  )
 }
