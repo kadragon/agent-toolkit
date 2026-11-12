@@ -7,7 +7,7 @@ description: >-
   "diagnose this", "why is it failing" — something throws, crashes, hangs,
   corrupts output, or got slow with an unknown cause. NOT when the cause is
   already identified — fix and test directly.
-version: 1.1.2
+version: 1.2.0
 ---
 
 # Debug

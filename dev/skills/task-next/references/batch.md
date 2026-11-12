@@ -11,7 +11,8 @@ and malformed-input behavior from the candidate selector. Zero eligible units â†
 without creating a branch or contract; when the units are all blocked, that report is the blocker
 list in `SKILL.md` Step 2.
 
-Render a numbered list with tag, scope, and blockers.
+Render a numbered list with tag, scope, and blockers, then wait for the user's selection; report
+out-of-range indices.
 Non-interactive `--all`: select ready units within already approved scope and announce them,
 at most **5 units per run** â€” an unattended loop has no one to notice runaway cost. The rest
 stay queued; list them in the final report for the next run.

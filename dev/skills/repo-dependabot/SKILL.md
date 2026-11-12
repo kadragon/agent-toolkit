@@ -4,7 +4,7 @@ description: >-
   Bulk dependabot PR triage across owned repos — batch merge, grouped-update config, status
   audit. Not for a single-PR rebase (use `@dependabot rebase`).
 disable-model-invocation: true
-version: 1.0.1
+version: 1.1.0
 ---
 
 # Dependabot Manager

@@ -25,9 +25,9 @@ whose cause still holds.
 ## What changed
 
 - **Stop on first failure → fix forward or default:**
-  - review-cycle Step 4.1: a failed fix check is fixed once, then reverted and filed to
-    `## Review Backlog`.
-  - harness-init Step 9: the run fixes its own files.
+  - review-cycle Step 4.1: a failed fix check is fixed once, then that finding's edits are
+    reverted and filed to `## Review Backlog`. A `contract` finding still stops the merge.
+  - harness-init Step 9: one fix pass on files this run wrote.
   - qa-verifier: the 3-failure early stop is gone.
   - Spawn contract: only Objective and Boundaries are required. This touches
     `.claude/agents/implementer.md`, harness-invariants, and `docs/delegation.md`.
@@ -53,8 +53,10 @@ whose cause still holds.
 Both decisions were reopened by the user's approval of this pass.
 
 - **#215 never-auto-default list** (`harness-invariants.md` → *Non-Interactive Gate Defaults*):
-  - The >8 large-group guard and the version-bump level moved to stated defaults.
-  - CI `timeout` re-runs once; a second timeout still stops.
+  - The >8 large-group guard now takes the first 8 open items in document order. The
+    version-bump level is chosen by semver and stated in the PR body.
+  - CI `timeout` re-runs once; a second timeout still stops. Other CI lookup failures still ask
+    after their one retry.
 - **2026-09-04 diet** kept harness-curate's independent delete reviewer. It is now an inline keep
   case that greps for routes the scanner cannot see.
 

@@ -174,7 +174,7 @@ return value / PR body. A silently applied default violates this contract.
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
 | Code-cycle approval (`task-next` and `task-new`) | Apply `task-next/references/cycle.md` → *Plan gate* | Approved constraints carry forward; unresolved material decisions are not auto-approved |
 | `task-next --all` selection | Take ready units within approved scope; execution mode per `task-next/references/batch.md` | Batch selection does not authorize parallel-agent cost |
-| `task-next` large group (>8 open items) | Take the subset the *Plan gate* sizes into one contract; name the remainder in the hand-off | The Plan gate already owns sizing; the remainder stays in `backlog.md` |
+| `task-next` large group (>8 open items) | Take the first 8 open items in document order; name the remainder in the hand-off | A fixed cut is decidable; the remainder stays in `backlog.md` for the next run |
 | Version-bump level, repo states no release policy | Choose by semver; state level and reason in the hand-off and PR body | A local, reviewed edit — the PR review sees it before anything ships |
 | Review-cycle CI `reason:"timeout"` | Re-run `ci-wait.sh` once | A slow run is not a failure and counts no strike; a second timeout is a stop below |
 

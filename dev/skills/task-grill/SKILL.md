@@ -82,5 +82,6 @@ with "dev:task-grill" — only when there is **genuine, non-trivial ambiguity** 
 ## Exit
 
 Stop and hand off when an implementer could build from the summary without asking a question —
-look up the gaps the repo answers (Rule 3) and ask only the rest. Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
+look up the gaps the repo answers (Rule 3); each remaining gap goes back to step 2 (in a
+non-interactive run, Rule 4's non-interactive branch). Do not continue grilling once scope is clear — proceeding to ask more questions than the ambiguity warrants is itself a failure
 mode (over-interviewing trivial decisions).

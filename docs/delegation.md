@@ -108,9 +108,9 @@ retry. Compare total retry/review cost before recommending a permanent pin chang
 | Same failure ×2 | `codex:rescue` with an explicit brief — what failed, what was already tried |
 | Once the cause is known | Encode verified recurring failures mechanically (hook/lint/test) where evidence justifies it |
 
-## Spawn Prompt Contract (all 4 fields mandatory)
+## Spawn Prompt Contract
 
-Every `Agent(...)` call must include:
+Every `Agent(...)` call carries these fields; Objective and Boundaries are required:
 
 ```
 - Objective: {what specifically to accomplish}
