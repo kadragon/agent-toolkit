@@ -59,8 +59,8 @@ If the repo has no `backlog.md`, create one with a
 ### Code Scanning Items
 
 - Include the file path and line number.
-- Read the flagged file at the reported line range (+-5 lines) to understand context.
-- If the file no longer exists, use the **"Dismiss stale alert"** template.
+- Read the flagged file at the reported line range (+-5 lines) from the default branch (fetched per `security-overview.md` § 2-1) to understand context.
+- If the file no longer exists on the default branch, use the **"Dismiss stale alert"** template — a file missing only from the working tree is still live.
 
 ### Secret Scanning Items
 
