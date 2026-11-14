@@ -47,8 +47,10 @@ checks, version bump, cleanup, commits — runs in the worktree: each Bash comma
 under it, and the in-flight checkout is never read or edited. Unlike `--tree`, nothing collapses
 back into this checkout: when the review cycle issues `merge-and-cleanup.sh`, append that
 absolute worktree path as its optional fifth argument, `worktree_path`, so the merge removes the
-worktree. Issue that call `cd`-prefixed into the worktree, like every other step: from the
-in-flight checkout, the script runs `git checkout <base>` there.
+worktree. Run it from inside the worktree — from the in-flight checkout, the script runs
+`git checkout <base>` there — but keep the merge command itself unprefixed, the only shape an
+auto-mode allow rule matches: issue `cd "<repo root>/.worktrees/<slug>"` as its own Bash call
+first (the cwd carries to the next call), then the merge command.
 
 ## Scope
 
