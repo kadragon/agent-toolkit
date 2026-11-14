@@ -58,7 +58,7 @@ Before writing fix tasks, read the relevant files:
 - **Code Scanning**: Alerts describe the default branch, so read from it, not the working tree — a feature branch or worktree may lack a file that is still live. Alert paths are relative to the repo root. Fetch the remote's current default branch explicitly once per run — a plain `git fetch` skips it on a single-branch clone and never follows a renamed default:
 
   ```bash
-  DEFAULT_BRANCH=$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\(.*\)\tHEAD$|\1|p')
+  DEFAULT_BRANCH=$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\(.*\)[[:blank:]]HEAD$|\1|p')
   DEFAULT_OK=no
   [[ -n "$DEFAULT_BRANCH" ]] \
     && git fetch --quiet origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" \
