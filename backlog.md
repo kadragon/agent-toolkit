@@ -11,6 +11,12 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #391 — task_nodes branch exits 3 on an in-flight checkout; cycle.md runs that cycle in a worktree (2026-11-14)
+
+- [ ] [debt] a squash-landed feature branch now exits 0, so cycle.md's `git checkout -b` starts the new cycle from that stale HEAD and misses later base commits; branch from the confirmed base in that case (source: codex panel) (introduced here) — dev/skills/task-next/scripts/task_nodes.py `in_flight_status`
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

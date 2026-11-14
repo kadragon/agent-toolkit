@@ -14,20 +14,24 @@ NODES="$CYCLE_DIR/../scripts/task_nodes.py"
 BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" | python3 "$NODES" branch --title "<title>")
 rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
+echo "branch: $BRANCH (exit $rc)"
 [[ $rc -eq 0 ]] && git checkout -b "$BRANCH"
 ```
 
 The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when it falls back.
+Exit 1 with no name: origin/HEAD is unset and the base is unsure — run the `git remote set-head`
+it names, then re-run the block.
 
-**Exit 3** — this checkout is on another branch with changes not on the base: a cycle in flight.
-The block printed the name and left that checkout alone; keep it that way and run this whole
-cycle in its own worktree:
+**Exit 3** — this checkout is on another branch with changes not on the base, committed or not: a
+cycle in flight. The block made no checkout; keep it that way and run this whole cycle in its own
+worktree. Shell variables do not survive between Bash calls, so write the printed branch and the
+base the warning names in as literals:
 
 ```bash
+BRANCH="<the branch the block printed>"
+BASE="<the base the warning names>"   # origin/<name>, or a local main/master when there is no origin
 SLUG="${BRANCH#*/}"
-git fetch
-BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
-  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
+if git remote get-url origin >/dev/null 2>&1; then git fetch || exit 1; fi
 EXCLUDE=$(git rev-parse --git-path info/exclude)
 mkdir -p -- "$(dirname -- "$EXCLUDE")"
 grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"
@@ -37,10 +41,11 @@ git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
 These are `tree.md`'s Branch lines minus leveling the local base, which this checkout does not
 hold. From here on every step of this cycle and the review cycle — contract `save`, edits,
 checks, version bump, cleanup, commits — runs in the worktree: each Bash command begins
-`cd ".worktrees/$SLUG" &&`, file tools take absolute paths under it, and the in-flight checkout
-is never read or edited. Unlike `--tree`, nothing collapses back into this checkout.
-It also warns when this checkout is on a branch with commits not on the base — a cycle in
-flight: skip the `checkout -b` and run the `git worktree add .worktrees/<slug>` it names.
+`cd "<repo root>/.worktrees/<slug>" &&` with the literal path, file tools take absolute paths
+under it, and the in-flight checkout is never read or edited. Unlike `--tree`, nothing collapses
+back into this checkout: when the review cycle issues `merge-and-cleanup.sh`, append that
+absolute worktree path as its optional fifth argument, `worktree_path`, so the merge removes the
+worktree.
 
 ## Scope
 
