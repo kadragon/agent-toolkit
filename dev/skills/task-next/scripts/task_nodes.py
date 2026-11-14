@@ -176,19 +176,20 @@ def in_flight_status(name: str) -> tuple[int, str | None]:
 
     0 — safe (on the base, outside git, or nothing unlanded). IN_FLIGHT_EXIT — this checkout is on
     a branch with changes not on the base, committed or not: a cycle in flight that an in-place
-    `checkout -b` would switch out from under it (or carry its dirty edits away). 1 — that same
-    judgment, but made against a guessed local `main`/`master` because an `origin` remote has no
-    HEAD: the base is unsure, so stop, as tree.md does. A git failure past those is silence.
+    `checkout -b` would switch out from under it (or carry its dirty edits away). 1 — an `origin`
+    remote has no HEAD and this checkout is off main/master: the base is unknown, so stop, as
+    tree.md does, rather than guess a local `main`. A git failure past those is silence.
     """
     current = _git_out("branch", "--show-current")
     if not current:
         return 0, None
     base = _git_out("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-    guessed = False
     if not base:
         if current in ("main", "master"):
             return 0, None
-        guessed = _git_out("remote", "get-url", "origin") is not None
+        if _git_out("remote", "get-url", "origin") is not None:
+            return 1, (f"origin/HEAD unset and this checkout is on `{current}` — the base is unknown, "
+                       f"so whether a cycle is in flight cannot be judged; run: git remote set-head origin --auto")
         base = next((b for b in ("main", "master")
                      if _git_out("rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None), None)
     if not base or current == base.split("/", 1)[-1]:
@@ -208,9 +209,6 @@ def in_flight_status(name: str) -> tuple[int, str | None]:
         return 0, None
     what = " and ".join(part for part, on in ((f"{ahead} commit(s)", committed),
                                               ("uncommitted changes", dirty)) if on)
-    if guessed:
-        return 1, (f"this checkout is on `{current}` with {what} not on a guessed base `{base}`, "
-                   f"and origin/HEAD is unset; run: git remote set-head origin --auto")
     return IN_FLIGHT_EXIT, (
         f"this checkout is on `{current}` with {what} not on base `{base}` — a cycle in flight, "
         f"so the caller must not `git checkout -b {name}` here. Run this cycle in its own "
@@ -1290,8 +1288,8 @@ def run_tests() -> int:
                 "origin/HEAD unset on main itself is the base — exit 0 with the name")
         _g("checkout", "-q", "-b", "develop")
         _unset_on_develop = _branch_run(_td)
-        _assert(_unset_on_develop.returncode == 0 and _unset_on_develop.stdout.strip() == "fix/next-thing",
-                f"origin/HEAD unset on a clean branch with nothing past the guessed base exits 0 "
+        _assert(_unset_on_develop.returncode == 1 and _unset_on_develop.stdout == "",
+                f"origin/HEAD unset off main/master exits 1 even on a clean branch — the base is unknown "
                 f"(got {_unset_on_develop.returncode}, {_unset_on_develop.stderr!r})")
         _g("checkout", "-q", "main")
         _main_sha = subprocess.run(_git + ["rev-parse", "HEAD"], env=_env, capture_output=True,
