@@ -79,8 +79,8 @@ Git effects have a separate boundary: `git-authorization.md`.
 ```markdown
 **Tag:** [FEAT] | [REFACTOR] | [FIX] | [TEST] | [CONSTRAINT] | [DOCS] | [HARNESS] | [PLAN]
 **Scope:** files or areas this change touches
-**Approval source:** <verified user-invoked: or explicit-user: instruction and scope; otherwise unknown>
-**Allowed Git actions:** <comma-separated authorized actions; none when unknown>
+**Approval source:** user-invoked: <verified invocation, scope> | explicit-user: <verified instruction, scope> | unknown
+**Allowed Git actions:** <subset of: commit, feature-push, pr-write, base-merge, base-push, integrate | none>
 **Git limits:** <none | implementation-only | no-push | pr-only | unknown>
 **Acceptance criteria:**
 - [ ] one concrete criterion per item → the test, command, or observation that proves it
