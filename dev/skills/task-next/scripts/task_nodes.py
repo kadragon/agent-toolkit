@@ -20,7 +20,7 @@ Usage:
                   sharing one tag give that prefix (lowercased); mixed or absent tags fall back
                   to `fix` and say so on stderr. `--tag` skips stdin derivation entirely.
                   Creates no branch — the caller does `git checkout -b` on exit 0 only. Exit 3:
-                  this checkout is on a branch with changes not on the base (a cycle in flight);
+                  this checkout is on any branch but the base, or a detached HEAD;
                   the name is still printed, and stderr points at cycle.md → *Branch*'s worktree
                   procedure. Exit 1 without a name: origin/HEAD unset off main/master.
 
@@ -174,45 +174,32 @@ IN_FLIGHT_EXIT = 3
 def in_flight_status(name: str) -> tuple[int, str | None]:
     """Judge whether `git checkout -b` is safe in this checkout: (exit status, stderr message).
 
-    0 — safe (on the base, outside git, or nothing unlanded). IN_FLIGHT_EXIT — this checkout is on
-    a branch with changes not on the base, committed or not: a cycle in flight that an in-place
-    `checkout -b` would switch out from under it (or carry its dirty edits away). 1 — an `origin`
-    remote has no HEAD and this checkout is off main/master: the base is unknown, so stop, as
-    tree.md does, rather than guess a local `main`. A git failure past those is silence.
+    0 — safe: on the base branch (uncommitted edits there ride into the new branch, as the
+    task-spec hand-off needs), outside a work tree, or no base can be named. IN_FLIGHT_EXIT — any
+    other branch or a detached HEAD: an in-place `checkout -b` would branch from that HEAD, not the
+    base, and switch its work out from under it. Whether that branch's work has landed is not
+    judged. 1 — an `origin` remote has no HEAD and this checkout is off main/master: the base is
+    unknown, so stop, as tree.md does, rather than guess a local `main`.
     """
-    current = _git_out("branch", "--show-current")
-    if not current:
+    if _git_out("rev-parse", "--is-inside-work-tree") != "true":
         return 0, None
+    current = _git_out("branch", "--show-current") or ""   # "" on a detached HEAD
     base = _git_out("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if not base:
         if current in ("main", "master"):
             return 0, None
         if _git_out("remote", "get-url", "origin") is not None:
-            return 1, (f"origin/HEAD unset and this checkout is on `{current}` — the base is unknown, "
-                       f"so whether a cycle is in flight cannot be judged; run: git remote set-head origin --auto")
+            return 1, (f"origin/HEAD unset and this checkout is on `{current or 'a detached HEAD'}` — "
+                       f"the base is unknown; run: git remote set-head origin --auto")
         base = next((b for b in ("main", "master")
                      if _git_out("rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None), None)
     if not base or current == base.split("/", 1)[-1]:
         return 0, None
-    ahead = _git_out("rev-list", "--count", f"{base}..HEAD")
-    if ahead is None or not ahead.isdigit():
-        return 0, None
-    committed = int(ahead) > 0
-    if committed:
-        # Commits ahead by SHA are not unlanded work when the base already carries their changes
-        # (a squash merge): merging HEAD into the base then changes nothing. A git without
-        # `merge-tree --write-tree`, or a conflict, falls through to in flight — the safe side.
-        merged = _git_out("merge-tree", "--write-tree", base, "HEAD")
-        committed = not (merged and merged.splitlines()[0] == _git_out("rev-parse", f"{base}^{{tree}}"))
-    dirty = bool(_git_out("status", "--porcelain"))
-    if not committed and not dirty:
-        return 0, None
-    what = " and ".join(part for part, on in ((f"{ahead} commit(s)", committed),
-                                              ("uncommitted changes", dirty)) if on)
+    where = f"`{current}`" if current else "a detached HEAD"
     return IN_FLIGHT_EXIT, (
-        f"this checkout is on `{current}` with {what} not on base `{base}` — a cycle in flight, "
-        f"so the caller must not `git checkout -b {name}` here. Run this cycle in its own "
-        f"worktree: task-next references/cycle.md → *Branch* (exit {IN_FLIGHT_EXIT})."
+        f"this checkout is on {where}, not base `{base}`, so the caller must not "
+        f"`git checkout -b {name}` here. Run this cycle in its own worktree: "
+        f"task-next references/cycle.md → *Branch* (exit {IN_FLIGHT_EXIT})."
     )
 
 
@@ -1208,8 +1195,8 @@ def run_tests() -> int:
         finally:
             os.close(_w)
 
-    # A checkout sitting on a branch with changes not on the base is a cycle in flight: an
-    # in-place `checkout -b` would switch it out from under that cycle. The command still prints
+    # A checkout on any branch but the base may hold a cycle in flight, and an in-place
+    # `checkout -b` would branch from its HEAD rather than the base. The command still prints
     # the name but exits IN_FLIGHT_EXIT, so the caller's `checkout -b` (gated on 0) never runs.
     # The fixture strips the ambient repo selectors and fences discovery at the temp dir's parent,
     # so a run from inside a hook or another repo cannot leak into it.
@@ -1243,38 +1230,37 @@ def run_tests() -> int:
                 "on the base branch the branch command prints the name, exits 0, and does not warn")
         _g("checkout", "-q", "-b", "feat/in-flight")
         _clean_feature = _branch_run(_td)
-        _assert(_clean_feature.returncode == 0 and "in flight" not in _clean_feature.stderr,
-                "a feature branch with no commits past the base exits 0 and does not warn")
-        Path(_td, "draft.txt").write_text("uncommitted\n")
-        _dirty_feature = _branch_run(_td)
-        _assert(_dirty_feature.returncode == IN_FLIGHT_EXIT and "uncommitted" in _dirty_feature.stderr,
-                f"a feature branch with uncommitted work and no commits ahead is in flight "
-                f"(got {_dirty_feature.returncode}, {_dirty_feature.stderr!r})")
-        Path(_td, "draft.txt").unlink()
+        _assert(_clean_feature.returncode == IN_FLIGHT_EXIT and _clean_feature.stdout.strip() == "fix/next-thing",
+                f"any branch other than the base exits {IN_FLIGHT_EXIT} and still prints the name, even clean "
+                f"with nothing past the base — `checkout -b` here would branch from its HEAD "
+                f"(got {_clean_feature.returncode}, {_clean_feature.stderr!r})")
+        _assert("feat/in-flight" in _clean_feature.stderr and "cycle.md" in _clean_feature.stderr
+                and "*Branch*" in _clean_feature.stderr and "git worktree add" not in _clean_feature.stderr,
+                f"the warning names the branch and points at cycle.md's Branch procedure, not a bare "
+                f"worktree command (got {_clean_feature.stderr!r})")
+        # Squash-landed: nothing on the branch is unlanded, but its HEAD predates later base work,
+        # so `checkout -b` from it would start stale — still refused.
         _commit("unmerged work", "work.txt")
-        _in_flight = _branch_run(_td)
-        _assert(_in_flight.returncode == IN_FLIGHT_EXIT and _in_flight.stdout.strip() == "fix/next-thing",
-                f"a checkout with unmerged changes exits {IN_FLIGHT_EXIT} and still prints the name "
-                f"(got {_in_flight.returncode})")
-        _assert("feat/in-flight" in _in_flight.stderr and "cycle.md" in _in_flight.stderr
-                and "*Branch*" in _in_flight.stderr and "git worktree add" not in _in_flight.stderr,
-                f"the warning points at cycle.md's Branch procedure, not a bare worktree command "
-                f"(got {_in_flight.stderr!r})")
-        # Squash-merged: the base carries every change as one new commit, so the branch's commits
-        # are still `base..HEAD` by SHA, yet nothing on it is unlanded.
-        _commit("second unmerged change", "more.txt")
         _g("checkout", "-q", "main")
         _g("merge", "--squash", "-q", "feat/in-flight")
         _commit("squash of feat/in-flight")
         _commit("later base work", "later.txt")
         _g("checkout", "-q", "feat/in-flight")
         _squashed = _branch_run(_td)
-        _assert(_squashed.returncode == 0 and "in flight" not in _squashed.stderr,
-                f"a branch whose changes already landed on the base by squash is not in flight "
-                f"(got {_squashed.returncode}, {_squashed.stderr!r})")
-        _commit("new work after the squash", "new.txt")
-        _assert(_branch_run(_td).returncode == IN_FLIGHT_EXIT,
-                "new work on top of a squash-merged branch is in flight again")
+        _assert(_squashed.returncode == IN_FLIGHT_EXIT,
+                f"a squash-landed branch is refused too (got {_squashed.returncode}, {_squashed.stderr!r})")
+        _g("checkout", "-q", "--detach", "main")
+        _detached = _branch_run(_td)
+        _assert(_detached.returncode == IN_FLIGHT_EXIT and "detached HEAD" in _detached.stderr,
+                f"a detached HEAD is not the base (got {_detached.returncode}, {_detached.stderr!r})")
+        _g("checkout", "-q", "main")
+        Path(_td, "draft.txt").write_text("carried edit\n")
+        _dirty_base = _branch_run(_td)
+        _assert(_dirty_base.returncode == 0 and _dirty_base.stderr == "",
+                f"uncommitted edits on the base ride into the new branch: exit 0, no warning "
+                f"(got {_dirty_base.returncode}, {_dirty_base.stderr!r})")
+        Path(_td, "draft.txt").unlink()
+        _g("checkout", "-q", "feat/in-flight")
         # An origin remote whose HEAD is unset leaves the base unknown: stop, as tree.md does,
         # rather than guess a local `main`.
         _g("remote", "add", "origin", str(Path(_td, "no-such-remote")))

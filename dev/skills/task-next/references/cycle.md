@@ -22,8 +22,9 @@ The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when
 Exit 1 with no name: origin/HEAD is unset and the base is unsure — run the `git remote set-head`
 it names, then re-run the block.
 
-**Exit 3** — this checkout is on another branch with changes not on the base, committed or not: a
-cycle in flight. The block made no checkout; keep it that way and run this whole cycle in its own
+**Exit 3** — this checkout is on a branch other than the base, or a detached HEAD. Landed or
+not, a `checkout -b` here would branch from that HEAD instead of the base, and would switch any
+cycle in flight out from under it. The block made no checkout; keep it that way and run this whole cycle in its own
 worktree. Shell variables do not survive between Bash calls, so write the printed branch and the
 base the warning names in as literals:
 
@@ -35,6 +36,7 @@ if git remote get-url origin >/dev/null 2>&1; then git fetch || exit 1; fi
 EXCLUDE=$(git rev-parse --git-path info/exclude)
 mkdir -p -- "$(dirname -- "$EXCLUDE")"
 grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"
+# if $BRANCH already exists locally (a partial run), delete it first: git branch -D "$BRANCH" (confirm with user)
 git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
 ```
 
@@ -45,7 +47,8 @@ checks, version bump, cleanup, commits — runs in the worktree: each Bash comma
 under it, and the in-flight checkout is never read or edited. Unlike `--tree`, nothing collapses
 back into this checkout: when the review cycle issues `merge-and-cleanup.sh`, append that
 absolute worktree path as its optional fifth argument, `worktree_path`, so the merge removes the
-worktree.
+worktree. Issue that call `cd`-prefixed into the worktree, like every other step: from the
+in-flight checkout, the script runs `git checkout <base>` there.
 
 ## Scope
 
