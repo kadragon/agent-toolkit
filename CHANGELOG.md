@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [done] security-overview scans only the current directory's repo; no clone phase (dev v4.11.44) (2026-11-14)
+
 - [done] in-flight gate shrunk to a base-branch check; tree.md stops on exit 3 (dev v4.11.43) (2026-11-14)
 - [done] task_nodes branch exits 3 on an in-flight checkout; cycle.md runs that cycle in a worktree; pane wrap fix (dev v4.11.42, mods v0.9.2) (2026-11-14)
 - [done] task_nodes branch warns on an in-flight checkout; contract pane matches spans verbatim, folded line rereads (dev v4.11.41) (2026-11-12)

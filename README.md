@@ -17,7 +17,7 @@ Three plugins:
 
 | Command | Description | Claude Code | Codex |
 |---|---|---|---|
-| `/security-overview` | Scans GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) across owned repos, writes per-repo `plan.md` | ✅ | ❌ |
+| `/security-overview` | Scans GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) for the current directory's repo, appends fixes to its `backlog.md` | ✅ | ❌ |
 
 ### `prod` — document authoring
 

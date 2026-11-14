@@ -1,6 +1,6 @@
 # backlog.md Template and Rules
 
-Rules and template for appending a security-fix section to each affected repo's `backlog.md`.
+Rules and template for appending a security-fix section to the scanned repo's `backlog.md`.
 
 Findings outlive the cycle that produced them, so they belong in `backlog.md` — the repo's only
 persistent queue. Never write them to `tasks.md`: that file is the current Sprint Contract and is
@@ -9,14 +9,13 @@ holding a `## Security Fixes` section.
 
 ## Target Path
 
-The section is appended to each affected repo's own backlog:
+The section is appended to the backlog at the root of the current repo:
 
 ```
-${WORKSPACE_DIR}/${REPO_NAME}/backlog.md
+$(git rev-parse --show-toplevel)/backlog.md
 ```
 
-Where `WORKSPACE_DIR` is the **parent** of the current working directory.
-Do NOT create a single consolidated file. If a repo has no `backlog.md`, create one with a
+If the repo has no `backlog.md`, create one with a
 `# Backlog` heading, then append the section below it.
 
 ## Template
@@ -82,14 +81,14 @@ that entry's re-file bar. Match only what the user rejected, never a whole packa
 | Secret scanning | the same secret type **and** location |
 
 A severity higher than the one the entry records also meets the bar. List each withheld alert
-in the summary with the entry it matched. A repo whose alerts are all withheld gets no
-`## Security Fixes` section — remove an existing one — and appears only on the Withheld line.
+in the summary with the entry it matched. If every alert is withheld, write no
+`## Security Fixes` section — remove an existing one — and report only the Withheld line.
 
 ### Idempotency
 
 If `backlog.md` already contains a `## Security Fixes` section:
 
-Before replacing: run `git log -1 --format=%ai backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
+Before replacing: run `git -C "$(git rev-parse --show-toplevel)" log -1 --format=%ai -- backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
 
 On confirmation (or if no human edit detected):
 - **Replace** that section with fresh scan results.
@@ -119,16 +118,14 @@ This prevents duplicate entries from repeated runs.
 
 ## Summary Format
 
-After updating all backlog.md files, present:
+After updating backlog.md, present:
 
 ```
 | Repo | Path | Items |
 |------|------|-------|
 | my-webapp | ~/dev/my-webapp/backlog.md | 5 |
-| api-server | ~/dev/api-server/backlog.md | 2 |
 
-Total: 7 fix items across 2 repos.
-Withheld (matched `## Rejected — do not re-file`): api-server lodash GHSA-xxxx-xxxx-xxxx (MODERATE) — "accepted risk, dev-only dependency".
+Withheld (matched `## Rejected — do not re-file`): lodash GHSA-xxxx-xxxx-xxxx (MODERATE) — "accepted risk, dev-only dependency".
 
-Suggested next step: Open each repo directory and begin fixing the highest-severity items, or ask to work through a specific repo.
+Suggested next step: begin fixing the highest-severity items.
 ```
