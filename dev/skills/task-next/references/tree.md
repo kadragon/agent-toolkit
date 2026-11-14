@@ -16,7 +16,11 @@ NODES="$SKILL_DIR/scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
   | python3 "$NODES" branch --title "<selected heading title>")
+rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
+# exit 3: this checkout is off the base, and --tree keeps tasks.md and the version bump here — stop;
+# run without --tree instead (cycle.md → *Branch*, exit 3)
+[[ $rc -eq 0 ]] || { echo "branch exited $rc — run this cycle without --tree: cycle.md → *Branch*" >&2; exit 1; }
 SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
 git fetch
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \

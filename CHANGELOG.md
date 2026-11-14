@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- [done] task_nodes branch exits 3 on an in-flight checkout; cycle.md runs that cycle in a worktree; pane wrap fix (dev v4.11.42) (2026-11-14)
+- [done] in-flight gate shrunk to a base-branch check; tree.md stops on exit 3 (dev v4.11.43) (2026-11-14)
+- [done] task_nodes branch exits 3 on an in-flight checkout; cycle.md runs that cycle in a worktree; pane wrap fix (dev v4.11.42, mods v0.9.2) (2026-11-14)
 - [done] task_nodes branch warns on an in-flight checkout; contract pane matches spans verbatim, folded line rereads (dev v4.11.41) (2026-11-12)
 - [done] Review-recall benchmark on 12 escaped defects (dev v4.11.40) (2026-11-12) → dev/skills/task-review-cycle/evals/review-recall/RESULTS.md
 - [done] Deconstrain prod skills; kr_audit allowances per 10-sentence window (prod v3.2.15) (2026-11-12) → docs/design/prod-deconstrain.md

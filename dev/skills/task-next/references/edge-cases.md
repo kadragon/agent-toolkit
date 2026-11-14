@@ -26,8 +26,10 @@ Recover the Git authorization fields with it (`git-authorization.md`).
 
 **Nothing in flight.** `contract` null, `changes` empty, and no commits ahead of the base means
 this branch owns no cycle — a branch created ahead of the work, or one whose cycle already merged
-and was retired. Say so and return to the caller's normal selection path; do not ask for a
-contract for work that does not exist, and do not report blocked.
+and was retired. Say so, `git checkout <base>` (nothing here is lost), and return to the
+caller's normal selection path — left on this branch, cycle.md → *Branch* exits 3 and routes the
+new cycle through a worktree. Do not ask for a contract for work that does not exist, and do not
+report blocked.
 
 **Choose the earliest unmet obligation** (only once one of the three shows work):
 
