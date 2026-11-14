@@ -88,7 +88,7 @@ in the summary with the entry it matched. If every alert is withheld, write no
 
 If `backlog.md` already contains a `## Security Fixes` section:
 
-Before replacing: run `git log -1 --format=%ai backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
+Before replacing: run `git -C "$(git rev-parse --show-toplevel)" log -1 --format=%ai -- backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
 
 On confirmation (or if no human edit detected):
 - **Replace** that section with fresh scan results.

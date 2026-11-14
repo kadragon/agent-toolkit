@@ -5,12 +5,12 @@ customizing queries, debugging API responses, or handling edge cases.
 
 ## Dependabot — GraphQL
 
-One GraphQL call fetches the current repo's open alerts (`OWNER`/`REPO` from `gh repo view`).
+One GraphQL call fetches the current repo's open alerts (`OWNER`/`REPO` resolved from the `origin` remote). Pass both with `-f`, never `-F`: `-F` turns a repo named `2048` or `true` into a number or boolean and the `String!` check fails.
 
 ### Query Structure
 
 ```bash
-gh api graphql -F owner="${OWNER}" -F name="${REPO}" -f query='
+gh api graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     name

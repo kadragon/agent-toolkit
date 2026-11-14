@@ -17,24 +17,22 @@ Single continuous flow: **Discover → Generate Tasks**.
 
 ### 1-1. Authenticate and resolve the repo
 
-Verify `gh` authenticated. If not, stop and suggest `gh auth login`. Resolve the current directory's repo; if `gh repo view` fails (not a git checkout, or no GitHub remote), stop and say so.
-
-```bash
-REPO_INFO=$(gh repo view --json nameWithOwner,url -q '"\(.nameWithOwner) \(.url)"')
-echo "${REPO_INFO}"
-```
+Verify `gh` authenticated. If not, stop and suggest `gh auth login`. The scan target is the checkout's `origin` remote — not bare `gh repo view`, which follows `GH_REPO` and prefers an `upstream` remote. `fetch-alerts.sh` resolves it; exit 2 (no git checkout or no origin) or 3 (origin is not a GitHub repo gh can read) → stop and report its message.
 
 ### 1-2. Collect alerts
 
 **Default: use `fetch-alerts.sh`** — it fetches Dependabot (GraphQL), Code Scanning and Secret Scanning (REST) for this repo only. Use manual queries only when: (a) script unavailable, (b) user requests specific API exploration, (c) script fails. Never mix both in the same run.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/commands/security-overview/fetch-alerts.sh"
+SCAN_OUT=$(bash "${CLAUDE_PLUGIN_ROOT}/commands/security-overview/fetch-alerts.sh")
+SCAN_DIR=$(tail -1 <<<"$SCAN_OUT")
 ```
+
+Results go to a temp directory outside the repo (last output line), so alert data never lands in the working tree.
 
 For query structure, field reference, error handling → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`**.
 
-Expected errors: Code Scanning 403/404 and Secret Scanning 404 mean the feature is not enabled — record as "not enabled", skip.
+Expected errors: Code Scanning 403/404 and Secret Scanning 404 mean the feature is not enabled; the script writes `<type>.disabled` beside the `[]` result — report that type as "not enabled", not as 0. Any other failure lands in `.fetch-errors`.
 
 **Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context. `fetch-alerts.sh` strips secret fields automatically. If using manual queries, pipe through `jq 'del(.[] | .secret)'` before processing.
 
@@ -46,18 +44,18 @@ Show one row for the repo:
 |------|-----------|--------------|----------------|-------|
 | repo-name | 3 (1 HIGH, 2 LOW) | 1 (1 ERROR) | 0 | 4 |
 
-Mark a feature that is not enabled as "not enabled". If the total is zero, report that and stop — do not touch `backlog.md`.
+Mark a feature that is not enabled as "not enabled". If `${SCAN_DIR}/.fetch-errors` exists, show it and treat zero counts as unknown, never as clean. Total zero with no fetch errors → if `backlog.md` has a `## Security Fixes` section, remove it (manual-edit check in backlog-template.md § Idempotency still applies); either way report and stop.
 
 ## Phase 2: Update backlog.md
 
-Write a `## Security Fixes` section into the current repo's `backlog.md`. Do NOT write to `tasks.md` — that file is the current Sprint Contract and is deleted at sprint close, so findings placed there are lost.
+Write a `## Security Fixes` section into the current repo's root `backlog.md`. Do NOT write to `tasks.md` — that file is the current Sprint Contract and is deleted at sprint close, so findings placed there are lost.
 
 ### 2-1. Read code context
 
 Before writing fix tasks, read the relevant files:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files. Before writing items, check for already-open Dependabot PRs: run `gh search prs --author app/dependabot --state open --repo <owner>/<repo> --limit 100 --json number,title,url` once (not per-alert), then match each alert's package name exactly (not by substring) against the package token in PR titles. Pattern details → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`** § Cross-referencing Open PRs.
-- **Code Scanning**: Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
+- **Code Scanning**: Alert paths are relative to the repo root — resolve them against `git rev-parse --show-toplevel`, not cwd. Read flagged file at lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive. If file deleted: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
 ### 2-2. Write the backlog.md section
