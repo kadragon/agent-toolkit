@@ -55,7 +55,19 @@ Write a `## Security Fixes` section into the current repo's root `backlog.md`. D
 Before writing fix tasks, read the relevant files:
 
 - **Dependabot**: Read dependency manifests (package.json, requirements.txt, etc.) for current versions. Skip lock files. Before writing items, check for already-open Dependabot PRs: run `gh search prs --author app/dependabot --state open --repo <owner>/<repo> --limit 100 --json number,title,url` once (not per-alert), then match each alert's package name exactly (not by substring) against the package token in PR titles. Pattern details → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`** § Cross-referencing Open PRs.
-- **Code Scanning**: Alerts describe the default branch, so read from it, not the working tree — a feature branch or worktree may lack a file that is still live. Alert paths are relative to the repo root. Refresh the ref once per run: `git fetch origin --quiet`, and if `git rev-parse --verify -q origin/HEAD` fails, `git remote set-head origin --auto`. Per alert, `git cat-file -e "origin/HEAD:<path>"` decides existence; when it exists, read lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive from `git show "origin/HEAD:<path>"`. When it does not: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
+- **Code Scanning**: Alerts describe the default branch, so read from it, not the working tree — a feature branch or worktree may lack a file that is still live. Alert paths are relative to the repo root. Fetch the remote's current default branch explicitly once per run — a plain `git fetch` skips it on a single-branch clone and never follows a renamed default:
+
+  ```bash
+  DEFAULT_BRANCH=$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\(.*\)\tHEAD$|\1|p')
+  DEFAULT_OK=no
+  [[ -n "$DEFAULT_BRANCH" ]] \
+    && git fetch --quiet origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" \
+    && git remote set-head origin "$DEFAULT_BRANCH" >/dev/null \
+    && git rev-parse --verify -q "origin/HEAD^{commit}" >/dev/null \
+    && DEFAULT_OK=yes
+  ```
+
+  `DEFAULT_OK` not `yes` → existence is unknown: write each alert as a normal item with `(file not verified — default branch unreachable)`, never `[STALE - file deleted]`, and say so in the summary. Otherwise, per alert, `git cat-file -e "origin/HEAD:<path>"` decides existence; when it exists, read lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive from `git show "origin/HEAD:<path>"`. When it does not: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
 ### 2-2. Write the backlog.md section
