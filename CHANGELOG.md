@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- [done] security-overview checks stale code-scanning files on the default branch (dev v4.11.45) (2026-11-14)
+- [done] security-overview checks stale code-scanning files on the default branch (dev v4.11.46) (2026-11-14)
 - [done] security-overview scans only the current directory's repo; no clone phase (dev v4.11.44) (2026-11-14)
 
 - [done] in-flight gate shrunk to a base-branch check; tree.md stops on exit 3 (dev v4.11.43) (2026-11-14)
