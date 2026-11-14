@@ -12,10 +12,33 @@ NODES="$CYCLE_DIR/../scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 # queue item(s): pipe each selected item line verbatim; free-text request: pass --tag <TYPE> and no stdin
 BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" | python3 "$NODES" branch --title "<title>")
-git checkout -b "$BRANCH"
+rc=$?
+[[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
+[[ $rc -eq 0 ]] && git checkout -b "$BRANCH"
 ```
 
 The script applies the shared-`[type]`-else-`fix/` rule and warns on stderr when it falls back.
+
+**Exit 3** — this checkout is on another branch with changes not on the base: a cycle in flight.
+The block printed the name and left that checkout alone; keep it that way and run this whole
+cycle in its own worktree:
+
+```bash
+SLUG="${BRANCH#*/}"
+git fetch
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
+EXCLUDE=$(git rev-parse --git-path info/exclude)
+mkdir -p -- "$(dirname -- "$EXCLUDE")"
+grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"
+git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
+```
+
+These are `tree.md`'s Branch lines minus leveling the local base, which this checkout does not
+hold. From here on every step of this cycle and the review cycle — contract `save`, edits,
+checks, version bump, cleanup, commits — runs in the worktree: each Bash command begins
+`cd ".worktrees/$SLUG" &&`, file tools take absolute paths under it, and the in-flight checkout
+is never read or edited. Unlike `--tree`, nothing collapses back into this checkout.
 It also warns when this checkout is on a branch with commits not on the base — a cycle in
 flight: skip the `checkout -b` and run the `git worktree add .worktrees/<slug>` it names.
 

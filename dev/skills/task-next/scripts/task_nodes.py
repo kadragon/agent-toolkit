@@ -19,9 +19,10 @@ Usage:
   branch          Print `<type>/<slug>`. Item lines on stdin supply the `[TYPE]` tag: all items
                   sharing one tag give that prefix (lowercased); mixed or absent tags fall back
                   to `fix` and say so on stderr. `--tag` skips stdin derivation entirely.
-                  Creates no branch — the caller does `git checkout -b "$(...)"`. Reads git
-                  only to warn on stderr when this checkout is on a branch with commits not on
-                  the base (a cycle in flight), naming the `git worktree add` to use instead.
+                  Creates no branch — the caller does `git checkout -b` on exit 0 only. Exit 3:
+                  this checkout is on a branch with changes not on the base (a cycle in flight);
+                  the name is still printed, and stderr points at cycle.md → *Branch*'s worktree
+                  procedure. Exit 1 without a name: origin/HEAD unset off main/master.
 
   changelog       Compose one entry and insert it as the FIRST line under `## Unreleased`,
                   creating that section (and the file) when absent. Prints the inserted line.
@@ -167,29 +168,44 @@ def _git_out(*args: str) -> str | None:
     return run.stdout.strip() if run.returncode == 0 else None
 
 
-def in_flight_warning(name: str) -> str | None:
-    """Warn when this checkout sits on a branch with commits not on the base.
+IN_FLIGHT_EXIT = 3
 
-    That branch is a cycle in flight: `git checkout -b` here would switch its checkout out from
-    under it, so the new cycle belongs in a worktree. Advisory only — any git failure is silence.
+
+def in_flight_status(name: str) -> tuple[int, str | None]:
+    """Judge whether `git checkout -b` is safe in this checkout: (exit status, stderr message).
+
+    0 — safe (on the base, outside git, or nothing unlanded). IN_FLIGHT_EXIT — this checkout is on
+    a branch with changes not on the base, a cycle in flight that an in-place `checkout -b` would
+    switch out from under it. 1 — an `origin` remote whose HEAD is unset leaves the base unknown;
+    stop, as tree.md does, rather than guess a local `main`. A git failure past those is silence.
     """
     current = _git_out("branch", "--show-current")
     if not current:
-        return None
+        return 0, None
     base = _git_out("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if not base:
+        if current in ("main", "master"):
+            return 0, None
+        if _git_out("remote", "get-url", "origin") is not None:
+            return 1, ("origin/HEAD unset — cannot tell whether this checkout holds a cycle in "
+                       "flight; run: git remote set-head origin --auto")
         base = next((b for b in ("main", "master")
                      if _git_out("rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None), None)
     if not base or current == base.split("/", 1)[-1]:
-        return None
+        return 0, None
     ahead = _git_out("rev-list", "--count", f"{base}..HEAD")
     if not ahead or not ahead.isdigit() or int(ahead) == 0:
-        return None
-    slug = name.split("/", 1)[-1]
-    return (
-        f"this checkout is on `{current}` with {ahead} commit(s) not on `{base}` — a cycle in flight. "
-        f"Do not `git checkout -b` here; start the new cycle in a worktree: "
-        f"git worktree add .worktrees/{slug} -b {name} {base}"
+        return 0, None
+    # Commits ahead by SHA are not unlanded work when the base already carries their changes
+    # (a squash merge). Merging HEAD into the base then changes nothing; a git without
+    # `merge-tree --write-tree`, or a conflict, falls through to in flight.
+    merged = _git_out("merge-tree", "--write-tree", base, "HEAD")
+    if merged and merged.splitlines()[0] == _git_out("rev-parse", f"{base}^{{tree}}"):
+        return 0, None
+    return IN_FLIGHT_EXIT, (
+        f"this checkout is on `{current}` with {ahead} commit(s) not on `{base}` — a cycle in "
+        f"flight, so the caller must not `git checkout -b {name}` here. Run this cycle in its own "
+        f"worktree: task-next references/cycle.md → *Branch* (exit {IN_FLIGHT_EXIT})."
     )
 
 
@@ -993,11 +1009,14 @@ def cmd_branch(argv: list[str]) -> int:
         return 1
     if warning:
         sys.stderr.write(f"Warning: {warning}\n")
-    in_flight = in_flight_warning(name)
-    if in_flight:
-        sys.stderr.write(f"Warning: {in_flight}\n")
+    status, message = in_flight_status(name)
+    if status == 1:
+        sys.stderr.write(f"Error: {message}\n")
+        return 1
+    if message:
+        sys.stderr.write(f"Warning: {message}\n")
     print(name)
-    return 0
+    return status
 
 
 def cmd_changelog(argv: list[str]) -> int:
@@ -1182,38 +1201,86 @@ def run_tests() -> int:
         finally:
             os.close(_w)
 
-    # A checkout sitting on a branch with commits not on the base is a cycle in flight: an
-    # in-place `checkout -b` would switch it out from under that cycle. The command still
-    # prints the name (advisory), and stays silent on the base branch and outside git.
+    # A checkout sitting on a branch with changes not on the base is a cycle in flight: an
+    # in-place `checkout -b` would switch it out from under that cycle. The command still prints
+    # the name but exits IN_FLIGHT_EXIT, so the caller's `checkout -b` (gated on 0) never runs.
+    # The fixture strips the ambient repo selectors and fences discovery at the temp dir's parent,
+    # so a run from inside a hook or another repo cannot leak into it.
+    _env = {k: v for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    _env["GIT_CEILING_DIRECTORIES"] = str(Path(tempfile.gettempdir()).resolve())
     with tempfile.TemporaryDirectory() as _td:
         _git = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
                 "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-C", _td]
 
-        def _commit(msg: str) -> None:
-            subprocess.run(_git + ["commit", "--no-verify", "-q", "--allow-empty", "-m", msg], check=True)
+        def _g(*args: str) -> None:
+            subprocess.run(_git + list(args), check=True, env=_env, capture_output=True)
+
+        def _commit(msg: str, path: str | None = None) -> None:
+            if path:
+                Path(_td, path).write_text(msg + "\n")
+                _g("add", path)
+            _g("commit", "--no-verify", "-q", "--allow-empty", "-m", msg)
 
         def _branch_run(cwd: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(
                 [sys.executable, __file__, "branch", "--title", "next thing", "--tag", "FIX"],
-                cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30,
+                cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30, env=_env,
             )
 
-        subprocess.run(_git + ["init", "-q", "-b", "main"], check=True)
-        _commit("base")
+        _g("init", "-q", "-b", "main")
+        _commit("base", "base.txt")
         _on_base = _branch_run(_td)
-        _assert(_on_base.stdout.strip() == "fix/next-thing" and "worktree" not in _on_base.stderr,
-                "on the base branch the branch command prints the name and does not warn")
-        subprocess.run(_git + ["checkout", "-q", "-b", "feat/in-flight"], check=True)
+        _assert(_on_base.returncode == 0 and _on_base.stdout.strip() == "fix/next-thing"
+                and "in flight" not in _on_base.stderr,
+                "on the base branch the branch command prints the name, exits 0, and does not warn")
+        _g("checkout", "-q", "-b", "feat/in-flight")
         _clean_feature = _branch_run(_td)
-        _assert("worktree" not in _clean_feature.stderr,
-                "a feature branch with no commits past the base does not warn")
-        _commit("unmerged work")
+        _assert(_clean_feature.returncode == 0 and "in flight" not in _clean_feature.stderr,
+                "a feature branch with no commits past the base exits 0 and does not warn")
+        _commit("unmerged work", "work.txt")
         _in_flight = _branch_run(_td)
-        _assert(_in_flight.returncode == 0 and _in_flight.stdout.strip() == "fix/next-thing",
-                "a checkout with unmerged commits still prints the name — the warning is advisory")
-        _assert("feat/in-flight" in _in_flight.stderr
-                and "git worktree add .worktrees/next-thing -b fix/next-thing main" in _in_flight.stderr,
-                f"a checkout with unmerged commits warns and names the worktree command (got {_in_flight.stderr!r})")
+        _assert(_in_flight.returncode == IN_FLIGHT_EXIT and _in_flight.stdout.strip() == "fix/next-thing",
+                f"a checkout with unmerged changes exits {IN_FLIGHT_EXIT} and still prints the name "
+                f"(got {_in_flight.returncode})")
+        _assert("feat/in-flight" in _in_flight.stderr and "cycle.md" in _in_flight.stderr
+                and "*Branch*" in _in_flight.stderr and "git worktree add" not in _in_flight.stderr,
+                f"the warning points at cycle.md's Branch procedure, not a bare worktree command "
+                f"(got {_in_flight.stderr!r})")
+        # Squash-merged: the base carries every change as one new commit, so the branch's commits
+        # are still `base..HEAD` by SHA, yet nothing on it is unlanded.
+        _commit("second unmerged change", "more.txt")
+        _g("checkout", "-q", "main")
+        _g("merge", "--squash", "-q", "feat/in-flight")
+        _commit("squash of feat/in-flight")
+        _commit("later base work", "later.txt")
+        _g("checkout", "-q", "feat/in-flight")
+        _squashed = _branch_run(_td)
+        _assert(_squashed.returncode == 0 and "in flight" not in _squashed.stderr,
+                f"a branch whose changes already landed on the base by squash is not in flight "
+                f"(got {_squashed.returncode}, {_squashed.stderr!r})")
+        _commit("new work after the squash", "new.txt")
+        _assert(_branch_run(_td).returncode == IN_FLIGHT_EXIT,
+                "new work on top of a squash-merged branch is in flight again")
+        # An origin remote whose HEAD is unset leaves the base unknown: stop, as tree.md does,
+        # rather than guess a local `main`.
+        _g("remote", "add", "origin", str(Path(_td, "no-such-remote")))
+        _unset = _branch_run(_td)
+        _assert(_unset.returncode == 1 and _unset.stdout == "" and "set-head" in _unset.stderr,
+                f"origin/HEAD unset off main/master exits 1 with the set-head fix and no name "
+                f"(got {_unset.returncode}, {_unset.stderr!r})")
+        _g("checkout", "-q", "main")
+        _unset_on_main = _branch_run(_td)
+        _assert(_unset_on_main.returncode == 0 and _unset_on_main.stdout.strip() == "fix/next-thing",
+                "origin/HEAD unset on main itself is the base — exit 0 with the name")
+        _main_sha = subprocess.run(_git + ["rev-parse", "HEAD"], env=_env, capture_output=True,
+                                   text=True, check=True).stdout.strip()
+        _g("update-ref", "refs/remotes/origin/main", _main_sha)
+        _g("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        _g("checkout", "-q", "feat/in-flight")
+        _remote_base = _branch_run(_td)
+        _assert(_remote_base.returncode == IN_FLIGHT_EXIT and "origin/main" in _remote_base.stderr,
+                f"with origin/HEAD set the base is origin/main (got {_remote_base.stderr!r})")
     with tempfile.TemporaryDirectory() as _td:
         _outside = _branch_run(_td)
         _assert(_outside.returncode == 0 and _outside.stderr == "",
