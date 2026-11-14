@@ -34,7 +34,9 @@ const itemsOf = (contract: string): Item[] => {
       const match = CHECKBOX.exec(item)
       const last = section[section.length - 1]
 
-      if (match !== null) section.push({ text: match[2] ?? '', isChecked: match[1] !== ' ' })
+      // A wrap joins with exactly one space, so a line's trailing spaces never
+      // reach a backticked span that continues on the next line.
+      if (match !== null) section.push({ text: (match[2] ?? '').trimEnd(), isChecked: match[1] !== ' ' })
       else if (last !== undefined && /^\s/.test(item) && item.trim() !== '') last.text += ` ${item.trim()}`
     }
 

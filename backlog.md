@@ -11,6 +11,16 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #391 — task_nodes branch exits 3 on an in-flight checkout; cycle.md runs that cycle in a worktree (2026-11-14)
+
+- [ ] [harness] a squash-landed feature branch exits 0, so cycle.md's `git checkout -b` starts the new cycle from that stale HEAD and misses later base commits; branch from the confirmed base, or route it through the worktree (source: codex panel, claude review) (introduced here) — dev/skills/task-next/scripts/task_nodes.py `in_flight_status`
+- [ ] [harness] `in_flight_status` is now a gate but still fails open: a failed or timed-out `rev-list`/`status` (e.g. origin/HEAD pointing at a pruned origin/master) returns 0 and `checkout -b` runs in place; fail closed once a base resolves (source: claude review) (introduced here) — dev/skills/task-next/scripts/task_nodes.py `in_flight_status`
+- [ ] [harness] tree.md ignores `branch`'s exit status: on exit 3 it continues and then tells the agent to switch to main, contradicting the warning; handle rc (stop with the cycle.md pointer) (source: claude review) (introduced here) — dev/skills/task-next/references/tree.md → *Modified Branch step*
+- [ ] [harness] the exit-3 worktree flow depends on `merge-and-cleanup.sh` running from inside the worktree; issued from the in-flight checkout it checks out the base there; say the call must be `cd`-prefixed, or make the script refuse a non-worktree cwd when `worktree_path` is given (source: claude review) (introduced here) — dev/skills/task-next/references/cycle.md → *Branch*
+- [ ] [debt] in-flight follow-ups: (a) on the base name, unpushed commits ahead of origin/<base> read as safe and ride into the new branch; (b) the exit-3 block has no recovery when `$BRANCH` already exists from a partial run (tree.md's delete-first note); (c) untracked files alone count as dirty — use `--untracked-files=no`; (d) the squash self-test assumes `merge-tree --write-tree` (git ≥2.38) — skip it on older git; (e) CHANGELOG entry names dev only, not mods v0.9.2 (source: claude review, agy panel) (introduced here) — dev/skills/task-next/scripts/task_nodes.py, dev/skills/task-next/references/cycle.md, CHANGELOG.md
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

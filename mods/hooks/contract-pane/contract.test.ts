@@ -163,6 +163,23 @@ test('a backticked span is the command verbatim; an unquoted check still collaps
   expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['none', 'pass', 'pass'])
 })
 
+test('a backticked span wrapping after trailing spaces joins with one space', () => {
+  const contract = parseContract(
+    report({
+      contract: [
+        '**Acceptance criteria:**',
+        '- [ ] Wrapped span → `python3 s.py   ',
+        '  --test`',
+      ].join('\n'),
+      evidence: [{ command: 'python3 s.py --test', exit_code: 0 }],
+    }),
+  )
+
+  if (contract === null) throw new Error('no contract')
+
+  expect(contract.criteria.map(criterion => markOf(contract, criterion))).toEqual(['pass'])
+})
+
 test('a contract saved with CRLF line endings reads the same', () => {
   const contract = parseContract(report({ contract: CONTRACT.replace(/\n/g, '\r\n') }))
 
