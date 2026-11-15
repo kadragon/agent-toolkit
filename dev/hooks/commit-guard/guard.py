@@ -22,7 +22,8 @@ The hook path applies two guards:
      `cd` that may not run (case arm, function body, subshell, behind an
      expansion that may be empty) adds its directory to the ones checked.
      One in-chain move is read (_chain_branch): `git switch -c|-C b` or
-     `git checkout -b|-B b` followed, through `&&`/`;` and plain
+     `git checkout -b|-B b` (a `-q`/`--quiet` anywhere in it ignored) followed,
+     through `&&`/`;` and plain
      `git add|rm|mv|status|commit` alone, by a plain `git commit` — the commit
      lands on b, so `git switch -c x && git add a && git commit` on main
      passes and `git switch -c main && git commit` blocks. Only plain git
@@ -1400,6 +1401,8 @@ _HEAD_NEUTRAL = {"add", "rm", "mv", "status"}  # not diff: `--output=<file>` wri
 _MESSAGE_RUNNERS = {"cat", "printf", "echo"}
 # the creation flags read: `git switch -c|-C b`, `git checkout -b|-B b`
 _CREATE_FLAGS = {"switch": ("-c", "-C"), "checkout": ("-b", "-B")}
+# dropped from a creation before it is read: output-only, HEAD lands the same
+_QUIET_FLAGS = ("-q", "--quiet")
 
 
 def _plain_git(segment):
@@ -1505,6 +1508,8 @@ def _chain_branch(segments, operators, arms, bodies, idx):
         if not words or len(words) < 2 or words[0] != "git":
             return None
         flags = _CREATE_FLAGS.get(words[1])
+        if flags:  # `-q` only silences output: `git switch -q -c b` still lands on b
+            words = words[:2] + [w for w in words[2:] if w not in _QUIET_FLAGS]
         if flags and len(words) in (4, 5) and words[2] in flags:
             if not _REF_NAME.match(words[3]) or (len(words) == 5 and (semi or words[4].startswith("-"))):
                 return None
@@ -1782,6 +1787,13 @@ def _test():
     check("live main: switch -C / checkout -B X && commit → passes",
           on_main("git switch -C feat/x && git commit -m '[FEAT] m'") == 0
           and on_main("git checkout -B feat/x && git commit -m '[FEAT] m'") == 0)
+    check("live main: switch -q -c X / checkout -b X --quiet && commit → passes",
+          on_main("git switch -q -c feat/x && git add a && git commit -m '[FEAT] m'") == 0
+          and on_main("git checkout -b feat/x --quiet && git commit -m '[FEAT] m'") == 0)
+    check("live main: switch -q -c main && commit → blocked",
+          on_main("git switch -q -c main && git commit -m '[FEAT] m'") == 2)
+    check("live main: switch -q X (no creation) && commit → blocked",
+          on_main("git switch -q feat/x && git commit -m '[FEAT] m'") == 2)
     check("live main: checkout -b X <start-point> && commit → passes",
           on_main("git checkout -b feat/x origin/main && git commit -m '[FEAT] m'") == 0)
     check("live main: cat-heredoc message after an in-chain switch -c → passes",
