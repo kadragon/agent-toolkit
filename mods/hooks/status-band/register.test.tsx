@@ -2,6 +2,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+// The test runtime has timers, but the module's types (no DOM, no Node) do not declare them.
+declare const setTimeout: (callback: () => void, ms: number) => unknown
+
 const NOW = Date.parse('2026-10-11T12:00:00Z')
 const MINUTE = 60_000
 const BAND = {
@@ -9,6 +12,7 @@ const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 20,
     bodyColumns: 80,
@@ -16,6 +20,10 @@ const BAND = {
     view: {},
   },
 } as const
+// A finished child's result, nothing cut off.
+const ran = (exitCode: number, stdout: string) => ({
+  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+})
 const USAGE = {
   input_tokens: 1,
   output_tokens: 1,
@@ -184,11 +192,11 @@ const world = (on: On): World => {
       state.queueRuns.push(e.argv)
       const out = e.argv.includes('--parked') ? state.queue.parked : state.queue.groups
 
-      return { value: { exitCode: out === undefined ? 1 : 0, stdout: out ?? '', stderr: '' } }
+      return ran(out === undefined ? 1 : 0, out ?? '')
     }
 
     if (e.argv[0] === 'git' && e.argv[1] === 'rev-parse') {
-      return { value: { exitCode: 0, stdout: '/work/agent-toolkit/.git\n', stderr: '' } }
+      return ran(0, '/work/agent-toolkit/.git\n')
     }
 
     if (e.argv[0] !== 'git') {
@@ -202,7 +210,7 @@ const world = (on: On): World => {
       if (out === null) throw new Error('python is not installed')
       if (state.isPython3Missing && e.argv[0] === 'python3') throw new Error('no python3')
 
-      return { value: { exitCode: 0, stdout: out, stderr: '' } }
+      return ran(0, out)
     }
 
     state.gitCalls += 1
@@ -214,7 +222,7 @@ const world = (on: On): World => {
 
     if (branch === null) throw new Error('git is not installed')
 
-    return { value: { exitCode: 0, stdout: `${branch}\n`, stderr: '' } }
+    return ran(0, `${branch}\n`)
   })
   on('turn.step', async function* ($, e) {
     state.now += state.stepMs
@@ -224,7 +232,8 @@ const world = (on: On): World => {
       index: e.index,
       answer: 'ok',
       toolUses: [],
-      usage: state.isUncached ? { ...USAGE, cache_read_input_tokens: 0 } : USAGE,
+      stopReason: 'end_turn' as const,
+      usage: { ...USAGE, ...(state.isUncached ? { cache_read_input_tokens: 0 } : {}), model: e.model },
     }
   })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
