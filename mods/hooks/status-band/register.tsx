@@ -70,7 +70,7 @@ type Live = {
   curateCheckedAt?: number
   curateRead?: Promise<void>
   // The queue as last read; stale after a command that may move it.
-  queue: StatusBand['queue']
+  queue?: StatusBand['queue']
   isQueueStale: boolean
   queueCheckedAt?: number
   queueRead?: Promise<void>

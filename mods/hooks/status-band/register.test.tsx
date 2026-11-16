@@ -1098,14 +1098,20 @@ test('the band is three rows at most, the queue on the setup row; in two it ride
   queueWorld(on)
 
   await start($)
+  // Each row is found on its own: the headline alone, the setup ending on the queue.
+  const headlineRow = { type: 'Text', text: / up (<|\d)/ } as const
   const four = await drawn($, 'terminal', { maxRows: 4 })
 
-  expect(four.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ queue 2 (1 parked)')
+  expect((await four.ui.find(headlineRow))?.text).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
+  expect(await setupRow(four.ui)).toBe('0 hooks │ queue 2 (1 parked)')
+  // Three rows in a band of four leave the blank one above them.
   expect((await four.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await four.ui.unmount()
 
   const two = await drawn($, 'terminal', { maxRows: 2 })
 
-  expect(two.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ queue 2 (1 parked)')
+  expect((await two.ui.find(headlineRow))?.text).toBe(
+    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ queue 2 (1 parked)',
+  )
   await two.ui.unmount()
 })
