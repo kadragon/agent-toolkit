@@ -2,10 +2,9 @@
 """Local gate for mods/: `claude plugin validate` + `claude plugin test`, failing on TS errors.
 
 `claude plugin validate ./mods` reports TypeScript errors as warnings and still exits 0 with
-"Validation passed with warnings". The mods test files carry known TS warnings, so the gate
-cannot fail on every `error TS`; it fails on one printed under a shipped (non-`*.test.ts(x)`)
-file's `Validating hooks: <path>` section. PR #398 shipped a TS2741 in
-`mods/hooks/status-band/register.tsx` past the old count-the-warnings habit.
+"Validation passed with warnings", so the gate fails on every `error TS` it prints, test files
+included, naming the `Validating hooks: <path>` section each sits under. PR #398 shipped a
+TS2741 in `mods/hooks/status-band/register.tsx` past the old count-the-warnings habit.
 
 Local only: CI does not install `claude`, so only the `--test` parser self-test runs there.
 
@@ -23,14 +22,10 @@ import sys
 
 SECTION_RE = re.compile(r"^Validating [^:]+: (?P<path>.+?)\s*$")
 TS_ERROR_RE = re.compile(r"\berror TS\d+:")
-TEST_FILE_RE = re.compile(r"\.test\.tsx?$")
 
 
-def shipped_ts_errors(output: str) -> tuple[list[str], int]:
-    """Return (`path: error line` for each TS error outside a test file, hooks section count).
-
-    A TS error before any section header has no file to exempt it, so it counts as shipped.
-    """
+def ts_errors(output: str) -> tuple[list[str], int]:
+    """Return (`path: error line` for each TS error, hooks section count)."""
     errors: list[str] = []
     sections = 0
     path = "<no section>"
@@ -41,7 +36,7 @@ def shipped_ts_errors(output: str) -> tuple[list[str], int]:
             if line.startswith("Validating hooks:"):
                 sections += 1
             continue
-        if TS_ERROR_RE.search(line) and not TEST_FILE_RE.search(path):
+        if TS_ERROR_RE.search(line):
             errors.append(f"{path}: {line.strip()}")
     return errors, sections
 
@@ -56,10 +51,10 @@ def verdict(validate_rc: int, validate_output: str, test_rc: int) -> list[str]:
     reasons: list[str] = []
     if validate_rc != 0:
         reasons.append(f"validate exited {validate_rc}")
-    errors, sections = shipped_ts_errors(validate_output)
+    errors, sections = ts_errors(validate_output)
     if sections == 0:
         reasons.append("validate printed no `Validating hooks:` section")
-    reasons.extend(f"TS error in shipped file — {err}" for err in errors)
+    reasons.extend(f"TS error — {err}" for err in errors)
     if test_rc != 0:
         reasons.append(f"test exited {test_rc}")
     return reasons
@@ -98,12 +93,10 @@ def selftest() -> int:
     tail = "\n✔ Validation passed with warnings\n"
 
     cases = [
-        ("test-file errors only", manifest + hooks_json + test_tsx + test_ts + tail, 0, 3),
-        ("shipped tsx error", manifest + hooks_json + test_tsx + shipped + tail, 1, 3),
-        # A shipped section *before* a test section: the exemption must not leak backward.
-        ("shipped then test", manifest + shipped + test_tsx + tail, 1, 2),
-        # A test section followed by a shipped file: the exemption must not leak forward.
-        ("test then shipped", test_tsx + shipped, 1, 2),
+        # Test files are gated like shipped ones: no path is exempt.
+        ("test-file errors count", manifest + hooks_json + test_tsx + test_ts + tail, 2, 3),
+        ("shipped tsx error", manifest + hooks_json + shipped + tail, 1, 2),
+        ("test and shipped errors", manifest + test_tsx + shipped + tail, 2, 2),
         ("error before any section", "  ❯ error TS1005: ';' expected.\n" + hooks_json, 1, 1),
         ("error under manifest section", manifest + "  ❯ error TS2304: x\n" + hooks_json, 1, 1),
         ("no hooks sections", manifest + tail, 0, 0),
@@ -111,7 +104,7 @@ def selftest() -> int:
     ]
     failures = 0
     for name, output, want_errors, want_sections in cases:
-        errors, sections = shipped_ts_errors(output)
+        errors, sections = ts_errors(output)
         if len(errors) != want_errors or sections != want_sections:
             failures += 1
             print(
@@ -121,13 +114,14 @@ def selftest() -> int:
             )
 
     # verdict(): every failure reason from main(), including the exit codes.
-    clean = manifest + hooks_json + test_tsx + tail
+    clean = manifest + hooks_json + tail
     verdict_cases = [
         ("clean run passes", (0, clean, 0), 0),
         ("validate nonzero exit", (1, clean, 0), 1),
         ("test nonzero exit", (0, clean, 1), 1),
         ("no hooks sections", (0, manifest + tail, 0), 1),
         ("shipped TS error", (0, manifest + shipped + tail, 0), 1),
+        ("test-file TS error", (0, manifest + hooks_json + test_tsx + tail, 0), 1),
         ("every failure reported", (3, manifest + shipped + tail, 4), 3),
     ]
     for name, call, want in verdict_cases:

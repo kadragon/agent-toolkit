@@ -2,6 +2,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+// The test runtime has timers, but the module's types (no DOM, no Node) do not declare them.
+declare const setTimeout: (callback: () => void, ms: number) => unknown
+
 const NOW = 1793589760 * 1000 + 30 * 60_000
 const RS = '\x1e'
 const US = '\x1f'
@@ -39,6 +42,7 @@ const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 20,
     bodyColumns: 200,

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods test fixtures type-check; check_mods.py fails on every error TS (mods v0.9.4) (2026-11-16) → docs/runbook.md
 - [done] local mods gate `scripts/check_mods.py` fails on `error TS` in shipped hook files (2026-11-16) → docs/runbook.md
 - [done] mods drop the Sprint Contract pane and cycle row; queue joins the setup row in a three-row band (mods v0.9.3) (2026-11-16)
 - [done] gongmun-draft triggers on "담당자에게 보낼 확인 요청·문의 문구" requests; trigger eval recall rose from 0% to 86% with no false positives (prod v3.2.16) (2026-11-16)
