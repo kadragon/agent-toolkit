@@ -2,7 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { NodeChange, Pr, PrExplain, PrRecap, PrRecapExplain, PrRecapView } from '../../types'
-import { contractSection, loadContract } from '../contract-pane/register'
 import {
   count,
   diffArgv,
@@ -18,8 +17,7 @@ import { ago, logArgv, parseLog, totalsOf } from './recap'
 
 // A merged PR: its numbers, a plain summary and a top-to-bottom diagram of the
 // parts it touches, both made once per commit by a small model. The latest is
-// shown first; the pane's p and n step to the older and newer ones. Above it,
-// under one rule, the contract-pane mod draws the branch's Sprint Contract.
+// shown first; the pane's p and n step to the older and newer ones.
 export const PANE = 'pr-recap'
 const TITLE = 'PR recap'
 const COMMAND = 'pr-recap'
@@ -228,7 +226,6 @@ function load($: EngineInterface): Promise<void> {
 // may not open a pane or write state.
 async function boot($: EngineInterface) {
   await $.command.register({ name: COMMAND, description: 'Show the latest merged PR in a side pane' })
-  void loadContract($).catch(() => undefined)
   await load($)
   await openPane($)
 }
@@ -268,7 +265,6 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     if (e.presentation.columns > 0) live.terminalColumns = e.presentation.columns
-    void loadContract($).catch(() => undefined)
     await load($)
     await openPane($)
 
@@ -284,26 +280,11 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const elements = $.ui.resolve(e)
-    const section = await contractSection($, elements)
-    const recap = await drawRecap($, elements, e.props)
-
-    if (section === null) return recap
-
-    const { Box, Text } = elements
-
-    return (
-      <Box flexDirection="column">
-        {section}
-        <Text dimColor>{'─'.repeat(Math.max(1, e.props.bodyColumns))}</Text>
-        {recap}
-      </Box>
-    )
+    return drawRecap($, $.ui.resolve(e), e.props)
   })
 }
 
-// The PR recap under the contract section: the latest merged PR, or the one
-// p and n stepped to.
+// The PR recap: the latest merged PR, or the one p and n stepped to.
 async function drawRecap(
   $: EngineInterface,
   { Box, Button, Text }: Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>,

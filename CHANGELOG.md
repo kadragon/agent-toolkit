@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods drop the Sprint Contract pane and cycle row; queue joins the setup row in a three-row band (mods v0.9.3) (2026-11-16)
 - [done] security-overview checks stale code-scanning files on the default branch (dev v4.11.46) (2026-11-14)
 - [done] security-overview scans only the current directory's repo; no clone phase (dev v4.11.44) (2026-11-14)
 

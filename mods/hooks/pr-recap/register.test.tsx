@@ -164,9 +164,6 @@ const world = (on: On): World => {
   return state
 }
 
-// The contract section on top of the pane is the contract-pane mod's: off here.
-const OWN = { options: { contractPaneEnabled: false } }
-
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 20))
 
 // The first band drawing boots the pane, as a session's first frame does.
@@ -189,7 +186,7 @@ const gated = () => {
   return { gate, release }
 }
 
-test('the first band drawing opens the pane at a quarter of the terminal with the latest PR explained', OWN, async ($, on) => {
+test('the first band drawing opens the pane at a quarter of the terminal with the latest PR explained', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -220,7 +217,7 @@ test('the first band drawing opens the pane at a quarter of the terminal with th
   }
 })
 
-test('p and n step through older and newer PRs, each explained once by its commit', OWN, async ($, on) => {
+test('p and n step through older and newer PRs, each explained once by its commit', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -255,7 +252,7 @@ test('p and n step through older and newer PRs, each explained once by its commi
   await ui.unmount()
 })
 
-test('a reread keeps an older PR shown; a newly merged PR takes the pane', OWN, async ($, on) => {
+test('a reread keeps an older PR shown; a newly merged PR takes the pane', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -278,7 +275,7 @@ test('a reread keeps an older PR shown; a newly merged PR takes the pane', OWN, 
   await ui.unmount()
 })
 
-test('a step taken while git reads is kept; a failed read keeps the PR shown', OWN, async ($, on) => {
+test('a step taken while git reads is kept; a failed read keeps the PR shown', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -305,7 +302,7 @@ test('a step taken while git reads is kept; a failed read keeps the PR shown', O
   await ui.unmount()
 })
 
-test('while the model runs the pane says so over the commit summary', OWN, async ($, on) => {
+test('while the model runs the pane says so over the commit summary', async ($, on) => {
   const state = world(on)
   const model = gated()
 
@@ -320,7 +317,7 @@ test('while the model runs the pane says so over the commit summary', OWN, async
   await ui.unmount()
 })
 
-test('a failed reply falls back to the commit summary with a note', OWN, async ($, on) => {
+test('a failed reply falls back to the commit summary with a note', async ($, on) => {
   const state = world(on)
 
   state.reply = null
@@ -332,7 +329,7 @@ test('a failed reply falls back to the commit summary with a note', OWN, async (
   await ui.unmount()
 })
 
-test('an unreadable reply falls back the same way', OWN, async ($, on) => {
+test('an unreadable reply falls back the same way', async ($, on) => {
   const state = world(on)
 
   state.reply = 'no json here'
@@ -343,7 +340,7 @@ test('an unreadable reply falls back the same way', OWN, async ($, on) => {
   await ui.unmount()
 })
 
-test('a failed explanation is asked again on the next reread', OWN, async ($, on) => {
+test('a failed explanation is asked again on the next reread', async ($, on) => {
   const state = world(on)
 
   state.reply = null
@@ -359,7 +356,7 @@ test('a failed explanation is asked again on the next reread', OWN, async ($, on
   await ui.unmount()
 })
 
-test('back on a branch whose PR was explained, its explanation shows again', OWN, async ($, on) => {
+test('back on a branch whose PR was explained, its explanation shows again', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -378,7 +375,7 @@ test('back on a branch whose PR was explained, its explanation shows again', OWN
   await ui.unmount()
 })
 
-test('a model reply that outlives its PR does not replace the one shown', OWN, async ($, on) => {
+test('a model reply that outlives its PR does not replace the one shown', async ($, on) => {
   const state = world(on)
   const model = gated()
 
@@ -402,7 +399,7 @@ test('a model reply that outlives its PR does not replace the one shown', OWN, a
   await ui.unmount()
 })
 
-test('with the summary switched off, nothing goes to the model', { options: { prRecapExplain: false, contractPaneEnabled: false } }, async ($, on) => {
+test('with the summary switched off, nothing goes to the model', { options: { prRecapExplain: false } }, async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -416,7 +413,7 @@ test('with the summary switched off, nothing goes to the model', { options: { pr
   await ui.unmount()
 })
 
-test('the explanation is kept by commit: a reread asks the model nothing', OWN, async ($, on) => {
+test('the explanation is kept by commit: a reread asks the model nothing', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -428,7 +425,7 @@ test('the explanation is kept by commit: a reread asks the model nothing', OWN, 
   expect(state.modelCalls).toHaveLength(1)
 })
 
-test('an explanation an earlier session kept is drawn without the model', OWN, async ($, on) => {
+test('an explanation an earlier session kept is drawn without the model', async ($, on) => {
   const state = world(on)
 
   state.store.set(`pr-recap:explain:${LATEST}`, EXPLAIN)
@@ -441,7 +438,7 @@ test('an explanation an earlier session kept is drawn without the model', OWN, a
   await ui.unmount()
 })
 
-test('a wider terminal re-asks the open pane its share; the same width does not', OWN, async ($, on) => {
+test('a wider terminal re-asks the open pane its share; the same width does not', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -454,7 +451,7 @@ test('a wider terminal re-asks the open pane its share; the same width does not'
   expect(state.opens.map(open => open.columns)).toEqual([50, 75])
 })
 
-test('a Bash command that moves the history reads the PRs again; another does not', OWN, async ($, on) => {
+test('a Bash command that moves the history reads the PRs again; another does not', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -476,7 +473,7 @@ test('a Bash command that moves the history reads the PRs again; another does no
   expect(state.logRuns).toBe(4)
 })
 
-test('a reread asked for while one runs follows it, once', OWN, async ($, on) => {
+test('a reread asked for while one runs follows it, once', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -494,7 +491,7 @@ test('a reread asked for while one runs follows it, once', OWN, async ($, on) =>
   expect(state.logRuns).toBe(3)
 })
 
-test('a boot that fails is tried again on the next band drawing', OWN, async ($, on) => {
+test('a boot that fails is tried again on the next band drawing', async ($, on) => {
   const state = world(on)
 
   state.registerFailures = 1
@@ -506,7 +503,7 @@ test('a boot that fails is tried again on the next band drawing', OWN, async ($,
   expect(state.opens).toEqual([{ id: 'pr-recap', columns: 50 }])
 })
 
-test('/pr-recap opens the pane at a quarter of the width it runs at', OWN, async ($, on) => {
+test('/pr-recap opens the pane at a quarter of the width it runs at', async ($, on) => {
   const state = world(on)
 
   await boot($)
@@ -521,7 +518,7 @@ test('/pr-recap opens the pane at a quarter of the width it runs at', OWN, async
   expect(state.logRuns).toBe(2)
 })
 
-test('outside a git repository the pane says why', OWN, async ($, on) => {
+test('outside a git repository the pane says why', async ($, on) => {
   const state = world(on)
 
   state.log = null
@@ -533,7 +530,7 @@ test('outside a git repository the pane says why', OWN, async ($, on) => {
   await ui.unmount()
 })
 
-test('switched off, the pane neither opens nor draws', { options: { prRecapEnabled: false, contractPaneEnabled: false } }, async ($, on) => {
+test('switched off, the pane neither opens nor draws', { options: { prRecapEnabled: false } }, async ($, on) => {
   const state = world(on)
 
   await boot($)
