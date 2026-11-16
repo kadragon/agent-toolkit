@@ -315,6 +315,10 @@ jobs:
       - name: Run scripts/ci/test_bump_version.py
         run: python3 scripts/ci/test_bump_version.py
 
+      # Parser self-test only: the gate itself needs the `claude` CLI and stays local.
+      - name: Run scripts/check_mods.py --test
+        run: python3 scripts/check_mods.py --test
+
   skill-frontmatter:
     name: Skill/agent/command frontmatter check
     runs-on: ubuntu-latest

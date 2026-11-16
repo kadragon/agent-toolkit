@@ -11,12 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Review Backlog
-
-### PR #398 — mods drop the Sprint Contract pane and cycle row (2026-11-16)
-
-- [ ] [constraint] Local mods gate passes on TypeScript errors: `claude plugin validate ./mods` prints `error TS…` in a shipped (non-test) hook file as a warning and still reports passed, so a TS2741 in `status-band/register.tsx` got through until Codex flagged it — make the `docs/runbook.md` → *Validate* gate fail on `error TS` outside `*.test.ts(x)` (local only; the CI-job rejection stands) (source: codex) — mods/hooks/status-band/register.tsx
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
