@@ -11,6 +11,12 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #400 — local mods gate fails on TS errors in shipped hook files (2026-11-16)
+
+- [ ] [debt] mods test files carry 7 `error TS` lines (TS2741/TS2345 `isCollapsed` missing on AbovePrompt props, TS2304 `setTimeout`, a `turn.step` StreamHook mismatch) that `scripts/check_mods.py` exempts by `*.test.ts(x)` path — fix the fixtures, then drop the exemption so the gate fails on every `error TS` (source: code-review) — mods/hooks/status-band/register.test.tsx:291
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
