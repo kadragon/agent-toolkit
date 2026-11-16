@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] gongmun-draft triggers on "담당자에게 보낼 확인 요청·문의 문구" requests; trigger eval recall 0% → 86%, no false positives (prod v3.2.16) (2026-11-16)
 - [done] commit-guard reads `git switch -q -c b` / `checkout -b b --quiet` as an in-chain creation (dev v4.11.47) (2026-11-15)
 - [done] security-overview checks stale code-scanning files on the default branch (dev v4.11.46) (2026-11-14)
 - [done] security-overview scans only the current directory's repo; no clone phase (dev v4.11.44) (2026-11-14)
