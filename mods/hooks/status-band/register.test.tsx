@@ -57,23 +57,12 @@ type World = {
   curateGate?: Promise<void>
   // True where only `python` is installed.
   isPython3Missing: boolean
-  // What the cycle and queue scripts print; one unset fails with exit 1.
-  work: { inspect?: string; groups?: string; parked?: string; prGet?: string; ciStatus?: string }
-  workRuns: (readonly string[])[]
-  toasts: string[]
+  // What the queue script prints; one unset fails with exit 1.
+  queue: { groups?: string; parked?: string }
+  queueRuns: (readonly string[])[]
 }
 
-const WORK_SCRIPT = /cycle_state\.py|backlog_candidates\.py|hub\.sh/
-
-// The script a work run asks, and what the world answers it.
-const workAnswer = (state: World, argv: readonly string[]): string | undefined => {
-  const script = argv.find(arg => WORK_SCRIPT.test(arg)) ?? ''
-
-  if (script.endsWith('cycle_state.py')) return state.work.inspect
-  if (script.endsWith('hub.sh')) return argv.includes('pr-get') ? state.work.prGet : state.work.ciStatus
-
-  return argv.includes('--parked') ? state.work.parked : state.work.groups
-}
+const QUEUE_SCRIPT = /backlog_candidates\.py/
 
 // On Windows the engine hands `fs` a POSIX path made absolute on the drive
 // (`/home/me` as `C:\home\me`), so it is also compared without one. Elsewhere
@@ -112,9 +101,8 @@ const world = (on: On): World => {
     curateOut: '',
     curateRuns: [],
     isPython3Missing: false,
-    work: {},
-    workRuns: [],
-    toasts: [],
+    queue: {},
+    queueRuns: [],
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -190,16 +178,11 @@ const world = (on: On): World => {
   on('fs.exists', async ($, e) => ({
     value: Object.keys(state.files).some(file => isFile(e.path, file)),
   }))
-  on('ui.toast', async ($, e) => {
-    state.toasts.push(e.text)
-
-    return { value: undefined }
-  })
   on('tool.call', { tool: 'Bash' }, async () => ({ result: {} }))
   on('process.run', async ($, e) => {
-    if (e.argv.some(arg => WORK_SCRIPT.test(arg))) {
-      state.workRuns.push(e.argv)
-      const out = workAnswer(state, e.argv)
+    if (e.argv.some(arg => QUEUE_SCRIPT.test(arg))) {
+      state.queueRuns.push(e.argv)
+      const out = e.argv.includes('--parked') ? state.queue.parked : state.queue.groups
 
       return { value: { exitCode: out === undefined ? 1 : 0, stdout: out ?? '', stderr: '' } }
     }
@@ -312,7 +295,7 @@ const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', pr
   const headline = (await ui.find({ type: 'Text', text: / up (<|\d)/ }))?.text
   const isSplit = ((props as { maxRows?: number }).maxRows ?? BAND.props.maxRows) >= 3
   const setup = isSplit
-    ? (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b)/ }))?.text
+    ? (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b|queue \d)/ }))?.text
     : undefined
   const texts = [
     setup === undefined || headline === undefined ? headline : `${headline} │ ${setup}`,
@@ -1037,174 +1020,98 @@ test('a slow curate check holds neither the counts nor a /clear', async ($, on) 
   await ui.unmount()
 })
 
-const CONTRACT = [
-  '# Status band cycle rows',
-  '**Tag:** [FEAT]',
-  '**Acceptance criteria:**',
-  '- [ ] the cycle row draws → claude plugin test ./mods',
-  '- [ ] the queue row draws → claude plugin test ./mods',
-  '',
-].join('\n')
-
-const inspectOut = (fields: Record<string, unknown> = {}): string =>
-  JSON.stringify({
-    branch: 'feat/x',
-    contract: CONTRACT,
-    evidence: [{ command: 'claude plugin test ./mods', exit: 0 }],
-    notes: null,
-    tree_matches_current: true,
-    ...fields,
-  })
-
-// A harness repo on a feature branch with a contract, an open PR and a queue.
-const cycleWorld = (on: On): World => {
+// A harness repo with a queue in its backlog.
+const queueWorld = (on: On): World => {
   const state = curateWorld(on, '')
 
-  state.branch = 'feat/x'
   state.files['/work/agent-toolkit/backlog.md'] = '## Queue\n- [ ] a\n'
-  state.files['/work/agent-toolkit/.git/task-review-ci-strikes-367'] = '1\n'
-  state.work = {
-    inspect: inspectOut(),
+  state.queue = {
     groups: '[{"title": "a"}, {"title": "b"}]',
     parked: '[{"title": "c"}]',
-    prGet: '{"pr_number": 367, "pr_url": "https://github.com/o/r/pull/367"}',
-    ciStatus: '{"status": "pending", "checks": 3}',
   }
 
   return state
 }
 
-const workRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
-  // The row's own text, not the dim phase run inside it.
-  (await ui.find({ type: 'Text', text: /^(implement|verified|ci|merge|rework|review): \S|^queue / }))?.text
+const setupRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
+  (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b|queue \d)/ }))?.text
 
-const scriptsRun = (state: World): string[] =>
-  state.workRuns.map(argv => (argv.find(arg => WORK_SCRIPT.test(arg)) ?? '').split('/').pop() ?? '')
-
-test('the cycle on a feature branch shows its contract, evidence, PR, CI and strikes, then the queue', async ($, on) => {
-  const state = cycleWorld(on)
+test('the queue ends the setup row, beside the MCP servers', async ($, on) => {
+  const state = queueWorld(on)
+  state.skills = { totalSkills: 2, tokens: 300 }
+  state.mcpServers = ['github']
 
   await start($)
   const { ui } = await drawn($)
 
-  expect(await workRow(ui)).toBe(
-    'ci: [FEAT] Status band cycle rows │ 2 criteria · evidence 1 ✓ │ PR #367 CI pending (strike 1) │ queue 2 (1 parked)',
-  )
-  expect(scriptsRun(state).sort()).toEqual([
-    'backlog_candidates.py',
-    'backlog_candidates.py',
-    'cycle_state.py',
-    'hub.sh',
-    'hub.sh',
-  ])
-  expect(state.toasts).toEqual([])
+  expect(await setupRow(ui)).toBe('0 hooks │ 2 skills (300) │ 1 mcp │ queue 2 (1 parked)')
+  expect(state.queueRuns.length).toBe(2)
   await ui.unmount()
 })
 
-test('on the base branch no cycle is read, and the queue alone shows', async ($, on) => {
-  const state = cycleWorld(on)
-  state.branch = 'main'
-
-  await start($)
-  const { ui } = await drawn($)
-
-  expect(await workRow(ui)).toBe('queue 2 (1 parked)')
-  expect(scriptsRun(state)).toEqual(['backlog_candidates.py', 'backlog_candidates.py'])
-  await ui.unmount()
-})
-
-test('without the dev plugin, or a backlog and a contract, nothing is read or drawn', async ($, on) => {
+test('without the dev plugin, or a backlog, nothing is read or drawn', async ($, on) => {
   const bare = world(on)
 
   await start($)
   const { ui } = await drawn($)
 
-  expect(bare.workRuns).toEqual([])
-  expect(await workRow(ui)).toBeUndefined()
+  expect(bare.queueRuns).toEqual([])
+  expect(await ui.find({ type: 'Text', text: /queue / })).toBeUndefined()
   await ui.unmount()
 })
 
-test('a cycle command reads the figures again behind the call; another leaves them', async ($, on) => {
-  const state = cycleWorld(on)
+test('a command that may move the queue reads it again behind the call; another leaves it', async ($, on) => {
+  const state = queueWorld(on)
 
   await start($)
-  const reads = state.workRuns.length
+  const reads = state.queueRuns.length
 
   await $.tool.call({ tool: 'Bash', command: 'git status --porcelain' })
   await settle()
-  expect(state.workRuns.length).toBe(reads)
+  expect(state.queueRuns.length).toBe(reads)
 
-  state.work.inspect = inspectOut({ evidence: null, tree_matches_current: false })
-  state.work.prGet = undefined
-  await $.tool.call({ tool: 'Bash', command: "python3 \"$STATE\" save <<'SPRINT_CONTRACT'" })
+  state.queue.groups = '[]'
+  state.queue.parked = '[]'
+  await $.tool.call({ tool: 'Bash', command: 'git pull --ff-only' })
   await settle()
   const { ui } = await drawn($)
 
-  expect(state.workRuns.length).toBeGreaterThan(reads)
-  expect(await workRow(ui)).toBe(
-    'implement: [FEAT] Status band cycle rows │ 2 criteria · no evidence │ queue 2 (1 parked)',
-  )
+  expect(state.queueRuns.length).toBeGreaterThan(reads)
+  expect(await setupRow(ui)).toBe('0 hooks │ queue 0')
   await ui.unmount()
 })
 
-test('a pending CI is asked again after two minutes, and the result that settles it is announced once', async ($, on) => {
-  const state = cycleWorld(on)
+test('a queue read that fails keeps the last figure', async ($, on) => {
+  const state = queueWorld(on)
 
   await start($)
-  const asked = state.workRuns.length
-
-  state.now += MINUTE
-  await measure($)
-  expect(state.workRuns.length).toBe(asked)
-
-  state.work.ciStatus = '{"status": "success", "checks": 3}'
-  delete state.files['/work/agent-toolkit/.git/task-review-ci-strikes-367']
-  state.now += MINUTE
-  await measure($)
-  const { ui } = await drawn($)
-
-  expect(scriptsRun(state).slice(asked)).toEqual(['hub.sh'])
-  expect(await workRow(ui)).toContain('merge: ')
-  expect(await workRow(ui)).toContain('PR #367 CI success │ queue')
-  expect(state.toasts).toEqual(['PR #367 CI passed'])
-
-  state.now += 2 * MINUTE
-  await measure($)
-  expect(state.workRuns.length).toBe(asked + 1)
-  expect(state.toasts).toEqual(['PR #367 CI passed'])
-  await ui.unmount()
-})
-
-test('a work read that fails keeps the last figures', async ($, on) => {
-  const state = cycleWorld(on)
-
-  await start($)
-  state.work.inspect = undefined
-  state.work.groups = undefined
+  state.queue.groups = undefined
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "[FIX] x"' })
   await settle()
   const { ui } = await drawn($)
 
-  expect(await workRow(ui)).toContain('ci: [FEAT] Status band cycle rows')
-  expect(await workRow(ui)).toContain('queue 2 (1 parked)')
+  expect(await setupRow(ui)).toBe('0 hooks │ queue 2 (1 parked)')
   await ui.unmount()
 })
 
-test('in a band of four rows the work takes the last; in one of three it rides on the setup', async ($, on) => {
-  cycleWorld(on)
+test('the band is three rows at most, the queue on the setup row; in two it rides on the headline', async ($, on) => {
+  queueWorld(on)
 
   await start($)
-  // A row of its own holds the cycle through to the queue; a run inside a row never does.
-  const ownRow = { type: 'Text', text: /^ci: \[FEAT\].*queue 2 \(1 parked\)$/ } as const
+  // Each row is found on its own: the headline alone, the setup ending on the queue.
+  const headlineRow = { type: 'Text', text: / up (<|\d)/ } as const
   const four = await drawn($, 'terminal', { maxRows: 4 })
 
-  expect(await four.ui.find(ownRow)).toBeDefined()
-  expect(four.texts[0]).not.toContain('ci: [FEAT]')
+  expect((await four.ui.find(headlineRow))?.text).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
+  expect(await setupRow(four.ui)).toBe('0 hooks │ queue 2 (1 parked)')
+  // Three rows in a band of four leave the blank one above them.
+  expect((await four.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await four.ui.unmount()
 
-  const three = await drawn($, 'terminal', { maxRows: 3 })
+  const two = await drawn($, 'terminal', { maxRows: 2 })
 
-  expect(await three.ui.find(ownRow)).toBeUndefined()
-  expect(three.texts[0]).toContain('│ ci: [FEAT] Status band cycle rows')
-  await three.ui.unmount()
+  expect((await two.ui.find(headlineRow))?.text).toBe(
+    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ queue 2 (1 parked)',
+  )
+  await two.ui.unmount()
 })
