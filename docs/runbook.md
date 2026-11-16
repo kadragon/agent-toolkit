@@ -44,8 +44,7 @@ codex plugin add prod@kadragon
 | `python3 dev/skills/task-next/scripts/test_cycle_state.py` | Contract/evidence/notes archive durability, criterion-check refusal, base-branch refusal, retirement, and the review cycle's clean-tree resume guard |
 | `python3 scripts/ci/test_bump_version.py` | `bump-version.sh` rewrites both manifests and `SKILL.md` on LF **and** CRLF checkouts |
 | `claude plugin validate ./dev` | Cross-check against the real loader (also flags manifest issues) |
-| `claude plugin validate ./mods` | Reads the hooks module as the engine will: which events it hooks, which `$` calls it makes, and everything the engine would refuse |
-| `claude plugin test ./mods` | Runs every `*.test.ts(x)` under `mods/` against the engine. **Local only — no CI job runs it**, so run both `mods` commands before every `mods/` PR |
+| `python3 scripts/check_mods.py` | The `mods/` gate: runs `claude plugin validate ./mods` (reads the hooks module as the engine will) and `claude plugin test ./mods` (every `*.test.ts(x)` against the engine), and fails on an `error TS` under a shipped, non-test file — `validate` alone prints those as warnings and still passes. **Local only — no CI job runs it** (CI runs only its `--test` parser self-test), so run it before every `mods/` PR |
 
 **`git add` a new file before you trust these checkers.** Every one of them walks
 `git ls-files`, so an untracked file is invisible to all of them: a new shipped asset passes

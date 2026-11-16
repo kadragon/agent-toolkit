@@ -13,9 +13,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #398 — mods drop the Sprint Contract pane and cycle row (2026-11-16)
+### PR #400 — local mods gate fails on TS errors in shipped hook files (2026-11-16)
 
-- [ ] [constraint] Local mods gate passes on TypeScript errors: `claude plugin validate ./mods` prints `error TS…` in a shipped (non-test) hook file as a warning and still reports passed, so a TS2741 in `status-band/register.tsx` got through until Codex flagged it — make the `docs/runbook.md` → *Validate* gate fail on `error TS` outside `*.test.ts(x)` (local only; the CI-job rejection stands) (source: codex) — mods/hooks/status-band/register.tsx
+- [ ] [debt] mods test files carry 7 `error TS` lines (TS2741/TS2345 `isCollapsed` missing on AbovePrompt props, TS2304 `setTimeout`, a `turn.step` StreamHook mismatch) that `scripts/check_mods.py` exempts by `*.test.ts(x)` path — fix the fixtures, then drop the exemption so the gate fails on every `error TS` (source: code-review) — mods/hooks/status-band/register.test.tsx:291
 
 ## Rejected — do not re-file
 
