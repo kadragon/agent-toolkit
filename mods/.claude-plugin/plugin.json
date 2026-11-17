@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "kadragon"
   },
@@ -37,6 +37,12 @@
       "type": "boolean",
       "title": "Hide the usage-limit warning",
       "description": "Hide the dim notice Claude Code shows as a usage window fills (\"You've used 75% of your weekly limit · resets … · Run /usage-credits …\"). A limit reached (100%) and every other notice still show. With this on and the status band off, nothing shows the usage figures before the limit.",
+      "default": true
+    },
+    "agentFlowEnabled": {
+      "type": "boolean",
+      "title": "Agent flow pane",
+      "description": "Add /flow, which opens a pane with this session's subagents as a live tree: each agent's status, type, task, elapsed time and tokens, nested under the agent that started it. From the first subagent it reads the agent list every two seconds, open or not, to time agents that end unwatched.",
       "default": true
     }
   }

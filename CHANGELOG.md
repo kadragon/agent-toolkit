@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods adds the agent-flow pane: /flow shows this session's subagents as a live tree (mods v1.1.0) (2026-11-17) → docs/architecture.md
 - [done] mods drops the PR recap side pane and hides the usage-limit warning notice (mods v1.0.0) (2026-11-17)
 - [done] mods test fixtures type-check; check_mods.py fails on every error TS (mods v0.9.4) (2026-11-16) → docs/runbook.md
 - [done] local mods gate `scripts/check_mods.py` fails on `error TS` in shipped hook files (2026-11-16) → docs/runbook.md

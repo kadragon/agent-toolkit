@@ -29,10 +29,29 @@ export type StatusBand = {
   queue?: Queue | null
 }
 
+// One subagent as the agent-flow pane draws it, from `$.agent.list()`.
+export type FlowAgent = {
+  id: string
+  parentId?: string
+  type: string
+  description: string
+  // The first line of its latest progress summary, where it differs from the description.
+  label?: string
+  status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
+  startTime: number
+  // Stamped by the first reading that saw it ended.
+  endTime?: number
+  tokens: number
+}
+
+// The agent-flow pane's last reading.
+export type AgentFlow = { agents: FlowAgent[]; readAt: number }
+
 declare module 'claude-code' {
   interface PluginState {
     mods: {
       statusBand: StatusBand | null
+      agentFlow: Shaped<AgentFlow | null>
     }
   }
 }

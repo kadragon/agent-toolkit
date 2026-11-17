@@ -80,7 +80,7 @@ type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
 
 // The handlers a plugin's default hooks file, its manifest and the files the
 // manifest names add; a file that is not there adds none.
-const pluginHooks = async ($: EngineInterface, root: string): Promise<number> => {
+async function pluginHooks($: EngineInterface, root: string): Promise<number> {
   const { files, inline } = await $.fs
     .read(under(root, '.claude-plugin/plugin.json'))
     .then(manifestHooks)
@@ -98,7 +98,7 @@ const pluginHooks = async ($: EngineInterface, root: string): Promise<number> =>
 }
 
 // Where the installed-plugins file says each plugin's directory is.
-const readInstallPaths = async ($: EngineInterface): Promise<Record<string, string>> => {
+async function readInstallPaths($: EngineInterface): Promise<Record<string, string>> {
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 
@@ -120,16 +120,17 @@ async function readDevRoot($: EngineInterface): Promise<string | undefined> {
 }
 
 // As the hooks do: `python3`, else `python` where only that is installed.
-const python = (
+function python(
   $: EngineInterface,
   args: string[],
   init: { timeoutMs: number; cwd?: string },
-): Promise<{ exitCode: number; stdout: string }> =>
-  $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+): Promise<{ exitCode: number; stdout: string }> {
+  return $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+}
 
 // Whether a harness-curate run is due here, judged as the session-start hook
 // judges it: only in a harness repo, by the installed dev plugin's own script.
-const readCurateDue = async ($: EngineInterface): Promise<boolean> => {
+async function readCurateDue($: EngineInterface): Promise<boolean> {
   const cwd = await $.session.cwd()
 
   if (!(await $.fs.exists(under(cwd, 'AGENTS.md')))) return false
@@ -148,7 +149,7 @@ const readCurateDue = async ($: EngineInterface): Promise<boolean> => {
 }
 
 // The queue's depth, as task-next's Step 1 counts it: null with no backlog.
-const readQueue = async ($: EngineInterface, root: string): Promise<StatusBand['queue']> => {
+async function readQueue($: EngineInterface, root: string): Promise<StatusBand['queue']> {
   const cwd = await $.session.cwd()
   const backlog = under(cwd, 'backlog.md')
 
@@ -168,7 +169,7 @@ const readQueue = async ($: EngineInterface, root: string): Promise<StatusBand['
 
 // The hook handlers in force: the settings' own and every enabled plugin's.
 // The engine lists none, so they are counted off the files that declare them.
-const countHooks = async ($: EngineInterface): Promise<number> => {
+async function countHooks($: EngineInterface): Promise<number> {
   const settings = await $.settings.read()
 
   if (settings.disableAllHooks === true) return 0
@@ -192,7 +193,7 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
 
 // The skill listing and the MCP servers as /context counts them, estimated
 // locally: no request is sent.
-const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> => {
+async function readContext($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> {
   const { context } = await $.session.usage({ breakdown: 'summary' })
   const breakdown = context.breakdown
 
@@ -209,7 +210,7 @@ const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills
 // Reads the counts apart from the other figures, which must not wait for the
 // files: one read at a time, and a count that cannot be read keeps the last
 // one this session gave.
-const loadSetup = ($: EngineInterface, live: Live): void => {
+function loadSetup($: EngineInterface, live: Live): void {
   if (live.setupRead !== undefined) return
 
   const epoch = live.setupEpoch
@@ -242,7 +243,7 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
 
 // The curate check spawns a scan, so it runs apart from the counts and at most
 // once in a while; between runs, or when a run fails, the last answer stands.
-const loadCurate = ($: EngineInterface, live: Live): void => {
+function loadCurate($: EngineInterface, live: Live): void {
   if (live.curateRead !== undefined) return
 
   const epoch = live.setupEpoch
@@ -273,7 +274,7 @@ const loadCurate = ($: EngineInterface, live: Live): void => {
 // The queue runs a script, so it is read apart from the counts: after a
 // command that may move it, else now and then. A read that fails keeps the
 // last figure.
-const loadQueue = ($: EngineInterface, live: Live): void => {
+function loadQueue($: EngineInterface, live: Live): void {
   if (live.queueRead !== undefined) return
 
   const epoch = live.setupEpoch
@@ -332,7 +333,7 @@ const isCached = (usage: { cache_read_input_tokens: number; cache_creation_input
 
 // The band is a convenience: a figure the engine cannot give is left out or
 // kept as last read, and nothing here may fail a hook.
-const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
+async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
 
@@ -423,7 +424,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
 }
 
 // Reads the figures and keeps the minute tick, where a surface draws the band.
-const watch = async ($: EngineInterface, live: Live): Promise<void> => {
+async function watch($: EngineInterface, live: Live): Promise<void> {
   try {
     const surfaces = await $.session.surfaces()
 
@@ -444,7 +445,22 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
   }
 }
 
+// The band's state for this load, set by register; unset while the band is off.
+const loaded: { live?: Live } = {}
+
+// The engine takes one session.start hook per plugin, and register.ts holds it.
+// Nothing waits for the read: a slow git must not hold the session.
+export function startStatusBand($: EngineInterface): void {
+  const live = loaded.live
+
+  if (live === undefined) return
+
+  resetSetup(live)
+  void watch($, live)
+}
+
 export const register: Register = (on, options) => {
+  loaded.live = undefined
   if (options.statusBandEnabled === false) return
 
   const ttl = options.statusBandCacheTtlMinutes
@@ -461,15 +477,7 @@ export const register: Register = (on, options) => {
     isQueueStale: true,
   }
 
-  // Neither hook waits for the read: a slow git must not hold the session.
-  on('session.start', async ($, e, next) => {
-    const result = await next(e)
-
-    resetSetup(live)
-    void watch($, live)
-
-    return result
-  })
+  loaded.live = live
 
   // Raised after each main-thread turn too, which may have switched the branch;
   // a surface that attached after the start gets its tick here.

@@ -11,6 +11,12 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #403 — mods agent-flow pane (2026-11-17)
+
+- [ ] [doc] Note in `docs/architecture.md` → mods that the engine takes one hook per event per plugin (no matcher), so `mods/hooks/register.ts` holds the one `session.start` and calls each mod's exported `start*($)`; `$` crosses files only into `function` declarations — without this a new mod costs several failed loads (source: harness-capture) — docs/architecture.md
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
