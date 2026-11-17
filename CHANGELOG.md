@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods status band register.tsx gains a SECTION MAP that check_mods.py holds to its top-level functions, so an agent reads one range instead of the whole file (mods v1.1.2) (2026-11-17)
 - [done] mods status band drops the backlog queue and its Bash tool.call hook, so Code Mode can load (mods v1.1.1) (2026-11-17)
 - [done] mods adds the agent-flow pane: /flow shows this session's subagents as a live tree (mods v1.1.0) (2026-11-17) → docs/architecture.md
 - [done] mods drops the PR recap side pane and hides the usage-limit warning notice (mods v1.0.0) (2026-11-17)
