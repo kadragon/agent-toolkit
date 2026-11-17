@@ -1,8 +1,9 @@
 import type { Register } from 'claude-code'
 
 // "You've used 75% of your weekly limit · resets … · Run /usage-credits …":
-// the engine's usage warning, whatever window or wording of the tail.
-const LIMIT_WARNING = /\b\d+% of your\b[^·]*\blimit\b/i
+// the engine's usage warning, whatever window or wording of the tail. One or
+// two digits: a limit reached (100%) still shows.
+const LIMIT_WARNING = /(?<!\d)\d{1,2}% of your\b[^·]*\blimit\b/i
 
 export const isLimitWarning = (text: string): boolean => LIMIT_WARNING.test(text)
 

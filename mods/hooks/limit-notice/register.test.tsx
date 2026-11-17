@@ -41,5 +41,7 @@ test(
 test('it reads each limit window and leaves other percentages alone', async () => {
   expect(isLimitWarning(WARNING)).toBe(true)
   expect(isLimitWarning("You've used 90% of your session limit · resets 4pm")).toBe(true)
+  expect(isLimitWarning("You've used 90% of your Opus limit")).toBe(true)
+  expect(isLimitWarning("You've used 100% of your weekly limit · resets Nov 18")).toBe(false)
   expect(isLimitWarning('Context 75% full')).toBe(false)
 })

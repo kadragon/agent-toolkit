@@ -33,8 +33,8 @@ build and may break on an update; `dev` and `prod` do not depend on it.
 
 | Mod | Description | Setting |
 |---|---|---|
-| `status-band` | Two rows above the prompt, each figure in its own color: model and effort, directory and git branch, session time, prompt-cache time left, hook count and skill count with the size of the skill listing, then context fill and the 5-hour and 7-day rate limits with their resets. A figure the engine has no reading for is left out. | `Status band` (on by default), `Status band cache TTL (minutes)` (`60`) |
-| `limit-notice` | Hides the dim usage warning Claude Code shows as a rate-limit window fills (`You've used 75% of your weekly limit · resets … · Run /usage-credits …`); every other notice stays. | `Hide the usage-limit warning` (on by default) |
+| `status-band` | Up to three rows above the prompt, each figure in its own color: model and effort, directory and git branch, session time, prompt-cache time left, hook count, skill count with the size of the skill listing, MCP server count and, in a harness repo, the backlog queue depth, then context fill and the 5-hour and 7-day rate limits with their resets. A figure the engine has no reading for is left out. | `Status band` (on by default), `Status band cache TTL (minutes)` (`60`) |
+| `limit-notice` | Hides the dim usage warning Claude Code shows as a rate-limit window fills (`You've used 75% of your weekly limit · resets … · Run /usage-credits …`). A reached limit (100%) and every other notice still show. | `Hide the usage-limit warning` (on by default) |
 
 `status-band` shows what a `statusLine` command such as claude-hud
 (github.com/jarrodwatts/claude-hud, whose layout it follows) shows, so running both draws the same

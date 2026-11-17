@@ -18,7 +18,7 @@
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
-      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts, context fill, rate limits, a due harness-curate run, and — in a harness repo — the task cycle on the branch (contract, evidence, PR and CI, with a toast when CI settles) and the backlog queue depth above the prompt.",
+      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts with — in a harness repo — the backlog queue depth beside them, context fill, rate limits and a due harness-curate run above the prompt, in three rows.",
       "default": true
     },
     "statusBandCacheTtlMinutes": {
@@ -36,7 +36,7 @@
     "limitNoticeHidden": {
       "type": "boolean",
       "title": "Hide the usage-limit warning",
-      "description": "Hide the dim notice Claude Code shows as a usage window fills (\"You've used 75% of your weekly limit · resets … · Run /usage-credits …\"). Other notices stay. The status band still shows the rate-limit figures.",
+      "description": "Hide the dim notice Claude Code shows as a usage window fills (\"You've used 75% of your weekly limit · resets … · Run /usage-credits …\"). A limit reached (100%) and every other notice still show. With this on and the status band off, nothing shows the usage figures before the limit.",
       "default": true
     }
   }

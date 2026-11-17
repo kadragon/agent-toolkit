@@ -1,7 +1,7 @@
 import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { CiState, Cycle, StatusBand } from '../../types'
+import type { StatusBand } from '../../types'
 import {
   connectedServers,
   enabledPlugins,
@@ -11,16 +11,7 @@ import {
   manifestHooks,
   under,
 } from './count'
-import {
-  ciSettled,
-  isCycleCommand,
-  isFeatureBranch,
-  parseCiStatus,
-  parseInspect,
-  parsePr,
-  parseStrikes,
-  queueOf,
-} from './cycle'
+import { isQueueCommand, queueOf } from './queue'
 import {
   contextText,
   curateText,
@@ -30,7 +21,6 @@ import {
   mergedSegments,
   setupSegments,
   UNICODE,
-  workSegments,
 } from './format'
 import type { Glyphs, Segment } from './format'
 
@@ -47,18 +37,12 @@ const CURATE_SCRIPT = 'skills/harness-curate/scripts/record_run.py'
 const CURATE_DUE_PREFIX = 'HARNESS-CURATE DUE'
 const CURATE_EVERY_MS = 10 * MINUTE_MS
 const CURATE_TIMEOUT_MS = 10_000
-// The cycle on the branch and the queue, read off the same plugin's task-next
-// and task-review-cycle scripts: again after a command of the cycle's own,
-// else now and then; a pending CI is asked after more often, and a result that
-// settles it is announced.
+// The queue, read off the same plugin's task-next script: again after a
+// command that may move it, else now and then.
 const DEV_PLUGIN = CURATE_PLUGIN
-const CYCLE_SCRIPT = 'skills/task-next/scripts/cycle_state.py'
 const CANDIDATES_SCRIPT = 'skills/task-next/scripts/backlog_candidates.py'
-const HUB_SCRIPT = 'skills/task-review-cycle/scripts/hub.sh'
-const STRIKE_FILE_PREFIX = 'task-review-ci-strikes-'
-const WORK_EVERY_MS = 5 * MINUTE_MS
-const CI_EVERY_MS = 2 * MINUTE_MS
-const WORK_TIMEOUT_MS = 20_000
+const QUEUE_EVERY_MS = 5 * MINUTE_MS
+const QUEUE_TIMEOUT_MS = 20_000
 // The surfaces the engine raises the band above the prompt on.
 const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
@@ -85,15 +69,12 @@ type Live = {
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
-  // The cycle and the queue as last read; stale after a cycle command.
-  work: Work
-  isWorkStale: boolean
-  workCheckedAt?: number
-  ciCheckedAt?: number
-  workRead?: Promise<void>
+  // The queue as last read; stale after a command that may move it.
+  queue?: StatusBand['queue']
+  isQueueStale: boolean
+  queueCheckedAt?: number
+  queueRead?: Promise<void>
 }
-
-type Work = Pick<StatusBand, 'cycle' | 'queue'>
 
 type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
 
@@ -132,8 +113,7 @@ const readInstallPaths = async ($: EngineInterface): Promise<Record<string, stri
 }
 
 // Where the dev plugin is installed, when the settings switch it on.
-// A function declaration: the contract pane calls it with `$` past an import.
-export async function readDevRoot($: EngineInterface): Promise<string | undefined> {
+async function readDevRoot($: EngineInterface): Promise<string | undefined> {
   if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
 
   return (await readInstallPaths($))[DEV_PLUGIN]
@@ -167,76 +147,15 @@ const readCurateDue = async ($: EngineInterface): Promise<boolean> => {
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
 }
 
-const hub = async ($: EngineInterface, root: string, args: string[]): Promise<string> => {
-  const { exitCode, stdout } = await $.process.run(['bash', under(root, HUB_SCRIPT), ...args], {
-    timeoutMs: WORK_TIMEOUT_MS,
-  })
-
-  if (exitCode !== 0) throw new Error(`hub.sh ${args[0] ?? ''} failed`)
-
-  return stdout
-}
-
-// The PR's CI and its strike count, as ci-wait keeps them; a strike file that
-// is not there is none.
-const readCi = async (
-  $: EngineInterface,
-  root: string,
-  number: number,
-): Promise<{ ci: CiState; strikes: number }> => {
-  const ci = parseCiStatus(await hub($, root, ['ci-status', String(number)]))
-  const gitDir = await $.process
-    .run(['git', 'rev-parse', '--absolute-git-dir'], { timeoutMs: GIT_TIMEOUT_MS })
-    .then(run => (run.exitCode === 0 ? run.stdout.trim() : ''))
-    .catch(() => '')
-  const strikes =
-    gitDir === ''
-      ? 0
-      : parseStrikes(
-          await $.fs.read(under(gitDir, `${STRIKE_FILE_PREFIX}${number}`)).catch(() => undefined),
-        )
-
-  return { ci, strikes }
-}
-
-// The cycle archived for the branch, with its open PR: null off a feature
-// branch or where none is archived. A PR lookup that fails leaves the PR out.
-const readCycle = async ($: EngineInterface, root: string): Promise<Cycle | null> => {
-  const { exitCode, stdout } = await $.process.run(['git', 'branch', '--show-current'], {
-    timeoutMs: GIT_TIMEOUT_MS,
-  })
-
-  if (exitCode !== 0 || !isFeatureBranch(stdout.trim())) return null
-
-  const inspect = await python($, [under(root, CYCLE_SCRIPT), 'inspect'], {
-    timeoutMs: WORK_TIMEOUT_MS,
-  })
-
-  // No contract is a reading the script prints; a failed run is none.
-  if (inspect.exitCode !== 0) throw new Error('cycle_state.py inspect failed')
-
-  const cycle = parseInspect(inspect.stdout)
-
-  if (cycle === null) return null
-
-  const number = await hub($, root, ['pr-get'])
-    .then(parsePr)
-    .catch(() => undefined)
-
-  if (number === undefined) return cycle
-
-  return { ...cycle, pr: { number, ...(await readCi($, root, number)) } }
-}
-
 // The queue's depth, as task-next's Step 1 counts it: null with no backlog.
-const readQueue = async ($: EngineInterface, root: string): Promise<Work['queue']> => {
+const readQueue = async ($: EngineInterface, root: string): Promise<StatusBand['queue']> => {
   const cwd = await $.session.cwd()
   const backlog = under(cwd, 'backlog.md')
 
   if (!(await $.fs.exists(backlog))) return null
 
   const script = under(root, CANDIDATES_SCRIPT)
-  const init = { timeoutMs: WORK_TIMEOUT_MS }
+  const init = { timeoutMs: QUEUE_TIMEOUT_MS }
   const [groups, parked] = await Promise.all([
     python($, [script, '--tasks', under(cwd, 'tasks.md'), '--backlog', backlog, '--full-scan', '--json'], init),
     python($, [script, '--backlog', backlog, '--parked', '--json'], init),
@@ -351,83 +270,47 @@ const loadCurate = ($: EngineInterface, live: Live): void => {
     })
 }
 
-// The cycle and the queue run scripts and ask the hub, so they are read apart
-// from the counts: after a cycle command, else now and then, and the CI of a
-// pending PR in between. A read that fails keeps the last figures.
-const loadWork = ($: EngineInterface, live: Live): void => {
-  if (live.workRead !== undefined) return
+// The queue runs a script, so it is read apart from the counts: after a
+// command that may move it, else now and then. A read that fails keeps the
+// last figure.
+const loadQueue = ($: EngineInterface, live: Live): void => {
+  if (live.queueRead !== undefined) return
 
   const epoch = live.setupEpoch
 
-  live.workRead = (async () => {
+  live.queueRead = (async () => {
     const now = await $.clock.now()
 
     if (epoch !== live.setupEpoch) return
 
     const isDue =
-      live.isWorkStale ||
-      live.workCheckedAt === undefined ||
-      now - live.workCheckedAt >= WORK_EVERY_MS
-    const pending = live.work.cycle?.pr
-    const isCiDue =
-      pending?.ci === 'pending' &&
-      (live.ciCheckedAt === undefined || now - live.ciCheckedAt >= CI_EVERY_MS)
+      live.isQueueStale ||
+      live.queueCheckedAt === undefined ||
+      now - live.queueCheckedAt >= QUEUE_EVERY_MS
 
-    if (!isDue && !isCiDue) return
+    if (!isDue) return
 
-    // Marked read now, before anything slow: a cycle command that lands while
-    // this read runs marks it again, and nothing else re-runs it.
-    if (isDue) {
-      live.isWorkStale = false
-      live.workCheckedAt = now
-      live.ciCheckedAt = now
-    }
+    // Marked read now, before anything slow: a command that lands while this
+    // read runs marks it again, and nothing else re-runs it.
+    live.isQueueStale = false
+    live.queueCheckedAt = now
 
     const root = await readDevRoot($).catch(() => undefined)
 
     if (root === undefined) return
 
-    const before = live.work.cycle?.pr?.ci
-    let work: Work
+    const queue = await readQueue($, root).catch(() => undefined)
 
-    if (isDue) {
-      const [cycle, queue] = await Promise.all([
-        readCycle($, root).catch(() => undefined),
-        readQueue($, root).catch(() => undefined),
-      ])
+    if (epoch !== live.setupEpoch || queue === undefined) return
 
-      work = {
-        cycle: cycle === undefined ? live.work.cycle : cycle,
-        queue: queue === undefined ? live.work.queue : queue,
-      }
-    } else {
-      live.ciCheckedAt = now
-      const cycle = live.work.cycle
-
-      if (cycle === undefined || cycle === null || cycle.pr === undefined) return
-
-      const number = cycle.pr.number
-      const ci = await readCi($, root, number).catch(() => undefined)
-
-      work = { ...live.work, cycle: ci === undefined ? cycle : { ...cycle, pr: { number, ...ci } } }
-    }
-
-    if (epoch !== live.setupEpoch) return
-
-    live.work = work
-    const pr = work.cycle?.pr
-
-    if (pr !== undefined && ciSettled(before, pr.ci)) {
-      $.ui.toast(`PR #${pr.number} CI ${pr.ci === 'success' ? 'passed' : 'failed'}`)
-    }
-
-    await update($, statusBand, current => (current === null ? null : { ...current, ...work }))
+    live.queue = queue
+    await update($, statusBand, current => (current === null ? null : { ...current, queue }))
   })()
     .catch(() => undefined)
     .finally(() => {
-      live.workRead = undefined
-      // A reset or a cycle command came while this read ran: read again.
-      if (live.isWorkStale) loadWork($, live)
+      live.queueRead = undefined
+      // A reset or a queue command came while this read ran: read again.
+      if (live.isQueueStale) loadQueue($, live)
     })
 }
 
@@ -438,10 +321,9 @@ const resetSetup = (live: Live): void => {
   live.setupEpoch += 1
   // A run in the last session stamped its record: ask again.
   live.curateCheckedAt = undefined
-  live.work = {}
-  live.isWorkStale = true
-  live.workCheckedAt = undefined
-  live.ciCheckedAt = undefined
+  live.queue = undefined
+  live.isQueueStale = true
+  live.queueCheckedAt = undefined
 }
 
 // Only a response that read or wrote the prompt cache renews it.
@@ -521,8 +403,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         skills: live.hasSetup ? live.setup.skills : current?.skills,
         mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
-        cycle: live.hasSetup ? live.work.cycle : current?.cycle,
-        queue: live.hasSetup ? live.work.queue : current?.queue,
+        queue: live.hasSetup ? live.queue : current?.queue,
       }
     })
 
@@ -556,7 +437,7 @@ const watch = async ($: EngineInterface, live: Live): Promise<void> => {
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
     loadSetup($, live)
     loadCurate($, live)
-    loadWork($, live)
+    loadQueue($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -577,8 +458,7 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSetup: false,
     setupEpoch: 0,
-    work: {},
-    isWorkStale: true,
+    isQueueStale: true,
   }
 
   // Neither hook waits for the read: a slow git must not hold the session.
@@ -631,14 +511,13 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // A command of the cycle's own ran: the contract, the PR or the queue may
-  // have moved, so they are read again behind the call.
+  // A command that may move the queue ran: it is read again behind the call.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
 
-    if (isCycleCommand(e.command)) {
-      live.isWorkStale = true
-      loadWork($, live)
+    if (isQueueCommand(e.command)) {
+      live.isQueueStale = true
+      loadQueue($, live)
     }
 
     return ran
@@ -686,11 +565,6 @@ export const register: Register = (on, options) => {
 
 type BandElements = Pick<Elements['terminal'], 'Box' | 'Text'>
 
-const joinedRows = (first: Segment[], second: Segment[], glyphs: Glyphs): Segment[] =>
-  first.length === 0 || second.length === 0
-    ? [...first, ...second]
-    : [...first, { text: glyphs.separator, isDim: true }, ...second]
-
 const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
   segments.map((segment, index) => (
     <Text
@@ -704,9 +578,9 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
   ))
 
 // This mod's rows of the band above the prompt, under a blank row that keeps
-// them off the line above where the band has a row to spare. The setup gets a
-// row of its own where `isSplit`, else it rides on the headline; `glyphs` is
-// the set the rows draw beyond plain letters. `hooks/band.tsx`
+// them off the line above where the band has a row to spare. The setup, the
+// queue at its end, gets a row of its own where `isSplit`, else it rides on
+// the headline; `glyphs` is the set the rows draw beyond plain letters. `hooks/band.tsx`
 // draws them: the engine takes one band hook per plugin, and `$` stays in that
 // hook's file.
 export const statusRows = (
@@ -715,16 +589,11 @@ export const statusRows = (
   {
     hasMargin,
     isSplit,
-    hasWorkRow = false,
     glyphs = UNICODE,
-  }: { hasMargin: boolean; isSplit: boolean; hasWorkRow?: boolean; glyphs?: Glyphs },
+  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs },
 ): RenderElement => {
   const { Box, Text } = elements
-  const work = workSegments(status, glyphs)
-  // Without a row of its own, the work rides on the setup row (or, merged, the headline).
-  const setup = isSplit
-    ? joinedRows(setupSegments(status, glyphs), hasWorkRow ? [] : work, glyphs)
-    : []
+  const setup = isSplit ? setupSegments(status, glyphs) : []
   const context = contextText(status, glyphs)
   const limits = limitsSegments(status, glyphs)
   const curate = curateText(status)
@@ -734,15 +603,10 @@ export const statusRows = (
       <Text wrap="truncate-end">
         {runs(
           elements,
-          isSplit
-            ? headlineSegments(status, glyphs)
-            : joinedRows(mergedSegments(status, glyphs), work, glyphs),
+          isSplit ? headlineSegments(status, glyphs) : mergedSegments(status, glyphs),
         )}
       </Text>
       {setup.length === 0 ? null : <Text wrap="truncate-end">{runs(elements, setup)}</Text>}
-      {hasWorkRow && work.length > 0 ? (
-        <Text wrap="truncate-end">{runs(elements, work)}</Text>
-      ) : null}
       {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
           {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
