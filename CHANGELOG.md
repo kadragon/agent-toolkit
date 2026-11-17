@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] docs: mods session.start lives in register.ts; $ crosses files only into function declarations (2026-11-17) → docs/architecture.md
 - [done] mods status-band register.tsx gains a SECTION MAP held to its functions by check_mods.py (mods v1.1.2) (2026-11-17) → docs/runbook.md
 - [done] mods status band drops the backlog queue and its Bash tool.call hook, so Code Mode can load (mods v1.1.1) (2026-11-17)
 - [done] mods adds the agent-flow pane: /flow shows this session's subagents as a live tree (mods v1.1.0) (2026-11-17) → docs/architecture.md
