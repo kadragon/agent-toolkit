@@ -29,63 +29,10 @@ export type StatusBand = {
   queue?: Queue | null
 }
 
-export type FileChange = {
-  path: string
-  added: number
-  deleted: number
-  isBinary: boolean
-}
-
-// One merged PR as the first-parent git log of HEAD records it.
-export type Pr = {
-  number: number
-  sha: string
-  // The `[FEAT]`-style tag the title opens with, without brackets.
-  tag?: string
-  title: string
-  author: string
-  mergedAt: number
-  // The commit body's paragraphs, trailers dropped.
-  summary: string[]
-  files: FileChange[]
-}
-
-// What the pr-recap pane read last; `error` when git could not answer.
-export type PrRecap = { prs: Pr[]; readAt: number; error?: string }
-
-export type NodeChange = 'added' | 'changed' | 'removed' | 'same'
-
-// One box of the structure diagram, top to bottom in the order work flows.
-export type ExplainNode = {
-  name: string
-  // What the PR did to it, or what it does here.
-  note: string
-  change: NodeChange
-  // How it hands over to the next box; empty on the last.
-  link: string
-}
-
-// What the model made of a PR: plain sentences and the diagram's boxes.
-export type PrExplain = { summary: string; nodes: ExplainNode[] }
-
-// The explanation of the latest PR, by its commit, as far as it has got.
-export type PrRecapExplain = {
-  sha: string
-  status: 'pending' | 'ready' | 'failed'
-  explain?: PrExplain
-}
-
-// The PR the pane shows, by its commit, and the latest PR when it was chosen;
-// the latest is shown when unset.
-export type PrRecapView = { sha: string; latest: string }
-
 declare module 'claude-code' {
   interface PluginState {
     mods: {
       statusBand: StatusBand | null
-      prRecap: Shaped<PrRecap | null>
-      prRecapExplain: Shaped<PrRecapExplain | null>
-      prRecapView: Shaped<PrRecapView | null>
     }
   }
 }

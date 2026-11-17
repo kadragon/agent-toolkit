@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.9.4",
+  "version": "1.0.0",
   "author": {
     "name": "kadragon"
   },
@@ -33,16 +33,10 @@
       "description": "Draw the status band's separators, effort mark, context bar and cut branch names in ASCII, for a terminal that leaves stale cells or broken glyphs behind on redraw (Wave on Windows).",
       "default": false
     },
-    "prRecapEnabled": {
+    "limitNoticeHidden": {
       "type": "boolean",
-      "title": "PR recap pane",
-      "description": "Open a side pane (about a quarter of the terminal) with the latest merged PR of the branch history: its numbers, a plain-language summary and a top-to-bottom diagram of the parts it touches, made once per commit by a small model (Haiku) and kept. With the pane focused, p and n step to the older and newer of the last 20 PRs. It rereads after a git merge, pull or checkout. /pr-recap opens it again.",
-      "default": true
-    },
-    "prRecapExplain": {
-      "type": "boolean",
-      "title": "PR recap summary by Haiku",
-      "description": "Let the PR recap pane send each PR it shows: its commit message, file list and diff (cut at 16k characters) to Haiku through your Claude account, once per commit, for its plain summary and diagram. Off, nothing leaves the machine and the pane shows the commit message instead.",
+      "title": "Hide the usage-limit warning",
+      "description": "Hide the dim notice Claude Code shows as a usage window fills (\"You've used 75% of your weekly limit · resets … · Run /usage-credits …\"). A limit reached (100%) and every other notice still show. With this on and the status band off, nothing shows the usage figures before the limit.",
       "default": true
     }
   }
