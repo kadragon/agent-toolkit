@@ -35,6 +35,7 @@ build and may break on an update; `dev` and `prod` do not depend on it.
 |---|---|---|
 | `status-band` | Up to three rows above the prompt, each figure in its own color: model and effort, directory and git branch, session time, prompt-cache time left, hook count, skill count with the size of the skill listing, MCP server count and, in a harness repo, the backlog queue depth, then context fill and the 5-hour and 7-day rate limits with their resets. A figure the engine has no reading for is left out. | `Status band` (on by default), `Status band cache TTL (minutes)` (`60`) |
 | `limit-notice` | Hides the dim usage warning Claude Code shows as a rate-limit window fills (`You've used 75% of your weekly limit · resets … · Run /usage-credits …`). A reached limit (100%) and every other notice still show. | `Hide the usage-limit warning` (on by default) |
+| `agent-flow` | `/flow` opens a pane with this session's subagents as a live tree, each nested under the agent that started it: a status mark (● running, ◐ waiting, ✓ done, ✗ failed), its type and task, elapsed time and tokens, and the first line of a running agent's progress. It reads the agent list every two seconds while the pane is open; the status band's ASCII setting draws it in plain marks too. | `Agent flow pane` (on by default) |
 
 `status-band` shows what a `statusLine` command such as claude-hud
 (github.com/jarrodwatts/claude-hud, whose layout it follows) shows, so running both draws the same
