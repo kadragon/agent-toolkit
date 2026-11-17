@@ -11,7 +11,6 @@ import {
   manifestHooks,
   under,
 } from './count'
-import { isQueueCommand, queueOf } from './queue'
 import {
   contextText,
   curateText,
@@ -37,12 +36,7 @@ const CURATE_SCRIPT = 'skills/harness-curate/scripts/record_run.py'
 const CURATE_DUE_PREFIX = 'HARNESS-CURATE DUE'
 const CURATE_EVERY_MS = 10 * MINUTE_MS
 const CURATE_TIMEOUT_MS = 10_000
-// The queue, read off the same plugin's task-next script: again after a
-// command that may move it, else now and then.
 const DEV_PLUGIN = CURATE_PLUGIN
-const CANDIDATES_SCRIPT = 'skills/task-next/scripts/backlog_candidates.py'
-const QUEUE_EVERY_MS = 5 * MINUTE_MS
-const QUEUE_TIMEOUT_MS = 20_000
 // The surfaces the engine raises the band above the prompt on.
 const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
@@ -69,11 +63,6 @@ type Live = {
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
-  // The queue as last read; stale after a command that may move it.
-  queue?: StatusBand['queue']
-  isQueueStale: boolean
-  queueCheckedAt?: number
-  queueRead?: Promise<void>
 }
 
 type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
@@ -146,25 +135,6 @@ async function readCurateDue($: EngineInterface): Promise<boolean> {
   )
 
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
-}
-
-// The queue's depth, as task-next's Step 1 counts it: null with no backlog.
-async function readQueue($: EngineInterface, root: string): Promise<StatusBand['queue']> {
-  const cwd = await $.session.cwd()
-  const backlog = under(cwd, 'backlog.md')
-
-  if (!(await $.fs.exists(backlog))) return null
-
-  const script = under(root, CANDIDATES_SCRIPT)
-  const init = { timeoutMs: QUEUE_TIMEOUT_MS }
-  const [groups, parked] = await Promise.all([
-    python($, [script, '--tasks', under(cwd, 'tasks.md'), '--backlog', backlog, '--full-scan', '--json'], init),
-    python($, [script, '--backlog', backlog, '--parked', '--json'], init),
-  ])
-
-  if (groups.exitCode !== 0 || parked.exitCode !== 0) throw new Error('backlog_candidates.py failed')
-
-  return queueOf(groups.stdout, parked.stdout)
 }
 
 // The hook handlers in force: the settings' own and every enabled plugin's.
@@ -271,50 +241,6 @@ function loadCurate($: EngineInterface, live: Live): void {
     })
 }
 
-// The queue runs a script, so it is read apart from the counts: after a
-// command that may move it, else now and then. A read that fails keeps the
-// last figure.
-function loadQueue($: EngineInterface, live: Live): void {
-  if (live.queueRead !== undefined) return
-
-  const epoch = live.setupEpoch
-
-  live.queueRead = (async () => {
-    const now = await $.clock.now()
-
-    if (epoch !== live.setupEpoch) return
-
-    const isDue =
-      live.isQueueStale ||
-      live.queueCheckedAt === undefined ||
-      now - live.queueCheckedAt >= QUEUE_EVERY_MS
-
-    if (!isDue) return
-
-    // Marked read now, before anything slow: a command that lands while this
-    // read runs marks it again, and nothing else re-runs it.
-    live.isQueueStale = false
-    live.queueCheckedAt = now
-
-    const root = await readDevRoot($).catch(() => undefined)
-
-    if (root === undefined) return
-
-    const queue = await readQueue($, root).catch(() => undefined)
-
-    if (epoch !== live.setupEpoch || queue === undefined) return
-
-    live.queue = queue
-    await update($, statusBand, current => (current === null ? null : { ...current, queue }))
-  })()
-    .catch(() => undefined)
-    .finally(() => {
-      live.queueRead = undefined
-      // A reset or a queue command came while this read ran: read again.
-      if (live.isQueueStale) loadQueue($, live)
-    })
-}
-
 // The counts were another session's: they are left out until read again.
 const resetSetup = (live: Live): void => {
   live.setup = {}
@@ -322,9 +248,6 @@ const resetSetup = (live: Live): void => {
   live.setupEpoch += 1
   // A run in the last session stamped its record: ask again.
   live.curateCheckedAt = undefined
-  live.queue = undefined
-  live.isQueueStale = true
-  live.queueCheckedAt = undefined
 }
 
 // Only a response that read or wrote the prompt cache renews it.
@@ -404,7 +327,6 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
         skills: live.hasSetup ? live.setup.skills : current?.skills,
         mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
-        queue: live.hasSetup ? live.queue : current?.queue,
       }
     })
 
@@ -438,7 +360,6 @@ async function watch($: EngineInterface, live: Live): Promise<void> {
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
     loadSetup($, live)
     loadCurate($, live)
-    loadQueue($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -474,7 +395,6 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSetup: false,
     setupEpoch: 0,
-    isQueueStale: true,
   }
 
   loaded.live = live
@@ -517,18 +437,6 @@ export const register: Register = (on, options) => {
     void watch($, live)
 
     return result
-  })
-
-  // A command that may move the queue ran: it is read again behind the call.
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const ran = await next(e)
-
-    if (isQueueCommand(e.command)) {
-      live.isQueueStale = true
-      loadQueue($, live)
-    }
-
-    return ran
   })
 
   // The request is passed on untouched: only its effort is read, and a
@@ -586,9 +494,8 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
   ))
 
 // This mod's rows of the band above the prompt, under a blank row that keeps
-// them off the line above where the band has a row to spare. The setup, the
-// queue at its end, gets a row of its own where `isSplit`, else it rides on
-// the headline; `glyphs` is the set the rows draw beyond plain letters. `hooks/band.tsx`
+// them off the line above where the band has a row to spare. The setup gets
+// a row of its own where `isSplit`, else it rides on the headline; `glyphs` is the set the rows draw beyond plain letters. `hooks/band.tsx`
 // draws them: the engine takes one band hook per plugin, and `$` stays in that
 // hook's file.
 export const statusRows = (

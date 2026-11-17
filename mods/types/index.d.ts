@@ -1,11 +1,3 @@
-// What the queue holds, as task-next's candidate script counts it.
-export type Queue = {
-  // Candidate groups a `--full-scan` lists.
-  groups: number
-  // Open items a blocked/deferred marker parks.
-  parked: number
-}
-
 export type StatusBand = {
   model: string
   effort?: string | number
@@ -25,8 +17,6 @@ export type StatusBand = {
   mcp?: number
   // A harness-curate run is due in this repo, as the dev plugin judges it.
   curateDue?: boolean
-  // The queue's depth; null once read and found no backlog.
-  queue?: Queue | null
 }
 
 // One subagent as the agent-flow pane draws it, from `$.agent.list()`.

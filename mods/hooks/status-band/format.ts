@@ -151,24 +151,7 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
   )
 }
 
-// The queue's depth; a queue read and found empty is a figure.
-export const queueSegments = (status: StatusBand): Segment[] => {
-  const queue = status.queue
-
-  if (queue === undefined || queue === null) return []
-
-  const groups: Segment = {
-    text: `queue ${queue.groups}`,
-    color: queue.groups === 0 ? undefined : 'suggestion',
-    isDim: queue.groups === 0,
-  }
-
-  return queue.parked === 0
-    ? [groups]
-    : [groups, { text: ` (${queue.parked} parked)`, color: 'warning' }]
-}
-
-// The cache countdown, what the session is set up with and the queue, on a row of their own.
+// The cache countdown and what the session is set up with, on a row of their own.
 export const setupSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] => {
   const cache = cacheText(status)
 
@@ -190,7 +173,6 @@ export const setupSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Seg
       status.mcp === undefined || status.mcp === 0
         ? []
         : [{ text: `${status.mcp} mcp`, color: 'ide' }],
-      queueSegments(status),
     ],
     glyphs.separator,
   )
