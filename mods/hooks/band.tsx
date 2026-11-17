@@ -1,7 +1,6 @@
 import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { noteTerminalColumns } from './pr-recap/register'
 import { ASCII, setupSegments, UNICODE, workSegments } from './status-band/format'
 import { statusRows } from './status-band/register'
 
@@ -21,15 +20,10 @@ const WORK_ROWS = STATUS_ROWS + 1
 export const register: Register = (on, options) => {
   // `$.state` outlives a reload, so a mod switched off mid-session still has its
   // last value there: the option decides, not the value.
-  const isStatusBandOn = options.statusBandEnabled !== false
-  const isPrRecapOn = options.prRecapEnabled !== false
-
-  if (!isStatusBandOn && !isPrRecapOn) return
+  if (options.statusBandEnabled === false) return
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    // The band spans the terminal: the pr-recap pane sizes its dock off it.
-    if (isPrRecapOn) noteTerminalColumns($, e.viewport?.columns)
-    if (!isStatusBandOn || e.props.hasSurvey || MIN_STATUS_ROWS > e.props.maxRows) return next(e)
+    if (e.props.hasSurvey || MIN_STATUS_ROWS > e.props.maxRows) return next(e)
 
     const status = await read($, statusBand)
 

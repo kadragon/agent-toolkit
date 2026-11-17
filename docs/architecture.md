@@ -37,10 +37,9 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
   hooks/
     hooks.json                 # names the one hooks module the engine loads
     register.ts                # entry: calls each mod's register by name
-    band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows, hands pr-recap the width
+    band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows
     status-band/               # one directory per mod: register.tsx, pure logic, *.test.ts(x)
-    pr-recap/                  # side pane of the latest PR, model-made summary + diagram; boots off the band's first drawing
-    contract-pane/             # Sprint Contract section on top of the pr-recap pane: criteria marked by recorded evidence
+    limit-notice/              # hides the engine's usage-limit warning notice
   types/index.d.ts             # $.state contract for every mod
 
 .claude/
