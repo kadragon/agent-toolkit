@@ -23,6 +23,16 @@ import {
 } from './format'
 import type { Glyphs, Segment } from './format'
 
+// ---- SECTION MAP ----
+// Read this file in ranges, not whole: find a name with `grep -n '<name>'` and read only
+// its range. Pure counting and text helpers live in count.ts and format.ts. The names
+// below are checked against the real top-level functions by `scripts/check_mods.py`.
+//   setup reads (plugins, hooks, skills, MCP, curate due): pluginHooks, readInstallPaths, readDevRoot, python, readCurateDue, countHooks, readContext
+//   setup loads and reset: loadSetup, loadCurate, resetSetup
+//   live refresh (git, cache window, tick): isCached, refresh, watch
+//   entry points (register holds every on(...) hook handler): startStatusBand, register
+//   rendering the band rows: runs, statusRows
+
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
 // The elapsed time and the reset countdowns read in minutes.
 const TICK_MS = 60_000
