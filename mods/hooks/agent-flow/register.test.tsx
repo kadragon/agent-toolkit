@@ -68,6 +68,7 @@ const world = (on: On): World => {
     return { value: state.agents }
   })
   on('clock.now', async () => ({ value: state.now }))
+  on('agent.spawn', async () => ({ model: 'claude-haiku-5-5', agentId: 'a' }))
   // A period ends when the test says so.
   on('clock.every', async () => {
     await new Promise<void>(resolve => state.ticks.push(resolve))
@@ -122,7 +123,8 @@ test('/flow opens the pane with the agents as a tree, on every surface', OPTIONS
     expect(lines.find(line => line.includes('map the mods'))).toBe('● Explore · map the mods 1m05s · 12k tok')
     expect(lines).toContain('  reading band.tsx')
     expect(lines.find(line => line.includes('task a1'))).toBe('└ ● general-purpose · task a1 10s · 800 tok')
-    expect(lines.find(line => line.includes('task b'))).toBe('✓ Explore · task b 5s · 12k tok')
+    // It ended before anything read it: its time is unknown.
+    expect(lines.find(line => line.includes('task b'))).toBe('✓ Explore · task b 12k tok')
   }
 })
 
@@ -133,22 +135,60 @@ test('the pane says so when the session has no subagents', OPTIONS, async ($, on
   expect(await texts($)).toEqual(['No subagents in this session yet.'])
 })
 
-test('a tick reads the agents only once the pane is open', OPTIONS, async ($, on) => {
+test('after a spawn a tick reads with the pane closed, so an unwatched end is stamped', OPTIONS, async ($, on) => {
   const state = world(on)
 
   await start($)
   state.ticks.shift()?.()
   await settle()
 
+  // No agent spawned yet: nothing polls.
   expect(state.reads).toBe(0)
 
-  await open($)
   state.agents = [info('a')]
-  state.now = NOW + 1000
+  await $.agent.spawn({
+    tool_use_id: 'toolu_1',
+    prompt: 'map the mods',
+    description: 'task a',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: false,
+    fork: false,
+  })
+  await settle()
   state.ticks.shift()?.()
   await settle()
 
-  expect((await texts($)).find(line => line.includes('task a'))).toBe('● Explore · task a 1m06s · 12k tok')
+  expect(state.reads).toBe(2)
+
+  state.agents = [info('a', { status: 'completed' })]
+  state.now = NOW + 2000
+  state.ticks.shift()?.()
+  await settle()
+  state.now = NOW + 60 * 60_000
+  await open($)
+
+  expect((await texts($)).find(line => line.includes('task a'))).toBe('✓ Explore · task a 1m07s · 12k tok')
+})
+
+test('a pane too short for the tree keeps the running agents', OPTIONS, async ($, on) => {
+  const state = world(on)
+
+  state.agents = [
+    info('old', { status: 'completed', startTime: NOW - 90_000 }),
+    info('a', { label: 'reading band.tsx' }),
+    info('b', { label: 'writing tree.ts' }),
+  ]
+  await open($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 6 } } })
+  const lines = (await ui.findAll({ type: 'Text' })).map(text => text.text)
+
+  await ui.unmount()
+
+  expect(lines.some(line => line.includes('task old'))).toBe(false)
+  expect(lines).toContain('  writing tree.ts')
+  expect(lines).toContain('  reading band.tsx')
 })
 
 test('the ASCII setting draws plain marks', { options: { ...OPTIONS.options, statusBandAscii: true } }, async ($, on) => {

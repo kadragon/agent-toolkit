@@ -109,9 +109,14 @@ export function elapsedText(ms: number): string {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`
 }
 
+// The unit is picked after rounding, so 9,999 reads 10k and 999,600 reads 1.0M.
 export function tokensText(tokens: number): string {
   if (tokens < 1000) return `${tokens}`
-  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k`
+
+  const thousands = tokens / 1000
+
+  if (Math.round(thousands * 10) < 100) return `${thousands.toFixed(1)}k`
+  if (Math.round(thousands) < 1000) return `${Math.round(thousands)}k`
 
   return `${(tokens / 1_000_000).toFixed(1)}M`
 }
@@ -127,20 +132,50 @@ export function summaryText(agents: readonly FlowAgent[], glyphs: FlowGlyphs): s
 }
 
 // The agents of a new reading, each carrying the end time an earlier reading
-// stamped. One seen ended at its first reading is stamped then: its time runs a
-// little long, never on.
+// stamped. The readings run every tick of the session, so an agent seen ending
+// is stamped within a tick of it; one already ended at its first reading (it
+// ended before this load read anything) gets no end time: its time is unknown.
 export function mergeAgents(previous: readonly FlowAgent[], infos: readonly AgentInfo[], now: number): FlowAgent[] {
   const before = new Map(previous.map(agent => [agent.id, agent]))
 
   return infos.map(info => {
     const agent = toFlowAgent(info)
+    const seen = before.get(agent.id)
 
-    if (isActive(agent.status)) return agent
+    if (isActive(agent.status) || seen === undefined) return agent
 
-    return { ...agent, endTime: before.get(agent.id)?.endTime ?? now }
+    const endTime = seen.endTime ?? (isActive(seen.status) ? now : undefined)
+
+    return endTime === undefined ? agent : { ...agent, endTime }
   })
 }
 
-// An agent's elapsed time: up to now while it runs, frozen at the last reading
-// that saw it run once it ended (the engine keeps no end time).
-export const elapsedOf = (agent: FlowAgent, now: number): number => (agent.endTime ?? now) - agent.startTime
+// An agent's elapsed time: up to now while it runs, up to its stamped end once
+// it ended; unknown for one that ended unseen.
+export function elapsedOf(agent: FlowAgent, now: number): number | undefined {
+  if (isActive(agent.status)) return now - agent.startTime
+
+  return agent.endTime === undefined ? undefined : agent.endTime - agent.startTime
+}
+
+// The lines one row draws: a running agent's progress line is a second one.
+export const linesOf = (row: FlowRow): number => (isActive(row.agent.status) && row.agent.label !== undefined ? 2 : 1)
+
+// The rows that fit in `room` lines, tree order kept: finished agents give way
+// first, the earliest started first, then the earliest rows of what is left.
+export function fitRows(rows: readonly FlowRow[], room: number): FlowRow[] {
+  const total = (list: readonly FlowRow[]) => list.reduce((sum, row) => sum + linesOf(row), 0)
+  let kept = [...rows]
+  const finished = rows
+    .filter(row => !isActive(row.agent.status))
+    .sort((a, b) => a.agent.startTime - b.agent.startTime)
+
+  for (const row of finished) {
+    if (total(kept) <= room) break
+    kept = kept.filter(one => one !== row)
+  }
+
+  while (kept.length > 0 && total(kept) > room) kept = kept.slice(1)
+
+  return kept
+}

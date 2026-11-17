@@ -6,6 +6,7 @@ import {
   ASCII_FLOW,
   elapsedOf,
   elapsedText,
+  fitRows,
   flowRows,
   mergeAgents,
   summaryText,
@@ -65,16 +66,36 @@ test('an agent keeps the first progress line that differs from its description',
   expect('parentId' in toFlowAgent(info('a'))).toBe(false)
 })
 
-test('an ended agent is stamped once and keeps that end time', () => {
+test('an agent seen ending is stamped once; one already ended when first seen is not', () => {
   const first = mergeAgents([], [info('a', { status: 'completed' }), info('b')], 5000)
 
-  expect(first.map(one => one.endTime)).toEqual([5000, undefined])
+  expect(first.map(one => one.endTime)).toEqual([undefined, undefined])
 
   const second = mergeAgents(first, [info('a', { status: 'completed' }), info('b', { status: 'failed' })], 9000)
 
-  expect(second.map(one => one.endTime)).toEqual([5000, 9000])
-  expect(second[0] === undefined ? undefined : elapsedOf(second[0], 20_000)).toBe(4000)
+  expect(second.map(one => one.endTime)).toEqual([undefined, 9000])
+
+  const third = mergeAgents(second, [info('b', { status: 'failed' })], 13_000)
+
+  expect(third[0]?.endTime).toBe(9000)
+  expect(third[0] === undefined ? undefined : elapsedOf(third[0], 20_000)).toBe(8000)
+  expect(second[0] === undefined ? 0 : elapsedOf(second[0], 20_000)).toBeUndefined()
   expect(elapsedOf(agent('r', 1000), 20_000)).toBe(19_000)
+})
+
+test('a tree taller than the pane drops finished agents first, then its earliest rows', () => {
+  const rows = flowRows([
+    agent('a', 1, { label: 'reading' }),
+    agent('a1', 2, { parentId: 'a', status: 'completed' }),
+    agent('b', 3, { status: 'completed' }),
+    agent('c', 4, { label: 'writing' }),
+  ])
+  const ids = (room: number) => fitRows(rows, room).map(row => row.agent.id)
+
+  expect(ids(6)).toEqual(['a', 'a1', 'b', 'c'])
+  expect(ids(5)).toEqual(['a', 'b', 'c'])
+  expect(ids(4)).toEqual(['a', 'c'])
+  expect(ids(3)).toEqual(['c'])
 })
 
 test('elapsed time and tokens read short', () => {
@@ -84,7 +105,9 @@ test('elapsed time and tokens read short', () => {
   expect(elapsedText(3_660_000)).toBe('1h01m')
   expect(tokensText(999)).toBe('999')
   expect(tokensText(1250)).toBe('1.3k')
+  expect(tokensText(9_999)).toBe('10k')
   expect(tokensText(45_600)).toBe('46k')
+  expect(tokensText(999_600)).toBe('1.0M')
   expect(tokensText(2_340_000)).toBe('2.3M')
 })
 

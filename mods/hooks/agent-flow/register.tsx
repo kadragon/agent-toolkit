@@ -6,6 +6,7 @@ import {
   ASCII_FLOW,
   elapsedOf,
   elapsedText,
+  fitRows,
   flowRows,
   isActive,
   mergeAgents,
@@ -36,45 +37,48 @@ const COLORS: Record<FlowAgent['status'], string | undefined> = {
   killed: 'error',
 }
 
-// What one load of the module keeps; a reload asks the engine again whether the
-// pane is open.
-const live: { isEnabled: boolean; isOpen: boolean; tick?: { cancel: () => void } } = {
-  isEnabled: false,
-  isOpen: false,
-}
+// What one load of the module keeps.
+const live: { isEnabled: boolean; tick?: { cancel: () => void } } = { isEnabled: false }
 
+// Never throws: a timer and a spawn hook start it unawaited.
 export async function readAgents($: EngineInterface): Promise<void> {
-  const infos = await $.agent.list().catch(() => undefined)
+  try {
+    const infos = await $.agent.list()
+    const now = await $.clock.now()
 
-  if (infos === undefined) return
+    await update($, flowAtom, previous => {
+      // A slower read that started earlier does not move the reading back.
+      if (previous !== null && now < previous.readAt) return previous
 
-  const now = await $.clock.now()
+      const agents = mergeAgents(previous?.agents ?? [], infos, now)
+      const isSame = previous !== null && JSON.stringify(previous.agents) === JSON.stringify(agents)
 
-  await update($, flowAtom, previous => {
-    const agents = mergeAgents(previous?.agents ?? [], infos, now)
-    const isSame = previous !== null && JSON.stringify(previous.agents) === JSON.stringify(agents)
+      // A still reading writes nothing, unless an agent runs and its time moves.
+      if (isSame && !agents.some(agent => isActive(agent.status))) return previous
 
-    // A still reading writes nothing, unless an agent runs and its time moves.
-    if (isSame && !agents.some(agent => isActive(agent.status))) return previous
-
-    return { agents, readAt: now }
-  })
+      return { agents, readAt: now }
+    })
+  } catch {
+    // Nothing read: the pane keeps its last reading.
+  }
 }
 
+// From the first spawn (or /flow) every tick reads, open pane or not, so an
+// agent that ends unwatched is stamped within a tick of it; a session that
+// starts no agent polls nothing, and a still reading writes nothing.
 function startTick($: EngineInterface) {
-  live.tick ??= $.clock.every(TICK_MS, () => {
-    if (live.isOpen) void readAgents($)
-  })
+  live.tick ??= $.clock.every(TICK_MS, () => void readAgents($))
 }
 
 // The engine takes one session.start hook per plugin, and register.ts holds it.
 export async function startAgentFlow($: EngineInterface): Promise<void> {
   if (!live.isEnabled) return
 
-  await $.command.register({ name: COMMAND, description: 'Show the subagents of this session as a live tree' })
-  // After a reload the pane may still be open: keep reading for it.
-  live.isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === PANE)
-  startTick($)
+  // A refused registration (a /clear raises the start again) must not fail the
+  // plugin's one session.start hook.
+  await $.command
+    .register({ name: COMMAND, description: 'Show the subagents of this session as a live tree' })
+    .catch(() => undefined)
 }
 
 export const register: Register = (on, options) => {
@@ -84,7 +88,6 @@ export const register: Register = (on, options) => {
   const glyphs = options.statusBandAscii === true ? ASCII_FLOW : UNICODE_FLOW
 
   on('command.run', { command: COMMAND }, async $ => {
-    live.isOpen = true
     startTick($)
     await readAgents($)
     await $.ui.open({ id: PANE, title: TITLE })
@@ -92,17 +95,12 @@ export const register: Register = (on, options) => {
     return { text: 'Agent flow pane opened.' }
   })
 
-  on('ui.close', async ($, e, next) => {
-    if (e.id === PANE) live.isOpen = false
-
-    return next(e)
-  })
-
   // A new agent shows at once, not on the next tick.
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
 
-    if (live.isOpen) void readAgents($)
+    startTick($)
+    void readAgents($)
 
     return started
   })
@@ -121,9 +119,8 @@ export const register: Register = (on, options) => {
     }
 
     const room = Math.max(1, (e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24) - HEADER_ROWS)
-    const rows = flowRows(agents)
-    // The newest rows win when the tree outgrows the pane.
-    const shown = rows.length > room ? rows.slice(rows.length - room) : rows
+    // A tree taller than the pane drops finished agents first.
+    const shown = fitRows(flowRows(agents), room)
 
     return (
       <Box flexDirection="column">
@@ -132,7 +129,8 @@ export const register: Register = (on, options) => {
         {shown.map(({ agent, depth }) => {
           const indent = depth === 0 ? '' : `${'  '.repeat(depth - 1)}${glyphs.branch}`
           const isDone = !isActive(agent.status)
-          const figures = `${elapsedText(elapsedOf(agent, flow.readAt))}${glyphs.sep}${tokensText(agent.tokens)} tok`
+          const elapsed = elapsedOf(agent, flow.readAt)
+          const figures = `${elapsed === undefined ? '' : `${elapsedText(elapsed)}${glyphs.sep}`}${tokensText(agent.tokens)} tok`
 
           return (
             <Box key={agent.id} flexDirection="column">
