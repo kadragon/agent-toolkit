@@ -13,7 +13,7 @@ import {
 } from './count'
 import { isQueueCommand, queueOf } from './queue'
 import {
-  contextText,
+  contextSegments,
   curateText,
   headlineSegments,
   levelOf,
@@ -76,7 +76,7 @@ type Live = {
   queueRead?: Promise<void>
 }
 
-type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
+type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue' | 'contextParts'>
 
 // The handlers a plugin's default hooks file, its manifest and the files the
 // manifest names add; a file that is not there adds none.
@@ -190,9 +190,11 @@ const countHooks = async ($: EngineInterface): Promise<number> => {
   return counts.reduce((total, count) => total + count, own)
 }
 
-// The skill listing and the MCP servers as /context counts them, estimated
-// locally: no request is sent.
-const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> => {
+// The skill listing, the MCP servers and what fills the window as /context
+// counts them, estimated locally: no request is sent.
+const readContext = async (
+  $: EngineInterface,
+): Promise<Pick<StatusBand, 'skills' | 'mcp' | 'contextParts'>> => {
   const { context } = await $.session.usage({ breakdown: 'summary' })
   const breakdown = context.breakdown
 
@@ -203,6 +205,9 @@ const readContext = async ($: EngineInterface): Promise<Pick<StatusBand, 'skills
   return {
     skills: skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens },
     mcp: connectedServers(breakdown.mcpTools),
+    contextParts: (breakdown.categories ?? []).flatMap(({ kind, tokens, color }) =>
+      kind === 'deferred' ? [] : [{ kind, tokens, color }],
+    ),
   }
 }
 
@@ -226,6 +231,7 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
       hooks: hooks ?? live.setup.hooks,
       skills: context?.skills ?? live.setup.skills,
       mcp: context?.mcp ?? live.setup.mcp,
+      contextParts: context?.contextParts ?? live.setup.contextParts,
     }
 
     live.setup = { ...live.setup, ...setup }
@@ -402,6 +408,7 @@ const refresh = async ($: EngineInterface, live: Live): Promise<void> => {
         hooks: live.hasSetup ? live.setup.hooks : current?.hooks,
         skills: live.hasSetup ? live.setup.skills : current?.skills,
         mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
+        contextParts: live.hasSetup ? live.setup.contextParts : current?.contextParts,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
         queue: live.hasSetup ? live.queue : current?.queue,
       }
@@ -594,7 +601,8 @@ export const statusRows = (
 ): RenderElement => {
   const { Box, Text } = elements
   const setup = isSplit ? setupSegments(status, glyphs) : []
-  const context = contextText(status, glyphs)
+  const contextRuns = contextSegments(status, glyphs)
+  const context = contextRuns.map(segment => segment.text).join('')
   const limits = limitsSegments(status, glyphs)
   const curate = curateText(status)
 
@@ -609,7 +617,9 @@ export const statusRows = (
       {setup.length === 0 ? null : <Text wrap="truncate-end">{runs(elements, setup)}</Text>}
       {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
-          {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
+          {context === '' ? null : (
+            <Text color={levelOf(status.contextPercent)}>{runs(elements, contextRuns)}</Text>
+          )}
           {limits.length === 0 ? null : (
             <Text wrap="truncate-end">
               {context === '' ? null : <Text dimColor>{glyphs.separator}</Text>}

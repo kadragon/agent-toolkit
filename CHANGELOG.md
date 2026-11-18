@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] mods Context bar is 30 cells, split by /context category colors with no labels (mods v0.9.5) (2026-11-18)
 - [done] mods test fixtures type-check; check_mods.py fails on every error TS (mods v0.9.4) (2026-11-16) → docs/runbook.md
 - [done] local mods gate `scripts/check_mods.py` fails on `error TS` in shipped hook files (2026-11-16) → docs/runbook.md
 - [done] mods drop the Sprint Contract pane and cycle row; queue joins the setup row in a three-row band (mods v0.9.3) (2026-11-16)

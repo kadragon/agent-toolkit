@@ -3,8 +3,10 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { StatusBand } from '../../types'
 import {
   ASCII,
+  UNICODE,
   bar,
   cacheText,
+  contextBarSegments,
   contextText,
   duration,
   headline,
@@ -96,19 +98,74 @@ describe('modelLabel', () => {
 })
 
 describe('context', () => {
-  test('draws a ten-cell bar and a whole percentage', () => {
-    expect(contextText(STATUS)).toBe('Context ░░░░░░░░░░ 0%')
-    expect(contextText({ ...STATUS, contextPercent: 42 })).toBe('Context ████░░░░░░ 42%')
-    expect(contextText({ ...STATUS, contextPercent: 100 })).toBe('Context ██████████ 100%')
+  test('draws a thirty-cell bar and a whole percentage', () => {
+    expect(contextText(STATUS)).toBe('Context ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0%')
+    expect(contextText({ ...STATUS, contextPercent: 42 })).toBe('Context █████████████░░░░░░░░░░░░░░░░░ 42%')
+    expect(contextText({ ...STATUS, contextPercent: 100 })).toBe('Context ██████████████████████████████ 100%')
   })
 
   test('is left out with no reading', () => {
     expect(contextText({ ...STATUS, contextPercent: undefined })).toBe('')
   })
 
-  test('keeps the bar inside its ten cells', () => {
-    expect(bar(250)).toBe('██████████')
-    expect(bar(-5)).toBe('░░░░░░░░░░')
+  test('keeps the bar inside its thirty cells', () => {
+    expect(bar(250)).toBe('██████████████████████████████')
+    expect(bar(-5)).toBe('░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░')
+  })
+
+  // 200k window: 20k system prompt and tools, 40k messages, 100k free, 40k reserve.
+  const PARTS: StatusBand['contextParts'] = [
+    { kind: 'used', tokens: 6_000, color: 'promptBorder' },
+    { kind: 'used', tokens: 14_000, color: 'inactive' },
+    { kind: 'used', tokens: 40_000, color: 'permission' },
+    { kind: 'free', tokens: 100_000, color: 'promptBorder' },
+    { kind: 'buffer', tokens: 40_000, color: 'inactive' },
+  ]
+  const split = (percent: number, parts = PARTS, glyphs = UNICODE) =>
+    contextBarSegments({ ...STATUS, contextPercent: percent, contextParts: parts }, glyphs).map(
+      ({ text, color, isDim }) => [text, color ?? (isDim === true ? 'dim' : '')],
+    )
+
+  test('splits the fill by what holds it, each in its own color, with no labels', () => {
+    expect(split(30)).toEqual([
+      ['██', 'promptBorder'],
+      ['██', 'inactive'],
+      ['█████', 'permission'],
+      ['───────────────', 'dim'],
+      ['░░░░░░', 'dim'],
+    ])
+    expect(contextText({ ...STATUS, contextPercent: 30, contextParts: PARTS })).toBe(
+      `Context ${'█'.repeat(9)}${'─'.repeat(15)}░░░░░░ 30%`,
+    )
+  })
+
+  test('the fill follows the percentage and stays inside the bar', () => {
+    const cells = (percent: number) => split(percent).map(([text]) => text).join('')
+
+    expect(cells(30)).toHaveLength(30)
+    expect(cells(100)).toBe('█'.repeat(30))
+    expect(cells(90)).toBe(`${'█'.repeat(27)}░░░`)
+  })
+
+  test('a row with tokens keeps a cell while cells go round', () => {
+    expect(split(10).slice(0, 3)).toEqual([
+      ['█', 'promptBorder'],
+      ['█', 'inactive'],
+      ['█', 'permission'],
+    ])
+    // Fewer cells than rows: the largest takes the one there is.
+    expect(split(3).slice(0, 1)).toEqual([['█', 'permission']])
+  })
+
+  test('without a breakdown it draws one fill', () => {
+    expect(split(42, [])).toEqual([[`${'█'.repeat(13)}${'░'.repeat(17)}`, '']])
+    expect(split(42, [{ kind: 'free', tokens: 1, color: 'x' }])).toHaveLength(1)
+  })
+
+  test('the ASCII set draws the split in plain letters', () => {
+    expect(split(30, PARTS, ASCII).map(([text]) => text).join('')).toBe(
+      `${'#'.repeat(9)}${'-'.repeat(15)}......`,
+    )
   })
 
   test('colors by how full the window is', () => {
@@ -232,7 +289,7 @@ describe('ascii', () => {
     expect(mergedSegments(status, ASCII).map(segment => segment.text).join('')).toBe(
       '[Opus 5.5 medium] | agent-toolkit git:(feat/status-band-colors~) | up <1m | 2 hooks',
     )
-    expect(contextText({ ...STATUS, contextPercent: 42 }, ASCII)).toBe('Context ####------ 42%')
+    expect(contextText({ ...STATUS, contextPercent: 42 }, ASCII)).toBe('Context #############----------------- 42%')
     expect(limitsSegments(STATUS, ASCII).map(segment => segment.text).join('')).toBe(
       '5h: 88% (2h 4m) | 7d: 9% (6d 7h)',
     )
