@@ -1,8 +1,11 @@
 // Pure status text: no engine types, so it runs and tests without `$`.
 
-import type { StatusBand } from '../../types'
+import type { ContextPart, StatusBand } from '../../types'
 
-const BAR_CELLS = 10
+const BAR_CELLS = 30
+// What the Context row needs beside the bar: `Context ` and ` 100%`.
+const CONTEXT_FRAME_CELLS = 13
+const MIN_BAR_CELLS = 5
 // A longer branch name is cut, so it does not push the figures after it off the row.
 const BRANCH_CELLS = 24
 const MINUTE_MS = 60_000
@@ -17,6 +20,9 @@ export type Glyphs = {
   effort: Record<string, string>
   filled: string
   empty: string
+  // The window left, and the compaction reserve, where the bar is split by category.
+  free: string
+  buffer: string
   ellipsis: string
 }
 
@@ -25,6 +31,8 @@ export const UNICODE: Glyphs = {
   effort: { low: '○', medium: '◔', high: '◑', xhigh: '◕', max: '●' },
   filled: '█',
   empty: '░',
+  free: '─',
+  buffer: '░',
   ellipsis: '…',
 }
 
@@ -33,6 +41,8 @@ export const ASCII: Glyphs = {
   effort: {},
   filled: '#',
   empty: '-',
+  free: '-',
+  buffer: '.',
   ellipsis: '~',
 }
 // The windows the band names, in the order it draws them.
@@ -61,11 +71,22 @@ export const modelLabel = (model: string): string => {
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))
 
-export const bar = (percent: number | undefined, glyphs: Glyphs = UNICODE): string => {
-  const filled = Math.round((clampPercent(percent) / 100) * BAR_CELLS)
+export const bar = (
+  percent: number | undefined,
+  glyphs: Glyphs = UNICODE,
+  cells: number = BAR_CELLS,
+): string => {
+  const filled = Math.round((clampPercent(percent) / 100) * cells)
 
-  return glyphs.filled.repeat(filled) + glyphs.empty.repeat(BAR_CELLS - filled)
+  return glyphs.filled.repeat(filled) + glyphs.empty.repeat(cells - filled)
 }
+
+// The bar's cells in a terminal `columns` wide: the full bar where it fits,
+// else what leaves the figure on the row.
+export const barCells = (columns: number | undefined): number =>
+  columns === undefined
+    ? BAR_CELLS
+    : Math.min(BAR_CELLS, Math.max(MIN_BAR_CELLS, Math.floor(columns) - CONTEXT_FRAME_CELLS))
 
 export const levelOf = (percent: number | undefined): Level => {
   const used = clampPercent(percent)
@@ -188,11 +209,96 @@ export const headline = (status: StatusBand): string => textOf(headlineSegments(
 
 export const setupText = (status: StatusBand): string => textOf(setupSegments(status))
 
+// Splits `cells` by weight, the largest remainders taking the cells rounding left.
+const apportion = (weights: number[], cells: number): number[] => {
+  const total = weights.reduce((sum, weight) => sum + weight, 0)
+
+  if (total <= 0 || cells <= 0) return weights.map(() => 0)
+
+  const shares = weights.map(weight => (weight / total) * cells)
+  const counts = shares.map(Math.floor)
+  let left = cells - counts.reduce((sum, count) => sum + count, 0)
+
+  for (const index of shares
+    .map((share, at) => at)
+    .sort((a, b) => shares[b]! - counts[b]! - (shares[a]! - counts[a]!))) {
+    if (left === 0) break
+    counts[index]! += 1
+    left -= 1
+  }
+
+  return counts
+}
+
+// The used cells, split among the rows that fill them; a row with any tokens
+// keeps a cell of its own while there are cells enough to go round.
+const usedCells = (used: ContextPart[], cells: number): number[] => {
+  const holding = used.filter(part => part.tokens > 0).length
+
+  if (holding === 0 || cells < holding) return apportion(used.map(part => part.tokens), cells)
+
+  const rest = apportion(used.map(part => part.tokens), cells - holding)
+
+  return rest.map((count, index) => count + (used[index]!.tokens > 0 ? 1 : 0))
+}
+
+// The bar, after /context and the context-bar mod of
+// github.com/hamzafer/claude-code-mods: each row that fills the window in its own color,
+// then the window left and the compaction reserve. The filled length follows
+// the percentage, so bar and figure agree; without a breakdown, one fill.
+// Past the warning line the unfilled cells take the level's color, so a
+// window near full still reads as such.
+export const contextBarSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  cells: number = BAR_CELLS,
+): Segment[] => {
+  const parts = status.contextParts ?? []
+  const used = parts.filter(part => part.kind === 'used')
+  const filled = Math.round((clampPercent(status.contextPercent) / 100) * cells)
+
+  if (used.every(part => part.tokens <= 0)) return [{ text: bar(status.contextPercent, glyphs, cells) }]
+
+  const window = parts.reduce((sum, part) => sum + Math.max(0, part.tokens), 0)
+  const reserve = parts
+    .filter(part => part.kind === 'buffer')
+    .reduce((sum, part) => sum + Math.max(0, part.tokens), 0)
+  const buffer = Math.min(cells - filled, Math.round((reserve / window) * cells))
+  const free = cells - filled - buffer
+  const level = levelOf(status.contextPercent)
+  const rest: Segment = level === 'success' ? { text: '', isDim: true } : { text: '', color: level }
+  const counts = usedCells(used, filled)
+  const runs: Segment[] = used.map((part, index) => ({
+    text: glyphs.filled.repeat(counts[index]!),
+    color: part.color,
+  }))
+
+  return [
+    ...runs,
+    { ...rest, text: glyphs.free.repeat(free) },
+    { ...rest, text: glyphs.buffer.repeat(buffer) },
+  ].filter(segment => segment.text !== '')
+}
+
 // A fill the engine has no reading for is left out, never drawn as 0%.
-export const contextText = (status: StatusBand, glyphs: Glyphs = UNICODE): string =>
+export const contextSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  cells: number = BAR_CELLS,
+): Segment[] =>
   status.contextPercent === undefined
-    ? ''
-    : `Context ${bar(status.contextPercent, glyphs)} ${Math.round(clampPercent(status.contextPercent))}%`
+    ? []
+    : [
+        { text: 'Context ' },
+        ...contextBarSegments(status, glyphs, cells),
+        { text: ` ${Math.round(clampPercent(status.contextPercent))}%` },
+      ]
+
+export const contextText = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  cells: number = BAR_CELLS,
+): string => textOf(contextSegments(status, glyphs, cells))
 
 // A window the engine has no reading for is left out, never drawn as 0%.
 export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] =>

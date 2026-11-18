@@ -50,6 +50,10 @@ type World = {
   // What the environment holds; a name not listed is unset.
   env: Record<string, string>
   skills?: { totalSkills: number; tokens: number }
+  // The rows /context lists beside its grid; unset, the breakdown carries none.
+  categories?: { name: string; tokens: number; color: string; isDeferred: boolean; kind: string }[]
+  // Set to hold the next breakdown read open, with what it read, until the test lets it go.
+  breakdownGate?: Promise<void>
   // The servers of the MCP tools the breakdown carries, one entry per tool.
   mcpServers: string[]
   // Servers that need a sign-in: they offer only the tools that start one.
@@ -122,6 +126,7 @@ const world = (on: On): World => {
         ? {}
         : {
             breakdown: {
+              ...(state.categories === undefined ? {} : { categories: state.categories }),
               skills: { ...state.skills, includedSkills: 0, skillFrontmatter: [] },
               mcpTools: [
                 ...state.mcpServers.map((serverName, index) => ({
@@ -141,6 +146,13 @@ const world = (on: On): World => {
               ],
             },
           }
+
+    if (e.breakdown !== undefined) {
+      const gate = state.breakdownGate
+
+      state.breakdownGate = undefined
+      await gate
+    }
 
     return {
       value: {
@@ -347,7 +359,7 @@ test('a measurement redraws the figures and the branch', async ($, on) => {
   expect(measured.changed).toEqual(['context'])
   expect(texts).toEqual([
     '[Opus 5.5] │ agent-toolkit git:(feat/x) │ up 5m',
-    'Context █████████░ 91%',
+    'Context ███████████████████████████░░░ 91%',
     undefined,
   ])
   expect(color).toBe('error')
@@ -434,7 +446,7 @@ test('before the first prompt the context reads 0%, later a missing reading is l
   await start($)
   const fresh = await drawn($)
 
-  expect(fresh.texts[1]).toBe('Context ░░░░░░░░░░ 0%')
+  expect(fresh.texts[1]).toBe('Context ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0%')
   await fresh.ui.unmount()
 
   state.turns = 2
@@ -444,6 +456,89 @@ test('before the first prompt the context reads 0%, later a missing reading is l
   expect(later.texts[1]).toBeUndefined()
   expect(later.texts[2]).toBe('5h: 88% (2h 4m)')
   await later.ui.unmount()
+})
+
+test('the context bar is split by what fills the window, without labels', async ($, on) => {
+  const state = world(on)
+  state.settings = {}
+  state.skills = { totalSkills: 2, tokens: 300 }
+  state.percent = 30
+  const row = (name: string, tokens: number, color: string, kind: string) => ({
+    name,
+    tokens,
+    color,
+    kind,
+    isDeferred: kind === 'deferred',
+  })
+  state.categories = [
+    row('System prompt', 6_000, 'promptBorder', 'used'),
+    row('MCP tools (deferred)', 50_000, 'cyan_FOR_SUBAGENTS_ONLY', 'deferred'),
+    row('System tools', 14_000, 'inactive', 'used'),
+    row('Messages', 40_000, 'permission', 'used'),
+    row('Free space', 100_000, 'promptBorder', 'free'),
+    row('Autocompact buffer', 40_000, 'inactive', 'buffer'),
+  ]
+
+  await start($)
+  await measure($)
+  const { ui, texts, color } = await drawn($)
+  const runs = await ui.findAll({ type: 'Text', text: /^[█─░]+$/ })
+
+  expect(texts[1]).toBe(`Context ${'█'.repeat(9)}${'─'.repeat(15)}░░░░░░ 30%`)
+  expect(color).toBe('success')
+  expect(runs.map(run => [run.text, run.props.color ?? (run.props.dimColor ? 'dim' : '')])).toEqual([
+    ['██', 'promptBorder'],
+    ['██', 'inactive'],
+    ['█████', 'permission'],
+    ['─'.repeat(15), 'dim'],
+    ['░░░░░░', 'dim'],
+  ])
+  expect(texts[1]).not.toMatch(/System|Messages|Free/)
+  await ui.unmount()
+})
+
+test('a measure that lands while the breakdown is read reads it again', async ($, on) => {
+  const state = world(on)
+  state.settings = {}
+  state.skills = { totalSkills: 2, tokens: 300 }
+  state.percent = 30
+  const row = (tokens: number, color: string, kind: string) => ({
+    name: color,
+    tokens,
+    color,
+    kind,
+    isDeferred: false,
+  })
+  let release = () => {}
+  state.breakdownGate = new Promise<void>(resolve => (release = resolve))
+  state.categories = [row(60_000, 'promptBorder', 'used'), row(140_000, 'promptBorder', 'free')]
+
+  await start($)
+  state.categories = [row(60_000, 'permission', 'used'), row(140_000, 'promptBorder', 'free')]
+  await measure($)
+  release()
+  await settle()
+  const { ui } = await drawn($)
+  const runs = await ui.findAll({ type: 'Text', text: /^█+$/ })
+
+  expect(runs.map(run => run.props.color)).toEqual(['permission'])
+  await ui.unmount()
+})
+
+test('in a narrow terminal the bar shrinks so the figure stays on its row', async ($, on) => {
+  world(on)
+
+  await start($)
+  const ui = await $.ui.mount({
+    ...BAND,
+    viewport: { columns: 30, rows: 20, isFullscreen: false },
+    surface: 'terminal',
+  })
+  const context = await ui.find({ type: 'Text', text: /^Context / })
+
+  expect(context?.text).toBe(`Context ██${'░'.repeat(15)} 12%`)
+  expect(context?.props.wrap).toBe('truncate-end')
+  await ui.unmount()
 })
 
 test('a failed usage read keeps the last figures', async ($, on) => {
@@ -457,7 +552,7 @@ test('a failed usage read keeps the last figures', async ($, on) => {
 
   expect(texts).toEqual([
     '[Opus 5.5] │ agent-toolkit git:(main) │ up 15m',
-    'Context █░░░░░░░░░ 12%',
+    'Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12%',
     ' │ 5h: 88% (1h 54m)',
   ])
   await ui.unmount()
@@ -791,7 +886,7 @@ test(
       'cache 60m | 0 hooks | 2 skills (300)',
     ])
     expect(texts.slice(1)).toEqual([
-      'Context #--------- 12%',
+      'Context ####-------------------------- 12%',
       ' | 5h: 88% (2h 4m)',
     ])
     await ui.unmount()
@@ -929,7 +1024,7 @@ test('a curate check that cannot run fails nothing and keeps the rest of the ban
   // `python3` failed to start, then `python`.
   expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
   expect(await curateFlag(ui)).toBeUndefined()
-  expect(texts[1]).toBe('Context █░░░░░░░░░ 12%')
+  expect(texts[1]).toBe('Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12%')
   await ui.unmount()
 })
 
@@ -946,7 +1041,7 @@ test('a due curate run follows the other figures on its row behind a separator',
   await start($)
   const { ui } = await drawn($)
 
-  expect(await curateRow(ui)).toBe('Context █░░░░░░░░░ 12% │ 5h: 88% (2h 4m) │ harness-curate due')
+  expect(await curateRow(ui)).toBe('Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12% │ 5h: 88% (2h 4m) │ harness-curate due')
   await ui.unmount()
 })
 

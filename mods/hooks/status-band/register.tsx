@@ -12,7 +12,8 @@ import {
   under,
 } from './count'
 import {
-  contextText,
+  barCells,
+  contextSegments,
   curateText,
   headlineSegments,
   levelOf,
@@ -70,12 +71,14 @@ type Live = {
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
   setupRead?: Promise<void>
+  // A read was asked for while one ran: the window moved, so it runs again.
+  isSetupStale: boolean
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
 }
 
-type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue'>
+type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue' | 'contextParts'>
 
 // The handlers a plugin's default hooks file, its manifest and the files the
 // manifest names add; a file that is not there adds none.
@@ -171,9 +174,11 @@ async function countHooks($: EngineInterface): Promise<number> {
   return counts.reduce((total, count) => total + count, own)
 }
 
-// The skill listing and the MCP servers as /context counts them, estimated
-// locally: no request is sent.
-async function readContext($: EngineInterface): Promise<Pick<StatusBand, 'skills' | 'mcp'>> {
+// The skill listing, the MCP servers and what fills the window as /context
+// counts them, estimated locally: no request is sent.
+async function readContext(
+  $: EngineInterface,
+): Promise<Pick<StatusBand, 'skills' | 'mcp' | 'contextParts'>> {
   const { context } = await $.session.usage({ breakdown: 'summary' })
   const breakdown = context.breakdown
 
@@ -184,6 +189,9 @@ async function readContext($: EngineInterface): Promise<Pick<StatusBand, 'skills
   return {
     skills: skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens },
     mcp: connectedServers(breakdown.mcpTools),
+    contextParts: (breakdown.categories ?? []).flatMap(({ kind, tokens, color }) =>
+      kind === 'deferred' ? [] : [{ kind, tokens, color }],
+    ),
   }
 }
 
@@ -191,7 +199,13 @@ async function readContext($: EngineInterface): Promise<Pick<StatusBand, 'skills
 // files: one read at a time, and a count that cannot be read keeps the last
 // one this session gave.
 function loadSetup($: EngineInterface, live: Live): void {
-  if (live.setupRead !== undefined) return
+  if (live.setupRead !== undefined) {
+    live.isSetupStale = true
+
+    return
+  }
+
+  live.isSetupStale = false
 
   const epoch = live.setupEpoch
 
@@ -207,6 +221,7 @@ function loadSetup($: EngineInterface, live: Live): void {
       hooks: hooks ?? live.setup.hooks,
       skills: context?.skills ?? live.setup.skills,
       mcp: context?.mcp ?? live.setup.mcp,
+      contextParts: context?.contextParts ?? live.setup.contextParts,
     }
 
     live.setup = { ...live.setup, ...setup }
@@ -216,8 +231,9 @@ function loadSetup($: EngineInterface, live: Live): void {
     .catch(() => undefined)
     .finally(() => {
       live.setupRead = undefined
-      // A reset came while this read ran: the counts are the new session's to read.
-      if (epoch !== live.setupEpoch) loadSetup($, live)
+      // A reset or a measure came while this read ran: what fills the window
+      // moved, and the counts may be the new session's to read.
+      if (epoch !== live.setupEpoch || live.isSetupStale) loadSetup($, live)
     })
 }
 
@@ -336,6 +352,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
         hooks: live.hasSetup ? live.setup.hooks : current?.hooks,
         skills: live.hasSetup ? live.setup.skills : current?.skills,
         mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
+        contextParts: live.hasSetup ? live.setup.contextParts : current?.contextParts,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
       }
     })
@@ -405,6 +422,7 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSetup: false,
     setupEpoch: 0,
+    isSetupStale: false,
   }
 
   loaded.live = live
@@ -505,7 +523,9 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
 
 // This mod's rows of the band above the prompt, under a blank row that keeps
 // them off the line above where the band has a row to spare. The setup gets
-// a row of its own where `isSplit`, else it rides on the headline; `glyphs` is the set the rows draw beyond plain letters. `hooks/band.tsx`
+// a row of its own where `isSplit`, else it rides on the headline; `glyphs` is
+// the set the rows draw beyond plain letters, and `columns` the terminal's
+// width, which the Context bar shrinks to fit. `hooks/band.tsx`
 // draws them: the engine takes one band hook per plugin, and `$` stays in that
 // hook's file.
 export const statusRows = (
@@ -515,11 +535,13 @@ export const statusRows = (
     hasMargin,
     isSplit,
     glyphs = UNICODE,
-  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs },
+    columns,
+  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs; columns?: number },
 ): RenderElement => {
   const { Box, Text } = elements
   const setup = isSplit ? setupSegments(status, glyphs) : []
-  const context = contextText(status, glyphs)
+  const contextRuns = contextSegments(status, glyphs, barCells(columns))
+  const context = contextRuns.map(segment => segment.text).join('')
   const limits = limitsSegments(status, glyphs)
   const curate = curateText(status)
 
@@ -534,7 +556,11 @@ export const statusRows = (
       {setup.length === 0 ? null : <Text wrap="truncate-end">{runs(elements, setup)}</Text>}
       {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
-          {context === '' ? null : <Text color={levelOf(status.contextPercent)}>{context}</Text>}
+          {context === '' ? null : (
+            <Text color={levelOf(status.contextPercent)} wrap="truncate-end">
+              {runs(elements, contextRuns)}
+            </Text>
+          )}
           {limits.length === 0 ? null : (
             <Text wrap="truncate-end">
               {context === '' ? null : <Text dimColor>{glyphs.separator}</Text>}
