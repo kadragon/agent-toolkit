@@ -52,6 +52,8 @@ type World = {
   skills?: { totalSkills: number; tokens: number }
   // The rows /context lists beside its grid; unset, the breakdown carries none.
   categories?: { name: string; tokens: number; color: string; isDeferred: boolean; kind: string }[]
+  // Set to hold the next breakdown read open, with what it read, until the test lets it go.
+  breakdownGate?: Promise<void>
   // The servers of the MCP tools the breakdown carries, one entry per tool.
   mcpServers: string[]
   // Servers that need a sign-in: they offer only the tools that start one.
@@ -151,6 +153,13 @@ const world = (on: On): World => {
               ],
             },
           }
+
+    if (e.breakdown !== undefined) {
+      const gate = state.breakdownGate
+
+      state.breakdownGate = undefined
+      await gate
+    }
 
     return {
       value: {
@@ -500,6 +509,50 @@ test('the context bar is split by what fills the window, without labels', async 
     ['░░░░░░', 'dim'],
   ])
   expect(texts[1]).not.toMatch(/System|Messages|Free/)
+  await ui.unmount()
+})
+
+test('a measure that lands while the breakdown is read reads it again', async ($, on) => {
+  const state = world(on)
+  state.settings = {}
+  state.skills = { totalSkills: 2, tokens: 300 }
+  state.percent = 30
+  const row = (tokens: number, color: string, kind: string) => ({
+    name: color,
+    tokens,
+    color,
+    kind,
+    isDeferred: false,
+  })
+  let release = () => {}
+  state.breakdownGate = new Promise<void>(resolve => (release = resolve))
+  state.categories = [row(60_000, 'promptBorder', 'used'), row(140_000, 'promptBorder', 'free')]
+
+  await start($)
+  state.categories = [row(60_000, 'permission', 'used'), row(140_000, 'promptBorder', 'free')]
+  await measure($)
+  release()
+  await settle()
+  const { ui } = await drawn($)
+  const runs = await ui.findAll({ type: 'Text', text: /^█+$/ })
+
+  expect(runs.map(run => run.props.color)).toEqual(['permission'])
+  await ui.unmount()
+})
+
+test('in a narrow terminal the bar shrinks so the figure stays on its row', async ($, on) => {
+  world(on)
+
+  await start($)
+  const ui = await $.ui.mount({
+    ...BAND,
+    viewport: { columns: 30, rows: 20, isFullscreen: false },
+    surface: 'terminal',
+  })
+  const context = await ui.find({ type: 'Text', text: /^Context / })
+
+  expect(context?.text).toBe(`Context ██${'░'.repeat(15)} 12%`)
+  expect(context?.props.wrap).toBe('truncate-end')
   await ui.unmount()
 })
 

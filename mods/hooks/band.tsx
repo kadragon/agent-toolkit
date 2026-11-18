@@ -42,6 +42,7 @@ export const register: Register = (on, options) => {
       hasMargin: rows < e.props.maxRows,
       isSplit,
       glyphs,
+      columns: e.viewport?.columns,
     })
   })
 }

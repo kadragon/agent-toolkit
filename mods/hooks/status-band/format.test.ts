@@ -5,6 +5,7 @@ import {
   ASCII,
   UNICODE,
   bar,
+  barCells,
   cacheText,
   contextBarSegments,
   contextText,
@@ -155,6 +156,24 @@ describe('context', () => {
     ])
     // Fewer cells than rows: the largest takes the one there is.
     expect(split(3).slice(0, 1)).toEqual([['█', 'permission']])
+  })
+
+  test('past the warning line the unfilled cells take the level color', () => {
+    expect(split(75).slice(-2)).toEqual([
+      ['─', 'warning'],
+      ['░░░░░░', 'warning'],
+    ])
+    expect(split(93).slice(-1)).toEqual([['░░', 'error']])
+  })
+
+  test('the bar shrinks to the terminal, keeping the figure on the row', () => {
+    expect(barCells(undefined)).toBe(30)
+    expect(barCells(80)).toBe(30)
+    expect(barCells(30)).toBe(17)
+    expect(barCells(10)).toBe(5)
+    expect(
+      contextText({ ...STATUS, contextPercent: 100, contextParts: PARTS }, UNICODE, barCells(30)),
+    ).toHaveLength(30)
   })
 
   test('without a breakdown it draws one fill', () => {

@@ -13,6 +13,7 @@ import {
 } from './count'
 import { isQueueCommand, queueOf } from './queue'
 import {
+  barCells,
   contextSegments,
   curateText,
   headlineSegments,
@@ -66,6 +67,8 @@ type Live = {
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
   setupRead?: Promise<void>
+  // A read was asked for while one ran: the window moved, so it runs again.
+  isSetupStale: boolean
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
@@ -215,7 +218,13 @@ const readContext = async (
 // files: one read at a time, and a count that cannot be read keeps the last
 // one this session gave.
 const loadSetup = ($: EngineInterface, live: Live): void => {
-  if (live.setupRead !== undefined) return
+  if (live.setupRead !== undefined) {
+    live.isSetupStale = true
+
+    return
+  }
+
+  live.isSetupStale = false
 
   const epoch = live.setupEpoch
 
@@ -241,8 +250,9 @@ const loadSetup = ($: EngineInterface, live: Live): void => {
     .catch(() => undefined)
     .finally(() => {
       live.setupRead = undefined
-      // A reset came while this read ran: the counts are the new session's to read.
-      if (epoch !== live.setupEpoch) loadSetup($, live)
+      // A reset or a measure came while this read ran: what fills the window
+      // moved, and the counts may be the new session's to read.
+      if (epoch !== live.setupEpoch || live.isSetupStale) loadSetup($, live)
     })
 }
 
@@ -465,6 +475,7 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSetup: false,
     setupEpoch: 0,
+    isSetupStale: false,
     isQueueStale: true,
   }
 
@@ -587,7 +598,8 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
 // This mod's rows of the band above the prompt, under a blank row that keeps
 // them off the line above where the band has a row to spare. The setup, the
 // queue at its end, gets a row of its own where `isSplit`, else it rides on
-// the headline; `glyphs` is the set the rows draw beyond plain letters. `hooks/band.tsx`
+// the headline; `glyphs` is the set the rows draw beyond plain letters, and
+// `columns` the terminal's width, which the Context bar shrinks to fit. `hooks/band.tsx`
 // draws them: the engine takes one band hook per plugin, and `$` stays in that
 // hook's file.
 export const statusRows = (
@@ -597,11 +609,12 @@ export const statusRows = (
     hasMargin,
     isSplit,
     glyphs = UNICODE,
-  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs },
+    columns,
+  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs; columns?: number },
 ): RenderElement => {
   const { Box, Text } = elements
   const setup = isSplit ? setupSegments(status, glyphs) : []
-  const contextRuns = contextSegments(status, glyphs)
+  const contextRuns = contextSegments(status, glyphs, barCells(columns))
   const context = contextRuns.map(segment => segment.text).join('')
   const limits = limitsSegments(status, glyphs)
   const curate = curateText(status)
@@ -618,7 +631,9 @@ export const statusRows = (
       {context === '' && limits.length === 0 && curate === '' ? null : (
         <Box>
           {context === '' ? null : (
-            <Text color={levelOf(status.contextPercent)}>{runs(elements, contextRuns)}</Text>
+            <Text color={levelOf(status.contextPercent)} wrap="truncate-end">
+              {runs(elements, contextRuns)}
+            </Text>
           )}
           {limits.length === 0 ? null : (
             <Text wrap="truncate-end">
