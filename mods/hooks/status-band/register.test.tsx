@@ -69,12 +69,7 @@ type World = {
   curateGate?: Promise<void>
   // True where only `python` is installed.
   isPython3Missing: boolean
-  // What the queue script prints; one unset fails with exit 1.
-  queue: { groups?: string; parked?: string }
-  queueRuns: (readonly string[])[]
 }
-
-const QUEUE_SCRIPT = /backlog_candidates\.py/
 
 // On Windows the engine hands `fs` a POSIX path made absolute on the drive
 // (`/home/me` as `C:\home\me`), so it is also compared without one. Elsewhere
@@ -113,8 +108,6 @@ const world = (on: On): World => {
     curateOut: '',
     curateRuns: [],
     isPython3Missing: false,
-    queue: {},
-    queueRuns: [],
   }
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -198,15 +191,7 @@ const world = (on: On): World => {
   on('fs.exists', async ($, e) => ({
     value: Object.keys(state.files).some(file => isFile(e.path, file)),
   }))
-  on('tool.call', { tool: 'Bash' }, async () => ({ result: {} }))
   on('process.run', async ($, e) => {
-    if (e.argv.some(arg => QUEUE_SCRIPT.test(arg))) {
-      state.queueRuns.push(e.argv)
-      const out = e.argv.includes('--parked') ? state.queue.parked : state.queue.groups
-
-      return ran(out === undefined ? 1 : 0, out ?? '')
-    }
-
     if (e.argv[0] === 'git' && e.argv[1] === 'rev-parse') {
       return ran(0, '/work/agent-toolkit/.git\n')
     }
@@ -316,7 +301,7 @@ const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', pr
   const headline = (await ui.find({ type: 'Text', text: / up (<|\d)/ }))?.text
   const isSplit = ((props as { maxRows?: number }).maxRows ?? BAND.props.maxRows) >= 3
   const setup = isSplit
-    ? (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b|queue \d)/ }))?.text
+    ? (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b)/ }))?.text
     : undefined
   const texts = [
     setup === undefined || headline === undefined ? headline : `${headline} │ ${setup}`,
@@ -1124,90 +1109,19 @@ test('a slow curate check holds neither the counts nor a /clear', async ($, on) 
   await ui.unmount()
 })
 
-// A harness repo with a queue in its backlog.
-const queueWorld = (on: On): World => {
-  const state = curateWorld(on, '')
-
-  state.files['/work/agent-toolkit/backlog.md'] = '## Queue\n- [ ] a\n'
-  state.queue = {
-    groups: '[{"title": "a"}, {"title": "b"}]',
-    parked: '[{"title": "c"}]',
-  }
-
-  return state
-}
-
 const setupRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
-  (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b|queue \d)/ }))?.text
+  (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b)/ }))?.text
 
-test('the queue ends the setup row, beside the MCP servers', async ($, on) => {
-  const state = queueWorld(on)
-  state.skills = { totalSkills: 2, tokens: 300 }
-  state.mcpServers = ['github']
+test('the band is three rows at most, the setup on a row of its own; in two it rides on the headline', async ($, on) => {
+  curateWorld(on, '')
 
   await start($)
-  const { ui } = await drawn($)
-
-  expect(await setupRow(ui)).toBe('0 hooks │ 2 skills (300) │ 1 mcp │ queue 2 (1 parked)')
-  expect(state.queueRuns.length).toBe(2)
-  await ui.unmount()
-})
-
-test('without the dev plugin, or a backlog, nothing is read or drawn', async ($, on) => {
-  const bare = world(on)
-
-  await start($)
-  const { ui } = await drawn($)
-
-  expect(bare.queueRuns).toEqual([])
-  expect(await ui.find({ type: 'Text', text: /queue / })).toBeUndefined()
-  await ui.unmount()
-})
-
-test('a command that may move the queue reads it again behind the call; another leaves it', async ($, on) => {
-  const state = queueWorld(on)
-
-  await start($)
-  const reads = state.queueRuns.length
-
-  await $.tool.call({ tool: 'Bash', command: 'git status --porcelain' })
-  await settle()
-  expect(state.queueRuns.length).toBe(reads)
-
-  state.queue.groups = '[]'
-  state.queue.parked = '[]'
-  await $.tool.call({ tool: 'Bash', command: 'git pull --ff-only' })
-  await settle()
-  const { ui } = await drawn($)
-
-  expect(state.queueRuns.length).toBeGreaterThan(reads)
-  expect(await setupRow(ui)).toBe('0 hooks │ queue 0')
-  await ui.unmount()
-})
-
-test('a queue read that fails keeps the last figure', async ($, on) => {
-  const state = queueWorld(on)
-
-  await start($)
-  state.queue.groups = undefined
-  await $.tool.call({ tool: 'Bash', command: 'git commit -m "[FIX] x"' })
-  await settle()
-  const { ui } = await drawn($)
-
-  expect(await setupRow(ui)).toBe('0 hooks │ queue 2 (1 parked)')
-  await ui.unmount()
-})
-
-test('the band is three rows at most, the queue on the setup row; in two it rides on the headline', async ($, on) => {
-  queueWorld(on)
-
-  await start($)
-  // Each row is found on its own: the headline alone, the setup ending on the queue.
+  // Each row is found on its own: the headline alone, then the setup.
   const headlineRow = { type: 'Text', text: / up (<|\d)/ } as const
   const four = await drawn($, 'terminal', { maxRows: 4 })
 
   expect((await four.ui.find(headlineRow))?.text).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
-  expect(await setupRow(four.ui)).toBe('0 hooks │ queue 2 (1 parked)')
+  expect(await setupRow(four.ui)).toBe('0 hooks')
   // Three rows in a band of four leave the blank one above them.
   expect((await four.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await four.ui.unmount()
@@ -1215,7 +1129,7 @@ test('the band is three rows at most, the queue on the setup row; in two it ride
   const two = await drawn($, 'terminal', { maxRows: 2 })
 
   expect((await two.ui.find(headlineRow))?.text).toBe(
-    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ queue 2 (1 parked)',
+    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks',
   )
   await two.ui.unmount()
 })

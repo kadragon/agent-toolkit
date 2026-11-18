@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- [done] mods Context bar is 30 cells, split by /context category colors with no labels (mods v0.9.5) (2026-11-18)
+- [done] mods Context bar is 30 cells, split by /context category colors with no labels (mods v1.1.3) (2026-11-18)
+- [done] docs: mods session.start lives in register.ts; $ crosses files only into function declarations (2026-11-17) → docs/architecture.md
+- [done] mods status-band register.tsx gains a SECTION MAP held to its functions by check_mods.py (mods v1.1.2) (2026-11-17) → docs/runbook.md
+- [done] mods status band drops the backlog queue and its Bash tool.call hook, so Code Mode can load (mods v1.1.1) (2026-11-17)
+- [done] mods adds the agent-flow pane: /flow shows this session's subagents as a live tree (mods v1.1.0) (2026-11-17) → docs/architecture.md
+- [done] mods drops the PR recap side pane and hides the usage-limit warning notice (mods v1.0.0) (2026-11-17)
 - [done] mods test fixtures type-check; check_mods.py fails on every error TS (mods v0.9.4) (2026-11-16) → docs/runbook.md
 - [done] local mods gate `scripts/check_mods.py` fails on `error TS` in shipped hook files (2026-11-16) → docs/runbook.md
 - [done] mods drop the Sprint Contract pane and cycle row; queue joins the setup row in a three-row band (mods v0.9.3) (2026-11-16)

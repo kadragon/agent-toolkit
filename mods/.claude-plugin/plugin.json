@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "0.9.5",
+  "version": "1.1.3",
   "author": {
     "name": "kadragon"
   },
@@ -18,7 +18,7 @@
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
-      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts with — in a harness repo — the backlog queue depth beside them, context fill, rate limits and a due harness-curate run above the prompt, in three rows.",
+      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts, context fill, rate limits and a due harness-curate run above the prompt, in three rows.",
       "default": true
     },
     "statusBandCacheTtlMinutes": {
@@ -33,16 +33,16 @@
       "description": "Draw the status band's separators, effort mark, context bar and cut branch names in ASCII, for a terminal that leaves stale cells or broken glyphs behind on redraw (Wave on Windows).",
       "default": false
     },
-    "prRecapEnabled": {
+    "limitNoticeHidden": {
       "type": "boolean",
-      "title": "PR recap pane",
-      "description": "Open a side pane (about a quarter of the terminal) with the latest merged PR of the branch history: its numbers, a plain-language summary and a top-to-bottom diagram of the parts it touches, made once per commit by a small model (Haiku) and kept. With the pane focused, p and n step to the older and newer of the last 20 PRs. It rereads after a git merge, pull or checkout. /pr-recap opens it again.",
+      "title": "Hide the usage-limit warning",
+      "description": "Hide the dim notice Claude Code shows as a usage window fills (\"You've used 75% of your weekly limit · resets … · Run /usage-credits …\"). A limit reached (100%) and every other notice still show. With this on and the status band off, nothing shows the usage figures before the limit.",
       "default": true
     },
-    "prRecapExplain": {
+    "agentFlowEnabled": {
       "type": "boolean",
-      "title": "PR recap summary by Haiku",
-      "description": "Let the PR recap pane send each PR it shows: its commit message, file list and diff (cut at 16k characters) to Haiku through your Claude account, once per commit, for its plain summary and diagram. Off, nothing leaves the machine and the pane shows the commit message instead.",
+      "title": "Agent flow pane",
+      "description": "Add /flow, which opens a pane with this session's subagents as a live tree: each agent's status, type, task, elapsed time and tokens, nested under the agent that started it. From the first subagent it reads the agent list every two seconds, open or not, to time agents that end unwatched.",
       "default": true
     }
   }

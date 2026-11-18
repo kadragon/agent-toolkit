@@ -36,10 +36,11 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
   .claude-plugin/plugin.json   # own semver line; userConfig holds each mod's options
   hooks/
     hooks.json                 # names the one hooks module the engine loads
-    register.ts                # entry: calls each mod's register by name
-    band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows, hands pr-recap the width
+    register.ts                # entry: calls each mod's register by name; holds the one session.start hook
+    band.tsx                   # the one hook on the band above the prompt; stacks each mod's rows
     status-band/               # one directory per mod: register.tsx, pure logic, *.test.ts(x)
-    pr-recap/                  # side pane of the latest PR, model-made summary + diagram; boots off the band's first drawing
+    limit-notice/              # hides the engine's usage-limit warning notice
+    agent-flow/                # /flow pane: this session's subagents as a live tree
   types/index.d.ts             # $.state contract for every mod
 
 .claude/
@@ -77,7 +78,10 @@ plugin.json
 - A mod never submits a prompt or changes a turn's result on its own: it offers, the person acts.
 - The engine takes one unmatched hook per event from a plugin, and one per `ui.render` site. Mods that
   draw above the prompt each export a row builder, and `mods/hooks/band.tsx` holds the single band hook
-  that stacks them; `$` and an atom's key never cross an import, so both are spelled in that file.
+  that stacks them; `$` and an atom's key never cross into a row builder, so both are spelled in that file.
+- The same rule holds for `session.start`: `mods/hooks/register.ts` holds the plugin's one hook and
+  calls each mod's exported `start*($)`. The loader follows `$` across files only into `function`
+  declarations, so a `$`-taking export is never an arrow const — otherwise the plugin fails to load.
 - `dev/skills/harness-init/references/` owns shared templates (backlog schema, harness invariants); other skills, agents and scripts cite a file there (`dev:harness-init` → `references/<file>`) instead of copying its content
 
 ## Key Abstractions

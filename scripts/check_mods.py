@@ -6,15 +6,19 @@
 included, naming the `Validating hooks: <path>` section each sits under. PR #398 shipped a
 TS2741 in `mods/hooks/status-band/register.tsx` past the old count-the-warnings habit.
 
-Local only: CI does not install `claude`, so only the `--test` parser self-test runs there.
+It also fails when a large hook file's SECTION MAP comment drifts from its top-level functions.
+
+Local only: CI does not install `claude`, so only the `--test` self-test runs there; it checks
+the parser and the shipped SECTION MAPs.
 
 Usage:
   python3 scripts/check_mods.py [mods-dir]   # default ./mods
-  python3 scripts/check_mods.py --test       # parser self-test, no `claude` needed
+  python3 scripts/check_mods.py --test       # parser + SECTION MAP self-test, no `claude` needed
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -39,6 +43,48 @@ def ts_errors(output: str) -> tuple[list[str], int]:
         if TS_ERROR_RE.search(line):
             errors.append(f"{path}: {line.strip()}")
     return errors, sections
+
+
+SECTION_MAP_MARKER = "// ---- SECTION MAP ----"
+SECTION_MAP_FILES = ("hooks/status-band/register.tsx",)
+TOP_FUNCTION_RE = re.compile(r"^(?:export )?(?:async )?function\*? (\w+)")
+TOP_ARROW_RE = re.compile(r"^(?:export )?const (\w+)(?::[^=]+)? = (?:async )?\(")
+
+
+def section_map_drift(src: str) -> list[str]:
+    """Return how a file's SECTION MAP comment differs from its top-level functions.
+
+    Agents grep the map and read one range; a function it omits, or a stale name it keeps,
+    sends them back to reading the whole file.
+    """
+    lines = src.splitlines()
+    defs = set()
+    for line in lines:
+        match = TOP_FUNCTION_RE.match(line) or TOP_ARROW_RE.match(line)
+        if match:
+            defs.add(match.group(1))
+    if SECTION_MAP_MARKER not in lines:
+        return ["no SECTION MAP block"]
+    mapped = set()
+    for line in lines[lines.index(SECTION_MAP_MARKER) + 1 :]:
+        if not line.startswith("//"):
+            break
+        if line.startswith("//   ") and ":" in line:
+            mapped |= {n.strip() for n in line.split(":", 1)[1].split(",") if n.strip()}
+    reasons = []
+    if defs - mapped:
+        reasons.append(f"SECTION MAP misses {sorted(defs - mapped)}")
+    if mapped - defs:
+        reasons.append(f"SECTION MAP keeps stale {sorted(mapped - defs)}")
+    return reasons
+
+
+def section_map_reasons(mods_dir: str) -> list[str]:
+    reasons = []
+    for rel in SECTION_MAP_FILES:
+        with open(f"{mods_dir}/{rel}", encoding="utf-8") as handle:
+            reasons.extend(f"{rel}: {r}" for r in section_map_drift(handle.read()))
+    return reasons
 
 
 def run(argv: list[str]) -> tuple[int, str]:
@@ -70,7 +116,7 @@ def main(mods_dir: str) -> int:
     test_rc, test_output = run(["claude", "plugin", "test", mods_dir])
     print(test_output, end="")
 
-    reasons = verdict(validate_rc, validate_output, test_rc)
+    reasons = verdict(validate_rc, validate_output, test_rc) + section_map_reasons(mods_dir)
     for reason in reasons:
         print(f"check_mods: {reason}", file=sys.stderr)
     print("check_mods: FAIL" if reasons else "check_mods: OK", file=sys.stderr)
@@ -130,7 +176,29 @@ def selftest() -> int:
             failures += 1
             print(f"FAIL verdict {name}: reasons={reasons!r} (want {want})", file=sys.stderr)
 
-    total = len(cases) + len(verdict_cases)
+    # section_map_drift(): synthetic files, then the shipped ones (this runs in CI).
+    mapped = "// ---- SECTION MAP ----\n//   all: a, b\n\n"
+    map_cases = [
+        ("map matches", mapped + "function a() {}\nexport const b = (x: number): void => {}\n", 0),
+        ("map misses async def", mapped + "function a() {}\nconst b = () => 1\nasync function c() {}\n", 1),
+        ("map keeps stale name", mapped + "function a() {}\n", 1),
+        ("no map block", "function a() {}\n", 1),
+        ("non-arrow const ignored", mapped + "function a() {}\nconst b = () => 1\nconst c = atom(1)\n", 0),
+        ("typed arrow export", mapped + "function a() {}\nexport const b: T = (on) => {}\n", 0),
+        ("indented def ignored", mapped + "function a() {}\nconst b = () => 1\n  function c() {}\n", 0),
+    ]
+    for name, src, want in map_cases:
+        drift = section_map_drift(src)
+        if len(drift) != want:
+            failures += 1
+            print(f"FAIL section map {name}: {drift!r} (want {want})", file=sys.stderr)
+    mods_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mods")
+    shipped_drift = section_map_reasons(mods_dir)
+    if shipped_drift:
+        failures += 1
+        print(f"FAIL shipped section maps: {shipped_drift!r}", file=sys.stderr)
+
+    total = len(cases) + len(verdict_cases) + len(map_cases) + 1
     print(f"check_mods selftest: {total - failures}/{total} passed", file=sys.stderr)
     return 1 if failures else 0
 

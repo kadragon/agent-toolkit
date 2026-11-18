@@ -260,15 +260,7 @@ describe('counts', () => {
     expect(headline(COUNTED)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
   })
 
-  test('end on the queue beside the MCP servers', () => {
-    expect(setupText({ ...COUNTED, queue: { groups: 4, parked: 2 } })).toBe(
-      'cache 58m │ 21 hooks │ 49 skills (4.2k) │ 4 mcp │ queue 4 (2 parked)',
-    )
-  })
-
-  test('draw an empty queue and leave out an unread or absent one', () => {
-    expect(setupText({ ...STATUS, queue: { groups: 0, parked: 0 } })).toBe('queue 0')
-    expect(setupText({ ...STATUS, queue: null })).toBe('')
+  test('leave out a setup not yet read', () => {
     expect(setupText(STATUS)).toBe('')
   })
 
