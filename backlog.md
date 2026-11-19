@@ -25,13 +25,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   Done when: `task-next/SKILL.md` gate table splits the `task_worktree` row, `task_contract_dirty` row marked legacy, `edge-cases.md` *Work already in flight* resumes worktrees only on explicit request → `validate-harness.sh` + a manual run with a second worktree present
   Approach: edit the gate rows and edge-case prose; add `--resume` to task-next's flag list
 
-## 5 — task new tree
-
-- [ ] [HARNESS] `task-new --tree` runs the free-text cycle in a worktree even from base
-  Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → `task-new --tree`
-  Done when: `task-new/SKILL.md` accepts `--tree` and points to the shared worktree-cycle description; no `tasks.md` written → `validate-harness.sh` + a manual `task-new --tree` run
-  Approach: one override line in task-new Step 3 → *Branch*
-
 ## Review Backlog
 
 ### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)
