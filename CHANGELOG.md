@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] task-next candidates skip backlog items claimed by other .worktrees/ runs (dev v4.11.48) (2026-11-19) → docs/design/concurrent-tree-cycles.md
 - [done] mods Context bar is 30 cells, split by /context category colors with no labels (mods v1.1.3) (2026-11-18)
 - [done] docs: mods session.start lives in register.ts; $ crosses files only into function declarations (2026-11-17) → docs/architecture.md
 - [done] mods status-band register.tsx gains a SECTION MAP held to its functions by check_mods.py (mods v1.1.2) (2026-11-17) → docs/runbook.md
