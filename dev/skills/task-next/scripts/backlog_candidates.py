@@ -871,7 +871,12 @@ def worktree_claims(wt_tasks: str, wt_backlog: str | None, base_backlog: str | N
 
 def _git(cwd: str, *args: str) -> str | None:
     try:
-        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=False)
+        # utf-8, not the locale: on a cp949 Windows host the default decode of a Korean backlog
+        # raises, which `--ref` would then report as a missing file
+        r = subprocess.run(
+            ["git", "-C", cwd, *args], capture_output=True, text=True, encoding="utf-8",
+            errors="replace", check=False,
+        )
     except OSError:
         return None
     return r.stdout if r.returncode == 0 else None
@@ -885,7 +890,9 @@ def _read_optional(path: str) -> str | None:
         return None
 
 
-def collect_claims(backlog_path: str, tasks_path: str | None, ref: str = "HEAD") -> dict[str, set[str]]:
+def collect_claims(
+    backlog_path: str, tasks_path: str | None, ref: str = "HEAD", include_self: bool = False
+) -> dict[str, set[str]]:
     """{worktree path (as git lists it): claimed item keys} for every OTHER `.worktrees/` worktree.
 
     Same `/.worktrees/` test as task-next's working tree gate; any other linked worktree is not a
@@ -894,6 +901,11 @@ def collect_claims(backlog_path: str, tasks_path: str | None, ref: str = "HEAD")
     uncommitted). The merge-base is taken against `ref` — this checkout's HEAD by default, the
     base a candidate run sits on, or the `--ref` base a `--tree` run selects from (HEAD may then
     be an unrelated feature branch). Not a git repo, or git unavailable → no claims, never an error.
+
+    `include_self` (set with `--ref`) also counts this checkout — and the main worktree, when this
+    one is linked — as a claimant, by the same rule:
+    a `--tree` run selects past it, so a non-`--tree` cycle in progress here (its `## Covers`, or
+    the backlog lines it pruned, committed or not) must still hold its items.
     """
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
@@ -907,13 +919,19 @@ def collect_claims(backlog_path: str, tasks_path: str | None, ref: str = "HEAD")
         if tasks_path
         else os.path.join(os.path.dirname(backlog_rel), "tasks.md")
     )
+    claimants = [
+        wt
+        for wt in (ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree "))
+        if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top
+    ]
+    if include_self:
+        # this checkout, and the main worktree (first listed) when run from a linked one
+        main_wt = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), None)
+        claimants.append(top)
+        if main_wt and os.path.isdir(main_wt) and os.path.realpath(main_wt) != top:
+            claimants.append(main_wt)
     claims: dict[str, set[str]] = {}
-    for line in listing.splitlines():
-        if not line.startswith("worktree "):
-            continue
-        wt = line[len("worktree "):]
-        if "/.worktrees/" not in wt or not os.path.isdir(wt) or os.path.realpath(wt) == top:
-            continue
+    for wt in claimants:
         wt_tasks = _read_optional(os.path.join(wt, tasks_rel)) or ""
         wt_backlog = _read_optional(os.path.join(wt, backlog_rel))
         base_backlog = None
@@ -960,7 +978,10 @@ def claimed_skip_note(
         return None
 
     def _name(wt: str) -> str:
-        return os.path.relpath(os.path.realpath(wt), os.path.realpath(top)) if top else wt
+        if not top:
+            return wt
+        rel = os.path.relpath(os.path.realpath(wt), os.path.realpath(top))
+        return "this checkout" if rel == "." else rel
 
     per = "; ".join(
         f"{len(lines)} by {_name(wt)} ({', '.join(f'{label}:{n}' for n in lines)})"
@@ -1106,7 +1127,9 @@ def main(argv: list[str]) -> int:
     # a duplicate cycle. Named on stderr even when candidates remain, so the skip is never silent.
     if backlog_path:  # always true past _read_file(required=True); narrows the type
         counts = mark_claimed(
-            backlog_raw, backlog_tokens, collect_claims(backlog_path, tasks_path, ref or "HEAD")
+            backlog_raw,
+            backlog_tokens,
+            collect_claims(backlog_path, tasks_path, ref or "HEAD", include_self=ref is not None),
         )
         top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
         label = f"{ref}:{backlog_path}" if ref else backlog_path  # line numbers are the ref's
@@ -1283,15 +1306,32 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
             == {"item E"},
             "--ref main takes the merge-base against main, so wt4's pruned E stays claimed",
         )
+        # a non-`--tree` cycle in this checkout claims C through its own uncommitted tasks.md
+        write(os.path.join(repo, "tasks.md"), "# C sprint\nstatus: active\n\n## Covers\n\n- [ ] item C\n")
+        _assert(
+            "item C" not in collect_claims(backlog, None, "main").get(os.path.realpath(repo), set()),
+            "without include_self this checkout claims nothing (default runs sit in it)",
+        )
+        _assert(
+            collect_claims(backlog, None, "main", include_self=True).get(os.path.realpath(repo))
+            == {"item C"},
+            "include_self counts this checkout's `## Covers` as a claim",
+        )
+        from_wt1 = collect_claims(os.path.join(wt1, "backlog.md"), None, "main", include_self=True)
+        _assert(
+            {os.path.basename(k.rstrip("/\\")): v for k, v in from_wt1.items()}.get("repo") == {"item C"},
+            "run from a linked worktree, include_self also counts the main worktree's claims",
+        )
         r = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--backlog", backlog, "--ref", "main"],
             capture_output=True, text=True, cwd=repo, env=env,
         )
         _assert(
-            r.returncode == 0 and r.stdout.strip() == "[1] backlog.md: Queue (2 items)",
-            "--ref reads backlog.md as committed at main: the uncommitted F is invisible and A, B, E "
-            f"are claimed (got {r.stdout.strip()!r} / {r.stderr.strip()!r})",
+            r.returncode == 0 and r.stdout.strip() == "[1] backlog.md: Queue (1 items)",
+            "--ref reads backlog.md as committed at main: the uncommitted F is invisible and A, B, "
+            f"C (this checkout), E are claimed (got {r.stdout.strip()!r} / {r.stderr.strip()!r})",
         )
+        _assert("1 by this checkout" in r.stderr, "the skip line names this checkout as a claimant")
         _assert(f"main:{backlog}:" in r.stderr, "the skip line labels lines with the ref they index")
         r = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--backlog", backlog, "--ref", "no-such-ref"],

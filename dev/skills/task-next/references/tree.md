@@ -8,8 +8,9 @@ and the main checkout is never edited or switched. `--tree` is the user's explic
 delegate implementation and QA, which satisfies the direction requirement of the delegation
 policy.
 
-**Branch (replaces `git checkout -b` under `--tree`):** derive the branch and level the local
-base, then create the worktree per *Worktree cycle* with this `BASE`:
+**Branch (replaces `git checkout -b` under `--tree`):** derive the branch, pin the base commit
+and level the local base, then create the worktree per *Worktree cycle* with `BASE` = the printed
+SHA:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -21,23 +22,28 @@ rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
 # exit 3 (this checkout is off the base) is fine here: --tree never touches this checkout
 [[ $rc -eq 0 || $rc -eq 3 ]] || { echo "branch exited $rc — see stderr above" >&2; exit 1; }
-git fetch || exit 1
+# the commit Step 1 selected from (task-next), or empty (task-new: no selection) → pin it here
+BASE_SHA="<the SHA Step 1 printed, or empty>"
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-# level the local base with $BASE only when this checkout is clean on it; any other state is
-# someone else's work, so skip — the worktree is built from $BASE and never needs the local base
+if [[ -z "$BASE_SHA" ]]; then
+  git fetch origin || exit 1
+  BASE_SHA=$(git rev-parse --verify "$BASE^{commit}") || exit 1
+fi
+# level the local base with $BASE_SHA only when this checkout is clean on it; any other state is
+# someone else's work, so skip — the worktree is built from $BASE_SHA and never needs the local base
 CURRENT=$(git branch --show-current)
 DIRTY=$(git status --porcelain)
 if [[ "$CURRENT" == "${BASE#origin/}" && -z "$DIRTY" ]]; then
-  git merge --ff-only "$BASE" || echo "local $CURRENT cannot fast-forward to $BASE — left as is" >&2
+  git merge --ff-only "$BASE_SHA" || echo "local $CURRENT cannot fast-forward to $BASE_SHA — left as is" >&2
 fi
-echo "branch: $BRANCH  base: $BASE"
+echo "branch: $BRANCH  base: $BASE_SHA ($BASE)"
 ```
 
-This checkout's branch and uncommitted edits — `backlog.md` and `docs/design/` included — stay
-where they are and never reach the worktree or the PR. Selection already came from `$BASE`
-(`SKILL.md` → Step 1), so the worktree's `backlog.md` holds every selected line and
-`prune-backlog` finds them.
+Create the worktree with `BASE` set to the printed SHA, not the moving `origin/<name>`: the
+worktree's `backlog.md` is then exactly the one Step 1 selected from, so it holds every selected
+line and `prune-backlog` finds them. This checkout's branch and uncommitted edits — `backlog.md`
+and `docs/design/` included — stay where they are and never reach the worktree or the PR.
 
 **Claim — right after `git worktree add`, before the plan gate.** A `backlog.md` group → write
 the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers`

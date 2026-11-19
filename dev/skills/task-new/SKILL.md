@@ -64,7 +64,7 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 
 - **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → replace the block with
   `../task-next/references/tree.md` → *Branch*, swapping its piped item lines for `--tag <TYPE>`
-  (it resolves `BASE` from `origin/HEAD`, levels the local base only when this checkout is clean
+  and an empty `BASE_SHA` (it pins `origin/HEAD`'s commit, levels the local base only when this checkout is clean
   on it, and leaves this checkout's branch and uncommitted edits untouched), then run the whole
   cycle as a `cycle.md` → *Worktree cycle* from any branch or dirty state (the gate's `--tree` row). Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
