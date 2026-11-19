@@ -17,7 +17,7 @@ SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|n
 BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | cut -f1,2 | grep -m1 -e '-' || true)
 MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
 SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod|mods)/.*\.(sh|py|ps1|cjs|ts|tsx)$' | head -1 || true)
-# a linked worktree (cycle.md → *Worktree cycle*): the lite merge's `git checkout <base>` cannot run here
+# a linked worktree (`../../task-next/references/cycle.md` → *Worktree cycle*): the lite merge's `git checkout <base>` cannot run here
 WORKTREE_HIT=$([[ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]] && echo linked-worktree || true)
 FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}${WORKTREE_HIT}"
 ```
