@@ -1,11 +1,11 @@
 ---
 name: task-new
-version: 2.4.0
+version: 2.5.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
-  (possibly direct base-branch merge/push). Multi-session work goes to a spec plus backlog
-  tickets instead. Already on the queue instead → task-next.
+  (possibly direct base-branch merge/push). Flag: --tree (worktree isolation). Multi-session
+  work goes to a spec plus backlog tickets instead. Already on the queue instead → task-next.
 disable-model-invocation: true
 ---
 
@@ -62,7 +62,10 @@ Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that re
 directory) with these overrides. Verify the originating user invocation and preserve its
 Git limits per `../task-next/references/git-authorization.md` before writes:
 
-- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1.
+- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → run the whole cycle as a
+  *Worktree cycle* even when the block exits 0 on base: skip its `git checkout -b`, and use
+  `BASE` = `origin/HEAD`'s target (a local `main`/`master` when there is no origin). Nothing is
+  claimed: no `tasks.md` means no `## Covers`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
