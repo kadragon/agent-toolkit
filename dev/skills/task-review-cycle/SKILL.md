@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.7.0
+version: 1.8.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -216,7 +216,11 @@ never reset hard; recover within established authority. Lite is done only once t
 **Retire the archive on either path** once the merge is confirmed, a merge the user ran included (a leftover resurrects for the next
 same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
-**Hub path** — `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
+**Hub path** — first, in the feature checkout (its worktree, if any), `python3
+"$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
+pushed a merge of base, bump and CHANGELOG redone, so CI restarts; `conflict`/`denied`/`error` →
+stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
+Then `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
 ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then
 resolve the helper; non-zero → stop, no merge. Then issue the merge as a second, separate command
 starting with the printed path — no `bash` prefix, no variable: the only shape an auto-mode allow

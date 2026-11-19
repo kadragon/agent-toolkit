@@ -77,16 +77,18 @@ that fell behind base and recomputes the bump number. `task-new --tree` uses the
   items are dropped from candidates, and the output names how many were skipped and by which
   worktree. The `cycle_state` archive is not used for claims: its contract text is not
   guaranteed to carry the verbatim item lines.
-- **Pre-merge resync (decision d).** In `task-review-cycle`, before the hub merge: fetch; if the
-  branch is behind `origin/<base>`, rebase onto it. For the version-bearing files — both
-  manifests of the bumped plugin, the `version:` line of any `SKILL.md` bumped with `--skill`,
-  and `CHANGELOG.md` — take base's side, re-run `bump-version.sh` with the level chosen in the
-  original cycle (recorded in the contract archive or PR body so the resync can read it), and
-  re-insert the CHANGELOG entry with the new version via `task_nodes.py changelog`. Any other
-  conflict stops the resync and is reported — never auto-resolved. Then `git push
-  --force-with-lease`, wait for CI again, merge. Force-push needs its own Git authority check
-  (`git-authorization.md`). Where the scripted part lives (new script vs. `task_nodes.py`
-  subcommand) is an implementation choice for the ticket.
+- **Pre-merge resync (decision d).** In `task-review-cycle`, before the hub path's CI wait:
+  `scripts/pre_merge_resync.py` fetches; if the branch is behind `origin/<base>`, it **merges**
+  base into the branch (no rebase). For the version-bearing files — both manifests of the bumped
+  plugin, the `version:` line of any `SKILL.md` bumped with `--skill`, and `CHANGELOG.md` — a
+  conflict hunk whose sides are only version lines takes base's side; the version is then set
+  to base's plus the level chosen in the original cycle, derived from git history (merge-base
+  version → branch tip version, exactly one semver step, else stop), and the branch's CHANGELOG
+  entries are re-inserted on base's file with the new version via `task_nodes.py`'s
+  `insert_changelog_entry`. Any other conflict aborts the merge and is reported — never
+  auto-resolved. The merge commit is pushed fast-forward under `feature-push` authority —
+  no force push, so `git-authorization.md`'s force rule is unchanged — then CI is waited on
+  again and the PR merges. A squash hub merge drops the merge commit.
 - **`task-new --tree`.** `task-new` accepts `--tree` and runs cycle.md's worktree path even from
   base. It writes no `tasks.md` (no queue line), so it claims nothing under the claimed-items
   rule; that is acceptable because a free-text request is not in the queue.
@@ -102,6 +104,11 @@ that fell behind base and recomputes the bump number. `task-new --tree` uses the
   "forgot my stopped run" risk.
 - Claims from the `cycle_state` archive — the archive is keyed by branch and holds contract
   text, not guaranteed verbatim backlog lines; worktree files are the direct source.
+- Rebase + `git push --force-with-lease` for the resync — user settings deny
+  `git push* --force*`, and `git-authorization.md` grants no force authority; merging base in
+  and pushing fast-forward needs only `feature-push`.
+- Recording the bump level in the contract archive or PR body — git history already holds it
+  (merge-base vs tip version), so there is no record to forget or drift.
 - Lite (local merge) path inside the worktree — base is checked out in the main worktree, so
   the merge would have to edit the main checkout.
 

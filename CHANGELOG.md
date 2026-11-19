@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] review cycle merges base into a PR behind it and re-bumps, no force push (dev v4.11.51) (2026-11-19) → docs/design/concurrent-tree-cycles.md
 - [done] task-new --tree runs the free-text cycle in its own worktree, even from base (dev v4.11.50) (2026-11-19) → docs/design/concurrent-tree-cycles.md
 - [done] --tree runs collapse-free in its worktree and claims its items before the plan gate (dev v4.11.49) (2026-11-19) → docs/design/concurrent-tree-cycles.md
 - [done] task-next candidates skip backlog items claimed by other .worktrees/ runs (dev v4.11.48) (2026-11-19) → docs/design/concurrent-tree-cycles.md
