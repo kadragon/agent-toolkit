@@ -62,10 +62,11 @@ Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that re
 directory) with these overrides. Verify the originating user invocation and preserve its
 Git limits per `../task-next/references/git-authorization.md` before writes:
 
-- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → run the whole cycle as a
-  *Worktree cycle* even when the block exits 0 on base: skip its `git checkout -b`, and use
-  `BASE` = `origin/HEAD`'s target (a local `main`/`master` when there is no origin). Nothing is
-  claimed: no `tasks.md` means no `## Covers`, and a free-text request is not on the queue.
+- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → replace the block with
+  `../task-next/references/tree.md` → *Branch*, swapping its piped item lines for `--tag <TYPE>`
+  (it resolves `BASE` from `origin/HEAD`, levels a checked-out local base, and stops on
+  uncommitted queue edits), then run the whole cycle as a `cycle.md` → *Worktree cycle* even
+  from base. Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
@@ -74,3 +75,6 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 ## Step 4 — Hand off
 
 Per `cycle.md` → *Hand off*: `args: --from task-new --auto`, Sprint Contract restated verbatim.
+`--tree` → hand off from the worktree and state its absolute path, so the review cycle runs
+there, takes the hub path, and passes the path to `merge-and-cleanup.sh` (*Worktree cycle* →
+*Route*, *Merge*).
