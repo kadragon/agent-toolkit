@@ -223,6 +223,83 @@ def test_denied_writes_nothing(tmp):
     check(not git(repo, "status", "--porcelain", "--untracked-files=no"), "tree written without authority")
 
 
+def behind(tmp, a_files, b_files, b_actions=None):
+    """feat/b branches beside feat/a; feat/a merges; returns the repo on feat/b."""
+    repo = setup(tmp)
+    branch(repo, "feat/a", a_files, "[TEST] a")
+    branch(repo, "feat/b", b_files, "[TEST] b")
+    if b_actions:
+        grant(repo, "feat/b", actions=b_actions)
+    squash_merge(repo, "feat/a")
+    git(repo, "checkout", "-q", "feat/b")
+    return repo
+
+
+def unchanged(repo, head):
+    check(git(repo, "rev-parse", "HEAD") == head, "HEAD moved")
+    check(git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False) == "", "merge left open")
+    check(not git(repo, "status", "--porcelain", "--untracked-files=no"), "tree left dirty")
+
+
+def test_commit_authority_required(tmp):
+    repo = behind(tmp, {**release("1.0.1"), "x.txt": "a\n"}, {**release("1.0.1"), "y.txt": "b\n"},
+                  b_actions="feature-push, pr-write")
+    head = git(repo, "rev-parse", "HEAD")
+    rc, result = resync(repo)
+    check(rc == 1 and result["status"] == "denied" and "commit" in result["message"],
+          f"merge commit written without commit authority: {result}")
+    unchanged(repo, head)
+
+
+def test_body_version_line_is_not_a_version_conflict(tmp):
+    repo = behind(tmp, release("1.0.1", body="version: 7"), release("1.0.1", body="version: 8"))
+    head = git(repo, "rev-parse", "HEAD")
+    rc, result = resync(repo)
+    check(rc == 1 and result["status"] == "conflict" and "dev/skills/s/SKILL.md" in result["paths"],
+          f"a body version: line was auto-resolved: {result}")
+    unchanged(repo, head)
+
+
+def test_base_deleted_changelog_stops(tmp):
+    repo = setup(tmp)
+    branch(repo, "feat/b", {**release("1.0.1", entries=entry("B", "1.0.1"))}, "[TEST] b")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "rm", "-q", "CHANGELOG.md")
+    git(repo, "commit", "-qm", "[TEST] drop changelog")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "checkout", "-q", "feat/b")
+    head = git(repo, "rev-parse", "HEAD")
+    rc, result = resync(repo)
+    check(rc == 1 and "no longer has CHANGELOG.md" in result.get("message", ""),
+          f"deleted CHANGELOG recreated: {result}")
+    unchanged(repo, head)
+
+
+def test_failed_commit_aborts_merge(tmp):
+    repo = behind(tmp, {**release("1.0.1"), "x.txt": "a\n"}, {**release("1.0.1"), "y.txt": "b\n"})
+    hooks = tmp / "hooks"
+    hooks.mkdir()
+    (hooks / "pre-commit").write_text("#!/bin/sh\nexit 1\n")
+    (hooks / "pre-commit").chmod(0o755)
+    git(repo, "config", "core.hooksPath", str(hooks))
+    head = git(repo, "rev-parse", "HEAD")
+    rc, result = resync(repo)
+    check(rc == 1 and result["status"] == "error", f"failed commit not reported: {result}")
+    unchanged(repo, head)
+
+
+def test_unpushed_merge_is_pushed_on_rerun(tmp):
+    repo = behind(tmp, {**release("1.0.1"), "x.txt": "a\n"}, {**release("1.0.1"), "y.txt": "b\n"})
+    git(repo, "config", "remote.origin.pushurl", str(tmp / "missing.git"))
+    rc, result = resync(repo)
+    check(rc == 1 and "push failed" in result.get("message", ""), f"push failure hidden: {result}")
+    git(repo, "config", "--unset", "remote.origin.pushurl")
+    rc, result = resync(repo)
+    check(rc == 0 and result["status"] == "resynced", f"rerun did not push the local merge: {result}")
+    check(git(repo, "rev-parse", "origin/feat/b") == git(repo, "rev-parse", "HEAD"), "not pushed")
+    check('"version": "1.0.2"' in (repo / "dev/.claude-plugin/plugin.json").read_text(), "re-bumped twice")
+
+
 def test_multi_step_bump_stops(tmp):
     repo = setup(tmp)
     branch(repo, "feat/g", {**release("1.0.1"), "x.txt": "g\n"}, "[TEST] g")
@@ -239,7 +316,10 @@ def main():
     test_classify()
     for test in (test_two_branches_both_merge, test_version_line_conflict_takes_base,
                  test_non_version_conflict_stops, test_mixed_hunk_in_version_file_stops,
-                 test_denied_writes_nothing, test_multi_step_bump_stops):
+                 test_denied_writes_nothing, test_multi_step_bump_stops,
+                 test_commit_authority_required, test_body_version_line_is_not_a_version_conflict,
+                 test_base_deleted_changelog_stops, test_failed_commit_aborts_merge,
+                 test_unpushed_merge_is_pushed_on_rerun):
         with tempfile.TemporaryDirectory() as tmp:
             test(Path(tmp))
     print("pre_merge_resync: all tests passed")

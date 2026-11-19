@@ -218,8 +218,8 @@ same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" r
 
 **Hub path** — first, in the feature checkout (its worktree, if any), `python3
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
-pushed a merge of base with the bump re-applied and CHANGELOG re-inserted, so CI restarts;
-`conflict`/`denied`/`error` → stop, keep the PR, report. A merge later refused as behind → once more.
+pushed a merge of base, bump and CHANGELOG redone, so CI restarts; `conflict`/`denied`/`error` →
+stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
 Then `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
 ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then
 resolve the helper; non-zero → stop, no merge. Then issue the merge as a second, separate command

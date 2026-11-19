@@ -6,14 +6,17 @@ Usage: pre_merge_resync.py --base <base_branch> [--remote origin]
 Run from the feature branch's checkout (a `.worktrees/` worktree included) with a clean
 tracked tree. Steps:
 
-1. `feature-push` authority is checked first (cycle_state.py authorize); denied → nothing written.
-2. Fetch `<remote>/<base>`. Already an ancestor of HEAD → `up-to-date`, nothing written.
+1. `commit` and `feature-push` authority are checked first (cycle_state.py authorize); denied →
+   nothing written. `commit` is checked again before the merge commit, `feature-push` before push.
+2. Fetch `<remote>/<base>` and the PR branch; pin base to one SHA. Base already in HEAD → done:
+   `up-to-date` when the PR branch is HEAD, else the unpushed earlier merge is pushed.
 3. Read what the branch bumped, from its merge-base to HEAD: every `plugin.json` under a
    `.claude-plugin/` or `.codex-plugin/` directory and every `SKILL.md` whose version changed,
    each by exactly one semver step — that step is the level re-applied. A multi-step change
    stops the run. The branch's `CHANGELOG.md` must only add entry lines; they are re-inserted.
-4. `git merge --no-ff --no-commit <remote>/<base>`. A conflict hunk whose sides are both only
-   version lines takes base's side; any other conflict aborts the merge and stops (`conflict`).
+4. `git merge --no-ff --no-commit <remote>/<base>`. A single one-line conflict hunk on the file's
+   own version field takes base's side; any other conflict, or any failure before the merge
+   commit, aborts the merge and stops.
 5. Each bumped file's version is set to base's version plus the original level; CHANGELOG.md is
    base's file with the branch's entries re-inserted under `## Unreleased`, their
    `(<plugin> v<old>)` rewritten to the new version. The merge commit is made, `feature-push`
@@ -150,13 +153,12 @@ def resolve_version_hunks(path):
     text = Path(path).read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     pattern = version_pattern(path)
-    result, i, hunks = [], 0, 0
+    result, i, at = [], 0, []
     while i < len(lines):
         if not lines[i].startswith("<<<<<<< "):
             result.append(lines[i])
             i += 1
             continue
-        hunks += 1
         ours, theirs, section = [], [], "ours"
         i += 1
         while i < len(lines) and not lines[i].startswith(">>>>>>> "):
@@ -173,11 +175,16 @@ def resolve_version_hunks(path):
         if i == len(lines):
             return False
         i += 1
-        if not ours or not theirs or not all(pattern.match(x.rstrip("\r\n")) for x in ours + theirs):
+        if len(ours) != 1 or len(theirs) != 1 or not all(
+                pattern.match(x.rstrip("\r\n")) for x in ours + theirs):
             return False
+        at.append(len(result))
         result.extend(theirs)   # merging base into the branch: "theirs" is base
-    if not hunks:
-        return False            # modify/delete and other marker-less conflicts are not ours to settle
+    if len(at) != 1:
+        return False            # marker-less (modify/delete) or several hunks: not ours to settle
+    # Only the file's own version field — not a `version:` in a SKILL.md body or a nested key.
+    if version_line_index(path, [x.rstrip("\r\n") for x in result]) != at[0]:
+        return False
     Path(path).write_text("".join(result), encoding="utf-8")
     return True
 
@@ -211,11 +218,21 @@ def plugin_names(path, rev):
     return names
 
 
-def authorize(branch):
-    proc = subprocess.run([sys.executable, str(STATE), "authorize", "--branch", branch,
-                           "--action", "feature-push"], capture_output=True, text=True)
-    if proc.returncode:
-        raise Stop("denied", proc.stderr.strip() or "feature-push not established")
+def authorize(branch, *actions):
+    for action in actions:
+        proc = subprocess.run([sys.executable, str(STATE), "authorize", "--branch", branch,
+                               "--action", action], capture_output=True, text=True)
+        if proc.returncode:
+            raise Stop("denied", proc.stderr.strip() or f"{action} not established")
+
+
+def push(branch, remote, base, **result):
+    authorize(branch, "feature-push")
+    pushed = git("push", "--quiet", remote, f"HEAD:refs/heads/{branch}", check=False)
+    result = {"branch": branch, "base": f"{remote}/{base}", "head": out("rev-parse", "HEAD"), **result}
+    if pushed.returncode:
+        raise Stop("error", f"merge committed locally, push failed: {pushed.stderr.strip()}", **result)
+    return {"status": "resynced", "pushed": True, **result}
 
 
 def load_insert():
@@ -229,68 +246,75 @@ def resync(base, remote):
     branch = git("symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
     if not branch or branch == base:
         raise Stop("error", f"run from the feature branch, not '{branch or 'detached HEAD'}'")
-    authorize(branch)
+    authorize(branch, "commit", "feature-push")
     if out("status", "--porcelain", "--untracked-files=no"):
         raise Stop("error", "tracked changes present; commit or stash before resync")
-    target = f"refs/remotes/{remote}/{base}"
-    git("fetch", "--quiet", remote, f"+refs/heads/{base}:{target}")
+    git("fetch", "--quiet", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}",
+        f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
+    # Pinned once: other worktrees share the remote-tracking ref and may move it mid-run.
+    target = out("rev-parse", f"refs/remotes/{remote}/{base}^{{commit}}")
+    pr_head = out("rev-parse", f"refs/remotes/{remote}/{branch}^{{commit}}")
+    if git("merge-base", "--is-ancestor", pr_head, "HEAD", check=False).returncode:
+        raise Stop("error", f"{remote}/{branch} has commits this checkout lacks; pull them first")
     if not git("merge-base", "--is-ancestor", target, "HEAD", check=False).returncode:
-        return {"status": "up-to-date", "branch": branch, "base": f"{remote}/{base}"}
+        if pr_head == out("rev-parse", "HEAD"):
+            return {"status": "up-to-date", "branch": branch, "base": f"{remote}/{base}"}
+        return push(branch, remote, base, note="pushed a resync left unpushed by an earlier run")
 
     merge_base = out("merge-base", "HEAD", target)
     names = out("diff", "--name-only", merge_base, "HEAD").splitlines()
     bumps = branch_bumps(merge_base, names)
     entries = branch_entries(merge_base) if CHANGELOG in names else []
+    if entries and git("cat-file", "-e", f"{target}:{CHANGELOG}", check=False).returncode:
+        raise Stop("error", f"base no longer has {CHANGELOG}; resync by hand")
     insert = load_insert() if entries else None
 
     merged = git("merge", "--no-ff", "--no-commit", target, check=False)
-    if merged.returncode:
-        unmerged = out("diff", "--name-only", "--diff-filter=U").splitlines()
-        stuck = [p for p in unmerged
-                 if not ((p == CHANGELOG and entries) or (p in bumps and resolve_version_hunks(p)))]
-        if not unmerged:
-            git("merge", "--abort", check=False)
-            raise Stop("error", f"merge failed: {merged.stderr.strip() or merged.stdout.strip()}")
-        if stuck:
-            git("merge", "--abort", check=False)
-            raise Stop("conflict", "non-version conflict; merge aborted, nothing pushed", paths=stuck)
+    try:
+        if merged.returncode:
+            unmerged = out("diff", "--name-only", "--diff-filter=U").splitlines()
+            if not unmerged:
+                raise Stop("error", f"merge failed: {merged.stderr.strip() or merged.stdout.strip()}")
+            stuck = [p for p in unmerged
+                     if not ((p == CHANGELOG and entries) or (p in bumps and resolve_version_hunks(p)))]
+            if stuck:
+                raise Stop("conflict", "non-version conflict; merge aborted, nothing pushed", paths=stuck)
 
-    versions = []
-    rewrites = []   # (plugin name, branch version, resynced version) for CHANGELOG entries
-    for path, info in bumps.items():
-        base_version = version_at(target, path)
-        new = bump(base_version, info["level"]) if base_version else info["branch"]
-        set_version(path, new)
-        git("add", "--", path)
-        versions.append({"file": path, "level": info["level"], "base": base_version, "to": new})
-        if MANIFEST.search(path):
-            rewrites += [(name, info["branch"], new) for name in plugin_names(path, "HEAD")]
+        versions = []
+        rewrites = []   # (plugin name, branch version, resynced version) for CHANGELOG entries
+        for path, info in bumps.items():
+            base_version = version_at(target, path)
+            new = bump(base_version, info["level"]) if base_version else info["branch"]
+            set_version(path, new)
+            git("add", "--", path)
+            versions.append({"file": path, "level": info["level"], "base": base_version, "to": new})
+            if MANIFEST.search(path):
+                rewrites += [(name, info["branch"], new) for name in plugin_names(path, "HEAD")]
 
-    if entries:
-        base_text = git("show", f"{target}:{CHANGELOG}", check=False)
-        text = base_text.stdout if not base_text.returncode else ""
-        updated = []
-        for entry in entries:
-            for name, old, new in rewrites:
-                entry = entry.replace(f"({name} v{old})", f"({name} v{new})")
-            updated.append(entry)
-        for entry in reversed(updated):
-            text, _ = insert(text, entry)
-        Path(CHANGELOG).write_text(text, encoding="utf-8")
-        git("add", "--", CHANGELOG)
-        entries = updated
+        if entries:
+            text = out("show", f"{target}:{CHANGELOG}") + "\n"
+            updated = []
+            for entry in entries:
+                for name, old, new in rewrites:
+                    entry = entry.replace(f"({name} v{old})", f"({name} v{new})")
+                updated.append(entry)
+            for entry in reversed(updated):
+                text, _ = insert(text, entry)
+            Path(CHANGELOG).write_text(text, encoding="utf-8")
+            git("add", "--", CHANGELOG)
+            entries = updated
 
-    if out("diff", "--name-only", "--diff-filter=U"):
+        if out("diff", "--name-only", "--diff-filter=U"):
+            raise Stop("conflict", "unresolved paths remain; merge aborted, nothing pushed")
+        authorize(branch, "commit")
+        git("commit", "--quiet", "--no-edit")
+    except (Stop, OSError) as failure:
+        # Anything between the merge and its commit leaves MERGE_HEAD and a half-written index.
         git("merge", "--abort", check=False)
-        raise Stop("conflict", "unresolved paths remain; merge aborted, nothing pushed")
-    git("commit", "--quiet", "--no-edit")
-    authorize(branch)
-    pushed = git("push", "--quiet", remote, f"HEAD:refs/heads/{branch}", check=False)
-    result = {"branch": branch, "base": f"{remote}/{base}", "head": out("rev-parse", "HEAD"),
-              "versions": versions, "changelog_entries": entries}
-    if pushed.returncode:
-        raise Stop("error", f"merge committed locally, push failed: {pushed.stderr.strip()}", **result)
-    return {"status": "resynced", "pushed": True, **result}
+        if isinstance(failure, Stop):
+            raise
+        raise Stop("error", f"{failure}; merge aborted, nothing pushed") from failure
+    return push(branch, remote, base, versions=versions, changelog_entries=entries)
 
 
 def main(argv=None):

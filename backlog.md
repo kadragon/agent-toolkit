@@ -33,6 +33,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] Two sessions selecting before either writes `## Covers` can both take the same item; claims need an atomic commit-or-reselect step (source: codex) — docs/design/concurrent-tree-cycles.md → Claimed items
 - [ ] [debt] Claim keys are the item's first-line text, so identical item text in two groups is indistinguishable (one claim hides both; a deletion is masked by the surviving twin) (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:item_keys
 
+### PR #411 — review cycle merges base into a PR behind it and re-bumps (2026-11-19)
+
+- [ ] [debt] pre_merge_resync rewrites only single-plugin CHANGELOG suffixes; `(dev vX, mods vY)` entries keep the old numbers (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
+- [ ] [debt] pre_merge_resync reads and writes via text mode, so a CRLF-tracked manifest or CHANGELOG is rewritten as LF (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:set_version
+- [ ] [debt] pre_merge_resync opens repo-relative paths from the CWD; run from a subdirectory it fails before writing (source: agy) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
