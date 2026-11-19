@@ -38,18 +38,22 @@ BRANCH="<the branch the block printed>"
 BASE="<the base>"   # origin/<name>, or a local main/master when there is no origin
 SLUG="${BRANCH#*/}"
 if git remote get-url origin >/dev/null 2>&1; then git fetch || exit 1; fi
+# the main worktree's root, even when this session sits in another linked worktree — never nest
+ROOT=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+[[ -n "$ROOT" ]] || { echo "cannot resolve the main worktree" >&2; exit 1; }
 EXCLUDE=$(git rev-parse --git-path info/exclude)
 mkdir -p -- "$(dirname -- "$EXCLUDE")"
 grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"   # leading newline: the file may lack a final one
 # if $BRANCH already exists locally (a partial run), delete it first: git branch -D "$BRANCH" (confirm with user)
-git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
+git worktree add "$ROOT/.worktrees/$SLUG" -b "$BRANCH" "$BASE"
+echo "worktree: $ROOT/.worktrees/$SLUG"
 ```
 
-From here on every step of this cycle and the review cycle — `tasks.md`, contract `save`, edits,
-checks, version bump, `CHANGELOG.md`, cleanup, commits, PR, merge — runs in the worktree: each
-Bash command begins `cd "<repo root>/.worktrees/<slug>" &&` with the literal path, file tools
-take absolute paths under it, and the starting checkout is never read, edited or switched.
-Nothing collapses back into it.
+From here on every step of this cycle and the review cycle up to the merge — `tasks.md`,
+contract `save`, edits, checks, version bump, `CHANGELOG.md`, cleanup, commits, PR — runs in the
+worktree: each Bash command begins `cd "<printed worktree path>" &&` with the literal path (Codex:
+set each call's `workdir` to it instead), file tools take absolute paths under it, and the
+starting checkout is never read, edited or switched. Nothing collapses back into it.
 
 - **Route.** The review cycle takes the hub (PR) path: its lite merge runs `git checkout <base>`,
   which a linked worktree cannot do while the base is checked out elsewhere. The risk-routing
@@ -58,8 +62,10 @@ Nothing collapses back into it.
   path as its optional fifth argument, `worktree_path`, so the merge removes the worktree. Run it
   from inside the worktree — from the starting checkout, the script runs `git checkout <base>`
   there — but keep the merge command itself unprefixed, the only shape an auto-mode allow rule
-  matches: issue `cd "<repo root>/.worktrees/<slug>"` as its own Bash call first (the cwd carries
-  to the next call), then the merge command.
+  matches: issue `cd "<printed worktree path>"` as its own Bash call first (the cwd carries to
+  the next call; Codex resets it per call, so set the merge call's `workdir` instead), then the
+  merge command. The merge deletes the worktree, so every step after it — `cycle_state.py
+  retire --branch <branch>` included — runs from the main worktree root (`ROOT`).
 - **Stopped run.** A failed check, missing authority or a QA stop preserves the worktree, branch
   and archive; only an explicit user instruction removes them. The archive stays either way —
   `cycle_state.py retire` follows a merge, never an abandonment.

@@ -29,19 +29,26 @@ if [[ "$CURRENT" == "${BASE#origin/}" ]]; then
   git merge --ff-only "$BASE" \
     || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
 fi
+# the worktree is built from $BASE: uncommitted queue edits (the gate's carried backlog.md /
+# docs/design rows) would not reach it, and prune-backlog would miss lines selected from them
+QUEUE_DIRTY=$(git status --porcelain -- backlog.md tasks.md docs/design)
+[[ -z "$QUEUE_DIRTY" ]] || { echo "uncommitted queue edits — commit them to base first, or run without --tree:" >&2; echo "$QUEUE_DIRTY" >&2; exit 1; }
 echo "branch: $BRANCH  base: $BASE"
 ```
 
-**Claim — right after `git worktree add`, before the plan gate.** Write the worktree's
-`tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers` listing each
-selected item line verbatim. `backlog_candidates.py` treats a `## Covers` line in another
+**Claim — right after `git worktree add`, before the plan gate.** A `backlog.md` group → write
+the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers`
+listing each selected item line verbatim. A `tasks.md` h1 block (`status: open`) → it is already
+in the worktree's copy: flip that block to `status: active` there and write no second block. `backlog_candidates.py` treats a `## Covers` line in another
 `.worktrees/` checkout as claimed, so a second session cannot pick the same item while this one
-waits at the plan gate. A declined plan → remove the worktree and branch (nothing else exists
-yet).
+waits at the plan gate. A declined plan → revert only this claim (delete the `tasks.md` it
+created, or restore the flipped block with `git restore tasks.md`), confirm `git status
+--porcelain` in the worktree is empty, then `git worktree remove` it and `git branch -d` the
+branch — no forced removal.
 
 **Mark active:** after the plan gate, add the Sprint Contract to that same worktree `tasks.md`
 block — every `--tree` run writes it, even for one item. Archive the contract per `cycle.md` →
-*Sprint Contract*, prefixing the command with `cd "<repo root>/.worktrees/<slug>" &&` — the
+*Sprint Contract*, prefixing the command with `cd "<printed worktree path>" &&` — the
 archive is keyed by the branch of the checkout it runs in, and an un-prefixed save keys it to
 the base branch, which `cycle_state.py` refuses.
 
