@@ -42,7 +42,7 @@ More than six parallel units → confirm the implementer + QA cost explicitly. R
 ### A3 — Parallel implementation
 
 The main session owns worktree lifecycle; do not use agent-lifetime worktree isolation.
-Ignore `.worktrees/` via `info/exclude` (`tree.md` → Branch step), fetch the base once, and create the integration branch and every
+Ignore `.worktrees/` via `info/exclude` (`cycle.md` → *Worktree cycle*), fetch the base once, and create the integration branch and every
 unit worktree from that same fetched base. Preserve any authorized backlog-only edits on the
 integration checkout. Create a worktree with `git worktree add .worktrees/<slug> -b wt/<slug>
 <captured-base-commit>`; use actual values discovered this run.

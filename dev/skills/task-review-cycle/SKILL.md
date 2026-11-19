@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.6.0
+version: 1.7.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -83,7 +83,7 @@ fi
 `guard_skipped: true` → report.
 
 **Route by risk** — `references/risk-routing.md`, evaluated on every run including explicit path
-flags. Its floor block is mandatory: all four captures force hub with required CI — neither
+flags. Its floor block is mandatory: every capture forces hub with required CI — neither
 `--lite` nor a judgment call may route one lite. Judgment escalates, never below. `--no-hub` stays local-only and stops before merge; report required
 remote checks as pending. Announce path, rationale, mandatory checks, and panel on/off in one line.
 

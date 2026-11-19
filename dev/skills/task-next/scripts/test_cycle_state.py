@@ -157,20 +157,34 @@ class RecoveryTest(unittest.TestCase):
         for filename in ("batch.md", "tree.md", "edge-cases.md"):
             self.assertIn("git-authorization.md", (Path(__file__).parents[1] / "references" / filename).read_text())
 
-    def test_lite_step4_script_fix_reroutes_to_hub(self):
-        # Lite was routed on the pre-review diff; a review fix adding a shipped script must not
-        # merge on that stale route.
+    def floor_hit(self, cwd=None):
+        """Run risk-routing.md's floor block in `cwd` (default: the repo) and return FLOOR_HIT."""
         skill_dir = Path(__file__).parents[2] / "task-review-cycle"
         floor = (skill_dir / "references/risk-routing.md").read_text()
         floor = floor.split("**Floor**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
         floor = floor.replace("<absolute parent directory of the loaded SKILL.md>", str(skill_dir.resolve()))
         floor = floor.replace("<from authorization route: --no-hub or empty>", "--no-hub")
+        result = subprocess.run(["bash", "-c", floor + '\nprintf "%s" "$FLOOR_HIT"'],
+                                cwd=cwd or self.repo, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
 
-        def floor_hit():
-            result = subprocess.run(["bash", "-c", floor + '\nprintf "%s" "$FLOOR_HIT"'],
-                                    cwd=self.repo, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return result.stdout
+    def test_linked_worktree_floors_to_hub(self):
+        # A worktree cycle (cycle.md → *Worktree cycle*) cannot run the lite merge's
+        # `git checkout <base>`: the main worktree holds the base.
+        (self.repo / "notes.md").write_text("lite-eligible change\n")
+        self.git("add", ".")
+        self.commit()
+        self.assertEqual(self.floor_hit(), "")
+        wt = self.repo / ".worktrees" / "linked"
+        self.git("worktree", "add", "-qb", "harness/linked", str(wt))
+        self.assertIn("linked-worktree", self.floor_hit(cwd=wt))
+
+    def test_lite_step4_script_fix_reroutes_to_hub(self):
+        # Lite was routed on the pre-review diff; a review fix adding a shipped script must not
+        # merge on that stale route.
+        skill_dir = Path(__file__).parents[2] / "task-review-cycle"
+        floor_hit = self.floor_hit
 
         (self.repo / "notes.md").write_text("lite-eligible change\n")
         self.git("add", ".")
