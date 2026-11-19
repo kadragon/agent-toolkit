@@ -11,13 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 4 — concurrent tree gate
-
-- [ ] [HARNESS] working tree gate proceeds past other `.worktrees/` when the main checkout is clean on base, announcing them in one line; resume only on `--resume <slug>` or a named request
-  Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → Gate relaxation; Explicit resume
-  Done when: `task-next/SKILL.md` gate table splits the `task_worktree` row, `task_contract_dirty` row marked legacy, `edge-cases.md` *Work already in flight* resumes worktrees only on explicit request → `validate-harness.sh` + a manual run with a second worktree present
-  Approach: edit the gate rows and edge-case prose; add `--resume` to task-next's flag list
-
 ## Review Backlog
 
 ### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)
@@ -31,6 +24,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] pre_merge_resync rewrites only single-plugin CHANGELOG suffixes; `(dev vX, mods vY)` entries keep the old numbers (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
 - [ ] [debt] pre_merge_resync reads and writes via text mode, so a CRLF-tracked manifest or CHANGELOG is rewritten as LF (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:set_version
 - [ ] [debt] pre_merge_resync opens repo-relative paths from the CWD; run from a subdirectory it fails before writing (source: agy) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
+
+### PR #412 — task-next proceeds past other .worktrees/ on a clean base (2026-11-19)
+
+- [ ] [harness] A preserved `--all` unit (`.worktrees/<slug>` on `wt/<slug>`) writes no `## Covers` and prunes no backlog line, so the clean-base gate skips past it while Step 1 still offers its item (source: code-review) (introduced here) — dev/skills/task-next/references/batch.md → unit worktrees
+- [ ] [harness] A default run routed through exit 3's *Worktree cycle* claims nothing until cleanup (one item writes no `tasks.md`; a group writes `## Covers` after the plan gate), so a clean-base session can pick the same item (source: code-review) — dev/skills/task-next/references/cycle.md → Worktree cycle
 
 ## Rejected — do not re-file
 

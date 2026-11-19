@@ -2,8 +2,9 @@
 
 Rarely-hit branches of `dev:task-next`, split out of `SKILL.md` so the hot path stays small.
 
-**Work already in flight** — inspect a feature branch or `--tree` worktree before selecting new
-queue work, even when the checkout is clean. Commits and changed files locate candidate work;
+**Work already in flight** — inspect a feature branch in this checkout, a `.worktrees/<slug>` run
+named by `--resume <slug>` or the user, before selecting new queue work, even when the checkout
+is clean. Commits and changed files locate candidate work;
 neither proves implementation, versioning, validation, or review complete.
 
 ```bash
@@ -14,8 +15,20 @@ python3 "$STATE" inspect
 ```
 
 Run in the candidate checkout. The probe includes staged, unstaged, and untracked changes and
-the branch's saved contract; it deliberately returns no resume stage. For `--tree`, inspect the
-matching worktree listed by `git worktree list`, not main's unrelated dirty state.
+the branch's saved contract; it deliberately returns no resume stage.
+
+**Which checkout.** A feature branch checked out in this checkout is inspected here, unasked. A
+`.worktrees/<slug>` run is inspected only on `--resume <slug>` or when the user names that
+worktree — any other may be a live session's, so its mere presence never triggers this edge case
+(`SKILL.md` → *Working tree gate*). Prefix the probe with `cd "<absolute .worktrees/<slug> path>"
+&&`, not main's unrelated dirty state; no matching worktree → say so and stop. A resumed
+`.worktrees/<slug>` run finishes every remaining stage in that worktree as a `cycle.md` →
+*Worktree cycle* (hub route, `worktree_path` on the merge) — under `references/tree.md`'s
+implementer/QA rules when its `tasks.md` holds a claim block. Two explicit resumes report and stop
+instead: a worktree on a `wt/<slug>` branch is a parallel batch unit, resumed through the batch row
+below while its batch is unmerged — after that merge, name the unit and its archive and ask
+whether to run it as its own cycle or remove it; and a worktree whose probe shows nothing in flight is not
+handed to *Nothing in flight*, which switches this checkout and selects new work.
 
 **Recovering the contract.** Read the saved original, evidence, and `notes` beside it first —
 notes list approaches a stuck run already tried; do not repeat them — then an active
