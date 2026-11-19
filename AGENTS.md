@@ -18,7 +18,7 @@ Plugin marketplace (dev + prod + mods) by kadragon. This repo IS the harness —
 
 ## Golden Principles
 
-Invariants; each states how it is enforced. Violations block merges.
+Invariants. Each states its enforcement mechanism where one exists. Violations block merges.
 
 1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. `mods/` is Claude Code only: its single `mods/.claude-plugin/plugin.json` must increment. Enforced by CI (`harness-check.yml`) for both platforms. Semver: major is reserved for removing or renaming something invoked **by name** (skill, agent, command); a hook has no invocable name, so hook removal is a patch. Full table: `docs/conventions.md` → Plugin Version Bump Rules.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review.
