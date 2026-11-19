@@ -37,7 +37,7 @@ No row below grants permission. After the applicable checks above pass, match th
 
 | Job | Delegate to | Model | Context to pass |
 |-----|-------------|-------|-----------------|
-| Read-only map of an unexplored plugin area | `explorer` | sonnet | Plugin dir path |
+| Read-only map of an unexplored plugin area | `explorer` | inherits (shared agent-home role) | Plugin dir path |
 | Implementation task from `backlog.md` | `implementer` | sonnet | Backlog item, conventions, target files |
 | Verifying an implementation | `qa-verifier` | sonnet | Modified files, test/lint commands |
 | Skill quality assessment requested | `skill-evaluator` | opus | Skill path, eval-criteria.md |
