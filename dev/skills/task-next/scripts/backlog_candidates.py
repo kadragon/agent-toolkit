@@ -920,14 +920,18 @@ def collect_claims(backlog_path: str, tasks_path: str | None) -> dict[str, set[s
     return claims
 
 
-def mark_claimed(backlog_raw: str, backlog_tokens: list[dict], claims: dict[str, set[str]]) -> dict[str, int]:
-    """Tag each open backlog item a worktree claimed with `claimed_by`; return open-item counts.
+def mark_claimed(
+    backlog_raw: str, backlog_tokens: list[dict], claims: dict[str, set[str]]
+) -> dict[str, list[int]]:
+    """Tag each open backlog item a worktree claimed with `claimed_by`; return its line numbers.
 
     Tagged items drop out of every selector and the zero-candidate diagnosis names them. A key
-    claimed by two worktrees is attributed to the first one listed.
+    claimed by two worktrees is attributed to the first one listed. The lines matter, not just a
+    count: a group can be partly claimed, and the caller reads the group's lines straight from
+    backlog.md in Steps 2-3, so it needs to know which of them to leave out.
     """
     raw = backlog_raw.splitlines()
-    counts: dict[str, int] = {}
+    counts: dict[str, list[int]] = {}
     for t in backlog_tokens:
         if t["type"] != "checkbox" or t["state"] != " ":
             continue
@@ -936,20 +940,30 @@ def mark_claimed(backlog_raw: str, backlog_tokens: list[dict], claims: dict[str,
         for wt, keys in claims.items():
             if key in keys:
                 t["claimed_by"] = wt
-                counts[wt] = counts.get(wt, 0) + 1
+                counts.setdefault(wt, []).append(t["line"])
                 break
     return counts
 
 
-def claimed_skip_note(counts: dict[str, int], top: str | None = None) -> str | None:
-    if not counts:
+def claimed_skip_note(
+    claimed: dict[str, list[int]], top: str | None = None, label: str = "backlog.md"
+) -> str | None:
+    """One stderr line naming every skipped item as `<label>:<line>`, grouped per worktree."""
+    if not claimed:
         return None
 
     def _name(wt: str) -> str:
         return os.path.relpath(os.path.realpath(wt), os.path.realpath(top)) if top else wt
 
-    per = ", ".join(f"{n} by {_name(wt)}" for wt, n in counts.items())
-    return f"Skipped {sum(counts.values())} item(s) claimed by in-flight worktrees: {per}"
+    per = "; ".join(
+        f"{len(lines)} by {_name(wt)} ({', '.join(f'{label}:{n}' for n in lines)})"
+        for wt, lines in claimed.items()
+    )
+    total = sum(len(v) for v in claimed.values())
+    return (
+        f"Skipped {total} item(s) claimed by in-flight worktrees: {per} — leave these lines out "
+        "of scope even when their group is selected"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1060,7 +1074,7 @@ def main(argv: list[str]) -> int:
     if backlog_path:  # always true past _read_file(required=True); narrows the type
         counts = mark_claimed(backlog_raw, backlog_tokens, collect_claims(backlog_path, tasks_path))
         top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
-        note = claimed_skip_note(counts, top.strip() if top else None)
+        note = claimed_skip_note(counts, top.strip() if top else None, backlog_path)
         if note is not None:
             sys.stderr.write(note + "\n")
 
@@ -1111,12 +1125,29 @@ def _test_claimed_items() -> None:
     """Temp-repo fixtures for `collect_claims` — the only test that touches real files (a tempdir)."""
     import tempfile
 
-    env = {
-        **os.environ,
+    # Strip the ambient repo selectors and fence discovery at the temp root (as task_nodes.py's
+    # fixtures do): run from a git hook, an inherited GIT_DIR would point every `git -C <tmp>`
+    # call — the fixture's commits and collect_claims' own queries — at the real repository.
+    selectors = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+    env = {k: v for k, v in os.environ.items() if k not in selectors}
+    env.update({
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
         "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-    }
+        "GIT_CEILING_DIRECTORIES": os.path.realpath(tempfile.gettempdir()),
+    })
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)  # collect_claims/_git run in-process and inherit os.environ
+    try:
+        _run_claimed_fixtures(env)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def _run_claimed_fixtures(env: dict[str, str]) -> None:
+    import tempfile
 
     def git(cwd: str, *args: str) -> None:
         subprocess.run(["git", "-C", cwd, *args], check=True, capture_output=True, env=env)
@@ -1170,7 +1201,10 @@ def _test_claimed_items() -> None:
             [(c["title"], c["items"]) for c in got] == [("Queue", 3)],
             "claimed items drop out of the count: C, D (wrapped) and E remain",
         )
-        _assert(sum(counts.values()) == 2, "the skip count covers exactly the claimed open items")
+        _assert(
+            sorted(n for lines in counts.values() for n in lines) == [3, 4],
+            "the skip covers exactly the claimed open items, by line",
+        )
 
         r = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--backlog", backlog],
@@ -1178,9 +1212,10 @@ def _test_claimed_items() -> None:
         )
         _assert(
             "Skipped 2 item(s) claimed by in-flight worktrees:" in r.stderr
-            and "1 by .worktrees/wt1" in r.stderr
-            and "1 by .worktrees/wt2" in r.stderr,
-            "the CLI names the skip count per worktree on stderr",
+            and f"1 by .worktrees/wt1 ({backlog}:3)" in r.stderr
+            and f"1 by .worktrees/wt2 ({backlog}:4)" in r.stderr,
+            "the CLI names each skipped line per worktree on stderr, so a partly claimed group "
+            "can be scoped",
         )
         _assert(r.stdout.strip() == "[1] backlog.md: Queue (3 items)", "stdout lists only unclaimed items")
 

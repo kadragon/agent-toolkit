@@ -39,6 +39,15 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   Done when: `task-new/SKILL.md` accepts `--tree` and points to the shared worktree-cycle description; no `tasks.md` written → `validate-harness.sh` + a manual `task-new --tree` run
   Approach: one override line in task-new Step 3 → *Branch*
 
+## Review Backlog
+
+### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)
+
+- [ ] [harness] Phase A `status: open` tasks.md sprint blocks are not claim-checked; a block another worktree marked active stays a candidate (source: code-review) — dev/skills/task-next/scripts/backlog_candidates.py:phase_a_candidates
+- [ ] [harness] A `--tree` worktree exists from *Branch* but writes `## Covers` only at *Mark active*, so its item is unclaimed while the plan gate waits; fold into the collapse-free `--tree` ticket (source: code-review) — docs/design/concurrent-tree-cycles.md → Claimed items
+- [ ] [harness] Two sessions selecting before either writes `## Covers` can both take the same item; claims need an atomic commit-or-reselect step (source: codex) — docs/design/concurrent-tree-cycles.md → Claimed items
+- [ ] [debt] Claim keys are the item's first-line text, so identical item text in two groups is indistinguishable (one claim hides both; a deletion is masked by the surviving twin) (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:item_keys
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

@@ -68,7 +68,8 @@ python3 "$CANDIDATES" --backlog backlog.md --parked                      # block
 The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items, items another
 `.worktrees/` run has claimed, and anything inside comments or code fences. **Read stderr every
-run**: a claimed-skip line names which worktrees hold skipped items — relay it; an
+run**: a claimed-skip line names each item another worktree holds, by line — relay it, and
+leave those lines out of Step 2–3 scope even when their group is selected; an
 unbalanced-fence warning makes that file untrustworthy; a persistent-section warning means
 `tasks.md` needs the move above; a zero-candidate diagnosis is relayed verbatim and goes to Step 2's zero-groups report
 (`--full-scan` qualifies groups by the same test, so it finds none either); a truncation note
