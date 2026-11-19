@@ -11,13 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 4 — concurrent tree gate
-
-- [ ] [HARNESS] working tree gate proceeds past other `.worktrees/` when the main checkout is clean on base, announcing them in one line; resume only on `--resume <slug>` or a named request
-  Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → Gate relaxation; Explicit resume
-  Done when: `task-next/SKILL.md` gate table splits the `task_worktree` row, `task_contract_dirty` row marked legacy, `edge-cases.md` *Work already in flight* resumes worktrees only on explicit request → `validate-harness.sh` + a manual run with a second worktree present
-  Approach: edit the gate rows and edge-case prose; add `--resume` to task-next's flag list
-
 ## Review Backlog
 
 ### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)

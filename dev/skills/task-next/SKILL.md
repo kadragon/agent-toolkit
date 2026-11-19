@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.10.0
+version: 2.11.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -16,6 +16,7 @@ layer; the cycle and the review are elsewhere.
 
 **Modes:** default = single-pick (Steps 1–4). `--all` (or "전부 처리", "모두 돌려", "batch all")
 → `references/batch.md`. `--tree` → single-pick through a git worktree, `references/tree.md`.
+`--resume <slug>` → resume the stopped run in `.worktrees/<slug>` instead of selecting.
 A free-text request not yet on the queue is `task-new`'s job.
 
 ## Prerequisites
@@ -40,13 +41,18 @@ Base branch means `main` or `master`.
 
 | State | Action |
 |-------|--------|
-| clean on base branch, `task_worktree` empty | proceed |
+| `--resume <slug>`, or the user names a worktree | *Work already in flight* on `.worktrees/<slug>` only (`references/edge-cases.md`) |
+| clean on base branch | proceed |
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
-| on base branch, `task_worktree` non-empty, whatever is dirty | same edge case — a `--tree` or parallel batch run is in flight |
-| on base branch, `task_contract_dirty` non-empty | same edge case — legacy: a pre-collapse-free `--tree` run stopped after removing its worktree |
+| on base branch, `task_contract_dirty` non-empty | same edge case — legacy only: a pre-collapse-free `--tree` run stopped after removing its worktree |
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
+
+On a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' `--tree` runs,
+not this one's: announce them in one line (`skipping 2 in-flight worktrees: .worktrees/foo,
+.worktrees/bar`), then select without asking. Never inspect or adopt one unasked — Step 1
+already skips the items they claimed.
 
 `tasks.md` is optional. It holds the Sprint Contract and nothing else, exists only when a
 `## Covers` deletion list is needed (a pre-existing `status: open` h1 block, or a ≥2-item group;
@@ -135,8 +141,8 @@ the integrated candidate after worktree checks.
 
 Recognise by name; open `references/edge-cases.md` before acting.
 
-- **Work already in flight** — a feature branch or `--tree` worktree, including clean committed
-  work. Recover the contract, then choose the earliest unmet obligation.
+- **Work already in flight** — a feature branch in this checkout, or a `.worktrees/<slug>` run
+  named by `--resume <slug>` or the user, including clean committed work. Recover the contract, then choose the earliest unmet obligation.
 - **Deferred backlog item (≥2 candidates)** — surface the blocker, confirm it is resolved.
 - **Deferred item in a group** — warn and continue with the group's other items.
 - **Review finding spans multiple PRs** — scope to the specific `file:line`.

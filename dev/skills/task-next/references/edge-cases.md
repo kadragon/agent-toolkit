@@ -14,8 +14,13 @@ python3 "$STATE" inspect
 ```
 
 Run in the candidate checkout. The probe includes staged, unstaged, and untracked changes and
-the branch's saved contract; it deliberately returns no resume stage. For `--tree`, inspect the
-matching worktree listed by `git worktree list`, not main's unrelated dirty state.
+the branch's saved contract; it deliberately returns no resume stage.
+
+**Which checkout.** A feature branch checked out in this checkout is inspected here, unasked. A
+`.worktrees/<slug>` run is inspected only on `--resume <slug>` or when the user names that
+worktree — any other may be a live session's, so its mere presence never triggers this edge case
+(`SKILL.md` → *Working tree gate*). Prefix the probe with `cd "<absolute .worktrees/<slug> path>"
+&&`, not main's unrelated dirty state; no matching worktree → say so and stop.
 
 **Recovering the contract.** Read the saved original, evidence, and `notes` beside it first —
 notes list approaches a stuck run already tried; do not repeat them — then an active
