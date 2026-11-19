@@ -1,11 +1,11 @@
 ---
 name: task-new
-version: 2.4.0
+version: 2.5.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
-  (possibly direct base-branch merge/push). Multi-session work goes to a spec plus backlog
-  tickets instead. Already on the queue instead → task-next.
+  (possibly direct base-branch merge/push). Flag: --tree (worktree isolation). Multi-session
+  work goes to a spec plus backlog tickets instead. Already on the queue instead → task-next.
 disable-model-invocation: true
 ---
 
@@ -62,7 +62,11 @@ Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that re
 directory) with these overrides. Verify the originating user invocation and preserve its
 Git limits per `../task-next/references/git-authorization.md` before writes:
 
-- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1.
+- **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → replace the block with
+  `../task-next/references/tree.md` → *Branch*, swapping its piped item lines for `--tag <TYPE>`
+  (it resolves `BASE` from `origin/HEAD`, levels a checked-out local base, and stops on
+  uncommitted queue edits), then run the whole cycle as a `cycle.md` → *Worktree cycle* even
+  from base. Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
@@ -71,3 +75,6 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 ## Step 4 — Hand off
 
 Per `cycle.md` → *Hand off*: `args: --from task-new --auto`, Sprint Contract restated verbatim.
+`--tree` → hand off from the worktree and state its absolute path, so the review cycle runs
+there, takes the hub path, and passes the path to `merge-and-cleanup.sh` (*Worktree cycle* →
+*Route*, *Merge*).

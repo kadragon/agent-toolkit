@@ -29,8 +29,8 @@ whole cycle as a *Worktree cycle* (below), with `BASE` the base the warning name
 
 ### Worktree cycle
 
-One shape for every cycle that must not touch the checkout it starts from: exit 3 above, and
-`task-next --tree` (`tree.md`). Shell variables do not survive between Bash calls, so write the
+One shape for every cycle that must not touch the checkout it starts from: exit 3 above,
+`task-next --tree` (`tree.md`), and `task-new --tree`. Shell variables do not survive between Bash calls, so write the
 printed branch and the base in as literals:
 
 ```bash
