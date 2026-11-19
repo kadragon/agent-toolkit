@@ -21,7 +21,7 @@ Return pass/fail per criterion with evidence.
 
 ## Effort Tier
 
-Default **simple** (≤15 tool calls — the six standing checks plus the contract's criteria). At the
+Default **comparison** (≤15 tool calls — the six standing checks plus the contract's criteria). At the
 cap, stop and return the table: every criterion not yet graded gets `unverified` with the reason.
 Never start a check the brief did not
 name when the brief's own lint/test command already covers it.
