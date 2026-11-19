@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.11.0
+version: 2.12.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -42,6 +42,7 @@ Base branch means `main` or `master`.
 | State | Action |
 |-------|--------|
 | `--resume <slug>`, or the user names a worktree | *Work already in flight* on `.worktrees/<slug>` only (`references/edge-cases.md`) |
+| `--tree`, any branch, clean or dirty | proceed: this checkout is never read for selection, edited, or switched, so its branch and dirty files are someone else's (at most one non-`--tree` session, or the user). Announce them in one line — `main checkout: <current_branch>, <N> dirty file(s), left as is` — and, when `queue_delta` or a `docs/design/` file is dirty, add that these uncommitted queue edits are invisible to `--tree` until committed to base. Step 1 selects from the base |
 | clean on base branch | proceed |
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
@@ -49,7 +50,7 @@ Base branch means `main` or `master`.
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
-On a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' runs, not this
+On the `--tree` row or a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' runs, not this
 one's: announce them in one line (`skipping 2 in-flight worktrees: .worktrees/foo,
 .worktrees/bar`), then select without asking. Never inspect or adopt one unasked — Step 1
 skips the `backlog.md` items they claimed.
@@ -69,6 +70,17 @@ CANDIDATES="$SKILL_DIR/scripts/backlog_candidates.py"
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md              # fast path, cap 3
 python3 "$CANDIDATES" --tasks tasks.md --backlog backlog.md --full-scan  # full list, type priority
 python3 "$CANDIDATES" --backlog backlog.md --parked                      # blocked/deferred items, Step 2 stop
+```
+
+`--tree` selects from the base it will branch from, not this checkout: resolve it first, then add
+`--ref "$BASE"` to each command above, so both files are read as committed there and claims are
+measured against it. Read the selected lines in Steps 2–3 from the same source (`git show
+"$BASE:backlog.md"`, or the worktree's copy once created).
+
+```bash
+git fetch || exit 1
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
 ```
 
 The script owns selection: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
@@ -141,7 +153,7 @@ the integrated candidate after worktree checks.
 
 Recognise by name; open `references/edge-cases.md` before acting.
 
-- **Work already in flight** — a feature branch in this checkout, or a `.worktrees/<slug>` run
+- **Work already in flight** — a feature branch in this checkout (not under `--tree`), or a `.worktrees/<slug>` run
   named by `--resume <slug>` or the user, including clean committed work. Recover the contract, then choose the earliest unmet obligation.
 - **Deferred backlog item (≥2 candidates)** — surface the blocker, confirm it is resolved.
 - **Deferred item in a group** — warn and continue with the group's other items.

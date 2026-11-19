@@ -2,9 +2,15 @@
 """backlog_candidates.py — deterministic candidate-group parser for task-next Step 1.
 
 Usage:
-  python3 backlog_candidates.py --tasks PATH --backlog PATH [--full-scan] [--json]
+  python3 backlog_candidates.py --tasks PATH --backlog PATH [--ref REV] [--full-scan] [--json]
   python3 backlog_candidates.py --backlog PATH --parked [--json]
   python3 backlog_candidates.py --test
+
+  --ref REV       read --tasks/--backlog as committed at REV (`git show REV:<repo-relative path>`)
+                   instead of from this checkout's working tree, and take claim merge-bases
+                   against REV instead of HEAD. `task-next --tree` passes its base (origin/HEAD),
+                   so this checkout's branch and uncommitted edits never shape the selection.
+                   An unresolvable REV, or a backlog absent at REV, is a fatal error.
 
   --tasks PATH    path to tasks.md (optional file; absent path is treated as empty input,
                    same as the `2>/dev/null` grep fallback it replaces)
@@ -14,7 +20,7 @@ Usage:
   --json          emit a JSON array of candidate objects instead of the plain-text list
   Claimed items: in candidate modes (not --parked), backlog.md open items that another
   `.worktrees/` worktree has claimed — listed under its tasks.md `## Covers`, or deleted from its
-  backlog.md relative to its merge-base with this checkout's HEAD — are dropped, and stderr names
+  backlog.md relative to its merge-base with this checkout's HEAD (or --ref) — are dropped, and stderr names
   the count per worktree (`Skipped N item(s) claimed by in-flight worktrees: ...`). See
   `collect_claims()`/`worktree_claims()`.
 
@@ -879,14 +885,15 @@ def _read_optional(path: str) -> str | None:
         return None
 
 
-def collect_claims(backlog_path: str, tasks_path: str | None) -> dict[str, set[str]]:
+def collect_claims(backlog_path: str, tasks_path: str | None, ref: str = "HEAD") -> dict[str, set[str]]:
     """{worktree path (as git lists it): claimed item keys} for every OTHER `.worktrees/` worktree.
 
     Same `/.worktrees/` test as task-next's working tree gate; any other linked worktree is not a
     task cycle and is ignored, as is the worktree this script runs in. Files are read at the same
     repo-relative paths as `--backlog`/`--tasks`, from the worktree's working tree (cleanup is
-    uncommitted). The merge-base is taken against this checkout's HEAD — the base a candidate
-    run sits on. Not a git repo, or git unavailable → no claims, never an error.
+    uncommitted). The merge-base is taken against `ref` — this checkout's HEAD by default, the
+    base a candidate run sits on, or the `--ref` base a `--tree` run selects from (HEAD may then
+    be an unrelated feature branch). Not a git repo, or git unavailable → no claims, never an error.
     """
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
@@ -911,9 +918,9 @@ def collect_claims(backlog_path: str, tasks_path: str | None) -> dict[str, set[s
         wt_backlog = _read_optional(os.path.join(wt, backlog_rel))
         base_backlog = None
         wt_head = _git(wt, "rev-parse", "HEAD")
-        mb = _git(repo, "merge-base", "HEAD", wt_head.strip()) if wt_head else None
+        mb = _git(repo, "merge-base", ref, wt_head.strip()) if wt_head else None
         if mb:
-            base_backlog = _git(repo, "show", f"{mb.strip()}:{backlog_rel}")
+            base_backlog = _git(repo, "show", f"{mb.strip()}:{backlog_rel.replace(os.sep, '/')}")
         keys = worktree_claims(wt_tasks, wt_backlog, base_backlog)
         if keys:
             claims[wt] = keys
@@ -991,12 +998,31 @@ def _read_file(path: str | None, *, required: bool = False) -> str:
         return ""
 
 
+def _read_at_ref(path: str | None, ref: str, *, required: bool = False) -> str:
+    """`_read_file` for `--ref`: `path` as committed at `ref`, resolved repo-relative from the
+    checkout holding it. Absent at `ref` → "" (tasks.md is optional), or fatal when `required`."""
+    if not path:
+        return _read_file(path, required=required)
+    repo = os.path.dirname(os.path.abspath(path))
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    if top is None or _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
+        sys.stderr.write(f"Error: --ref {ref} does not resolve to a commit in a git checkout of {path}\n")
+        sys.exit(1)
+    rel = os.path.relpath(os.path.realpath(os.path.abspath(path)), os.path.realpath(top.strip()))
+    out = _git(repo, "show", f"{ref}:{rel.replace(os.sep, '/')}")
+    if out is None and required:
+        sys.stderr.write(f"Error: {rel} does not exist at {ref}\n")
+        sys.exit(1)
+    return out or ""
+
+
 def main(argv: list[str]) -> int:
     if "--test" in argv:
         return run_tests()
 
     tasks_path = None
     backlog_path = None
+    ref = None
     full_scan_flag = False
     json_flag = False
     parked_flag = False
@@ -1004,14 +1030,17 @@ def main(argv: list[str]) -> int:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in ("--tasks", "--backlog") and i + 1 >= len(argv):
-            sys.stderr.write(f"Error: {a} requires a path argument\n")
+        if a in ("--tasks", "--backlog", "--ref") and i + 1 >= len(argv):
+            sys.stderr.write(f"Error: {a} requires an argument\n")
             sys.exit(1)
         if a == "--tasks":
             tasks_path = argv[i + 1]
             i += 2
         elif a == "--backlog":
             backlog_path = argv[i + 1]
+            i += 2
+        elif a == "--ref":
+            ref = argv[i + 1]
             i += 2
         elif a == "--full-scan":
             full_scan_flag = True
@@ -1025,8 +1054,12 @@ def main(argv: list[str]) -> int:
         else:
             i += 1
 
-    tasks_raw = _read_file(tasks_path)
-    backlog_raw = _read_file(backlog_path, required=True)
+    if ref is None:
+        tasks_raw = _read_file(tasks_path)
+        backlog_raw = _read_file(backlog_path, required=True)
+    else:
+        tasks_raw = _read_at_ref(tasks_path, ref)
+        backlog_raw = _read_at_ref(backlog_path, ref, required=True)
     tasks_tokens = tokenize(tasks_raw)
     backlog_tokens = tokenize(backlog_raw)
 
@@ -1072,9 +1105,12 @@ def main(argv: list[str]) -> int:
     # Claimed items: another `.worktrees/` run already holds them, so selecting one here would start
     # a duplicate cycle. Named on stderr even when candidates remain, so the skip is never silent.
     if backlog_path:  # always true past _read_file(required=True); narrows the type
-        counts = mark_claimed(backlog_raw, backlog_tokens, collect_claims(backlog_path, tasks_path))
+        counts = mark_claimed(
+            backlog_raw, backlog_tokens, collect_claims(backlog_path, tasks_path, ref or "HEAD")
+        )
         top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
-        note = claimed_skip_note(counts, top.strip() if top else None, backlog_path)
+        label = f"{ref}:{backlog_path}" if ref else backlog_path  # line numbers are the ref's
+        note = claimed_skip_note(counts, top.strip() if top else None, label)
         if note is not None:
             sys.stderr.write(note + "\n")
 
@@ -1229,6 +1265,39 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
             and "parked" not in diag,
             "an all-claimed backlog is diagnosed as claimed, not done or parked",
         )
+
+        # --ref: a `--tree` run selects from the base while this checkout sits on an unrelated
+        # feature branch with uncommitted queue edits. wt4 branched from main after "add E" and
+        # pruned E; this checkout is on `side`, cut from the seed commit, which never had E.
+        wt4 = os.path.join(repo, ".worktrees", "wt4")
+        git(repo, "worktree", "add", "-q", "-b", "b4", wt4, "main")
+        write(os.path.join(wt4, "backlog.md"), base)  # base + E, minus E
+        git(repo, "checkout", "-q", "-b", "side", "HEAD~1")
+        write(backlog, base + "- [ ] item F uncommitted\n")
+        _assert(
+            all("item E" not in v for v in collect_claims(backlog, None).values()),
+            "default merge-base against HEAD (a branch without E) loses wt4's prune claim",
+        )
+        _assert(
+            {os.path.basename(k): v for k, v in collect_claims(backlog, None, "main").items()}.get("wt4")
+            == {"item E"},
+            "--ref main takes the merge-base against main, so wt4's pruned E stays claimed",
+        )
+        r = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--backlog", backlog, "--ref", "main"],
+            capture_output=True, text=True, cwd=repo, env=env,
+        )
+        _assert(
+            r.returncode == 0 and r.stdout.strip() == "[1] backlog.md: Queue (2 items)",
+            "--ref reads backlog.md as committed at main: the uncommitted F is invisible and A, B, E "
+            f"are claimed (got {r.stdout.strip()!r} / {r.stderr.strip()!r})",
+        )
+        _assert(f"main:{backlog}:" in r.stderr, "the skip line labels lines with the ref they index")
+        r = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--backlog", backlog, "--ref", "no-such-ref"],
+            capture_output=True, text=True, cwd=repo, env=env,
+        )
+        _assert(r.returncode == 1 and "--ref no-such-ref" in r.stderr, "an unresolvable --ref is fatal")
 
         nonrepo = os.path.join(tmp, "plain")
         os.makedirs(nonrepo)

@@ -1,6 +1,7 @@
 ## `--tree` mode (single task, worktree isolation)
 
-Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick, then runs the whole
+Triggered by `--tree`. Runs Steps 1–2 as default single-pick does, but from the base (`SKILL.md`
+→ *Working tree gate* `--tree` row, Step 1 `--ref`), then runs the whole
 code cycle as a `cycle.md` → *Worktree cycle* in `.worktrees/<slug>`: `tasks.md`, contract
 archive, edits, version bump, `CHANGELOG.md`, cleanup, commits, PR and merge all happen there,
 and the main checkout is never edited or switched. `--tree` is the user's explicit direction to
@@ -23,18 +24,20 @@ rc=$?
 git fetch || exit 1
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-# bring the local base level with $BASE — only when it is the branch checked out here
+# level the local base with $BASE only when this checkout is clean on it; any other state is
+# someone else's work, so skip — the worktree is built from $BASE and never needs the local base
 CURRENT=$(git branch --show-current)
-if [[ "$CURRENT" == "${BASE#origin/}" ]]; then
-  git merge --ff-only "$BASE" \
-    || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
+DIRTY=$(git status --porcelain)
+if [[ "$CURRENT" == "${BASE#origin/}" && -z "$DIRTY" ]]; then
+  git merge --ff-only "$BASE" || echo "local $CURRENT cannot fast-forward to $BASE — left as is" >&2
 fi
-# the worktree is built from $BASE: uncommitted queue edits (the gate's carried backlog.md /
-# docs/design rows) would not reach it, and prune-backlog would miss lines selected from them
-QUEUE_DIRTY=$(git status --porcelain -- backlog.md tasks.md docs/design)
-[[ -z "$QUEUE_DIRTY" ]] || { echo "uncommitted queue edits — commit them to base first, or run without --tree:" >&2; echo "$QUEUE_DIRTY" >&2; exit 1; }
 echo "branch: $BRANCH  base: $BASE"
 ```
+
+This checkout's branch and uncommitted edits — `backlog.md` and `docs/design/` included — stay
+where they are and never reach the worktree or the PR. Selection already came from `$BASE`
+(`SKILL.md` → Step 1), so the worktree's `backlog.md` holds every selected line and
+`prune-backlog` finds them.
 
 **Claim — right after `git worktree add`, before the plan gate.** A `backlog.md` group → write
 the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers`
