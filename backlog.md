@@ -25,6 +25,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] pre_merge_resync reads and writes via text mode, so a CRLF-tracked manifest or CHANGELOG is rewritten as LF (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:set_version
 - [ ] [debt] pre_merge_resync opens repo-relative paths from the CWD; run from a subdirectory it fails before writing (source: agy) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
 
+### PR #412 — task-next proceeds past other .worktrees/ on a clean base (2026-11-19)
+
+- [ ] [harness] A preserved `--all` unit (`.worktrees/<slug>` on `wt/<slug>`) writes no `## Covers` and prunes no backlog line, so the clean-base gate skips past it while Step 1 still offers its item (source: code-review) (introduced here) — dev/skills/task-next/references/batch.md → unit worktrees
+- [ ] [harness] A default run routed through exit 3's *Worktree cycle* claims nothing until cleanup (one item writes no `tasks.md`; a group writes `## Covers` after the plan gate), so a clean-base session can pick the same item (source: code-review) — dev/skills/task-next/references/cycle.md → Worktree cycle
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

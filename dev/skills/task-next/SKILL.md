@@ -49,10 +49,10 @@ Base branch means `main` or `master`.
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
-On a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' `--tree` runs,
-not this one's: announce them in one line (`skipping 2 in-flight worktrees: .worktrees/foo,
+On a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' runs, not this
+one's: announce them in one line (`skipping 2 in-flight worktrees: .worktrees/foo,
 .worktrees/bar`), then select without asking. Never inspect or adopt one unasked — Step 1
-already skips the items they claimed.
+skips the `backlog.md` items they claimed.
 
 `tasks.md` is optional. It holds the Sprint Contract and nothing else, exists only when a
 `## Covers` deletion list is needed (a pre-existing `status: open` h1 block, or a ≥2-item group;
