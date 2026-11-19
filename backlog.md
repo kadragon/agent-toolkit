@@ -11,30 +11,23 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 2 — collapse free tree
-
-- [ ] [HARNESS] `--tree` runs the whole cycle in `.worktrees/<slug>` with no collapse; the main checkout is never edited or switched
-  Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → Collapse-free `--tree`; `--tree` always takes the hub (PR) path; Implementer/QA boundary
-  Done when: `tree.md` writes `tasks.md`, bump, CHANGELOG and cleanup in the worktree, has no collapse block, routes review to the hub path and passes `worktree_path` to `merge-and-cleanup.sh`; `tree.md` and `cycle.md` exit 3 share one worktree-cycle description → `bash dev/skills/harness-init/scripts/validate-harness.sh` + a manual `--tree` run leaving `git status` clean on base in the main checkout
-  Approach: fold `tree.md` onto `cycle.md` → *Branch* exit 3's worktree rules; delete *Collapse after QA passes*
-
 ## 3 — pre merge resync
 
-- [ ] [HARNESS] review cycle resyncs a PR behind base before merge: rebase, take base's version files, re-bump at the original level, re-insert CHANGELOG, force-with-lease, re-wait CI *(blocked by: 2-collapse-free-tree)*
+- [ ] [HARNESS] review cycle resyncs a PR behind base before merge: rebase, take base's version files, re-bump at the original level, re-insert CHANGELOG, force-with-lease, re-wait CI
   Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → Pre-merge resync (decision d)
   Done when: two branches bumping the same plugin both merge, the second at the next number with its CHANGELOG entry on that version; a non-version conflict stops with no push; force-push checks Git authority → new regression test wired as a `harness-check.yml` step
   Approach: scripted resync (new script or `task_nodes.py` subcommand) called from `task-review-cycle` hub path before `merge-and-cleanup.sh`; record the bump level where the resync can read it
 
 ## 4 — concurrent tree gate
 
-- [ ] [HARNESS] working tree gate proceeds past other `.worktrees/` when the main checkout is clean on base, announcing them in one line; resume only on `--resume <slug>` or a named request *(blocked by: 2-collapse-free-tree)* *(blocked by: 3-pre-merge-resync)*
+- [ ] [HARNESS] working tree gate proceeds past other `.worktrees/` when the main checkout is clean on base, announcing them in one line; resume only on `--resume <slug>` or a named request *(blocked by: 3-pre-merge-resync)*
   Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → Gate relaxation; Explicit resume
   Done when: `task-next/SKILL.md` gate table splits the `task_worktree` row, `task_contract_dirty` row marked legacy, `edge-cases.md` *Work already in flight* resumes worktrees only on explicit request → `validate-harness.sh` + a manual run with a second worktree present
   Approach: edit the gate rows and edge-case prose; add `--resume` to task-next's flag list
 
 ## 5 — task new tree
 
-- [ ] [HARNESS] `task-new --tree` runs the free-text cycle in a worktree even from base *(blocked by: 2-collapse-free-tree)*
+- [ ] [HARNESS] `task-new --tree` runs the free-text cycle in a worktree even from base
   Source: docs/design/concurrent-tree-cycles.md → Implementation Decisions → `task-new --tree`
   Done when: `task-new/SKILL.md` accepts `--tree` and points to the shared worktree-cycle description; no `tasks.md` written → `validate-harness.sh` + a manual `task-new --tree` run
   Approach: one override line in task-new Step 3 → *Branch*
@@ -44,7 +37,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)
 
 - [ ] [harness] Phase A `status: open` tasks.md sprint blocks are not claim-checked; a block another worktree marked active stays a candidate (source: code-review) — dev/skills/task-next/scripts/backlog_candidates.py:phase_a_candidates
-- [ ] [harness] A `--tree` worktree exists from *Branch* but writes `## Covers` only at *Mark active*, so its item is unclaimed while the plan gate waits; fold into the collapse-free `--tree` ticket (source: code-review) — docs/design/concurrent-tree-cycles.md → Claimed items
 - [ ] [harness] Two sessions selecting before either writes `## Covers` can both take the same item; claims need an atomic commit-or-reselect step (source: codex) — docs/design/concurrent-tree-cycles.md → Claimed items
 - [ ] [debt] Claim keys are the item's first-line text, so identical item text in two groups is indistinguishable (one claim hides both; a deletion is masked by the surviving twin) (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:item_keys
 

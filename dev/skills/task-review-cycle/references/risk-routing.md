@@ -17,7 +17,9 @@ SECURITY_HIT=$(echo "$CHANGED_FILES" | grep -Ei 'auth|crypto|secret|permission|n
 BINARY_HIT=$(git diff "${BASE_BRANCH}...HEAD" --numstat | cut -f1,2 | grep -m1 -e '-' || true)
 MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode change|rename) ' | head -1 || true)
 SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod|mods)/.*\.(sh|py|ps1|cjs|ts|tsx)$' | head -1 || true)
-FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}"
+# a linked worktree (`../../task-next/references/cycle.md` → *Worktree cycle*): the lite merge's `git checkout <base>` cannot run here
+WORKTREE_HIT=$([[ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]] && echo linked-worktree || true)
+FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}${WORKTREE_HIT}"
 ```
 
 `FLOOR_HIT` non-empty means some row below forces hub. A lite route re-runs this block after
@@ -28,6 +30,7 @@ Step 5 commits a Step 4 fix (SKILL.md Step 6): a review fix can add the script t
 | `SECURITY_HIT`, `BINARY_HIT`, or `MODE_OR_RENAME` | **hub** with required CI; `--lite` cannot bypass, and judgment cannot route it lite |
 | `SECURITY_HIT` | also `EFFORT="high"` in Step 2 |
 | `SCRIPT_HIT` | **hub** with required CI; `--lite` cannot bypass |
+| `WORKTREE_HIT` | **hub**; `--lite` cannot bypass — the lite merge checks out the base, which the main worktree holds |
 
 A shipped script forces hub so the panel reviews it: quoting, shell-expansion and interpreter-shim
 defects are where the non-Claude engines earn their slot.

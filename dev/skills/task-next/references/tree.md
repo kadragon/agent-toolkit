@@ -1,14 +1,14 @@
 ## `--tree` mode (single task, worktree isolation)
 
-Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick. The code cycle (Step
-3) is modified so implementation and QA run in an isolated git worktree — the main checkout
-stays on the base branch throughout, but `--tree` isolates **code changes** only. The main checkout still
-carries the uncommitted tracking files (`tasks.md`, and later the version bump) exactly as the
-default single-pick path does; see the *Mark active* note and the *Version bump* paragraph below.
-`--tree` is the user's explicit direction to delegate implementation and QA, which satisfies the
-direction requirement of the delegation policy.
+Triggered by `--tree`. Runs Steps 1–2 identically to default single-pick, then runs the whole
+code cycle as a `cycle.md` → *Worktree cycle* in `.worktrees/<slug>`: `tasks.md`, contract
+archive, edits, version bump, `CHANGELOG.md`, cleanup, commits, PR and merge all happen there,
+and the main checkout is never edited or switched. `--tree` is the user's explicit direction to
+delegate implementation and QA, which satisfies the direction requirement of the delegation
+policy.
 
-**Modified Branch step (replaces `git checkout -b` under `--tree`):**
+**Branch (replaces `git checkout -b` under `--tree`):** derive the branch and level the local
+base, then create the worktree per *Worktree cycle* with this `BASE`:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -18,74 +18,60 @@ BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" \
   | python3 "$NODES" branch --title "<selected heading title>")
 rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
-# exit 3: this checkout is off the base, and --tree keeps tasks.md and the version bump here — stop;
-# run without --tree instead (cycle.md → *Branch*, exit 3)
-[[ $rc -eq 0 ]] || { echo "branch exited $rc — run this cycle without --tree: cycle.md → *Branch*" >&2; exit 1; }
-SLUG="${BRANCH#*/}"    # the branch name without its <type>/ prefix
-git fetch
+# exit 3 (this checkout is off the base) is fine here: --tree never touches this checkout
+[[ $rc -eq 0 || $rc -eq 3 ]] || { echo "branch exited $rc — see stderr above" >&2; exit 1; }
+git fetch || exit 1
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
 # bring the local base level with $BASE — only when it is the branch checked out here
 CURRENT=$(git branch --show-current)
-[[ "$CURRENT" == "${BASE#origin/}" ]] \
-  || { echo "checked out '$CURRENT', but origin/HEAD is $BASE — switch to ${BASE#origin/} first" >&2; exit 1; }
-git merge --ff-only "$BASE" \
-  || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
-# ignore .worktrees/ locally: info/exclude is untracked, so nothing needs restoring afterwards
-EXCLUDE=$(git rev-parse --git-path info/exclude)
-mkdir -p -- "$(dirname -- "$EXCLUDE")"
-grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"   # leading newline: the file may lack a final one
-# if $BRANCH already exists locally (prior failed run), delete it first: git branch -D "$BRANCH" (confirm with user)
-git worktree add ".worktrees/$SLUG" -b "$BRANCH" "$BASE"
+if [[ "$CURRENT" == "${BASE#origin/}" ]]; then
+  git merge --ff-only "$BASE" \
+    || { echo "local $CURRENT cannot fast-forward to $BASE (diverged, or a carried edit conflicts) — reconcile first" >&2; exit 1; }
+fi
+# the worktree is built from $BASE: uncommitted queue edits (the gate's carried backlog.md /
+# docs/design rows) would not reach it, and prune-backlog would miss lines selected from them
+QUEUE_DIRTY=$(git status --porcelain -- backlog.md tasks.md docs/design)
+[[ -z "$QUEUE_DIRTY" ]] || { echo "uncommitted queue edits — commit them to base first, or run without --tree:" >&2; echo "$QUEUE_DIRTY" >&2; exit 1; }
+echo "branch: $BRANCH  base: $BASE"
 ```
 
-**Mark active:** runs in the main checkout, with one tree-mode exception to the default path's
-single-item inline contract: every `--tree` run writes a backlog group's Sprint Contract —
-`tasks.md`, `status: active`, and `## Covers` with the exact item line — there, uncommitted. It is
-carried onto `$BRANCH` by the collapse `git checkout` below the same way the version bump is (see
-**Version bump** further down), so a second invocation sees the run as in flight.
+**Claim — right after `git worktree add`, before the plan gate.** A `backlog.md` group → write
+the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers`
+listing each selected item line verbatim. A `tasks.md` h1 block (`status: open`) → it is already
+in the worktree's copy: flip that block to `status: active` there and write no second block. `backlog_candidates.py` treats a `## Covers` line in another
+`.worktrees/` checkout as claimed, so a second session cannot pick the same item while this one
+waits at the plan gate. A declined plan → revert only this claim (delete the `tasks.md` it
+created, or restore the flipped block with `git restore tasks.md`), confirm `git status
+--porcelain` in the worktree is empty, then `git worktree remove` it and `git branch -d` the
+branch — no forced removal.
 
-**Implement (`cycle.md` → *Implement*):** archive the approved contract per `cycle.md` →
-*Sprint Contract*, prefixing that command with `cd ".worktrees/$SLUG" &&` — the archive is keyed by
-the branch of the checkout it runs in, and an un-prefixed save keys it to the base branch, which
-`cycle_state.py` refuses. Then spawn `implementer`; its brief carries the rules in `cycle.md` →
-*Implement*, worktree briefs included.
+**Mark active:** after the plan gate, add the Sprint Contract to that same worktree `tasks.md`
+block — every `--tree` run writes it, even for one item. Archive the contract per `cycle.md` →
+*Sprint Contract*, prefixing the command with `cd "<printed worktree path>" &&` — the
+archive is keyed by the branch of the checkout it runs in, and an un-prefixed save keys it to
+the base branch, which `cycle_state.py` refuses.
 
-The agent works entirely inside the worktree — it must NOT touch `plugin.json` manifests,
-`backlog.md`, `tasks.md`, or `CHANGELOG.md` anywhere (those are main-checkout edits done after QA).
-A stuck report → the parent records it as a `note` from the worktree (`cycle.md` → *Stuck-fix stop*).
+**Implement (`cycle.md` → *Implement*):** spawn `implementer`; its brief carries the rules in
+`cycle.md` → *Implement*, worktree briefs included. The agent must NOT touch `plugin.json`
+manifests, `backlog.md`, `tasks.md`, or `CHANGELOG.md` — the parent does those edits in the same
+worktree after QA. A stuck report → the parent records it as a `note` from the worktree
+(`cycle.md` → *Stuck-fix stop*).
 
 Git authority for both briefs, worktree commits and the handoff: `git-authorization.md` (run
-`authorize` from the worktree). No commit authority → keep the worktree intact, skip collapse, report.
+`authorize` from the worktree). No commit authority → keep the worktree intact and report.
 
 **QA:** spawn `qa-verifier` pointed at the worktree path, verifying against the Sprint Contract,
 with the same brief rules (its verdict goes in its final response, an empty one included). One
 fix-and-re-verify retry.
 
-**If QA fails after one retry:** stop and preserve the worktree, branch, contract archive, and
-main-checkout tracking state. Report unmet criteria. Destructive abandonment requires explicit
-user authorization; a failed check does not authorize deletion.
+**If QA fails after one retry:** stop and report unmet criteria; the worktree, branch and
+archive are preserved per *Worktree cycle* → *Stopped run*. Resuming is the default. Only when
+the user explicitly authorizes abandoning the run, remove the worktree and branch — its
+`tasks.md` goes with the worktree.
 
-The preserved worktree routes every later run to *Work already in flight* through the
-`task_worktree` row of the working tree gate — deliberate, so no run starts on top of this one.
-Resuming is the default: collapse the worktree as below once QA passes. Only when the user
-explicitly authorizes abandoning the run, drop the `status: active` block this run wrote to
-`tasks.md` (it covers work that never landed), then remove the worktree and branch. Leave the
-contract archive: `cycle_state.py retire` belongs after a merge, not after an abandonment.
-
-**Version bump (`cycle.md` → *Version bump*):** performed in the **main checkout** only — do NOT edit manifests inside the worktree. Read which files changed inside the worktree to determine which plugin directory to bump, then run `bash scripts/bump-version.sh <plugin> <major|minor|patch>` (or hand-edit where that script is absent) in the main checkout. Leave uncommitted (carries through to `$BRANCH` on `git checkout` since there is no conflict — implementer cannot touch manifests per the constraint above).
-
-**Collapse after QA passes:**
-
-Ensure the worktree is clean (implementer committed all changes to `$BRANCH`). If `git status` inside the worktree shows dirty files, check commit authority from the worktree before committing them — `git worktree remove` refuses on a dirty worktree.
-
-```bash
-SLUG=<slug>            # same slug used in the Branch step above
-BRANCH=<type>/<slug>   # same branch used in the Branch step above
-[ ! -d ".worktrees/$SLUG" ] || git worktree remove ".worktrees/$SLUG" || exit 1   # re-runnable; branch $BRANCH stays
-git checkout "$BRANCH" || exit 1   # refused: base keeps the dirty tasks.md, which the gate reads as in flight; report it
-```
-
-Now run **pre-merge cleanup** (backlog / tasks.md / CHANGELOG edits) in the main checkout on
-`$BRANCH`, then `cycle.md` → *Validation evidence* on the complete candidate. The common Git
-archive survives worktree removal. Carry it and the evidence when handing off: call the Skill tool with "dev:task-review-cycle" and `args: --from task-next --auto` (Step 4).
+**After QA passes:** in the worktree, `cycle.md` → *Version bump*, *Cleanup* (`prune-tasks` on
+the worktree `tasks.md`, `prune-backlog` on the worktree `backlog.md`, `changelog`), then
+*Validation evidence* on the complete candidate. Hand off per Step 4 from the worktree, stating
+the absolute worktree path so the review cycle runs there, takes the hub path, and passes the
+path to `merge-and-cleanup.sh` (*Worktree cycle* → *Route*, *Merge*).

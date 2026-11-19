@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.9.0
+version: 2.10.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -44,7 +44,7 @@ Base branch means `main` or `master`.
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
 | on base branch, `task_worktree` non-empty, whatever is dirty | same edge case — a `--tree` or parallel batch run is in flight |
-| on base branch, `task_contract_dirty` non-empty | same edge case — a `--tree` collapse stopped after removing its worktree |
+| on base branch, `task_contract_dirty` non-empty | same edge case — legacy: a pre-collapse-free `--tree` run stopped after removing its worktree |
 | on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
@@ -118,7 +118,8 @@ Follow `references/cycle.md` end to end with these overrides; Git authority is
   `status: active`, the contract, and `## Covers` listing each item line **verbatim** (the
   deletion list). Leave the items `- [ ]` in `backlog.md` until cleanup.
 - exactly 1 item → no `tasks.md`; archive the contract per `cycle.md` and carry the item's verbatim line to
-  `prune-backlog` yourself. `--tree` writes `tasks.md` even for one item.
+  `prune-backlog` yourself. `--tree` writes `tasks.md` even for one item, in its worktree before the
+  plan gate (`references/tree.md` → *Claim*).
 
 **Cleanup** runs `prune-tasks` only when a sprint block exists, and `prune-backlog` over the
 `## Covers` lines (or the single carried line). Post-merge, `backlog.md` and `tasks.md` carry no
