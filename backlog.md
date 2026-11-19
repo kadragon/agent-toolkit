@@ -30,6 +30,14 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] A preserved `--all` unit (`.worktrees/<slug>` on `wt/<slug>`) writes no `## Covers` and prunes no backlog line, so the clean-base gate skips past it while Step 1 still offers its item (source: code-review) (introduced here) — dev/skills/task-next/references/batch.md → unit worktrees
 - [ ] [harness] A default run routed through exit 3's *Worktree cycle* claims nothing until cleanup (one item writes no `tasks.md`; a group writes `## Covers` after the plan gate), so a clean-base session can pick the same item (source: code-review) — dev/skills/task-next/references/cycle.md → Worktree cycle
 
+### PR #413 — task-next --tree selects from origin/HEAD whatever the main checkout holds (2026-11-19)
+
+- [ ] [harness] Under `--tree`, *Prerequisites* stops on a `backlog.md` missing from this checkout before looking at the base commit, which may still hold one (source: codex) (introduced here) — dev/skills/task-next/SKILL.md → Prerequisites
+- [ ] [harness] Under `--tree`, an all-blocked Step 2 deletes a landed blocked marker in this checkout and re-runs Step 1, which reads the base commit, so the item stays blocked (source: codex) (introduced here) — dev/skills/task-next/SKILL.md → Step 2
+- [ ] [harness] merge-and-cleanup.sh fast-forwards a main checkout on base after a worktree merge without a clean check, so a dirty checkout `--tree` announced as left as is can still move (source: codex) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:116
+- [ ] [debt] `--ref` maps the queue path through `realpath`, so a symlinked backlog.md/tasks.md is looked up at the ref as its link target (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_read_at_ref
+- [ ] [constraint] No test pins utf-8 decoding of `git show` queue output; Linux CI's utf-8 locale cannot catch a cp949 regression (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_git
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

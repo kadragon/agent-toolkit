@@ -35,7 +35,7 @@ printed branch and the base in as literals:
 
 ```bash
 BRANCH="<the branch the block printed>"
-BASE="<the base>"   # origin/<name>, or a local main/master when there is no origin
+BASE="<the base>"   # origin/<name>; the pinned SHA under --tree; a local main/master when there is no origin
 SLUG="${BRANCH#*/}"
 if git remote get-url origin >/dev/null 2>&1; then git fetch || exit 1; fi
 # the main worktree's root, even when this session sits in another linked worktree — never nest
