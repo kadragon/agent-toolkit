@@ -38,6 +38,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] `--ref` maps the queue path through `realpath`, so a symlinked backlog.md/tasks.md is looked up at the ref as its link target (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_read_at_ref
 - [ ] [constraint] No test pins utf-8 decoding of `git show` queue output; Linux CI's utf-8 locale cannot catch a cp949 regression (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_git
 
+### PR #414 — review cycle gains a comments axis (2026-11-20)
+
+- [ ] [debt] The directive exemption (any tool-read comment) swallows correctness suppressions such as `# type: ignore` / `eslint-disable`, so the `suppression` verdict is unreachable; exempt only non-suppression directives (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Scope
+- [ ] [debt] A `constraint` comment is deleted under `--auto` or on decline while only a backlog line records it; keep it until the replacing check lands (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Applying
+- [ ] [debt] `delete` verdicts are listed as already applied in the Step 3 table though Step 4 performs them, and Step 5 stages only Step 4 files; mark them pending in the table (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Applying
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
