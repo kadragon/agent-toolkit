@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
 MAX_STRIKES="${CI_WAIT_MAX_STRIKES:-3}"

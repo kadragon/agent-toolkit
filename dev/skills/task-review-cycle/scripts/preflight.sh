@@ -68,7 +68,7 @@ done
 
 errors=()
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Per-cycle cache ---------------------------------------------------------
 CACHE_ENABLED="${PREFLIGHT_CACHE:-1}"
