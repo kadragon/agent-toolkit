@@ -22,7 +22,13 @@ Usage:
   `.worktrees/` worktree has claimed — listed under its tasks.md `## Covers`, or deleted from its
   backlog.md relative to its merge-base with this checkout's HEAD (or --ref) — are dropped, and stderr names
   the count per worktree (`Skipped N item(s) claimed by in-flight worktrees: ...`). See
-  `collect_claims()`/`worktree_claims()`.
+  `collect_claims()`/`worktree_claims()`. Identical item text in two groups is attributed per
+  group: a `## Covers` line is keyed with its h1 block's title, a merge-base deletion of a twin
+  with its heading, so a claim on one twin does not hide the other and the surviving twin does not
+  mask a deletion (a key naming a group the backlog lacks matches the text anywhere). Phase A
+  `status: open` blocks are claim-checked too: a block whose h1 title appears in another
+  `.worktrees/` worktree's tasks.md with any other status is skipped and named on stderr
+  (`collect_block_claims()`).
 
   --parked        list the backlog.md open items a blocked/deferred marker parks, instead of
                    candidates: `<backlog path>:<line> [<heading>] <item text>` per item (with
@@ -124,8 +130,12 @@ Self-check (--test):
   unindented or blank-line-separated line is not folded in; the token keeps its FIRST line
   number), and the claimed-items case (a `## Covers` claim, a merge-base deletion claim, a line
   added to base after branching left unclaimed, a non-`.worktrees/` worktree ignored, the stderr
-  skip line, and the all-claimed diagnosis). Every fixture is an in-memory string except the
-  claimed-items case, which builds a throwaway git repo in a tempdir. Exits 0 on PASS, 1 on FAIL.
+  skip line, and the all-claimed diagnosis), the per-group twin attribution, the Phase A block
+  claim, `--ref` on a symlinked queue file, and the utf-8 pin on `git show` output (decoding
+  forced to ascii for any call that does not request utf-8), and a block titled for one heading
+  that covers lines from several (all claimed). Every fixture is an in-memory string except the
+  claimed-items, `--ref`, symlink and utf-8 cases, which build throwaway git repos in a tempdir.
+  Exits 0 on PASS, 1 on FAIL.
 """
 
 from __future__ import annotations
@@ -430,10 +440,10 @@ def _direct_open_items(tokens: list[dict], heading: dict, all_headings: list[dic
 
 # ---- Phase A: tasks.md h1 sprint blocks ------------------------------------------------
 
-def phase_a_candidates(tasks_tokens: list[dict]) -> list[dict]:
-    """h1 blocks whose FIRST status: line strictly between this h1 and the next h1 is 'open'."""
+def h1_blocks(tasks_tokens: list[dict]) -> list[tuple[dict, str | None]]:
+    """(h1 heading token, value of its FIRST status: line strictly inside the block or None)."""
     h1s = _headings(tasks_tokens, (1,))
-    result = []
+    blocks = []
     for idx, h in enumerate(h1s):
         end = h1s[idx + 1]["line"] if idx + 1 < len(h1s) else math.inf
         status_value = None
@@ -441,7 +451,18 @@ def phase_a_candidates(tasks_tokens: list[dict]) -> list[dict]:
             if t["type"] == "status" and h["line"] < t["line"] < end:
                 status_value = t["value"]
                 break
-        if status_value == "open":
+        blocks.append((h, status_value))
+    return blocks
+
+
+def phase_a_candidates(tasks_tokens: list[dict]) -> list[dict]:
+    """h1 blocks whose FIRST status: line strictly between this h1 and the next h1 is 'open'.
+
+    A block another `.worktrees/` run holds (`claimed_by`, set by `mark_claimed_blocks`) is skipped.
+    """
+    result = []
+    for h, status_value in h1_blocks(tasks_tokens):
+        if status_value == "open" and not h.get("claimed_by"):
             result.append(
                 {"source": "tasks.md", "kind": "h1", "title": h["title"], "line": h["line"], "items": None}
             )
@@ -825,48 +846,112 @@ def zero_candidate_diagnosis(tasks_tokens: list[dict], backlog_tokens: list[dict
 # Claimed items — other `.worktrees/` runs (concurrent `--tree` cycles)
 # ---------------------------------------------------------------------------
 
-def item_keys(text: str, under: str | None = None) -> set[str]:
+_KEY_SEP = "\x1f"
+
+
+def _qkey(group: str | None, text: str) -> str:
+    """Claim key: bare item text, or `group<US>text` when the group tells twins apart."""
+    return f"{group}{_KEY_SEP}{text}" if group is not None else text
+
+
+def _split_key(key: str) -> tuple[str | None, str]:
+    if _KEY_SEP in key:
+        group, text = key.split(_KEY_SEP, 1)
+        return group, text
+    return None, key
+
+
+def item_keys(text: str, under: str | None = None, qualify: object = None) -> set[str]:
     """Match keys for the checkbox items in `text`: the item's FIRST line after `- [?] `, stripped.
 
     The first line, not the tokenizer's folded text, because `## Covers` copies each item line
     verbatim and a wrapped continuation is not part of that copy. `under` restricts the scan to
-    the region of every level-1..3 heading with exactly that title (e.g. "Covers").
+    the region of every level-1..3 heading with exactly that title (e.g. "Covers"); the group of
+    such an item is the h1 block holding it (task-next writes the selected heading as that h1).
+    Otherwise an item's group is its nearest preceding level-1..3 heading.
+
+    `qualify` prefixes the group onto a key (`_qkey`): True qualifies every item, a set qualifies
+    only items whose text is in it (twins), None leaves keys bare.
     """
     tokens = tokenize(text)
     raw = text.splitlines()
+    headings = _headings(tokens)
     regions = None
     if under is not None:
-        headings = _headings(tokens)
         regions = [(h["line"], _region_end(h, headings)) for h in headings if h["title"] == under]
     keys = set()
+    group = None
+    h1_title = None
     for t in tokens:
+        if t["type"] == "heading" and t["level"] in (1, 2, 3):
+            group = t["title"]
+            if t["level"] == 1:
+                h1_title = t["title"]
+            continue
         if t["type"] != "checkbox":
             continue
         if regions is not None and not any(s < t["line"] < e for s, e in regions):
             continue
         m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
         if m and m.group(2).strip():
-            keys.add(m.group(2).strip())
+            item = m.group(2).strip()
+            g = h1_title if under is not None else group
+            if qualify is True or (isinstance(qualify, (set, frozenset)) and item in qualify):
+                keys.add(_qkey(g, item))
+            else:
+                keys.add(item)
     return keys
+
+
+def _twin_texts(text: str) -> set[str]:
+    """Item texts that occur more than once in `text`'s checkbox items (identical twins)."""
+    raw = text.splitlines()
+    seen: dict[str, int] = {}
+    for t in tokenize(text):
+        if t["type"] != "checkbox":
+            continue
+        m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
+        if m and m.group(2).strip():
+            seen[m.group(2).strip()] = seen.get(m.group(2).strip(), 0) + 1
+    return {k for k, n in seen.items() if n > 1}
 
 
 def worktree_claims(wt_tasks: str, wt_backlog: str | None, base_backlog: str | None) -> set[str]:
     """Item keys one worktree has claimed — pure, so the rule is testable without git.
 
-    (a) a line under that worktree's `tasks.md` `## Covers`; (b) a line present in `backlog.md`
+    (a) a line under that worktree's `tasks.md` `## Covers`, keyed with its h1 block's title;
+    (b) a line present in `backlog.md`
     at the worktree's merge-base but gone from the worktree's own `backlog.md` — this keeps the
     claim alive after cleanup has pruned both files but before merge. A line added to base after
     the worktree branched is absent from the merge-base, so (b) never claims it. Either backlog
     side missing disables (b): an unreadable file is not "every line deleted".
 
+    Identical item text in two groups is told apart per group: a (b) text that occurs more than
+    once at the merge-base is keyed with its heading, so deleting one twin claims only that one
+    and the surviving twin does not mask the deletion. A text occurring once keeps its bare key.
+    `mark_claimed` honours a qualified key's group only for a text that is a twin in the
+    backlog being scanned and has a copy under that group; any other qualified key (a text
+    occurring once, or a group holding no copy — e.g. an h1 titled for one heading that covers
+    lines from several) matches the text in any group.
+
     A line the worktree reworded (e.g. a blocked-marker sync) also reads as deleted, so its
     original text counts as claimed until that worktree merges. That errs toward skipping, the
     safe side: a double-picked item costs a duplicate cycle, a skipped one waits one merge.
     """
-    claimed = item_keys(wt_tasks, under="Covers")
+    claimed = item_keys(wt_tasks, under="Covers", qualify=True)
     if wt_backlog is not None and base_backlog is not None:
-        claimed |= item_keys(base_backlog) - item_keys(wt_backlog)
+        twins = _twin_texts(base_backlog)
+        claimed |= item_keys(base_backlog, qualify=twins) - item_keys(wt_backlog, qualify=twins)
     return claimed
+
+
+def block_claims(wt_tasks: str) -> set[str]:
+    """h1 titles in one worktree's tasks.md whose block took a status other than `open`.
+
+    Phase A blocks carry no checkbox to claim: another run holds one by flipping the same h1 to
+    `status: active` (or beyond) in its own tasks.md. A block with no status line is not held.
+    """
+    return {h["title"] for h, status in h1_blocks(tokenize(wt_tasks)) if status not in (None, "open")}
 
 
 def _git(cwd: str, *args: str) -> str | None:
@@ -888,6 +973,71 @@ def _read_optional(path: str) -> str | None:
             return fh.read()
     except OSError:
         return None
+
+
+def _repo_rel(path: str, top: str) -> str:
+    """`path` relative to the repo top, by its own name: only the directory is resolved through
+    symlinks (to match `top`), so a symlinked queue file is looked up where it lives, not at its
+    link target."""
+    directory = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+    return os.path.relpath(os.path.join(directory, os.path.basename(path)), os.path.realpath(top))
+
+
+def _claimants(listing: str, top: str, include_self: bool) -> list[str]:
+    """Worktrees whose claims count: every other `.worktrees/` one, plus (include_self) this
+    checkout and the main worktree. `top` is the realpath of this checkout's top level."""
+    claimants = [
+        wt
+        for wt in (ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree "))
+        if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top
+    ]
+    if include_self:
+        # this checkout, and the main worktree (first listed) when run from a linked one
+        main_wt = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), None)
+        claimants.append(top)
+        if main_wt and os.path.isdir(main_wt) and os.path.realpath(main_wt) != top:
+            claimants.append(main_wt)
+    return claimants
+
+
+def collect_block_claims(
+    backlog_path: str, tasks_path: str | None, include_self: bool = False
+) -> dict[str, set[str]]:
+    """{worktree path: h1 titles its tasks.md holds beyond `open`} — Phase A's counterpart of
+    `collect_claims`, same claimant set and the same repo-relative tasks.md path."""
+    repo = os.path.dirname(os.path.abspath(backlog_path))
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    listing = _git(repo, "worktree", "list", "--porcelain")
+    if top is None or listing is None:
+        return {}
+    top = os.path.realpath(top.strip())
+    tasks_rel = (
+        _repo_rel(tasks_path, top)
+        if tasks_path
+        else os.path.join(os.path.dirname(_repo_rel(backlog_path, top)), "tasks.md")
+    )
+    claims: dict[str, set[str]] = {}
+    for wt in _claimants(listing, top, include_self):
+        titles = block_claims(_read_optional(os.path.join(wt, tasks_rel)) or "")
+        if titles:
+            claims[wt] = titles
+    return claims
+
+
+def mark_claimed_blocks(
+    tasks_tokens: list[dict], claims: dict[str, set[str]]
+) -> dict[str, list[int]]:
+    """Tag each `status: open` h1 block another worktree holds with `claimed_by`; return lines."""
+    counts: dict[str, list[int]] = {}
+    for h, status in h1_blocks(tasks_tokens):
+        if status != "open":
+            continue
+        for wt, titles in claims.items():
+            if h["title"] in titles:
+                h["claimed_by"] = wt
+                counts.setdefault(wt, []).append(h["line"])
+                break
+    return counts
 
 
 def collect_claims(
@@ -913,23 +1063,13 @@ def collect_claims(
     if top is None or listing is None:
         return {}
     top = os.path.realpath(top.strip())
-    backlog_rel = os.path.relpath(os.path.realpath(os.path.abspath(backlog_path)), top)
+    backlog_rel = _repo_rel(backlog_path, top)
     tasks_rel = (
-        os.path.relpath(os.path.realpath(os.path.abspath(tasks_path)), top)
+        _repo_rel(tasks_path, top)
         if tasks_path
         else os.path.join(os.path.dirname(backlog_rel), "tasks.md")
     )
-    claimants = [
-        wt
-        for wt in (ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree "))
-        if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top
-    ]
-    if include_self:
-        # this checkout, and the main worktree (first listed) when run from a linked one
-        main_wt = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), None)
-        claimants.append(top)
-        if main_wt and os.path.isdir(main_wt) and os.path.realpath(main_wt) != top:
-            claimants.append(main_wt)
+    claimants = _claimants(listing, top, include_self)
     claims: dict[str, set[str]] = {}
     for wt in claimants:
         wt_tasks = _read_optional(os.path.join(wt, tasks_rel)) or ""
@@ -951,19 +1091,47 @@ def mark_claimed(
     """Tag each open backlog item a worktree claimed with `claimed_by`; return its line numbers.
 
     Tagged items drop out of every selector and the zero-candidate diagnosis names them. A key
-    claimed by two worktrees is attributed to the first one listed. The lines matter, not just a
+    claimed by two worktrees is attributed to the first one listed. A group-qualified key
+    claims only the item under that heading (see `worktree_claims`). The lines matter, not just a
     count: a group can be partly claimed, and the caller reads the group's lines straight from
     backlog.md in Steps 2-3, so it needs to know which of them to leave out.
     """
     raw = backlog_raw.splitlines()
-    counts: dict[str, list[int]] = {}
+    # every checkbox's group, so a key's group only matters for a text that is really a twin
+    groups_of: dict[str, list[str | None]] = {}
+    g = None
     for t in backlog_tokens:
+        if t["type"] == "heading" and t["level"] in (1, 2, 3):
+            g = t["title"]
+        elif t["type"] == "checkbox":
+            m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
+            if m:
+                groups_of.setdefault(m.group(2).strip(), []).append(g)
+    counts: dict[str, list[int]] = {}
+    group = None
+    for t in backlog_tokens:
+        if t["type"] == "heading" and t["level"] in (1, 2, 3):
+            group = t["title"]
+            continue
         if t["type"] != "checkbox" or t["state"] != " ":
             continue
         m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
-        key = m.group(2).strip() if m else None
+        text = m.group(2).strip() if m else None
         for wt, keys in claims.items():
-            if key in keys:
+            # A key's group narrows the match only for a twin (text under 2+ headings) AND only when
+            # some copy sits under that group; otherwise the group is unplaceable (a Phase A h1
+            # title, or a block titled for one heading that covers lines from several) and the
+            # text matches anywhere — the err-toward-skipping side.
+            if any(
+                kt == text
+                and (
+                    kg is None
+                    or len(groups_of.get(kt, ())) < 2
+                    or kg == group
+                    or kg not in groups_of.get(kt, ())
+                )
+                for kg, kt in map(_split_key, keys)
+            ):
                 t["claimed_by"] = wt
                 counts.setdefault(wt, []).append(t["line"])
                 break
@@ -971,7 +1139,8 @@ def mark_claimed(
 
 
 def claimed_skip_note(
-    claimed: dict[str, list[int]], top: str | None = None, label: str = "backlog.md"
+    claimed: dict[str, list[int]], top: str | None = None, label: str = "backlog.md",
+    what: str = "item(s)", tail: str = " — leave these lines out of scope even when their group is selected",
 ) -> str | None:
     """One stderr line naming every skipped item as `<label>:<line>`, grouped per worktree."""
     if not claimed:
@@ -989,8 +1158,7 @@ def claimed_skip_note(
     )
     total = sum(len(v) for v in claimed.values())
     return (
-        f"Skipped {total} item(s) claimed by in-flight worktrees: {per} — leave these lines out "
-        "of scope even when their group is selected"
+        f"Skipped {total} {what} claimed by in-flight worktrees: {per}{tail}"
     )
 
 
@@ -1029,7 +1197,7 @@ def _read_at_ref(path: str | None, ref: str, *, required: bool = False) -> str:
     if top is None or _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
         sys.stderr.write(f"Error: --ref {ref} does not resolve to a commit in a git checkout of {path}\n")
         sys.exit(1)
-    rel = os.path.relpath(os.path.realpath(os.path.abspath(path)), os.path.realpath(top.strip()))
+    rel = _repo_rel(path, top.strip())
     out = _git(repo, "show", f"{ref}:{rel.replace(os.sep, '/')}")
     if out is None and required:
         sys.stderr.write(f"Error: {rel} does not exist at {ref}\n")
@@ -1134,6 +1302,21 @@ def main(argv: list[str]) -> int:
         top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
         label = f"{ref}:{backlog_path}" if ref else backlog_path  # line numbers are the ref's
         note = claimed_skip_note(counts, top.strip() if top else None, label)
+        if note is not None:
+            sys.stderr.write(note + "\n")
+
+    # Phase A blocks: another run holds one by flipping the same h1 to a non-open status in its own
+    # tasks.md, so a block still `open` here is a duplicate cycle waiting to happen.
+    if tasks_path and backlog_path:
+        block_counts = mark_claimed_blocks(
+            tasks_tokens, collect_block_claims(backlog_path, tasks_path, include_self=ref is not None)
+        )
+        top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
+        label = f"{ref}:{tasks_path}" if ref else tasks_path
+        note = claimed_skip_note(
+            block_counts, top.strip() if top else None, label, what="sprint block(s)",
+            tail=" — another run already took them; do not select",
+        )
         if note is not None:
             sys.stderr.write(note + "\n")
 
@@ -1244,7 +1427,7 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
         backlog = os.path.join(repo, "backlog.md")
         claims = collect_claims(backlog, None)
         by_name = {os.path.basename(k): v for k, v in claims.items()}
-        _assert(by_name.get("wt1") == {"item A"}, "a `## Covers` line in a .worktrees/ tasks.md is claimed")
+        _assert(by_name.get("wt1") == {_qkey("A sprint", "item A")}, "a `## Covers` line in a .worktrees/ tasks.md is claimed")
         _assert(by_name.get("wt2") == {"item B"}, "a backlog line deleted relative to merge-base is claimed")
         _assert("elsewhere" not in by_name, "a worktree outside .worktrees/ claims nothing")
         _assert(
@@ -1269,10 +1452,11 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
             [sys.executable, os.path.abspath(__file__), "--backlog", backlog],
             capture_output=True, text=True, cwd=repo, env=env,
         )
+        fwd = backlog.replace(os.sep, "/")
         _assert(
-            "Skipped 2 item(s) claimed by in-flight worktrees:" in r.stderr
-            and f"1 by .worktrees/wt1 ({backlog}:3)" in r.stderr
-            and f"1 by .worktrees/wt2 ({backlog}:4)" in r.stderr,
+            "Skipped 2 item(s) claimed by in-flight worktrees:" in r.stderr.replace(os.sep, "/")
+            and f"1 by .worktrees/wt1 ({fwd}:3)" in r.stderr.replace(os.sep, "/")
+            and f"1 by .worktrees/wt2 ({fwd}:4)" in r.stderr.replace(os.sep, "/"),
             "the CLI names each skipped line per worktree on stderr, so a partly claimed group "
             "can be scoped",
         )
@@ -1314,12 +1498,12 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
         )
         _assert(
             collect_claims(backlog, None, "main", include_self=True).get(os.path.realpath(repo))
-            == {"item C"},
+            == {_qkey("C sprint", "item C")},
             "include_self counts this checkout's `## Covers` as a claim",
         )
         from_wt1 = collect_claims(os.path.join(wt1, "backlog.md"), None, "main", include_self=True)
         _assert(
-            {os.path.basename(k.rstrip("/\\")): v for k, v in from_wt1.items()}.get("repo") == {"item C"},
+            {os.path.basename(k.rstrip("/\\")): v for k, v in from_wt1.items()}.get("repo") == {_qkey("C sprint", "item C")},
             "run from a linked worktree, include_self also counts the main worktree's claims",
         )
         r = subprocess.run(
@@ -1339,10 +1523,144 @@ def _run_claimed_fixtures(env: dict[str, str]) -> None:
         )
         _assert(r.returncode == 1 and "--ref no-such-ref" in r.stderr, "an unresolvable --ref is fatal")
 
+        _run_claim_extension_fixtures(tmp, env)
+
         nonrepo = os.path.join(tmp, "plain")
         os.makedirs(nonrepo)
         write(os.path.join(nonrepo, "backlog.md"), base)
         _assert(collect_claims(os.path.join(nonrepo, "backlog.md"), None) == {}, "outside a git repo there are no claims")
+
+
+def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
+    """Twin attribution, Phase A block claims, symlinked queue at --ref, utf-8 pin — own repo."""
+
+    def git(cwd: str, *args: str) -> None:
+        subprocess.run(["git", "-C", cwd, *args], check=True, capture_output=True, env=env)
+
+    def write(path: str, text: str) -> None:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    # a block titled for ONE heading that covers lines from several must claim them all, and a
+    # covered twin whose copies are not under that title is claimed in both places
+    multi = "## Alpha\n\n- [ ] a1\n\n## Beta\n\n- [ ] b1\n- [ ] dup\n\n## Gamma\n\n- [ ] g1\n- [ ] dup\n"
+    cov_tasks = "# Alpha\nstatus: active\n\n## Covers\n\n- [ ] a1\n- [ ] b1\n- [ ] g1\n- [ ] dup\n"
+    mtoks = tokenize(multi)
+    mcounts = mark_claimed(multi, mtoks, {"/x/.worktrees/w": worktree_claims(cov_tasks, None, None)})
+    _assert(
+        sorted(n for ls in mcounts.values() for n in ls) == [3, 7, 8, 12, 13],
+        "a `# Alpha` block covering Alpha, Beta and Gamma lines claims them all, twin in both places",
+    )
+
+    repo = os.path.join(tmp, "repo2")
+    os.makedirs(repo)
+    git(repo, "init", "-q", "-b", "main")
+    base = "## G1\n\n- [ ] twin\n- [ ] solo\n\n## G2\n\n- [ ] twin\n"
+    backlog = os.path.join(repo, "backlog.md")
+    tasks = os.path.join(repo, "tasks.md")
+    write(backlog, base)
+    git(repo, "add", "backlog.md")
+    git(repo, "commit", "-q", "-m", "seed")
+    write(tasks, "# Sprint X\nstatus: open\n\n# Sprint Y\nstatus: open\n")
+
+    wt_cov = os.path.join(repo, ".worktrees", "cov")
+    git(repo, "worktree", "add", "-q", "-b", "c1", wt_cov)
+    write(os.path.join(wt_cov, "tasks.md"), "# G2\nstatus: active\n\n## Covers\n\n- [ ] twin\n")
+    wt_del = os.path.join(repo, ".worktrees", "del")
+    git(repo, "worktree", "add", "-q", "-b", "c2", wt_del)
+    write(os.path.join(wt_del, "backlog.md"), base.replace("## G1\n\n- [ ] twin\n", "## G1\n\n", 1))
+    wt_blk = os.path.join(repo, ".worktrees", "blk")
+    git(repo, "worktree", "add", "-q", "-b", "c3", wt_blk)
+    write(os.path.join(wt_blk, "tasks.md"), "# Sprint X\nbody\nstatus: active\n")
+
+    claims = collect_claims(backlog, None)
+    by_name = {os.path.basename(k): v for k, v in claims.items()}
+    raw = open(backlog, encoding="utf-8").read()
+
+    def claimed_lines(only: str) -> list[int]:
+        toks = tokenize(raw)
+        return sorted(n for ls in mark_claimed(raw, toks, {only: by_name[only]}).values() for n in ls)
+
+    _assert(claimed_lines("cov") == [8], "a Covers claim on G2's twin hides G2's copy only, not G1's twin")
+    _assert(
+        claimed_lines("del") == [3],
+        "deleting G1's twin claims G1's copy; G2's surviving twin does not mask the deletion",
+    )
+
+    block = collect_block_claims(backlog, tasks)
+    _assert(
+        {os.path.basename(k): v for k, v in block.items()} == {"cov": {"G2"}, "blk": {"Sprint X"}},
+        "a non-open h1 block in another worktree's tasks.md is a block claim",
+    )
+    toks = tokenize(open(tasks, encoding="utf-8").read())
+    counts = mark_claimed_blocks(toks, block)
+    _assert(
+        [c["title"] for c in phase_a_candidates(toks)] == ["Sprint Y"] and list(counts.values()) == [[1]],
+        "a Phase A open block another worktree took is skipped; the untouched one stays",
+    )
+    r = subprocess.run(
+        [sys.executable, os.path.abspath(__file__), "--tasks", tasks, "--backlog", backlog],
+        capture_output=True, text=True, cwd=repo, env=env,
+    )
+    _assert(
+        "Skipped 1 sprint block(s) claimed by in-flight worktrees: 1 by .worktrees" in r.stderr and "blk (" in r.stderr
+        and f"{tasks}:1" in r.stderr and "Sprint X" not in r.stdout and "Sprint Y" in r.stdout,
+        f"the CLI names the skipped sprint block on stderr (got {r.stdout!r} / {r.stderr!r})",
+    )
+
+    # --ref with a symlinked backlog: the working-tree path is a link to a file outside the repo,
+    # but the ref holds a regular backlog.md. Looked up by its own repo-relative name, not target.
+    outside = os.path.join(tmp, "outside")
+    os.makedirs(outside)
+    write(os.path.join(outside, "shared.md"), "## Real\n\n- [ ] at ref\n")
+    link_repo = os.path.join(tmp, "repo3")
+    os.makedirs(link_repo)
+    git(link_repo, "init", "-q", "-b", "main")
+    write(os.path.join(link_repo, "backlog.md"), "## Real\n\n- [ ] at ref\n")
+    git(link_repo, "add", "backlog.md")
+    git(link_repo, "commit", "-q", "-m", "seed")
+    os.remove(os.path.join(link_repo, "backlog.md"))
+    try:
+        os.symlink(os.path.join(outside, "shared.md"), os.path.join(link_repo, "backlog.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        print("  SKIP: symlinks unavailable here — --ref symlink fixture not run")
+    else:
+        r = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--backlog", os.path.join(link_repo, "backlog.md"),
+             "--ref", "main"],
+            capture_output=True, text=True, cwd=link_repo, env=env,
+        )
+        _assert(
+            r.returncode == 0 and r.stdout.strip() == "[1] backlog.md: Real (1 items)",
+            f"--ref reads a symlinked backlog.md at its repo-relative path (got {r.stdout!r} / {r.stderr!r})",
+        )
+
+    # utf-8 pin: a Korean line committed at the ref must survive `git show`. subprocess.run is shimmed
+    # so any call that does not ask for utf-8 decodes as ascii strictly — what a cp949 or C locale
+    # would do to these bytes — and Linux CI's utf-8 locale cannot mask a dropped `encoding=`.
+    ko_repo = os.path.join(tmp, "repo4")
+    os.makedirs(ko_repo)
+    git(ko_repo, "init", "-q", "-b", "main")
+    korean = "## 한국어\n\n- [ ] 항목 하나\n"
+    write(os.path.join(ko_repo, "backlog.md"), korean)
+    git(ko_repo, "add", "backlog.md")
+    git(ko_repo, "commit", "-q", "-m", "seed")
+    real_run = subprocess.run
+
+    def shim(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if str(kwargs.get("encoding", "")).lower().replace("-", "") != "utf8":
+            kwargs["encoding"], kwargs["errors"] = "ascii", "strict"
+        return real_run(*args, **kwargs)
+
+    subprocess.run = shim  # type: ignore[assignment]
+    try:
+        try:
+            got = _read_at_ref(os.path.join(ko_repo, "backlog.md"), "main", required=True)
+        except (UnicodeDecodeError, SystemExit):  # a failed decode surfaces as "absent at ref"
+            got = None
+    finally:
+        subprocess.run = real_run  # type: ignore[assignment]
+    _assert(got is not None and got.replace("\r\n", "\n") == korean, "git show output decodes as utf-8 whatever the locale")
 
 
 def run_tests() -> int:
