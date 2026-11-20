@@ -21,10 +21,10 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Prerequisites
 
-**Required:** `backlog.md`. Missing → stop and point to `dev:harness-init`. Under `--tree`, check
-the base commit's copy (`git cat-file -e "$BASE_SHA:backlog.md"`, after Step 1's pin), not this
-checkout. Read
-`docs/conventions.md` when present; when absent the linter is the authority.
+**Required:** `backlog.md`. Missing → stop and point to `dev:harness-init`. Under `--tree`, this
+checkout's copy does not count: defer the check to right after Step 1 pins `BASE_SHA`, and test the
+base commit's copy (`git cat-file -e "$BASE_SHA:backlog.md"`); missing there → stop with the same
+pointer. Read `docs/conventions.md` when present; when absent the linter is the authority.
 
 **Working tree gate.** Capture the state before judging dirty files:
 

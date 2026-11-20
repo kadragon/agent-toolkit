@@ -52,8 +52,11 @@ echo "worktree: $ROOT/.worktrees/$SLUG"
 **Claim.** The branch name is derived from the selected heading, so `git worktree add -b` failing
 on an existing `$BRANCH` means a run already holds that item. Do not delete the branch. A leftover
 of this session's own (the user names it, or this session created it) → resume per `edge-cases.md`.
-Anything else → re-run Step 1, whose claims now include it, and reselect; nothing left → report.
-Only an explicit user instruction removes a stale branch.
+Anything else → re-run Step 1 and reselect without the colliding item. Claims come from
+worktrees, not branches, so Step 1 may still offer it (a stale branch with no worktree, or a run
+between `worktree add` and its `tasks.md`): then drop it from this run's selection and report the
+colliding branch — never retry the same item, never delete the branch unasked; a stale branch is
+the user's decision. Nothing left → report.
 
 Queue items only: right after a successful `worktree add`, before the plan gate, write the worktree's
 `tasks.md` (`# <heading verbatim>`, `status: active`, `## Covers` with each selected line verbatim —

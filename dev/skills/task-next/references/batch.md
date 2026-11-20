@@ -48,7 +48,8 @@ integration checkout. Create a worktree with `git worktree add .worktrees/<slug>
 <captured-base-commit>`; use actual values discovered this run. Right after creation, write an
 uncommitted `tasks.md` in each unit worktree with `## Covers` listing the unit's lines verbatim — its
 claim, so the clean-base gate and Step 1 skip them. Never stage or commit it (`tasks.md` is
-integration-owned).
+integration-owned). When base already tracks a `tasks.md`, the unit's `## Covers` is appended to
+that file, still uncommitted.
 
 Archive the aggregate contract from the integration branch before spawning. Each implementer
 gets its approved unit contract, absolute worktree path, owned files, and relevant test commands.
@@ -95,8 +96,9 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
 
 ### A6 — Cleanup and report
 
-After confirmed successful merge, remove only clean worktrees whose units landed, deleting each
-one's uncommitted `tasks.md` claim first (the only file allowed dirty). A preserved unit keeps it, so its claim persists. Use the
+After confirmed successful merge, remove only clean worktrees whose units landed, first removing
+each one's uncommitted `tasks.md` claim (the only file allowed dirty): delete it, or `git restore
+tasks.md` when base tracks one. A preserved unit keeps it, so its claim persists. Use the
 integrated-unit list carried into the hand-off (a later session: the merged PR body); squash
 ancestry cannot prove unit identity. Run
 `cycle_state.py retire --branch wt/<slug>` for each landed unit, so a reused unit branch name
