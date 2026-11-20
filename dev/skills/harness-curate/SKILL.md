@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.5.0
+version: 2.6.0
 disable-model-invocation: true
 ---
 
@@ -106,7 +106,9 @@ rule, anything an exit code can decide — routes to a deterministic check (a ho
 CI job), whichever the repo's existing guardrail makes cheapest. A **judgement call** routes to
 the review-time asset (a `code-review` rule, the reviewer agent), where a diff is all the
 context it needs. Only a fact the agent must hold before anything asks stays an instruction-file
-line. Default to building the check over writing the sentence.
+line. Default to building the check over writing the sentence. An existing instruction-file or
+skill line whose rule a hook, lint, test or CI job already enforces is a deletion candidate:
+the check is the rule, the sentence only costs load.
 
 Ignore one-offs. A deterministic repeat (the same mechanical step every session) promotes to a
 hook rather than a skill. **Permission-prompt tuning is out of scope** — never touch the

@@ -1,7 +1,8 @@
 # Review Consolidation Guide
 
 Step 3 of `task-review-cycle`. Sources tag their findings: `code-review` (the reviewer's
-`code-review` run), `contract` (the reviewer's Sprint Contract grading), and on every non-lite
+`code-review` run), `contract` (the reviewer's Sprint Contract grading), `comments` (the
+reviewer's comment pass, `comment-rules.md`; inline when the reviewer did not run), and on every non-lite
 route the panel's `agy` and `codex`. Lite has one source, the engine that did not drive the cycle
 (`risk-routing.md` → *Lite reviewer*): when that is `codex`, `contract` comes from the
 orchestrator's inline grading.

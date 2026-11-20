@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.1.0
+version: 4.2.0
 ---
 
 # Capture Learnings — session retrospective
@@ -53,7 +53,9 @@ Not for cross-project audits, unused-skill cleanup, or building a named asset �
    if it fits them all, it is the cross-cutting row above, not a per-skill edit.
 
    Mechanism before sentence: a rule expressible as a check goes there first; prose is the
-   fallback. Every proposal names in one line **the concrete failure this prevents** ("without
+   fallback. A lesson routed to a check gets no sentence too — not in an instruction file, a
+   skill, or memory — and the check's landing deletes any prose it now enforces: the
+   instruction is the symptom (`cursor/plugins@aaeb0ea:pstack/skills/principle-encode-lessons-in-structure`). Every proposal names in one line **the concrete failure this prevents** ("without
    this: X happens again") — for memory it lands in the body.
 
    **Skill-authoring handoff.** For a confirmed new skill or substantial rewrite outside the

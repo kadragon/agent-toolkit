@@ -26,7 +26,8 @@
 #   command stays with the orchestrator, both because --permission-mode plan
 #   forbids it here and because that half is already the orchestrator's job.
 # Output: JSON array of findings on stdout — the contract Step 3 consolidation
-#         consumes, with contract findings tagged "source":"contract".
+#         consumes, with contract findings tagged "source":"contract" and comment
+#         findings (references/comment-rules.md) tagged "source":"comments".
 
 set -euo pipefail
 
@@ -36,6 +37,13 @@ EFFORT="${2:-}"
 CONTRACT="${3:-}"
 
 command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; exit 1; }
+
+# The comments axis rules live in one file the orchestrator's inline pass also reads. It is read
+# here, above the heredoc, with read -d rather than a command substitution, for the bash 3.2
+# quoting trap described at the contract append below.
+RULES_FILE="${BASH_SOURCE[0]%/*}/../references/comment-rules.md"
+[ -f "$RULES_FILE" ] || { echo "ERROR: comment rules not found: $RULES_FILE" >&2; exit 1; }
+IFS= read -r -d '' COMMENT_RULES <"$RULES_FILE" || true
 
 # SKILL.md Step 2 delegates the whole reviewer prompt to this script, so this
 # block is its only copy — there is no second prompt to keep in sync. The strict
@@ -92,6 +100,15 @@ in the contract — this session is read-only, and the orchestrator runs that co
 Sprint Contract:
 ${CONTRACT}"
 fi
+
+PROMPT="${PROMPT}
+
+Finally, review the comments this diff adds or edits under the rules below. Append one finding
+per flagged comment to the SAME JSON array, with severity P1, failure set to the verdict name
+(delete, must-kill, suppression, or constraint), and \"source\":\"comments\". Read-only: report,
+never edit.
+
+${COMMENT_RULES}"
 
 # --permission-mode plan makes the headless session structurally read-only: it
 # can still read the diff and files (git diff, Read) but cannot Edit/Write or
