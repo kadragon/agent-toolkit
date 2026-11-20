@@ -55,9 +55,10 @@ Archive the aggregate contract from the integration branch before spawning. Each
 gets its approved unit contract, absolute worktree path, owned files, and relevant test commands.
 Follow `docs/delegation.md` when present; otherwise include objective, output format, tools, and
 boundaries in each brief, plus the brief rules in `cycle.md` → *Implement* (worktree briefs
-included). Agents may edit only their owned files, never convergence files, and commit by explicit path — never `git add -A`/`commit -a`, which would
-stage the uncommitted claim `tasks.md`. The integration
-session records a stuck report as a `note` on the unit's branch so a fresh run sees it.
+included). Agents may edit only their owned files, never convergence files, and commit by
+explicit path — never `git add -A`/`commit -a`, which would stage the uncommitted claim
+`tasks.md`. The integration session records a stuck report as a `note` on the unit's branch so a
+fresh run sees it.
 
 Each implementer archives its unit contract in the worktree, implements and runs focused checks,
 then checks `cycle_state.py authorize --action commit` from its own worktree before

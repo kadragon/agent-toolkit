@@ -375,7 +375,9 @@ def case_dirty_main_checkout_not_fast_forwarded(tmp):
     (repo / "a.md").write_text("dirty\n")
     proc = _merge_stderr(repo, d)
     out = json.loads(proc.stdout)
-    if proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() != head             or "uncommitted" not in proc.stderr or out["merge_ok"] is not True             or branch_exists(repo):
+    if (proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() != head
+            or "uncommitted" not in proc.stderr or out["merge_ok"] is not True
+            or branch_exists(repo)):
         fail("dirty_main_checkout_not_fast_forwarded",
              f"rc {proc.returncode}, stderr {proc.stderr!r}, out {out!r}")
     repo, d = _repo_behind_origin(tmp)

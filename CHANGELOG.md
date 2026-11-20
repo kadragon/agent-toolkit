@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] worktree runs claim items on creation and per group; --tree reads base (3 units) (dev v4.11.56) (2026-11-20) → docs/design/concurrent-tree-cycles.md
 - [done] pre_merge_resync keeps EOLs, multi-plugin suffixes, any CWD; comment rules keep suppressions and constraints (dev v4.11.55) (2026-11-20)
 - [done] task-next --tree selects from origin/HEAD whatever the main checkout's branch or dirty state (dev v4.11.53) (2026-11-19)
 - [done] task-next skips other .worktrees/ on a clean base; --resume <slug> resumes one (dev v4.11.52) (2026-11-19) → docs/design/concurrent-tree-cycles.md
