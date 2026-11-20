@@ -16,7 +16,8 @@ bundler, linter, formatter, or type checker reads. Examples, not a closed list: 
 lines, `# shellcheck shell=`, `"use strict"`, `//go:build`, `//go:embed`, `//go:generate`,
 `# frozen_string_literal`, a Dockerfile `# syntax=`, `/*#__PURE__*/`, bundler magic comments,
 `# type:` annotations, JSDoc types under `// @ts-check`, formatter on/off markers. When unsure
-whether a tool reads it, it is a directive.
+whether a tool reads it, it is a directive. A lint or type suppression is the exception: it is a
+comment in scope, judged by the keep list and the `suppression` verdict.
 
 ## Keep list
 
@@ -29,7 +30,8 @@ Only these comments stay. When unsure whether one applies, the comment goes.
 - Doc comments that define a public API contract: a function docstring of an exported API, a
   script's usage header naming its arguments and output.
 - Issue or RFC links that explain a constraint code cannot express.
-- Lint suppressions whose rule is faulty, pedantic, or style-only for this line.
+- Lint or type suppressions whose rule is faulty, pedantic, or style-only for this line, or
+  whose cause is an external stub or dependency this repo cannot fix.
 
 ## Verdicts
 
@@ -64,7 +66,7 @@ thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before a
 
 - `delete` → delete, without waiting for confirmation even without `--auto`: a non-directive
   comment carries no behavior. Reject a `delete` aimed at a directive. List it in the Step 3
-  table as already applied.
+  table as pending; Step 4 deletes it, and Step 5 stages it with the other Step 4 files.
 - `must-kill` / `suppression` → without `--auto`, offer the smallest in-scope fix that makes the
   comment unnecessary, removing the workaround it named (never a symptom guard), and wait.
   Approved → apply it, then delete the comment. `--auto`, declined, or a fix that needs work
@@ -72,5 +74,5 @@ thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before a
   `--auto` never renames or restructures code for a comment. Then delete a `must-kill` comment,
   but keep a `suppression`: removing it before its cause is fixed fails the required checks.
 - `constraint` → without `--auto`, offer the encoding and wait. Approved → encode, then delete.
-  Declined or `--auto` → delete and file the constraint under `## Review Backlog` as
-  `[constraint]`.
+  Declined or `--auto` → keep the comment and file the constraint under `## Review Backlog` as
+  `[constraint]`; the comment goes in the cycle that lands its check.

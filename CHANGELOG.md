@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] pre_merge_resync keeps EOLs, multi-plugin suffixes, any CWD; comment rules keep suppressions and constraints (dev v4.11.55) (2026-11-20)
 - [done] task-next --tree selects from origin/HEAD whatever the main checkout's branch or dirty state (dev v4.11.53) (2026-11-19)
 - [done] task-next skips other .worktrees/ on a clean base; --resume <slug> resumes one (dev v4.11.52) (2026-11-19) → docs/design/concurrent-tree-cycles.md
 - [done] review cycle merges base into a PR behind it and re-bumps, no force push (dev v4.11.51) (2026-11-19) → docs/design/concurrent-tree-cycles.md
