@@ -28,7 +28,9 @@ orchestrator's inline grading.
 6. **Gate.** Every in-scope P0/P1 finding is applied before merge, P0 first. In-scope P2/P3 —
    only the panel emits them; `code-review` reports merge-blocking problems only — do not gate:
    record them like out-of-scope findings. A `contract` finding is in-scope P0 by construction and
-   bypasses the confidence and `failure` filters and `--auto`.
+   bypasses the confidence and `failure` filters and `--auto`. A `comments` finding carries no
+   harm path or confidence by design: it bypasses the harm check in step 2 and the confidence and
+   `failure` filters in step 3, and is applied per `comment-rules.md` → *Applying*, not by this gate.
 
 ## Present
 

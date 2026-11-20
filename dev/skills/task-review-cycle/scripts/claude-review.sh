@@ -103,10 +103,11 @@ fi
 
 PROMPT="${PROMPT}
 
-Finally, review the comments this diff adds or edits under the rules below. Append one finding
-per flagged comment to the SAME JSON array, with severity P1, failure set to the verdict name
-(delete, must-kill, suppression, or constraint), and \"source\":\"comments\". Read-only: report,
-never edit.
+Finally, review the comments this diff adds or edits under the rules below. This pass overrides
+the blocking-only rule above: comment findings are not merge-blocking and are still reported.
+Append one finding per flagged comment to the SAME JSON array, with severity P1, failure empty,
+verdict set to one of delete, must-kill, suppression, constraint, and \"source\":\"comments\".
+Read-only: report, never edit.
 
 ${COMMENT_RULES}"
 

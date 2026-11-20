@@ -11,9 +11,12 @@ Code comments that this branch's diff adds or edits, in source files only: scrip
 configs. Prose documents (`*.md`, docs, `SKILL.md` text) are not comments. Untouched comments
 are out of scope even when they break these rules.
 
-Tooling directives are not comments and are never flagged: shebangs, encoding lines,
-`# shellcheck shell=`, `"use strict"`, formatter on/off markers, `// prettier-ignore`, and
-type-checker mode lines such as `// @ts-check`.
+Tooling directives are not comments and are never flagged: any comment a compiler, build tool,
+bundler, linter, formatter, or type checker reads. Examples, not a closed list: shebangs, encoding
+lines, `# shellcheck shell=`, `"use strict"`, `//go:build`, `//go:embed`, `//go:generate`,
+`# frozen_string_literal`, a Dockerfile `# syntax=`, `/*#__PURE__*/`, bundler magic comments,
+`# type:` annotations, JSDoc types under `// @ts-check`, formatter on/off markers. When unsure
+whether a tool reads it, it is a directive.
 
 ## Keep list
 
@@ -59,12 +62,14 @@ Re-read each finding against the diff first. Reject one that touches code rather
 lands outside the diff, deletes a keep-list comment, or misstates a `must-kill` reason. For a
 thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before accepting.
 
-- `delete` → delete, without waiting for confirmation even without `--auto`: removing a comment
-  changes no behavior. List it in the Step 3 table as already applied.
-- `must-kill` / `suppression` → the smallest in-scope fix that makes the comment unnecessary,
-  removing the workaround it named; never a symptom guard. A fix that needs work outside this
-  branch's purpose → delete the comment anyway and file the reshape under
-  `## Review Backlog` as `[debt]`.
+- `delete` → delete, without waiting for confirmation even without `--auto`: a non-directive
+  comment carries no behavior. Reject a `delete` aimed at a directive. List it in the Step 3
+  table as already applied.
+- `must-kill` / `suppression` → without `--auto`, offer the smallest in-scope fix that makes the
+  comment unnecessary, removing the workaround it named (never a symptom guard), and wait.
+  Approved → apply it, then delete the comment. `--auto`, declined, or a fix that needs work
+  outside this branch's purpose → delete the comment and file the reshape under
+  `## Review Backlog` as `[debt]`; `--auto` never renames or restructures code for a comment.
 - `constraint` → without `--auto`, offer the encoding and wait. Approved → encode, then delete.
   Declined or `--auto` → delete and file the constraint under `## Review Backlog` as
   `[constraint]`.
