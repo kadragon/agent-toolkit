@@ -378,7 +378,7 @@ acquire_workspace_lock() {
   # workspace reached through a symlink — or, on Windows, through a differently-cased path, which
   # `show-toplevel` echoes verbatim from the cwd — yields two locks for the single broker they share.
   root=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$slug")
-  root=$(cd "$root" 2>/dev/null && pwd -P) || root=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$slug")
+  root=$(CDPATH= cd -- "$root" 2>/dev/null && pwd -P) || root=$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$slug")
   [ "$CODEX_REVIEW_PLATFORM" = "windows" ] && root=$(printf '%s' "$root" | tr '[:upper:]' '[:lower:]')
   lock_key=$(printf '%s' "$root" | cksum | tr -d ' \t' 2>/dev/null || printf '%s' "0")
   LOCK_DIR="$lock_root/codex-review-${slug}-${lock_key}.lock"
