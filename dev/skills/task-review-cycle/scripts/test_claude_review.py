@@ -187,6 +187,39 @@ def case_blocking_scope_and_failure_field(tmp):
     check("passthrough never drops a blocking finding", "never re-rank, re-judge, merge, summarize or drop a blocking finding" in flat, prompt[:1600])
 
 
+def case_comment_rules_reach_prompt(tmp):
+    """The comments axis is appended from references/comment-rules.md verbatim, backticks inert."""
+    print("\ncase: comment rules appended verbatim with their own source tag")
+    rules = (SCRIPT.parent.parent / "references" / "comment-rules.md").read_text()
+    _, prompt = run(tmp, ["main", "", CONTRACT], stdout=envelope("[]"))
+    check("rules text appears verbatim", rules in prompt, prompt[-400:])
+    check('comment findings tagged', '"source":"comments"' in prompt)
+    check("rules follow the contract block", prompt.index(CONTRACT) < prompt.index(rules))
+
+
+def case_missing_comment_rules_exits_nonzero(tmp):
+    print("\ncase: script copied without its references -> non-zero, never a rule-less review")
+    lone = tmp / "lone" / "scripts"
+    lone.mkdir(parents=True, exist_ok=True)
+    shutil.copy(SCRIPT, lone / SCRIPT.name)
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "claude"
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    proc = subprocess.run(
+        ["bash", str(lone / SCRIPT.name), "main", ""],
+        capture_output=True,
+        text=True,
+        cwd=tmp,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+             "CLAUDE_STUB_CAPTURE": str(tmp / "unused.txt")},
+        timeout=60,
+    )
+    check("non-zero exit", proc.returncode != 0)
+    check("names the missing rules", "comment rules not found" in proc.stderr, proc.stderr)
+
+
 def case_effort_reaches_prompt(tmp):
     print("\ncase: effort arg lands in the skill args, not the skill name")
     _, prompt = run(tmp, ["main", "high"], stdout=envelope("[]"))
@@ -279,6 +312,8 @@ def main():
             case_no_contract_omits_grading,
             case_contract_reaches_prompt,
             case_contract_is_not_executed,
+            case_comment_rules_reach_prompt,
+            case_missing_comment_rules_exits_nonzero,
             case_effort_reaches_prompt,
             case_blocking_scope_and_failure_field,
             case_array_passthrough,

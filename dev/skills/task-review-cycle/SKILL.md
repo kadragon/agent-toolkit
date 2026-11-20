@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.8.0
+version: 1.9.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -135,8 +135,9 @@ an execution-based criterion against the evidence line above, silent on one when
 
 `CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
 `Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review the
-diff against the contract inline. Inline review and lite's
-inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
+diff against the contract inline. The reviewer also emits `"source":"comments"` findings
+(`references/comment-rules.md`); when it did not run, apply that file inline, tagged the same. Inline
+review and lite's inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
 
 **Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
 `references/review-sources.md` in the turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
@@ -144,8 +145,7 @@ reclaim (`references/late-source-reclaim.md`) is what makes not waiting safe.
 
 ## Step 3: Consolidate and confirm
 Follow `references/consolidation-guide.md`. A `contract` finding is in-scope P0, never dropped by
-confidence or by `--auto`.
-
+confidence or by `--auto`; a `comments` finding follows `references/comment-rules.md` → *Applying*.
 Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
 approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
 (format and the rejected-record check in the guide) — never `tasks.md`.
@@ -159,7 +159,7 @@ In this order, because everything before the last step changes the tree the chec
    finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
    applied finding touched the file), file it under `backlog.md` → `## Review Backlog`, and
    continue. A fixed `contract` finding → re-run the reviewer once; still failing → stop, never
-   merge.
+   merge. A `comments` finding follows `references/comment-rules.md` → *Applying*.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
