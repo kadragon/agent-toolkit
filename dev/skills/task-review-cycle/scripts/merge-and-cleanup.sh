@@ -122,8 +122,9 @@ if [ "$MERGE_OK" = "true" ]; then
       CAN_CLEAN=false
       CLEANUP_MSG="WARNING: Could not check out '${BASE_BRANCH}'; local cleanup skipped: ${CHECKOUT_ERR}"
     else
-      # A dirty checkout (e.g. one task-next --tree left as is) must not move under its owner.
-      BASE_STATUS=$(git status --porcelain 2>/dev/null || true)
+      # A dirty checkout (e.g. one task-next --tree left as is) must not move under its owner;
+      # untracked files do not count (a fast-forward that would overwrite one just fails, harmlessly).
+      BASE_STATUS=$(git status --porcelain --untracked-files=no 2>/dev/null || true)
       if [ -n "$BASE_STATUS" ]; then
         BASE_NOTE=" (base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes)"
         echo "NOTE: base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes" >&2

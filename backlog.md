@@ -11,6 +11,13 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Review Backlog
+
+### PR #416 — worktree runs claim items on creation and per group; --tree reads base (2026-11-20)
+
+- [ ] [debt] When every open `tasks.md` sprint block is claimed by another worktree, the zero-candidate diagnosis still says `no h1 block with status: open`, contradicting the skip line; `_diagnose_source` reads only checkbox `claimed_by` (source: codex, agy) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_diagnose_source
+- [ ] [harness] A worktree run that writes (rather than appends) its `tasks.md` over a base-tracked one drops base's open sprint blocks, which the merge-base rule then reads as claimed and the merge would delete — cycle.md/tree.md should say append when base tracks `tasks.md`, as batch.md now does (source: lead, found while fixing block claims) — dev/skills/task-next/references/cycle.md → Worktree cycle → Claim
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

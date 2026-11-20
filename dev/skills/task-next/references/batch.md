@@ -46,10 +46,13 @@ Ignore `.worktrees/` via `info/exclude` (`cycle.md` → *Worktree cycle*), fetch
 unit worktree from that same fetched base. Preserve any authorized backlog-only edits on the
 integration checkout. Create a worktree with `git worktree add .worktrees/<slug> -b wt/<slug>
 <captured-base-commit>`; use actual values discovered this run. Right after creation, write an
-uncommitted `tasks.md` in each unit worktree with `## Covers` listing the unit's lines verbatim — its
-claim, so the clean-base gate and Step 1 skip them. Never stage or commit it (`tasks.md` is
-integration-owned). When base already tracks a `tasks.md`, the unit's `## Covers` is appended to
-that file, still uncommitted.
+uncommitted `tasks.md` in each unit worktree — `# <unit heading verbatim>`, `status: active`,
+`## Covers` listing the unit's lines verbatim — its claim, so the clean-base gate and Step 1 skip
+them. Never stage or commit it (`tasks.md` is integration-owned). When base already tracks a
+`tasks.md`, append that whole block (never a bare `## Covers`, which would fall under base's last
+h1), still uncommitted. Then re-check as `cycle.md` → *Worktree cycle* → *Claim* does: from each
+unit worktree, re-run the Step 1 candidate script without `--ref` and drop any line another
+worktree also claims from that unit before its implementer is spawned.
 
 Archive the aggregate contract from the integration branch before spawning. Each implementer
 gets its approved unit contract, absolute worktree path, owned files, and relevant test commands.

@@ -44,13 +44,17 @@ ROOT=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 EXCLUDE=$(git rev-parse --git-path info/exclude)
 mkdir -p -- "$(dirname -- "$EXCLUDE")"
 grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"   # leading newline: the file may lack a final one
-# no pre-delete: `-b` fails when $BRANCH exists, and that failure is the claim lock (below)
-git worktree add "$ROOT/.worktrees/$SLUG" -b "$BRANCH" "$BASE"
+# no pre-delete: the add fails when $BRANCH or the path exists, and that failure is the claim lock (below)
+git worktree add "$ROOT/.worktrees/$SLUG" -b "$BRANCH" "$BASE" \
+  || { echo "claim collision: $BRANCH or .worktrees/$SLUG already exists" >&2; exit 1; }
 echo "worktree: $ROOT/.worktrees/$SLUG"
 ```
 
-**Claim.** The branch name is derived from the selected heading, so `git worktree add -b` failing
-on an existing `$BRANCH` means a run already holds that item. Do not delete the branch. A leftover
+**Claim.** The slug is derived from the selected heading, so `git worktree add` failing on an
+existing `$BRANCH` or `.worktrees/$SLUG` (two selections from one heading can differ only in the
+type prefix) means a run may already hold that item; a truncated slug can also collide across two
+long headings, which the drop-and-report rule below absorbs. Never use the printed path after a
+failed add — it is the other run's worktree. Do not delete the branch. A leftover
 of this session's own (the user names it, or this session created it) → resume per `edge-cases.md`.
 Anything else → re-run Step 1 and reselect without the colliding item. Claims come from
 worktrees, not branches, so Step 1 may still offer it (a stale branch with no worktree, or a run

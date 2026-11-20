@@ -945,13 +945,24 @@ def worktree_claims(wt_tasks: str, wt_backlog: str | None, base_backlog: str | N
     return claimed
 
 
-def block_claims(wt_tasks: str) -> set[str]:
-    """h1 titles in one worktree's tasks.md whose block took a status other than `open`.
+def block_claims(wt_tasks: str, base_tasks: str | None = None) -> set[str]:
+    """h1 titles of `open` blocks one worktree has taken.
 
     Phase A blocks carry no checkbox to claim: another run holds one by flipping the same h1 to
     `status: active` (or beyond) in its own tasks.md. A block with no status line is not held.
+    With `base_tasks` (tasks.md at the worktree's merge-base), only a block that was `open` there
+    counts, and it counts while flipped or deleted: a status inherited from base, or a new block
+    that only shares a title (a backlog group's `# <heading>`), took nothing; a block cleanup's
+    `prune-tasks` removed stays held until merge, as (b) in `worktree_claims` keeps a pruned line.
+    Without it (merge-base unknown), every non-open block counts, erring toward skipping.
     """
-    return {h["title"] for h, status in h1_blocks(tokenize(wt_tasks)) if status not in (None, "open")}
+    blocks = h1_blocks(tokenize(wt_tasks))
+    held = {h["title"] for h, status in blocks if status not in (None, "open")}
+    if base_tasks is None:
+        return held
+    was_open = {h["title"] for h, status in h1_blocks(tokenize(base_tasks)) if status == "open"}
+    present = {h["title"] for h, _ in blocks}
+    return (held & was_open) | (was_open - present)
 
 
 def _git(cwd: str, *args: str) -> str | None:
@@ -1001,10 +1012,10 @@ def _claimants(listing: str, top: str, include_self: bool) -> list[str]:
 
 
 def collect_block_claims(
-    backlog_path: str, tasks_path: str | None, include_self: bool = False
+    backlog_path: str, tasks_path: str | None, include_self: bool = False, ref: str = "HEAD"
 ) -> dict[str, set[str]]:
-    """{worktree path: h1 titles its tasks.md holds beyond `open`} — Phase A's counterpart of
-    `collect_claims`, same claimant set and the same repo-relative tasks.md path."""
+    """{worktree path: h1 titles of `open` blocks it took} — Phase A's counterpart of
+    `collect_claims`: same claimant set, repo-relative tasks.md path and merge-base against `ref`."""
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
     listing = _git(repo, "worktree", "list", "--porcelain")
@@ -1018,7 +1029,13 @@ def collect_block_claims(
     )
     claims: dict[str, set[str]] = {}
     for wt in _claimants(listing, top, include_self):
-        titles = block_claims(_read_optional(os.path.join(wt, tasks_rel)) or "")
+        base_tasks = None
+        wt_head = _git(wt, "rev-parse", "HEAD")
+        mb = _git(repo, "merge-base", ref, wt_head.strip()) if wt_head else None
+        if mb:
+            # absent at the merge-base → no open block there → "" (nothing to take)
+            base_tasks = _git(repo, "show", f"{mb.strip()}:{tasks_rel.replace(os.sep, '/')}") or ""
+        titles = block_claims(_read_optional(os.path.join(wt, tasks_rel)) or "", base_tasks)
         if titles:
             claims[wt] = titles
     return claims
@@ -1309,7 +1326,9 @@ def main(argv: list[str]) -> int:
     # tasks.md, so a block still `open` here is a duplicate cycle waiting to happen.
     if tasks_path and backlog_path:
         block_counts = mark_claimed_blocks(
-            tasks_tokens, collect_block_claims(backlog_path, tasks_path, include_self=ref is not None)
+            tasks_tokens, collect_block_claims(
+                backlog_path, tasks_path, include_self=ref is not None, ref=ref or "HEAD"
+            )
         )
         top = _git(os.path.dirname(os.path.abspath(backlog_path)), "rev-parse", "--show-toplevel")
         label = f"{ref}:{tasks_path}" if ref else tasks_path
@@ -1559,19 +1578,21 @@ def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
     backlog = os.path.join(repo, "backlog.md")
     tasks = os.path.join(repo, "tasks.md")
     write(backlog, base)
-    git(repo, "add", "backlog.md")
+    sprints = "# Sprint X\nstatus: open\n\n# Sprint Y\nstatus: open\n"
+    write(tasks, sprints)
+    git(repo, "add", "backlog.md", "tasks.md")
     git(repo, "commit", "-q", "-m", "seed")
-    write(tasks, "# Sprint X\nstatus: open\n\n# Sprint Y\nstatus: open\n")
 
     wt_cov = os.path.join(repo, ".worktrees", "cov")
     git(repo, "worktree", "add", "-q", "-b", "c1", wt_cov)
-    write(os.path.join(wt_cov, "tasks.md"), "# G2\nstatus: active\n\n## Covers\n\n- [ ] twin\n")
+    # a backlog-group claim appends its own h1 block to the tracked tasks.md
+    write(os.path.join(wt_cov, "tasks.md"), sprints + "\n# G2\nstatus: active\n\n## Covers\n\n- [ ] twin\n")
     wt_del = os.path.join(repo, ".worktrees", "del")
     git(repo, "worktree", "add", "-q", "-b", "c2", wt_del)
     write(os.path.join(wt_del, "backlog.md"), base.replace("## G1\n\n- [ ] twin\n", "## G1\n\n", 1))
     wt_blk = os.path.join(repo, ".worktrees", "blk")
     git(repo, "worktree", "add", "-q", "-b", "c3", wt_blk)
-    write(os.path.join(wt_blk, "tasks.md"), "# Sprint X\nbody\nstatus: active\n")
+    write(os.path.join(wt_blk, "tasks.md"), "# Sprint X\nbody\nstatus: active\n\n# Sprint Y\nstatus: open\n")
 
     claims = collect_claims(backlog, None)
     by_name = {os.path.basename(k): v for k, v in claims.items()}
@@ -1589,8 +1610,18 @@ def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
 
     block = collect_block_claims(backlog, tasks)
     _assert(
-        {os.path.basename(k): v for k, v in block.items()} == {"cov": {"G2"}, "blk": {"Sprint X"}},
-        "a non-open h1 block in another worktree's tasks.md is a block claim",
+        {os.path.basename(k): v for k, v in block.items()} == {"blk": {"Sprint X"}},
+        "a block open at the merge-base and flipped in another worktree is a block claim; "
+        "a new active block (a backlog group's `# G2`) takes no sprint block",
+    )
+    base_t = "# A\nstatus: open\n\n# B\nstatus: deferred\n\n# C\nstatus: open\n"
+    _assert(
+        block_claims("# A\nstatus: active\n\n# B\nstatus: deferred\n", base_t) == {"A", "C"},
+        "flipped (A) and pruned (C) open blocks are held; B's inherited `deferred` is not",
+    )
+    _assert(
+        block_claims("# B\nstatus: deferred\n") == {"B"},
+        "with the merge-base unknown every non-open block counts, erring toward skipping",
     )
     toks = tokenize(open(tasks, encoding="utf-8").read())
     counts = mark_claimed_blocks(toks, block)

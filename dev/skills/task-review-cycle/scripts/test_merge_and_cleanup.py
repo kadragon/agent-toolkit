@@ -382,6 +382,7 @@ def case_dirty_main_checkout_not_fast_forwarded(tmp):
              f"rc {proc.returncode}, stderr {proc.stderr!r}, out {out!r}")
     repo, d = _repo_behind_origin(tmp)
     head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "scratch.txt").write_text("untracked\n")  # untracked only: still clean for the guard
     proc = _merge_stderr(repo, d)
     if proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() == head:
         fail("dirty_main_checkout_not_fast_forwarded", f"clean checkout did not move: {proc.stderr!r}")
