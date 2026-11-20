@@ -302,29 +302,31 @@ def test_unpushed_merge_is_pushed_on_rerun(tmp):
 
 def test_multi_plugin_suffix_rewritten(tmp):
     """`(dev vX, mods vY)` re-versions the dev term and leaves the plugin this branch did not bump."""
-    both = "- [done] B thing (mods v0.1.0, dev v1.0.1) (2026-02-02)\n"
+    both = "- [done] B thing after (dev v1.0.1) (mods v0.1.0, dev v1.0.1) (2026-02-02)\n"
     repo = behind(tmp, {**release("1.0.1", entries=entry("A thing", "1.0.1")), "x.txt": "a\n"},
                   {**release("1.0.1", entries=both), "y.txt": "b\n"})
     rc, result = resync(repo)
     check(rc == 0 and result["status"] == "resynced", f"resync failed: {result}")
     log = (repo / "CHANGELOG.md").read_text()
-    check("B thing (mods v0.1.0, dev v1.0.2)" in log, f"multi-plugin suffix not re-versioned: {log}")
+    check("B thing after (dev v1.0.1) (mods v0.1.0, dev v1.0.2)" in log,
+          f"suffix not re-versioned, or the title's version was: {log}")
 
 
 def test_line_endings_kept(tmp):
-    """Tracked CRLF stays CRLF and LF stays LF, whatever the platform's text-mode newline."""
-    for eol in ("\r\n", "\n"):
-        sub = tmp / ("crlf" if eol == "\r\n" else "lf")
+    """Tracked CRLF stays CRLF and LF stays LF, whatever the platform's text-mode newline; an LF
+    blob under core.autocrlf=true gets a CRLF CHANGELOG, as checkout would write it."""
+    for name, eol, autocrlf in (("crlf", "\r\n", "false"), ("lf", "\n", "false"), ("auto", "\n", "true")):
+        sub = tmp / name
         sub.mkdir()
-        resync_with_eol(sub, eol)
+        resync_with_eol(sub, eol, autocrlf)
 
 
-def resync_with_eol(tmp, eol):
+def resync_with_eol(tmp, eol, autocrlf):
     origin = tmp / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     repo = tmp / "repo"
     subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True, capture_output=True)
-    for key, value in (("user.email", "t@example.com"), ("user.name", "t"), ("core.autocrlf", "false"),
+    for key, value in (("user.email", "t@example.com"), ("user.name", "t"), ("core.autocrlf", autocrlf),
                        ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null")):
         git(repo, "config", key, value)
 
@@ -352,6 +354,10 @@ def resync_with_eol(tmp, eol):
     git(repo, "checkout", "-q", "feat/b")
     rc, result = resync(repo)
     check(rc == 0 and result["status"] == "resynced", f"resync failed: {result}")
+    if autocrlf == "true":
+        data = (repo / "CHANGELOG.md").read_bytes()
+        check(data.count(b"\r\n") == data.count(b"\n"), f"CHANGELOG not written as checkout would: {data!r}")
+        return
     for name in ("dev/.claude-plugin/plugin.json", "dev/skills/s/SKILL.md", "CHANGELOG.md"):
         data = (repo / name).read_bytes()
         crlf_count = data.count(b"\r\n")

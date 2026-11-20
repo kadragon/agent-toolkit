@@ -32,6 +32,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] `--ref` maps the queue path through `realpath`, so a symlinked backlog.md/tasks.md is looked up at the ref as its link target (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_read_at_ref
 - [ ] [constraint] No test pins utf-8 decoding of `git show` queue output; Linux CI's utf-8 locale cannot catch a cp949 regression (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_git
 
+### PR #415 — pre_merge_resync EOLs/suffixes/CWD; comment rules (2026-11-20)
+
+- [ ] [debt] Script-dir resolution `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` prints two paths under an exported `CDPATH` when run by a relative path; clear `CDPATH` for that `cd` in every task-review-cycle script (source: codex) — dev/skills/task-review-cycle/scripts/claude-review.sh:44
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

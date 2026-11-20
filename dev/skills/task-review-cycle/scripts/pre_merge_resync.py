@@ -41,8 +41,9 @@ CHANGELOG = "CHANGELOG.md"
 MANIFEST = re.compile(r"(?:^|/)\.(?:claude|codex)-plugin/plugin\.json$")
 JSON_VERSION = re.compile(r'^(\s*"version"\s*:\s*")([^"]+)(".*)$')
 SKILL_VERSION = re.compile(r"^(version:[ \t]*)(\S+)(.*)$")
-# One `<plugin> v<X.Y.Z>` term of an entry's suffix: `(dev v1.2.3)` or `(dev v1.2.3, mods v0.1.0)`.
-SUFFIX_TERM = re.compile(r"([(]|, )([\w.-]+) v(\d+\.\d+\.\d+)(?=[,)])")
+# An entry's version suffix, the group right before its date: `(dev v1.2.3, mods v0.1.0) (2026-01-01)`.
+SUFFIX = re.compile(r"\(([^()]*)\)(?= \(\d{4}-\d{2}-\d{2}\))")
+SUFFIX_TERM = re.compile(r"(^|, )([\w.-]+) v(\d+\.\d+\.\d+)(?=,|$)")
 ENV = {**os.environ, "GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"}
 
 
@@ -72,11 +73,12 @@ def write(path, text):
     Path(path).write_bytes(text.encode("utf-8"))
 
 
-def show_raw(rev, path):
-    """A blob's text with its stored line endings; text-mode git output folds CRLF."""
-    proc = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, env=ENV)
+def show_checkout(rev, path):
+    """A blob as checkout would write it (core.autocrlf, .gitattributes eol), byte for byte."""
+    proc = subprocess.run(["git", "cat-file", "--filters", f"{rev}:{path}"], capture_output=True, env=ENV)
     if proc.returncode:
-        raise Stop("error", f"git show {rev}:{path} failed: {proc.stderr.decode(errors='replace').strip()}")
+        raise Stop("error", f"git cat-file --filters {rev}:{path} failed: "
+                            f"{proc.stderr.decode(errors='replace').strip()}")
     return proc.stdout.decode("utf-8")
 
 
@@ -253,11 +255,11 @@ def push(branch, remote, base, **result):
 
 
 def rewrite_suffix(entry, rewrites):
-    """Re-version every `<plugin> v<old>` term of the entry's suffix in one pass."""
+    """Re-version every `<plugin> v<old>` term of the version suffix; the title is left alone."""
     def swap(match):
         new = rewrites.get((match.group(2), match.group(3)))
         return f"{match.group(1)}{match.group(2)} v{new}" if new else match.group(0)
-    return SUFFIX_TERM.sub(swap, entry)
+    return SUFFIX.sub(lambda group: f"({SUFFIX_TERM.sub(swap, group.group(1))})", entry, count=1)
 
 
 def load_insert():
@@ -318,7 +320,7 @@ def resync(base, remote):
                 rewrites.update({(name, info["branch"]): new for name in plugin_names(path, "HEAD")})
 
         if entries:
-            text = show_raw(target, CHANGELOG)
+            text = show_checkout(target, CHANGELOG)
             updated = [rewrite_suffix(entry, rewrites) for entry in entries]
             for entry in reversed(updated):
                 text, _ = insert(text, entry)

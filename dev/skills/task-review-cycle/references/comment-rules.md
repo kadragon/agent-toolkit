@@ -30,7 +30,8 @@ Only these comments stay. When unsure whether one applies, the comment goes.
 - Doc comments that define a public API contract: a function docstring of an exported API, a
   script's usage header naming its arguments and output.
 - Issue or RFC links that explain a constraint code cannot express.
-- Lint suppressions whose rule is faulty, pedantic, or style-only for this line.
+- Lint or type suppressions whose rule is faulty, pedantic, or style-only for this line, or
+  whose cause is an external stub or dependency this repo cannot fix.
 
 ## Verdicts
 
