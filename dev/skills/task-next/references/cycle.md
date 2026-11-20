@@ -44,10 +44,23 @@ ROOT=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 EXCLUDE=$(git rev-parse --git-path info/exclude)
 mkdir -p -- "$(dirname -- "$EXCLUDE")"
 grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$EXCLUDE"   # leading newline: the file may lack a final one
-# if $BRANCH already exists locally (a partial run), delete it first: git branch -D "$BRANCH" (confirm with user)
+# no pre-delete: `-b` fails when $BRANCH exists, and that failure is the claim lock (below)
 git worktree add "$ROOT/.worktrees/$SLUG" -b "$BRANCH" "$BASE"
 echo "worktree: $ROOT/.worktrees/$SLUG"
 ```
+
+**Claim.** The branch name is derived from the selected heading, so `git worktree add -b` failing
+on an existing `$BRANCH` means a run already holds that item. Do not delete the branch. A leftover
+of this session's own (the user names it, or this session created it) → resume per `edge-cases.md`.
+Anything else → re-run Step 1, whose claims now include it, and reselect; nothing left → report.
+Only an explicit user instruction removes a stale branch.
+
+Queue items only: right after a successful `worktree add`, before the plan gate, write the worktree's
+`tasks.md` (`# <heading verbatim>`, `status: active`, `## Covers` with each selected line verbatim —
+one item included; `SKILL.md` Step 3 *Mark active* then adds only the contract). Then, from the
+worktree, re-run the Step 1 candidate script without `--ref`; it lists lines another worktree also
+claims. Yield those lines — drop them from the covers and scope; none left → declined-plan teardown
+(`tree.md` → *Claim*) and reselect. Both sessions may yield; that errs toward skipping.
 
 From here on every step of this cycle and the review cycle up to the merge — `tasks.md`,
 contract `save`, edits, checks, version bump, `CHANGELOG.md`, cleanup, commits, PR — runs in the

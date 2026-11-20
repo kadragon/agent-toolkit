@@ -21,7 +21,9 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Prerequisites
 
-**Required:** `backlog.md`. Missing → stop and point to `dev:harness-init`. Read
+**Required:** `backlog.md`. Missing → stop and point to `dev:harness-init`. Under `--tree`, check
+the base commit's copy (`git cat-file -e "$BASE_SHA:backlog.md"`, after Step 1's pin), not this
+checkout. Read
 `docs/conventions.md` when present; when absent the linter is the authority.
 
 **Working tree gate.** Capture the state before judging dirty files:
@@ -126,7 +128,9 @@ repo before labelling; an unverified guess is labelled `unknown`.
 
 A marker whose blocker has verifiably landed is not a blocker. Delete it per
 `references/cycle.md` → *Blocked-marker sync*, re-run Step 1, and report the stop only if the
-queue is still all blocked; name the markers removed. Clearing any other blocker is new work:
+queue is still all blocked; name the markers removed. Under `--tree` Step 1 reads the base, so a
+local delete changes nothing: do not delete, list the marker as **agent can clear** (remove it on
+base) and stop. Clearing any other blocker is new work:
 offer it, do not start it unasked.
 
 ## Step 3 — Run the cycle
@@ -140,8 +144,8 @@ Follow `references/cycle.md` end to end with these overrides; Git authority is
   `status: active`, the contract, and `## Covers` listing each item line **verbatim** (the
   deletion list). Leave the items `- [ ]` in `backlog.md` until cleanup.
 - exactly 1 item → no `tasks.md`; archive the contract per `cycle.md` and carry the item's verbatim line to
-  `prune-backlog` yourself. `--tree` writes `tasks.md` even for one item, in its worktree before the
-  plan gate (`references/tree.md` → *Claim*).
+  `prune-backlog` yourself. Worktree runs (`--tree`, exit 3) write `tasks.md` even for one item, in
+  the worktree before the plan gate (`references/cycle.md` → *Worktree cycle* → *Claim*).
 
 **Cleanup** runs `prune-tasks` only when a sprint block exists, and `prune-backlog` over the
 `## Covers` lines (or the single carried line). Post-merge, `backlog.md` and `tasks.md` carry no
