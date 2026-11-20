@@ -132,8 +132,10 @@ Self-check (--test):
   added to base after branching left unclaimed, a non-`.worktrees/` worktree ignored, the stderr
   skip line, and the all-claimed diagnosis), the per-group twin attribution, the Phase A block
   claim, `--ref` on a symlinked queue file, and the utf-8 pin on `git show` output (decoding
-  forced to ascii for any call that does not request utf-8). Every fixture is an in-memory string except the
-  claimed-items case, which builds a throwaway git repo in a tempdir. Exits 0 on PASS, 1 on FAIL.
+  forced to ascii for any call that does not request utf-8), and a block titled for one heading
+  that covers lines from several (all claimed). Every fixture is an in-memory string except the
+  claimed-items, `--ref`, symlink and utf-8 cases, which build throwaway git repos in a tempdir.
+  Exits 0 on PASS, 1 on FAIL.
 """
 
 from __future__ import annotations
@@ -927,8 +929,10 @@ def worktree_claims(wt_tasks: str, wt_backlog: str | None, base_backlog: str | N
     Identical item text in two groups is told apart per group: a (b) text that occurs more than
     once at the merge-base is keyed with its heading, so deleting one twin claims only that one
     and the surviving twin does not mask the deletion. A text occurring once keeps its bare key.
-    `mark_claimed` resolves a qualified key against the group it names; a group that does not
-    exist in the backlog (e.g. a Phase A h1 title) matches the text in any group.
+    `mark_claimed` honours a qualified key's group only for a text that is a twin in the
+    backlog being scanned and has a copy under that group; any other qualified key (a text
+    occurring once, or a group holding no copy — e.g. an h1 titled for one heading that covers
+    lines from several) matches the text in any group.
 
     A line the worktree reworded (e.g. a blocked-marker sync) also reads as deleted, so its
     original text counts as claimed until that worktree merges. That errs toward skipping, the
@@ -1093,7 +1097,16 @@ def mark_claimed(
     backlog.md in Steps 2-3, so it needs to know which of them to leave out.
     """
     raw = backlog_raw.splitlines()
-    titles = {t["title"] for t in _headings(backlog_tokens)}
+    # every checkbox's group, so a key's group only matters for a text that is really a twin
+    groups_of: dict[str, list[str | None]] = {}
+    g = None
+    for t in backlog_tokens:
+        if t["type"] == "heading" and t["level"] in (1, 2, 3):
+            g = t["title"]
+        elif t["type"] == "checkbox":
+            m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
+            if m:
+                groups_of.setdefault(m.group(2).strip(), []).append(g)
     counts: dict[str, list[int]] = {}
     group = None
     for t in backlog_tokens:
@@ -1105,10 +1118,18 @@ def mark_claimed(
         m = _CHECKBOX_RE.match(raw[t["line"] - 1].lstrip())
         text = m.group(2).strip() if m else None
         for wt, keys in claims.items():
-            # a key naming a group absent from this backlog (a Phase A h1 title) is unplaceable:
-            # match the text anywhere, the err-toward-skipping side
+            # A key's group narrows the match only for a twin (text under 2+ headings) AND only when
+            # some copy sits under that group; otherwise the group is unplaceable (a Phase A h1
+            # title, or a block titled for one heading that covers lines from several) and the
+            # text matches anywhere — the err-toward-skipping side.
             if any(
-                kt == text and (kg is None or kg == group or kg not in titles)
+                kt == text
+                and (
+                    kg is None
+                    or len(groups_of.get(kt, ())) < 2
+                    or kg == group
+                    or kg not in groups_of.get(kt, ())
+                )
                 for kg, kt in map(_split_key, keys)
             ):
                 t["claimed_by"] = wt
@@ -1519,6 +1540,17 @@ def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
     def write(path: str, text: str) -> None:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
+
+    # a block titled for ONE heading that covers lines from several must claim them all, and a
+    # covered twin whose copies are not under that title is claimed in both places
+    multi = "## Alpha\n\n- [ ] a1\n\n## Beta\n\n- [ ] b1\n- [ ] dup\n\n## Gamma\n\n- [ ] g1\n- [ ] dup\n"
+    cov_tasks = "# Alpha\nstatus: active\n\n## Covers\n\n- [ ] a1\n- [ ] b1\n- [ ] g1\n- [ ] dup\n"
+    mtoks = tokenize(multi)
+    mcounts = mark_claimed(multi, mtoks, {"/x/.worktrees/w": worktree_claims(cov_tasks, None, None)})
+    _assert(
+        sorted(n for ls in mcounts.values() for n in ls) == [3, 7, 8, 12, 13],
+        "a `# Alpha` block covering Alpha, Beta and Gamma lines claims them all, twin in both places",
+    )
 
     repo = os.path.join(tmp, "repo2")
     os.makedirs(repo)
