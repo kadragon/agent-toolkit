@@ -50,7 +50,8 @@ the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`
 listing each selected item line verbatim. A `tasks.md` h1 block (`status: open`) → it is already
 in the worktree's copy: flip that block to `status: active` there and write no second block. `backlog_candidates.py` treats a `## Covers` line in another
 `.worktrees/` checkout as claimed, so a second session cannot pick the same item while this one
-waits at the plan gate. A declined plan → revert only this claim (delete the `tasks.md` it
+waits at the plan gate; `cycle.md` → *Worktree cycle* → *Claim* covers a branch collision and the
+re-check after writing it. A declined plan → revert only this claim (delete the `tasks.md` it
 created, or restore the flipped block with `git restore tasks.md`), confirm `git status
 --porcelain` in the worktree is empty, then `git worktree remove` it and `git branch -d` the
 branch — no forced removal.

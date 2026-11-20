@@ -45,14 +45,23 @@ The main session owns worktree lifecycle; do not use agent-lifetime worktree iso
 Ignore `.worktrees/` via `info/exclude` (`cycle.md` → *Worktree cycle*), fetch the base once, and create the integration branch and every
 unit worktree from that same fetched base. Preserve any authorized backlog-only edits on the
 integration checkout. Create a worktree with `git worktree add .worktrees/<slug> -b wt/<slug>
-<captured-base-commit>`; use actual values discovered this run.
+<captured-base-commit>`; use actual values discovered this run. Right after creation, write an
+uncommitted `tasks.md` in each unit worktree — `# <unit heading verbatim>`, `status: active`,
+`## Covers` listing the unit's lines verbatim — its claim, so the clean-base gate and Step 1 skip
+them. Never stage or commit it (`tasks.md` is integration-owned). When base already tracks a
+`tasks.md`, append that whole block (never a bare `## Covers`, which would fall under base's last
+h1), still uncommitted. Then re-check as `cycle.md` → *Worktree cycle* → *Claim* does: from each
+unit worktree, re-run the Step 1 candidate script without `--ref` and drop any line another
+worktree also claims from that unit before its implementer is spawned.
 
 Archive the aggregate contract from the integration branch before spawning. Each implementer
 gets its approved unit contract, absolute worktree path, owned files, and relevant test commands.
 Follow `docs/delegation.md` when present; otherwise include objective, output format, tools, and
 boundaries in each brief, plus the brief rules in `cycle.md` → *Implement* (worktree briefs
-included). Agents may edit only their owned files, never convergence files. The integration
-session records a stuck report as a `note` on the unit's branch so a fresh run sees it.
+included). Agents may edit only their owned files, never convergence files, and commit by
+explicit path — never `git add -A`/`commit -a`, which would stage the uncommitted claim
+`tasks.md`. The integration session records a stuck report as a `note` on the unit's branch so a
+fresh run sees it.
 
 Each implementer archives its unit contract in the worktree, implements and runs focused checks,
 then checks `cycle_state.py authorize --action commit` from its own worktree before
@@ -94,7 +103,9 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
 
 After confirmed successful merge, remove only clean worktrees whose units landed. Use the
 integrated-unit list carried into the hand-off (a later session: the merged PR body); squash
-ancestry cannot prove unit identity. Run
+ancestry cannot prove unit identity. A landed unit's uncommitted `tasks.md` claim is the one file
+allowed dirty: delete it (`git restore tasks.md` when base tracks one) before removal. A preserved
+unit keeps it, so its claim persists. Run
 `cycle_state.py retire --branch wt/<slug>` for each landed unit, so a reused unit branch name
 cannot resurrect its contract. Delete a unit branch only after its saved tip is confirmed
 included in the integrated result; any required force operation follows the user's authorization

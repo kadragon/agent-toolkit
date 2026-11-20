@@ -13,28 +13,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #408 — task-next candidates skip items claimed by other .worktrees/ runs (2026-11-19)
+### PR #416 — worktree runs claim items on creation and per group; --tree reads base (2026-11-20)
 
-- [ ] [harness] Phase A `status: open` tasks.md sprint blocks are not claim-checked; a block another worktree marked active stays a candidate (source: code-review) — dev/skills/task-next/scripts/backlog_candidates.py:phase_a_candidates
-- [ ] [harness] Two sessions selecting before either writes `## Covers` can both take the same item; claims need an atomic commit-or-reselect step (source: codex) — docs/design/concurrent-tree-cycles.md → Claimed items
-- [ ] [debt] Claim keys are the item's first-line text, so identical item text in two groups is indistinguishable (one claim hides both; a deletion is masked by the surviving twin) (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:item_keys
-
-### PR #412 — task-next proceeds past other .worktrees/ on a clean base (2026-11-19)
-
-- [ ] [harness] A preserved `--all` unit (`.worktrees/<slug>` on `wt/<slug>`) writes no `## Covers` and prunes no backlog line, so the clean-base gate skips past it while Step 1 still offers its item (source: code-review) (introduced here) — dev/skills/task-next/references/batch.md → unit worktrees
-- [ ] [harness] A default run routed through exit 3's *Worktree cycle* claims nothing until cleanup (one item writes no `tasks.md`; a group writes `## Covers` after the plan gate), so a clean-base session can pick the same item (source: code-review) — dev/skills/task-next/references/cycle.md → Worktree cycle
-
-### PR #413 — task-next --tree selects from origin/HEAD whatever the main checkout holds (2026-11-19)
-
-- [ ] [harness] Under `--tree`, *Prerequisites* stops on a `backlog.md` missing from this checkout before looking at the base commit, which may still hold one (source: codex) (introduced here) — dev/skills/task-next/SKILL.md → Prerequisites
-- [ ] [harness] Under `--tree`, an all-blocked Step 2 deletes a landed blocked marker in this checkout and re-runs Step 1, which reads the base commit, so the item stays blocked (source: codex) (introduced here) — dev/skills/task-next/SKILL.md → Step 2
-- [ ] [harness] merge-and-cleanup.sh fast-forwards a main checkout on base after a worktree merge without a clean check, so a dirty checkout `--tree` announced as left as is can still move (source: codex) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:116
-- [ ] [debt] `--ref` maps the queue path through `realpath`, so a symlinked backlog.md/tasks.md is looked up at the ref as its link target (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_read_at_ref
-- [ ] [constraint] No test pins utf-8 decoding of `git show` queue output; Linux CI's utf-8 locale cannot catch a cp949 regression (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_git
-
-### PR #415 — pre_merge_resync EOLs/suffixes/CWD; comment rules (2026-11-20)
-
-- [ ] [debt] Script-dir resolution `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` prints two paths under an exported `CDPATH` when run by a relative path; clear `CDPATH` for that `cd` in every task-review-cycle script (source: codex) — dev/skills/task-review-cycle/scripts/claude-review.sh:44
+- [ ] [debt] When every open `tasks.md` sprint block is claimed by another worktree, the zero-candidate diagnosis still says `no h1 block with status: open`, contradicting the skip line; `_diagnose_source` reads only checkbox `claimed_by` (source: codex, agy) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_diagnose_source
+- [ ] [harness] A worktree run that writes (rather than appends) its `tasks.md` over a base-tracked one drops base's open sprint blocks, which the merge-base rule then reads as claimed and the merge would delete — cycle.md/tree.md should say append when base tracks `tasks.md`, as batch.md now does (source: lead, found while fixing block claims) — dev/skills/task-next/references/cycle.md → Worktree cycle → Claim
 
 ## Rejected — do not re-file
 

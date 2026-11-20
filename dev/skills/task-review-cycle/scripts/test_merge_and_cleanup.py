@@ -341,6 +341,72 @@ def case_hub_writes_check_authority(tmp):
     print("ok hub create/merge deny before remote CLI")
 
 
+def _repo_behind_origin(tmp):
+    # Main checkout on base with origin/main one commit ahead, so a fast-forward is observable.
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "main")
+    bare = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "origin", "main")
+    other = Path(tempfile.mkdtemp(dir=tmp)) / "other"
+    subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True, capture_output=True)
+    git(other, "config", "user.email", "test@example.com")
+    git(other, "config", "user.name", "test")
+    git(other, "config", "commit.gpgsign", "false")
+    (other / "b.md").write_text("b\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-qm", "[TEST] ahead")
+    git(other, "push", "-q", "origin", "main")
+    return repo, d
+
+
+def _merge_stderr(repo, d, env=None, script=None):
+    proc = subprocess.run(["bash", script or str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+                           '{"squash":true}'], cwd=repo, check=False, capture_output=True,
+                          text=True, env=env)
+    return proc
+
+
+def case_dirty_main_checkout_not_fast_forwarded(tmp):
+    # A dirty main checkout (left as is by task-next --tree) must not move; a clean one still does.
+    repo, d = _repo_behind_origin(tmp)
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "a.md").write_text("dirty\n")
+    proc = _merge_stderr(repo, d)
+    out = json.loads(proc.stdout)
+    if (proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() != head
+            or "uncommitted" not in proc.stderr or out["merge_ok"] is not True
+            or branch_exists(repo)):
+        fail("dirty_main_checkout_not_fast_forwarded",
+             f"rc {proc.returncode}, stderr {proc.stderr!r}, out {out!r}")
+    repo, d = _repo_behind_origin(tmp)
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "scratch.txt").write_text("untracked\n")  # untracked only: still clean for the guard
+    proc = _merge_stderr(repo, d)
+    if proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() == head:
+        fail("dirty_main_checkout_not_fast_forwarded", f"clean checkout did not move: {proc.stderr!r}")
+    print("ok dirty_main_checkout_not_fast_forwarded")
+
+
+def case_script_dir_ignores_cdpath(tmp):
+    # Relative invocation with CDPATH naming a dir that holds the same relative path: an unguarded
+    # `cd` prints the resolved path twice, so SCRIPT_DIR holds two lines and `source` fails.
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "main")
+    rel = ".git/sd/skills"
+    shutil.copytree(d.parents[1], repo / rel)
+    decoy = Path(tempfile.mkdtemp(dir=tmp))
+    (decoy / rel / "task-review-cycle/scripts").mkdir(parents=True)
+    script = f"{rel}/task-review-cycle/scripts/merge-and-cleanup.sh"
+    proc = _merge_stderr(repo, d, env={**os.environ, "CDPATH": str(decoy)}, script=script)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        fail("script_dir_ignores_cdpath", f"rc {proc.returncode}, stderr {proc.stderr!r}")
+    if json.loads(proc.stdout)["merge_ok"] is not True:
+        fail("script_dir_ignores_cdpath", f"got {proc.stdout!r}")
+    print("ok script_dir_ignores_cdpath")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="merge-cleanup-")
     try:
@@ -360,6 +426,8 @@ def main():
         case_inside_worktree_keeps_main_branch(tmp)
         case_linked_worktree_without_path_stays(tmp)
         case_hub_merge_state_unconfirmed(tmp)
+        case_dirty_main_checkout_not_fast_forwarded(tmp)
+        case_script_dir_ignores_cdpath(tmp)
     finally:
         shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")

@@ -41,7 +41,7 @@ command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; e
 # The comments axis rules live in one file the orchestrator's inline pass also reads. It is read
 # here, above the heredoc, with read -d rather than a command substitution, for the bash 3.2
 # quoting trap described at the contract append below.
-RULES_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../references/comment-rules.md"
+RULES_FILE="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../references/comment-rules.md"
 [ -f "$RULES_FILE" ] || { echo "ERROR: comment rules not found: $RULES_FILE" >&2; exit 1; }
 IFS= read -r -d '' COMMENT_RULES <"$RULES_FILE" || true
 

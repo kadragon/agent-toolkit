@@ -70,7 +70,7 @@ else
 fi
 
 # --- Merge PR (hub.sh routes to gh or the Forgejo/Gitea REST API) ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/git-authority.sh"
 require_git_authority --branch "$FEATURE_BRANCH" --action base-merge
 MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" "$FEATURE_BRANCH" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
@@ -102,7 +102,7 @@ if [ "$MERGE_OK" = "true" ]; then
   # out in the main worktree. Only then move there — and never switch the branch it holds, which
   # may be another agent's: on a different branch, base is left un-updated and cleanup continues.
   if [ -n "$WORKTREE_PATH" ]; then
-    WORKTREE_PATH=$(cd "$WORKTREE_PATH" 2>/dev/null && pwd -P || printf '%s' "$WORKTREE_PATH")
+    WORKTREE_PATH=$(CDPATH= cd -- "$WORKTREE_PATH" 2>/dev/null && pwd -P || printf '%s' "$WORKTREE_PATH")
     if [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$WORKTREE_PATH" ]; then
       IN_TARGET=true
       MAIN_WORKTREE=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
@@ -122,8 +122,16 @@ if [ "$MERGE_OK" = "true" ]; then
       CAN_CLEAN=false
       CLEANUP_MSG="WARNING: Could not check out '${BASE_BRANCH}'; local cleanup skipped: ${CHECKOUT_ERR}"
     else
-      git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
-      git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+      # A dirty checkout (e.g. one task-next --tree left as is) must not move under its owner;
+      # untracked files do not count (a fast-forward that would overwrite one just fails, harmlessly).
+      BASE_STATUS=$(git status --porcelain --untracked-files=no 2>/dev/null || true)
+      if [ -n "$BASE_STATUS" ]; then
+        BASE_NOTE=" (base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes)"
+        echo "NOTE: base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes" >&2
+      else
+        git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
+        git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+      fi
     fi
   fi
   if [ "$CAN_CLEAN" = "true" ]; then

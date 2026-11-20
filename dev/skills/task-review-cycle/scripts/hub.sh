@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/git-authority.sh"
 
 SUBCOMMAND="${1:?Usage: hub.sh <detect|repo-info|pr-create|pr-get|ci-status|ci-logs|merge> [args]}"
