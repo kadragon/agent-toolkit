@@ -41,6 +41,8 @@ CHANGELOG = "CHANGELOG.md"
 MANIFEST = re.compile(r"(?:^|/)\.(?:claude|codex)-plugin/plugin\.json$")
 JSON_VERSION = re.compile(r'^(\s*"version"\s*:\s*")([^"]+)(".*)$')
 SKILL_VERSION = re.compile(r"^(version:[ \t]*)(\S+)(.*)$")
+# One `<plugin> v<X.Y.Z>` term of an entry's suffix: `(dev v1.2.3)` or `(dev v1.2.3, mods v0.1.0)`.
+SUFFIX_TERM = re.compile(r"([(]|, )([\w.-]+) v(\d+\.\d+\.\d+)(?=[,)])")
 ENV = {**os.environ, "GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"}
 
 
@@ -59,6 +61,23 @@ def git(*args, check=True):
 
 def out(*args):
     return git(*args).stdout.rstrip("\n")
+
+
+def read(path):
+    """File text with its line endings intact; read_text folds CRLF to LF."""
+    return Path(path).read_bytes().decode("utf-8")
+
+
+def write(path, text):
+    Path(path).write_bytes(text.encode("utf-8"))
+
+
+def show_raw(rev, path):
+    """A blob's text with its stored line endings; text-mode git output folds CRLF."""
+    proc = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, env=ENV)
+    if proc.returncode:
+        raise Stop("error", f"git show {rev}:{path} failed: {proc.stderr.decode(errors='replace').strip()}")
+    return proc.stdout.decode("utf-8")
 
 
 def is_version_file(path):
@@ -150,8 +169,7 @@ def branch_entries(merge_base):
 
 def resolve_version_hunks(path):
     """Take base's side of every conflict hunk in path; False when a hunk is not version-only."""
-    text = Path(path).read_text(encoding="utf-8")
-    lines = text.splitlines(keepends=True)
+    lines = read(path).splitlines(keepends=True)
     pattern = version_pattern(path)
     result, i, at = [], 0, []
     while i < len(lines):
@@ -185,20 +203,19 @@ def resolve_version_hunks(path):
     # Only the file's own version field — not a `version:` in a SKILL.md body or a nested key.
     if version_line_index(path, [x.rstrip("\r\n") for x in result]) != at[0]:
         return False
-    Path(path).write_text("".join(result), encoding="utf-8")
+    write(path, "".join(result))
     return True
 
 
 def set_version(path, version):
-    raw = Path(path).read_text(encoding="utf-8")
-    lines = raw.splitlines(keepends=True)
+    lines = read(path).splitlines(keepends=True)
     i = version_line_index(path, [x.rstrip("\r\n") for x in lines])
     if i is None:
         raise Stop("error", f"{path}: version line not found after merge")
     eol = lines[i][len(lines[i].rstrip("\r\n")):]
     match = version_pattern(path).match(lines[i].rstrip("\r\n"))
     lines[i] = f"{match.group(1)}{version}{match.group(3)}{eol}"
-    Path(path).write_text("".join(lines), encoding="utf-8")
+    write(path, "".join(lines))
 
 
 def plugin_names(path, rev):
@@ -235,6 +252,14 @@ def push(branch, remote, base, **result):
     return {"status": "resynced", "pushed": True, **result}
 
 
+def rewrite_suffix(entry, rewrites):
+    """Re-version every `<plugin> v<old>` term of the entry's suffix in one pass."""
+    def swap(match):
+        new = rewrites.get((match.group(2), match.group(3)))
+        return f"{match.group(1)}{match.group(2)} v{new}" if new else match.group(0)
+    return SUFFIX_TERM.sub(swap, entry)
+
+
 def load_insert():
     spec = importlib.util.spec_from_file_location("_task_nodes", NODES)
     module = importlib.util.module_from_spec(spec)
@@ -247,6 +272,7 @@ def resync(base, remote):
     if not branch or branch == base:
         raise Stop("error", f"run from the feature branch, not '{branch or 'detached HEAD'}'")
     authorize(branch, "commit", "feature-push")
+    os.chdir(out("rev-parse", "--show-toplevel"))   # git prints every path below repo-relative
     if out("status", "--porcelain", "--untracked-files=no"):
         raise Stop("error", "tracked changes present; commit or stash before resync")
     git("fetch", "--quiet", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}",
@@ -281,7 +307,7 @@ def resync(base, remote):
                 raise Stop("conflict", "non-version conflict; merge aborted, nothing pushed", paths=stuck)
 
         versions = []
-        rewrites = []   # (plugin name, branch version, resynced version) for CHANGELOG entries
+        rewrites = {}   # (plugin name, branch version) -> resynced version, for CHANGELOG entries
         for path, info in bumps.items():
             base_version = version_at(target, path)
             new = bump(base_version, info["level"]) if base_version else info["branch"]
@@ -289,18 +315,14 @@ def resync(base, remote):
             git("add", "--", path)
             versions.append({"file": path, "level": info["level"], "base": base_version, "to": new})
             if MANIFEST.search(path):
-                rewrites += [(name, info["branch"], new) for name in plugin_names(path, "HEAD")]
+                rewrites.update({(name, info["branch"]): new for name in plugin_names(path, "HEAD")})
 
         if entries:
-            text = out("show", f"{target}:{CHANGELOG}") + "\n"
-            updated = []
-            for entry in entries:
-                for name, old, new in rewrites:
-                    entry = entry.replace(f"({name} v{old})", f"({name} v{new})")
-                updated.append(entry)
+            text = show_raw(target, CHANGELOG)
+            updated = [rewrite_suffix(entry, rewrites) for entry in entries]
             for entry in reversed(updated):
                 text, _ = insert(text, entry)
-            Path(CHANGELOG).write_text(text, encoding="utf-8")
+            write(CHANGELOG, text)
             git("add", "--", CHANGELOG)
             entries = updated
 

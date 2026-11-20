@@ -19,12 +19,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] Two sessions selecting before either writes `## Covers` can both take the same item; claims need an atomic commit-or-reselect step (source: codex) — docs/design/concurrent-tree-cycles.md → Claimed items
 - [ ] [debt] Claim keys are the item's first-line text, so identical item text in two groups is indistinguishable (one claim hides both; a deletion is masked by the surviving twin) (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:item_keys
 
-### PR #411 — review cycle merges base into a PR behind it and re-bumps (2026-11-19)
-
-- [ ] [debt] pre_merge_resync rewrites only single-plugin CHANGELOG suffixes; `(dev vX, mods vY)` entries keep the old numbers (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
-- [ ] [debt] pre_merge_resync reads and writes via text mode, so a CRLF-tracked manifest or CHANGELOG is rewritten as LF (source: codex) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:set_version
-- [ ] [debt] pre_merge_resync opens repo-relative paths from the CWD; run from a subdirectory it fails before writing (source: agy) (introduced here) — dev/skills/task-review-cycle/scripts/pre_merge_resync.py:resync
-
 ### PR #412 — task-next proceeds past other .worktrees/ on a clean base (2026-11-19)
 
 - [ ] [harness] A preserved `--all` unit (`.worktrees/<slug>` on `wt/<slug>`) writes no `## Covers` and prunes no backlog line, so the clean-base gate skips past it while Step 1 still offers its item (source: code-review) (introduced here) — dev/skills/task-next/references/batch.md → unit worktrees
@@ -37,12 +31,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] merge-and-cleanup.sh fast-forwards a main checkout on base after a worktree merge without a clean check, so a dirty checkout `--tree` announced as left as is can still move (source: codex) — dev/skills/task-review-cycle/scripts/merge-and-cleanup.sh:116
 - [ ] [debt] `--ref` maps the queue path through `realpath`, so a symlinked backlog.md/tasks.md is looked up at the ref as its link target (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_read_at_ref
 - [ ] [constraint] No test pins utf-8 decoding of `git show` queue output; Linux CI's utf-8 locale cannot catch a cp949 regression (source: codex) (introduced here) — dev/skills/task-next/scripts/backlog_candidates.py:_git
-
-### PR #414 — review cycle gains a comments axis (2026-11-20)
-
-- [ ] [debt] The directive exemption (any tool-read comment) swallows correctness suppressions such as `# type: ignore` / `eslint-disable`, so the `suppression` verdict is unreachable; exempt only non-suppression directives (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Scope
-- [ ] [debt] A `constraint` comment is deleted under `--auto` or on decline while only a backlog line records it; keep it until the replacing check lands (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Applying
-- [ ] [debt] `delete` verdicts are listed as already applied in the Step 3 table though Step 4 performs them, and Step 5 stages only Step 4 files; mark them pending in the table (source: codex) (introduced here) — dev/skills/task-review-cycle/references/comment-rules.md → Applying
 
 ## Rejected — do not re-file
 

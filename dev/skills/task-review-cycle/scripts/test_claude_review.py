@@ -220,6 +220,29 @@ def case_missing_comment_rules_exits_nonzero(tmp):
     check("names the missing rules", "comment rules not found" in proc.stderr, proc.stderr)
 
 
+def case_bare_name_from_own_folder(tmp):
+    """`bash claude-review.sh` has no `/` in BASH_SOURCE, so `%/*` would strip nothing."""
+    print("\ncase: run by bare name from its own folder -> rules still found")
+    rules = (SCRIPT.parent.parent / "references" / "comment-rules.md").read_text()
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "claude"
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    capture = tmp / "bare.txt"
+    proc = subprocess.run(
+        ["bash", SCRIPT.name, "main", ""],
+        capture_output=True,
+        text=True,
+        cwd=SCRIPT.parent,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+             "CLAUDE_STUB_CAPTURE": str(capture), "CLAUDE_STUB_STDOUT": envelope("[]")},
+        timeout=60,
+    )
+    check("exit 0", proc.returncode == 0, proc.stderr)
+    check("rules reach the prompt", capture.exists() and rules in capture.read_text())
+
+
 def case_effort_reaches_prompt(tmp):
     print("\ncase: effort arg lands in the skill args, not the skill name")
     _, prompt = run(tmp, ["main", "high"], stdout=envelope("[]"))
@@ -314,6 +337,7 @@ def main():
             case_contract_is_not_executed,
             case_comment_rules_reach_prompt,
             case_missing_comment_rules_exits_nonzero,
+            case_bare_name_from_own_folder,
             case_effort_reaches_prompt,
             case_blocking_scope_and_failure_field,
             case_array_passthrough,

@@ -89,8 +89,8 @@ def squash_merge(repo, name):
     git(repo, "push", "-q", "origin", "main")
 
 
-def resync(repo):
-    proc = subprocess.run([sys.executable, str(SCRIPT), "--base", "main"], cwd=repo,
+def resync(repo, cwd=None):
+    proc = subprocess.run([sys.executable, str(SCRIPT), "--base", "main"], cwd=cwd or repo,
                           capture_output=True, text=True)
     return proc.returncode, json.loads(proc.stdout)
 
@@ -300,6 +300,74 @@ def test_unpushed_merge_is_pushed_on_rerun(tmp):
     check('"version": "1.0.2"' in (repo / "dev/.claude-plugin/plugin.json").read_text(), "re-bumped twice")
 
 
+def test_multi_plugin_suffix_rewritten(tmp):
+    """`(dev vX, mods vY)` re-versions the dev term and leaves the plugin this branch did not bump."""
+    both = "- [done] B thing (mods v0.1.0, dev v1.0.1) (2026-02-02)\n"
+    repo = behind(tmp, {**release("1.0.1", entries=entry("A thing", "1.0.1")), "x.txt": "a\n"},
+                  {**release("1.0.1", entries=both), "y.txt": "b\n"})
+    rc, result = resync(repo)
+    check(rc == 0 and result["status"] == "resynced", f"resync failed: {result}")
+    log = (repo / "CHANGELOG.md").read_text()
+    check("B thing (mods v0.1.0, dev v1.0.2)" in log, f"multi-plugin suffix not re-versioned: {log}")
+
+
+def test_line_endings_kept(tmp):
+    """Tracked CRLF stays CRLF and LF stays LF, whatever the platform's text-mode newline."""
+    for eol in ("\r\n", "\n"):
+        sub = tmp / ("crlf" if eol == "\r\n" else "lf")
+        sub.mkdir()
+        resync_with_eol(sub, eol)
+
+
+def resync_with_eol(tmp, eol):
+    origin = tmp / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    repo = tmp / "repo"
+    subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True, capture_output=True)
+    for key, value in (("user.email", "t@example.com"), ("user.name", "t"), ("core.autocrlf", "false"),
+                       ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null")):
+        git(repo, "config", key, value)
+
+    def crlf(files):
+        for name, text in files.items():
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.replace("\n", eol).encode("utf-8"))
+
+    git(repo, "checkout", "-q", "-b", "main")
+    crlf(release("1.0.0"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "[TEST] init")
+    git(repo, "push", "-q", "-u", "origin", "main")
+    for name, files in (("feat/a", {**release("1.0.1", entries=entry("A thing", "1.0.1")), "x.txt": "a\n"}),
+                        ("feat/b", {**release("1.0.1", body="by B", entries=entry("B thing", "1.0.1")),
+                                    "y.txt": "b\n"})):
+        git(repo, "checkout", "-q", "-b", name, "origin/main")
+        crlf(files)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-qm", f"[TEST] {name}")
+        git(repo, "push", "-q", "-u", "origin", name)
+        grant(repo, name)
+    squash_merge(repo, "feat/a")
+    git(repo, "checkout", "-q", "feat/b")
+    rc, result = resync(repo)
+    check(rc == 0 and result["status"] == "resynced", f"resync failed: {result}")
+    for name in ("dev/.claude-plugin/plugin.json", "dev/skills/s/SKILL.md", "CHANGELOG.md"):
+        data = (repo / name).read_bytes()
+        crlf_count = data.count(b"\r\n")
+        check(crlf_count == (data.count(b"\n") if eol == "\r\n" else 0), f"{name} changed EOL: {data!r}")
+    check(b"B thing (dev v1.0.2)" in (repo / "CHANGELOG.md").read_bytes(), "entry not re-versioned")
+
+
+def test_runs_from_subdirectory(tmp):
+    repo = behind(tmp, {**release("1.0.1", entries=entry("A thing", "1.0.1")), "x.txt": "a\n"},
+                  {**release("1.0.1", entries=entry("B thing", "1.0.1")), "y.txt": "b\n"})
+    rc, result = resync(repo, cwd=repo / "dev" / "skills")
+    check(rc == 0 and result["status"] == "resynced", f"resync from a subdirectory failed: {result}")
+    check('"version": "1.0.2"' in (repo / "dev/.claude-plugin/plugin.json").read_text(), "not re-bumped")
+    check("B thing (dev v1.0.2)" in (repo / "CHANGELOG.md").read_text(), "entry not re-versioned")
+
+
 def test_multi_step_bump_stops(tmp):
     repo = setup(tmp)
     branch(repo, "feat/g", {**release("1.0.1"), "x.txt": "g\n"}, "[TEST] g")
@@ -319,7 +387,8 @@ def main():
                  test_denied_writes_nothing, test_multi_step_bump_stops,
                  test_commit_authority_required, test_body_version_line_is_not_a_version_conflict,
                  test_base_deleted_changelog_stops, test_failed_commit_aborts_merge,
-                 test_unpushed_merge_is_pushed_on_rerun):
+                 test_unpushed_merge_is_pushed_on_rerun, test_multi_plugin_suffix_rewritten,
+                 test_line_endings_kept, test_runs_from_subdirectory):
         with tempfile.TemporaryDirectory() as tmp:
             test(Path(tmp))
     print("pre_merge_resync: all tests passed")
