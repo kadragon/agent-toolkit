@@ -76,7 +76,12 @@ that fell behind base and recomputes the bump number. `task-new --tree` uses the
   alive after cleanup has pruned both `tasks.md` and the backlog line but before merge. Claimed
   items are dropped from candidates, and the output names how many were skipped and by which
   worktree. The `cycle_state` archive is not used for claims: its contract text is not
-  guaranteed to carry the verbatim item lines.
+  guaranteed to carry the verbatim item lines. Claiming is atomic-or-reselect: the worktree
+  branch name is derived from the selected heading, so `git worktree add -b` failing on an existing
+  branch means another run holds the item and the session reselects. The claim (`## Covers`,
+  written at creation for every worktree run, one item and `--all` unit worktrees included) is
+  re-checked right after writing; a line another worktree also claims is yielded, so concurrent
+  sessions may both skip it but never both work it.
 - **Pre-merge resync (decision d).** In `task-review-cycle`, before the hub path's CI wait:
   `scripts/pre_merge_resync.py` fetches; if the branch is behind `origin/<base>`, it **merges**
   base into the branch (no rebase). For the version-bearing files — both manifests of the bumped
