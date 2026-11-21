@@ -11,6 +11,10 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Dispatch
+
+- [ ] [bug] `dispatch.py send` reports `{"submitted": true}` while the task still sits unsent in the Codex composer (observed 2026-11-21, agent-home → agent-toolkit child: the full message stayed expanded on the `›` line until Enter was pressed by hand). Suspects in `send()`: `codex_screen` returns `waiting`, not `paste`, for an expanded (non-collapsed) prompt, so the Enter retry never fires; and `turn != 0` or a brief `working` status right after `hc send` is taken as proof of submission. Acceptance: `submitted: true` only once Codex shows a working turn with an empty composer; an expanded unsent prompt gets the one Enter retry. — dev/skills/dispatch/scripts/dispatch.py
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
