@@ -7,7 +7,9 @@
                      [--name N] [--keep-connectors] [--no-show] [--dry-run] [MESSAGE]
       Start the child with hc run and, inside the Herdr app, keep its pane in the
       right-hand column. Prints one JSON object: name, address, parent, shown.
-      Codex takes no MESSAGE: send it with hc send once the screen is clear.
+      Codex takes no MESSAGE: use the send subcommand.
+  dispatch.py send ADDRESS MESSAGE
+      Send the first task to a fresh Codex child after checking the live screen.
 """
 import argparse
 import json
@@ -24,6 +26,12 @@ CLAUDE_SETTINGS = {
     "disableClaudeAiConnectors": True,
     "enabledPlugins": {"cc-plugin-you-should-know@builtin": False},
 }
+HOOK_REVIEW = re.compile(
+    r"^(?:[•└⚠]\s*)?(?:(?:\d+\s+)?hooks? needs? review\b|hook failed\b|"
+    r"(?:plugin contents changed;\s*)?hook approval required\b)", re.IGNORECASE)
+WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
+PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
+SCREEN_POLL_SECONDS = 0.25
 
 
 def terminal_name(raw):
@@ -37,7 +45,7 @@ def terminal_name(raw):
 def child_argv(cli, model, effort, message, keep_connectors):
     if cli == "codex":
         if message:
-            raise SystemExit("codex takes no first message at launch; hc send it once the screen is clear")
+            raise SystemExit("codex takes no first message at launch; use dispatch.py send")
         # Herdr requires foreground Codex so commands execute inside its terminal.
         return ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
                 "-c", f"model_reasoning_effort={effort}"]
@@ -51,7 +59,7 @@ def child_argv(cli, model, effort, message, keep_connectors):
 
 
 def hc_json(*args):
-    out = subprocess.run(["hc", *args, "--json"], capture_output=True, text=True,
+    out = subprocess.run(["hc", args[0], "--json", *args[1:]], capture_output=True, text=True,
                          encoding="utf-8", check=True).stdout
     return json.loads(out)
 
@@ -156,6 +164,83 @@ def launch(args):
                       "cli": args.cli, "model": args.model, "effort": args.effort, "shown": shown}))
 
 
+def codex_screen(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if any(HOOK_REVIEW.match(line) for line in lines):
+        return "hooks"
+    if any(WARNING_FOOTER.search(line) for line in lines):
+        return "warning"
+
+    # A transcript prompt can appear above output while the actual composer is hidden.
+    for line in reversed(lines):
+        if line.startswith(("•", "■", "─ Worked for")):
+            break
+        if line.startswith("›"):
+            prompt = line[1:].strip()
+            if prompt in ("", "Ask Codex to do anything"):
+                return "ready"
+            if PASTED_CONTENT.fullmatch(prompt):
+                return "paste"
+            break
+    return "waiting"
+
+
+def read_codex_screen(address):
+    screen = hc_json("read", "--lines", "0", address)
+    if not screen["complete"] or screen["how"] != "screen":
+        return "waiting"
+    return codex_screen(screen["text"])
+
+
+def send(args):
+    address = args.address
+    if not args.message.strip():
+        raise SystemExit("first message is empty")
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            screen = read_codex_screen(address)
+            if screen == "hooks":
+                raise SystemExit(f"{address}: task withheld; review and trust the Codex hooks via /hooks")
+            if screen == "warning":
+                raise SystemExit(f"{address}: task withheld; inspect the Codex warning with F2")
+            if screen == "ready":
+                terminal = hc_json("get", address)
+                if terminal["turn"] != 0:
+                    raise SystemExit(f"{address}: first task withheld; this child already started a turn")
+                if (terminal.get("status") or {}).get("state") == "idle":
+                    break
+            if time.monotonic() >= deadline:
+                raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
+            time.sleep(SCREEN_POLL_SECONDS)
+
+        # Herdr can report that no turn started even after it pasted the message.
+        hc_json("send", "--if", "idle", "--", address, args.message)
+
+        deadline = time.monotonic() + 5
+        previous = None
+        retried_enter = False
+        while True:
+            screen = read_codex_screen(address)
+            if screen == "hooks":
+                raise SystemExit(f"{address}: Codex showed a hook failure after the send; inspect before continuing")
+            terminal = hc_json("get", address)
+            if terminal["turn"] != 0 or (terminal.get("status") or {}).get("state") == "working":
+                print(json.dumps({"address": address, "submitted": True}))
+                return
+            if screen == "warning":
+                raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
+            if screen == previous == "paste" and not retried_enter:
+                hc_json("keys", address, "enter")
+                retried_enter = True
+            if time.monotonic() >= deadline:
+                raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
+            previous = screen
+            time.sleep(SCREEN_POLL_SECONDS)
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
+        raise SystemExit(f"{address}: Herdr could not confirm delivery; inspect the screen before retrying") from None
+
+
 def pick(args):
     skills = Path(__file__).resolve().parents[2]
     script = skills / "task-next" / "scripts" / "backlog_candidates.py"
@@ -191,6 +276,10 @@ def main(argv):
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
     launch_parser.set_defaults(func=launch)
+    send_parser = sub.add_parser("send")
+    send_parser.add_argument("address")
+    send_parser.add_argument("message")
+    send_parser.set_defaults(func=send)
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
