@@ -32,7 +32,8 @@ HOOK_BLOCKER = re.compile(
     re.IGNORECASE)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
-HERDR_SENDER = re.compile(r'^<hc from="[^"]+">')
+HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
+CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
 
 
@@ -166,8 +167,22 @@ def launch(args):
                       "cli": args.cli, "model": args.model, "effort": args.effort, "shown": shown}))
 
 
+def matches_sent_message(rows, message):
+    visible = "\n".join(row.strip() for row in rows)
+    envelope = HERDR_MESSAGE.fullmatch(visible)
+    if envelope:
+        visible = envelope[1]
+
+    # Codex wraps composer rows at the terminal width.
+    for row in visible.splitlines():
+        if not message.startswith(row):
+            return False
+        message = message[len(row):].lstrip()
+    return not message
+
+
 def codex_screen(text, *, sent_message=None):
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
     # Codex indents continued lines of the submitted prompt in its transcript.
     hook_lines = lines if sent_message is not None else (line.lstrip() for line in lines)
     if any(HOOK_BLOCKER.match(line) for line in hook_lines):
@@ -176,8 +191,8 @@ def codex_screen(text, *, sent_message=None):
         return "warning"
 
     # A transcript prompt can appear above output while the actual composer is hidden.
-    for line in reversed(lines):
-        line = line.lstrip()
+    for index in reversed(range(len(lines))):
+        line = lines[index].lstrip()
         if line.startswith(("•", "■", "─ Worked for")):
             break
         if line.startswith("›"):
@@ -187,9 +202,10 @@ def codex_screen(text, *, sent_message=None):
             if PASTED_CONTENT.fullmatch(prompt):
                 return "paste"
             if sent_message is not None:
-                expanded = HERDR_SENDER.sub("", prompt).removesuffix("</hc>")
-                # The first visible line can be a wrapped prefix of the send.
-                if expanded and sent_message.startswith(expanded):
+                # Codex leaves a blank row between the composer and its status line.
+                body_end = next((row for row in reversed(range(index + 1, len(lines) - 1))
+                                 if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), len(lines))
+                if matches_sent_message((prompt, *lines[index + 1:body_end]), sent_message):
                     return "paste"
             break
     return "waiting"
