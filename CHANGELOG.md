@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Confirm Codex task submission in dispatch (dev v4.12.2) (2026-11-21)
 - [done] Document the built-in Explore subagent (2026-11-21) → docs/delegation.md
 - [done] Route dev:dispatch by quota runway and guard Codex task startup (dev v4.12.1) (2026-11-21) → dev/skills/dispatch/SKILL.md
 - [done] Add the dev:dispatch skill for home repositories (dev v4.12.0) (2026-11-21) → dev/skills/dispatch/SKILL.md

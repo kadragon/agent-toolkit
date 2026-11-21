@@ -167,10 +167,70 @@ class CodexSendTests(unittest.TestCase):
     def test_send_leaves_enter_alone_once_the_turn_started(self):
         with patch("dispatch.hc_json", side_effect=[
             self.screen(self.READY), self.IDLE, {"started": True},
-            self.screen(self.PASTE), {"turn": 1},
+            self.screen(self.PASTE), {**self.WORKING, "turn": 1},
+            self.screen(self.READY), {**self.WORKING, "turn": 1},
         ]) as hc, patch("builtins.print"):
             send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_retries_an_expanded_paste_once_even_if_herdr_counted_a_turn(self):
+        idle = {**self.IDLE, "turn": 1}
+        working = {**self.WORKING, "turn": 1}
+        for message, prompt in (
+            ("a task", "› a task"),
+            ("a task", '› <hc from="t6">a task</hc>'),
+            ("a task with a long first line", '› <hc from="t6">a task with\n  a long first line</hc>'),
+            ("a task", '› <hc from="t6 lead" reach="send results">\n  a task</hc>'),
+            ("a task", '› <hc from="t6 lead"\n  reach="send results">a task</hc>'),
+        ):
+            with self.subTest(prompt=prompt):
+                expanded = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
+                ready = self.screen(self.READY)
+                responses = {
+                    "read": iter((ready, expanded, expanded, expanded, expanded, ready)),
+                    "get": iter((self.IDLE, working, idle, idle, idle, working)),
+                }
+
+                def respond(command, *_args):
+                    return next(responses[command]) if command in responses else {}
+
+                with patch("dispatch.hc_json", side_effect=respond) as hc, \
+                        patch("dispatch.time.sleep"), patch("builtins.print") as output:
+                    send(SimpleNamespace(address="t7", message=message))
+                self.assertEqual(hc.call_args_list.count(call("keys", "t7", "enter")), 1)
+                self.assertEqual(hc.call_count, 14)
+                self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_requires_working_status_and_a_clear_composer_in_the_same_poll(self):
+        idle = {**self.IDLE, "turn": 1}
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen("› a task\n\n• Working"), self.WORKING,
+            self.screen(self.READY), idle,
+            self.screen(self.READY), self.WORKING,
+        ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
+            send(self.ARGS)
+        self.assertEqual(hc.call_count, 9)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+        self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_does_not_retry_enter_on_an_unrelated_prompt(self):
+        for prompt in ("› another draft", "› a", "› a task\n  with an extra line", '› <hc from="t6">a</hc>'):
+            with self.subTest(prompt=prompt):
+                draft = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
+                ready = self.screen(self.READY)
+                responses = {
+                    "read": iter((ready, draft, draft, ready)),
+                    "get": iter((self.IDLE, self.IDLE, self.IDLE, self.WORKING)),
+                }
+
+                def respond(command, *_args):
+                    return next(responses[command]) if command in responses else {}
+
+                with patch("dispatch.hc_json", side_effect=respond) as hc, \
+                        patch("dispatch.time.sleep"), patch("builtins.print"):
+                    send(self.ARGS)
+                self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
     def test_send_ignores_hook_words_in_the_echoed_task(self):
         echoed = f"› Investigate the following\n  Hook failed on SessionStart\n\n{self.READY}"

@@ -32,6 +32,8 @@ HOOK_BLOCKER = re.compile(
     re.IGNORECASE)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
+HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
+CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
 
 
@@ -165,18 +167,32 @@ def launch(args):
                       "cli": args.cli, "model": args.model, "effort": args.effort, "shown": shown}))
 
 
-def codex_screen(text, *, after_send=False):
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+def matches_sent_message(rows, message):
+    visible = "\n".join(row.strip() for row in rows)
+    envelope = HERDR_MESSAGE.fullmatch(visible)
+    if envelope:
+        visible = envelope[1]
+
+    # Codex wraps composer rows at the terminal width.
+    for row in visible.splitlines():
+        if not message.startswith(row):
+            return False
+        message = message[len(row):].lstrip()
+    return not message
+
+
+def codex_screen(text, *, sent_message=None):
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
     # Codex indents continued lines of the submitted prompt in its transcript.
-    hook_lines = lines if after_send else (line.lstrip() for line in lines)
+    hook_lines = lines if sent_message is not None else (line.lstrip() for line in lines)
     if any(HOOK_BLOCKER.match(line) for line in hook_lines):
         return "hooks"
     if lines and WARNING_FOOTER.search(lines[-1]):
         return "warning"
 
     # A transcript prompt can appear above output while the actual composer is hidden.
-    for line in reversed(lines):
-        line = line.lstrip()
+    for index in reversed(range(len(lines))):
+        line = lines[index].lstrip()
         if line.startswith(("•", "■", "─ Worked for")):
             break
         if line.startswith("›"):
@@ -185,20 +201,27 @@ def codex_screen(text, *, after_send=False):
                 return "ready"
             if PASTED_CONTENT.fullmatch(prompt):
                 return "paste"
+            if sent_message is not None:
+                # Codex leaves a blank row between the composer and its status line.
+                body_end = next((row for row in reversed(range(index + 1, len(lines) - 1))
+                                 if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), len(lines))
+                if matches_sent_message((prompt, *lines[index + 1:body_end]), sent_message):
+                    return "paste"
             break
     return "waiting"
 
 
-def read_codex_screen(address, *, after_send=False):
+def read_codex_screen(address, *, sent_message=None):
     screen = hc_json("read", "--lines", "0", address)
     if not screen["complete"] or screen["how"] != "screen":
         return "waiting"
-    return codex_screen(screen["text"], after_send=after_send)
+    return codex_screen(screen["text"], sent_message=sent_message)
 
 
 def send(args):
     address = args.address
-    if not args.message.strip():
+    sent_message = args.message.strip()
+    if not sent_message:
         raise SystemExit("first message is empty")
     attempted_send = False
     try:
@@ -224,27 +247,28 @@ def send(args):
         hc_json("send", "--if", "idle", "--", address, args.message)
 
         deadline = time.monotonic() + 5
-        previous = None
+        previous_idle_paste = False
         retried_enter = False
         while True:
-            screen = read_codex_screen(address, after_send=True)
+            screen = read_codex_screen(address, sent_message=sent_message)
             if screen == "hooks":
                 raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
             terminal = hc_json("get", address)
             status = (terminal.get("status") or {}).get("state")
             if status == "blocked":
                 raise SystemExit(f"{address}: Codex blocked after the send; inspect the screen before continuing")
-            if terminal["turn"] != 0 or (status == "working" and screen != "paste"):
+            if status == "working" and screen == "ready":
                 print(json.dumps({"address": address, "submitted": True}))
                 return
             if screen == "warning":
                 raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
-            if status == "idle" and screen == previous == "paste" and not retried_enter:
+            idle_paste = status == "idle" and screen == "paste"
+            if idle_paste and previous_idle_paste and not retried_enter:
                 hc_json("keys", address, "enter")
                 retried_enter = True
             if time.monotonic() >= deadline:
                 raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
-            previous = screen
+            previous_idle_paste = idle_paste
             time.sleep(SCREEN_POLL_SECONDS)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as err:
         reason = ("Herdr could not confirm delivery; inspect the screen before retrying" if attempted_send
