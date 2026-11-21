@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Add the dev:dispatch skill for home repositories (dev v4.12.0) (2026-11-21) → dev/skills/dispatch/SKILL.md
 - [done] Report claimed sprint blocks and preserve existing tasks (dev v4.11.57) (2026-11-21) → dev/skills/task-next/references/cycle.md
 - [done] worktree runs claim items on creation and per group; --tree reads base (3 units) (dev v4.11.56) (2026-11-20) → docs/design/concurrent-tree-cycles.md
 - [done] pre_merge_resync keeps EOLs, multi-plugin suffixes, any CWD; comment rules keep suppressions and constraints (dev v4.11.55) (2026-11-20)

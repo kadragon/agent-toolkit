@@ -215,6 +215,7 @@ are all model-invoked, which is the default, so they carry no fields and need no
 | `task-review-cycle` | model | The callable half of the review cycle, extracted from `task-review`. |
 | `reference-review` | model | Read-only comparison; stops for the user's pick before any edit. |
 | `test-prune` | model | Evidence-gated test cleanup; edits only when asked to clean up, never commits. |
+| `dispatch` | model | Routes a home repo's requests to child sessions in listed repos. |
 
 Adding a skill means placing it in this table in the same PR.
 

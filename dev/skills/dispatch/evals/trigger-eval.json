@@ -1,0 +1,7 @@
+[
+  {"query": "dispatch this from my home repo to the repo listed in repos/ and run its queue through Herdr", "should_trigger": true},
+  {"query": "relaunch the child session that dispatch opened through hc run at a higher effort", "should_trigger": true},
+  {"query": "홈 레포에서 다른 레포의 큐를 돌려줘", "should_trigger": true},
+  {"query": "run the next backlog item in this checkout", "should_trigger": false},
+  {"query": "debug the failure in the current repo", "should_trigger": false}
+]
