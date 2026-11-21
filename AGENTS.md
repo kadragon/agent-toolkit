@@ -32,7 +32,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 
 | Role | Fits | Model |
 |------|------|-------|
-| explorer | Read-only map of an unfamiliar plugin area | inherits (shared agent-home role, no `model:`) |
+| `Explore` (built-in) | Read-only map of an unfamiliar plugin area | Built-in default |
 | implementer | A `backlog.md` item with a Sprint Contract | sonnet |
 | qa-verifier | Verifying work a *different* agent implemented | sonnet |
 | skill-evaluator | Skill quality assessment | opus |
@@ -48,7 +48,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 
 - `plugin.json` is the release contract — bump it last, after all skill changes, before PR
 - Skills are in `{plugin}/skills/{name}/SKILL.md` — `description:` field drives auto-invocation
-- Agent roles in `.claude/agents/*.md` (explorer is the shared user-level role) — spawned as subagents
+- Repository-local agent roles live in `.claude/agents/*.md`. Read-only exploration uses Claude Code's built-in `Explore` subagent.
 - Mods (function hooks) live only in `mods/hooks/{name}/`, plus `mods/hooks/band.tsx`, the one hook that draws every mod's rows above the prompt; run `python3 scripts/check_mods.py` locally (validate + test, failing on any TS error) — CI does not
 - Tests: every `test_*.py` and `--test`/`--selftest` script under `dev/`/`prod/`/`scripts/` has a `python3 <path> [flag]` step in `harness-check.yml` — run the matching one
 - Validate harness from the working tree, not the plugin cache: `bash dev/skills/harness-init/scripts/validate-harness.sh`
