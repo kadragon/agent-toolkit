@@ -46,7 +46,7 @@ class ChildArgvTests(unittest.TestCase):
     def test_codex_argv_and_message_guard(self):
         self.assertEqual(
             child_argv("codex", "gpt-6.2-sol", "high", None, False),
-            ["codex", "--no-alt-screen", "--approve-for-me", "-m", "gpt-6.2-sol",
+            ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", "gpt-6.2-sol",
              "-c", "model_reasoning_effort=high"],
         )
         with self.assertRaisesRegex(SystemExit, "codex takes no first message"):

@@ -38,7 +38,8 @@ def child_argv(cli, model, effort, message, keep_connectors):
     if cli == "codex":
         if message:
             raise SystemExit("codex takes no first message at launch; hc send it once the screen is clear")
-        return ["codex", "--no-alt-screen", "--approve-for-me", "-m", model,
+        # Herdr requires foreground Codex so commands execute inside its terminal.
+        return ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
                 "-c", f"model_reasoning_effort={effort}"]
     if not message:
         raise SystemExit("a claude child needs its first message")
@@ -67,7 +68,6 @@ def app(*args):
 
 
 def home_tab(home):
-    """The tab that shows the home terminal, from the app's own layout (not from focus)."""
     for space in app("ls")["spaces"]:
         for tab in space["tabs"]:
             if any(t["terminal"] == home for t in tab["terminals"]):

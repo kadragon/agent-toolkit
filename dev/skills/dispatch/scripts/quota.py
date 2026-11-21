@@ -22,7 +22,7 @@ from pathlib import Path
 WEEK = 7 * 24 * 3600
 CLAUDE_CACHE = Path(os.environ.get(
     "QUOTA_CLAUDE_CACHE", str(Path.home() / ".claude" / "state" / "quota-claude.json")))
-HOT_AHEAD = 15     # points ahead of an even burn through the week
+HOT_AHEAD = 15
 HOT_USED = 75
 CRITICAL_USED = 90
 HOT_5H = 80
@@ -97,7 +97,7 @@ def assess(snapshot, now):
     if not snapshot:
         return {"state": "unknown"}
     used, reset, observed = snapshot["used"], snapshot["reset"], snapshot["observed"]
-    if reset <= now:  # the window rolled over since the snapshot
+    if reset <= now:
         used, elapsed = 0.0, 0.0
     else:
         elapsed = max(0.0, min(100.0, 100.0 * (1 - (reset - now) / WEEK)))

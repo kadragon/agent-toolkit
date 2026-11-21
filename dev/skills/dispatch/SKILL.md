@@ -36,7 +36,8 @@ missing → clone from that URL, or stop when the line says "Local only".
 | anything else (question, review, debug) | the request, verbatim |
 
 In a Codex session write `/dev:task-next` as `$task-next` and `/dev:task-new` as `$task-new`,
-with the same arguments.
+with the same arguments. Pass the user's Git limits verbatim. If the command cannot carry
+them, send the original request as plain text.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -60,7 +61,7 @@ recommendation and checking it against the request, and it stays open for the wh
 every watch turn re-reads its growing context at the home model's price. Fable at home only
 when the user asks.
 
-Balance by quota. Before picking the pairs of a wave, run `python -I "<dispatch>/scripts/quota.py"`
+Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints, per CLI, `used`, `elapsed`, `state` (`ok`, `hot`, `critical`,
 `unknown`), and one `bias`; the thresholds live in the script. A state the 5-hour window
@@ -103,7 +104,7 @@ Effort — ambiguity and risk:
 | `xhigh` | an unknown cause (debugging, performance), design or spec phases (`task-grill`, `task-spec`), or a costly mistake: security, auth, data migration, production DB or deploy paths |
 
 - Judge from the request text. For `/dev:task-next`, judge the item task-next will pick:
-  `python -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"` (add `--tree` for a `--tree`
+  `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"` (add `--tree` for a `--tree`
   run) prints task-next's own candidate list as JSON; the first entry is its pick. Read that
   entry's lines in `backlog.md` (or `tasks.md`) for its criteria. This is not a working-tree
   preflight. When the pick is unclear, take the pair of the hardest listed candidate; `--all`
@@ -124,7 +125,7 @@ Run `hc ls` first. A live task session in the repo — yours or another home ses
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
 
 ```sh
-python -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
+python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
   --cwd "<repo path>" [--name <repo>-<n>] '<first message>'
 ```
 
@@ -163,7 +164,7 @@ A Codex child starts with no first message (`launch --cli codex` refuses one), w
 once the screen is clear:
 
 ```sh
-python -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol --effort <effort> --cwd "<repo path>"
+python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol --effort <effort> --cwd "<repo path>"
 hc read --lines 40 <address>    # until the › input line shows, with no dialog over it
 hc send <address> '<first message>'
 ```
@@ -227,9 +228,8 @@ The user delegates the session's decisions to this session:
   session's recommendation unless it conflicts with the request or the repo; add a correction
   when it is missing something. Answer with `hc send <address> '<answer>'`, then tell the user in
   one line what was chosen and why.
-- **Push and merge** — allowed once the commit has been through the review cycle
-  (`dev:task-review-cycle`, or the repo's own review); before that, hold the session short of
-  push.
+- **Push and merge** — follow the user's original authorization and limits, and wait until
+  the commit has passed the target repo's review cycle.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.
