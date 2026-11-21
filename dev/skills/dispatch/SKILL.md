@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.1.0
+version: 1.1.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -164,8 +164,9 @@ python3 -I "<dispatch>/scripts/dispatch.py" send -- <address> '<first message>'
 ```
 
 - `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
-  failure, and presses Enter once if a collapsed paste stays in the composer. Check the screen
-  before retrying an unconfirmed submission.
+  failure, and presses Enter once if a collapsed or expanded paste stays in the idle composer.
+  It confirms submission when Herdr reports a working turn and the composer is clear. Check
+  the screen before retrying an unconfirmed submission.
 - When blocked, read `references/codex-readiness.md` to clear the screen and review changed
   hooks. If it cannot be cleared, tell the user what is blocking the task and leave it unsent.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the

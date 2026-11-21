@@ -167,8 +167,56 @@ class CodexSendTests(unittest.TestCase):
     def test_send_leaves_enter_alone_once_the_turn_started(self):
         with patch("dispatch.hc_json", side_effect=[
             self.screen(self.READY), self.IDLE, {"started": True},
-            self.screen(self.PASTE), {"turn": 1},
+            self.screen(self.PASTE), {**self.WORKING, "turn": 1},
+            self.screen(self.READY), {**self.WORKING, "turn": 1},
         ]) as hc, patch("builtins.print"):
+            send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_retries_an_expanded_paste_once_even_if_herdr_counted_a_turn(self):
+        idle = {**self.IDLE, "turn": 1}
+        working = {**self.WORKING, "turn": 1}
+        for message, prompt in (
+            ("a task", "› a task"),
+            ("a task", '› <hc from="t6">a task</hc>'),
+            ("a task with a long first line", '› <hc from="t6">a task with\n  a long first line</hc>'),
+        ):
+            with self.subTest(prompt=prompt):
+                expanded = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
+                with patch("dispatch.hc_json", side_effect=[
+                    self.screen(self.READY), self.IDLE, {"started": True},
+                    expanded, working,
+                    expanded, idle,
+                    expanded, idle, {},
+                    expanded, idle,
+                    self.screen(self.READY), working,
+                ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
+                    send(SimpleNamespace(address="t7", message=message))
+                self.assertEqual(hc.call_args_list.count(call("keys", "t7", "enter")), 1)
+                self.assertEqual(hc.call_count, 14)
+                self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_requires_working_status_and_a_clear_composer_in_the_same_poll(self):
+        idle = {**self.IDLE, "turn": 1}
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen("› a task\n\n• Working"), self.WORKING,
+            self.screen(self.READY), idle,
+            self.screen(self.READY), self.WORKING,
+        ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
+            send(self.ARGS)
+        self.assertEqual(hc.call_count, 9)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+        self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_does_not_retry_enter_on_an_unrelated_prompt(self):
+        draft = self.screen("› another draft")
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": False},
+            draft, self.IDLE,
+            draft, self.IDLE,
+            self.screen(self.READY), self.WORKING,
+        ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print"):
             send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
