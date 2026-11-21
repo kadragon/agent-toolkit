@@ -6,8 +6,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import call, patch
 
-from dispatch import child_argv, free_name, tallest, terminal_name
+from dispatch import child_argv, codex_screen, free_name, send, tallest, terminal_name
+from quota import WEEK, assess
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -102,7 +105,149 @@ class PickTests(unittest.TestCase):
                     self.assertEqual(json.loads(result.stdout)[0]["title"], title, result.stderr)
 
 
+class CodexSendTests(unittest.TestCase):
+    READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
+    PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
+    ARGS = SimpleNamespace(address="t7", message="a task")
+    IDLE = {"turn": 0, "status": {"state": "idle"}}
+    WORKING = {"turn": 0, "status": {"state": "working"}}
+
+    def test_screen_recognizes_composer_and_ignores_transcript_or_draft(self):
+        for text, expected in (
+            (self.READY, "ready"),
+            ("›", "ready"),
+            (self.PASTE, "paste"),
+            (f"› [Pasted Content 1576 chars]\n\n• Working\n\n{self.READY}", "ready"),
+            ("› [Pasted Content 1576 chars]\n\n■ Error", "waiting"),
+            ("› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue", "waiting"),
+            ("› draft [Pasted Content 1576 chars]", "waiting"),
+            ("  >_ OpenAI Codex (v0.171.0)", "waiting"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(codex_screen(text), expected)
+
+    def test_send_withholds_task_on_visible_hook_or_warning(self):
+        for text, reason in (
+            ("Hooks need review\n› 1. Review hooks", "/hooks"),
+            ("⚠\ufe0f 1 hook needs review before it can run.", "/hooks"),
+            (f"• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}", "/hooks"),
+            (f"• Blocked by hook\n  └ Policy prevented this action.\n{self.READY}", "/hooks"),
+            (f"• Hook stopped\n  └ Policy prevented this action.\n{self.READY}", "/hooks"),
+            (f"{self.READY}\n  ⚠ 1 warning · f2 to view", "F2"),
+            (f"{self.READY}\n  ← for agents · ? for shortcuts       ⚠ 2 warnings · F2 to view", "F2"),
+        ):
+            with self.subTest(text=text), patch("dispatch.hc_json", return_value=self.screen(text)) as hc:
+                with self.assertRaisesRegex(SystemExit, reason):
+                    send(self.ARGS)
+                hc.assert_called_once_with("read", "--lines", "0", "t7")
+
+    @staticmethod
+    def screen(text):
+        return {"complete": True, "how": "screen", "text": text}
+
+    def test_send_presses_enter_once_for_a_paste_left_in_the_composer(self):
+        responses = [
+            self.screen(self.READY), self.IDLE, {"started": False},
+            self.screen(self.PASTE), self.IDLE,
+            self.screen(self.PASTE), self.IDLE, {},
+            self.screen(self.READY), self.WORKING,
+        ]
+        with patch("dispatch.hc_json", side_effect=responses) as hc, \
+                patch("dispatch.time.sleep"), patch("builtins.print") as output:
+            send(self.ARGS)
+        self.assertEqual(hc.call_args_list, [
+            call("read", "--lines", "0", "t7"), call("get", "t7"),
+            call("send", "--if", "idle", "--", "t7", "a task"),
+            call("read", "--lines", "0", "t7"), call("get", "t7"),
+            call("read", "--lines", "0", "t7"), call("get", "t7"), call("keys", "t7", "enter"),
+            call("read", "--lines", "0", "t7"), call("get", "t7"),
+        ])
+        self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_leaves_enter_alone_once_the_turn_started(self):
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen(self.PASTE), {"turn": 1},
+        ]) as hc, patch("builtins.print"):
+            send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_ignores_hook_words_in_the_echoed_task(self):
+        echoed = f"› Investigate the following\n  Hook failed on SessionStart\n\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen(echoed), self.WORKING,
+        ]) as hc, patch("builtins.print") as output:
+            send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+        self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_reports_a_real_hook_failure_after_delivery(self):
+        failed = f"› Investigate\n\n• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True}, self.screen(failed),
+        ]) as hc:
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_withholds_enter_when_dialog_opens_after_reading_a_paste(self):
+        blocked = {"turn": 0, "status": {"state": "blocked"}}
+        responses = [
+            self.screen(self.READY), self.IDLE, {"started": False},
+            self.screen(self.PASTE), self.IDLE,
+            self.screen(self.PASTE), blocked, {},
+            self.screen(self.READY), {"turn": 1},
+        ]
+        with patch("dispatch.hc_json", side_effect=responses) as hc, \
+                patch("dispatch.time.sleep"), patch("builtins.print"):
+            with self.assertRaisesRegex(SystemExit, "blocked after the send"):
+                send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+
 class QuotaTests(unittest.TestCase):
+    def test_critical_when_weekly_runway_ends_before_reset(self):
+        now = 1_800_000_000
+        result = assess({"used": 83, "reset": now + WEEK * 0.554, "observed": now}, now)
+        self.assertEqual(result["state"], "critical")
+        self.assertEqual(result["elapsed"], 44.6)
+        self.assertEqual(result["runway_h"], 15.3)
+        self.assertEqual(result["reset_in_h"], 93.1)
+
+    def test_weekly_runway_compares_unrounded_values(self):
+        now = 1_800_000_000
+        for used, state in ((49.99, "ok"), (50, "ok"), (50.01, "critical")):
+            with self.subTest(used=used):
+                result = assess({"used": used, "reset": now + WEEK / 2, "observed": now}, now)
+                self.assertEqual(result["state"], state)
+                self.assertEqual(result["runway_h"], 84)
+
+    def test_weekly_runway_without_a_measurable_pace(self):
+        now = 1_800_000_000
+        for used, reset, expected in (
+            (0, now + WEEK / 2, None),
+            (1, now + WEEK, None),
+            (100, now + WEEK, 0),
+            (100, now, None),
+        ):
+            with self.subTest(used=used, reset=reset):
+                result = assess({"used": used, "reset": reset, "observed": now}, now)
+                self.assertEqual(result["runway_h"], expected)
+
+    def test_five_hour_window_can_raise_state_until_it_resets(self):
+        now = 1_800_000_000
+        for used, reset, state in (
+            (79, now + 3600, "ok"),
+            (80, now + 3600, "hot"),
+            (90, now + 3600, "critical"),
+            (90, now, "ok"),
+        ):
+            with self.subTest(used=used, reset=reset):
+                snapshot = {"used": 10, "reset": now + WEEK / 2, "observed": now,
+                            "five_hour": {"used": used, "reset": reset, "observed": now}}
+                self.assertEqual(assess(snapshot, now)["state"], state)
+
     def test_reader_accepts_status_line_snapshot_at_override_and_handles_absence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

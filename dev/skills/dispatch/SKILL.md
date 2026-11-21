@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.0.0
+version: 1.1.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -50,11 +50,9 @@ the work needs, the effort by how ambiguous or risky it is. The user naming a CL
 effort overrides both tables and every rule below.
 
 Codex takes the work Claude's haiku and sonnet would, to keep Claude usage for the work that
-needs opus judgment; its usage is a separate quota. Its model is `gpt-6.2-sol`, Codex's
-go-to coding model. `gpt-6.2-astra` and the `max`/`ultra` efforts only when the user asks: a
-stall on Codex goes to Claude opus instead, which also brings a second model family.
-Claude `haiku` and `sonnet` only when the user asks, Codex is unavailable, or the quota bias
-below says `claude`.
+needs opus judgment. Use `gpt-6.2-sol` for Codex, and reserve `gpt-6.2-astra` and the
+`max`/`ultra` efforts for user requests. Use Claude `haiku` and `sonnet` on request,
+when Codex is unavailable, or when quota favors Claude.
 
 The home session runs on opus: its decisions are reading a child's
 recommendation and checking it against the request, and it stays open for the whole run, so
@@ -63,18 +61,18 @@ when the user asks.
 
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
-and prints, per CLI, `used`, `elapsed`, `state` (`ok`, `hot`, `critical`,
-`unknown`), and one `bias`; the thresholds live in the script. A state the 5-hour window
-raised resets within hours, so it holds for this wave only; re-run the script for the next.
+and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
+plus each CLI's `state` and one `bias`. Any weekly pace that exhausts quota before reset is
+`critical`. Recheck next wave because the 5-hour window can reset.
 See `references/quota-snapshot.md` when wiring or diagnosing the Claude status-line snapshot.
 Apply the bias on top of the tables below:
 
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | opus rows at `high` or below that are task cycles or reviews (a `/dev:task-next` item without written criteria, a change across several modules, a review) go to codex `gpt-6.2-sol` at `high`. `/dev:task-new`, spec and design phases, anything at xhigh, and escalated pairs stay on opus |
+| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest, at `high` when scope is settled, including `/dev:task-new`, reviews and bounded design or spec work. |
 | `claude` (Codex running ahead) | codex rows go to claude `sonnet` at the same effort; a `low` lookup to `haiku` |
-| `both-hot` | the tables as written, at most two children, and tell the user both numbers before launching |
+| `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 
 - `critical` on a CLI: launch nothing on it without the user's yes. Move a row to the other
   CLI when the bias table allows it; otherwise ask.
@@ -82,16 +80,14 @@ Apply the bias on top of the tables below:
   The Claude snapshot refreshes whenever a Claude status line draws, the Codex one only when a
   Codex session runs, so a large `age_h` on Codex usually means it sat idle. The Codex plan
   may report no 5-hour window; then only the weekly one counts.
-- The bias moves the starting pair only; escalation follows `references/escalation.md`.
-- The home session itself runs on Claude, so a `codex` bias is also a reason to keep its
-  watch turns few (step 5).
+- Escalation uses the wave's effective bias and `references/escalation.md`.
 
 Model — capability:
 
 | Model | When |
 |-------|------|
-| codex `gpt-6.2-sol` | a factual lookup or log summary that changes no file; a change whose cause and place are already known, docs or config text, one file or a few — including a backlog item that names those files and its acceptance criteria; a `/dev:task-next` item for an ordinary feature or fix |
-| claude `opus` | `/dev:task-new`, a review or a diagnosis, a change that has to hold several modules or the domain in mind, and anything at xhigh; the default when unsure |
+| codex `gpt-6.2-sol` | factual lookups and ordinary features, fixes or reviews with settled scope |
+| claude `opus` | open-ended design or review, uncertain diagnosis, work requiring substantial domain judgment, or work starting at xhigh |
 | `fable` | only by escalation from opus/xhigh, or when the user asks |
 
 Effort — ambiguity and risk:
@@ -100,24 +96,24 @@ Effort — ambiguity and risk:
 |--------|------|
 | `low` | lookups that change no file |
 | `medium` | a clear spec or contract, little to decide, cheap to get wrong; a backlog item with written acceptance criteria (a `task-tickets` slice). `gpt-6.2-sol`'s own default |
-| `high` | the default for task cycles on an item without written criteria, and for `/dev:task-new` |
-| `xhigh` | an unknown cause (debugging, performance), design or spec phases (`task-grill`, `task-spec`), or a costly mistake: security, auth, data migration, production DB or deploy paths |
+| `high` | ordinary work that requires judgment about implementation or review within its scope |
+| `xhigh` | unknown-cause debugging, unresolved design or requirements, or a costly mistake |
 
-- Judge from the request text. For `/dev:task-next`, judge the item task-next will pick:
+- Judge the scope from the files, design, or constraints the request fixes. For `/dev:task-next`,
+  judge the item task-next will pick:
   `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"` (add `--tree` for a `--tree`
   run) prints task-next's own candidate list as JSON; the first entry is its pick. Read that
   entry's lines in `backlog.md` (or `tasks.md`) for its criteria. This is not a working-tree
   preflight. When the pick is unclear, take the pair of the hardest listed candidate; `--all`
   always takes the pair of the hardest open item.
-- `--effort max` only when the user asks for it; it costs much more and rarely beats xhigh.
-- Codex does not run at xhigh unless the user picks a Codex effort: work that needs xhigh
-  needs opus too, so it starts on Claude.
+- Codex uses `xhigh` on the Codex-bias escalation ladder or when the user selects it.
 - Effort is fixed per session and the model already scales its thinking per turn within it,
   so set it once at launch. It changes between phases, since each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
   an escalated task launches, read `references/escalation.md` for the ladder and the relaunch.
-- State the CLI, the pair and the reason in one line when reporting the launch, with the quota
-  numbers when the bias changed the pair (`Claude week 82% at 44% elapsed, 5h 45% → codex`).
+- Before launch, give the CLI, pair and reason in one line. If either state is other than `ok`,
+  include both CLIs' weekly used, elapsed and runway in that line. Mark missing values as
+  unavailable and include 5-hour usage when it raised the state.
 
 ## 4. Launch
 
@@ -160,23 +156,20 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-A Codex child starts with no first message (`launch --cli codex` refuses one), which is sent
-once the screen is clear:
+A Codex child starts with no first message. Use the guarded send after launch:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol --effort <effort> --cwd "<repo path>"
-hc read --lines 40 <address>    # until the › input line shows, with no dialog over it
-hc send <address> '<first message>'
+python3 -I "<dispatch>/scripts/dispatch.py" send -- <address> '<first message>'
 ```
 
-- Codex runs a first message given at launch even while its "Hooks need review" dialog is up,
-  with the dev plugin's commit and memory guards off until it is answered. So clear the
-  screen first: a hook-review or repo-trust dialog — tell the user, then pick "Trust all and
-  continue" (`hc keys <address> down enter`), and `esc` any panel left open. `hc send` without
-  `--force` refuses while a dialog blocks. Typed into Codex's input line, `$task-next` runs as
-  the skill.
+- `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
+  failure, and presses Enter once if a collapsed paste stays in the composer. Check the screen
+  before retrying an unconfirmed submission.
+- When blocked, read `references/codex-readiness.md` to clear the screen and review changed
+  hooks. If it cannot be cleared, tell the user what is blocking the task and leave it unsent.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
-  workspace-write sandbox, so the child does not stop on them.
+  workspace-write sandbox. Hook trust uses Codex's separate review flow.
 - Claude-only hooks configured in a home repo do not run in a Codex child. Hold a Codex child to the same "Leave to the user"
   list in step 5.
 
@@ -190,8 +183,8 @@ More than one session:
   after the previous one has created its worktree, or pick a different item for each one when
   it asks. With an older dev plugin or for one batch PR, use `/dev:task-next --all`.
 - Several repos: one launch per repo, in a single turn.
-- Keep a wave to two to four live children. Each child rebuilds its own picture of the repo, so
-  items that need the same files or conventions go to one session (`/dev:task-next --all`)
+- Keep a wave to at most four live children (two under `both-hot`). Each child rebuilds its
+  own repo context, so items sharing files or conventions go to one session (`/dev:task-next --all`)
   rather than one session each.
 - A first message that is not a slash command ends with: `When you finish or get blocked,
   report in three lines or fewer with hc send <parent>; put details in a file and give its

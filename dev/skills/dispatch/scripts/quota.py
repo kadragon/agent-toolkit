@@ -9,7 +9,8 @@ Reads only limits the servers reported; never counts tokens.
 Without arguments it prints one JSON object:
   {"claude": {...}, "codex": {...}, "bias": "none|codex|claude|both-hot"}
 Each CLI gets used (weekly percent), elapsed (percent of its 7-day window),
-ahead (used - elapsed), reset_in_h, age_h (snapshot age), five_hour_used when
+ahead (used - elapsed), reset_in_h, runway_h (hours to 100% at the weekly pace,
+null when there is no estimate), age_h (snapshot age), five_hour_used when
 reported, and state ok|hot|critical|unknown.
 """
 import datetime as dt
@@ -22,7 +23,6 @@ from pathlib import Path
 WEEK = 7 * 24 * 3600
 CLAUDE_CACHE = Path(os.environ.get(
     "QUOTA_CLAUDE_CACHE", str(Path.home() / ".claude" / "state" / "quota-claude.json")))
-HOT_AHEAD = 15
 HOT_USED = 75
 CRITICAL_USED = 90
 HOT_5H = 80
@@ -97,14 +97,21 @@ def assess(snapshot, now):
     if not snapshot:
         return {"state": "unknown"}
     used, reset, observed = snapshot["used"], snapshot["reset"], snapshot["observed"]
+    reset_in_h = max(0.0, reset - now) / 3600
     if reset <= now:
-        used, elapsed = 0.0, 0.0
+        used, elapsed_h = 0.0, 0.0
     else:
-        elapsed = max(0.0, min(100.0, 100.0 * (1 - (reset - now) / WEEK)))
+        elapsed_h = max(0.0, WEEK - (reset - now)) / 3600
+    elapsed = 100.0 * elapsed_h / (WEEK / 3600)
     ahead = used - elapsed
-    if used >= CRITICAL_USED:
+    runway_h = None
+    if used == 100:
+        runway_h = 0.0
+    elif used > 0 and elapsed_h > 0:
+        runway_h = elapsed_h * (100 - used) / used
+    if used >= CRITICAL_USED or (runway_h is not None and runway_h < reset_in_h):
         state = "critical"
-    elif used >= HOT_USED or ahead >= HOT_AHEAD:
+    elif used >= HOT_USED:
         state = "hot"
     else:
         state = "ok"
@@ -122,7 +129,8 @@ def assess(snapshot, now):
         **result,
         "elapsed": round(elapsed, 1),
         "ahead": round(ahead, 1),
-        "reset_in_h": round(max(0.0, reset - now) / 3600, 1),
+        "reset_in_h": round(reset_in_h, 1),
+        "runway_h": round(runway_h, 1) if runway_h is not None and math.isfinite(runway_h) else None,
         "age_h": round((now - observed) / 3600, 1),
     }
 
