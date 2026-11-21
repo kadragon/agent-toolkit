@@ -23,7 +23,6 @@ from pathlib import Path
 WEEK = 7 * 24 * 3600
 CLAUDE_CACHE = Path(os.environ.get(
     "QUOTA_CLAUDE_CACHE", str(Path.home() / ".claude" / "state" / "quota-claude.json")))
-HOT_AHEAD = 15
 HOT_USED = 75
 CRITICAL_USED = 90
 HOT_5H = 80
@@ -112,7 +111,7 @@ def assess(snapshot, now):
         runway_h = elapsed_h * (100 - used) / used
     if used >= CRITICAL_USED or (runway_h is not None and runway_h < reset_in_h):
         state = "critical"
-    elif used >= HOT_USED or ahead >= HOT_AHEAD:
+    elif used >= HOT_USED:
         state = "hot"
     else:
         state = "ok"

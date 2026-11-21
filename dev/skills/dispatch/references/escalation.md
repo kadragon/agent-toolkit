@@ -17,10 +17,11 @@ wrong, and when a later phase of an escalated task launches.
   least as high on both axes and higher on at least one (haiku < sonnet = sol < opus < fable).
 - When the next rung is on a `critical` CLI, ask the user. A stall after fable/xhigh goes to
   the user.
-- Never step down from an escalated pair inside one task: once a phase escalates, later
-  phases take the pair from the tables or the escalated pair, whichever is higher on each
-  axis. Without an escalation each phase re-reads the tables, so a spec phase at xhigh can
-  hand off to an implementation phase at high.
+- Carry the latest escalated pair as the floor for later phases, using the higher model and
+  effort from that pair and the new phase's starting pair. The Codex-bias ladder's model
+  switch from sol/xhigh to opus/high sets the new floor at opus/high. If a later phase still
+  needs a sol/xhigh floor and its new bias does not allow Codex xhigh, use opus/xhigh.
+  Without escalation, each phase uses its own starting pair.
 
 ## Relaunch
 

@@ -110,6 +110,7 @@ class CodexSendTests(unittest.TestCase):
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
     ARGS = SimpleNamespace(address="t7", message="a task")
     IDLE = {"turn": 0, "status": {"state": "idle"}}
+    WORKING = {"turn": 0, "status": {"state": "working"}}
 
     def test_screen_recognizes_composer_and_ignores_transcript_or_draft(self):
         for text, expected in (
@@ -128,8 +129,10 @@ class CodexSendTests(unittest.TestCase):
     def test_send_withholds_task_on_visible_hook_or_warning(self):
         for text, reason in (
             ("Hooks need review\n› 1. Review hooks", "/hooks"),
-            ("⚠ 1 hook needs review before it can run.", "/hooks"),
+            ("⚠\ufe0f 1 hook needs review before it can run.", "/hooks"),
             (f"• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}", "/hooks"),
+            (f"• Blocked by hook\n  └ Policy prevented this action.\n{self.READY}", "/hooks"),
+            (f"• Hook stopped\n  └ Policy prevented this action.\n{self.READY}", "/hooks"),
             (f"{self.READY}\n  ⚠ 1 warning · f2 to view", "F2"),
             (f"{self.READY}\n  ← for agents · ? for shortcuts       ⚠ 2 warnings · F2 to view", "F2"),
         ):
@@ -147,7 +150,7 @@ class CodexSendTests(unittest.TestCase):
             self.screen(self.READY), self.IDLE, {"started": False},
             self.screen(self.PASTE), self.IDLE,
             self.screen(self.PASTE), self.IDLE, {},
-            self.screen(self.READY), {"turn": 0, "status": {"state": "working"}},
+            self.screen(self.READY), self.WORKING,
         ]
         with patch("dispatch.hc_json", side_effect=responses) as hc, \
                 patch("dispatch.time.sleep"), patch("builtins.print") as output:
@@ -167,6 +170,39 @@ class CodexSendTests(unittest.TestCase):
             self.screen(self.PASTE), {"turn": 1},
         ]) as hc, patch("builtins.print"):
             send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_ignores_hook_words_in_the_echoed_task(self):
+        echoed = f"› Investigate the following\n  Hook failed on SessionStart\n\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen(echoed), self.WORKING,
+        ]) as hc, patch("builtins.print") as output:
+            send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+        self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_reports_a_real_hook_failure_after_delivery(self):
+        failed = f"› Investigate\n\n• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True}, self.screen(failed),
+        ]) as hc:
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_send_withholds_enter_when_dialog_opens_after_reading_a_paste(self):
+        blocked = {"turn": 0, "status": {"state": "blocked"}}
+        responses = [
+            self.screen(self.READY), self.IDLE, {"started": False},
+            self.screen(self.PASTE), self.IDLE,
+            self.screen(self.PASTE), blocked, {},
+            self.screen(self.READY), {"turn": 1},
+        ]
+        with patch("dispatch.hc_json", side_effect=responses) as hc, \
+                patch("dispatch.time.sleep"), patch("builtins.print"):
+            with self.assertRaisesRegex(SystemExit, "blocked after the send"):
+                send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
 

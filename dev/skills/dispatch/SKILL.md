@@ -62,14 +62,15 @@ when the user asks.
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
-plus each CLI's `state` and one `bias`. Recheck next wave because the 5-hour window can reset.
+plus each CLI's `state` and one `bias`. Any weekly pace that exhausts quota before reset is
+`critical`. Recheck next wave because the 5-hour window can reset.
 See `references/quota-snapshot.md` when wiring or diagnosing the Claude status-line snapshot.
 Apply the bias on top of the tables below:
 
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | Send fixed-scope work to Codex `gpt-6.2-sol` at `high`, including `/dev:task-new`, reviews and design or spec work with settled scope. Use opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). |
+| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest, at `high` when scope is settled, including `/dev:task-new`, reviews and bounded design or spec work. |
 | `claude` (Codex running ahead) | codex rows go to claude `sonnet` at the same effort; a `low` lookup to `haiku` |
 | `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 

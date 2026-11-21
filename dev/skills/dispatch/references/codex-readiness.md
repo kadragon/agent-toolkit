@@ -11,10 +11,10 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
   warnings, close the warning view and open the local `/hooks` command from a clear composer
   with `hc keys <address> / h o o k s enter`. Review and approve as above. F2 only opens the
   warnings view. Dismiss an unrelated warning after confirming it does not affect hook trust.
-- **Hook failed** — inspect the failure before any task. If Codex reports that plugin contents
-  changed and the live `/hooks` view has nothing to approve, restart the task-free child and
-  use **Review hooks** at startup. Restart after approval if the failure remains on screen,
-  or if a SessionStart hook had already been skipped.
+- **Hook failed, blocked, or stopped** — inspect the cause before any task. For a changed-plugin warning or failure,
+  if the live `/hooks` view has nothing to approve, restart the child without a task and use
+  **Review hooks** at startup. Restart after approval if the failure remains on screen or if
+  a SessionStart hook had already been skipped.
 - **Repository trust** — tell the user before accepting a known target directory. Select
   **Yes, continue** in its own dialog and then check for hook review.
 
