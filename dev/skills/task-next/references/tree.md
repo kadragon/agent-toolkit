@@ -45,16 +45,14 @@ worktree's `backlog.md` is then exactly the one Step 1 selected from, so it hold
 line and `prune-backlog` finds them. This checkout's branch and uncommitted edits — `backlog.md`
 and `docs/design/` included — stay where they are and never reach the worktree or the PR.
 
-**Claim — right after `git worktree add`, before the plan gate.** A `backlog.md` group → write
-the worktree's `tasks.md` with `# <selected heading verbatim>`, `status: active`, and `## Covers`
-listing each selected item line verbatim. A `tasks.md` h1 block (`status: open`) → it is already
-in the worktree's copy: flip that block to `status: active` there and write no second block. `backlog_candidates.py` treats a `## Covers` line in another
-`.worktrees/` checkout as claimed, so a second session cannot pick the same item while this one
-waits at the plan gate; `cycle.md` → *Worktree cycle* → *Claim* covers a branch collision and the
-re-check after writing it. A declined plan → revert only this claim (delete the `tasks.md` it
-created, or restore the flipped block with `git restore tasks.md`), confirm `git status
---porcelain` in the worktree is empty, then `git worktree remove` it and `git branch -d` the
-branch — no forced removal.
+**Claim — right after `git worktree add`, before the plan gate.** For a `backlog.md` group,
+follow `cycle.md` → *Worktree cycle* → *Claim*: append the full claim block if the base tracks
+`tasks.md`, or create the file with that block. For a `tasks.md` h1 block (`status: open`), flip
+that block to `status: active` in the worktree's copy. The shared claim step covers branch
+collisions and the re-check after writing the claim. A declined plan → revert only this claim
+(delete the `tasks.md` it created, or restore the base-tracked file with `git restore tasks.md`),
+confirm `git status --porcelain` in the worktree is empty, then `git worktree remove` it and
+`git branch -d` the branch — no forced removal.
 
 **Mark active:** after the plan gate, add the Sprint Contract to that same worktree `tasks.md`
 block — every `--tree` run writes it, even for one item. Archive the contract per `cycle.md` →
