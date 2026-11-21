@@ -240,6 +240,9 @@ jobs:
       - name: Run dev/skills/task-next/scripts/backlog_candidates.py --test
         run: python3 dev/skills/task-next/scripts/backlog_candidates.py --test
 
+      - name: Run dev/skills/dispatch/scripts/test_dispatch.py
+        run: python3 dev/skills/dispatch/scripts/test_dispatch.py
+
       - name: Run dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
         run: python3 dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
 
