@@ -62,9 +62,11 @@ between `worktree add` and its `tasks.md`): then drop it from this run's selecti
 colliding branch — never retry the same item, never delete the branch unasked; a stale branch is
 the user's decision. Nothing left → report.
 
-Queue items only: right after a successful `worktree add`, before the plan gate, write the worktree's
-`tasks.md` (`# <heading verbatim>`, `status: active`, `## Covers` with each selected line verbatim —
-one item included; `SKILL.md` Step 3 *Mark active* then adds only the contract). Then, from the
+For a backlog selection, right after a successful `worktree add`, before the plan gate, add a
+claim block to the worktree's `tasks.md`: `# <heading verbatim>`, `status: active`, and `## Covers`
+with each selected line verbatim, even for one item. If the base tracks `tasks.md`, append the
+whole block under its own h1 and preserve the existing blocks. Otherwise, create the file.
+`SKILL.md` Step 3 *Mark active* then adds only the contract. Then, from the
 worktree, re-run the Step 1 candidate script without `--ref`; it lists lines another worktree also
 claims. Yield those lines — drop them from the covers and scope; none left → declined-plan teardown
 (`tree.md` → *Claim*) and reselect. Both sessions may yield; that errs toward skipping.

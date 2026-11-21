@@ -672,6 +672,15 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
             "`#`–`###` heading)."
         )
 
+    if label == "tasks.md":
+        claimed_blocks = [h for h, status in h1_blocks(tokens) if status == "open" and h.get("claimed_by")]
+        if claimed_blocks:
+            msgs.append(
+                f"tasks.md: {len(claimed_blocks)} open sprint block(s) claimed by another `.worktrees/` run — "
+                "see the skip line above; resume that worktree to work them."
+            )
+            return msgs
+
     open_boxes = [t for t in boxes if t["state"] == " "]
     claimed = [t for t in open_boxes if t.get("claimed_by")]
     actionable = [t for t in open_boxes if not _is_blocked(t["text"]) and not t.get("claimed_by")]
@@ -1615,6 +1624,10 @@ def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
         "a new active block (a backlog group's `# G2`) takes no sprint block",
     )
     base_t = "# A\nstatus: open\n\n# B\nstatus: deferred\n\n# C\nstatus: open\n"
+    _assert(
+        not block_claims(base_t + "\n# New group\nstatus: active\n\n## Covers\n- [ ] new item\n", base_t),
+        "appending an active backlog claim block preserves every inherited open sprint",
+    )
     _assert(
         block_claims("# A\nstatus: active\n\n# B\nstatus: deferred\n", base_t) == {"A", "C"},
         "flipped (A) and pruned (C) open blocks are held; B's inherited `deferred` is not",
@@ -2612,6 +2625,20 @@ Nothing from this group is queued.
         out == ["No candidates found. Why:", "  - tasks.md: no h1 block with `status: open`."],
         "tasks.md's empty-queue line names the h1 `status: open` rule, not checkboxes",
     )
+
+    for contract_body in ("Contract written as prose.\n", "- [ ] Run the contract check.\n"):
+        tasks_tokens = tokenize("# Sprint A\nstatus: open\n\n" + contract_body + "\n# Sprint B\nstatus: open\n")
+        mark_claimed_blocks(tasks_tokens, {".worktrees/a": {"Sprint A"}, ".worktrees/b": {"Sprint B"}})
+        out = zero_candidate_diagnosis(tasks_tokens, tokenize(""))
+        _assert(
+            not phase_a_candidates(tasks_tokens)
+            and out == [
+                "No candidates found. Why:",
+                "  - tasks.md: 2 open sprint block(s) claimed by another `.worktrees/` run — "
+                "see the skip line above; resume that worktree to work them.",
+            ],
+            f"an all-claimed sprint queue diagnoses sprint blocks even with {contract_body.strip()!r}",
+        )
 
     # 8i: prose bullets with no `#`–`###` heading above them (none at all, or `####` only) are
     # drift too — `_prose_only_headings` judges per heading, so it never sees them.
