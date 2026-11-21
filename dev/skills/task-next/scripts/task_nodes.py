@@ -86,6 +86,7 @@ from backlog_candidates import (  # noqa: E402
     _strip_fenced_blocks,
     _strip_html_comments,
     backlog_fast_candidates,
+    h1_blocks,
     tasks_persistent_sections,
     tokenize,
 )
@@ -943,18 +944,23 @@ def persistent_sections(text: str) -> list[str]:
 def prune_h1_block(text: str, title: str) -> tuple[str, list[str]]:
     """Delete the whole `# <title>` block — heading, `status:` line, and body — up to the next h1.
 
+    If titles collide, prune only when exactly one matching block is active.
     Correct only because `tasks.md` holds the Sprint Contract and nothing else; `cmd_prune` blocks
     the mixed-content case up front via `persistent_sections`.
     """
     lines, eols = _split(text)
     default_eol = _dominant_eol(eols)
-    tok = tokenize(text)
-    h1s = [t for t in tok if t["type"] == "heading" and t["level"] == 1]
-    start = next((t["line"] - 1 for t in h1s if t["title"].strip() == title.strip()), None)
-    if start is None:
-        titles = ", ".join(repr(t["title"]) for t in h1s) or "none"
+    blocks = h1_blocks(tokenize(text))
+    matches = [(heading, status) for heading, status in blocks if heading["title"].strip() == title.strip()]
+    if not matches:
+        titles = ", ".join(repr(heading["title"]) for heading, _ in blocks) or "none"
         return text, [f"no h1 block titled {title!r} (h1 blocks present: {titles})"]
-    end = next((t["line"] - 1 for t in h1s if t["line"] - 1 > start), len(lines))
+    if len(matches) > 1:
+        matches = [(heading, status) for heading, status in matches if status == "active"]
+        if len(matches) != 1:
+            return text, [f"ambiguous h1 block titled {title!r}: expected exactly one active match"]
+    start = matches[0][0]["line"] - 1
+    end = next((heading["line"] - 1 for heading, _ in blocks if heading["line"] - 1 > start), len(lines))
     kept = [i for i in range(len(lines)) if not (start <= i < end)]
     final = _collapse_gap_blanks([lines[i] for i in kept], kept)
     out = _join([lines[i] for i in final], [eols[i] for i in final], default_eol)
@@ -2093,6 +2099,15 @@ status: open
     _assert(problems == [] and out.startswith("# Sprint two"),
             "the whole h1 block — heading, status, body — is deleted up to the next h1")
     _assert("## Scope" not in out and "body content" not in out, "the block's body goes with it")
+
+    open_sprint = "# Shared title\nstatus: open\n"
+    active_claim = "# Shared title\nstatus: active\n\n## Covers\n- [ ] backlog item\n"
+    out, problems = prune_h1_block(open_sprint + "\n" + active_claim, "Shared title")
+    _assert(not problems and out.rstrip() == open_sprint.rstrip(),
+            "pruning a same-title active backlog claim preserves the open sprint")
+    ambiguous = active_claim + "\n" + active_claim
+    out, problems = prune_h1_block(ambiguous, "Shared title")
+    _assert(problems and out == ambiguous, "pruning refuses ambiguous same-title active blocks")
 
     out, problems = prune_h1_block(tasks, "Sprint three")
     _assert(len(problems) == 1 and "no h1 block titled" in problems[0] and "'Sprint one'" in problems[0],

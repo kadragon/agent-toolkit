@@ -672,6 +672,7 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
             "`#`–`###` heading)."
         )
 
+    claimed_blocks = []
     if label == "tasks.md":
         claimed_blocks = [h for h, status in h1_blocks(tokens) if status == "open" and h.get("claimed_by")]
         if claimed_blocks:
@@ -679,7 +680,9 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
                 f"tasks.md: {len(claimed_blocks)} open sprint block(s) claimed by another `.worktrees/` run — "
                 "see the skip line above; resume that worktree to work them."
             )
-            return msgs
+            h1s = [h for h in headings if h["level"] == 1]
+            regions = [(h["line"], _region_end(h, h1s)) for h in claimed_blocks]
+            boxes = [t for t in boxes if not any(start < t["line"] < end for start, end in regions)]
 
     open_boxes = [t for t in boxes if t["state"] == " "]
     claimed = [t for t in open_boxes if t.get("claimed_by")]
@@ -738,8 +741,8 @@ def _diagnose_source(label: str, tokens: list[dict]) -> list[str]:
                 "`*(blocked by: …)*` / `*(deferred: …)*` marker — clear a blocker to make one "
                 f"actionable.{pointer}"
             )
-        elif claimed:
-            pass  # every open item is claimed; the line above already says so
+        elif claimed or claimed_blocks:
+            pass
         elif boxes and not drifted:
             msgs.append(f"{label}: no open items (all `[x]`/`[>]`).")
         elif not drifted:
@@ -970,8 +973,9 @@ def block_claims(wt_tasks: str, base_tasks: str | None = None) -> set[str]:
     if base_tasks is None:
         return held
     was_open = {h["title"] for h, status in h1_blocks(tokenize(base_tasks)) if status == "open"}
+    still_open = {h["title"] for h, status in blocks if status == "open"}
     present = {h["title"] for h, _ in blocks}
-    return (held & was_open) | (was_open - present)
+    return (was_open & (held - still_open)) | (was_open - present)
 
 
 def _git(cwd: str, *args: str) -> str | None:
@@ -1627,6 +1631,10 @@ def _run_claim_extension_fixtures(tmp: str, env: dict[str, str]) -> None:
     _assert(
         not block_claims(base_t + "\n# New group\nstatus: active\n\n## Covers\n- [ ] new item\n", base_t),
         "appending an active backlog claim block preserves every inherited open sprint",
+    )
+    _assert(
+        not block_claims(base_t + "\n# A\nstatus: active\n\n## Covers\n- [ ] new item\n", base_t),
+        "an appended backlog claim does not claim the open sprint with the same title",
     )
     _assert(
         block_claims("# A\nstatus: active\n\n# B\nstatus: deferred\n", base_t) == {"A", "C"},
@@ -2639,6 +2647,19 @@ Nothing from this group is queued.
             ],
             f"an all-claimed sprint queue diagnoses sprint blocks even with {contract_body.strip()!r}",
         )
+
+    tasks_tokens = tokenize(
+        "- [ ] stray\n\n# Sprint A\nstatus: open\n\n- [ ] run checks\n\n"
+        "# Other\n\n## Misplaced items\n- [ ] move to backlog\n"
+    )
+    mark_claimed_blocks(tasks_tokens, {".worktrees/a": {"Sprint A"}})
+    out = zero_candidate_diagnosis(tasks_tokens, tokenize(""))
+    _assert(
+        any("1 open sprint block(s) claimed" in line for line in out)
+        and any("1 actionable item(s) sit above" in line for line in out)
+        and any("1 actionable item(s) are attributed" in line for line in out),
+        "a claimed sprint does not mask tasks.md diagnostics outside its block",
+    )
 
     # 8i: prose bullets with no `#`–`###` heading above them (none at all, or `####` only) are
     # drift too — `_prose_only_headings` judges per heading, so it never sees them.
