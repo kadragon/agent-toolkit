@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.1.1
+version: 1.2.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -26,18 +26,39 @@ Find the repo in `repos/*.md` by name or description; its line gives the local p
 clone URL when it is missing. Ambiguous match → ask which repo, naming the candidates. Path
 missing → clone from that URL, or stop when the line says "Local only".
 
-## 2. Pick the first message
+## 2. Choose the session layout and first message
 
-| Request | First message |
-|---------|---------------|
-| run the queue / next item | `/dev:task-next` |
-| run every queued item | `/dev:task-next --all` |
-| new work the user described | `/dev:task-new <the request, verbatim>` |
-| anything else (question, review, debug) | the request, verbatim |
+For independent requests across repos, use one child per repo, applying this table to each.
+For work that depends on another repo's result, wait for that result before launch. Keep
+the live-child limits in step 4.
 
-In a Codex session write `/dev:task-next` as `$task-next` and `/dev:task-new` as `$task-new`,
-with the same arguments. Pass the user's Git limits verbatim. If the command cannot carry
-them, send the original request as plain text.
+| Same-repo request | First message |
+|-------------------|---------------|
+| Run the next queued item | `/dev:task-next` |
+| Run a queue batch in one PR, or run every queued item | `/dev:task-next --all`; the child decides serial or parallel under its batch rules |
+| Run independent queued units in separate worktrees | One `/dev:task-next --tree` per unit, subject to the gates below |
+| Run independently scoped new work in separate worktrees | One `/dev:task-new --tree <unit>` per unit, subject to the gates below |
+| Start new work | `/dev:task-new <the request, verbatim>` |
+| Question, review, debug, or other standalone work | The request, verbatim |
+
+Use the separate-worktree rows when the user requested separate worktree runs, each unit
+has disjoint edits and independently verifiable scope, and the child dev plugin supports
+concurrent worktrees (4.11.52 or later). Give a new-work child exactly one clear,
+single-cycle unit. Keep uncertain, dependent, planning-only, or overlapping work in one
+session. A separate-PR request requires permission for each PR; a one-PR request stays
+with a single session. If the user's requested layout cannot be used, explain why before
+changing its scope or PR shape.
+
+Forward task commands as a child session's first message only for a workflow the human
+actually requested. In Codex use `$task-next` or `$task-new`, with the same arguments.
+Carry a dispatch handoff in the task arguments, with these fields kept distinct:
+original user request (verbatim), assigned unit, and user Git limits (verbatim).
+Mark any dispatcher-added `--tree` as isolation only. A child must establish its authority
+from the original request before any Git write and verify user direction before nested delegation.
+When preparing independent PRs, instruct every child to report ready and stop before
+base merge; pass the actual permission for each later phase separately. If the CLI
+cannot preserve the origin, scope, and limits through the task command, hold the
+workflow and report what could not be carried. Forward standalone requests as plain text.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -99,13 +120,17 @@ Effort — ambiguity and risk:
 | `high` | ordinary work that requires judgment about implementation or review within its scope |
 | `xhigh` | unknown-cause debugging, unresolved design or requirements, or a costly mistake |
 
-- Judge the scope from the files, design, or constraints the request fixes. For `/dev:task-next`,
-  judge the item task-next will pick:
-  `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"` (add `--tree` for a `--tree`
-  run) prints task-next's own candidate list as JSON; the first entry is its pick. Read that
-  entry's lines in `backlog.md` (or `tasks.md`) for its criteria. This is not a working-tree
-  preflight. When the pick is unclear, take the pair of the hardest listed candidate; `--all`
-  always takes the pair of the hardest open item.
+- Judge the scope from the files, design, or constraints the request fixes. For
+  `/dev:task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`.
+  Add `--full-scan` for `--all`, a known unattended run, or an unclear selection.
+  Add `--tree` for a worktree run; it reads the local `origin/HEAD` without fetching,
+  so the child's fetched base can differ. Read stderr for selector diagnostics and read
+  the criteria for the relevant candidates. Size for the hardest eligible unit within
+  the requested selection or, if selection is open, the hardest eligible unit shown.
+  For an unattended single-pick use the first full-scan result as the estimate. The
+  child owns final selection and unattended limits. Answer a selection question using
+  the child's displayed titles and numbers, since fast and full-scan order can differ.
+  If the selected scope exceeds the estimate, use the escalation procedure.
 - Codex uses `xhigh` on the Codex-bias escalation ladder or when the user selects it.
 - Effort is fixed per session and the model already scales its thinking per turn within it,
   so set it once at launch. It changes between phases, since each phase is a new launch.
@@ -176,22 +201,16 @@ python3 -I "<dispatch>/scripts/dispatch.py" send -- <address> '<first message>'
 
 More than one session:
 
-- Several task sessions in one repo run as `--tree` (child dev plugin 4.11.52 or later): each
-  `/dev:task-next --tree` or `/dev:task-new --tree <request>` works in its own
-  `.worktrees/<slug>` and selects from the base commit, so it neither reads nor switches the
-  main checkout. At most one session per repo runs without `--tree`, since that one switches
-  the main checkout. Name them `<repo>-<n>`. Claims are not atomic: start the next session only
-  after the previous one has created its worktree, or pick a different item for each one when
-  it asks. With an older dev plugin or for one batch PR, use `/dev:task-next --all`.
-- Several repos: one launch per repo, in a single turn.
-- Keep a wave to at most four live children (two under `both-hot`). Each child rebuilds its
-  own repo context, so items sharing files or conventions go to one session (`/dev:task-next --all`)
-  rather than one session each.
+- At most one task session per repo uses the main checkout. Name concurrent children
+  `<repo>-<n>`. Before starting another child on the same queue, run `pick --tree --full-scan`
+  and confirm stderr identifies the previous child's claim by worktree and item. A worktree
+  directory alone is insufficient. If the earlier child blocks before claiming, resolve its
+  blocker before starting a second child for that queue.
+- Keep a wave to at most four live children (two under `both-hot`).
 - A first message that is not a slash command ends with: `When you finish or get blocked,
   report in three lines or fewer with hc send <parent>; put details in a file and give its
-  path.` `<parent>` is the `parent` field the launch printed — this session's address as a
-  literal address, never a name and never the child's `$HC_TERMINAL_ID`. A slash command,
-  or its Codex `$` form, takes no such suffix, since its arguments go to the skill.
+  path.` Use the launch result's literal `parent` address. A slash command or its Codex
+  `$` form takes no reporting suffix.
 
 ## 5. Watch and decide
 
@@ -222,8 +241,12 @@ The user delegates the session's decisions to this session:
   session's recommendation unless it conflicts with the request or the repo; add a correction
   when it is missing something. Answer with `hc send <address> '<answer>'`, then tell the user in
   one line what was chosen and why.
+  Keep decisions within the user's scope and Git limits. For batch execution without
+  established parallel delegation authority, choose the sequential path.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
-  the commit has passed the target repo's review cycle.
+  the commit has passed the target repo's review cycle. For separate PRs in one repo, wait
+  for the current merge to finish before authorizing the next merge phase. Resync each
+  candidate against the latest base and rerun required checks on its final head.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.

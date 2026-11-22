@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 2.5.1
+version: 2.6.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
@@ -38,6 +38,9 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 First match wins. Size comes before clarity: a fully specified request can still be too large
 for one contract.
 
+- **Dispatched as one of several concurrent `--tree` children** → continue only when the
+  assigned scope is one clear, bounded implementation. If it needs an interview, spec, or
+  queue edits first, report that to the home session before writing to the shared checkout.
 - **Queue without implementing** (the user asks only to record it) → call the Skill tool with
   "dev:task-tickets" on the request, then **stop**.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for

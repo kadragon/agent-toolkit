@@ -1,8 +1,8 @@
 """Deterministic steps of the dispatch skill.
 
-  dispatch.py pick <repo path> [--tree]
-      Print, as JSON, the candidates task-next would pick in <repo path>, from the
-      task-next script bundled with this dev plugin (fast path, first = its pick).
+  dispatch.py pick <repo path> [--tree] [--full-scan]
+      Print task-next's candidate snapshot as JSON, using the bundled selector.
+      Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      [--name N] [--keep-connectors] [--no-show] [--dry-run] [MESSAGE]
       Start the child with hc run and, inside the Herdr app, keep its pane in the
@@ -286,6 +286,8 @@ def pick(args):
            "--backlog", "backlog.md", "--json"]
     if args.tree:
         cmd += ["--ref", "origin/HEAD"]
+    if args.full_scan:
+        cmd.append("--full-scan")
     done = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, encoding="utf-8")
     if done.returncode:
         raise SystemExit(done.stderr.strip() or done.stdout.strip())
@@ -299,6 +301,7 @@ def main(argv):
     pick_parser = sub.add_parser("pick")
     pick_parser.add_argument("repo")
     pick_parser.add_argument("--tree", action="store_true")
+    pick_parser.add_argument("--full-scan", action="store_true")
     pick_parser.set_defaults(func=pick)
     launch_parser = sub.add_parser("launch")
     launch_parser.add_argument("--cli", choices=["claude", "codex"], required=True)
