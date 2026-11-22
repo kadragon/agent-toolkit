@@ -4,11 +4,12 @@
       Print task-next's candidate snapshot as JSON, using the bundled selector.
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
+                     --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
                      [--name N] [--parent T] [--task TASK] [--keep-connectors]
                      [--no-show] [--dry-run] [MESSAGE]
       Start the child with hc run and, inside the Herdr app, keep its pane in the
       right-hand column. Prints one JSON object: name, address, parent, shown.
-      Codex takes --task or a later send. Claude takes MESSAGE.
+      Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup turn 1 or phase reuse.
   dispatch.py collect RECEIPT [--close]
@@ -43,6 +44,7 @@ CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for 
 SCREEN_POLL_SECONDS = 0.25
 RESULT_STATES = {"done", "ready", "blocked", "merged"}
 RESULT_LIMIT = 8192
+TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
 
 
 def terminal_name(raw):
@@ -213,11 +215,37 @@ def free_name(base, explicit, taken):
     return f"{base[:29]}-{n}"
 
 
+def first_prompt(cli, message, handoff):
+    if not message.strip():
+        raise SystemExit("first message is empty")
+    commands = TASK_COMMANDS[cli]
+    if handoff["work_kind"] != "standalone" and message.split(maxsplit=1)[0] not in commands:
+        print(f"warning: {handoff['work_kind']} work should start with {' or '.join(commands)}; "
+              "this first message may skip the task cycle", file=sys.stderr)
+    fields = {"Original user request (verbatim)": handoff["request"],
+              "Assigned unit": handoff["unit"],
+              "Git limits": handoff["git_limits"]}
+    return (f"{message}\n\nHandoff metadata (JSON):\n"
+            "Task-cycle mode and flags come exclusively from the invocation above.\n"
+            "<dispatch-handoff>\n"
+            f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+            "</dispatch-handoff>")
+
+
 def launch(args):
     cwd = Path(args.cwd).expanduser()
     name = terminal_name(args.name or cwd.name)
-    if args.task and (args.cli != "codex" or args.message):
+    if args.task is not None and (args.cli != "codex" or args.message is not None):
         raise SystemExit("--task is for Codex only; Claude takes its task as MESSAGE")
+    handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
+    for key in ("request", "unit", "git_limits"):
+        if not handoff[key].strip():
+            raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    message = args.message
+    if args.cli == "claude" and message is not None:
+        message = first_prompt(args.cli, message, handoff)
+    if args.task is not None and not args.task.strip():
+        raise SystemExit("first message is empty")
     home = args.parent or os.environ.get("HC_TERMINAL_ID")
     result_path = None
     if not args.dry_run:
@@ -239,9 +267,12 @@ def launch(args):
         result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
     argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
             "--name", name, "--cwd", str(cwd), *(["--parent", home] if home else ["--no-parent"]),
-            *child_argv(args.cli, args.model, args.effort, args.message, args.keep_connectors, result_path)]
+            *child_argv(args.cli, args.model, args.effort, message, args.keep_connectors, result_path)]
     if args.dry_run:
-        print(json.dumps({"name": name, "argv": argv}, ensure_ascii=False))
+        preview = {"name": name, "argv": argv}
+        if args.task is not None:
+            preview["task"] = first_prompt(args.cli, args.task, handoff)
+        print(json.dumps(preview, ensure_ascii=False))
         return
     result = json.loads(subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
                                        check=True).stdout)
@@ -251,7 +282,7 @@ def launch(args):
            "created_ms": terminal["created_ms"], "cli": args.cli, "model": args.model,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
     receipt = result_path.with_name("run.json")
-    write_json(receipt, run)
+    write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     if terminal.get("parent") != home:
         print(json.dumps({**run, "shown": False, "run": str(receipt), "result": str(result_path)}), flush=True)
         detail = ("Claude may have received its launch prompt; inspect before retrying"
@@ -359,6 +390,12 @@ def send_task(args, run_path):
         raise SystemExit("--continue requires --run")
     message = args.message
     if run_path:
+        if not continuation:
+            if "handoff" in run:
+                message = first_prompt("codex", message, run["handoff"])
+            else:
+                print("warning: legacy receipt has no handoff metadata; include the original request, "
+                      "assigned unit, and Git limits in the first message", file=sys.stderr)
         message += "\n\n" + report_instruction(run_path.with_name("result.json"))
     sent_message = message.strip()
     screen_reads = 0
@@ -405,6 +442,8 @@ def send_task(args, run_path):
                     raise SystemExit(f"{address}: task withheld; the child started another turn")
             run["sent"] = "unconfirmed"
             write_json(run_path, run)
+        else:
+            print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
         hc_json("send", *guard, "--", address, message)
@@ -508,6 +547,10 @@ def main(argv):
     launch_parser.add_argument("--model", required=True)
     launch_parser.add_argument("--effort", required=True)
     launch_parser.add_argument("--cwd", required=True)
+    launch_parser.add_argument("--work-kind", choices=["queue", "new", "standalone"], required=True)
+    launch_parser.add_argument("--request", required=True, help="verbatim original user request")
+    launch_parser.add_argument("--unit", required=True, help="assigned unit")
+    launch_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--parent")
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
