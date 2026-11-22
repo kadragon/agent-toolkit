@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -85,11 +86,28 @@ def write_json(path, data):
 
 
 def load_run(path):
-    path = Path(path).resolve()
     try:
-        return path, json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch receipt {path}: {error}") from None
+
+
+@contextmanager
+def lock_run(path):
+    with path.with_suffix(".lock").open("a+b") as lock:
+        lock.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise SystemExit(f"cannot lock dispatch receipt {path}: {error}") from None
+        yield
 
 
 def verify_terminal(run, terminal):
@@ -208,6 +226,9 @@ def launch(args):
             owner = next((t for t in terminals if t["address"] == home and t["state"] == "live"), None)
             if owner is None:
                 raise SystemExit(f"parent {home} is not live; pass --parent with this session's address")
+            owner = hc_json("get", home)
+            if owner.get("address") != home or owner.get("state") != "live":
+                raise SystemExit(f"parent {home} is no longer live")
             parent_dir = (owner.get("foreground") or {}).get("cwd") or owner.get("cwd")
             if not parent_dir or Path(parent_dir).resolve() != Path.cwd().resolve():
                 raise SystemExit(f"parent {home} is outside this directory; run launch from the home session directory")
@@ -233,7 +254,9 @@ def launch(args):
     write_json(receipt, run)
     if terminal.get("parent") != home:
         print(json.dumps({**run, "shown": False, "run": str(receipt), "result": str(result_path)}), flush=True)
-        raise SystemExit(f"{address}: parent changed at launch; task withheld")
+        detail = ("Claude may have received its launch prompt; inspect before retrying"
+                  if args.cli == "claude" else "task withheld")
+        raise SystemExit(f"{address}: parent changed at launch; {detail}")
     shown = False
     if home and not args.no_show:
         try:
@@ -307,13 +330,20 @@ def startup_composer(text):
 
 
 def send(args):
+    run_file = getattr(args, "run", None)
+    run_path = Path(run_file).resolve() if run_file else None
+    with lock_run(run_path) if run_path else nullcontext():
+        send_task(args, run_path)
+
+
+def send_task(args, run_path):
     address = args.address
     if not args.message.strip():
         raise SystemExit("first message is empty")
-    run_path, run = None, None
+    run = None
     continuation = getattr(args, "continuation", False)
-    if getattr(args, "run", None):
-        run_path, run = load_run(args.run)
+    if run_path:
+        run = load_run(run_path)
         if run["cli"] != "codex" or run["address"] != address:
             raise SystemExit("receipt is for another terminal or CLI")
         if run["sent"] == "unconfirmed":
@@ -367,6 +397,12 @@ def send(args):
             if run["parent"]:
                 os.environ["HC_TERMINAL_ID"] = run["parent"]
             _, run["previous_result"] = read_result(run_path)
+            if status == "done":
+                current = hc_json("get", address)
+                verify_terminal(run, current)
+                if (current["turn"] != terminal["turn"] or
+                        (current.get("status") or {}).get("state") != "done"):
+                    raise SystemExit(f"{address}: task withheld; the child started another turn")
             run["sent"] = "unconfirmed"
             write_json(run_path, run)
         attempted_send = True
@@ -415,7 +451,13 @@ def send(args):
 
 
 def collect(args):
-    path, run = load_run(args.run)
+    path = Path(args.run).resolve()
+    with lock_run(path) if args.close else nullcontext():
+        collect_result(path, args.close)
+
+
+def collect_result(path, close):
+    run = load_run(path)
     result, written = read_result(path)
     if written == run.get("previous_result"):
         result = None
@@ -423,14 +465,14 @@ def collect(args):
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
-    if args.close:
+    if close:
         if not result or result["status"] not in {"done", "merged"} or not (finished or status == "done"):
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
         hc_json("rm", run["address"])
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "closed": args.close, "screen_reads": run["screen_reads"]},
+                      "result": result, "closed": close, "screen_reads": run["screen_reads"]},
                      ensure_ascii=False))
 
 

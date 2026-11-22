@@ -237,7 +237,8 @@ nothing is stashed. Anything that fails a check stays; report it instead.
 
 Reuse the Codex session and worktree for the next authorized phase with
 `dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`.
-Point to the existing contract and validation evidence. Reuse evidence only when the cycle
+Keep using the same receipt for send and close, which are serialized. Point to the existing
+contract and validation evidence. Reuse evidence only when the cycle
 confirms it applies to the current candidate. Preserve the original authority and record any
 new verified user grants in that contract. For a Claude slash-only phase, launch again with
 the command as the first message and the existing contract and worktree as handoff evidence.

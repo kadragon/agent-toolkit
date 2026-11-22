@@ -15,6 +15,7 @@ from dispatch import (
     collect,
     free_name,
     launch,
+    lock_run,
     send,
     tallest,
     terminal_name,
@@ -104,12 +105,12 @@ class DispatchReceiptTests(unittest.TestCase):
 
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
-        for terminals, reason in (([], "not live"),
-                                  ([{"address": "t6", "state": "live", "cwd": Path.cwd().parent}],
-                                   "outside this directory")):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
+        for replies, reason in (([{"terminals": []}], "not live"),
+                                ([{"terminals": [owner]}, owner], "outside this directory")):
             with (
                 self.subTest(reason=reason),
-                patch("dispatch.hc_json", return_value={"terminals": terminals}),
+                patch("dispatch.hc_json", side_effect=replies),
                 patch("dispatch.subprocess.run") as run,
             ):
                 with self.assertRaisesRegex(SystemExit, reason):
@@ -119,9 +120,10 @@ class DispatchReceiptTests(unittest.TestCase):
     def test_launch_uses_quiet_child_and_emits_receipt_before_send(self):
         with tempfile.TemporaryDirectory() as directory:
             args = self.launch_args(directory)
-            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
+            live_owner = {**owner, "foreground": {"cwd": str(Path.cwd())}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
-            calls = [{"terminals": [owner]}, self.TERMINAL]
+            calls = [{"terminals": [owner]}, live_owner, self.TERMINAL]
             with (
                 patch("dispatch.hc_json", side_effect=calls),
                 patch("dispatch.subprocess.run", return_value=child) as run,
@@ -138,6 +140,21 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertEqual(receipt["created_ms"], 50)
             self.assertFalse(receipt["sent"])
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
+
+    def test_claude_parent_mismatch_reports_that_launch_may_have_delivered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+            child = {**self.TERMINAL, "parent": "t5"}
+            args = self.launch_args(directory, cli="claude", task=None, message="/dev:task-next")
+            with (
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, child]),
+                patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(child))) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                patch("builtins.print"),
+            ):
+                with self.assertRaisesRegex(SystemExit, "Claude may have received its launch prompt"):
+                    launch(args)
+                self.assertEqual(run.call_args.args[0][-1], "/dev:task-next")
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -176,6 +193,20 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "no final result"):
                     collect(SimpleNamespace(run=receipt, close=True))
                 hc.assert_called_once_with("get", "t7")
+
+    def test_receipt_operations_do_not_overlap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            follow_up = SimpleNamespace(address="t7", message="next", run=receipt, continuation=True)
+            close = SimpleNamespace(run=receipt, close=True)
+            with lock_run(receipt), patch("dispatch.hc_json") as hc:
+                for operation, args in ((send, follow_up), (collect, close)):
+                    with self.subTest(operation=operation.__name__):
+                        with self.assertRaisesRegex(SystemExit, "cannot lock dispatch receipt"):
+                            operation(args)
+                hc.assert_not_called()
+            with lock_run(receipt):
+                pass
 
 
 class PickTests(unittest.TestCase):
@@ -410,6 +441,26 @@ class CodexSendTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
                     send(args)
             self.assertEqual(hc.call_count, 3)
+
+    def test_continuation_rechecks_that_the_child_still_has_the_same_completed_turn(self):
+        owner = DispatchReceiptTests.TERMINAL
+        done = {**owner, "turn": 1, "status": {"state": "done"}}
+        working = {**owner, "turn": 2, "status": {"state": "working"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            saved = {**DispatchReceiptTests.RECEIPT, "sent": True}
+            receipt.write_text(json.dumps(saved), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="next", run=receipt, continuation=True)
+            with patch("dispatch.hc_json", side_effect=[self.screen(self.READY), done, working]) as hc:
+                with self.assertRaisesRegex(SystemExit, "started another turn"):
+                    send(args)
+            self.assertNotIn("send", [entry.args[0] for entry in hc.call_args_list])
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), saved)
+            with patch("dispatch.hc_json", side_effect=[
+                self.screen(self.READY), done, done, {}, self.screen(self.READY), working,
+            ]) as hc, patch("builtins.print"):
+                send(args)
+            self.assertEqual([entry.args[0] for entry in hc.call_args_list].count("send"), 1)
 
 
 class QuotaTests(unittest.TestCase):

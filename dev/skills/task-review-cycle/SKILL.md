@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.9.1
+version: 1.10.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -108,7 +108,7 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 `pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
-Apply `references/review-sources.md` → *Data-sharing policy* before launching any reviewer.
+Apply `references/review-sources.md` → *Data-sharing policy* to every primary, panel, and fallback reviewer.
 **Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
@@ -116,6 +116,8 @@ evidence per the shared cycle; execute missing/stale required checks before revi
 absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
 
 ```bash
+CLAUDE_ALLOWED="<true only when the policy permits Claude>"
+[[ "$CLAUDE_ALLOWED" == true ]] || { echo '{"code_review_slot":"policy-excluded"}'; exit 0; }
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 BASE_BRANCH="<from Setup>"
 EFFORT="<high when the latest floor run's SECURITY_HIT was non-empty or the risk is material, else empty>"
@@ -129,15 +131,13 @@ bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTR
   || echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh exited non-zero"}'
 ```
 
-It grades requirements and code quality as separate axes in one read-only pass, printing the
-findings array on stdout. It never runs the lint/test command (`--permission-mode plan`); it grades
-an execution-based criterion against the evidence line above, silent on one when that line is absent.
+It returns requirements and code findings on stdout in one read-only pass. In plan mode it
+grades execution-based criteria only when given the lint/test evidence above.
 
-`CLAUDE_CLI_AVAILABLE` `false`, the `code_review_slot` sentinel, or the 600s Bash timeout → record
-`Reviewers Skipped: <reason>`; on lite run its fallback first (*Lite reviewer*), else review the
-diff against the contract inline. The reviewer also emits `"source":"comments"` findings
-(`references/comment-rules.md`); when it did not run, apply that file inline, tagged the same. Inline
-review and lite's inline contract grading (Codex as reviewer) are self-grading: disclose it; neither satisfies a policy requiring independence.
+`CLAUDE_CLI_AVAILABLE` `false`, a `code_review_slot` sentinel, or timeout → record `Reviewers Skipped: <reason>`.
+Use the permitted fallback on lite, or grade the diff against the contract inline. Apply
+`references/comment-rules.md` inline when Claude did not run, tagged `"source":"comments"`.
+Disclose inline grading as self-grading and satisfy any required independence with an allowed reviewer.
 
 **Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
 `references/review-sources.md` in the turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
