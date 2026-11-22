@@ -222,12 +222,13 @@ def first_prompt(cli, message, handoff):
     if handoff["work_kind"] != "standalone" and message.split(maxsplit=1)[0] not in commands:
         print(f"warning: {handoff['work_kind']} work should start with {' or '.join(commands)}; "
               "this first message may skip the task cycle", file=sys.stderr)
-    return (f"{message}\n\nHandoff metadata:\n"
+    fields = {"Original user request (verbatim)": handoff["request"],
+              "Assigned unit": handoff["unit"],
+              "Git limits": handoff["git_limits"]}
+    return (f"{message}\n\nHandoff metadata (JSON):\n"
             "Task-cycle mode and flags come exclusively from the invocation above.\n"
             "<dispatch-handoff>\n"
-            f"- Original user request (verbatim): {handoff['request']}\n"
-            f"- Assigned unit: {handoff['unit']}\n"
-            f"- Git limits: {handoff['git_limits']}\n"
+            f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
             "</dispatch-handoff>")
 
 

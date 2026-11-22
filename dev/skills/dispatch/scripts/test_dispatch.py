@@ -18,6 +18,7 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    report_instruction,
     send,
     tallest,
     terminal_name,
@@ -100,15 +101,13 @@ class ChildArgvTests(unittest.TestCase):
 class DispatchReceiptTests(unittest.TestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
-    HANDOFF = {"work_kind": "queue", "request": "큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.",
-               "unit": "First queued item", "git_limits": " pr-only\nDon't merge. "}
-    BLOCK = ("\n\nHandoff metadata:\n"
+    FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
+              "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+    HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
+               "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
+    BLOCK = ("\n\nHandoff metadata (JSON):\n"
              "Task-cycle mode and flags come exclusively from the invocation above.\n"
-             "<dispatch-handoff>\n"
-             "- Original user request (verbatim): 큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.\n"
-             "- Assigned unit: First queued item\n"
-             "- Git limits:  pr-only\nDon't merge. \n"
-             "</dispatch-handoff>")
+             f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",
@@ -154,6 +153,8 @@ class DispatchReceiptTests(unittest.TestCase):
                 payload = json.loads(stdout.getvalue())
                 prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
                 self.assertEqual(prompt, message + self.BLOCK)
+                fields = prompt.split("<dispatch-handoff>\n", 1)[1].removesuffix("\n</dispatch-handoff>")
+                self.assertEqual(json.loads(fields), self.FIELDS)
                 self.assertEqual(bool(stderr.getvalue()), warns)
                 if warns:
                     self.assertIn("warning:", stderr.getvalue())
@@ -490,7 +491,7 @@ class CodexSendTests(unittest.TestCase):
                 send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
-    def test_owned_startup_turn_one_without_a_prior_task_is_accepted(self):
+    def test_owned_startup_turn_one_preserves_multiline_handoff_in_expanded_paste(self):
         startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
         owner = DispatchReceiptTests.TERMINAL
         idle = {**owner, "turn": 1, "status": {"state": "idle"}}
@@ -500,14 +501,18 @@ class CodexSendTests(unittest.TestCase):
             run = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            expected = "a task" + DispatchReceiptTests.BLOCK + "\n\n" + report_instruction(
+                receipt.resolve().with_name("result.json"))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(self.READY), busy,
             ]) as hc, redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO):
                 send(args)
             prompt = next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send")
-            self.assertTrue(prompt.startswith("a task" + DispatchReceiptTests.BLOCK + "\n\n"))
-            self.assertIn("result.json", prompt)
+            rows = prompt.replace("\n", "\n  ")
+            self.assertEqual(codex_screen(f"› {rows}\n\n  GPT-6.2-Sol default · ~/repo", sent_message=prompt),
+                             "paste")
+            self.assertEqual(prompt, expected)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):
@@ -563,7 +568,7 @@ class CodexSendTests(unittest.TestCase):
                 send(args)
             prompts = [entry.args[-1] for entry in hc.call_args_list if entry.args[0] == "send"]
             self.assertEqual(len(prompts), 1)
-            self.assertNotIn("Handoff metadata:", prompts[0])
+            self.assertNotIn("<dispatch-handoff>", prompts[0])
 
 
 class QuotaTests(unittest.TestCase):

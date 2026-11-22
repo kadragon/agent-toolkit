@@ -50,7 +50,7 @@ Separate PRs require permission for each PR. Report any unsupported request layo
 Forward only workflows the human requested. In separate-worktree prompts, add
 `Dispatch mode: parallel-worktree` and mark an added `--tree` as isolation only.
 Children verify authority before Git writes or nested delegation and stop separate PRs at ready
-before base merge.
+before base merge. Hold if the CLI cannot carry the handoff fields.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -139,8 +139,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 ```
 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
-in step 2. The launcher rejects missing or blank handoff fields and appends their values to the
-first message. Pass `--git-limits='not specified'` when the user gave no limits. This conveys no
+in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
+as JSON strings. Pass `--git-limits='not specified'` when the user gave no limits. This conveys no
 Git grant. Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
 
