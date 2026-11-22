@@ -101,12 +101,14 @@ class DispatchReceiptTests(unittest.TestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     HANDOFF = {"work_kind": "queue", "request": "큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.",
-               "unit": "First queued item", "git_limits": " pr-only\nStop before merge. "}
+               "unit": "First queued item", "git_limits": " pr-only\nDon't merge. "}
     BLOCK = ("\n\nHandoff metadata:\n"
-             "Select the task-cycle mode and flags from the invocation above.\n"
+             "Task-cycle mode and flags come exclusively from the invocation above.\n"
+             "<dispatch-handoff>\n"
              "- Original user request (verbatim): 큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.\n"
              "- Assigned unit: First queued item\n"
-             "- Git limits:  pr-only\nStop before merge. ")
+             "- Git limits:  pr-only\nDon't merge. \n"
+             "</dispatch-handoff>")
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",

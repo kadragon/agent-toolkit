@@ -223,10 +223,12 @@ def first_prompt(cli, message, handoff):
         print(f"warning: {handoff['work_kind']} work should start with {' or '.join(commands)}; "
               "this first message may skip the task cycle", file=sys.stderr)
     return (f"{message}\n\nHandoff metadata:\n"
-            "Select the task-cycle mode and flags from the invocation above.\n"
+            "Task-cycle mode and flags come exclusively from the invocation above.\n"
+            "<dispatch-handoff>\n"
             f"- Original user request (verbatim): {handoff['request']}\n"
             f"- Assigned unit: {handoff['unit']}\n"
-            f"- Git limits: {handoff['git_limits']}")
+            f"- Git limits: {handoff['git_limits']}\n"
+            "</dispatch-handoff>")
 
 
 def launch(args):
