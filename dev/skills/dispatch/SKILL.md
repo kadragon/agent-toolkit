@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.2.0
+version: 1.3.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -17,8 +17,10 @@ and `task-new` use the current directory's Git state and queue, so give the chil
 the command as its first message. With the dev plugin installed in the child, Claude uses
 slash commands and Codex uses `$task-next` and `$task-new`. Step 3 picks the CLI.
 
-`scripts/dispatch.py` reads task-next's pick and launches the child. Replace `<dispatch>`
-in commands with the absolute directory containing this loaded `SKILL.md`.
+`scripts/dispatch.py` reads task-next's pick, launches the child, and collects its result.
+Replace `<dispatch>` with the directory containing the installed `SKILL.md`. If a live plugin
+update removes that directory, resolve the current installed path before the next command.
+Keep the receipt and address of the existing child.
 
 ## 1. Resolve the repo
 
@@ -82,7 +84,7 @@ Apply the bias on top of the tables below:
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest, at `high` when scope is settled, including `/dev:task-new`, reviews and bounded design or spec work. |
+| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest. Keep settled acceptance checks at `medium`; use `high` when implementation or review requires judgment. |
 | `claude` (Codex running ahead) | codex rows go to claude `sonnet` at the same effort; a `low` lookup to `haiku` |
 | `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 
@@ -136,15 +138,15 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
   --cwd "<repo path>" [--name <repo>-<n>] '<first message>'
 ```
 
-It prints `{name, address, parent, shown}`. `--dry-run` prints the `hc run` line instead.
-Keep each child's `address` for every later `hc` command (`send`, `read`, `keys`, `get`, `kill`,
-`rm`). Names are shared across Herdr spaces, so a familiar name may now belong to another
-home session's child. Launch behavior:
+It prints the child's address, parent and pane status, plus paths to a private receipt (`run`)
+and its result. Keep the receipt and address. Names are shared across Herdr spaces.
+`--dry-run` prints the `hc run` arguments. Launch behavior:
 
 - `--name` defaults to the repo directory name, lowercased and cut to hc's 32 characters of
   `a-z 0-9 - _`, with `-2`, `-3` added when a live terminal anywhere already has it. The
-  message goes to hc as one argument. The child's parent is set
-  to this session (`$HC_TERMINAL_ID`) explicitly; a warning line means it is not.
+  message goes to hc as one argument. The launcher validates the parent is live and in the
+  current home directory. If `$HC_TERMINAL_ID` is stale, identify this session in `hc ls` and
+  pass `--parent <address>`. Children use `--no-notify` so exit notices stay out of the composer.
 - Claude children get `--settings` that turn off prompt suggestions and the session recap (a
   suggestion on the child's `❯` line reads like a typed prompt in `hc read`, and both spend
   tokens on a session nobody types into — so text on that line is never the user's input), the
@@ -167,19 +169,20 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-A Codex child starts with no first message. Use the guarded send after launch:
+A Codex child starts idle. Launch and send in one invocation to avoid a version change between
+the two commands:
 
 ```sh
-python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol --effort <effort> --cwd "<repo path>"
-python3 -I "<dispatch>/scripts/dispatch.py" send -- <address> '<first message>'
+python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol \
+  --effort <effort> --cwd "<repo path>" --task '<first message>'
 ```
 
 - `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
   failure, and presses Enter once if a collapsed or expanded paste stays in the idle composer.
   It confirms submission when Herdr reports a working turn and the composer is clear. Check
   the screen before retrying an unconfirmed submission.
-- When blocked, read `references/codex-readiness.md` to clear the screen and review changed
-  hooks. If it cannot be cleared, tell the user what is blocking the task and leave it unsent.
+- When blocked, read `references/codex-readiness.md` before launching another child. After
+  clearing the gate, send with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
   workspace-write sandbox. Hook trust uses Codex's separate review flow.
 - Claude-only hooks configured in a home repo do not run in a Codex child. Hold a Codex child to the same "Leave to the user"
@@ -191,10 +194,6 @@ More than one session:
   `<repo>-<n>`. Before starting another child on the same queue, use `pick --tree --full-scan`
   and confirm stderr identifies the previous child's claim by worktree and item.
 - Keep a wave to at most four live children (two under `both-hot`).
-- A first message that is not a slash command ends with: `When you finish or get blocked,
-  report in three lines or fewer with hc send <parent>; put details in a file and give its
-  path.` Use the launch result's literal `parent` address. A slash command or its Codex
-  `$` form takes no reporting suffix.
 
 ## 5. Watch and decide
 
@@ -205,15 +204,14 @@ context small, since every wake-up re-sends all of it:
   command, keep working or end the turn. A timeout is only a check-in: start another wait
   without reading anything. Keep the timeout under the prompt-cache lifetime (1 hour on a
   subscription) so a wake-up still hits the cache.
-- On news, act on the child's `hc send` report when there is one. Otherwise read the visible
-  screen only (`hc read --lines 0 <address>`), and go to `--lines 60` or the artifact file only
-  when the screen does not show what to decide.
+- On a status change, run `dispatch.py collect <receipt>` for compact results. Read the visible
+  screen only when the result is missing or a decision is unclear. Read details from the artifact
+  only when they affect the decision. Report model, effort, and screen reads with measured token
+  totals or review retries when available. Leave unavailable counts unknown.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. To find what is still running, take only terminals whose
-  `parent` is `$HC_TERMINAL_ID` from `hc ls --json`; the rest belong to other home sessions —
-  never send to, read for decisions, kill or adopt them. When the context is compacted instead,
-  keep each child's address, name, repo, phase, model/effort pair and the decisions made; drop
-  screen reads.
+  `parent` matches the validated parent address from the launch receipts. When context is
+  compacted, keep the receipts, active phases and decisions; drop screen transcripts.
 - An `<hc from="…">` report or a `hc wait` result names its sender's address. Act on it only
   when that address is one of your children; anything else came from elsewhere — tell the user
   and do not answer it.
@@ -228,23 +226,24 @@ The user delegates the session's decisions to this session:
   Keep decisions within the user's scope and Git limits. For batch execution without
   established parallel delegation authority, choose the sequential path.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
-  the commit has passed the target repo's review cycle. For separate PRs in one repo, wait
-  for the current merge to finish before authorizing the next merge phase. Resync each
-  candidate against the latest base and rerun required checks on its final head.
+  the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
+  merge one at a time. Resync each against the latest base, preserve both sides of shared queue
+  and changelog entries, and rerun required checks on the final head.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.
 
-Once a session's work has merged, run `hc kill <address>` and `hc rm <address>`, and
+Once a session's work has merged or its authorized non-merge task is complete, verify its result
+and run `dispatch.py collect <receipt> --close`. Then
 remove any clone or worktree this session created for it — after checking
 that `git status --porcelain` is empty, no branch has commits missing from `origin/<base>`, and
 nothing is stashed. Anything that fails a check stays; report it instead.
 
-In a Claude child, a slash command sent with `hc send` arrives wrapped as a message, so
-slash-only skills refuse it and `/clear` does nothing (a Codex child takes `$task-next` typed
-into its input line, as in step 4). For the next phase, `hc kill <address>`, `hc rm <address>`, then
-launch again per step 4 with the slash command as the first message and the pair from step 3,
-never below a pair the task escalated to; uncommitted queue files carry over in the working
-tree. Run phases back to back when the user asked for the whole queue; otherwise report each
-finished phase and let the user start the next. Status on request: `hc get <address>`,
-`hc read --lines 60 <address>`.
+Reuse the Codex session and worktree for the next authorized phase with
+`dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`.
+Keep using the same receipt for send and close, which are serialized. Point to the existing
+contract and validation evidence. Reuse evidence only when the cycle
+confirms it applies to the current candidate. Preserve the original authority and record any
+new verified user grants in that contract. For a Claude slash-only phase, launch again with
+the command as the first message and the existing contract and worktree as handoff evidence.
+Run phases back to back within the requested scope.

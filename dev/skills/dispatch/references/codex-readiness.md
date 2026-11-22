@@ -23,4 +23,12 @@ cannot be verified, approval is unavailable, or a warning remains, report the bl
 withhold the task. For an unconfirmed send, inspect whether the task already started before
 retrying.
 
+If a marketplace update replaced the installed directory, run `send --run <receipt>` using
+the current installed script. A receipt flagged unconfirmed blocks another scripted send.
+Inspect the transcript and result file first. If the task started, let the existing session
+finish. If the text is still in its composer, confirm that it is the intended task and submit
+it once there. Relaunch only after verifying that the task never started and preserving any
+changes. A normal startup can report turn 1, so the guarded sender also checks that the
+receipt belongs to the child and that the startup screen has no previous prompt.
+
 Codex documents [hook trust and the /hooks browser](https://learn.chatgpt.com/docs/hooks).
