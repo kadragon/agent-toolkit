@@ -189,11 +189,8 @@ Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no ed
 
 ## Step 6: Merge
 
-PR-only: reclaim late panel results, finish checks, report the reviewed PR, stop before merge.
-Unknown merge authority keeps the PR and archive. Never retire an unmerged cycle.
-If the dispatch handoff requires a pre-merge stop, finish the same PR checks and report it
-as ready. Resume the merge in the authorized merge phase, using the saved contract and
-rechecking the candidate against the current base.
+PR-only or dispatch pre-merge stop: reclaim late panel results, finish checks, and report the PR
+ready. Keep the archive until merge. Resume only within established authority on the latest base.
 
 **Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
 re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route

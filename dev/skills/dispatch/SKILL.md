@@ -28,9 +28,8 @@ missing → clone from that URL, or stop when the line says "Local only".
 
 ## 2. Choose the session layout and first message
 
-For independent requests across repos, use one child per repo, applying this table to each.
-For work that depends on another repo's result, wait for that result before launch. Keep
-the live-child limits in step 4.
+Use one child per repo. Launch independent repos concurrently within step 4's limit.
+For dependencies, wait for the preceding repo's result.
 
 | Same-repo request | First message |
 |-------------------|---------------|
@@ -41,24 +40,16 @@ the live-child limits in step 4.
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Use the separate-worktree rows when the user requested separate worktree runs, each unit
-has disjoint edits and independently verifiable scope, and the child dev plugin supports
-concurrent worktrees (4.11.52 or later). Give a new-work child exactly one clear,
-single-cycle unit. Keep uncertain, dependent, planning-only, or overlapping work in one
-session. A separate-PR request requires permission for each PR; a one-PR request stays
-with a single session. If the user's requested layout cannot be used, explain why before
-changing its scope or PR shape.
+Separate worktrees require user direction, independently verifiable units with disjoint edits,
+and dev plugin 4.11.52 or later. Give each new-work child one clear, single-cycle unit.
+Keep uncertain, dependent, planning-only, or overlapping work in one session.
+Separate PRs require permission for each PR. Report any unsupported request layout.
 
-Forward task commands as a child session's first message only for a workflow the human
-actually requested. In Codex use `$task-next` or `$task-new`, with the same arguments.
-Carry a dispatch handoff in the task arguments, with these fields kept distinct:
-original user request (verbatim), assigned unit, and user Git limits (verbatim).
-Mark any dispatcher-added `--tree` as isolation only. A child must establish its authority
-from the original request before any Git write and verify user direction before nested delegation.
-When preparing independent PRs, instruct every child to report ready and stop before
-base merge; pass the actual permission for each later phase separately. If the CLI
-cannot preserve the origin, scope, and limits through the task command, hold the
-workflow and report what could not be carried. Forward standalone requests as plain text.
+Forward only task workflows the human requested. Codex uses `$task-next` or `$task-new`.
+In the task arguments include the verbatim user request, assigned unit, and verbatim Git limits.
+Mark dispatcher-added `--tree` as isolation only. The child verifies original authority
+before Git writes or nested delegation. Separate PR children stop at ready before base merge.
+If the CLI cannot carry the handoff, hold the workflow and report the missing fields.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -120,17 +111,12 @@ Effort — ambiguity and risk:
 | `high` | ordinary work that requires judgment about implementation or review within its scope |
 | `xhigh` | unknown-cause debugging, unresolved design or requirements, or a costly mistake |
 
-- Judge the scope from the files, design, or constraints the request fixes. For
-  `/dev:task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`.
-  Add `--full-scan` for `--all`, a known unattended run, or an unclear selection.
-  Add `--tree` for a worktree run; it reads the local `origin/HEAD` without fetching,
-  so the child's fetched base can differ. Read stderr for selector diagnostics and read
-  the criteria for the relevant candidates. Size for the hardest eligible unit within
-  the requested selection or, if selection is open, the hardest eligible unit shown.
-  For an unattended single-pick use the first full-scan result as the estimate. The
-  child owns final selection and unattended limits. Answer a selection question using
-  the child's displayed titles and numbers, since fast and full-scan order can differ.
-  If the selected scope exceeds the estimate, use the escalation procedure.
+- For `task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`.
+  Add `--full-scan` for batches, known unattended runs, or an unclear selection. Add
+  `--tree` for worktrees; it reads local `origin/HEAD` without fetching. Read stderr and
+  the relevant criteria. Size for the hardest eligible candidate in scope, or estimate an
+  unattended single run from the first full-scan result. The child owns final selection
+  and unattended limits. Use its displayed titles and numbers, and escalate when needed.
 - Codex uses `xhigh` on the Codex-bias escalation ladder or when the user selects it.
 - Effort is fixed per session and the model already scales its thinking per turn within it,
   so set it once at launch. It changes between phases, since each phase is a new launch.
@@ -202,10 +188,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" send -- <address> '<first message>'
 More than one session:
 
 - At most one task session per repo uses the main checkout. Name concurrent children
-  `<repo>-<n>`. Before starting another child on the same queue, run `pick --tree --full-scan`
-  and confirm stderr identifies the previous child's claim by worktree and item. A worktree
-  directory alone is insufficient. If the earlier child blocks before claiming, resolve its
-  blocker before starting a second child for that queue.
+  `<repo>-<n>`. Before starting another child on the same queue, use `pick --tree --full-scan`
+  and confirm stderr identifies the previous child's claim by worktree and item.
 - Keep a wave to at most four live children (two under `both-hot`).
 - A first message that is not a slash command ends with: `When you finish or get blocked,
   report in three lines or fewer with hc send <parent>; put details in a file and give its
