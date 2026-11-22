@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.3.0
+version: 1.3.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -47,11 +47,10 @@ new-work child one clear, single-cycle unit and each queue child an exact assign
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
 Separate PRs require permission for each PR. Report any unsupported request layout.
 
-Forward only workflows the human requested. Codex uses `$task-next` or `$task-new`.
-Include the verbatim user request, assigned unit and verbatim Git limits as handoff metadata.
-Set `Dispatch mode: parallel-worktree` for separate-worktree rows; mark an added `--tree`
-as isolation only. Children verify authority before Git writes or nested delegation and
-stop separate PRs at ready before base merge. Hold if the CLI cannot carry these fields.
+Forward only workflows the human requested. In separate-worktree prompts, add
+`Dispatch mode: parallel-worktree` and mark an added `--tree` as isolation only.
+Children verify authority before Git writes or nested delegation and stop separate PRs at ready
+before base merge.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -135,24 +134,27 @@ both share the checkout: say so and stop, unless the new one runs `--tree` (belo
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
-  --cwd "<repo path>" [--name <repo>-<n>] '<first message>'
+  --cwd "<repo path>" --work-kind <kind> --request='<verbatim user request>' \
+  --unit='<assigned unit>' --git-limits='<verbatim Git limits>' '<first message>'
 ```
 
-It prints the child's address, parent and pane status, plus paths to a private receipt (`run`)
-and its result. Keep the receipt and address. Names are shared across Herdr spaces.
-`--dry-run` prints the `hc run` arguments. Launch behavior:
+Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
+in step 2. The launcher rejects missing or blank handoff fields and appends their values to the
+first message. Pass `--git-limits='not specified'` when the user gave no limits. This conveys no
+Git grant. Read stderr and correct any mismatch between queue/new work and the platform's
+task-cycle commands.
+
+Keep the printed child address and receipt (`run`) with its result path. `--dry-run` previews
+the `hc run` arguments and any Codex `--task` prompt. Launch behavior:
 
 - `--name` defaults to the repo directory name, lowercased and cut to hc's 32 characters of
   `a-z 0-9 - _`, with `-2`, `-3` added when a live terminal anywhere already has it. The
   message goes to hc as one argument. The launcher validates the parent is live and in the
   current home directory. If `$HC_TERMINAL_ID` is stale, identify this session in `hc ls` and
   pass `--parent <address>`. Children use `--no-notify` so exit notices stay out of the composer.
-- Claude children get `--settings` that turn off prompt suggestions and the session recap (a
-  suggestion on the child's `❯` line reads like a typed prompt in `hc read`, and both spend
-  tokens on a session nobody types into — so text on that line is never the user's input), the
-  built-in "you should know" plugin (its `✦ Heads up` card waits for a key that would go to the
-  session), and the claude.ai connectors (about 2.3k tokens per request a repo session never
-  uses). Pass `--keep-connectors` when the request needs one.
+- Claude settings disable prompt suggestions (they look like typed input in `hc read`), the
+  recap, the built-in "you should know" plugin (its card intercepts keys), and claude.ai
+  connectors. Pass `--keep-connectors` when the request needs one.
 - Inside the Herdr app (`$HC_TERMINAL_ID` set) it keeps the child's pane beside this session:
   home on the left, children in one column on the right, each new one splitting the tallest
   child pane, so 2 and 4 children get equal heights and 3 get ½ ¼ ¼. The pane goes beside
@@ -174,19 +176,19 @@ the two commands:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol \
-  --effort <effort> --cwd "<repo path>" --task '<first message>'
+  --effort <effort> --cwd "<repo path>" --work-kind <kind> --request='<verbatim user request>' \
+  --unit='<assigned unit>' --git-limits='<verbatim Git limits>' --task '<first message>'
 ```
 
 - `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
   failure, and presses Enter once if a collapsed or expanded paste stays in the idle composer.
   It confirms submission when Herdr reports a working turn and the composer is clear. Check
   the screen before retrying an unconfirmed submission.
-- When blocked, read `references/codex-readiness.md` before launching another child. After
-  clearing the gate, send with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+- When blocked, read `references/codex-readiness.md`. After clearing the gate, retry with
+  `dispatch.py send --run <receipt> -- <address> '<first message>'` to reuse its handoff fields.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
   workspace-write sandbox. Hook trust uses Codex's separate review flow.
-- Claude-only hooks configured in a home repo do not run in a Codex child. Hold a Codex child to the same "Leave to the user"
-  list in step 5.
+- Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
 
 More than one session:
 
@@ -245,5 +247,4 @@ Keep using the same receipt for send and close, which are serialized. Point to t
 contract and validation evidence. Reuse evidence only when the cycle
 confirms it applies to the current candidate. Preserve the original authority and record any
 new verified user grants in that contract. For a Claude slash-only phase, launch again with
-the command as the first message and the existing contract and worktree as handoff evidence.
-Run phases back to back within the requested scope.
+the command first and include the existing contract and worktree. Run phases back to back.

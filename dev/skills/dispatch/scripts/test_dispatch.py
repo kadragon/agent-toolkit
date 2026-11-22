@@ -5,6 +5,8 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, patch
@@ -98,12 +100,62 @@ class ChildArgvTests(unittest.TestCase):
 class DispatchReceiptTests(unittest.TestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
+    HANDOFF = {"work_kind": "queue", "request": "둘다 진행해줘\n다른 에이전트는 띄우지 마.",
+               "unit": "First queued item", "git_limits": " pr-only\nStop before merge. "}
+    BLOCK = ("\n\nHandoff metadata:\n"
+             "- Original user request (verbatim): 둘다 진행해줘\n다른 에이전트는 띄우지 마.\n"
+             "- Assigned unit: First queued item\n"
+             "- Git limits:  pr-only\nStop before merge. ")
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",
-                    effort="medium", task="a task", message=None, keep_connectors=False,
-                    dry_run=False, no_show=True)
+                    effort="medium", task="$task-next", message=None, keep_connectors=False,
+                    dry_run=False, no_show=True, **self.HANDOFF)
         return SimpleNamespace(**(args | overrides))
+
+    def test_missing_or_blank_handoff_fields_stop_launch(self):
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+             "--cli", "claude", "--model", "opus", "--effort", "high", "--cwd", ".",
+             "--work-kind", "queue", "--unit", "First queued item", "--git-limits", "pr-only",
+             "/dev:task-next", "--dry-run"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("required: --request", result.stderr)
+        for field in ("request", "unit", "git_limits"):
+            with self.subTest(field=field), patch("dispatch.hc_json") as hc:
+                with self.assertRaisesRegex(SystemExit, "--" + field.replace("_", "-")):
+                    launch(self.launch_args(Path.cwd(), **{field: " \n "}))
+                hc.assert_not_called()
+
+    def test_dry_run_keeps_the_task_prefix_and_warns_for_free_text_or_wrong_cli(self):
+        for cli, kind, message, warns in (
+            ("claude", "queue", "/dev:task-next --all", False),
+            ("claude", "new", "/dev:task-new\nUpdate docs", False),
+            ("claude", "queue", "대기열 작업을 진행해줘.", True),
+            ("claude", "new", "$task-new Update docs", True),
+            ("codex", "queue", "$task-next --tree", False),
+            ("codex", "new", "$task-new Update docs", False),
+            ("codex", "new", "Update docs\n$task-new", True),
+            ("codex", "queue", "$task-next-extra", True),
+            ("codex", "standalone", "Review the pending changes", False),
+        ):
+            with self.subTest(cli=cli, kind=kind, message=message):
+                args = self.launch_args(Path.cwd(), cli=cli, work_kind=kind, dry_run=True,
+                                        message=message if cli == "claude" else None,
+                                        task=message if cli == "codex" else None)
+                stderr = StringIO()
+                with redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO) as stdout:
+                    launch(args)
+                payload = json.loads(stdout.getvalue())
+                prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
+                self.assertEqual(prompt, message + self.BLOCK)
+                self.assertEqual(bool(stderr.getvalue()), warns)
+                if warns:
+                    self.assertIn("warning:", stderr.getvalue())
+                    self.assertIn("task-next", stderr.getvalue())
+                    self.assertIn("task-new", stderr.getvalue())
 
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
@@ -138,10 +190,13 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertIn("--no-notify", argv)
             self.assertEqual(argv[argv.index("--parent") + 1], "t6")
             payload = json.loads(output.call_args.args[0])
+            self.assertNotIn("handoff", payload)
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
             self.assertFalse(receipt["sent"])
+            self.assertEqual(receipt["handoff"], self.HANDOFF)
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
+            self.assertEqual(submit.call_args.args[0].message, "$task-next")
 
     def test_claude_parent_mismatch_reports_that_launch_may_have_delivered(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -156,7 +211,7 @@ class DispatchReceiptTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(SystemExit, "Claude may have received its launch prompt"):
                     launch(args)
-                self.assertEqual(run.call_args.args[0][-1], "/dev:task-next")
+                self.assertEqual(run.call_args.args[0][-1], "/dev:task-next" + self.BLOCK)
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -437,13 +492,18 @@ class CodexSendTests(unittest.TestCase):
         busy = {**idle, "turn": 2, "status": {"state": "working"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(self.READY), busy,
-            ]) as hc, patch("builtins.print"):
+            ]) as hc, redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO):
                 send(args)
-            self.assertIn("result.json", next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send"))
+            prompt = next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send")
+            self.assertTrue(prompt.startswith("a task" + DispatchReceiptTests.BLOCK + "\n\n"))
+            self.assertIn("result.json", prompt)
+            self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):
                 send(args)
@@ -453,8 +513,9 @@ class CodexSendTests(unittest.TestCase):
         idle = {**DispatchReceiptTests.TERMINAL, "turn": 1, "status": {"state": "idle"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
-            args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="$task-next", run=receipt)
             with patch("dispatch.hc_json", side_effect=[startup, idle, startup]) as hc:
                 with self.assertRaisesRegex(SystemExit, "already started a turn"):
                     send(args)
@@ -467,12 +528,15 @@ class CodexSendTests(unittest.TestCase):
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            with patch("dispatch.hc_json", side_effect=[self.screen(self.READY), idle, OSError()]) as hc:
+            stderr = StringIO()
+            with (patch("dispatch.hc_json", side_effect=[self.screen(self.READY), idle, OSError()]) as hc,
+                  redirect_stderr(stderr)):
                 with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
                     send(args)
                 with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
                     send(args)
             self.assertEqual(hc.call_count, 3)
+            self.assertIn("warning: legacy receipt has no handoff metadata", stderr.getvalue())
 
     def test_continuation_rechecks_that_the_child_still_has_the_same_completed_turn(self):
         owner = DispatchReceiptTests.TERMINAL
@@ -480,7 +544,7 @@ class CodexSendTests(unittest.TestCase):
         working = {**owner, "turn": 2, "status": {"state": "working"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            saved = {**DispatchReceiptTests.RECEIPT, "sent": True}
+            saved = {**DispatchReceiptTests.RECEIPT, "sent": True, "handoff": DispatchReceiptTests.HANDOFF}
             receipt.write_text(json.dumps(saved), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="next", run=receipt, continuation=True)
             with patch("dispatch.hc_json", side_effect=[self.screen(self.READY), done, working]) as hc:
@@ -492,7 +556,9 @@ class CodexSendTests(unittest.TestCase):
                 self.screen(self.READY), done, done, {}, self.screen(self.READY), working,
             ]) as hc, patch("builtins.print"):
                 send(args)
-            self.assertEqual([entry.args[0] for entry in hc.call_args_list].count("send"), 1)
+            prompts = [entry.args[-1] for entry in hc.call_args_list if entry.args[0] == "send"]
+            self.assertEqual(len(prompts), 1)
+            self.assertNotIn("Handoff metadata:", prompts[0])
 
 
 class QuotaTests(unittest.TestCase):
