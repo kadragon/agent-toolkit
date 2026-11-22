@@ -66,7 +66,9 @@ class ChildArgvTests(unittest.TestCase):
             child_argv("codex", "gpt-6.2-sol", "high", "$task-next", False)
 
     def test_claude_passes_message_as_one_arg_and_optionally_keeps_connectors(self):
-        message = '/dev:task-new Keep "quotes"\nand a newline'
+        message = ('/dev:task-new --tree Update docs\n'
+                   'Original user request: Prepare a PR for "Update docs".\n'
+                   'Assigned unit: Update docs\nUser Git limits: PR only')
         default_settings = {
             "promptSuggestionEnabled": False,
             "awaySummaryEnabled": False,
@@ -220,21 +222,49 @@ class PickTests(unittest.TestCase):
                    "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
             subprocess.run([*git, "init", "-q"], cwd=repo, env=env, check=True)
             backlog = repo / "backlog.md"
-            base_section = "## Base queue\n\n- [ ] [FEAT] Base item\n"
+            base_section = "## Base queue\n\n- [ ] [FEAT] Base item\n\n"
+            base_tail = (
+                "## Base second\n\n- [ ] [DOCS] Second item\n\n"
+                "## Base third\n\n- [ ] [DOCS] Third item\n\n"
+                "### Base nested\n\n- [ ] [FEAT] Nested item\n"
+            )
             live_section = "## Working tree queue\n\n- [ ] [FEAT] Working tree item\n\n"
             backlog_title = "# Backlog\n\n"
-            backlog.write_text(backlog_title + base_section, encoding="utf-8")
+            backlog.write_text(backlog_title + base_section + base_tail, encoding="utf-8")
             for args in (["add", "backlog.md"], ["commit", "-q", "-m", "base"],
                          ["update-ref", "refs/remotes/origin/HEAD", "HEAD"]):
                 subprocess.run([*git, *args], cwd=repo, env=env, check=True)
-            backlog.write_text(backlog_title + live_section + base_section, encoding="utf-8")
+            backlog.write_text(backlog_title + live_section + base_section + base_tail, encoding="utf-8")
             dispatch = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "pick", str(repo)]
 
-            for options, title in (([], "Working tree queue"), (["--tree"], "Base queue")):
+            full_base = ["Base nested", "Base queue", "Base second", "Base third"]
+            cases = (
+                ([], ["Working tree queue", "Base queue"]),
+                (["--tree"], ["Base queue", "Base second"]),
+                (["--full-scan"], ["Base nested", "Working tree queue", *full_base[1:]]),
+                (["--tree", "--full-scan"], full_base),
+            )
+            for options, expected in cases:
                 with self.subTest(options=options):
                     result = subprocess.run([*dispatch, *options], cwd=root, env=env, check=True,
                                             capture_output=True, text=True, encoding="utf-8")
-                    self.assertEqual(json.loads(result.stdout)[0]["title"], title, result.stderr)
+                    self.assertEqual([item["title"] for item in json.loads(result.stdout)], expected, result.stderr)
+
+            worktree = repo / ".worktrees" / "first"
+            subprocess.run([*git, "worktree", "add", "--quiet", "--detach", str(worktree), "HEAD"],
+                           cwd=repo, env=env, check=True)
+            for claimed in (False, True):
+                with self.subTest(claimed=claimed):
+                    if claimed:
+                        (worktree / "tasks.md").write_text(
+                            "# Base nested\nstatus: active\n\n## Covers\n- [ ] [FEAT] Nested item\n",
+                            encoding="utf-8",
+                        )
+                    result = subprocess.run([*dispatch, "--tree", "--full-scan"], cwd=root, env=env, check=True,
+                                            capture_output=True, text=True, encoding="utf-8")
+                    expected = full_base[1:] if claimed else full_base
+                    self.assertEqual([item["title"] for item in json.loads(result.stdout)], expected, result.stderr)
+                    self.assertEqual("claimed by in-flight worktrees" in result.stderr, claimed, result.stderr)
 
 
 class CodexSendTests(unittest.TestCase):
@@ -278,6 +308,8 @@ class CodexSendTests(unittest.TestCase):
         return {"complete": True, "how": "screen", "text": text}
 
     def test_send_presses_enter_once_for_a_paste_left_in_the_composer(self):
+        message = ('$task-next --tree\nOriginal user request: Review the next ticket.\n'
+                   'Assigned unit: Next ticket\nUser Git limits: No push')
         responses = [
             self.screen(self.READY), self.IDLE, {"started": False},
             self.screen(self.PASTE), self.IDLE,
@@ -286,10 +318,10 @@ class CodexSendTests(unittest.TestCase):
         ]
         with patch("dispatch.hc_json", side_effect=responses) as hc, \
                 patch("dispatch.time.sleep"), patch("builtins.print") as output:
-            send(self.ARGS)
+            send(SimpleNamespace(address="t7", message=message))
         self.assertEqual(hc.call_args_list, [
             call("read", "--lines", "0", "t7"), call("get", "t7"),
-            call("send", "--if", "idle", "--", "t7", "a task"),
+            call("send", "--if", "idle", "--", "t7", message),
             call("read", "--lines", "0", "t7"), call("get", "t7"),
             call("read", "--lines", "0", "t7"), call("get", "t7"), call("keys", "t7", "enter"),
             call("read", "--lines", "0", "t7"), call("get", "t7"),

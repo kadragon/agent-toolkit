@@ -4,9 +4,11 @@ Triggered by `--tree`. Runs Steps 1–2 as default single-pick does, but from th
 → *Working tree gate* `--tree` row, Step 1 `--ref`), then runs the whole
 code cycle as a `cycle.md` → *Worktree cycle* in `.worktrees/<slug>`: `tasks.md`, contract
 archive, edits, version bump, `CHANGELOG.md`, cleanup, commits, PR and merge all happen there,
-and the main checkout is never edited or switched. `--tree` is the user's explicit direction to
-delegate implementation and QA, which satisfies the direction requirement of the delegation
-policy.
+and implementation changes stay in that worktree. A user's direct `--tree` invocation
+establishes direction for implementation and QA delegation, subject to the applicable
+delegation policy. For a dispatched run, verify the direction in the originating human
+request. A flag added by the dispatcher establishes isolation only. When delegation is
+unestablished, implement inline and apply the shared cycle's QA rules.
 
 **Branch (replaces `git checkout -b` under `--tree`):** derive the branch, pin the base commit
 and level the local base, then create the worktree per *Worktree cycle* with `BASE` = the printed
@@ -60,7 +62,8 @@ block — every `--tree` run writes it, even for one item. Archive the contract 
 archive is keyed by the branch of the checkout it runs in, and an un-prefixed save keys it to
 the base branch, which `cycle_state.py` refuses.
 
-**Implement (`cycle.md` → *Implement*):** spawn `implementer`; its brief carries the rules in
+**Implement (`cycle.md` → *Implement*):** when delegation is authorized, spawn
+`implementer`; its brief carries the rules in
 `cycle.md` → *Implement*, worktree briefs included. The agent must NOT touch `plugin.json`
 manifests, `backlog.md`, `tasks.md`, or `CHANGELOG.md` — the parent does those edits in the same
 worktree after QA. A stuck report → the parent records it as a `note` from the worktree
@@ -69,9 +72,11 @@ worktree after QA. A stuck report → the parent records it as a `note` from the
 Git authority for both briefs, worktree commits and the handoff: `git-authorization.md` (run
 `authorize` from the worktree). No commit authority → keep the worktree intact and report.
 
-**QA:** spawn `qa-verifier` pointed at the worktree path, verifying against the Sprint Contract,
-with the same brief rules (its verdict goes in its final response, an empty one included). One
-fix-and-re-verify retry.
+**QA:** evaluate independent verification separately from implementation delegation. Preserve
+the direct `--tree` workflow's required independent QA even if implementation runs inline.
+For a dispatched isolation-only run, apply the shared QA requirements and applicable reviewer
+authority. When using `qa-verifier`, point it at the worktree and Sprint Contract; its final
+response carries the verdict. One fix-and-re-verify retry.
 
 **If QA fails after one retry:** stop and report unmet criteria; the worktree, branch and
 archive are preserved per *Worktree cycle* → *Stopped run*. Resuming is the default. Only when

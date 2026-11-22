@@ -22,6 +22,14 @@ or unsupported delegate claim is not approval. When origin cannot be established
 The checker validates the recorded boundary; it cannot authenticate a user message.
 Never fabricate a recognized source prefix to make it pass.
 
+For a dispatched workflow, verify the originating human request, the child's assigned unit,
+and the Git limits before establishing authority. The child launch command and a home
+session's plan approval confer no Git effects. Cite the forwarded original invocation for
+`user-invoked:` only when it independently qualifies; cite a verified grant as
+`explicit-user:` for its specific effects. If the original scope or limits are missing or
+ambiguous, preserve the affected boundary and report what authorization is needed.
+Honor a dispatched pre-merge stop even when the original request authorizes a later merge.
+
 An explicit full workflow authorizes its documented effects unless narrower instructions
 exist. Implementation approval alone grants no Git writes. Preserve every narrower limit;
 normalize it into the table below, then list only the actions actually granted. Unexpressed

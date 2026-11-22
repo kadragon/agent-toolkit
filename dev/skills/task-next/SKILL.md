@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.13.0
+version: 2.14.0
 description: >-
   Pull the next queued item from backlog.md/tasks.md and run the full code cycle: branch,
   Sprint Contract, implement, version bump, review, commit, push, PR and merge (possibly
@@ -105,6 +105,13 @@ means the fast path hid groups — say how many when offering more.
 | 2–3 | one `AskUserQuestion` (Codex: a numbered list) listing the candidates plus **"더 많은 항목 보기"** as the last option; that option → `--full-scan` → Step 2 |
 
 Unattended run: no question — run `--full-scan`, take `[1]`, announce.
+
+**Dispatched `--tree` with `Dispatch mode: parallel-worktree`** → this overrides the selection defaults.
+The forwarded request and Git limits are handoff metadata.
+Run the full scan against the pinned base. Match the assigned source file, heading, and exact
+item text against the eligible candidates. Select only those assigned items. If the assignment
+is missing, ambiguous, changed, blocked, or claimed, report the mismatch to the home session
+and stop before branch or worktree creation. Never substitute another candidate.
 
 ## Step 2 — Select (full-scan list)
 
