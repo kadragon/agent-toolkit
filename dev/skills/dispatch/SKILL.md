@@ -42,8 +42,9 @@ For dependencies, wait for the preceding repo's result.
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Separate worktrees require user direction, independently verifiable units with disjoint edits,
-and dev plugin 4.11.52 or later. Give each new-work child one clear, single-cycle unit.
+Verify each child has dev plugin 4.12.4 or later before sending a separate-worktree task.
+Require user direction and independently verifiable units with disjoint edits. Give each
+new-work child one clear, single-cycle unit and each queue child an exact assigned candidate.
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
 Separate PRs require permission for each PR. Report any unsupported request layout.
 

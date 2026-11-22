@@ -72,9 +72,11 @@ worktree after QA. A stuck report → the parent records it as a `note` from the
 Git authority for both briefs, worktree commits and the handoff: `git-authorization.md` (run
 `authorize` from the worktree). No commit authority → keep the worktree intact and report.
 
-**QA:** when delegation is authorized, spawn `qa-verifier` pointed at the worktree path, verifying against the Sprint Contract,
-with the same brief rules (its verdict goes in its final response, an empty one included). One
-fix-and-re-verify retry.
+**QA:** evaluate independent verification separately from implementation delegation. Preserve
+the direct `--tree` workflow's required independent QA even if implementation runs inline.
+For a dispatched isolation-only run, apply the shared QA requirements and applicable reviewer
+authority. When using `qa-verifier`, point it at the worktree and Sprint Contract; its final
+response carries the verdict. One fix-and-re-verify retry.
 
 **If QA fails after one retry:** stop and report unmet criteria; the worktree, branch and
 archive are preserved per *Worktree cycle* → *Stopped run*. Resuming is the default. Only when

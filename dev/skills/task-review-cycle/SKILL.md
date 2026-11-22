@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.10.0
+version: 1.11.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -189,8 +189,8 @@ Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no ed
 
 ## Step 6: Merge
 
-PR-only or dispatch pre-merge stop: reclaim late panel results, finish checks, and report the PR
-ready. Keep the archive until merge. Resume only within established authority on the latest base.
+PR-only, unverified base-merge authority, or dispatch pre-merge stop: reclaim late panel results,
+finish checks, report the PR ready, and preserve its archive before any merge preparation.
 
 **Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
 re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route

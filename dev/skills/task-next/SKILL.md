@@ -106,6 +106,12 @@ means the fast path hid groups — say how many when offering more.
 
 Unattended run: no question — run `--full-scan`, take `[1]`, announce.
 
+**Dispatched `--tree` with an assigned unit** → this overrides the selection defaults.
+Run the full scan against the pinned base. Match the assigned source file, heading, and exact
+item text against the eligible candidates. Select only those assigned items. If the assignment
+is missing, ambiguous, changed, blocked, or claimed, report the mismatch to the home session
+and stop before branch or worktree creation. Never substitute another candidate.
+
 ## Step 2 — Select (full-scan list)
 
 Print every group as `[N] <source>: <title> (<M> items)` and wait for a number (unattended:
