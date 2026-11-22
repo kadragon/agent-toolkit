@@ -26,6 +26,8 @@ capture block, then its table rows in order.
 
 ## Step 1 — Classify and size
 
+For `Dispatch mode: parallel-worktree`, classify and size only the assigned unit.
+
 Infer the tag from the **Tag:** list in `../task-next/references/cycle.md` → *Sprint Contract* —
 the one that names the change (a docs-only request is `[DOCS]`, a harness change `[HARNESS]`).
 
@@ -35,12 +37,14 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 
 ## Step 2 — Route
 
-First match wins. Size comes before clarity: a fully specified request can still be too large
-for one contract.
+For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only the assigned
+unit; the quoted request and Git limits carry context and authority. If the assignment
+is missing, already queued, unclear, larger than one contract, or requires shared planning
+or queue edits, report the blocker to the home session and stop before writing. Otherwise
+proceed to Step 3 with the assigned unit.
 
-- **Dispatched as one of several concurrent `--tree` children** → continue only when the
-  assigned scope is one clear, bounded implementation. If it needs an interview, spec, or
-  queue edits first, report that to the home session before writing to the shared checkout.
+For other runs, first match wins. Size comes before clarity: a fully specified request
+can still be too large for one contract.
 - **Queue without implementing** (the user asks only to record it) → call the Skill tool with
   "dev:task-tickets" on the request, then **stop**.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for

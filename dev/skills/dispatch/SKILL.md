@@ -30,8 +30,7 @@ missing → clone from that URL, or stop when the line says "Local only".
 
 ## 2. Choose the session layout and first message
 
-Use one child per repo. Launch independent repos concurrently within step 4's limit.
-For dependencies, wait for the preceding repo's result.
+Default to one child per repo. Launch independent repos within step 4's limit; wait on dependencies.
 
 | Same-repo request | First message |
 |-------------------|---------------|
@@ -48,11 +47,11 @@ new-work child one clear, single-cycle unit and each queue child an exact assign
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
 Separate PRs require permission for each PR. Report any unsupported request layout.
 
-Forward only task workflows the human requested. Codex uses `$task-next` or `$task-new`.
-In the task arguments include the verbatim user request, assigned unit, and verbatim Git limits.
-Mark dispatcher-added `--tree` as isolation only. The child verifies original authority
-before Git writes or nested delegation. Separate PR children stop at ready before base merge.
-If the CLI cannot carry the handoff, hold the workflow and report the missing fields.
+Forward only workflows the human requested. Codex uses `$task-next` or `$task-new`.
+Include the verbatim user request, assigned unit and verbatim Git limits as handoff metadata.
+Set `Dispatch mode: parallel-worktree` for separate-worktree rows; mark an added `--tree`
+as isolation only. Children verify authority before Git writes or nested delegation and
+stop separate PRs at ready before base merge. Hold if the CLI cannot carry these fields.
 
 `/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -192,8 +191,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
 More than one session:
 
 - At most one task session per repo uses the main checkout. Name concurrent children
-  `<repo>-<n>`. Before starting another child on the same queue, use `pick --tree --full-scan`
-  and confirm stderr identifies the previous child's claim by worktree and item.
+  `<repo>-<n>`. For the next `task-next --tree` child on the same queue, use
+  `pick --tree --full-scan` to confirm the preceding queue child's worktree claim in stderr.
 - Keep a wave to at most four live children (two under `both-hot`).
 
 ## 5. Watch and decide
