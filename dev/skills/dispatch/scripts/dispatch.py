@@ -9,7 +9,7 @@
                      [--no-show] [--dry-run] [MESSAGE]
       Start the child with hc run and, inside the Herdr app, keep its pane in the
       right-hand column. Prints one JSON object: name, address, parent, shown.
-      Codex takes --task or a later send. Claude takes MESSAGE.
+      Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup turn 1 or phase reuse.
   dispatch.py collect RECEIPT [--close]
@@ -223,6 +223,7 @@ def first_prompt(cli, message, handoff):
         print(f"warning: {handoff['work_kind']} work should start with {' or '.join(commands)}; "
               "this first message may skip the task cycle", file=sys.stderr)
     return (f"{message}\n\nHandoff metadata:\n"
+            "Select the task-cycle mode and flags from the invocation above.\n"
             f"- Original user request (verbatim): {handoff['request']}\n"
             f"- Assigned unit: {handoff['unit']}\n"
             f"- Git limits: {handoff['git_limits']}")
@@ -438,6 +439,8 @@ def send_task(args, run_path):
                     raise SystemExit(f"{address}: task withheld; the child started another turn")
             run["sent"] = "unconfirmed"
             write_json(run_path, run)
+        else:
+            print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
         hc_json("send", *guard, "--", address, message)

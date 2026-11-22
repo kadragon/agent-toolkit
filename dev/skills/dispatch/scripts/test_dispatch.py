@@ -100,10 +100,11 @@ class ChildArgvTests(unittest.TestCase):
 class DispatchReceiptTests(unittest.TestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
-    HANDOFF = {"work_kind": "queue", "request": "둘다 진행해줘\n다른 에이전트는 띄우지 마.",
+    HANDOFF = {"work_kind": "queue", "request": "큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.",
                "unit": "First queued item", "git_limits": " pr-only\nStop before merge. "}
     BLOCK = ("\n\nHandoff metadata:\n"
-             "- Original user request (verbatim): 둘다 진행해줘\n다른 에이전트는 띄우지 마.\n"
+             "Select the task-cycle mode and flags from the invocation above.\n"
+             "- Original user request (verbatim): 큐 모두 돌려 (--all)\n다른 에이전트는 띄우지 마.\n"
              "- Assigned unit: First queued item\n"
              "- Git limits:  pr-only\nStop before merge. ")
 
@@ -381,6 +382,8 @@ class CodexSendTests(unittest.TestCase):
             call("read", "--lines", "0", "t7"), call("get", "t7"), call("keys", "t7", "enter"),
             call("read", "--lines", "0", "t7"), call("get", "t7"),
         ])
+        output.assert_any_call("warning: no dispatch receipt. Use --run to carry handoff metadata",
+                               file=sys.stderr)
         self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
 
     def test_send_leaves_enter_alone_once_the_turn_started(self):

@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.3.1
+version: 1.4.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -141,8 +141,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their values to the
 first message. Pass `--git-limits='not specified'` when the user gave no limits. This conveys no
-Git grant. Read stderr and correct any mismatch between queue/new work and the platform's
-task-cycle commands.
+Git grant. Use `--dry-run` to check the task-cycle command before launch. A mismatch during
+launch warns on stderr and proceeds.
 
 Keep the printed child address and receipt (`run`) with its result path. `--dry-run` previews
 the `hc run` arguments and any Codex `--task` prompt. Launch behavior:
@@ -184,8 +184,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
   failure, and presses Enter once if a collapsed or expanded paste stays in the idle composer.
   It confirms submission when Herdr reports a working turn and the composer is clear. Check
   the screen before retrying an unconfirmed submission.
-- When blocked, read `references/codex-readiness.md`. After clearing the gate, retry with
-  `dispatch.py send --run <receipt> -- <address> '<first message>'` to reuse its handoff fields.
+- After clearing a block per `references/codex-readiness.md`, retry the first message with
+  `dispatch.py send --run <receipt> -- <address> '<first message>'` to carry its handoff fields.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
   workspace-write sandbox. Hook trust uses Codex's separate review flow.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
