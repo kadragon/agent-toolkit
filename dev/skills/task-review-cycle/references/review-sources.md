@@ -2,6 +2,14 @@
 
 The non-Claude engines (agy, Codex).
 
+## Data-sharing policy
+
+Before any review launch, check the repository's policy for sending source, diffs, and
+contracts to the selected engine. CLI and hub availability do not establish permission.
+Record policy exclusions without probing prohibited engines. Use an allowed independent
+reviewer when required. If none can satisfy a required gate, stop before merge. Keep all
+required CI and validation checks. A rejected data transfer must not be retried via another tool.
+
 ## Panel source launch
 
 Lite reuses the codex block below, run in the foreground, whenever `risk-routing.md` → *Lite reviewer* selects it — as the reviewer or as the fallback (`risk-routing.md` → *Lite

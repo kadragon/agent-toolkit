@@ -108,7 +108,7 @@ Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty
 `pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
-
+Apply `references/review-sources.md` → *Data-sharing policy* before launching any reviewer.
 **Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing

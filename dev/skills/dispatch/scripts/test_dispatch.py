@@ -9,7 +9,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
-from dispatch import child_argv, codex_screen, free_name, send, tallest, terminal_name
+from dispatch import (
+    child_argv,
+    codex_screen,
+    collect,
+    free_name,
+    launch,
+    send,
+    tallest,
+    terminal_name,
+)
 from quota import WEEK, assess
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -75,6 +84,98 @@ class ChildArgvTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SystemExit, "claude child needs its first message"):
             child_argv("claude", "opus", "high", None, False)
+
+    def test_claude_report_does_not_modify_the_slash_command(self):
+        argv = child_argv("claude", "opus", "high", "/dev:task-next", False, Path("result.json"))
+        self.assertEqual(argv[-3], "--append-system-prompt")
+        self.assertIn("result.json", argv[-2])
+        self.assertEqual(argv[-1], "/dev:task-next")
+
+
+class DispatchReceiptTests(unittest.TestCase):
+    TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
+    RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
+
+    def launch_args(self, cwd, **overrides):
+        args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",
+                    effort="medium", task="a task", message=None, keep_connectors=False,
+                    dry_run=False, no_show=True)
+        return SimpleNamespace(**(args | overrides))
+
+    def test_launch_rejects_stale_parent_before_start(self):
+        args = self.launch_args(Path.cwd())
+        for terminals, reason in (([], "not live"),
+                                  ([{"address": "t6", "state": "live", "cwd": Path.cwd().parent}],
+                                   "outside this directory")):
+            with (
+                self.subTest(reason=reason),
+                patch("dispatch.hc_json", return_value={"terminals": terminals}),
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, reason):
+                    launch(args)
+                run.assert_not_called()
+
+    def test_launch_uses_quiet_child_and_emits_receipt_before_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.launch_args(directory)
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+            child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+            calls = [{"terminals": [owner]}, self.TERMINAL]
+            with (
+                patch("dispatch.hc_json", side_effect=calls),
+                patch("dispatch.subprocess.run", return_value=child) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                patch("dispatch.send") as submit,
+                patch("builtins.print") as output,
+            ):
+                launch(args)
+            argv = run.call_args.args[0]
+            self.assertIn("--no-notify", argv)
+            self.assertEqual(argv[argv.index("--parent") + 1], "t6")
+            payload = json.loads(output.call_args.args[0])
+            receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["created_ms"], 50)
+            self.assertFalse(receipt["sent"])
+            self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
+
+    def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
+        done = {**self.TERMINAL, "status": {"state": "done"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
+            result = receipt.with_name("result.json")
+            for status in ("ready", "merged"):
+                result.write_text(json.dumps({"status": status, "phase": "review", "summary": "CI passed"}),
+                                  encoding="utf-8")
+                args = SimpleNamespace(run=receipt, close=True)
+                with patch("dispatch.hc_json", return_value=done) as hc, patch("builtins.print"):
+                    if status == "ready":
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(args)
+                        hc.assert_called_once_with("get", "t7")
+                    else:
+                        collect(args)
+                        self.assertEqual(hc.call_args_list,
+                                         [call("get", "t7"), call("kill", "t7"), call("rm", "t7")])
+            with patch("dispatch.hc_json", return_value={**done, "created_ms": 70}) as hc:
+                with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
+                    collect(args)
+                hc.assert_called_once_with("get", "t7")
+
+    def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            result = receipt.with_name("result.json")
+            result.write_text(json.dumps({"status": "done", "phase": "implementation", "summary": "ok"}),
+                              encoding="utf-8")
+            run = {**self.RECEIPT, "previous_result": result.stat().st_mtime_ns}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+            terminal = {**self.TERMINAL, "status": {"state": "done"}}
+            with patch("dispatch.hc_json", return_value=terminal) as hc:
+                with self.assertRaisesRegex(SystemExit, "no final result"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+                hc.assert_called_once_with("get", "t7")
 
 
 class PickTests(unittest.TestCase):
@@ -182,6 +283,7 @@ class CodexSendTests(unittest.TestCase):
             ("a task with a long first line", '› <hc from="t6">a task with\n  a long first line</hc>'),
             ("a task", '› <hc from="t6 lead" reach="send results">\n  a task</hc>'),
             ("a task", '› <hc from="t6 lead"\n  reach="send results">a task</hc>'),
+            ("a task", '› <hc from="t6">a task</hc>\n\n'),
         ):
             with self.subTest(prompt=prompt):
                 expanded = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
@@ -264,6 +366,50 @@ class CodexSendTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "blocked after the send"):
                 send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_owned_startup_turn_one_without_a_prior_task_is_accepted(self):
+        startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
+        owner = DispatchReceiptTests.TERMINAL
+        idle = {**owner, "turn": 1, "status": {"state": "idle"}}
+        busy = {**idle, "turn": 2, "status": {"state": "working"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            with patch("dispatch.hc_json", side_effect=[
+                startup, idle, startup, {"started": True}, self.screen(self.READY), busy,
+            ]) as hc, patch("builtins.print"):
+                send(args)
+            self.assertIn("result.json", next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send"))
+            self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
+            with self.assertRaisesRegex(SystemExit, "only after the first task"):
+                send(args)
+
+    def test_owned_startup_turn_one_with_prior_prompt_is_refused(self):
+        startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n› Someone else's task\n\n{self.READY}")
+        idle = {**DispatchReceiptTests.TERMINAL, "turn": 1, "status": {"state": "idle"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            with patch("dispatch.hc_json", side_effect=[startup, idle, startup]) as hc:
+                with self.assertRaisesRegex(SystemExit, "already started a turn"):
+                    send(args)
+            self.assertNotIn("send", [c.args[0] for c in hc.call_args_list])
+
+    def test_unconfirmed_delivery_is_persisted_and_never_resent(self):
+        owner = DispatchReceiptTests.TERMINAL
+        idle = {**owner, "turn": 0, "status": {"state": "idle"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            with patch("dispatch.hc_json", side_effect=[self.screen(self.READY), idle, OSError()]) as hc:
+                with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                    send(args)
+                with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
+                    send(args)
+            self.assertEqual(hc.call_count, 3)
 
 
 class QuotaTests(unittest.TestCase):
