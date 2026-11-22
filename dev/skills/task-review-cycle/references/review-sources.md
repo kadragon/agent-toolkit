@@ -2,6 +2,15 @@
 
 The non-Claude engines (agy, Codex).
 
+## Data-sharing policy
+
+Before selecting a primary, panel, or fallback reviewer, check the repository policy and user
+authorization for sharing source, diffs, and contracts with that engine. Set each block's
+`*_ALLOWED` only from that decision. Record exclusions without probing prohibited engines.
+Select an allowed independent reviewer for any gate that requires one. If none can satisfy
+the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer
+must not be retried through another tool.
+
 ## Panel source launch
 
 Lite reuses the codex block below, run in the foreground, whenever `risk-routing.md` → *Lite reviewer* selects it — as the reviewer or as the fallback (`risk-routing.md` → *Lite
@@ -22,6 +31,8 @@ exists to recover are gone. Neither is stopped by the cycle (SKILL.md Step 2); t
 keeps that safe.
 
 ```bash
+AGY_ALLOWED="<true only when the policy permits agy>"
+[[ "$AGY_ALLOWED" == true ]] || { echo '{"agy_review":"policy-excluded"}' >&2; exit 0; }
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 LOCAL_FLAG="<from authorization route: --no-hub or empty>"
@@ -36,6 +47,8 @@ fi
 ```
 
 ```bash
+CODEX_ALLOWED="<true only when the policy permits Codex>"
+[[ "$CODEX_ALLOWED" == true ]] || { echo '{"codex_review":"policy-excluded"}' >&2; exit 0; }
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
 LOCAL_FLAG="<from authorization route: --no-hub or empty>"
