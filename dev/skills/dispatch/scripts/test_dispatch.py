@@ -693,6 +693,26 @@ class CodexSendTests(unittest.TestCase):
                 output.assert_any_call("warning: the submission left no trace; sending it once more", file=sys.stderr)
                 self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
 
+    def test_submission_with_a_trace_after_the_send_is_not_resent(self):
+        sends = []
+        reads = iter([self.screen(self.READY), self.screen(self.PASTE), self.screen(self.PASTE)])
+
+        def respond(command, *args):
+            if command == "read":
+                return next(reads, self.screen(self.READY))
+            if command == "get":
+                return self.IDLE
+            if command == "send":
+                sends.append(args)
+            return {}
+
+        with patch("dispatch.hc_json", side_effect=respond) as hc, patch("dispatch.time.sleep"), \
+                patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "could not confirm submission"):
+                send(self.ARGS)
+        self.assertEqual(len(sends), 1)
+        self.assertIn(call("keys", "t7", "enter"), hc.call_args_list)
+
     def test_lost_submission_is_not_sent_a_third_time(self):
         sends = []
 
@@ -722,6 +742,7 @@ class CodexSendTests(unittest.TestCase):
             ({**owner, "turn": 1, "status": {"state": "idle"}}, startup, False),
             ({**owner, "turn": 1, "status": {"state": "idle"}}, self.screen(self.PASTE), False),
             ({**owner, "turn": 0, "status": {"state": "idle"}}, transcript, False),
+            ({**owner, "turn": 1, "status": {"state": "idle"}}, transcript, False),
         ):
             with self.subTest(terminal=terminal, screen=screen), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"

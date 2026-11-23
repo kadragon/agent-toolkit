@@ -399,8 +399,9 @@ def send_task(args, run_path):
             result, written = read_result(run_path)
             terminal = hc_json("get", address)
             verify_terminal(run, terminal)
-            started = ((terminal.get("status") or {}).get("state") == "working"
-                       or ("sent_turn" in run and terminal["turn"] > run["sent_turn"]))
+            state = (terminal.get("status") or {}).get("state")
+            started = (state == "working"
+                       or (state == "done" and "sent_turn" in run and terminal["turn"] > run["sent_turn"]))
             if started:
                 snapshot = hc_json("read", "--lines", "0", address)
                 started = (snapshot["complete"] and snapshot["how"] == "screen"
@@ -499,10 +500,12 @@ def send_task(args, run_path):
         guard = ["--if", "idle"] if status == "idle" else []
 
         def confirmed():
+            """Return (submitted, saw_trace)."""
             nonlocal screen_reads
             deadline = time.monotonic() + 5
             previous_idle_paste = False
             retried_enter = False
+            saw_trace = False
             while True:
                 screen_reads += 1
                 screen = read_codex_screen(address, sent_message=sent_message)
@@ -519,15 +522,16 @@ def send_task(args, run_path):
                     result, written = read_result(run_path)
                     completed = bool(result and written != run["previous_result"])
                 if screen == "ready" and (status == "working" or completed):
-                    return True
+                    return True, True
+                saw_trace = saw_trace or screen in ("paste", "draft") or status == "working"
                 if screen == "warning":
                     raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
                 idle_paste = (status == "idle" or (continuation and status == "done")) and screen == "paste"
                 if idle_paste and previous_idle_paste and not retried_enter:
                     hc_json("keys", address, "enter")
-                    retried_enter = True
+                    retried_enter = saw_trace = True
                 if time.monotonic() >= deadline:
-                    return False
+                    return False, saw_trace
                 previous_idle_paste = idle_paste
                 time.sleep(SCREEN_POLL_SECONDS)
 
@@ -554,13 +558,13 @@ def send_task(args, run_path):
         for attempt in range(2):
             try:
                 hc_json("send", *guard, "--", address, message)
-                submitted = confirmed()
             except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
                 if attempt or not lost():
                     raise
                 submitted = False
             else:
-                if not submitted and (attempt or not lost()):
+                submitted, saw_trace = confirmed()
+                if not submitted and (attempt or saw_trace or not lost()):
                     raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
             if submitted:
                 if run:

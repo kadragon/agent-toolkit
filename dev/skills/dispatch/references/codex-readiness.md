@@ -32,4 +32,16 @@ it once there. Relaunch only after verifying that the task never started and pre
 changes. A normal startup can report turn 1, so the guarded sender also checks that the
 receipt belongs to the child and that the startup screen has no previous prompt.
 
+## Send recovery
+
+- A collapsed or expanded paste left in the idle composer gets one Enter.
+- A stray draft in an owned child's composer before its first task (turn 0, or the startup
+  screen at turn 1) is cleared with `ctrl+u` — up to five presses a second apart, for a stale
+  frame or several rows — and named on stderr. Any other draft is reported and the task withheld.
+- A submit that left no trace — composer clear, same turn, still idle for two seconds, the task
+  not echoed in the transcript — is sent once more. A paste, Enter retry, or working status seen
+  after the send rules that out.
+- An unconfirmed receipt is accepted as delivered once the child writes a new result, or is
+  working or done past the recorded turn with a clear composer and no startup screen.
+
 Codex documents [hook trust and the /hooks browser](https://learn.chatgpt.com/docs/hooks).
