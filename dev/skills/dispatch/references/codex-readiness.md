@@ -28,15 +28,16 @@ the current installed script. By default an unconfirmed receipt blocks another s
 the child writes a new result or starts a turn past the one recorded at send; then `send`
 accepts it as delivered. Otherwise inspect the transcript and result file first. If the task started, let the existing session
 finish. If the text is still in its composer, confirm that it is the intended task and submit
-it once there. If the task never started and the composer is clear and idle, use
-`dispatch.py send --run <receipt> --resend -- <address> '<same message>'`. Relaunch only after
-verifying that the task never started and preserving any
-changes. A normal startup can report turn 1, so the guarded sender also checks that the
+it once there. If the task never started and the composer is clear, use
+`dispatch.py send --run <receipt> --resend -- <address> '<same message>'` on an idle child or
+a follow-up still on its previous completed turn. Relaunch only after verifying that the
+task never started and preserving any changes. A normal startup can report turn 1, so the guarded sender also checks that the
 receipt belongs to the child and that the startup screen has no previous prompt.
 
 ## Send recovery
 
-- A collapsed or expanded paste left in the idle composer gets one Enter.
+- A paste left in the idle composer gets one Enter if its text matches the message or Herdr
+  acknowledged sending it.
 - A stray draft in an owned child's composer before its first task (turn 0, or the startup
   screen at turn 1) is cleared with `ctrl+u` — up to five presses a second apart, for a stale
   frame or several rows — and named on stderr. Any other draft is reported and the task withheld.

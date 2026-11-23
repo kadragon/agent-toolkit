@@ -226,8 +226,8 @@ The user delegates the session's decisions to this session:
   Honor Git limits. Run batches sequentially unless the user authorized parallel delegation.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
   the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
-  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge
-  `origin/main` into it. Preserve both sides of shared queue and changelog entries and rerun
+  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
+  (for example, `origin/main`) into it. Preserve both sides of shared queue and changelog entries and rerun
   required checks on the final head. This keeps pushes fast-forward and the merge commit
   stays off main when the PR is squash-merged.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own

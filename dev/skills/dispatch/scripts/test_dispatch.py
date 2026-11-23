@@ -425,7 +425,7 @@ class WorkflowDocsTests(unittest.TestCase):
         launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
         self.assertIn("ask once before launch which Git actions the user authorizes", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
-        self.assertIn("Once a parallel PR branch has been pushed, fetch and merge `origin/main`", watch_step)
+        self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
 
 
 class CodexSendTests(unittest.TestCase):
@@ -490,27 +490,54 @@ class CodexSendTests(unittest.TestCase):
                     self.assertEqual(operations, [])
 
     def test_launch_recovers_paste_when_herdr_could_not_confirm_submission(self):
-        with tempfile.TemporaryDirectory() as directory:
-            operations = []
+        for acknowledged in (False, True):
+            with self.subTest(acknowledged=acknowledged), tempfile.TemporaryDirectory() as directory:
+                operations = []
+                message = None
 
-            def respond(command, *args):
-                if command == "get":
-                    turn = self.WORKING if "keys" in operations else self.IDLE
-                    return {**DispatchReceiptTests.TERMINAL, **turn}
-                if command == "read":
-                    return self.screen(self.PASTE if operations == ["send"] else self.READY)
-                operations.append(command)
-                if command == "send":
-                    raise subprocess.CalledProcessError(1, "hc", stderr="could not confirm submission")
-                return {}
+                def respond(command, *args):
+                    nonlocal message
+                    if command == "get":
+                        turn = self.WORKING if "keys" in operations else self.IDLE
+                        return {**DispatchReceiptTests.TERMINAL, **turn}
+                    if command == "read":
+                        if operations != ["send"]:
+                            return self.screen(self.READY)
+                        paste = self.PASTE if acknowledged else f"› {message}\n\n  GPT-6.2-Sol default · ~/repo"
+                        return self.screen(paste)
+                    operations.append(command)
+                    if command == "send":
+                        message = args[-1]
+                        if not acknowledged:
+                            raise subprocess.CalledProcessError(1, "hc", stderr="could not confirm submission")
+                        return {"started": False}
+                    return {}
 
-            try:
-                calls = self.launch_codex(directory, respond)
-            except SystemExit as error:
-                self.fail(f"Launch should recover the pasted task: {error}")
-            self.assertEqual(operations, ["send", "keys"])
-            self.assertIn(call("keys", "t7", "enter"), calls)
-            self.assertTrue(json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))["sent"])
+                try:
+                    calls = self.launch_codex(directory, respond)
+                except SystemExit as error:
+                    self.fail(f"Launch should recover the pasted task: {error}")
+                self.assertEqual(operations, ["send", "keys"])
+                self.assertIn(call("keys", "t7", "enter"), calls)
+                self.assertTrue(json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))["sent"])
+
+    def test_send_error_does_not_submit_an_unidentified_collapsed_paste(self):
+        reads = iter([self.screen(self.READY)])
+
+        def respond(command, *args):
+            if command == "read":
+                return next(reads, self.screen(self.PASTE))
+            if command == "get":
+                return self.IDLE
+            if command == "send":
+                raise subprocess.CalledProcessError(1, "hc")
+            return {}
+
+        with (patch("dispatch.hc_json", side_effect=respond) as hc, patch("dispatch.time.sleep"),
+              patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO())):
+            with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                send(self.ARGS)
+        self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
     def test_send_error_and_unrelated_working_status_do_not_confirm_delivery(self):
         def respond(command, *args):
@@ -532,7 +559,7 @@ class CodexSendTests(unittest.TestCase):
         for text, expected in (
             (self.READY, "ready"),
             ("›", "ready"),
-            (self.PASTE, "paste"),
+            (self.PASTE, "collapsed"),
             (f"› [Pasted Content 1576 chars]\n\n• Working\n\n{self.READY}", "ready"),
             ("› [Pasted Content 1576 chars]\n\n■ Error", "waiting"),
             ("› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue", "waiting"),
@@ -775,6 +802,28 @@ class CodexSendTests(unittest.TestCase):
                 expected = "$task-next" + ("" if phase else DispatchReceiptTests.BLOCK)
                 self.assertEqual(prompt[-1], expected + "\n\n" + report_instruction(receipt.with_name("result.json")))
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_resend_retries_a_followup_on_the_same_completed_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 3, "sent_continuation": True}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="next phase", run=receipt, resend=True)
+            done = {**DispatchReceiptTests.TERMINAL, "turn": 3, "status": {"state": "done"}}
+            ready = self.screen(self.READY)
+            later = {**done, "turn": 4}
+            working = {**done, "turn": 4, "status": {"state": "working"}}
+            with patch("dispatch.hc_json", side_effect=[ready, later, later, {}, ready, working]) as hc, \
+                    redirect_stdout(StringIO()):
+                with self.assertRaisesRegex(SystemExit, "not idle or on the same completed turn"):
+                    send(args)
+                self.assertEqual(hc.call_count, 2)
+
+            with patch("dispatch.hc_json", side_effect=[ready, done, done, {}, ready, working]) as hc, \
+                    redirect_stdout(StringIO()):
+                send(args)
+            self.assertEqual(hc.call_args_list[3].args[:3], ("send", "--", "t7"))
+            self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
     def test_owned_first_task_clears_a_stray_draft_once(self):
         owner = DispatchReceiptTests.TERMINAL

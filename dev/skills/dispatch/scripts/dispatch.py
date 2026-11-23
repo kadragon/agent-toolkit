@@ -357,7 +357,7 @@ def codex_screen(text, *, sent_message=None):
         if line.startswith("›"):
             prompt = line[1:].strip()
             if PASTED_CONTENT.fullmatch(prompt):
-                return "paste"
+                return "collapsed"
             # Codex leaves a blank row between the composer and its status line.
             status_row = next((row for row in reversed(range(index + 1, len(lines) - 1))
                                if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), None)
@@ -516,12 +516,13 @@ def send_task(args, run_path):
                     verify_terminal(run, terminal)
                 status = (terminal.get("status") or {}).get("state")
                 if resend:
-                    if terminal["state"] != "live" or status != "idle":
-                        raise SystemExit(f"{address}: resend withheld; the Codex terminal is not idle")
                     sent_turn = run.get("sent_turn", 0)
                     continuation = run.get(
                         "sent_continuation", sent_turn > 1 or (sent_turn == 1 and not startup_composer(text))
                     )
+                    same_done_turn = (continuation and status == "done" and run.get("sent_turn") == terminal["turn"])
+                    if terminal["state"] != "live" or (status != "idle" and not same_done_turn):
+                        raise SystemExit(f"{address}: resend withheld; the Codex terminal is not idle or on the same completed turn")
                     break
                 initial = terminal["turn"] == 0
                 if not initial and not continuation:
@@ -597,10 +598,12 @@ def send_task(args, run_path):
                 started = status == "working" and (not send_failed or retried_enter)
                 if screen == "ready" and (started or completed):
                     return True, True
-                saw_trace = saw_trace or screen in ("paste", "draft") or status == "working"
+                saw_trace = saw_trace or screen in ("paste", "collapsed", "draft") or status == "working"
                 if screen == "warning":
                     raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
-                idle_paste = (status == "idle" or (continuation and status == "done")) and screen == "paste"
+                # A collapsed paste shows no text. Trust it only when Herdr confirmed typing the message.
+                matches_paste = screen == "paste" or (screen == "collapsed" and not send_failed)
+                idle_paste = (status == "idle" or (continuation and status == "done")) and matches_paste
                 if idle_paste and previous_idle_paste and not retried_enter:
                     hc_json("keys", address, "enter")
                     retried_enter = saw_trace = True
