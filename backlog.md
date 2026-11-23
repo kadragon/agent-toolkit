@@ -11,6 +11,10 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
+## Dispatch — result and send robustness (2026-11-23)
+
+- [ ] [fix] `dispatch.py collect` and `send --continue` reject a child's `result.json` that lacks `status` (`cannot read dispatch result …: invalid status, phase, or summary`). A Codex child wrote `{"phase":"review","pr":779,…}` mid-cycle, then its turn was interrupted; the home session could not continue it with `send --run --continue` and fell back to raw `hc send`, which left a paste in the idle composer (`started: false`) until Enter was pressed by hand. Either treat a missing `status` as `working` (keeping the other fields), or have the child contract require `status` on every write. Done-when: a receipt whose result has no `status` still collects and accepts `send --continue`, covered by a test in `dev/skills/dispatch/scripts` — dev/skills/dispatch/scripts/dispatch.py
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
