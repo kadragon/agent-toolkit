@@ -471,8 +471,9 @@ def send_task(args, run_path):
             terminal = hc_json("get", address)
             verify_terminal(run, terminal)
             state = (terminal.get("status") or {}).get("state")
-            started = (state == "working"
-                       or (state == "done" and "sent_turn" in run and terminal["turn"] > run["sent_turn"]))
+            started = run.get("send_acknowledged", True) and (
+                state == "working" or (state == "done" and "sent_turn" in run and terminal["turn"] > run["sent_turn"])
+            )
             if started:
                 snapshot = hc_json("read", "--lines", "0", address)
                 started = (snapshot["complete"] and snapshot["how"] == "screen"
@@ -584,6 +585,8 @@ def send_task(args, run_path):
             message += "\n\n" + report_instruction(run_path.with_name("result.json"))
         sent_message = message.strip()
         echoed_before = transcript_echoed(text, sent_message)
+        if resend and echoed_before:
+            raise SystemExit(f"{address}: resend withheld; this message already appears in the Codex transcript")
         sent_turn = terminal["turn"]
         # Herdr can report that no turn started even after it pasted the message.
         if run:
@@ -602,6 +605,7 @@ def send_task(args, run_path):
             run["sent"] = "unconfirmed"
             run["sent_turn"] = sent_turn
             run["sent_continuation"] = continuation
+            run["send_acknowledged"] = False
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
@@ -671,11 +675,18 @@ def send_task(args, run_path):
                 time.sleep(SCREEN_POLL_SECONDS)
 
         for attempt in range(2):
+            if attempt and run and run["send_acknowledged"]:
+                run["send_acknowledged"] = False
+                write_json(run_path, run)
             send_error = None
             try:
                 hc_json("send", *guard, "--", address, message)
             except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
                 send_error = error
+            else:
+                if run:
+                    run["send_acknowledged"] = True
+                    write_json(run_path, run)
             submitted, saw_trace = confirmed(send_error is not None)
             if not submitted and (attempt or saw_trace or not lost()):
                 if send_error is not None:

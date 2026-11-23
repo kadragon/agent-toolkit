@@ -30,8 +30,9 @@ accepts it as delivered. Otherwise inspect the transcript and result file first.
 finish. If the text is still in its composer, confirm that it is the intended task and submit
 it once there. If the task never started, the composer is clear, and the child is still on
 the recorded turn, use `dispatch.py send --run <receipt> --resend -- <address> '<same message>'`.
-The child must be idle or on the previous completed turn of a follow-up. Relaunch only after
-verifying that the task never started and preserving any changes. A startup can report turn 1.
+The child must be idle or on the previous completed turn of a follow-up. A matching prompt in
+the transcript blocks resend. Relaunch only after verifying that the task never started and
+preserving any changes. A startup can report turn 1.
 For older receipts missing the delivery phase, a resend on turn 1 requires the startup screen.
 
 ## Send recovery
@@ -44,7 +45,8 @@ For older receipts missing the delivery phase, a resend on turn 1 requires the s
 - A submit that left no trace — composer clear, same turn, still idle for two seconds, the task
   not echoed in the transcript — is sent once more. A paste, Enter retry, or working status seen
   after the send rules that out.
-- An unconfirmed receipt is accepted as delivered once the child writes a new result, or is
-  working or done past the recorded turn with a clear composer and no startup screen.
+- An unconfirmed receipt is accepted as delivered once the child writes a new result. After
+  Herdr acknowledges a send, a clear composer and a working or completed turn can also
+  confirm it.
 
 Codex documents [hook trust and the /hooks browser](https://learn.chatgpt.com/docs/hooks).

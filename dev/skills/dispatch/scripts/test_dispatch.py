@@ -937,6 +937,49 @@ class CodexSendTests(unittest.TestCase):
             self.assertEqual(hc.call_args_list[2].args[-1],
                              expected + "\n\n" + report_instruction(receipt.with_name("result.json")))
 
+    def test_resend_refuses_a_message_already_visible_in_the_transcript(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 3, "sent_continuation": True}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="next phase", run=receipt, resend=True)
+            message = args.message + "\n\n" + report_instruction(receipt.with_name("result.json"))
+            echoed = self.screen(f"› {message}\n\n• Working\n\n{self.READY}")
+            done = {**DispatchReceiptTests.TERMINAL, "turn": 3, "status": {"state": "done"}}
+            working = {**done, "status": {"state": "working"}}
+            with patch("dispatch.hc_json", side_effect=[echoed, done, done, {}, self.screen(self.READY), working]) as hc, \
+                    redirect_stdout(StringIO()):
+                with self.assertRaisesRegex(SystemExit, "already appears in the Codex transcript"):
+                    send(args)
+                self.assertEqual(hc.call_count, 2)
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), run)
+
+    def test_continue_does_not_confirm_a_failed_send_from_unrelated_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            saved = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(saved), encoding="utf-8")
+            attempts = []
+            unrelated = self.screen(f"› an unrelated message\n\n• Working\n\n{self.READY}")
+
+            def respond(command, *args):
+                if command == "read":
+                    return unrelated if attempts else self.screen(self.READY)
+                if command == "get":
+                    state = self.WORKING if attempts else self.IDLE
+                    return {**DispatchReceiptTests.TERMINAL, **state}
+                attempts.append(command)
+                raise subprocess.CalledProcessError(1, "hc")
+
+            with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+                  patch("dispatch.time.monotonic", side_effect=range(1000))):
+                with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                    send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+                with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
+                    send(SimpleNamespace(address="t7", message="next", run=receipt, continuation=True))
+            self.assertEqual(attempts, ["send"])
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["sent"], "unconfirmed")
+
     def test_owned_first_task_clears_a_stray_draft_once(self):
         owner = DispatchReceiptTests.TERMINAL
         idle = {**owner, "turn": 0, "status": {"state": "idle"}}
