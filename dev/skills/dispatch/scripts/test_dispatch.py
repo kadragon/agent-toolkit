@@ -255,6 +255,22 @@ class DispatchReceiptTests(unittest.TestCase):
                     collect(SimpleNamespace(run=receipt, close=True))
                 hc.assert_called_once_with("get", "t7")
 
+    def test_collect_closes_a_finished_terminal_without_a_final_result(self):
+        finished = {**self.TERMINAL, "state": "finished", "status": None}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
+            receipt.with_name("result.json").write_text(
+                json.dumps({"status": "ready", "phase": "review", "summary": "PR open"}), encoding="utf-8")
+            with patch("dispatch.hc_json", return_value=finished) as hc, patch("builtins.print"):
+                collect(SimpleNamespace(run=receipt, close=True))
+            self.assertEqual(hc.call_args_list, [call("get", "t7"), call("rm", "t7")])
+            live = {**self.TERMINAL, "status": {"state": "idle"}}
+            with patch("dispatch.hc_json", return_value=live) as hc:
+                with self.assertRaisesRegex(SystemExit, "left intact"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+                hc.assert_called_once_with("get", "t7")
+
     def test_collect_reads_a_result_without_status_as_working(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
         with tempfile.TemporaryDirectory() as directory:
@@ -364,6 +380,7 @@ class CodexSendTests(unittest.TestCase):
             ("› [Pasted Content 1576 chars]\n\n■ Error", "waiting"),
             ("› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue", "waiting"),
             ("› draft [Pasted Content 1576 chars]", "waiting"),
+            ("› or\n\n  GPT-6.2-Sol default · ~/repo", "draft"),
             ("  >_ OpenAI Codex (v0.171.0)", "waiting"),
         ):
             with self.subTest(text=text):
@@ -561,14 +578,102 @@ class CodexSendTests(unittest.TestCase):
             receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
             stderr = StringIO()
-            with (patch("dispatch.hc_json", side_effect=[self.screen(self.READY), idle, OSError()]) as hc,
-                  redirect_stderr(stderr)):
+            # The re-read shows the paste still in the composer, so it is not provably lost.
+            with (patch("dispatch.hc_json", side_effect=[
+                self.screen(self.READY), idle, OSError(), self.screen(self.PASTE), idle, idle,
+            ]) as hc, redirect_stderr(stderr)):
                 with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
                     send(args)
                 with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
                     send(args)
-            self.assertEqual(hc.call_count, 3)
+            self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
+            self.assertEqual(hc.call_count, 6)
             self.assertIn("warning: legacy receipt has no handoff metadata", stderr.getvalue())
+
+    def test_owned_first_task_clears_a_stray_draft_once(self):
+        owner = DispatchReceiptTests.TERMINAL
+        idle = {**owner, "turn": 0, "status": {"state": "idle"}}
+        working = {**owner, "turn": 1, "status": {"state": "working"}}
+        draft = self.screen("› or\n\n  GPT-6.2-Sol default · ~/repo")
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}),
+                               encoding="utf-8")
+            with patch("dispatch.hc_json", side_effect=[
+                draft, idle, {}, self.screen(self.READY), idle, {"started": True}, self.screen(self.READY), working,
+            ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
+                send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+            self.assertIn(call("keys", "t7", "ctrl+u"), hc.call_args_list)
+            self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
+            output.assert_any_call("warning: cleared a stray draft from the composer: 'or'", file=sys.stderr)
+            self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_draft_without_an_owned_first_task_is_reported_not_cleared(self):
+        draft = self.screen("› or\n\n  GPT-6.2-Sol default · ~/repo")
+        with patch("dispatch.hc_json", side_effect=[draft]) as hc:
+            with self.assertRaisesRegex(SystemExit, "composer holds a draft: 'or'"):
+                send(self.ARGS)
+        self.assertNotIn("keys", [c.args[0] for c in hc.call_args_list])
+
+    def test_lost_submission_is_sent_once_more(self):
+        for failure in (None, subprocess.CalledProcessError(1, "hc")):
+            with self.subTest(failure=failure):
+                sends = []
+
+                def respond(command, *args):
+                    if command == "read":
+                        return self.screen(self.READY)
+                    if command == "get":
+                        return self.WORKING if len(sends) == 2 else self.IDLE
+                    sends.append(args)
+                    if failure is not None and len(sends) == 1:
+                        raise failure
+                    return {"started": False}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        patch("dispatch.time.monotonic", side_effect=range(1000)), \
+                        patch("builtins.print") as output:
+                    send(self.ARGS)
+                self.assertEqual(len(sends), 2)
+                output.assert_any_call("warning: the submission left no trace; sending it once more", file=sys.stderr)
+                self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_lost_submission_is_not_sent_a_third_time(self):
+        sends = []
+
+        def respond(command, *args):
+            if command == "read":
+                return self.screen(self.READY)
+            if command == "get":
+                return self.IDLE
+            sends.append(args)
+            return {}
+
+        with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "could not confirm submission"):
+                send(self.ARGS)
+        self.assertEqual(len(sends), 2)
+
+    def test_unconfirmed_receipt_is_accepted_once_the_child_started_a_turn(self):
+        owner = DispatchReceiptTests.TERMINAL
+        saved = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 0,
+                 "handoff": DispatchReceiptTests.HANDOFF}
+        for terminal, accepted in (
+            ({**owner, "turn": 1, "status": {"state": "done"}}, True),
+            ({**owner, "turn": 0, "status": {"state": "working"}}, True),
+            ({**owner, "turn": 0, "status": {"state": "idle"}}, False),
+        ):
+            with self.subTest(terminal=terminal), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps(saved), encoding="utf-8")
+                args = SimpleNamespace(address="t7", message="next", run=receipt)
+                with patch("dispatch.hc_json", return_value=terminal):
+                    expected = "only after the first task" if accepted else "previous delivery is unconfirmed"
+                    with self.assertRaisesRegex(SystemExit, expected):
+                        send(args)
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["sent"],
+                                 True if accepted else "unconfirmed")
 
     def test_continuation_rechecks_that_the_child_still_has_the_same_completed_turn(self):
         owner = DispatchReceiptTests.TERMINAL

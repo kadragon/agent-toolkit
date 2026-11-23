@@ -337,21 +337,35 @@ def codex_screen(text, *, sent_message=None):
                 return "ready"
             if PASTED_CONTENT.fullmatch(prompt):
                 return "paste"
-            if sent_message is not None:
-                # Codex leaves a blank row between the composer and its status line.
-                body_end = next((row for row in reversed(range(index + 1, len(lines) - 1))
-                                 if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), len(lines))
-                if matches_sent_message((prompt, *lines[index + 1:body_end]), sent_message):
-                    return "paste"
+            # Codex leaves a blank row between the composer and its status line.
+            status_row = next((row for row in reversed(range(index + 1, len(lines) - 1))
+                               if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), None)
+            body = (prompt, *lines[index + 1:len(lines) if status_row is None else status_row])
+            if sent_message is not None and matches_sent_message(body, sent_message):
+                return "paste"
+            if status_row is not None:
+                return "draft"
             break
     return "waiting"
 
 
-def read_codex_screen(address, *, sent_message=None):
+def composer_draft(text):
+    """The text typed in the composer when codex_screen reads it as a draft."""
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
+    index = max(i for i, line in enumerate(lines) if line.lstrip().startswith("›"))
+    status_row = next(row for row in reversed(range(index + 1, len(lines) - 1))
+                      if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1]))
+    return "\n".join([lines[index].lstrip()[1:].strip(),
+                      *(line.strip() for line in lines[index + 1:status_row])]).strip()
+
+
+def read_codex_screen(address, *, sent_message=None, with_text=False):
     screen = hc_json("read", "--lines", "0", address)
     if not screen["complete"] or screen["how"] != "screen":
-        return "waiting"
-    return codex_screen(screen["text"], sent_message=sent_message)
+        state = "waiting"
+    else:
+        state = codex_screen(screen["text"], sent_message=sent_message)
+    return (state, screen.get("text", "")) if with_text else state
 
 
 def startup_composer(text):
@@ -381,9 +395,13 @@ def send_task(args, run_path):
             raise SystemExit("receipt is for another terminal or CLI")
         if run["sent"] == "unconfirmed":
             result, written = read_result(run_path)
-            if not result or written == run.get("previous_result"):
+            terminal = hc_json("get", address)
+            verify_terminal(run, terminal)
+            # A child that reported or has since started a turn took the task.
+            started = ((terminal.get("status") or {}).get("state") == "working"
+                       or ("sent_turn" in run and terminal["turn"] > run["sent_turn"]))
+            if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
-            verify_terminal(run, hc_json("get", address))
             run["sent"] = True
             write_json(run_path, run)
         if run["sent"] != continuation:
@@ -402,15 +420,27 @@ def send_task(args, run_path):
     sent_message = message.strip()
     screen_reads = 0
     attempted_send = False
+    cleared_draft = None
     try:
         deadline = time.monotonic() + 30
         while True:
             screen_reads += 1
-            screen = read_codex_screen(address)
+            screen, text = read_codex_screen(address, with_text=True)
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             if screen == "warning":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex warning with F2")
+            if screen == "draft":
+                # Only an owned child's first task may discard what sits in its composer.
+                draft = composer_draft(text)
+                if not run or continuation or cleared_draft is not None:
+                    raise SystemExit(f"{address}: task withheld; the Codex composer holds a draft: {draft!r}")
+                terminal = hc_json("get", address)
+                verify_terminal(run, terminal)
+                if (terminal.get("status") or {}).get("state") == "idle" and terminal["turn"] <= 1:
+                    hc_json("keys", address, "ctrl+u")
+                    cleared_draft = draft
+                    print(f"warning: cleared a stray draft from the composer: {draft!r}", file=sys.stderr)
             if screen == "ready":
                 terminal = hc_json("get", address)
                 if run:
@@ -431,6 +461,7 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
+        sent_turn = terminal["turn"]
         # Herdr can report that no turn started even after it pasted the message.
         if run:
             if run["parent"]:
@@ -443,48 +474,77 @@ def send_task(args, run_path):
                         (current.get("status") or {}).get("state") != "done"):
                     raise SystemExit(f"{address}: task withheld; the child started another turn")
             run["sent"] = "unconfirmed"
+            run["sent_turn"] = sent_turn
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
-        hc_json("send", *guard, "--", address, message)
 
-        deadline = time.monotonic() + 5
-        previous_idle_paste = False
-        retried_enter = False
-        while True:
+        def confirmed():
+            nonlocal screen_reads
+            deadline = time.monotonic() + 5
+            previous_idle_paste = False
+            retried_enter = False
+            while True:
+                screen_reads += 1
+                screen = read_codex_screen(address, sent_message=sent_message)
+                if screen == "hooks":
+                    raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
+                terminal = hc_json("get", address)
+                if run:
+                    verify_terminal(run, terminal)
+                status = (terminal.get("status") or {}).get("state")
+                if status == "blocked":
+                    raise SystemExit(f"{address}: Codex blocked after the send; inspect the screen before continuing")
+                completed = False
+                if run and status == "done" and screen == "ready":
+                    result, written = read_result(run_path)
+                    completed = bool(result and written != run["previous_result"])
+                if screen == "ready" and (status == "working" or completed):
+                    return True
+                if screen == "warning":
+                    raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
+                idle_paste = (status == "idle" or (continuation and status == "done")) and screen == "paste"
+                if idle_paste and previous_idle_paste and not retried_enter:
+                    hc_json("keys", address, "enter")
+                    retried_enter = True
+                if time.monotonic() >= deadline:
+                    return False
+                previous_idle_paste = idle_paste
+                time.sleep(SCREEN_POLL_SECONDS)
+
+        def lost():
+            """The message left no trace: clear composer, no new turn, still waiting for input."""
+            nonlocal screen_reads
             screen_reads += 1
-            screen = read_codex_screen(address, sent_message=sent_message)
-            if screen == "hooks":
-                raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
-            terminal = hc_json("get", address)
+            screen = read_codex_screen(address)
+            current = hc_json("get", address)
             if run:
-                verify_terminal(run, terminal)
-            status = (terminal.get("status") or {}).get("state")
-            if status == "blocked":
-                raise SystemExit(f"{address}: Codex blocked after the send; inspect the screen before continuing")
-            completed = False
-            if run and status == "done" and screen == "ready":
-                result, written = read_result(run_path)
-                completed = bool(result and written != run["previous_result"])
-            if screen == "ready" and (status == "working" or completed):
+                verify_terminal(run, current)
+            state = (current.get("status") or {}).get("state")
+            return (screen == "ready" and current["turn"] == sent_turn
+                    and (state == "idle" or (continuation and state == "done")))
+
+        for attempt in range(2):
+            try:
+                hc_json("send", *guard, "--", address, message)
+                submitted = confirmed()
+            except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
+                if attempt or not lost():
+                    raise
+                submitted = False
+            else:
+                if not submitted and (attempt or not lost()):
+                    raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
+            if submitted:
                 if run:
                     run["sent"] = True
                     run["screen_reads"] += screen_reads
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
-            if screen == "warning":
-                raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
-            idle_paste = (status == "idle" or (continuation and status == "done")) and screen == "paste"
-            if idle_paste and previous_idle_paste and not retried_enter:
-                hc_json("keys", address, "enter")
-                retried_enter = True
-            if time.monotonic() >= deadline:
-                raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
-            previous_idle_paste = idle_paste
-            time.sleep(SCREEN_POLL_SECONDS)
+            print("warning: the submission left no trace; sending it once more", file=sys.stderr)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as err:
         reason = ("Herdr could not confirm delivery; inspect the screen before retrying" if attempted_send
                   else "task withheld; Herdr could not read Codex readiness")
@@ -507,7 +567,8 @@ def collect_result(path, close):
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
     if close:
-        if not result or result["status"] not in {"done", "merged"} or not (finished or status == "done"):
+        # A finished terminal (exited or killed) has nothing left to lose; a live one needs a final result.
+        if not finished and (not result or result["status"] not in {"done", "merged"} or status != "done"):
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])

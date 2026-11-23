@@ -24,8 +24,9 @@ withhold the task. For an unconfirmed send, inspect whether the task already sta
 retrying.
 
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using
-the current installed script. A receipt flagged unconfirmed blocks another scripted send.
-Inspect the transcript and result file first. If the task started, let the existing session
+the current installed script. A receipt flagged unconfirmed blocks another scripted send until
+the child writes a new result or starts a turn past the one recorded at send; then `send`
+accepts it as delivered. Otherwise inspect the transcript and result file first. If the task started, let the existing session
 finish. If the text is still in its composer, confirm that it is the intended task and submit
 it once there. Relaunch only after verifying that the task never started and preserving any
 changes. A normal startup can report turn 1, so the guarded sender also checks that the
