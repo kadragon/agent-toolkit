@@ -45,9 +45,10 @@ WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b",
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
-    r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b|(?:~|…|[a-z]:)?[/\\]\S)",
+    r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S)",
     re.IGNORECASE,
 )
+CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
@@ -359,10 +360,16 @@ def transcript_echoed(text, message):
 
 
 def footer_boundary(lines, composer, *, placeholder=False):
+    match_hint = CODEX_SHORTCUT_LINE.match if placeholder else CODEX_SHORTCUT_LINE.fullmatch
+    if (len(lines) >= composer + 4 and not lines[-3] and match_hint(lines[-1])
+            and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
+        return len(lines) - 3
+
     # A visible placeholder distinguishes arbitrary footer text from an indented draft.
     if len(lines) >= composer + 3 and not lines[-2]:
         footer = lines[-1]
-        if CODEX_STATUS_LINE.match(footer) or (placeholder and footer.startswith("  ")):
+        if (CODEX_STATUS_LINE.match(footer) or CODEX_SHORTCUT_LINE.match(footer)
+                or (placeholder and footer.startswith("  "))):
             return len(lines) - 2
     return None
 
@@ -383,10 +390,12 @@ def codex_screen(text, *, sent_message=None):
             break
         if line.startswith("›"):
             prompt = line[1:].strip()
-            if PASTED_CONTENT.fullmatch(prompt):
-                return "collapsed"
             placeholder = prompt == "Ask Codex to do anything"
             status_row = footer_boundary(lines, index, placeholder=placeholder)
+            if status_row is not None and WARNING_FOOTER.search(lines[status_row + 1]):
+                return "warning"
+            if PASTED_CONTENT.fullmatch(prompt):
+                return "collapsed"
             body = (prompt, *lines[index + 1:status_row])
             if (not prompt or placeholder) and not any(row.strip() for row in body[1:]):
                 return "ready"
