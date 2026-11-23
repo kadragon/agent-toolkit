@@ -453,7 +453,8 @@ class CodexSendTests(unittest.TestCase):
         footer = self.FOOTER_0171
         ready = f"› Ask Codex to do anything\n\n{footer}"
         branch_first = ready.replace("GPT-6.2-Sol high · ", "")
-        for screen in (ready, f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}", branch_first):
+        for screen in (ready, f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}", branch_first,
+                       f"{ready}       IDE context"):
             with self.subTest(screen=screen):
                 self.assertEqual(codex_screen(screen), "ready")
 
@@ -471,10 +472,14 @@ class CodexSendTests(unittest.TestCase):
         with self.subTest("extract draft"):
             self.assertEqual(composer_draft(screen), message)
             self.assertEqual(composer_draft(draft), message)
-            status_like_draft = "› Summarize this\n\n  main · weekly 54% left\n  ← for agents · ? for shortcuts"
-            self.assertEqual(codex_screen(status_like_draft), "waiting")
-            self.assertEqual(composer_draft(status_like_draft),
-                             "Summarize this\n\nmain · weekly 54% left\n← for agents · ? for shortcuts")
+        for status, hint in (
+            ("main · weekly 54% left", "← for agents · ? for shortcuts"),
+            ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts in this example."),
+        ):
+            with self.subTest(status=status, hint=hint):
+                status_like_draft = f"› Summarize this\n\n  {status}\n  {hint}"
+                self.assertEqual(codex_screen(status_like_draft), "waiting")
+                self.assertEqual(composer_draft(status_like_draft), f"Summarize this\n\n{status}\n{hint}")
 
         status, hint = footer.splitlines()
         warning = "       ⚠ 1 warning · f2 to view"
