@@ -5,15 +5,15 @@
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
-                     [--name N] [--parent T] [--task TASK] [--keep-connectors]
+                     [--name N] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--no-show] [--dry-run] [MESSAGE]
       Start the child with hc run and, inside the Herdr app, keep its pane in the
       right-hand column. Prints one JSON object: name, address, parent, shown.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
-  dispatch.py send [--run RECEIPT] [--continue] ADDRESS MESSAGE
-      Send to a clear Codex composer. A receipt allows startup turn 1 or phase reuse.
-  dispatch.py collect RECEIPT [--close]
-      Read the result and status without reading the screen. Close a completed child.
+  dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
+      Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
+  dispatch.py collect RECEIPT [--close [--force]]
+      Read the result and status without reading the screen. Close an owned child.
 """
 import argparse
 import json
@@ -37,10 +37,17 @@ HOOK_BLOCKER = re.compile(
     r"^(?:[•└⚠]\ufe0f?\s*)?(?:(?:\d+\s+)?hooks? needs? review|"
     r"hook (?:failed|stopped)|blocked by hook|(?:plugin contents changed;\s*)?hook approval required)\b",
     re.IGNORECASE)
+HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
+HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
+HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
+HOOK_TRUST_ERROR = re.compile(r"^\s*(Failed to trust hooks:[^\n]*)", re.MULTILINE)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
-CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
+CODEX_STATUS_LINE = re.compile(
+    r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b|(?:~|…|[a-z]:)?[/\\]\S)",
+    re.IGNORECASE,
+)
 SCREEN_POLL_SECONDS = 0.25
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
@@ -237,11 +244,28 @@ def first_prompt(cli, message, handoff):
             "</dispatch-handoff>")
 
 
+def warn_linked_worktree(cwd):
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return
+    paths = result.stdout.splitlines()
+    if len(paths) == 2 and Path(paths[0]).resolve() != Path(paths[1]).resolve():
+        print(f"warning: {cwd} is inside a linked worktree; the child can keep it open on Windows. "
+              "Launch from the main checkout and add --tree to the task invocation.", file=sys.stderr)
+
+
 def launch(args):
     cwd = Path(args.cwd).expanduser()
     name = terminal_name(args.name or cwd.name)
     if args.task is not None and (args.cli != "codex" or args.message is not None):
         raise SystemExit("--task is for Codex only; Claude takes its task as MESSAGE")
+    trust_hooks = getattr(args, "trust_hooks", False)
+    if trust_hooks and args.task is None:
+        raise SystemExit("--trust-hooks requires a Codex --task")
     handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
@@ -270,6 +294,7 @@ def launch(args):
         if not cwd.is_dir():
             raise SystemExit(f"no such directory: {cwd}")
         result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
+    warn_linked_worktree(cwd)
     argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
             "--name", name, "--cwd", str(cwd), *(["--parent", home] if home else ["--no-parent"]),
             *child_argv(args.cli, args.model, args.effort, message, args.keep_connectors, result_path)]
@@ -303,7 +328,7 @@ def launch(args):
             print(f"pane not kept: {err}", file=sys.stderr)
     print(json.dumps({**run, "shown": shown, "run": str(receipt), "result": str(result_path)}), flush=True)
     if args.task:
-        send(SimpleNamespace(address=address, message=args.task, run=receipt))
+        send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
 
 
 def matches_sent_message(rows, message):
@@ -318,6 +343,28 @@ def matches_sent_message(rows, message):
             return False
         message = message[len(row):].lstrip()
     return not message
+
+
+def transcript_echoed(text, message):
+    """Look for the complete message in the last prompt above the clear composer."""
+    lines = text.splitlines()
+    prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+    if len(prompts) < 2:
+        return False
+    last_prompt, composer = prompts[-2:]
+    end = next((i for i in range(last_prompt + 1, composer)
+                if lines[i].startswith(("•", "■", "─ Worked for"))), composer)
+    rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
+    return matches_sent_message(rows, message)
+
+
+def footer_boundary(lines, composer, *, placeholder=False):
+    # A visible placeholder distinguishes arbitrary footer text from an indented draft.
+    if len(lines) >= composer + 3 and not lines[-2]:
+        footer = lines[-1]
+        if CODEX_STATUS_LINE.match(footer) or (placeholder and footer.startswith("  ")):
+            return len(lines) - 2
+    return None
 
 
 def codex_screen(text, *, sent_message=None):
@@ -336,14 +383,13 @@ def codex_screen(text, *, sent_message=None):
             break
         if line.startswith("›"):
             prompt = line[1:].strip()
-            if prompt in ("", "Ask Codex to do anything"):
-                return "ready"
             if PASTED_CONTENT.fullmatch(prompt):
-                return "paste"
-            # Codex leaves a blank row between the composer and its status line.
-            status_row = next((row for row in reversed(range(index + 1, len(lines) - 1))
-                               if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), None)
-            body = (prompt, *lines[index + 1:len(lines) if status_row is None else status_row])
+                return "collapsed"
+            placeholder = prompt == "Ask Codex to do anything"
+            status_row = footer_boundary(lines, index, placeholder=placeholder)
+            body = (prompt, *lines[index + 1:status_row])
+            if (not prompt or placeholder) and not any(row.strip() for row in body[1:]):
+                return "ready"
             if sent_message is not None and matches_sent_message(body, sent_message):
                 return "paste"
             if status_row is not None:
@@ -355,10 +401,27 @@ def codex_screen(text, *, sent_message=None):
 def composer_draft(text):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
     index = max(i for i, line in enumerate(lines) if line.lstrip().startswith("›"))
-    status_row = next(row for row in reversed(range(index + 1, len(lines) - 1))
-                      if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1]))
+    status_row = footer_boundary(lines, index)
     return "\n".join([lines[index].lstrip()[1:].strip(),
                       *(line.strip() for line in lines[index + 1:status_row])]).strip()
+
+
+def hook_trust_keys(text):
+    """Find the visible trust-all option relative to the selected row."""
+    lines = text.splitlines()
+    title = next((i for i, line in enumerate(lines) if HOOK_REVIEW_TITLE.fullmatch(line)), None)
+    if title is None:
+        return None
+    options = [option for line in lines[title + 1:] if (option := HOOK_REVIEW_OPTION.fullmatch(line))]
+    labels = [option["label"] for option in options]
+    if "Review hooks" not in labels or not any(label.startswith("Continue without trusting") for label in labels):
+        return None
+    selected = [i for i, option in enumerate(options) if option["selected"]]
+    trust_all = [i for i, option in enumerate(options) if option["label"] == "Trust all and continue"]
+    if len(selected) != 1 or len(trust_all) != 1:
+        return None
+    offset = trust_all[0] - selected[0]
+    return ("down",) * offset if offset > 0 else ("up",) * -offset
 
 
 def read_codex_screen(address, *, sent_message=None, with_text=False):
@@ -391,17 +454,26 @@ def send_task(args, run_path):
         raise SystemExit("first message is empty")
     run = None
     continuation = getattr(args, "continuation", False)
+    resend = getattr(args, "resend", False)
+    trust_hooks = getattr(args, "trust_hooks", False)
+    if resend and not run_path:
+        raise SystemExit("--resend requires --run")
+    screen_reads = 0
     if run_path:
         run = load_run(run_path)
         if run["cli"] != "codex" or run["address"] != address:
             raise SystemExit("receipt is for another terminal or CLI")
-        if run["sent"] == "unconfirmed":
+        if resend:
+            if run["sent"] != "unconfirmed":
+                raise SystemExit("--resend requires an unconfirmed delivery")
+        elif run["sent"] == "unconfirmed":
             result, written = read_result(run_path)
             terminal = hc_json("get", address)
             verify_terminal(run, terminal)
             state = (terminal.get("status") or {}).get("state")
-            started = (state == "working"
-                       or (state == "done" and "sent_turn" in run and terminal["turn"] > run["sent_turn"]))
+            started = run.get("send_acknowledged", True) and (
+                state == "working" or (state == "done" and "sent_turn" in run and terminal["turn"] > run["sent_turn"])
+            )
             if started:
                 snapshot = hc_json("read", "--lines", "0", address)
                 started = (snapshot["complete"] and snapshot["how"] == "screen"
@@ -411,32 +483,42 @@ def send_task(args, run_path):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
             write_json(run_path, run)
-        if run["sent"] != continuation:
+        if not resend and run["sent"] != continuation:
             raise SystemExit("use --continue only after the first task is confirmed")
     elif continuation:
         raise SystemExit("--continue requires --run")
-    message = args.message
-    if run_path:
-        if not continuation:
-            if "handoff" in run:
-                message = first_prompt("codex", message, run["handoff"])
-            else:
-                print("warning: legacy receipt has no handoff metadata; include the original request, "
-                      "assigned unit, and Git limits in the first message", file=sys.stderr)
-        message += "\n\n" + report_instruction(run_path.with_name("result.json"))
-    sent_message = message.strip()
-    screen_reads = 0
     attempted_send = False
     stray_draft = None
     clears = 0
     last_clear = None
+    trust_moved = False
+    trust_accepted = False
     try:
         deadline = time.monotonic() + 30
         while True:
             screen_reads += 1
             screen, text = read_codex_screen(address, with_text=True)
+            if resend and screen != "ready":
+                raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
+            if screen == "hooks" and trust_accepted and HOOK_TRUST_PROGRESS.search(text):
+                screen = "waiting"
             if screen == "hooks":
-                raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                trust_error = HOOK_TRUST_ERROR.search(text) if trust_accepted else None
+                if trust_error:
+                    raise SystemExit(f"{address}: task withheld. {trust_error[1]}")
+                keys = hook_trust_keys(text) if trust_hooks else None
+                if keys is None:
+                    raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                terminal = hc_json("get", address)
+                verify_terminal(run, terminal)
+                if terminal["state"] != "live":
+                    raise SystemExit(f"{address}: task withheld; Codex exited during hook review")
+                if not keys and not trust_accepted:
+                    hc_json("keys", address, "enter")
+                    trust_accepted = True
+                elif keys and not trust_moved and not trust_accepted:
+                    hc_json("keys", address, *keys)
+                    trust_moved = True
             if screen == "warning":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex warning with F2")
             if screen == "draft":
@@ -464,6 +546,19 @@ def send_task(args, run_path):
                 if run:
                     verify_terminal(run, terminal)
                 status = (terminal.get("status") or {}).get("state")
+                if resend:
+                    sent_turn = run.get("sent_turn")
+                    if terminal["turn"] != sent_turn:
+                        raise SystemExit(f"{address}: resend withheld; the recorded turn no longer matches")
+                    if "sent_continuation" in run:
+                        continuation = run["sent_continuation"]
+                    elif sent_turn == 1 and not startup_composer(text):
+                        raise SystemExit(f"{address}: resend withheld; the first task phase is ambiguous in this legacy receipt")
+                    else:
+                        continuation = sent_turn > 1
+                    if terminal["state"] != "live" or not (status == "idle" or (continuation and status == "done")):
+                        raise SystemExit(f"{address}: resend withheld; the Codex terminal is not idle or on the same completed turn")
+                    break
                 initial = terminal["turn"] == 0
                 if not initial and not continuation:
                     if run and terminal["turn"] == 1:
@@ -479,12 +574,28 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
+        message = args.message
+        if run:
+            if not continuation:
+                if "handoff" in run:
+                    message = first_prompt("codex", message, run["handoff"])
+                else:
+                    print("warning: legacy receipt has no handoff metadata; include the original request, "
+                          "assigned unit, and Git limits in the first message", file=sys.stderr)
+            message += "\n\n" + report_instruction(run_path.with_name("result.json"))
+        sent_message = message.strip()
+        echoed_before = transcript_echoed(text, sent_message)
+        if resend and echoed_before:
+            raise SystemExit(f"{address}: resend withheld; this message already appears in the Codex transcript")
         sent_turn = terminal["turn"]
         # Herdr can report that no turn started even after it pasted the message.
         if run:
             if run["parent"]:
                 os.environ["HC_TERMINAL_ID"] = run["parent"]
-            _, run["previous_result"] = read_result(run_path)
+            result, written = read_result(run_path)
+            if resend and result and written != run.get("previous_result"):
+                raise SystemExit("the previous delivery already produced a result; use --continue for the next phase")
+            run["previous_result"] = written
             if status == "done":
                 current = hc_json("get", address)
                 verify_terminal(run, current)
@@ -493,13 +604,15 @@ def send_task(args, run_path):
                     raise SystemExit(f"{address}: task withheld; the child started another turn")
             run["sent"] = "unconfirmed"
             run["sent_turn"] = sent_turn
+            run["sent_continuation"] = continuation
+            run["send_acknowledged"] = False
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
 
-        def confirmed():
+        def confirmed(send_failed):
             """Return (submitted, saw_trace)."""
             nonlocal screen_reads
             deadline = time.monotonic() + 5
@@ -508,7 +621,7 @@ def send_task(args, run_path):
             saw_trace = False
             while True:
                 screen_reads += 1
-                screen = read_codex_screen(address, sent_message=sent_message)
+                screen, text = read_codex_screen(address, sent_message=sent_message, with_text=True)
                 if screen == "hooks":
                     raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
                 terminal = hc_json("get", address)
@@ -521,12 +634,18 @@ def send_task(args, run_path):
                 if run and status == "done" and screen == "ready":
                     result, written = read_result(run_path)
                     completed = bool(result and written != run["previous_result"])
-                if screen == "ready" and (status == "working" or completed):
-                    return True, True
-                saw_trace = saw_trace or screen in ("paste", "draft") or status == "working"
+                if screen == "ready":
+                    delivered = not send_failed or retried_enter or (
+                        not echoed_before and transcript_echoed(text, sent_message)
+                    )
+                    if completed or (status == "working" and delivered):
+                        return True, True
+                saw_trace = saw_trace or screen in ("paste", "collapsed", "draft") or status == "working"
                 if screen == "warning":
                     raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
-                idle_paste = (status == "idle" or (continuation and status == "done")) and screen == "paste"
+                # A collapsed paste shows no text. Trust it only when Herdr confirmed typing the message.
+                matches_paste = screen == "paste" or (screen == "collapsed" and not send_failed)
+                idle_paste = (status == "idle" or (continuation and status == "done")) and matches_paste
                 if idle_paste and previous_idle_paste and not retried_enter:
                     hc_json("keys", address, "enter")
                     retried_enter = saw_trace = True
@@ -556,16 +675,23 @@ def send_task(args, run_path):
                 time.sleep(SCREEN_POLL_SECONDS)
 
         for attempt in range(2):
+            if attempt and run and run["send_acknowledged"]:
+                run["send_acknowledged"] = False
+                write_json(run_path, run)
+            send_error = None
             try:
                 hc_json("send", *guard, "--", address, message)
-            except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
-                if attempt or not lost():
-                    raise
-                submitted = False
+            except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
+                send_error = error
             else:
-                submitted, saw_trace = confirmed()
-                if not submitted and (attempt or saw_trace or not lost()):
-                    raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
+                if run:
+                    run["send_acknowledged"] = True
+                    write_json(run_path, run)
+            submitted, saw_trace = confirmed(send_error is not None)
+            if not submitted and (attempt or saw_trace or not lost()):
+                if send_error is not None:
+                    raise send_error
+                raise SystemExit(f"{address}: could not confirm submission; inspect the input before retrying")
             if submitted:
                 if run:
                     run["sent"] = True
@@ -582,28 +708,41 @@ def send_task(args, run_path):
 
 def collect(args):
     path = Path(args.run).resolve()
+    force = getattr(args, "force", False)
+    if force and not args.close:
+        raise SystemExit("--force requires --close")
     with lock_run(path) if args.close else nullcontext():
-        collect_result(path, args.close)
+        collect_result(path, args.close, force)
 
 
-def collect_result(path, close):
+def collect_result(path, close, force):
     run = load_run(path)
-    result, written = read_result(path)
+    try:
+        result, written = read_result(path)
+    except SystemExit as error:
+        if not force:
+            raise
+        print(error, file=sys.stderr)
+        result, written = None, None
     if written == run.get("previous_result"):
         result = None
     terminal = hc_json("get", run["address"])
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
+    closed = {}
     if close:
         final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
-        if not (finished or final):
+        if not (force or finished or final):
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
         hc_json("rm", run["address"])
+        reason = "forced" if force else ("finished" if finished else "final_result")
+        closed = {"closed_reason": reason}
+        write_json(path, {**run, **closed})
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "closed": close, "screen_reads": run["screen_reads"]},
+                      "result": result, "closed": close, "screen_reads": run["screen_reads"], **closed},
                      ensure_ascii=False))
 
 
@@ -614,7 +753,7 @@ def pick(args):
     if not (repo / "backlog.md").exists() and not args.tree:
         raise SystemExit(f"{repo} has no backlog.md: no queue")
     cmd = [sys.executable, "-I", "-X", "utf8", str(script), "--tasks", "tasks.md",
-           "--backlog", "backlog.md", "--json"]
+           "--backlog", "backlog.md", "--json", "--counts"]
     if args.tree:
         cmd += ["--ref", "origin/HEAD"]
     if args.full_scan:
@@ -623,7 +762,7 @@ def pick(args):
     if done.returncode:
         raise SystemExit(done.stderr.strip() or done.stdout.strip())
     sys.stderr.write(done.stderr)
-    print(done.stdout.strip())
+    print(json.dumps(json.loads(done.stdout), ensure_ascii=False))
 
 
 def main(argv):
@@ -646,6 +785,7 @@ def main(argv):
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--parent")
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
+    launch_parser.add_argument("--trust-hooks", action="store_true", help="trust all hooks in the Codex startup dialog")
     launch_parser.add_argument("--keep-connectors", action="store_true")
     launch_parser.add_argument("--no-show", action="store_true")
     launch_parser.add_argument("--dry-run", action="store_true")
@@ -655,11 +795,14 @@ def main(argv):
     send_parser.add_argument("address")
     send_parser.add_argument("message")
     send_parser.add_argument("--run")
-    send_parser.add_argument("--continue", dest="continuation", action="store_true")
+    delivery = send_parser.add_mutually_exclusive_group()
+    delivery.add_argument("--continue", dest="continuation", action="store_true")
+    delivery.add_argument("--resend", action="store_true", help="retry an unconfirmed delivery to a clear idle composer")
     send_parser.set_defaults(func=send)
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
     collect_parser.add_argument("--close", action="store_true")
+    collect_parser.add_argument("--force", action="store_true", help="close even when the owned child has no final result")
     collect_parser.set_defaults(func=collect)
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):

@@ -24,24 +24,29 @@ withhold the task. For an unconfirmed send, inspect whether the task already sta
 retrying.
 
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using
-the current installed script. A receipt flagged unconfirmed blocks another scripted send until
+the current installed script. By default an unconfirmed receipt blocks another scripted send until
 the child writes a new result or starts a turn past the one recorded at send; then `send`
 accepts it as delivered. Otherwise inspect the transcript and result file first. If the task started, let the existing session
 finish. If the text is still in its composer, confirm that it is the intended task and submit
-it once there. Relaunch only after verifying that the task never started and preserving any
-changes. A normal startup can report turn 1, so the guarded sender also checks that the
-receipt belongs to the child and that the startup screen has no previous prompt.
+it once there. If the task never started, the composer is clear, and the child is still on
+the recorded turn, use `dispatch.py send --run <receipt> --resend -- <address> '<same message>'`.
+The child must be idle or on the previous completed turn of a follow-up. A matching prompt in
+the transcript blocks resend. Relaunch only after verifying that the task never started and
+preserving any changes. A startup can report turn 1.
+For older receipts missing the delivery phase, a resend on turn 1 requires the startup screen.
 
 ## Send recovery
 
-- A collapsed or expanded paste left in the idle composer gets one Enter.
+- A paste left in the idle composer gets one Enter if its text matches the message or Herdr
+  acknowledged sending it.
 - A stray draft in an owned child's composer before its first task (turn 0, or the startup
   screen at turn 1) is cleared with `ctrl+u` — up to five presses a second apart, for a stale
   frame or several rows — and named on stderr. Any other draft is reported and the task withheld.
 - A submit that left no trace — composer clear, same turn, still idle for two seconds, the task
   not echoed in the transcript — is sent once more. A paste, Enter retry, or working status seen
   after the send rules that out.
-- An unconfirmed receipt is accepted as delivered once the child writes a new result, or is
-  working or done past the recorded turn with a clear composer and no startup screen.
+- An unconfirmed receipt is accepted as delivered once the child writes a new result. After
+  Herdr acknowledges a send, a clear composer and a working or completed turn can also
+  confirm it.
 
 Codex documents [hook trust and the /hooks browser](https://learn.chatgpt.com/docs/hooks).
