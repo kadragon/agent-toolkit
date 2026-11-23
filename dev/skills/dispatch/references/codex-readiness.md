@@ -31,9 +31,8 @@ finish. If the text is still in its composer, confirm that it is the intended ta
 it once there. If the task never started, the composer is clear, and the child is still on
 the recorded turn, use `dispatch.py send --run <receipt> --resend -- <address> '<same message>'`.
 The child must be idle or on the previous completed turn of a follow-up. Relaunch only after
-verifying that the task never started and preserving any changes. A normal startup can
-report turn 1, so the guarded sender also checks that the
-receipt belongs to the child and that the startup screen has no previous prompt.
+verifying that the task never started and preserving any changes. A startup can report turn 1.
+For older receipts missing the delivery phase, a resend on turn 1 requires the startup screen.
 
 ## Send recovery
 

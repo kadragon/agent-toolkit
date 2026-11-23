@@ -39,6 +39,8 @@ HOOK_BLOCKER = re.compile(
     re.IGNORECASE)
 HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
 HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
+HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
+HOOK_TRUST_ERROR = re.compile(r"^\s*(Failed to trust hooks:[^\n]*)", re.MULTILINE)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
@@ -350,8 +352,10 @@ def transcript_echoed(text, message):
     if len(prompts) < 2:
         return False
     last_prompt, composer = prompts[-2:]
-    rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:composer])
-    return any(matches_sent_message(rows[:end], message) for end in range(1, len(rows) + 1))
+    end = next((i for i in range(last_prompt + 1, composer)
+                if lines[i].startswith(("•", "■", "─ Worked for"))), composer)
+    rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
+    return matches_sent_message(rows, message)
 
 
 def footer_boundary(lines, composer, *, placeholder=False):
@@ -495,7 +499,12 @@ def send_task(args, run_path):
             screen, text = read_codex_screen(address, with_text=True)
             if resend and screen != "ready":
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
+            if screen == "hooks" and trust_accepted and HOOK_TRUST_PROGRESS.search(text):
+                screen = "waiting"
             if screen == "hooks":
+                trust_error = HOOK_TRUST_ERROR.search(text) if trust_accepted else None
+                if trust_error:
+                    raise SystemExit(f"{address}: task withheld. {trust_error[1]}")
                 keys = hook_trust_keys(text) if trust_hooks else None
                 if keys is None:
                     raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
@@ -540,9 +549,12 @@ def send_task(args, run_path):
                     sent_turn = run.get("sent_turn")
                     if terminal["turn"] != sent_turn:
                         raise SystemExit(f"{address}: resend withheld; the recorded turn no longer matches")
-                    continuation = run.get(
-                        "sent_continuation", sent_turn > 1 or (sent_turn == 1 and not startup_composer(text))
-                    )
+                    if "sent_continuation" in run:
+                        continuation = run["sent_continuation"]
+                    elif sent_turn == 1 and not startup_composer(text):
+                        raise SystemExit(f"{address}: resend withheld; the first task phase is ambiguous in this legacy receipt")
+                    else:
+                        continuation = sent_turn > 1
                     if terminal["state"] != "live" or not (status == "idle" or (continuation and status == "done")):
                         raise SystemExit(f"{address}: resend withheld; the Codex terminal is not idle or on the same completed turn")
                     break

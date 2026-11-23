@@ -439,6 +439,10 @@ class CodexSendTests(unittest.TestCase):
         "› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n"
         "  enter confirm · esc skip"
     )
+    TRUSTING_HOOKS = (
+        "  Hooks need review\n  2 hooks are new or changed.\n  Trusting hooks...\n\n"
+        "›    Review hooks\n     Trust all and continue\n     Continue without trusting (hooks\n     won't run)"
+    )
 
     def launch_codex(self, directory, respond, **options):
         saved = DispatchReceiptTests()
@@ -466,6 +470,7 @@ class CodexSendTests(unittest.TestCase):
                               (True, "Hook failed: task is blocked\n  2. Trust all and continue")):
             with self.subTest(trust=trust, dialog=dialog), tempfile.TemporaryDirectory() as directory:
                 operations = []
+                approved_frames = iter([self.TRUSTING_HOOKS, self.TRUSTING_HOOKS])
 
                 def respond(command, *args):
                     if command == "get":
@@ -474,7 +479,7 @@ class CodexSendTests(unittest.TestCase):
                     if command == "read":
                         shown = dialog
                         if ("enter",) in operations:
-                            shown = self.READY
+                            shown = next(approved_frames, self.READY)
                         elif ("down",) in operations:
                             shown = dialog.replace("› 1. Review hooks\n  2.", "  1. Review hooks\n› 2.")
                         return self.screen(shown)
@@ -482,12 +487,38 @@ class CodexSendTests(unittest.TestCase):
                     return {}
 
                 if trust and dialog == self.HOOK_REVIEW:
-                    self.launch_codex(directory, respond, trust_hooks=True)
+                    try:
+                        self.launch_codex(directory, respond, trust_hooks=True)
+                    except SystemExit as error:
+                        self.fail(f"Launch should wait for hook trust to finish: {error}")
                     self.assertEqual(operations, [("down",), ("enter",), "send"])
                 else:
                     with self.assertRaisesRegex(SystemExit, "task withheld.*?/hooks"):
                         self.launch_codex(directory, respond, trust_hooks=trust)
                     self.assertEqual(operations, [])
+
+    def test_launch_reports_a_hook_trust_write_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            choices = []
+
+            def respond(command, *args):
+                if command == "get":
+                    return {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+                if command == "read":
+                    if not choices:
+                        return self.screen(self.HOOK_REVIEW)
+                    selected = self.HOOK_REVIEW.replace("› 1. Review hooks\n  2.", "  1. Review hooks\n› 2.")
+                    if choices == ["down"]:
+                        return self.screen(selected)
+                    return self.screen(selected.replace("  2 hooks are new or changed.",
+                                                        "  Failed to trust hooks: access denied"))
+                self.assertEqual(command, "keys")
+                choices.append(args[-1])
+                return {}
+
+            with self.assertRaisesRegex(SystemExit, "Failed to trust hooks: access denied"):
+                self.launch_codex(directory, respond, trust_hooks=True)
+            self.assertEqual(choices, ["down", "enter"])
 
     def test_launch_recovers_paste_when_herdr_could_not_confirm_submission(self):
         for acknowledged in (False, True):
@@ -586,6 +617,25 @@ class CodexSendTests(unittest.TestCase):
                         with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
                             send(args)
                 self.assertEqual(attempts, ["send"])
+
+    def test_send_error_rejects_a_transcript_prompt_with_only_the_same_prefix(self):
+        frames = iter([self.screen(self.READY)])
+        larger = self.screen(f"› a task\n  but skip the validation\n\n• Working\n\n{self.READY}")
+
+        def respond(command, *args):
+            if command == "read":
+                return next(frames, larger)
+            if command == "get":
+                return self.WORKING if attempts else self.IDLE
+            attempts.append(command)
+            raise subprocess.CalledProcessError(1, "hc")
+
+        attempts = []
+        with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+              patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO())):
+            with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                send(self.ARGS)
+        self.assertEqual(attempts, ["send"])
 
     def test_screen_recognizes_composer_and_ignores_transcript_or_draft(self):
         for text, expected in (
@@ -863,6 +913,29 @@ class CodexSendTests(unittest.TestCase):
                 send(args)
             self.assertEqual(hc.call_args_list[3].args[:3], ("send", "--", "t7"))
             self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_resend_preserves_handoff_for_a_legacy_startup_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 1,
+                   "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="$task-next", run=receipt, resend=True)
+            idle = {**DispatchReceiptTests.TERMINAL, **self.IDLE, "turn": 1}
+            working = {**idle, "status": {"state": "working"}}
+            ready = self.screen(self.READY)
+            with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working]) as hc, \
+                    redirect_stdout(StringIO()):
+                with self.assertRaisesRegex(SystemExit, "first task phase is ambiguous"):
+                    send(args)
+                self.assertEqual(hc.call_count, 2)
+            startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
+            with patch("dispatch.hc_json", side_effect=[startup, idle, {}, ready, working]) as hc, \
+                    redirect_stdout(StringIO()):
+                send(args)
+            expected = "$task-next" + DispatchReceiptTests.BLOCK
+            self.assertEqual(hc.call_args_list[2].args[-1],
+                             expected + "\n\n" + report_instruction(receipt.with_name("result.json")))
 
     def test_owned_first_task_clears_a_stray_draft_once(self):
         owner = DispatchReceiptTests.TERMINAL
