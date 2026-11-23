@@ -42,7 +42,7 @@ PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
-RESULT_STATES = {"done", "ready", "blocked", "merged"}
+RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
 
@@ -127,6 +127,9 @@ def read_result(path):
         if len(raw) > RESULT_LIMIT:
             raise ValueError("result exceeds 8 KiB")
         result = json.loads(raw.decode("utf-8-sig"))
+        if isinstance(result, dict) and "status" not in result:
+            # A child may write progress without status; read it as still in progress.
+            result = {"status": "working", **result}
         if (not isinstance(result, dict) or not isinstance(result.get("status"), str)
                 or result["status"] not in RESULT_STATES
                 or not isinstance(result.get("phase"), str)

@@ -255,6 +255,28 @@ class DispatchReceiptTests(unittest.TestCase):
                     collect(SimpleNamespace(run=receipt, close=True))
                 hc.assert_called_once_with("get", "t7")
 
+    def test_collect_reads_a_result_without_status_as_working(self):
+        done = {**self.TERMINAL, "status": {"state": "done"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
+            result = receipt.with_name("result.json")
+            result.write_text(json.dumps({"phase": "review", "pr": 779, "summary": "PR open"}), encoding="utf-8")
+            with patch("dispatch.hc_json", return_value=done), patch("builtins.print") as shown:
+                collect(SimpleNamespace(run=receipt, close=False))
+            report = json.loads(shown.call_args.args[0])
+            self.assertEqual(report["result"], {"status": "working", "phase": "review", "pr": 779,
+                                                "summary": "PR open"})
+            with patch("dispatch.hc_json", return_value=done) as hc:
+                with self.assertRaisesRegex(SystemExit, "left intact"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+                hc.assert_called_once_with("get", "t7")
+            result.write_text(json.dumps({"status": "bogus", "phase": "review", "summary": "x"}),
+                              encoding="utf-8")
+            with patch("dispatch.hc_json", return_value=done):
+                with self.assertRaisesRegex(SystemExit, "invalid status, phase, or summary"):
+                    collect(SimpleNamespace(run=receipt, close=False))
+
     def test_receipt_operations_do_not_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
@@ -569,6 +591,24 @@ class CodexSendTests(unittest.TestCase):
             prompts = [entry.args[-1] for entry in hc.call_args_list if entry.args[0] == "send"]
             self.assertEqual(len(prompts), 1)
             self.assertNotIn("<dispatch-handoff>", prompts[0])
+
+    def test_continuation_accepts_a_result_without_status(self):
+        owner = DispatchReceiptTests.TERMINAL
+        done = {**owner, "turn": 1, "status": {"state": "done"}}
+        working = {**owner, "turn": 2, "status": {"state": "working"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            saved = {**DispatchReceiptTests.RECEIPT, "sent": True, "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(saved), encoding="utf-8")
+            receipt.with_name("result.json").write_text(
+                json.dumps({"phase": "review", "pr": 779, "summary": "PR open"}), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="next", run=receipt, continuation=True)
+            with patch("dispatch.hc_json", side_effect=[
+                self.screen(self.READY), done, done, {}, self.screen(self.READY), working,
+            ]) as hc, patch("builtins.print"):
+                send(args)
+            self.assertEqual(len([entry for entry in hc.call_args_list if entry.args[0] == "send"]), 1)
+            self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
 
 class QuotaTests(unittest.TestCase):
