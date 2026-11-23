@@ -15,6 +15,7 @@ from dispatch import (
     child_argv,
     codex_screen,
     collect,
+    composer_draft,
     free_name,
     launch,
     lock_run,
@@ -431,6 +432,10 @@ class WorkflowDocsTests(unittest.TestCase):
 class CodexSendTests(unittest.TestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
+    FOOTER_0171 = (
+        "  GPT-6.2-Sol high · main · weekly 54% left · Context 0% used · knue-bookflow\n"
+        "  ← for agents · ? for shortcuts"
+    )
     ARGS = SimpleNamespace(address="t7", message="a task")
     IDLE = {"turn": 0, "status": {"state": "idle"}}
     WORKING = {"turn": 0, "status": {"state": "working"}}
@@ -443,6 +448,34 @@ class CodexSendTests(unittest.TestCase):
         "  Hooks need review\n  2 hooks are new or changed.\n  Trusting hooks...\n\n"
         "›    Review hooks\n     Trust all and continue\n     Continue without trusting (hooks\n     won't run)"
     )
+
+    def test_codex_0171_two_line_footer(self):
+        footer = self.FOOTER_0171
+        ready = f"› Ask Codex to do anything\n\n{footer}"
+        for screen in (ready, f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}"):
+            with self.subTest(screen=screen):
+                self.assertEqual(codex_screen(screen), "ready")
+
+        message = "Review this task\n\nGPT-6.2-Sol is the model in this example.\nKeep this line."
+        draft = "› " + "\n  ".join(message.splitlines())
+        screen = f"{draft}\n\n{footer}"
+        for shown, sent, expected in (
+            (screen, None, "draft"),
+            (screen, message, "paste"),
+            (draft, None, "waiting"),
+            (f"› [Pasted Content 1576 chars]\n\n{footer}", None, "collapsed"),
+        ):
+            with self.subTest(shown=shown, expected=expected):
+                self.assertEqual(codex_screen(shown, sent_message=sent), expected)
+        with self.subTest("extract draft"):
+            self.assertEqual(composer_draft(screen), message)
+            self.assertEqual(composer_draft(draft), message)
+
+        status, hint = footer.splitlines()
+        warning = "       ⚠ 1 warning · f2 to view"
+        for rows in (f"{status}{warning}\n{hint}", f"{status}\n{hint}{warning}"):
+            with self.subTest(rows=rows):
+                self.assertEqual(codex_screen(f"› Ask Codex to do anything\n\n{rows}"), "warning")
 
     def launch_codex(self, directory, respond, **options):
         saved = DispatchReceiptTests()
@@ -801,7 +834,8 @@ class CodexSendTests(unittest.TestCase):
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
 
     def test_owned_startup_turn_one_preserves_multiline_handoff_in_expanded_paste(self):
-        startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
+        ready = f"› Ask Codex to do anything\n\n{self.FOOTER_0171}"
+        startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}")
         owner = DispatchReceiptTests.TERMINAL
         idle = {**owner, "turn": 1, "status": {"state": "idle"}}
         busy = {**idle, "turn": 2, "status": {"state": "working"}}
@@ -814,12 +848,12 @@ class CodexSendTests(unittest.TestCase):
                 receipt.resolve().with_name("result.json"))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
-                startup, idle, startup, {"started": True}, self.screen(self.READY), busy,
+                startup, idle, startup, {"started": True}, self.screen(ready), busy,
             ]) as hc, redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO):
                 send(args)
             prompt = next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send")
             rows = prompt.replace("\n", "\n  ")
-            self.assertEqual(codex_screen(f"› {rows}\n\n  GPT-6.2-Sol default · ~/repo", sent_message=prompt),
+            self.assertEqual(codex_screen(f"› {rows}\n\n{self.FOOTER_0171}", sent_message=prompt),
                              "paste")
             self.assertEqual(prompt, expected)
             self.assertIn("warning:", stderr.getvalue())
@@ -864,7 +898,7 @@ class CodexSendTests(unittest.TestCase):
         owner = DispatchReceiptTests.TERMINAL
         for phase in (False, True):
             with self.subTest(continuation=phase), tempfile.TemporaryDirectory() as directory:
-                receipt = Path(directory) / "run.json"
+                receipt = Path(directory).resolve() / "run.json"
                 run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": int(phase),
                        "sent_continuation": phase, "handoff": DispatchReceiptTests.HANDOFF}
                 receipt.write_text(json.dumps(run), encoding="utf-8")
@@ -916,7 +950,7 @@ class CodexSendTests(unittest.TestCase):
 
     def test_resend_preserves_handoff_for_a_legacy_startup_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
-            receipt = Path(directory) / "run.json"
+            receipt = Path(directory).resolve() / "run.json"
             run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 1,
                    "handoff": DispatchReceiptTests.HANDOFF}
             receipt.write_text(json.dumps(run), encoding="utf-8")
@@ -939,7 +973,7 @@ class CodexSendTests(unittest.TestCase):
 
     def test_resend_refuses_a_message_already_visible_in_the_transcript(self):
         with tempfile.TemporaryDirectory() as directory:
-            receipt = Path(directory) / "run.json"
+            receipt = Path(directory).resolve() / "run.json"
             run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 3, "sent_continuation": True}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="next phase", run=receipt, resend=True)
