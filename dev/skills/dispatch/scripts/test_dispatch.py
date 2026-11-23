@@ -5,7 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -293,6 +293,25 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "invalid status, phase, or summary"):
                     collect(SimpleNamespace(run=receipt, close=False))
 
+    def test_collect_force_closes_an_owned_child_and_records_the_reason(self):
+        working = {**self.TERMINAL, "status": {"state": "working"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
+            receipt.with_name("result.json").write_text(
+                '{"status":"working","phase":"test","summary":"Tests are running"}', encoding="utf-8",
+            )
+            args = SimpleNamespace(run=receipt, close=True, force=True)
+            with patch("dispatch.hc_json", return_value={**working, "created_ms": 51}) as hc:
+                with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
+                    collect(args)
+                hc.assert_called_once_with("get", "t7")
+            with patch("dispatch.hc_json", return_value=working) as hc, redirect_stdout(StringIO()) as out:
+                collect(args)
+            self.assertEqual(hc.call_args_list, [call("get", "t7"), call("kill", "t7"), call("rm", "t7")])
+            self.assertEqual(json.loads(out.getvalue())["closed_reason"], "forced")
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "forced")
+
     def test_receipt_operations_do_not_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
@@ -325,7 +344,16 @@ class PickTests(unittest.TestCase):
                 "## Base third\n\n- [ ] [DOCS] Third item\n\n"
                 "### Base nested\n\n- [ ] [FEAT] Nested item\n"
             )
-            live_section = "## Working tree queue\n\n- [ ] [FEAT] Working tree item\n\n"
+            live_title = "작업 대기열"
+            live_section = (
+                f"## {live_title}\n\n"
+                "- [ ] [FEAT] Working tree item\n"
+                "- [ ] Wait for approval\n  *(deferred: ops)*\n"
+                "- [ ] Wait for API *(blocked by: 1-api)*\n"
+                "- [ ] Wait for both *(deferred: ops)* *(blocked by: 1-api)*\n"
+                "- [ ] Explain the `*(blocked by: <slug>)*` syntax\n"
+                "- [x] Completed *(deferred: ops)*\n\n"
+            )
             backlog_title = "# Backlog\n\n"
             backlog.write_text(backlog_title + base_section + base_tail, encoding="utf-8")
             for args in (["add", "backlog.md"], ["commit", "-q", "-m", "base"],
@@ -336,16 +364,24 @@ class PickTests(unittest.TestCase):
 
             full_base = ["Base nested", "Base queue", "Base second", "Base third"]
             cases = (
-                ([], ["Working tree queue", "Base queue"]),
+                ([], [live_title, "Base queue"]),
                 (["--tree"], ["Base queue", "Base second"]),
-                (["--full-scan"], ["Base nested", "Working tree queue", *full_base[1:]]),
+                (["--full-scan"], ["Base nested", live_title, *full_base[1:]]),
                 (["--tree", "--full-scan"], full_base),
             )
             for options, expected in cases:
                 with self.subTest(options=options):
                     result = subprocess.run([*dispatch, *options], cwd=root, env=env, check=True,
                                             capture_output=True, text=True, encoding="utf-8")
-                    self.assertEqual([item["title"] for item in json.loads(result.stdout)], expected, result.stderr)
+                    candidates = json.loads(result.stdout)
+                    self.assertEqual([item["title"] for item in candidates], expected, result.stderr)
+                    for item in candidates:
+                        counts = tuple(item[key] for key in ("items", "open", "deferred", "blocked"))
+                        if item["title"] == live_title:
+                            self.assertIn(live_title, result.stdout)
+                            self.assertEqual(counts, (2, 5, 2, 2))
+                        else:
+                            self.assertEqual(counts, (1, 1, 0, 0))
 
             worktree = repo / ".worktrees" / "first"
             subprocess.run([*git, "worktree", "add", "--quiet", "--detach", str(worktree), "HEAD"],
@@ -363,6 +399,34 @@ class PickTests(unittest.TestCase):
                     self.assertEqual([item["title"] for item in json.loads(result.stdout)], expected, result.stderr)
                     self.assertEqual("claimed by in-flight worktrees" in result.stderr, claimed, result.stderr)
 
+    def test_launch_warns_for_a_subdirectory_of_a_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "main checkout"
+            linked = Path(directory) / "linked checkout"
+            git = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+            subprocess.run([*git, "init", "-q", repo], check=True)
+            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
+            subprocess.run([*git, "worktree", "add", "-q", "--detach", linked], cwd=repo, check=True)
+            for checkout in (repo, linked):
+                nested = checkout / "nested"
+                nested.mkdir()
+                args = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch", "--dry-run",
+                        "--cli", "codex", "--model", "model", "--effort", "low", "--cwd", str(nested),
+                        "--work-kind", "new", "--request", "Task", "--unit", "Task", "--git-limits", "none"]
+                result = subprocess.run(args, check=True, capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual("inside a linked worktree" in result.stderr, checkout == linked)
+                self.assertEqual("Launch from the main checkout and add --tree" in result.stderr, checkout == linked)
+
+
+class WorkflowDocsTests(unittest.TestCase):
+    def test_launch_and_watch_document_operational_order(self):
+        skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
+        self.assertIn("ask once before launch which Git actions the user authorizes", launch_step)
+        self.assertIn("after confirming task delivery to every new child", watch_step)
+        self.assertIn("Once a parallel PR branch has been pushed, fetch and merge `origin/main`", watch_step)
+
 
 class CodexSendTests(unittest.TestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
@@ -370,6 +434,99 @@ class CodexSendTests(unittest.TestCase):
     ARGS = SimpleNamespace(address="t7", message="a task")
     IDLE = {"turn": 0, "status": {"state": "idle"}}
     WORKING = {"turn": 0, "status": {"state": "working"}}
+    HOOK_REVIEW = (
+        "  Hooks need review\n  2 hooks are new or changed.\n\n"
+        "› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n"
+        "  enter confirm · esc skip"
+    )
+
+    def launch_codex(self, directory, respond, **options):
+        saved = DispatchReceiptTests()
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+
+        def hc(command, *args):
+            if command == "ls":
+                return {"terminals": [owner]}
+            if command == "get" and args == ("t6",):
+                return owner
+            return respond(command, *args)
+
+        with (
+            patch("dispatch.hc_json", side_effect=hc) as mocked_hc,
+            patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(saved.TERMINAL))),
+            patch("dispatch.tempfile.mkdtemp", return_value=directory),
+            patch("dispatch.time.sleep"),
+            redirect_stdout(StringIO()),
+        ):
+            launch(saved.launch_args(directory, **options))
+        return mocked_hc.call_args_list
+
+    def test_launch_trusts_only_the_opted_in_startup_dialog(self):
+        for trust, dialog in ((True, self.HOOK_REVIEW), (False, self.HOOK_REVIEW),
+                              (True, "Hook failed: task is blocked\n  2. Trust all and continue")):
+            with self.subTest(trust=trust, dialog=dialog), tempfile.TemporaryDirectory() as directory:
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        turn = self.WORKING if "send" in operations else self.IDLE
+                        return {**DispatchReceiptTests.TERMINAL, **turn}
+                    if command == "read":
+                        shown = dialog
+                        if ("enter",) in operations:
+                            shown = self.READY
+                        elif ("down",) in operations:
+                            shown = dialog.replace("› 1. Review hooks\n  2.", "  1. Review hooks\n› 2.")
+                        return self.screen(shown)
+                    operations.append(args[1:] if command == "keys" else command)
+                    return {}
+
+                if trust and dialog == self.HOOK_REVIEW:
+                    self.launch_codex(directory, respond, trust_hooks=True)
+                    self.assertEqual(operations, [("down",), ("enter",), "send"])
+                else:
+                    with self.assertRaisesRegex(SystemExit, "task withheld.*?/hooks"):
+                        self.launch_codex(directory, respond, trust_hooks=trust)
+                    self.assertEqual(operations, [])
+
+    def test_launch_recovers_paste_when_herdr_could_not_confirm_submission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            operations = []
+
+            def respond(command, *args):
+                if command == "get":
+                    turn = self.WORKING if "keys" in operations else self.IDLE
+                    return {**DispatchReceiptTests.TERMINAL, **turn}
+                if command == "read":
+                    return self.screen(self.PASTE if operations == ["send"] else self.READY)
+                operations.append(command)
+                if command == "send":
+                    raise subprocess.CalledProcessError(1, "hc", stderr="could not confirm submission")
+                return {}
+
+            try:
+                calls = self.launch_codex(directory, respond)
+            except SystemExit as error:
+                self.fail(f"Launch should recover the pasted task: {error}")
+            self.assertEqual(operations, ["send", "keys"])
+            self.assertIn(call("keys", "t7", "enter"), calls)
+            self.assertTrue(json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))["sent"])
+
+    def test_send_error_and_unrelated_working_status_do_not_confirm_delivery(self):
+        def respond(command, *args):
+            if command == "read":
+                return self.screen(self.READY)
+            if command == "get":
+                return self.WORKING if sent else self.IDLE
+            sent.append(args)
+            raise subprocess.CalledProcessError(1, "hc")
+
+        sent = []
+        with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+              patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO())):
+            with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                send(self.ARGS)
+        self.assertEqual(len(sent), 1)
 
     def test_screen_recognizes_composer_and_ignores_transcript_or_draft(self):
         for text, expected in (
@@ -581,7 +738,7 @@ class CodexSendTests(unittest.TestCase):
             paste_still_in_composer = self.screen(self.PASTE)
             with (patch("dispatch.hc_json", side_effect=[
                 self.screen(self.READY), idle, OSError(), paste_still_in_composer, idle, idle,
-            ]) as hc, redirect_stderr(stderr)):
+            ]) as hc, patch("dispatch.time.monotonic", side_effect=[0, 1, 6]), redirect_stderr(stderr)):
                 with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
                     send(args)
                 with self.assertRaisesRegex(SystemExit, "previous delivery is unconfirmed"):
@@ -589,6 +746,35 @@ class CodexSendTests(unittest.TestCase):
             self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
             self.assertEqual(hc.call_count, 6)
             self.assertIn("warning: legacy receipt has no handoff metadata", stderr.getvalue())
+
+    def test_resend_keeps_the_original_phase_and_requires_a_clear_idle_composer(self):
+        owner = DispatchReceiptTests.TERMINAL
+        for phase in (False, True):
+            with self.subTest(continuation=phase), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": int(phase),
+                       "sent_continuation": phase, "handoff": DispatchReceiptTests.HANDOFF}
+                receipt.write_text(json.dumps(run), encoding="utf-8")
+                args = SimpleNamespace(address="t7", message="$task-next", run=receipt, resend=True)
+                idle = {**owner, **self.IDLE, "turn": int(phase)}
+                working = {**owner, **self.WORKING}
+                ready = self.screen(self.READY)
+                draft = self.screen("›\n  a multiline draft\n\n  GPT-6.2-Sol default · ~/repo")
+                for frames, reason in (([draft], "composer is not clear"),
+                                       ([self.screen(self.PASTE)], "composer is not clear"),
+                                       ([ready, working], "terminal is not idle")):
+                    with patch("dispatch.hc_json", side_effect=frames) as hc:
+                        with self.assertRaisesRegex(SystemExit, reason):
+                            send(args)
+                        self.assertFalse(any(c.args[0] in {"keys", "send"} for c in hc.call_args_list))
+                with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working]) as hc, \
+                        redirect_stdout(StringIO()):
+                    send(args)
+                prompt = hc.call_args_list[2].args
+                self.assertEqual(prompt[:-1], ("send", "--if", "idle", "--", "t7"))
+                expected = "$task-next" + ("" if phase else DispatchReceiptTests.BLOCK)
+                self.assertEqual(prompt[-1], expected + "\n\n" + report_instruction(receipt.with_name("result.json")))
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
     def test_owned_first_task_clears_a_stray_draft_once(self):
         owner = DispatchReceiptTests.TERMINAL

@@ -2,7 +2,7 @@
 """backlog_candidates.py — deterministic candidate-group parser for task-next Step 1.
 
 Usage:
-  python3 backlog_candidates.py --tasks PATH --backlog PATH [--ref REV] [--full-scan] [--json]
+  python3 backlog_candidates.py --tasks PATH --backlog PATH [--ref REV] [--full-scan] [--json [--counts]]
   python3 backlog_candidates.py --backlog PATH --parked [--json]
   python3 backlog_candidates.py --test
 
@@ -18,6 +18,7 @@ Usage:
                    so a missing/unreadable file here is treated as a real error, not "no candidates")
   --full-scan     run the full-scan algorithm instead of the fast path (see below)
   --json          emit a JSON array of candidate objects instead of the plain-text list
+  --counts        add open, deferred, and blocked checkbox counts to candidate JSON
   Claimed items: in candidate modes (not --parked), backlog.md open items that another
   `.worktrees/` worktree has claimed — listed under its tasks.md `## Covers`, or deleted from its
   backlog.md relative to its merge-base with this checkout's HEAD (or --ref) — are dropped, and stderr names
@@ -790,6 +791,29 @@ def parked_items(label: str, tokens: list[dict]) -> list[dict]:
     return out
 
 
+def add_candidate_counts(candidates: list[dict], tasks_tokens: list[dict], backlog_tokens: list[dict]) -> None:
+    """Count unchecked items in each candidate's region, including parked and claimed items."""
+    for source, tokens, levels in (
+        ("tasks.md", tasks_tokens, (1,)),
+        ("backlog.md", backlog_tokens, (1, 2, 3)),
+    ):
+        selected = [candidate for candidate in candidates if candidate["source"] == source]
+        if not selected:
+            continue
+        headings = _headings(tokens, levels)
+        open_lines = [token["line"] for token in tokens
+                      if token["type"] == "checkbox" and token["state"] == " "]
+        parked = parked_items(source, tokens)
+        for candidate in selected:
+            start = candidate["line"]
+            end = _region_end(candidate, headings)
+            kinds = [{marker["kind"] for marker in item["markers"]} for item in parked
+                     if start < item["line"] < end]
+            candidate.update(open=sum(start < line < end for line in open_lines),
+                             deferred=sum("deferred" in item for item in kinds),
+                             blocked=sum("blocked by" in item for item in kinds))
+
+
 # A parked item's prose can run to several hundred chars, and the all-blocked stop needs the
 # blocker, not the prose: the plain-text line clips the body and keeps every marker. --json and
 # the line number still give the full item.
@@ -1244,6 +1268,7 @@ def main(argv: list[str]) -> int:
     ref = None
     full_scan_flag = False
     json_flag = False
+    counts_flag = False
     parked_flag = False
 
     i = 0
@@ -1266,6 +1291,9 @@ def main(argv: list[str]) -> int:
             i += 1
         elif a == "--json":
             json_flag = True
+            i += 1
+        elif a == "--counts":
+            counts_flag = True
             i += 1
         elif a == "--parked":
             parked_flag = True
@@ -1364,6 +1392,8 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(note + "\n")
 
     if json_flag:
+        if counts_flag:
+            add_candidate_counts(candidates, tasks_tokens, backlog_tokens)
         print(json.dumps(candidates))
     else:
         for line in format_candidates(candidates):

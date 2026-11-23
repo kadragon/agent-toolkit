@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] dispatch: opt in to Codex hook trust, recover unconfirmed sends, force-close children, and summarize queue candidates (dev v4.12.8) (2026-11-23) → dev/skills/dispatch/SKILL.md
 - [done] dispatch: recover stray drafts and lost submits, close killed children (dev v4.12.7) (2026-11-23) → dev/skills/dispatch/SKILL.md
 - [done] dispatch: read a child result without status as working, so collect and send --continue accept it (dev v4.12.6) (2026-11-23)
 - [done] Preserve dispatch handoff metadata and warn on skipped task entry points (dev v4.12.5) (2026-11-22)

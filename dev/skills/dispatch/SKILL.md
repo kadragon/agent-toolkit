@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.4.1
+version: 1.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -117,7 +117,9 @@ Effort — ambiguity and risk:
   `--tree` for worktrees; it reads local `origin/HEAD` without fetching. Read stderr and
   the relevant criteria. Size for the hardest eligible candidate in scope, or estimate an
   unattended single run from the first full-scan result. The child owns final selection
-  and unattended limits. Use its displayed titles and numbers, and escalate when needed.
+  and unattended limits. `items` counts selectable backlog items. `open` counts all unchecked
+  items, including claims and parked items. An item with both markers counts in `deferred`
+  and `blocked`. Use the displayed titles and counts to size the work.
 - Codex uses `xhigh` on the Codex-bias escalation ladder or when the user selects it.
 - Effort is fixed per session and the model already scales its thinking per turn within it,
   so set it once at launch. It changes between phases, since each phase is a new launch.
@@ -131,6 +133,8 @@ Effort — ambiguity and risk:
 
 Run `hc ls` first. A live task session in the repo — yours or another home session's, since
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
+When the request leaves Git scope unspecified, ask once before launch which Git actions the
+user authorizes. Carry the answer in the handoff.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
@@ -140,8 +144,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. Pass `--git-limits='not specified'` when the user gave no limits. This conveys no
-Git grant. Shell-quote each value, as in `--git-limits='don'\''t merge'`.
+as JSON strings. For work proceeding without a Git grant, pass `--git-limits='not specified'`.
+Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
 
 Keep the printed child address and receipt (`run`) with its result path. `--dry-run` previews
@@ -186,13 +190,17 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
 - When blocked, read `references/codex-readiness.md` before launching another child. After
   clearing the gate, retry with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
-  workspace-write sandbox. Hook trust uses Codex's separate review flow.
+  workspace-write sandbox. With explicit authorization to trust every hook in the Codex
+  startup dialog, add `--trust-hooks` to `launch --task` to select **Trust all and continue**.
+  The default withholds the task for review.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
 
 More than one session:
 
 - At most one task session per repo uses the main checkout. Name concurrent children
-  `<repo>-<n>`. For the next `task-next --tree` child on the same queue, use
+  `<repo>-<n>`. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
+  Launching inside a linked worktree can keep Windows from deleting it at cleanup. For the
+  next `task-next --tree` child on the same queue, use
   `pick --tree --full-scan` to confirm the preceding queue child's worktree claim in stderr.
 - Keep a wave to at most four live children (two under `both-hot`).
 
@@ -201,8 +209,9 @@ More than one session:
 Tell the user each terminal's name, address and repo. Watch without blocking, and keep this session's
 context small, since every wake-up re-sends all of it:
 
-- One wait covers every child: run `hc wait --children any --timeout 1800` as a background
-  command, keep working or end the turn. A timeout is only a check-in: start another wait
+- Start `hc wait --children any --timeout 1800` in the background after confirming task
+  delivery to every new child. A child still idle at startup can wake the wait immediately.
+  Keep working or end the turn. A timeout is only a check-in: start another wait
   without reading anything. Keep the timeout under the prompt-cache lifetime (1 hour on a
   subscription) so a wake-up still hits the cache.
 - On a status change, run `dispatch.py collect <receipt>` for compact results. Read the visible
@@ -228,8 +237,10 @@ The user delegates the session's decisions to this session:
   established parallel delegation authority, choose the sequential path.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
   the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
-  merge one at a time. Resync each against the latest base, preserve both sides of shared queue
-  and changelog entries, and rerun required checks on the final head.
+  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge
+  `origin/main` into it. Preserve both sides of shared queue and changelog entries and rerun
+  required checks on the final head. This keeps pushes fast-forward and the merge commit
+  stays off main when the PR is squash-merged.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.
@@ -237,7 +248,9 @@ The user delegates the session's decisions to this session:
 Once a session's work has merged or its authorized non-merge task is complete, verify its result,
 then in this order (a live Windows child holds its worktree open): `hc kill <address>` unless it
 exited, wait for `hc get` to show `state: finished`, run `dispatch.py collect <receipt> --close`
-(a finished terminal closes without a final result), and remove any clone or worktree this session
+(a finished terminal closes without a final result). Use `collect --close --force` when
+authorized to close a child irrespective of its reported status. The receipt records
+`closed_reason`. Remove any clone or worktree this session
 created for it — after checking that `git status --porcelain` is empty, no branch has commits
 missing from `origin/<base>`, and nothing is stashed. Anything that fails a check stays; report it.
 
