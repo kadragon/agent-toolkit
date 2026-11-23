@@ -361,8 +361,8 @@ def transcript_echoed(text, message):
 
 def footer_boundary(lines, composer, *, placeholder=False):
     # A second footer row has the shortcut hint. Indentation alone also fits a draft.
-    if (len(lines) >= composer + 4 and not lines[-3]
-            and CODEX_STATUS_LINE.match(lines[-2]) and CODEX_SHORTCUT_LINE.fullmatch(lines[-1])):
+    if (len(lines) >= composer + 4 and not lines[-3] and CODEX_SHORTCUT_LINE.fullmatch(lines[-1])
+            and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
         return len(lines) - 3
 
     # A visible placeholder distinguishes arbitrary footer text from an indented draft.

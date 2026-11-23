@@ -452,7 +452,8 @@ class CodexSendTests(unittest.TestCase):
     def test_codex_0171_two_line_footer(self):
         footer = self.FOOTER_0171
         ready = f"› Ask Codex to do anything\n\n{footer}"
-        for screen in (ready, f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}"):
+        branch_first = ready.replace("GPT-6.2-Sol high · ", "")
+        for screen in (ready, f"  >_ OpenAI Codex (v0.171.0)\n\n{ready}", branch_first):
             with self.subTest(screen=screen):
                 self.assertEqual(codex_screen(screen), "ready")
 
@@ -470,6 +471,10 @@ class CodexSendTests(unittest.TestCase):
         with self.subTest("extract draft"):
             self.assertEqual(composer_draft(screen), message)
             self.assertEqual(composer_draft(draft), message)
+            status_like_draft = "› Summarize this\n\n  main · weekly 54% left\n  ← for agents · ? for shortcuts"
+            self.assertEqual(codex_screen(status_like_draft), "waiting")
+            self.assertEqual(composer_draft(status_like_draft),
+                             "Summarize this\n\nmain · weekly 54% left\n← for agents · ? for shortcuts")
 
         status, hint = footer.splitlines()
         warning = "       ⚠ 1 warning · f2 to view"
