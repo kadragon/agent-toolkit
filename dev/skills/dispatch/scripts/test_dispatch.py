@@ -578,9 +578,9 @@ class CodexSendTests(unittest.TestCase):
             receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
             stderr = StringIO()
-            # The re-read shows the paste still in the composer, so it is not provably lost.
+            paste_still_in_composer = self.screen(self.PASTE)
             with (patch("dispatch.hc_json", side_effect=[
-                self.screen(self.READY), idle, OSError(), self.screen(self.PASTE), idle, idle,
+                self.screen(self.READY), idle, OSError(), paste_still_in_composer, idle, idle,
             ]) as hc, redirect_stderr(stderr)):
                 with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
                     send(args)
@@ -607,6 +607,61 @@ class CodexSendTests(unittest.TestCase):
             self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
             output.assert_any_call("warning: cleared a stray draft from the composer: 'or'", file=sys.stderr)
             self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_cleared_draft_survives_a_stale_frame_and_spans_several_rows(self):
+        owner = DispatchReceiptTests.TERMINAL
+        idle = {**owner, "turn": 0, "status": {"state": "idle"}}
+        working = {**owner, "turn": 1, "status": {"state": "working"}}
+        two_rows = self.screen("› foo\n  bar\n\n  GPT-6.2-Sol default · ~/repo")
+        one_row = self.screen("› foo\n\n  GPT-6.2-Sol default · ~/repo")
+        reads = iter((two_rows, two_rows, one_row, self.screen(self.READY), self.screen(self.READY)))
+        gets = iter((idle, idle, idle, idle, working))
+
+        def respond(command, *_args):
+            return next(reads) if command == "read" else next(gets) if command == "get" else {}
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}),
+                               encoding="utf-8")
+            clock = [0.0]
+            with patch("dispatch.hc_json", side_effect=respond) as hc, \
+                    patch("dispatch.time.sleep", side_effect=lambda _: clock.__setitem__(0, clock[0] + 0.6)), \
+                    patch("dispatch.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("builtins.print") as output:
+                send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+        self.assertEqual(hc.call_args_list.count(call("keys", "t7", "ctrl+u")), 2)
+        output.assert_any_call("warning: cleared a stray draft from the composer: 'foo\\nbar'", file=sys.stderr)
+
+    def test_draft_after_a_real_turn_is_not_cleared(self):
+        busy = self.screen("› earlier task\n\n• Done\n\n› note\n\n  GPT-6.2-Sol default · ~/repo")
+        idle = {**DispatchReceiptTests.TERMINAL, "turn": 1, "status": {"state": "idle"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}),
+                               encoding="utf-8")
+            with patch("dispatch.hc_json", side_effect=[busy, idle]) as hc:
+                with self.assertRaisesRegex(SystemExit, "already started a turn"):
+                    send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+        self.assertNotIn("keys", [c.args[0] for c in hc.call_args_list])
+
+    def test_submission_echoed_in_the_transcript_is_not_resent(self):
+        sends = []
+        echoed = self.screen(f"› a task\n\n{self.READY}")
+
+        def respond(command, *args):
+            if command == "read":
+                return self.screen(self.READY) if not sends else echoed
+            if command == "get":
+                return self.IDLE
+            sends.append(args)
+            raise subprocess.CalledProcessError(1, "hc")
+
+        with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                patch("dispatch.time.monotonic", side_effect=range(1000)), redirect_stderr(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                send(self.ARGS)
+        self.assertEqual(len(sends), 1)
 
     def test_draft_without_an_owned_first_task_is_reported_not_cleared(self):
         draft = self.screen("› or\n\n  GPT-6.2-Sol default · ~/repo")
@@ -659,16 +714,20 @@ class CodexSendTests(unittest.TestCase):
         owner = DispatchReceiptTests.TERMINAL
         saved = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "sent_turn": 0,
                  "handoff": DispatchReceiptTests.HANDOFF}
-        for terminal, accepted in (
-            ({**owner, "turn": 1, "status": {"state": "done"}}, True),
-            ({**owner, "turn": 0, "status": {"state": "working"}}, True),
-            ({**owner, "turn": 0, "status": {"state": "idle"}}, False),
+        transcript = self.screen(f"› $task-next\n\n• Working\n\n{self.READY}")
+        startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
+        for terminal, screen, accepted in (
+            ({**owner, "turn": 1, "status": {"state": "done"}}, transcript, True),
+            ({**owner, "turn": 0, "status": {"state": "working"}}, transcript, True),
+            ({**owner, "turn": 1, "status": {"state": "idle"}}, startup, False),
+            ({**owner, "turn": 1, "status": {"state": "idle"}}, self.screen(self.PASTE), False),
+            ({**owner, "turn": 0, "status": {"state": "idle"}}, transcript, False),
         ):
-            with self.subTest(terminal=terminal), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(terminal=terminal, screen=screen), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
                 receipt.write_text(json.dumps(saved), encoding="utf-8")
                 args = SimpleNamespace(address="t7", message="next", run=receipt)
-                with patch("dispatch.hc_json", return_value=terminal):
+                with patch("dispatch.hc_json", side_effect=lambda command, *_: screen if command == "read" else terminal):
                     expected = "only after the first task" if accepted else "previous delivery is unconfirmed"
                     with self.assertRaisesRegex(SystemExit, expected):
                         send(args)

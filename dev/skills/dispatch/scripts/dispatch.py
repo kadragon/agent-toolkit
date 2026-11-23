@@ -42,6 +42,9 @@ PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
+DRAFT_CLEARS = 5
+DRAFT_CLEAR_SETTLE_SECONDS = 1
+LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
@@ -350,7 +353,6 @@ def codex_screen(text, *, sent_message=None):
 
 
 def composer_draft(text):
-    """The text typed in the composer when codex_screen reads it as a draft."""
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
     index = max(i for i, line in enumerate(lines) if line.lstrip().startswith("›"))
     status_row = next(row for row in reversed(range(index + 1, len(lines) - 1))
@@ -368,11 +370,11 @@ def read_codex_screen(address, *, sent_message=None, with_text=False):
     return (state, screen.get("text", "")) if with_text else state
 
 
-def startup_composer(text):
+def startup_composer(text, *, draft=False):
     """Herdr may count initial Codex startup as turn 1 before any prompt."""
     prompts = [line.strip() for line in text.splitlines() if line.lstrip().startswith("›")]
     return ("OpenAI Codex (v" in text and len(prompts) == 1
-            and prompts[0] in {"›", "› Ask Codex to do anything"}
+            and (draft or prompts[0] in {"›", "› Ask Codex to do anything"})
             and not any(line.lstrip().startswith(("•", "■")) for line in text.splitlines()))
 
 
@@ -397,9 +399,13 @@ def send_task(args, run_path):
             result, written = read_result(run_path)
             terminal = hc_json("get", address)
             verify_terminal(run, terminal)
-            # A child that reported or has since started a turn took the task.
             started = ((terminal.get("status") or {}).get("state") == "working"
                        or ("sent_turn" in run and terminal["turn"] > run["sent_turn"]))
+            if started:
+                snapshot = hc_json("read", "--lines", "0", address)
+                started = (snapshot["complete"] and snapshot["how"] == "screen"
+                           and codex_screen(snapshot["text"]) == "ready"
+                           and not startup_composer(snapshot["text"]))
             if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
@@ -420,7 +426,9 @@ def send_task(args, run_path):
     sent_message = message.strip()
     screen_reads = 0
     attempted_send = False
-    cleared_draft = None
+    stray_draft = None
+    clears = 0
+    last_clear = None
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -431,16 +439,25 @@ def send_task(args, run_path):
             if screen == "warning":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex warning with F2")
             if screen == "draft":
-                # Only an owned child's first task may discard what sits in its composer.
                 draft = composer_draft(text)
-                if not run or continuation or cleared_draft is not None:
+                stray_draft = stray_draft or draft
+                if not run or continuation:
                     raise SystemExit(f"{address}: task withheld; the Codex composer holds a draft: {draft!r}")
                 terminal = hc_json("get", address)
                 verify_terminal(run, terminal)
-                if (terminal.get("status") or {}).get("state") == "idle" and terminal["turn"] <= 1:
+                unstarted = terminal["turn"] == 0 or (terminal["turn"] == 1 and startup_composer(text, draft=True))
+                if not unstarted:
+                    raise SystemExit(f"{address}: first task withheld; this child already started a turn")
+                settled = last_clear is None or time.monotonic() - last_clear >= DRAFT_CLEAR_SETTLE_SECONDS
+                if (terminal.get("status") or {}).get("state") == "idle" and settled:
+                    if clears >= DRAFT_CLEARS:
+                        raise SystemExit(f"{address}: task withheld; the Codex composer still holds a draft: {draft!r}")
                     hc_json("keys", address, "ctrl+u")
-                    cleared_draft = draft
-                    print(f"warning: cleared a stray draft from the composer: {draft!r}", file=sys.stderr)
+                    clears += 1
+                    last_clear = time.monotonic()
+            if screen == "ready" and stray_draft is not None:
+                print(f"warning: cleared a stray draft from the composer: {stray_draft!r}", file=sys.stderr)
+                stray_draft = None
             if screen == "ready":
                 terminal = hc_json("get", address)
                 if run:
@@ -514,17 +531,25 @@ def send_task(args, run_path):
                 previous_idle_paste = idle_paste
                 time.sleep(SCREEN_POLL_SECONDS)
 
+        first_line = sent_message.splitlines()[0].strip()
+
         def lost():
-            """The message left no trace: clear composer, no new turn, still waiting for input."""
             nonlocal screen_reads
-            screen_reads += 1
-            screen = read_codex_screen(address)
-            current = hc_json("get", address)
-            if run:
-                verify_terminal(run, current)
-            state = (current.get("status") or {}).get("state")
-            return (screen == "ready" and current["turn"] == sent_turn
-                    and (state == "idle" or (continuation and state == "done")))
+            deadline = time.monotonic() + LOST_SETTLE_SECONDS
+            while True:
+                screen_reads += 1
+                screen, text = read_codex_screen(address, with_text=True)
+                current = hc_json("get", address)
+                if run:
+                    verify_terminal(run, current)
+                state = (current.get("status") or {}).get("state")
+                echoed = any(line.lstrip().startswith("›") and first_line in line for line in text.splitlines())
+                if (screen != "ready" or echoed or current["turn"] != sent_turn
+                        or not (state == "idle" or (continuation and state == "done"))):
+                    return False
+                if time.monotonic() >= deadline:
+                    return True
+                time.sleep(SCREEN_POLL_SECONDS)
 
         for attempt in range(2):
             try:
@@ -567,8 +592,8 @@ def collect_result(path, close):
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
     if close:
-        # A finished terminal (exited or killed) has nothing left to lose; a live one needs a final result.
-        if not finished and (not result or result["status"] not in {"done", "merged"} or status != "done"):
+        final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
+        if not (finished or final):
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
