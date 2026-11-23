@@ -13,9 +13,13 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Dispatch — result and send robustness (2026-11-23)
 
-- [ ] [fix] Codex first-task delivery fails silently enough to lose handoff fields. In the 2026-11-23 KNUE wave, two of three `launch --task` calls did not deliver: one withheld the task because a stray draft (`or`) sat in the idle composer (`no clear Codex input line`), one ended with `Herdr could not confirm delivery` while the composer was empty. Afterwards `send --run <receipt> [--continue]` kept refusing with `previous delivery is unconfirmed`, so the home session fell back to raw `hc send` and the verbatim request/unit/Git-limits block never reached that child. Clear a non-empty idle composer before typing (or report its text), retry an unconfirmed delivery once after re-reading the screen, and let `send` accept a receipt whose child has since started a working turn (or add `--mark-delivered`). Done-when: a stray draft and a lost first submit are both recovered by `launch` itself, and `send` works on such a receipt, each covered by a test — dev/skills/dispatch/scripts/dispatch.py
 - [ ] [feat] Home-configured handoff lines for `launch`. KNUE repos need the same line in every Codex child's first message ("외부 리뷰 승인: Codex·Claude 허용, agy 제외"), or Codex's auto-approval reviewer refuses task-review's diff egress mid-cycle; the home session forgot it on 2026-11-23 and a child stopped to ask. Let the home repo declare extra handoff lines per repo path prefix (e.g. a file next to `repos/*.md`) that `launch` appends after the verbatim fields. Done-when: a launch into a matching repo carries the configured line without the home session typing it — dev/skills/dispatch/scripts/dispatch.py
-- [ ] [fix] Cleanup after a non-merge or killed child. `collect <receipt> --close` refuses with `terminal has no final result or is still running; left intact` after the child reported `ready` by `hc send` and was then killed, so receipts pile up under `%TEMP%/dispatch-*`. On Windows `git worktree remove` also fails with `Permission denied` while the child terminal is alive, and the emptied directory can stay busy afterwards. Allow `--close` on a finished/killed terminal, and document (or script) the order: kill the child, wait for exit, close the receipt, then remove the worktree. Done-when: closing a killed child's receipt succeeds and the skill's cleanup steps state the order — dev/skills/dispatch/SKILL.md, dev/skills/dispatch/scripts/dispatch.py
+
+## Review Backlog
+
+### PR #429 — Recover dispatch first-task delivery and close killed children (2026-11-23)
+
+- [ ] [debt] `collect --close` removes the Herdr terminal but leaves the receipt directory (`%TEMP%/dispatch-*`: run.json, lock, result.json); delete what dispatch created after printing the result, or document a cleanup step (source: codex) — dev/skills/dispatch/scripts/dispatch.py
 
 ## Rejected — do not re-file
 

@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.4.0
+version: 1.4.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -181,9 +181,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
 ```
 
 - `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
-  failure, and presses Enter once if a collapsed or expanded paste stays in the idle composer.
-  It confirms submission when Herdr reports a working turn and the composer is clear. Check
-  the screen before retrying an unconfirmed submission.
+  failure, and confirms submission when Herdr reports a working turn and the composer is clear.
+  Draft, paste, and lost-submit recovery: `references/codex-readiness.md` → *Send recovery*.
 - When blocked, read `references/codex-readiness.md` before launching another child. After
   clearing the gate, retry with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 - `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
@@ -235,11 +234,12 @@ The user delegates the session's decisions to this session:
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.
 
-Once a session's work has merged or its authorized non-merge task is complete, verify its result
-and run `dispatch.py collect <receipt> --close`. Then
-remove any clone or worktree this session created for it — after checking
-that `git status --porcelain` is empty, no branch has commits missing from `origin/<base>`, and
-nothing is stashed. Anything that fails a check stays; report it instead.
+Once a session's work has merged or its authorized non-merge task is complete, verify its result,
+then in this order (a live Windows child holds its worktree open): `hc kill <address>` unless it
+exited, wait for `hc get` to show `state: finished`, run `dispatch.py collect <receipt> --close`
+(a finished terminal closes without a final result), and remove any clone or worktree this session
+created for it — after checking that `git status --porcelain` is empty, no branch has commits
+missing from `origin/<base>`, and nothing is stashed. Anything that fails a check stays; report it.
 
 Reuse the Codex session and worktree for the next authorized phase with
 `dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`.
