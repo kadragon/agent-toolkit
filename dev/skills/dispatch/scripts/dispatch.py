@@ -128,7 +128,6 @@ def read_result(path):
             raise ValueError("result exceeds 8 KiB")
         result = json.loads(raw.decode("utf-8-sig"))
         if isinstance(result, dict) and "status" not in result:
-            # A child may write progress without status; read it as still in progress.
             result = {"status": "working", **result}
         if (not isinstance(result, dict) or not isinstance(result.get("status"), str)
                 or result["status"] not in RESULT_STATES
