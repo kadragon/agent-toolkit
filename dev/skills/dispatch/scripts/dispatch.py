@@ -42,7 +42,10 @@ HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
-CODEX_STATUS_LINE = re.compile(r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b)", re.IGNORECASE)
+CODEX_STATUS_LINE = re.compile(
+    r"^ {2,}(?:gpt-\S+|(?:← for agents · )?\? for shortcuts\b|(?:~|…|[a-z]:)?[/\\]\S)",
+    re.IGNORECASE,
+)
 SCREEN_POLL_SECONDS = 0.25
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
@@ -340,6 +343,26 @@ def matches_sent_message(rows, message):
     return not message
 
 
+def transcript_echoed(text, message):
+    """Look for the complete message in the last prompt above the clear composer."""
+    lines = text.splitlines()
+    prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+    if len(prompts) < 2:
+        return False
+    last_prompt, composer = prompts[-2:]
+    rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:composer])
+    return any(matches_sent_message(rows[:end], message) for end in range(1, len(rows) + 1))
+
+
+def footer_boundary(lines, composer, *, placeholder=False):
+    # A visible placeholder distinguishes arbitrary footer text from an indented draft.
+    if len(lines) >= composer + 3 and not lines[-2]:
+        footer = lines[-1]
+        if CODEX_STATUS_LINE.match(footer) or (placeholder and footer.startswith("  ")):
+            return len(lines) - 2
+    return None
+
+
 def codex_screen(text, *, sent_message=None):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
     # Codex indents continued lines of the submitted prompt in its transcript.
@@ -358,11 +381,10 @@ def codex_screen(text, *, sent_message=None):
             prompt = line[1:].strip()
             if PASTED_CONTENT.fullmatch(prompt):
                 return "collapsed"
-            # Codex leaves a blank row between the composer and its status line.
-            status_row = next((row for row in reversed(range(index + 1, len(lines) - 1))
-                               if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1])), None)
-            body = (prompt, *lines[index + 1:len(lines) if status_row is None else status_row])
-            if prompt in ("", "Ask Codex to do anything") and not any(row.strip() for row in body[1:]):
+            placeholder = prompt == "Ask Codex to do anything"
+            status_row = footer_boundary(lines, index, placeholder=placeholder)
+            body = (prompt, *lines[index + 1:status_row])
+            if (not prompt or placeholder) and not any(row.strip() for row in body[1:]):
                 return "ready"
             if sent_message is not None and matches_sent_message(body, sent_message):
                 return "paste"
@@ -375,8 +397,7 @@ def codex_screen(text, *, sent_message=None):
 def composer_draft(text):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
     index = max(i for i, line in enumerate(lines) if line.lstrip().startswith("›"))
-    status_row = next(row for row in reversed(range(index + 1, len(lines) - 1))
-                      if not lines[row] and CODEX_STATUS_LINE.match(lines[row + 1]))
+    status_row = footer_boundary(lines, index)
     return "\n".join([lines[index].lstrip()[1:].strip(),
                       *(line.strip() for line in lines[index + 1:status_row])]).strip()
 
@@ -516,12 +537,13 @@ def send_task(args, run_path):
                     verify_terminal(run, terminal)
                 status = (terminal.get("status") or {}).get("state")
                 if resend:
-                    sent_turn = run.get("sent_turn", 0)
+                    sent_turn = run.get("sent_turn")
+                    if terminal["turn"] != sent_turn:
+                        raise SystemExit(f"{address}: resend withheld; the recorded turn no longer matches")
                     continuation = run.get(
                         "sent_continuation", sent_turn > 1 or (sent_turn == 1 and not startup_composer(text))
                     )
-                    same_done_turn = (continuation and status == "done" and run.get("sent_turn") == terminal["turn"])
-                    if terminal["state"] != "live" or (status != "idle" and not same_done_turn):
+                    if terminal["state"] != "live" or not (status == "idle" or (continuation and status == "done")):
                         raise SystemExit(f"{address}: resend withheld; the Codex terminal is not idle or on the same completed turn")
                     break
                 initial = terminal["turn"] == 0
@@ -549,6 +571,7 @@ def send_task(args, run_path):
                           "assigned unit, and Git limits in the first message", file=sys.stderr)
             message += "\n\n" + report_instruction(run_path.with_name("result.json"))
         sent_message = message.strip()
+        echoed_before = transcript_echoed(text, sent_message)
         sent_turn = terminal["turn"]
         # Herdr can report that no turn started even after it pasted the message.
         if run:
@@ -582,7 +605,7 @@ def send_task(args, run_path):
             saw_trace = False
             while True:
                 screen_reads += 1
-                screen = read_codex_screen(address, sent_message=sent_message)
+                screen, text = read_codex_screen(address, sent_message=sent_message, with_text=True)
                 if screen == "hooks":
                     raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
                 terminal = hc_json("get", address)
@@ -595,9 +618,12 @@ def send_task(args, run_path):
                 if run and status == "done" and screen == "ready":
                     result, written = read_result(run_path)
                     completed = bool(result and written != run["previous_result"])
-                started = status == "working" and (not send_failed or retried_enter)
-                if screen == "ready" and (started or completed):
-                    return True, True
+                if screen == "ready":
+                    delivered = not send_failed or retried_enter or (
+                        not echoed_before and transcript_echoed(text, sent_message)
+                    )
+                    if completed or (status == "working" and delivered):
+                        return True, True
                 saw_trace = saw_trace or screen in ("paste", "collapsed", "draft") or status == "working"
                 if screen == "warning":
                     raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")

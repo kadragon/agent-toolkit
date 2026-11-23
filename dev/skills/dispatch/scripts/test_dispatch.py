@@ -555,9 +555,45 @@ class CodexSendTests(unittest.TestCase):
                 send(self.ARGS)
         self.assertEqual(len(sent), 1)
 
+    def test_send_error_confirms_a_new_matching_prompt_in_the_transcript(self):
+        message = "a multiline\ntask"
+        echoed = self.screen(
+            f'› <hc from="t6">\n  {message}\n  </hc>\n\n• Working\n\n{self.READY}'
+        )
+        for previous, confirmed in ((self.screen(self.READY), True), (echoed, False)):
+            with self.subTest(confirmed=confirmed):
+                attempts = []
+
+                def respond(command, *args):
+                    if command == "read":
+                        return echoed if attempts else previous
+                    if command == "get":
+                        return self.WORKING if attempts else self.IDLE
+                    attempts.append(command)
+                    raise subprocess.CalledProcessError(1, "hc")
+
+                args = SimpleNamespace(address="t7", message=message)
+                with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+                      patch("dispatch.time.monotonic", side_effect=range(1000)),
+                      redirect_stdout(StringIO()) as out, redirect_stderr(StringIO())):
+                    if confirmed:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(f"The new transcript prompt should confirm delivery: {error}")
+                        self.assertIs(json.loads(out.getvalue())["submitted"], True)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "could not confirm delivery"):
+                            send(args)
+                self.assertEqual(attempts, ["send"])
+
     def test_screen_recognizes_composer_and_ignores_transcript_or_draft(self):
         for text, expected in (
             (self.READY, "ready"),
+            ("›\n\n  ~/repo", "ready"),
+            ("› Ask Codex to do anything\n\n  custom status", "ready"),
+            ("›\n  a multiline draft\n\n  ~/repo", "draft"),
+            ("›\n\n  a multiline draft with no status line", "waiting"),
             ("›", "ready"),
             (self.PASTE, "collapsed"),
             (f"› [Pasted Content 1576 chars]\n\n• Working\n\n{self.READY}", "ready"),
@@ -784,8 +820,8 @@ class CodexSendTests(unittest.TestCase):
                 receipt.write_text(json.dumps(run), encoding="utf-8")
                 args = SimpleNamespace(address="t7", message="$task-next", run=receipt, resend=True)
                 idle = {**owner, **self.IDLE, "turn": int(phase)}
-                working = {**owner, **self.WORKING}
-                ready = self.screen(self.READY)
+                working = {**owner, **self.WORKING, "turn": int(phase)}
+                ready = self.screen("›\n\n  ~/repo")
                 draft = self.screen("›\n  a multiline draft\n\n  GPT-6.2-Sol default · ~/repo")
                 for frames, reason in (([draft], "composer is not clear"),
                                        ([self.screen(self.PASTE)], "composer is not clear"),
@@ -813,11 +849,14 @@ class CodexSendTests(unittest.TestCase):
             ready = self.screen(self.READY)
             later = {**done, "turn": 4}
             working = {**done, "turn": 4, "status": {"state": "working"}}
-            with patch("dispatch.hc_json", side_effect=[ready, later, later, {}, ready, working]) as hc, \
-                    redirect_stdout(StringIO()):
-                with self.assertRaisesRegex(SystemExit, "not idle or on the same completed turn"):
-                    send(args)
-                self.assertEqual(hc.call_count, 2)
+            for advanced in (later, {**later, "status": {"state": "idle"}}):
+                with (
+                    patch("dispatch.hc_json", side_effect=[ready, advanced, advanced, {}, ready, working]) as hc,
+                    redirect_stdout(StringIO()),
+                ):
+                    with self.assertRaisesRegex(SystemExit, "the recorded turn no longer matches"):
+                        send(args)
+                    self.assertEqual(hc.call_count, 2)
 
             with patch("dispatch.hc_json", side_effect=[ready, done, done, {}, ready, working]) as hc, \
                     redirect_stdout(StringIO()):
