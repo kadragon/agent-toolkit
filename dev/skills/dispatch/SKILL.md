@@ -41,7 +41,8 @@ Default to one child per repo. Launch independent repos within step 4's limit; w
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Check the installed task skill handles `Dispatch mode: parallel-worktree` before sending the task.
+Before sending a worktree task, check that the chosen child CLI's installed `task-next`
+or `task-new` handles `Dispatch mode: parallel-worktree`.
 Require user direction and independently verifiable units with disjoint edits. Give each
 new-work child one clear, single-cycle unit and each queue child an exact assigned candidate.
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
@@ -137,8 +138,9 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. If the user gave no Git limits and the task can proceed under the original
-request, pass `--git-limits='not specified'`. This value grants no Git actions.
+as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workflow invocation
+grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
+For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
 

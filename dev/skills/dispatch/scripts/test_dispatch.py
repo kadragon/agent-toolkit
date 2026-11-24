@@ -421,8 +421,10 @@ class WorkflowDocsTests(unittest.TestCase):
         launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
         self.assertIn("If a required action is still unauthorized, ask once before launch "
                       "which Git actions the user authorizes", launch_step)
-        self.assertIn("If the user gave no Git limits and the task can proceed under the original request, "
-                      "pass `--git-limits='not specified'`. This value grants no Git actions.", launch_step)
+        self.assertIn("If an explicit full-workflow invocation grants the required Git writes and sets no narrower "
+                      "limits, pass `--git-limits='none'`.", launch_step)
+        self.assertIn("For work that needs no Git writes and has no user-provided limits, "
+                      "pass `--git-limits='not specified'`.", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
 
