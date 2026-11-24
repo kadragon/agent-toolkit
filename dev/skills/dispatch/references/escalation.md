@@ -26,7 +26,7 @@ wrong, and when a later phase of an escalated task launches.
 ## Relaunch
 
 Escalating relaunches the same phase. For a `--tree` run, read the worktree slug first
-(`hc read --lines 60 <address>`). Follow [Close the child terminal](../SKILL.md#close-the-child-terminal)
-with the old receipt. Then launch per SKILL.md step 4 with the new pair and the same first
-message. For a `--tree` run, keep its worktree and use `/dev:task-next --resume <slug>` as
-the first message.
+(`hc read --lines 60 <address>`). When authorized to end the old child, run
+`dispatch.py collect <old-receipt> --close --force` and confirm it closed. Then launch per
+SKILL.md step 4 with the new pair and the same first message. For a `--tree` run, keep its
+worktree and use `/dev:task-next --resume <slug>` as the first message.

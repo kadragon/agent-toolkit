@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import ANY, call, patch
 
 from dispatch import (
     child_argv,
@@ -215,6 +215,7 @@ class DispatchReceiptTests(unittest.TestCase):
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
+        finished = {**done, "state": "finished"}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
@@ -223,15 +224,24 @@ class DispatchReceiptTests(unittest.TestCase):
                 result.write_text(json.dumps({"status": status, "phase": "review", "summary": "CI passed"}),
                                   encoding="utf-8")
                 args = SimpleNamespace(run=receipt, close=True)
-                with patch("dispatch.hc_json", return_value=done) as hc, patch("builtins.print"):
+                with (
+                    patch("dispatch.hc_json", side_effect=[done, {}, done, finished, {}]) as hc,
+                    patch("dispatch.time.sleep") as sleep,
+                    patch("builtins.print"),
+                ):
                     if status == "ready":
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
                         hc.assert_called_once_with("get", "t7")
                     else:
                         collect(args)
-                        self.assertEqual(hc.call_args_list,
-                                         [call("get", "t7"), call("kill", "t7"), call("rm", "t7")])
+                        self.assertEqual(hc.call_args_list, [
+                            call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=ANY),
+                            call("get", "t7", timeout=ANY), call("rm", "t7"),
+                        ])
+                        sleep.assert_called_once()
+                        self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"],
+                                         "final_result")
             with patch("dispatch.hc_json", return_value={**done, "created_ms": 70}) as hc:
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
@@ -302,11 +312,39 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
-            with patch("dispatch.hc_json", return_value=working) as hc, redirect_stdout(StringIO()) as out:
+            finished = {**working, "state": "finished"}
+            with (
+                patch("dispatch.hc_json", side_effect=[working, {}, finished, {}]) as hc,
+                redirect_stdout(StringIO()) as out,
+            ):
                 collect(args)
-            self.assertEqual(hc.call_args_list, [call("get", "t7"), call("kill", "t7"), call("rm", "t7")])
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7"),
+            ])
             self.assertEqual(json.loads(out.getvalue())["closed_reason"], "forced")
             self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "forced")
+
+    def test_collect_leaves_receipt_open_when_finish_cannot_be_confirmed(self):
+        replaced = {**self.TERMINAL, "state": "finished", "created_ms": 51}
+        for snapshot, reason in (
+            (self.TERMINAL, "did not reach state: finished"),
+            (subprocess.TimeoutExpired("hc get", 9), "did not reach state: finished"),
+            (replaced, "terminal identity changed"),
+        ):
+            with self.subTest(snapshot=snapshot), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
+                with (
+                    patch("dispatch.hc_json", side_effect=[self.TERMINAL, {}, snapshot, {}]) as hc,
+                    patch("dispatch.time.monotonic", side_effect=[0, 1, 10, 10]),
+                    patch("dispatch.time.sleep"),
+                ):
+                    with self.assertRaisesRegex(SystemExit, reason):
+                        collect(SimpleNamespace(run=receipt, close=True, force=True))
+                self.assertEqual(hc.call_args_list, [
+                    call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=9),
+                ])
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), self.RECEIPT)
 
     def test_receipt_operations_do_not_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -720,6 +758,49 @@ class CodexSendTests(unittest.TestCase):
                     send(self.ARGS)
                 hc.assert_called_once_with("read", "--lines", "0", "t7")
 
+    def test_send_reports_a_bounded_tail_of_the_last_unrecognized_screen(self):
+        final_screen = self.screen(
+            "older transcript\n" * 10 + "  › 1. Confirm selection\n  2. " + "x" * 500
+            + "END_OF_LONG_ROW\n\n  Press enter to continue  \n\n"
+        )
+        with (
+            patch("dispatch.hc_json", side_effect=[self.screen("previous frame"), final_screen]) as hc,
+            patch("dispatch.time.monotonic", side_effect=[0, 5, 30]),
+            patch("dispatch.time.sleep"),
+            redirect_stderr(StringIO()) as stderr,
+            redirect_stdout(StringIO()) as stdout,
+        ):
+            with self.assertRaisesRegex(SystemExit, "no clear Codex input line"):
+                send(self.ARGS)
+        self.assertEqual(hc.call_args_list, [call("read", "--lines", "0", "t7")] * 2)
+        self.assertEqual(stdout.getvalue(), "")
+        tail = stderr.getvalue()
+        self.assertIn("› 1. Confirm selection", tail)
+        self.assertIn("Press enter to continue", tail)
+        self.assertNotIn("previous frame", tail)
+        self.assertNotIn("END_OF_LONG_ROW", tail)
+        self.assertLessEqual(len(tail.splitlines()), 7)
+        self.assertLess(len(tail), 400)
+
+    def test_send_never_reports_another_terminals_screen_for_a_stale_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            unrelated = {**DispatchReceiptTests.TERMINAL, "created_ms": 51}
+            for resend in (False, True):
+                with self.subTest(resend=resend):
+                    run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed" if resend else False}
+                    receipt.write_text(json.dumps(run), encoding="utf-8")
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt, resend=resend)
+                    with (
+                        patch("dispatch.hc_json", side_effect=[self.screen("Unrelated screen"), unrelated]) as hc,
+                        patch("dispatch.time.monotonic", side_effect=[0, 30]),
+                        redirect_stderr(StringIO()) as stderr,
+                    ):
+                        with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
+                            send(args)
+                    self.assertEqual(stderr.getvalue(), "")
+                    self.assertEqual(hc.call_args_list, [call("read", "--lines", "0", "t7"), call("get", "t7")])
+
     @staticmethod
     def screen(text):
         return {"complete": True, "how": "screen", "text": text}
@@ -923,13 +1004,16 @@ class CodexSendTests(unittest.TestCase):
                 working = {**owner, **self.WORKING, "turn": int(phase)}
                 ready = self.screen("›\n\n  ~/repo")
                 draft = self.screen("›\n  a multiline draft\n\n  GPT-6.2-Sol default · ~/repo")
+                dialog = self.screen("› 1. Yes\n  Press enter to continue")
                 for frames, reason in (([draft], "composer is not clear"),
                                        ([self.screen(self.PASTE)], "composer is not clear"),
+                                       ([dialog, idle], "composer is not clear"),
                                        ([ready, working], "terminal is not idle")):
-                    with patch("dispatch.hc_json", side_effect=frames) as hc:
+                    with patch("dispatch.hc_json", side_effect=frames) as hc, redirect_stderr(StringIO()) as stderr:
                         with self.assertRaisesRegex(SystemExit, reason):
                             send(args)
                         self.assertFalse(any(c.args[0] in {"keys", "send"} for c in hc.call_args_list))
+                        self.assertEqual("Press enter to continue" in stderr.getvalue(), frames[0] == dialog)
                 with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working]) as hc, \
                         redirect_stdout(StringIO()):
                     send(args)

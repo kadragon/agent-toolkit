@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.0.0
+version: 2.0.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -228,12 +228,12 @@ report it.
 
 ### Close the child terminal
 
-Run `hc kill <address>` unless it exited, wait for `hc get` to show `state: finished`, then
-run `dispatch.py collect <receipt> --close`. A live Windows child holds its worktree open.
+Run `dispatch.py collect <receipt> --close` before cleaning up the child's worktree.
+For a live child with a final result, it ends the program, waits up to 10 seconds for Herdr
+to report `state: finished`, then removes the terminal and records `closed_reason` in the receipt.
 A finished terminal closes without a final result. If the result file is unreadable,
 reconfirm `state: finished` and use `collect --close --force`. For a live child, use
 `--force` only when authorized to close it irrespective of its reported status.
-The receipt records `closed_reason`.
 
 ### Continue with another phase
 

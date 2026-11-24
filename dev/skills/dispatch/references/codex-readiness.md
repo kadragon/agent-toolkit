@@ -23,6 +23,7 @@ cannot be verified, approval is unavailable, or a warning remains, report the bl
 withhold the task. For an unconfirmed send, inspect whether the task already started before
 retrying.
 
+A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using
 the current installed script. By default an unconfirmed receipt blocks another scripted send until
 the child writes a new result or starts a turn past the one recorded at send; then `send`
