@@ -41,8 +41,10 @@ Default to one child per repo. Launch independent repos within step 4's limit; w
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Before sending a worktree task, check that the chosen child CLI's installed `task-next`
-or `task-new` handles `Dispatch mode: parallel-worktree`.
+Before sending a worktree task, read the chosen child CLI's installed `task-next/SKILL.md`
+or `task-new/SKILL.md`. Look for `Dispatch mode: parallel-worktree` and confirm that it
+restricts the run to the assigned unit. If the file is unreadable or lacks that handling,
+report the worktree layout as unsupported.
 Require user direction and independently verifiable units with disjoint edits. Give each
 new-work child one clear, single-cycle unit and each queue child an exact assigned candidate.
 Keep uncertain, dependent, planning-only, or overlapping work in one session.

@@ -418,7 +418,13 @@ class PickTests(unittest.TestCase):
 class WorkflowDocsTests(unittest.TestCase):
     def test_launch_and_watch_document_operational_order(self):
         skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        layout_step = skill.split("## 2. Choose the session layout and first message", 1)[1].split("## 3.", 1)[0]
         launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
+        self.assertIn("read the chosen child CLI's installed `task-next/SKILL.md` or `task-new/SKILL.md`", layout_step)
+        self.assertIn("Look for `Dispatch mode: parallel-worktree` and confirm that it restricts the run "
+                      "to the assigned unit.", layout_step)
+        self.assertIn("If the file is unreadable or lacks that handling, report the worktree layout as unsupported.",
+                      layout_step)
         self.assertIn("If a required action is still unauthorized, ask once before launch "
                       "which Git actions the user authorizes", launch_step)
         self.assertIn("If an explicit full-workflow invocation grants the required Git writes and sets no narrower "
