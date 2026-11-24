@@ -136,8 +136,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. If the work can proceed without Git authorization and the user gave no limits,
-pass `--git-limits='not specified'`.
+as JSON strings. If the user gave no Git limits and the task can proceed under the original
+request, pass `--git-limits='not specified'`. This value grants no Git actions.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
 
