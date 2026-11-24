@@ -226,9 +226,10 @@ report it.
 
 Run `hc kill <address>` unless it exited, wait for `hc get` to show `state: finished`, then
 run `dispatch.py collect <receipt> --close`. A live Windows child holds its worktree open.
-A finished terminal closes without a final result. Use `collect --close --force` when
-authorized to close a child irrespective of its reported status. The receipt records
-`closed_reason`.
+A finished terminal closes without a final result. If the result file is unreadable,
+reconfirm `state: finished` and use `collect --close --force`. For a live child, use
+`--force` only when authorized to close it irrespective of its reported status.
+The receipt records `closed_reason`.
 
 ### Continue with another phase
 
