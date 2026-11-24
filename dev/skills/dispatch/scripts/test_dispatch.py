@@ -782,6 +782,25 @@ class CodexSendTests(unittest.TestCase):
         self.assertLessEqual(len(tail.splitlines()), 7)
         self.assertLess(len(tail), 400)
 
+    def test_send_never_reports_another_terminals_screen_for_a_stale_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            unrelated = {**DispatchReceiptTests.TERMINAL, "created_ms": 51}
+            for resend in (False, True):
+                with self.subTest(resend=resend):
+                    run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed" if resend else False}
+                    receipt.write_text(json.dumps(run), encoding="utf-8")
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt, resend=resend)
+                    with (
+                        patch("dispatch.hc_json", side_effect=[self.screen("Unrelated screen"), unrelated]) as hc,
+                        patch("dispatch.time.monotonic", side_effect=[0, 30]),
+                        redirect_stderr(StringIO()) as stderr,
+                    ):
+                        with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
+                            send(args)
+                    self.assertEqual(stderr.getvalue(), "")
+                    self.assertEqual(hc.call_args_list, [call("read", "--lines", "0", "t7"), call("get", "t7")])
+
     @staticmethod
     def screen(text):
         return {"complete": True, "how": "screen", "text": text}
@@ -988,13 +1007,13 @@ class CodexSendTests(unittest.TestCase):
                 dialog = self.screen("› 1. Yes\n  Press enter to continue")
                 for frames, reason in (([draft], "composer is not clear"),
                                        ([self.screen(self.PASTE)], "composer is not clear"),
-                                       ([dialog], "composer is not clear"),
+                                       ([dialog, idle], "composer is not clear"),
                                        ([ready, working], "terminal is not idle")):
                     with patch("dispatch.hc_json", side_effect=frames) as hc, redirect_stderr(StringIO()) as stderr:
                         with self.assertRaisesRegex(SystemExit, reason):
                             send(args)
                         self.assertFalse(any(c.args[0] in {"keys", "send"} for c in hc.call_args_list))
-                        self.assertEqual("Press enter to continue" in stderr.getvalue(), frames == [dialog])
+                        self.assertEqual("Press enter to continue" in stderr.getvalue(), frames[0] == dialog)
                 with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working]) as hc, \
                         redirect_stdout(StringIO()):
                     send(args)

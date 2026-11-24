@@ -377,9 +377,11 @@ def read_codex_screen(address, *, sent_message=None, with_text=False):
     return (state, text) if with_text else state
 
 
-def print_screen_tail(address, text):
+def print_screen_tail(address, text, run):
     rows = [line.strip() for line in text.splitlines() if line.strip()][-6:]
     if rows:
+        if run:
+            verify_terminal(run, hc_json("get", address))
         print(f"{address}: last Codex screen rows:", file=sys.stderr)
         for row in rows:
             trimmed = row[:160] + "…" if len(row) > 160 else row
@@ -453,7 +455,7 @@ def send_task(args, run_path):
             screen, text = read_codex_screen(address, with_text=True)
             if resend and screen != "ready":
                 if screen == "waiting":
-                    print_screen_tail(address, text)
+                    print_screen_tail(address, text, run)
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks" and trust_accepted and HOOK_TRUST_PROGRESS.search(text):
                 screen = "waiting"
@@ -527,7 +529,7 @@ def send_task(args, run_path):
                     break
             if time.monotonic() >= deadline:
                 if screen == "waiting":
-                    print_screen_tail(address, text)
+                    print_screen_tail(address, text, run)
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
