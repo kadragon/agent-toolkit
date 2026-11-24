@@ -25,8 +25,8 @@ wrong, and when a later phase of an escalated task launches.
 
 ## Relaunch
 
-Escalating relaunches the same phase: `hc kill <address>`, `hc rm <address>`, then launch per
-SKILL.md step 4 with the same first message and the new pair. A `--tree` run resumes its
-worktree: read the slug from the session
-before killing it (`hc read --lines 60 <address>`) and launch with `/dev:task-next --resume <slug>`
-as the first message.
+Escalating relaunches the same phase. For a `--tree` run, read the worktree slug first
+(`hc read --lines 60 <address>`). Follow [Close the child terminal](../SKILL.md#close-the-child-terminal)
+with the old receipt. Then launch per SKILL.md step 4 with the new pair and the same first
+message. For a `--tree` run, keep its worktree and use `/dev:task-next --resume <slug>` as
+the first message.

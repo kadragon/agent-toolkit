@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Keep dispatch children in the background and streamline dispatch guidance (dev v4.12.10) (2026-11-24) → dev/skills/dispatch/SKILL.md
 - [done] Recognize two-line Codex composer footers (dev v4.12.9) (2026-11-23)
 - [done] Improve dispatch recovery and coordination (dev v4.12.8) (2026-11-23) → dev/skills/dispatch/SKILL.md
 - [done] dispatch: recover stray drafts and lost submits, close killed children (dev v4.12.7) (2026-11-23) → dev/skills/dispatch/SKILL.md
