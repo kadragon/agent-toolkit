@@ -49,6 +49,7 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
+CLOSE_WAIT_SECONDS = 10
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
@@ -152,9 +153,9 @@ def read_result(path):
         raise SystemExit(f"cannot read dispatch result {result_path}: {error}") from None
 
 
-def hc_json(*args):
+def hc_json(*args, timeout=None):
     out = subprocess.run(["hc", args[0], "--json", *args[1:]], capture_output=True, text=True,
-                         encoding="utf-8", check=True).stdout
+                         encoding="utf-8", check=True, timeout=timeout).stdout
     return json.loads(out)
 
 
@@ -368,11 +369,21 @@ def hook_trust_keys(text):
 
 def read_codex_screen(address, *, sent_message=None, with_text=False):
     screen = hc_json("read", "--lines", "0", address)
+    text = screen.get("text", "") if screen["how"] == "screen" else ""
     if not screen["complete"] or screen["how"] != "screen":
         state = "waiting"
     else:
-        state = codex_screen(screen["text"], sent_message=sent_message)
-    return (state, screen.get("text", "")) if with_text else state
+        state = codex_screen(text, sent_message=sent_message)
+    return (state, text) if with_text else state
+
+
+def print_screen_tail(address, text):
+    rows = [line.strip() for line in text.splitlines() if line.strip()][-6:]
+    if rows:
+        print(f"{address}: last Codex screen rows:", file=sys.stderr)
+        for row in rows:
+            trimmed = row[:160] + "…" if len(row) > 160 else row
+            print(f"  {trimmed!r}", file=sys.stderr)
 
 
 def startup_composer(text, *, draft=False):
@@ -441,6 +452,8 @@ def send_task(args, run_path):
             screen_reads += 1
             screen, text = read_codex_screen(address, with_text=True)
             if resend and screen != "ready":
+                if screen == "waiting":
+                    print_screen_tail(address, text)
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks" and trust_accepted and HOOK_TRUST_PROGRESS.search(text):
                 screen = "waiting"
@@ -513,6 +526,8 @@ def send_task(args, run_path):
                 if status == "idle" or (continuation and status == "done"):
                     break
             if time.monotonic() >= deadline:
+                if screen == "waiting":
+                    print_screen_tail(address, text)
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
@@ -657,6 +672,21 @@ def collect(args):
         collect_result(path, args.close, force)
 
 
+def wait_for_terminal_exit(run):
+    address = run["address"]
+    deadline = time.monotonic() + CLOSE_WAIT_SECONDS
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            terminal = hc_json("get", address, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            break
+        verify_terminal(run, terminal)
+        if terminal["state"] == "finished":
+            return
+        time.sleep(min(SCREEN_POLL_SECONDS, max(0, deadline - time.monotonic())))
+    raise SystemExit(f"{address}: terminal did not reach state: finished within {CLOSE_WAIT_SECONDS}s; receipt left open")
+
+
 def collect_result(path, close, force):
     run = load_run(path)
     try:
@@ -679,6 +709,7 @@ def collect_result(path, close, force):
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
+            wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
         reason = "forced" if force else ("finished" if finished else "final_result")
         closed = {"closed_reason": reason}
