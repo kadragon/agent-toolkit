@@ -6,9 +6,8 @@
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
                      [--name N] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
-                     [--no-show] [--dry-run] [MESSAGE]
-      Start the child with hc run and, inside the Herdr app, keep its pane in the
-      right-hand column. Prints one JSON object: name, address, parent, shown.
+                     [--dry-run] [MESSAGE]
+      Start a background child with hc run --bg. Prints launch and receipt details as JSON.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
@@ -159,63 +158,6 @@ def hc_json(*args):
     return json.loads(out)
 
 
-def tallest(panes):
-    """The pane to split: most rows; ties go to the earliest created, which halving keeps topmost."""
-    return min(panes, key=lambda t: (-t.get("rows", 0), t.get("created_ms", 0)))["address"]
-
-
-def app(*args):
-    out = subprocess.run(["herdr-app", *args], capture_output=True, text=True,
-                         encoding="utf-8", check=True).stdout
-    return json.loads(out)
-
-
-def home_tab(home):
-    for space in app("ls")["spaces"]:
-        for tab in space["tabs"]:
-            if any(t["terminal"] == home for t in tab["terminals"]):
-                return tab
-    raise RuntimeError(f"home terminal {home} is in no tab")
-
-
-def show(home, child):
-    """Home stays left; children stack in one column on the right of home's own tab.
-
-    terminal.keep places beside whatever pane has focus, and focus is one per window, so the
-    person (or another home session in another space) can move it. Every step is checked
-    against home's tab and the person's focus is put back.
-    """
-    for _ in range(40):  # the app lists a terminal hc just started a moment later
-        tab = home_tab(home)
-        entry = next(t for t in tab["terminals"] if t["terminal"] == home)
-        if child in entry.get("sub_agents", []):
-            break
-        time.sleep(0.25)
-    else:
-        raise RuntimeError(f"the app never listed {child} under {home}")
-    mine = {t["address"] for t in hc_json("ls")["terminals"]
-            if t.get("parent") == home and t.get("state") == "live" and t["address"] != child}
-    panes = {t["terminal"]: t["pane"] for t in tab["terminals"] if t["terminal"] in mine}
-    if panes:
-        target, place = tallest([hc_json("get", a) for a in panes]), "down"
-        target_pane = panes[target]
-    else:
-        place = "right"
-        target_pane = entry["pane"]
-    before = app("status").get("focused_pane")
-    try:
-        app("do", "pane.focus", "--pane", target_pane)
-        if app("status").get("focused_pane") != target_pane:
-            raise RuntimeError("focus moved before the pane was kept")
-        app("do", "terminal.keep", "--terminal", child, "--place", place)
-        if not any(t["terminal"] == child for t in home_tab(home)["terminals"]):
-            app("do", "terminal.park", "--terminal", child)
-            raise RuntimeError("the pane opened outside home's tab and was parked again")
-    finally:
-        if before:
-            subprocess.run(["herdr-app", "do", "pane.focus", "--pane", before], capture_output=True)
-
-
 def free_name(base, explicit, taken):
     """Names are global to hc, shared with every other home session's children."""
     if base not in taken:
@@ -314,20 +256,11 @@ def launch(args):
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+    print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}), flush=True)
     if terminal.get("parent") != home:
-        print(json.dumps({**run, "shown": False, "run": str(receipt), "result": str(result_path)}), flush=True)
         detail = ("Claude may have received its launch prompt; inspect before retrying"
                   if args.cli == "claude" else "task withheld")
         raise SystemExit(f"{address}: parent changed at launch; {detail}")
-    shown = False
-    if home and not args.no_show:
-        try:
-            show(home, result["address"])
-            shown = True
-        except (subprocess.CalledProcessError, OSError, ValueError, KeyError, RuntimeError,
-                StopIteration) as err:
-            print(f"pane not kept: {err}", file=sys.stderr)
-    print(json.dumps({**run, "shown": shown, "run": str(receipt), "result": str(result_path)}), flush=True)
     if args.task:
         send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
 
@@ -796,7 +729,6 @@ def main(argv):
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
     launch_parser.add_argument("--trust-hooks", action="store_true", help="trust all hooks in the Codex startup dialog")
     launch_parser.add_argument("--keep-connectors", action="store_true")
-    launch_parser.add_argument("--no-show", action="store_true")
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
     launch_parser.set_defaults(func=launch)

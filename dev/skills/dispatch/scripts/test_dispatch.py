@@ -21,7 +21,6 @@ from dispatch import (
     lock_run,
     report_instruction,
     send,
-    tallest,
     terminal_name,
 )
 from quota import WEEK, assess
@@ -37,14 +36,6 @@ class TerminalTests(unittest.TestCase):
     def test_terminal_name_rejects_empty_result(self):
         with self.assertRaisesRegex(SystemExit, "cannot build a terminal name"):
             terminal_name("!...!")
-
-    def test_tallest_prefers_older_pane_when_rows_tie(self):
-        panes = [
-            {"address": "short", "rows": 12, "created_ms": 1},
-            {"address": "tall-new", "rows": 24, "created_ms": 3},
-            {"address": "tall-old", "rows": 24, "created_ms": 2},
-        ]
-        self.assertEqual(tallest(panes), "tall-old")
 
     def test_free_name_uses_available_base(self):
         self.assertEqual(free_name("repo", True, {"another-repo"}), "repo")
@@ -113,7 +104,7 @@ class DispatchReceiptTests(unittest.TestCase):
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",
                     effort="medium", task="$task-next", message=None, keep_connectors=False,
-                    dry_run=False, no_show=True, **self.HANDOFF)
+                    dry_run=False, **self.HANDOFF)
         return SimpleNamespace(**(args | overrides))
 
     def test_missing_or_blank_handoff_fields_stop_launch(self):
@@ -176,7 +167,7 @@ class DispatchReceiptTests(unittest.TestCase):
                     launch(args)
                 run.assert_not_called()
 
-    def test_launch_uses_quiet_child_and_emits_receipt_before_send(self):
+    def test_launch_runs_in_background_and_emits_receipt_before_send(self):
         with tempfile.TemporaryDirectory() as directory:
             args = self.launch_args(directory)
             owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
@@ -191,10 +182,14 @@ class DispatchReceiptTests(unittest.TestCase):
                 patch("builtins.print") as output,
             ):
                 launch(args)
-            argv = run.call_args.args[0]
+            git_call, launch_call = run.call_args_list
+            self.assertEqual(git_call.args[0][0], "git")
+            argv = launch_call.args[0]
+            self.assertEqual(argv[:3], ["hc", "run", "--bg"])
             self.assertIn("--no-notify", argv)
             self.assertEqual(argv[argv.index("--parent") + 1], "t6")
             payload = json.loads(output.call_args.args[0])
+            self.assertNotIn("shown", payload)
             self.assertNotIn("handoff", payload)
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
@@ -424,7 +419,10 @@ class WorkflowDocsTests(unittest.TestCase):
     def test_launch_and_watch_document_operational_order(self):
         skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
         launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
-        self.assertIn("ask once before launch which Git actions the user authorizes", launch_step)
+        self.assertIn("If the task requires Git actions whose authorization is unclear, "
+                      "ask once before launch which Git actions the user authorizes", launch_step)
+        self.assertIn("If the work can proceed without Git authorization and the user gave no limits, "
+                      "pass `--git-limits='not specified'`", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
 

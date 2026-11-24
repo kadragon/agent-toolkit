@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 1.5.0
+version: 2.0.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -35,13 +35,13 @@ Default to one child per repo. Launch independent repos within step 4's limit; w
 | Same-repo request | First message |
 |-------------------|---------------|
 | Run the next queued item | `/dev:task-next` |
-| Run a queue batch in one PR, or run every queued item | `/dev:task-next --all`; the child decides serial or parallel under its batch rules |
+| Run a queue batch in one PR, or run every queued item | `/dev:task-next --all`; the child applies its batch rules and needs user authorization for parallel delegation |
 | Run independent queued units in separate worktrees | One `/dev:task-next --tree` per unit, subject to the gates below |
 | Run independently scoped new work in separate worktrees | One `/dev:task-new --tree <unit>` per unit, subject to the gates below |
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Verify each child has dev plugin 4.12.4 or later before sending a separate-worktree task.
+Verify the installed task skill supports separate-worktree dispatch before sending the task.
 Require user direction and independently verifiable units with disjoint edits. Give each
 new-work child one clear, single-cycle unit and each queue child an exact assigned candidate.
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
@@ -67,11 +67,6 @@ needs opus judgment. Use `gpt-6.2-sol` for Codex, and reserve `gpt-6.2-astra` an
 `max`/`ultra` efforts for user requests. Use Claude `haiku` and `sonnet` on request,
 when Codex is unavailable, or when quota favors Claude.
 
-The home session runs on opus: its decisions are reading a child's
-recommendation and checking it against the request, and it stays open for the whole run, so
-every watch turn re-reads its growing context at the home model's price. Fable at home only
-when the user asks.
-
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
@@ -83,7 +78,7 @@ Apply the bias on top of the tables below:
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest. Keep settled acceptance checks at `medium`; use `high` when implementation or review requires judgment. |
+| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest. |
 | `claude` (Codex running ahead) | codex rows go to claude `sonnet` at the same effort; a `low` lookup to `haiku` |
 | `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 
@@ -117,10 +112,7 @@ Effort — ambiguity and risk:
   `--tree` for worktrees; it reads local `origin/HEAD` without fetching. Read stderr and
   the relevant criteria. Size for the hardest eligible candidate in scope, or estimate an
   unattended single run from the first full-scan result. The child owns final selection
-  and unattended limits. `items` counts selectable backlog items. `open` counts all unchecked
-  items, including claims and parked items. An item with both markers counts in `deferred`
-  and `blocked`. Use the displayed titles and counts to size the work.
-- Codex uses `xhigh` on the Codex-bias escalation ladder or when the user selects it.
+  and unattended limits.
 - Effort is fixed per session and the model already scales its thinking per turn within it,
   so set it once at launch. It changes between phases, since each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
@@ -133,8 +125,8 @@ Effort — ambiguity and risk:
 
 Run `hc ls` first. A live task session in the repo — yours or another home session's, since
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
-When the request leaves Git scope unspecified, ask once before launch which Git actions the
-user authorizes. Carry the answer in the handoff.
+If the task requires Git actions whose authorization is unclear, ask once before launch which Git
+actions the user authorizes. Carry the answer in the handoff.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
@@ -144,25 +136,15 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. For work proceeding without a Git grant, pass `--git-limits='not specified'`.
+as JSON strings. If the work can proceed without Git authorization and the user gave no limits,
+pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
 
-Keep the printed child address and receipt (`run`) with its result path. `--dry-run` previews
-the `hc run` arguments and any Codex `--task` prompt. Launch behavior:
-
-- `--name` defaults to the repo directory name, lowercased and cut to hc's 32 characters of
-  `a-z 0-9 - _`, with `-2`, `-3` added when a live terminal anywhere already has it. The
-  message goes to hc as one argument. The launcher validates the parent is live and in the
-  current home directory. If `$HC_TERMINAL_ID` is stale, identify this session in `hc ls` and
-  pass `--parent <address>`. Children use `--no-notify` so exit notices stay out of the composer.
-- Claude settings disable prompt suggestions (they look like typed input in `hc read`), the
-  recap, the built-in "you should know" plugin (its card intercepts keys), and claude.ai
-  connectors. Pass `--keep-connectors` when the request needs one.
-- Inside Herdr, the launcher keeps children in one column to the right of home. It splits the
-  tallest child pane, checks the new pane landed in home's tab, and restores prior focus.
-  Leave pane placement to the launcher. A killed child's pane closes by itself. Pass `--no-show`
-  if requested. A `pane not kept` warning reports a layout failure while the child runs.
+Children run in the background. Keep the printed child address and receipt (`run`) with its
+result path. Use `hc read <address>` to inspect the terminal. If `$HC_TERMINAL_ID` is stale,
+identify this session in `hc ls` and pass `--parent <address>`. For Claude, pass
+`--keep-connectors` when the request needs claude.ai connectors.
 
 The first message travels as a `claude` argument, so it arrives with the launch. Confirm with
 `hc read --lines 40 <address>` that the session took it and the skill loaded (`Read SKILL.md
@@ -183,16 +165,15 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
   Draft, paste, and lost-submit recovery: `references/codex-readiness.md` → *Send recovery*.
 - When blocked, read `references/codex-readiness.md` before launching another child. After
   clearing the gate, retry with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
-- `--approve-for-me` sends Codex's approval prompts to its automatic reviewer inside the
-  workspace-write sandbox. With explicit authorization to trust every hook in the Codex
-  startup dialog, add `--trust-hooks` to `launch --task` to select **Trust all and continue**.
-  The default withholds the task for review.
+- With explicit authorization to trust every hook in the Codex startup dialog, add
+  `--trust-hooks` to `launch --task` to select **Trust all and continue**. The default
+  withholds the task for review.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
 
 More than one session:
 
-- At most one task session per repo uses the main checkout. Name concurrent children
-  `<repo>-<n>`. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
+- At most one task session per repo uses the main checkout. Use `--name <repo>-<n>` for
+  concurrent children, the main checkout as `--cwd`, and `--tree` in the first task invocation.
   Launching inside a linked worktree can keep Windows from deleting it at cleanup. For the
   next `task-next --tree` child on the same queue, use
   `pick --tree --full-scan` to confirm the preceding queue child's worktree claim in stderr.
@@ -223,7 +204,7 @@ The user delegates the session's decisions to this session:
   session's recommendation unless it conflicts with the request or the repo; add a correction
   when it is missing something. Answer with `hc send <address> '<answer>'`, then tell the user in
   one line what was chosen and why.
-  Honor Git limits. Run batches sequentially unless the user authorized parallel delegation.
+  Honor Git limits and step 2's batch authorization rule.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
   the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
   merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
@@ -234,14 +215,21 @@ The user delegates the session's decisions to this session:
   cleanup, anything else destructive, and any decision the user kept. Tell the user what is
   waiting and stop watching that session.
 
-Once a session's work has merged or its authorized non-merge task is complete, verify its result,
-then in this order (a live Windows child holds its worktree open): `hc kill <address>` unless it
-exited, wait for `hc get` to show `state: finished`, run `dispatch.py collect <receipt> --close`
-(a finished terminal closes without a final result). Use `collect --close --force` when
+Once a session's work has merged or its authorized non-merge task is complete, verify its
+result and [close the child terminal](#close-the-child-terminal). Remove any clone or worktree
+this session created for it after checking that `git status --porcelain` is empty, no branch has
+commits missing from `origin/<base>`, and nothing is stashed. Anything that fails a check stays;
+report it.
+
+### Close the child terminal
+
+Run `hc kill <address>` unless it exited, wait for `hc get` to show `state: finished`, then
+run `dispatch.py collect <receipt> --close`. A live Windows child holds its worktree open.
+A finished terminal closes without a final result. Use `collect --close --force` when
 authorized to close a child irrespective of its reported status. The receipt records
-`closed_reason`. Remove any clone or worktree this session created for it after checking
-that `git status --porcelain` is empty, no branch has commits
-missing from `origin/<base>`, and nothing is stashed. Anything that fails a check stays; report it.
+`closed_reason`.
+
+### Continue with another phase
 
 Reuse the Codex session and worktree for the next authorized phase with
 `dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`.
