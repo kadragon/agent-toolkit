@@ -35,13 +35,13 @@ Default to one child per repo. Launch independent repos within step 4's limit; w
 | Same-repo request | First message |
 |-------------------|---------------|
 | Run the next queued item | `/dev:task-next` |
-| Run a queue batch in one PR, or run every queued item | `/dev:task-next --all`; the child applies its batch rules and needs user authorization for parallel delegation |
+| Run a queue batch in one PR, or run every queued item | `/dev:task-next --all`; the child applies its batch rules and runs sequentially unless the user authorized parallel delegation |
 | Run independent queued units in separate worktrees | One `/dev:task-next --tree` per unit, subject to the gates below |
 | Run independently scoped new work in separate worktrees | One `/dev:task-new --tree <unit>` per unit, subject to the gates below |
 | Start new work | `/dev:task-new <the request, verbatim>` |
 | Question, review, debug, or other standalone work | The request, verbatim |
 
-Verify the installed task skill supports separate-worktree dispatch before sending the task.
+Check the installed task skill handles `Dispatch mode: parallel-worktree` before sending the task.
 Require user direction and independently verifiable units with disjoint edits. Give each
 new-work child one clear, single-cycle unit and each queue child an exact assigned candidate.
 Keep uncertain, dependent, planning-only, or overlapping work in one session.
@@ -125,8 +125,9 @@ Effort — ambiguity and risk:
 
 Run `hc ls` first. A live task session in the repo — yours or another home session's, since
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
-If the task requires Git actions whose authorization is unclear, ask once before launch which Git
-actions the user authorizes. Carry the answer in the handoff.
+Verify user authorization for the Git writes the task needs, including any grant from an explicit
+full-workflow invocation. If a required action is still unauthorized, ask once before launch
+which Git actions the user authorizes. Carry the answer in the handoff.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
@@ -172,8 +173,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
 
 More than one session:
 
-- At most one task session per repo uses the main checkout. Use `--name <repo>-<n>` for
-  concurrent children, the main checkout as `--cwd`, and `--tree` in the first task invocation.
+- At most one task session per repo uses the main checkout. For concurrent children, let the
+  launcher choose each name. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
   Launching inside a linked worktree can keep Windows from deleting it at cleanup. For the
   next `task-next --tree` child on the same queue, use
   `pick --tree --full-scan` to confirm the preceding queue child's worktree claim in stderr.

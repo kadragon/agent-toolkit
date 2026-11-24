@@ -419,8 +419,8 @@ class WorkflowDocsTests(unittest.TestCase):
     def test_launch_and_watch_document_operational_order(self):
         skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
         launch_step, watch_step = skill.split("## 4. Launch", 1)[1].split("## 5. Watch and decide", 1)
-        self.assertIn("If the task requires Git actions whose authorization is unclear, "
-                      "ask once before launch which Git actions the user authorizes", launch_step)
+        self.assertIn("If a required action is still unauthorized, ask once before launch "
+                      "which Git actions the user authorizes", launch_step)
         self.assertIn("If the user gave no Git limits and the task can proceed under the original request, "
                       "pass `--git-limits='not specified'`. This value grants no Git actions.", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
