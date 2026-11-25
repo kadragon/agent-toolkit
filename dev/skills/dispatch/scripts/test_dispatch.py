@@ -363,7 +363,8 @@ class DispatchReceiptTests(unittest.TestCase):
             receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
             result = receipt.with_name("result.json")
             result.write_text(json.dumps({"phase": "review", "pr": 779, "summary": "PR open"}), encoding="utf-8")
-            with patch("dispatch.hc_json", return_value=done), patch("builtins.print") as shown:
+            screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+            with patch("dispatch.hc_json", side_effect=[done, screen]), patch("builtins.print") as shown:
                 collect(SimpleNamespace(run=receipt, close=False))
             report = json.loads(shown.call_args.args[0])
             self.assertEqual(report["result"], {"status": "working", "phase": "review", "pr": 779,
@@ -377,6 +378,151 @@ class DispatchReceiptTests(unittest.TestCase):
             with patch("dispatch.hc_json", return_value=done):
                 with self.assertRaisesRegex(SystemExit, "invalid status, phase, or summary"):
                     collect(SimpleNamespace(run=receipt, close=False))
+
+    def collect_report(self, directory, status, *, screen="", result=None, cli="codex", **terminal_fields):
+        receipt = Path(directory) / "run.json"
+        receipt.write_text(json.dumps({**self.RECEIPT, "sent": True, "cli": cli}), encoding="utf-8")
+        if result is not None:
+            receipt.with_name("result.json").write_text(json.dumps(result), encoding="utf-8")
+        terminal = {**self.TERMINAL, "status": status, **terminal_fields}
+        snapshot = {"how": "screen", "text": screen}
+        with patch("dispatch.hc_json", side_effect=[terminal, snapshot]) as hc, redirect_stdout(StringIO()) as out:
+            collect(SimpleNamespace(run=receipt, close=False, stall_minutes=5))
+        output = out.getvalue()
+        self.assertEqual(len(output.splitlines()), 1)
+        return json.loads(output), hc.call_args_list
+
+    def test_collect_reports_stop_reasons_in_one_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for status, screen, expected, reads in (
+                ({"state": "error", "msg": "You've hit your usage limit"}, "", "Usage limit reached", 0),
+                ({"state": "done"}, "› task\n\nⓘ This content can’t be shown\n\n› Ask Codex to do anything",
+                 "Stopped by a safety or usage-policy filter", 1),
+                ({"state": "error"}, "■ Unexpected disconnection", "Child stopped on an error", 1),
+                ({"state": "blocked", "kind": "permission"}, "Approve this operation?", "Waiting for a dialog", 0),
+            ):
+                with self.subTest(expected=expected):
+                    report, calls = self.collect_report(directory, status, screen=screen)
+                    self.assertEqual(report["stop_reason"], expected)
+                    self.assertEqual(report["screen_reads"], self.RECEIPT["screen_reads"])
+                    self.assertEqual(report["collect_screen_reads"], reads)
+                    self.assertEqual(calls[0], call("get", "t7"))
+                    self.assertEqual(calls[1:], [call("read", "--lines", "0", "t7", timeout=ANY)] if reads else [])
+
+    def test_collect_uses_only_current_cli_notices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for screen in (
+                "ⓘ This content can’t be shown\n\n› new question\n\n› Ask Codex to do anything",
+                "› question\n\n• Ran cat example.txt\n    This content can’t be shown\n\n› Ask Codex to do anything",
+                "› question\n\n• Report: 'This content can’t be shown'\n\n› Ask Codex to do anything",
+            ):
+                with self.subTest(screen=screen):
+                    report, _ = self.collect_report(directory, {"state": "done"}, screen=screen)
+                    self.assertIsNone(report["stop_reason"])
+            report, _ = self.collect_report(directory, {"state": "error"}, screen="■ API Error: Usage Policy")
+            self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+            report, _ = self.collect_report(directory, {"state": "done"}, screen="■ You've hit your usage limit")
+            self.assertEqual(report["stop_reason"], "Usage limit reached")
+            report, calls = self.collect_report(
+                directory, {"state": "done"}, screen="ⓘ This content can’t be shown",
+                result={"status": "merged", "phase": "merge", "summary": "Merged"},
+            )
+            self.assertIsNone(report["stop_reason"])
+            self.assertEqual(calls, [call("get", "t7")])
+
+    def test_collect_reports_terminal_errors_even_with_a_child_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for status in ("ready", "blocked", "done"):
+                with self.subTest(status=status):
+                    result = {"status": status, "phase": "review", "summary": "Review status"}
+                    report, calls = self.collect_report(directory, None, result=result, state="finished", exit_code=1)
+                    self.assertEqual(report["stop_reason"], "Child exited with an error")
+                    self.assertEqual(calls, [call("get", "t7")])
+                    report, _ = self.collect_report(directory, {"state": "error"}, result=result)
+                    self.assertEqual(report["stop_reason"], "Child stopped on an error")
+
+    def test_collect_detects_a_resumed_child_stopping_after_a_previous_pause(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now_ms = time.time_ns() // 1_000_000
+            screen = "› Next task\n\nⓘ This content can’t be shown\n\n› Ask Codex to do anything"
+            for status in ("ready", "blocked"):
+                with self.subTest(status=status):
+                    result = {"status": status, "phase": "review", "summary": "Previous pause"}
+                    report, _ = self.collect_report(directory, {"state": "done"}, result=result, screen=screen)
+                    self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+                    with patch("dispatch.time.time_ns", return_value=(now_ms + 6 * 60_000) * 1_000_000):
+                        report, _ = self.collect_report(directory, {"state": "working"}, result=result,
+                                                        status_ms=now_ms)
+                        self.assertEqual(report["stop_reason"], "No new turn or commit for 5 minutes")
+
+    def test_collect_reads_notices_above_codex_composer_with_unrelated_warnings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            notice = "› task\n\nⓘ This content can’t be shown\n\n"
+            for screen in (
+                f"{notice}› Ask Codex to do anything\n\n  ⚠ 1 warning · f2 to view",
+                f"• Hook failed in the previous turn\n\n{notice}› Ask Codex to do anything",
+                f"{notice}› [Pasted Content 150 chars]",
+            ):
+                with self.subTest(screen=screen):
+                    report, _ = self.collect_report(directory, {"state": "done"}, screen=screen)
+                    self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+
+    def test_collect_reads_indented_claude_policy_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            screen = "❯ task\n\n  ⎿  API Error: Usage Policy\n\n❯ "
+            report, _ = self.collect_report(directory, {"state": "error"}, screen=screen, cli="claude")
+            self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+
+    def test_collect_reports_stall_after_both_turn_and_commit_are_old(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit",
+                            "-qm", "initial", "--allow-empty"], cwd=repo, check=True)
+            now_ms = time.time_ns() // 1_000_000
+            activity = {"cwd": "/wrong-launch-path", "foreground": {"cwd": str(repo)},
+                        "status_ms": now_ms - 6 * 60_000}
+            report, calls = self.collect_report(directory, {"state": "working"}, **activity)
+            self.assertIsNone(report["stop_reason"])
+            self.assertEqual(calls, [call("get", "t7")])
+            with patch("dispatch.time.time_ns", return_value=(now_ms + 6 * 60_000) * 1_000_000):
+                report, _ = self.collect_report(directory, {"state": "working"}, **activity)
+                self.assertEqual(report["stop_reason"], "No new turn or commit for 5 minutes")
+                report, _ = self.collect_report(directory, {"state": "done"}, **activity)
+                self.assertEqual(report["stop_reason"], "No new turn or commit for 5 minutes")
+                report, _ = self.collect_report(directory, {"state": "working"}, **activity,
+                                                screen="ⓘ This content can’t be shown")
+                self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+                report, calls = self.collect_report(directory, {"state": "working"},
+                                                    **(activity | {"status_ms": now_ms + 5 * 60_000}))
+                self.assertIsNone(report["stop_reason"])
+                self.assertEqual(calls, [call("get", "t7")])
+
+    def test_collect_only_flags_shared_categories_in_consecutive_sendbacks_for_the_same_change(self):
+        earlier = {"change": "/archive/contract.md", "round": 1, "categories": ["input-validation", "atomicity"]}
+        later = {**earlier, "round": 2, "categories": ["atomicity", "retry-safety"]}
+        with tempfile.TemporaryDirectory() as directory:
+            for history, expected in (
+                ([earlier, later], ["atomicity"]),
+                ([earlier, {**later, "categories": ["retry-safety"]}], []),
+                ([earlier, {**later, "change": "/other/contract.md"}], []),
+                ([earlier, earlier], []),
+                ([earlier, {**later, "round": 3}], []),
+                ([earlier, later, {**later, "round": 3, "categories": ["documentation"]}], []),
+                ([earlier, {**later, "categories": "atomicity"}], []),
+                ([later], []),
+            ):
+                with self.subTest(history=history):
+                    result = {"status": "blocked", "phase": "review", "summary": "Review findings",
+                              "review_sendbacks": history}
+                    report, calls = self.collect_report(directory, {"state": "done"}, result=result)
+                    self.assertEqual(report["scope_decision_categories"], expected)
+                    self.assertEqual(calls, [call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY)])
+            report, _ = self.collect_report(directory, {"state": "done"}, result={
+                "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
+            })
+            self.assertEqual(report["scope_decision_categories"], [])
 
     def test_collect_force_closes_an_owned_child_and_records_the_reason(self):
         working = {**self.TERMINAL, "status": {"state": "working"}}

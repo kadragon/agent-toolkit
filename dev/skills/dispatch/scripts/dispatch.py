@@ -11,8 +11,8 @@
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
-  dispatch.py collect RECEIPT [--close [--force]]
-      Read the result and status without reading the screen. Close an owned child.
+  dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
+      Read the result, status and any stop reason. Close an owned child.
 """
 import argparse
 import json
@@ -55,6 +55,14 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
+USAGE_NOTICE = re.compile(
+    r"(?:you(?:'ve|’ve| have)? (?:hit|reached) (?:your|the) (?:chatgpt )?(?:usage )?limit\b|"
+    r"(?:(?:individual )?quota|usage limit|rate limit) (?:reached|exceeded)\b)", re.IGNORECASE)
+FILTER_NOTICE = re.compile(r"This content can['’]t be shown\.?", re.IGNORECASE)
+POLICY_ERROR = re.compile(r"API Error:.*\busage policy\b", re.IGNORECASE)
+STOP_USAGE = "Usage limit reached"
+STOP_FILTER = "Stopped by a safety or usage-policy filter"
+STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
@@ -95,7 +103,8 @@ def report_instruction(result):
     return (f"Write progress at phase boundaries and the final report as UTF-8 JSON to {result} "
             "(write a temporary sibling, then rename over it). Fields: status (done, ready, "
             "blocked, or merged), phase, summary (at most three lines), and optional worktree, "
-            "contract, head, pr, ci, evidence, tokens (measured totals only), or review_retries. "
+            "contract, head, pr, ci, evidence, tokens (measured totals only), review_retries, "
+            "or review_sendbacks (per the task-review-cycle consolidation guide). "
             "Write ready when pausing before the merge, and merged only after confirming the merge. "
             "Use file paths for details. Do not send reports by hc send.")
 
@@ -761,7 +770,7 @@ def collect(args):
     if force and not args.close:
         raise SystemExit("--force requires --close")
     with lock_run(path) if args.close else nullcontext():
-        collect_result(path, args.close, force)
+        collect_result(path, args.close, force, getattr(args, "stall_minutes", STALL_MINUTES))
 
 
 def wait_for_terminal_exit(run):
@@ -779,7 +788,123 @@ def wait_for_terminal_exit(run):
     raise SystemExit(f"{address}: terminal did not reach state: finished within {CLOSE_WAIT_SECONDS}s; receipt left open")
 
 
-def collect_result(path, close, force):
+def notice_reason(line):
+    if USAGE_NOTICE.match(line):
+        return STOP_USAGE
+    if FILTER_NOTICE.fullmatch(line) or POLICY_ERROR.match(line):
+        return STOP_FILTER
+    return None
+
+
+def screen_stop_reason(snapshot, cli):
+    if snapshot.get("how") != "screen":
+        return None
+    lines = [line.rstrip() for line in snapshot["text"].rstrip().splitlines()]
+    if cli == "codex":
+        # A warning footer or an older hook notice can mask the composer classification.
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.startswith((*CODEX_OUTPUT_MARKERS, "ⓘ", "ℹ")):
+                break
+            if row.startswith("›"):
+                prompt = row[1:].strip()
+                if (prompt in {"", "Ask Codex to do anything"} or PASTED_CONTENT.fullmatch(prompt)
+                        or footer_boundary(lines, index) is not None):
+                    lines = lines[:index]
+                break
+    else:
+        composer = next((i for i in reversed(range(len(lines))) if lines[i].strip() == "❯"), None)
+        if composer is not None:
+            lines = lines[:composer]
+    for row in reversed(lines):
+        if row.startswith(("›", "❯")):
+            break
+        line = row.lstrip()
+        notice = line.lstrip("ⓘℹ■⚠⎿•\ufe0f ")
+        if line != row and not (cli == "claude" and line.startswith("⎿") and not FILTER_NOTICE.fullmatch(notice)):
+            continue
+        if reason := notice_reason(notice):
+            return reason
+    return None
+
+
+def last_commit_ms(cwd):
+    if not cwd:
+        return 0
+    try:
+        commit = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", "HEAD", "--"], cwd=cwd, capture_output=True,
+            text=True, check=True, timeout=2, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+        )
+        return int(commit.stdout) * 1000
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def child_stop_reason(terminal, run, result, written, stall_minutes):
+    """Return a one-line diagnosis and the number of extra screen reads."""
+    facts = terminal.get("status") or {}
+    state = facts.get("state")
+    if terminal["state"] == "finished":
+        if terminal.get("exit_code") not in (None, 0) or terminal.get("signal"):
+            return "Child exited with an error", 0
+        return None, 0
+    notice = notice_reason(facts.get("msg") or "")
+    if notice:
+        return notice, 0
+    if state == "blocked" and facts.get("kind") in {"permission", "question", "auth"}:
+        return "Waiting for a dialog", 0
+    status = result["status"] if result else None
+    if status in {"done", "merged"} and state == "done":
+        return None, 0
+
+    stale = False
+    track_idle = state in {"idle", "done"} and status not in {"ready", "blocked"}
+    if run.get("sent") and (state == "working" or track_idle) and terminal.get("status_ms") is not None:
+        cutoff_ms = time.time_ns() // 1_000_000 - stall_minutes * 60_000
+        # Herdr timestamps the current status; a new turn re-enters working.
+        if max(terminal["status_ms"], (written or 0) // 1_000_000) <= cutoff_ms:
+            worktree = (result or {}).get("worktree")
+            cwd = ((worktree if isinstance(worktree, str) else None)
+                   or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
+            stale = last_commit_ms(cwd) <= cutoff_ms
+    if not stale and state not in {"blocked", "error", "idle", "done"}:
+        return None, 0
+    try:
+        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=2)
+        notice = screen_stop_reason(snapshot, run["cli"])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        notice = None
+    if notice:
+        return notice, 1
+    if state == "blocked":
+        return "Waiting for a dialog", 1
+    if state == "error":
+        return "Child stopped on an error", 1
+    if stale:
+        return f"No new turn or commit for {stall_minutes} minutes", 1
+    return None, 1
+
+
+def repeated_review_categories(result):
+    if not result or result["status"] != "blocked":
+        return []
+    history = result.get("review_sendbacks")
+    if not isinstance(history, list) or len(history) < 2:
+        return []
+    earlier, later = history[-2:]
+    for verdict in (earlier, later):
+        if (not isinstance(verdict, dict) or not isinstance(verdict.get("change"), str)
+                or not verdict["change"].strip() or type(verdict.get("round")) is not int
+                or verdict["round"] < 1 or not isinstance(verdict.get("categories"), list)
+                or any(not isinstance(category, str) or not category.strip() for category in verdict["categories"])):
+            return []
+    if earlier["change"] != later["change"] or earlier["round"] + 1 != later["round"]:
+        return []
+    return sorted(set(earlier["categories"]).intersection(later["categories"]))
+
+
+def collect_result(path, close, force, stall_minutes):
     run = load_run(path)
     try:
         result, written = read_result(path)
@@ -789,12 +914,13 @@ def collect_result(path, close, force):
         print(error, file=sys.stderr)
         result, written = None, None
     if written == run.get("previous_result"):
-        result = None
+        result, written = None, None
     terminal = hc_json("get", run["address"])
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
     closed = {}
+    reason, reads = None, 0
     if close:
         final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
         if not (force or finished or final):
@@ -803,11 +929,15 @@ def collect_result(path, close, force):
             hc_json("kill", run["address"])
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
-        reason = "forced" if force else ("finished" if finished else "final_result")
-        closed = {"closed_reason": reason}
+        closed_reason = "forced" if force else ("finished" if finished else "final_result")
+        closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
+    else:
+        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes)
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "closed": close, "screen_reads": run["screen_reads"], **closed},
+                      "result": result, "stop_reason": reason,
+                      "scope_decision_categories": repeated_review_categories(result), "closed": close,
+                      "screen_reads": run["screen_reads"], "collect_screen_reads": reads, **closed},
                      ensure_ascii=False))
 
 
@@ -902,10 +1032,13 @@ def main(argv):
     send_parser.set_defaults(func=send)
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
+    collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
     collect_parser.add_argument("--close", action="store_true")
     collect_parser.add_argument("--force", action="store_true", help="close even when the owned child has no final result")
     collect_parser.set_defaults(func=collect)
     args = parser.parse_args(argv)
+    if args.command == "collect" and args.stall_minutes < 1:
+        collect_parser.error("--stall-minutes must be positive")
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     args.func(args)

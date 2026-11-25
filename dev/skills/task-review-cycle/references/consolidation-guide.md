@@ -34,11 +34,30 @@ orchestrator's inline grading.
 
 ## Present
 
-Table: Priority · Title · Source · Scope (In/Out) · Gate (Apply/Skip) · Recommendation. Then a
+Table: Priority · Title · Source · Scope (In/Out) · Gate (Apply/Skip) · Blocking category · Recommendation. Then a
 "Reviewers Skipped" line for any source that did not run or return (reason: sentinel, timeout,
 `still running`, `failed`, `locked`, `unavailable`, `claude CLI unavailable`).
 
+Give each blocking finding a short lowercase category for the guarantee it breaks, such as
+`atomicity`, `retry-safety`, or `input-validation`. Reuse the category when the same guarantee
+fails again. Leave the category blank for other findings.
+
 Without `--auto`: stop and wait for the user. With `--auto`: apply every in-scope P0/P1.
+
+## Report review send-backs to dispatch
+
+A consolidated verdict that sends the change back for another repair counts once, even if
+multiple sources found the issue or dispatch collects it repeatedly. A passing verdict ends
+the consecutive sequence. Preserve send-backs in the branch's archived cycle notes as one
+`Review send-back` line per verdict with a JSON object after the label. Use the contract archive
+path as `change`, the consecutive verdict number starting at 1 as `round`, and the deduplicated
+blocking categories as `categories`. Recover the last verdict through `cycle_state.py inspect`
+on resume. Record a `Review passed` line to end the sequence before starting a new one.
+
+When reporting a send-back through dispatch, include up to the last two entries in order in
+`result.json` as `review_sendbacks`. Keep `review_retries` as the measured retry count. When
+reporting a blocked review to the home session, use `status: blocked` and point to the evidence
+for each verdict. A newly approved scope starts a fresh sequence.
 
 ## Recording out-of-scope and non-blocking findings
 
