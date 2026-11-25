@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.11.0
+version: 1.12.0
 ---
 # Dev Review Cycle
 ## Caller gate
@@ -144,11 +144,10 @@ Disclose inline grading as self-grading and satisfy any required independence wi
 reclaim (`references/late-source-reclaim.md`) is what makes not waiting safe.
 
 ## Step 3: Consolidate and confirm
-Follow `references/consolidation-guide.md`. A `contract` finding is in-scope P0, never dropped by
-confidence or by `--auto`; a `comments` finding follows `references/comment-rules.md` → *Applying*.
-Without `--auto`: present the table and wait. With `--auto`: every in-scope P0/P1 finding is
-approved. Out-of-scope findings and in-scope P2/P3 go to `backlog.md` under `## Review Backlog`
-(format and the rejected-record check in the guide) — never `tasks.md`.
+Follow `references/consolidation-guide.md` for the review table, approval gate and backlog.
+Apply `comments` findings per `references/comment-rules.md` → *Applying*.
+For dispatched work, follow *Report review send-backs to dispatch* for each verdict,
+including the Step 4 re-review.
 
 ## Step 4: Apply
 

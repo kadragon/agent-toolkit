@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.3.0
+version: 2.4.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -189,11 +189,12 @@ Tell the user each terminal's name, address and repo. Watch in the background an
 
 - Start `hc wait --children any --timeout 1800` in the background after confirming task
   delivery to every new child. A child still idle at startup can wake the wait immediately.
-  On timeout, start another wait. Keep the timeout under the prompt-cache lifetime (1 hour
-  on a subscription).
-- On a status change, run `dispatch.py collect <receipt>` for compact results. Read the visible
-  screen only when the result is missing or a decision is unclear. Report model, effort, and
-  screen reads with measured token totals or review retries when available.
+  Keep the timeout under the prompt-cache lifetime (1 hour on a subscription).
+- On a status change or timeout, run `dispatch.py collect <receipt>` before waiting again. Report
+  its `stop_reason` when present. `--stall-minutes N` overrides the 30-minute inactivity threshold.
+  Collect checks the current status, recent child report and worktree commit, with a screen read
+  for missing CLI notices. Read the screen yourself if a decision remains unclear. Report
+  model, effort, screen reads and any measured token totals or review retries.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.
@@ -216,8 +217,8 @@ The user delegates the session's decisions to this session:
   required checks on the final head. This keeps pushes fast-forward and the merge commit
   stays off main when the PR is squash-merged.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
-  cleanup, anything else destructive, and any decision the user kept. Tell the user what is
-  waiting and stop watching that session.
+  cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
+  in collect), and any decision the user kept. Tell the user what is waiting and stop watching.
 
 Once a session's work has merged or its authorized non-merge task is complete, verify its
 result and [close the child terminal](#close-the-child-terminal). Remove any clone or worktree
