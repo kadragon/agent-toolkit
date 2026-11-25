@@ -54,6 +54,7 @@ CODEX_STATUS_LINE = re.compile(
     re.IGNORECASE,
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
+CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
@@ -178,7 +179,13 @@ def free_name(base, explicit, taken):
     return f"{base[:29]}-{n}"
 
 
-def configured_handoff_lines(home, cwd):
+def configured_handoff_lines(launch_dir, cwd):
+    home = launch_dir
+    for directory in (launch_dir, *launch_dir.parents):
+        git_path = directory / ".git"
+        if git_path.is_file() or (git_path / "HEAD").is_file():
+            home = directory
+            break
     config = home / "repos" / "handoff.json"
     try:
         prefixes = json.loads(config.read_text(encoding="utf-8"))
@@ -189,7 +196,7 @@ def configured_handoff_lines(home, cwd):
     if not isinstance(prefixes, dict):
         raise SystemExit(f"{config}: expected an object mapping path prefixes to lists of lines")
 
-    target = (home / cwd).resolve()
+    target = (launch_dir / cwd).resolve()
     extra_lines = []
     for prefix, lines in prefixes.items():
         if not prefix.strip():
@@ -225,6 +232,9 @@ def first_prompt(cli, message, handoff):
               "</dispatch-handoff>")
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
+        if cli == "codex":
+            extra_lines = [(f"> {line}" if line.lstrip().startswith(("›", *CODEX_OUTPUT_MARKERS)) else line)
+                           for line in extra_lines]
         prompt += "\n\n" + "\n".join(extra_lines)
     return prompt
 
@@ -332,7 +342,7 @@ def transcript_echoed(text, message):
         return False
     last_prompt, composer = prompts[-2:]
     end = next((i for i in range(last_prompt + 1, composer)
-                if lines[i].startswith(("•", "■", "─ Worked for"))), composer)
+                if lines[i].startswith(CODEX_OUTPUT_MARKERS)), composer)
     rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
     return matches_sent_message(rows, message)
 
@@ -364,7 +374,7 @@ def codex_screen(text, *, sent_message=None):
     # A transcript prompt can appear above output while the actual composer is hidden.
     for index in reversed(range(len(lines))):
         line = lines[index].lstrip()
-        if line.startswith(("•", "■", "─ Worked for")):
+        if line.startswith(CODEX_OUTPUT_MARKERS):
             break
         if line.startswith("›"):
             prompt = line[1:].strip()

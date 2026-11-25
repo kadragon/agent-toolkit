@@ -23,6 +23,7 @@ from dispatch import (
     report_instruction,
     send,
     terminal_name,
+    transcript_echoed,
 )
 from quota import WEEK, assess
 
@@ -195,6 +196,21 @@ class DispatchReceiptTests(unittest.TestCase):
                     with self.assertRaisesRegex(SystemExit, r"repos[/\\]handoff\.json"):
                         launch(self.launch_args(home))
                     hc.assert_not_called()
+
+    def test_home_handoff_reads_repo_config_from_a_subdirectory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            subprocess.run(["git", "init", "-q", str(home)], check=True)
+            (home / "tools").mkdir()
+            (home / "repos").mkdir()
+            (home / "repos" / "handoff.json").write_text(
+                json.dumps({"projects": ["Use the team review checklist."]}), encoding="utf-8"
+            )
+            args = self.launch_args("../projects/app", dry_run=True)
+            with patch("dispatch.Path.cwd", return_value=home / "tools"), redirect_stdout(StringIO()) as stdout:
+                launch(args)
+            self.assertEqual(json.loads(stdout.getvalue())["task"],
+                             "$task-next" + self.BLOCK + "\n\nUse the team review checklist.")
 
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
@@ -569,7 +585,7 @@ class CodexSendTests(unittest.TestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
     FOOTER_0171 = (
-        "  GPT-6.2-Sol high · main · weekly 54% left · Context 0% used · knue-bookflow\n"
+        "  GPT-6.2-Sol high · main · weekly 54% left · Context 0% used · sample-repo\n"
         "  ← for agents · ? for shortcuts"
     )
     ARGS = SimpleNamespace(address="t7", message="a task")
@@ -1135,13 +1151,15 @@ class CodexSendTests(unittest.TestCase):
         busy = {**idle, "turn": 2, "status": {"state": "working"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            extra_line = "Use the team review checklist."
-            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": [extra_line]}
+            extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
+                           "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run."]
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
             run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = "a task" + DispatchReceiptTests.BLOCK + f"\n\n{extra_line}\n\n" + report_instruction(
-                receipt.resolve().with_name("result.json"))
+            expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
+                        + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
+                        + report_instruction(receipt.resolve().with_name("result.json")))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
@@ -1151,6 +1169,7 @@ class CodexSendTests(unittest.TestCase):
             rows = prompt.replace("\n", "\n  ")
             self.assertEqual(codex_screen(f"› {rows}\n\n{self.FOOTER_0171}", sent_message=prompt),
                              "paste")
+            self.assertTrue(transcript_echoed(f"› {rows}\n\n• Completed\n\n{ready}", prompt))
             self.assertEqual(prompt, expected)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
