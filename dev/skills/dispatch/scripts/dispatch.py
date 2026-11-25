@@ -5,9 +5,10 @@
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
-                     [--name N] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
+                     [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
+      --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
@@ -80,6 +81,14 @@ def terminal_name(raw):
     if not name:
         raise SystemExit(f"cannot build a terminal name from {raw!r}")
     return name
+
+
+def child_name(repo, title):
+    base = terminal_name(repo)
+    slug = re.sub(r"[^a-z0-9_-]+", "-", (title or "").lower()).strip("-_")
+    if not slug:
+        return base
+    return f"{base}-{slug}"[:32].rstrip("-")
 
 
 def child_argv(cli, model, effort, message, keep_connectors, result=None):
@@ -268,7 +277,12 @@ def warn_linked_worktree(cwd):
 
 def launch(args):
     cwd = Path(args.cwd).expanduser()
-    name = terminal_name(args.name or cwd.name)
+    title = getattr(args, "title", None)
+    if title is not None:
+        title = " ".join(title.split())
+        if not title:
+            raise SystemExit("--title must not be blank")
+    name = terminal_name(args.name) if args.name else child_name(cwd.name, title)
     if args.task is not None and (args.cli != "codex" or args.message is not None):
         raise SystemExit("--task is for Codex only; Claude takes its task as MESSAGE")
     trust_hooks = getattr(args, "trust_hooks", False)
@@ -307,10 +321,13 @@ def launch(args):
         result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
     warn_linked_worktree(cwd)
     argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
-            "--name", name, "--cwd", str(cwd), *(["--parent", home] if home else ["--no-parent"]),
+            "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
+            *(["--parent", home] if home else ["--no-parent"]),
             *child_argv(args.cli, args.model, args.effort, message, args.keep_connectors, result_path)]
     if args.dry_run:
         preview = {"name": name, "argv": argv}
+        if title:
+            preview["title"] = title
         if args.task is not None:
             preview["task"] = first_prompt(args.cli, args.task, handoff)
         print(json.dumps(preview, ensure_ascii=False))
@@ -322,9 +339,11 @@ def launch(args):
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal["created_ms"], "cli": args.cli, "model": args.model,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
+    if title:
+        run["title"] = title
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
-    print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}), flush=True)
+    print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
     if terminal.get("parent") != home:
         detail = ("Claude may have received its launch prompt; inspect before retrying"
                   if args.cli == "claude" else "task withheld")
@@ -1015,6 +1034,7 @@ def main(argv):
     launch_parser.add_argument("--unit", required=True, help="assigned unit")
     launch_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     launch_parser.add_argument("--name")
+    launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
     launch_parser.add_argument("--trust-hooks", action="store_true", help="trust all hooks in the Codex startup dialog")

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Label dispatch children with task titles and map Codex models to Claude tiers (dev v4.12.19) (2026-11-26)
 - [done] Report dispatch stop reasons and repeated review categories (2 units) (dev v4.12.18) (2026-11-25)
 - [done] Append home-configured handoff lines at dispatch launch (dev v4.12.17) (2026-11-25) → dev/skills/dispatch/references/launch-handoff.md
 - [done] Replace organization-specific names in fixtures and examples (dev v4.12.16, prod v3.2.17) (2026-11-25)

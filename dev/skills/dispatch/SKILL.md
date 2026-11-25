@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.4.0
+version: 2.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -63,12 +63,11 @@ The task skills own the working-tree gate.
 Route by rules, not by a guess at the outcome: give each session the cheapest pair that can
 finish it, and escalate on evidence. Pick the two independently — the model by the capability
 the work needs, the effort by how ambiguous or risky it is. The user naming a CLI, model or
-effort overrides both tables and every rule below.
-
-Codex takes the work Claude's haiku and sonnet would, to keep Claude usage for the work that
-needs opus judgment. Use `gpt-6.2-sol` for Codex, and reserve `gpt-6.2-astra` and the
-`max`/`ultra` efforts for user requests. Use Claude `haiku` and `sonnet` on request,
-when Codex is unavailable, or when quota favors Claude.
+effort overrides both tables and every rule below, except the ban on `fable` and `gpt-6.2-astra`.
+Tiers are equal across CLIs: `haiku` = Codex `gpt-6-luna` < `sonnet` = `gpt-6.1-terra` < `opus` = `gpt-6.2-sol`.
+Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal
+Claude tier stands in when Codex is unavailable. Never use `fable` or `gpt-6.2-astra`; `max`/`ultra` only on request (`ultra` not on luna).
+A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
@@ -81,8 +80,8 @@ Apply the bias on top of the tables below:
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | Reserve opus for unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy). Use Codex `gpt-6.2-sol` for the rest. |
-| `claude` (Codex running ahead) | codex rows go to claude `sonnet` at the same effort; a `low` lookup to `haiku` |
+| `codex` (Claude running ahead) | Top-tier work also goes to Codex `gpt-6.2-sol`, except unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy), which stay on `opus`. |
+| `claude` (Codex running ahead) | Codex tiers go to the equal Claude tier at the same effort: `gpt-6-luna` → `haiku`, `gpt-6.1-terra` → `sonnet`. |
 | `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 
 - `critical` on a CLI: launch nothing on it without the user's yes. Move a row to the other
@@ -93,13 +92,13 @@ Apply the bias on top of the tables below:
   may report no 5-hour window; then only the weekly one counts.
 - Escalation uses the wave's effective bias and `references/escalation.md`.
 
-Model — capability:
+Model tier — capability (Default CLI applies under bias `none`):
 
-| Model | When |
-|-------|------|
-| codex `gpt-6.2-sol` | factual lookups and ordinary features, fixes or reviews with settled scope |
-| claude `opus` | open-ended design or review, uncertain diagnosis, work requiring substantial domain judgment, or work starting at xhigh |
-| `fable` | only by escalation from opus/xhigh, or when the user asks |
+| Tier | Claude | Codex | Default CLI | When |
+|------|--------|-------|-------------|------|
+| low | `haiku` | `gpt-6-luna` | Codex | factual lookups and mechanical edits with nothing to decide |
+| mid | `sonnet` | `gpt-6.1-terra` | Codex | ordinary features, fixes or reviews with settled scope |
+| top | `opus` | `gpt-6.2-sol` | Claude | open-ended design or review, uncertain diagnosis, work requiring substantial domain judgment, or work starting at xhigh |
 
 Effort — ambiguity and risk:
 
@@ -134,10 +133,11 @@ which Git actions the user authorizes. Carry the answer in the handoff.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
-  --cwd "<repo path>" --work-kind <kind> --request='<verbatim user request>' \
+  --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
   --unit='<assigned unit>' --git-limits='<verbatim Git limits>' '<first message>'
 ```
 
+Always pass `--title`, a short unit summary in the user's language (Herdr label `title`, receipt, name `<repo>-<slug>`).
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
 as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workflow invocation
@@ -163,8 +163,8 @@ Before launching or replacing a Codex child, follow `references/codex-readiness.
 For a single Codex child, launch and send in one invocation:
 
 ```sh
-python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol \
-  --effort <effort> --cwd "<repo path>" --work-kind <kind> --request='<verbatim user request>' \
+python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex model> \
+  --effort <effort> --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
   --unit='<assigned unit>' --git-limits='<verbatim Git limits>' --task '<first message>'
 ```
 

@@ -14,6 +14,7 @@ from unittest.mock import ANY, call, patch
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
     child_argv,
+    child_name,
     codex_screen,
     collect,
     composer_draft,
@@ -54,13 +55,15 @@ class TerminalTests(unittest.TestCase):
 
 class ChildArgvTests(unittest.TestCase):
     def test_codex_argv_and_message_guard(self):
-        self.assertEqual(
-            child_argv("codex", "gpt-6.2-sol", "high", None, False),
-            ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", "gpt-6.2-sol",
-             "-c", "model_reasoning_effort=high"],
-        )
-        with self.assertRaisesRegex(SystemExit, "codex takes no first message"):
-            child_argv("codex", "gpt-6.2-sol", "high", "$task-next", False)
+        for model in ("gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol"):
+            with self.subTest(model=model):
+                self.assertEqual(
+                    child_argv("codex", model, "high", None, False),
+                    ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
+                     "-c", "model_reasoning_effort=high"],
+                )
+                with self.assertRaisesRegex(SystemExit, "codex takes no first message"):
+                    child_argv("codex", model, "high", "$task-next", False)
 
     def test_claude_passes_message_as_one_arg_and_optionally_keeps_connectors(self):
         message = ('/dev:task-new --tree Update docs\n'
@@ -104,7 +107,7 @@ class DispatchReceiptTests(unittest.TestCase):
              f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
 
     def launch_args(self, cwd, **overrides):
-        args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.2-sol",
+        args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
                     effort="medium", task="$task-next", message=None, keep_connectors=False,
                     dry_run=False, **self.HANDOFF)
         return SimpleNamespace(**(args | overrides))
@@ -154,6 +157,60 @@ class DispatchReceiptTests(unittest.TestCase):
                     self.assertIn("warning:", stderr.getvalue())
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
+
+    def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
+        cwd = Path(tempfile.gettempdir()) / "myrepo"
+        for raw, name, title, expected in (
+            ("Fix login timeout", None, "Fix login timeout", "myrepo-fix-login-timeout"),
+            ("  Fix\nlogin  timeout ", None, "Fix login timeout", "myrepo-fix-login-timeout"),
+            ("로그인 시간 초과 수정", None, "로그인 시간 초과 수정", "myrepo"),
+            ("API 토큰 갱신", None, "API 토큰 갱신", "myrepo-api"),
+            ("Update dispatch receipts title handling", None, "Update dispatch receipts title handling",
+             "myrepo-update-dispatch-receipts"),
+            ("Fix login timeout", "custom", "Fix login timeout", "custom"),
+            (None, None, None, "myrepo"),
+        ):
+            with self.subTest(raw=raw, name=name), patch("dispatch.hc_json") as hc:
+                args = self.launch_args(cwd, cli="claude", task=None, message="/dev:task-new Fix login",
+                                        dry_run=True, name=name, title=raw)
+                with patch("sys.stdout", new_callable=StringIO) as stdout:
+                    launch(args)
+                hc.assert_not_called()
+                payload = json.loads(stdout.getvalue())
+                argv = payload["argv"]
+                self.assertEqual(payload["name"], expected)
+                self.assertEqual(argv[argv.index("--name") + 1], expected)
+                self.assertLessEqual(len(expected), 32)
+                if title is None:
+                    self.assertNotIn("--label", argv)
+                    self.assertNotIn("title", payload)
+                else:
+                    label = argv.index("--label")
+                    self.assertEqual(argv[label + 1], f"title={title}")
+                    self.assertLess(label, argv.index("claude"))
+                    self.assertEqual(payload["title"], title)
+
+    def test_child_name_keeps_the_repo_when_the_title_cannot_fit(self):
+        self.assertEqual(child_name("_" * 40, "Fix login timeout"), "_" * 32)
+
+    def test_blank_title_stops_launch(self):
+        with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "--title must not be blank"):
+            launch(self.launch_args(Path.cwd(), title=" \n "))
+        hc.assert_not_called()
+
+    def test_cli_title_reaches_the_dry_run_preview(self):
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+             "--cli", "claude", "--model", "sonnet", "--effort", "medium", "--cwd", str(SCRIPTS),
+             "--work-kind", "new", "--request", "요청", "--unit", "단위", "--git-limits", "none",
+             "--title", "제목 Fix", "--dry-run", "/dev:task-new 단위"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["title"], "제목 Fix")
+        self.assertEqual(payload["name"], "scripts-fix")
+        self.assertIn("title=제목 Fix", payload["argv"])
 
     def test_home_handoff_lines_follow_verbatim_fields_for_matching_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -276,6 +333,29 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
+
+    def test_launch_records_the_title_in_the_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            title = "대시보드 제목 정리"
+            args = self.launch_args(directory, name=None, title=title)
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
+                     "foreground": {"cwd": str(Path.cwd())}}
+            child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+            with (
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.subprocess.run", return_value=child) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                patch("dispatch.send"),
+                patch("builtins.print") as output,
+            ):
+                launch(args)
+            argv = run.call_args_list[-1].args[0]
+            self.assertEqual(argv[argv.index("--label") + 1], f"title={title}")
+            self.assertEqual(argv[argv.index("--name") + 1], terminal_name(Path(directory).name))
+            payload = json.loads(output.call_args.args[0])
+            self.assertEqual(payload["title"], title)
+            receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["title"], title)
 
     def test_claude_parent_mismatch_reports_that_launch_may_have_delivered(self):
         with tempfile.TemporaryDirectory() as directory:
