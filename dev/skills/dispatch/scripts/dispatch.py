@@ -721,6 +721,41 @@ def collect_result(path, close, force):
                      ensure_ascii=False))
 
 
+def warn_stale_local_base(repo):
+    remote_prefix = "refs/remotes/origin/"
+    git = ["git", "-C", str(repo)]
+    options = {
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": {**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+    }
+    try:
+        base = subprocess.run([*git, "branch", "--show-current"], **options, check=True).stdout.strip()
+        if not base:
+            return
+        remote = f"{remote_prefix}{base}"
+        default = subprocess.run(
+            [*git, "symbolic-ref", "--quiet", f"{remote_prefix}HEAD"], **options,
+        ).stdout.strip()
+        if default and default != remote:
+            return
+        if not default and base not in ("main", "master"):
+            return
+        result = subprocess.run(
+            [*git, "rev-list", "--count", f"refs/heads/{base}..{remote}", "--"],
+            **options, check=True,
+        )
+        behind = int(result.stdout)
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return
+    if behind:
+        commits = "commit" if behind == 1 else "commits"
+        print(f"warning: {base} is {behind} {commits} behind origin/{base}. "
+              "The local backlog may be stale. Update the local base or use pick --tree.", file=sys.stderr)
+
+
 def pick(args):
     skills = Path(__file__).resolve().parents[2]
     script = skills / "task-next" / "scripts" / "backlog_candidates.py"
@@ -731,6 +766,8 @@ def pick(args):
            "--backlog", "backlog.md", "--json", "--counts"]
     if args.tree:
         cmd += ["--ref", "origin/HEAD"]
+    else:
+        warn_stale_local_base(repo)
     if args.full_scan:
         cmd.append("--full-scan")
     done = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, encoding="utf-8")
