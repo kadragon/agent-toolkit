@@ -368,13 +368,15 @@ def footer_boundary(lines, composer, *, placeholder=False):
 
 def codex_hook_rows(lines):
     in_prompt = False
+    previous_blank = False
     for line in lines:
         if line.startswith("›"):
             in_prompt = True
         elif line and not line.startswith("  "):
             in_prompt = False
-        if not in_prompt:
+        if not in_prompt or previous_blank:
             yield line.lstrip()
+        previous_blank = not line
 
 
 def codex_screen(text, *, sent_message=None):

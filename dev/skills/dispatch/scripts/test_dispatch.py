@@ -878,10 +878,13 @@ class CodexSendTests(unittest.TestCase):
                 self.assertTrue(transcript_echoed(f"{shown}\n\n• Completed\n\n{self.READY}", message))
 
     def test_wrapped_hook_words_are_text_but_a_visible_hook_failure_is_a_blocker(self):
-        shown = "› A note about what to do when a\n  hook failed again."
+        shown = "› Review instructions\n\n  A note about what to do when a\n  hook failed again."
         self.assertEqual(codex_screen(f"{shown}\n\n{self.READY}"), "ready")
         failure = "• Hook failed\n  └ plugin contents changed; hook approval required"
         self.assertEqual(codex_screen(f"{shown}\n\n{failure}\n\n{self.READY}"), "hooks")
+        for notice in ("  └ hook approval required", "  Hooks need review"):
+            with self.subTest(notice=notice):
+                self.assertEqual(codex_screen(f"{shown}\n\n{notice}\n\n{self.READY}"), "hooks")
 
     def test_screen_with_indented_tool_output_and_no_composer_is_waiting(self):
         screen = f"› a task\n\n  • Completed\n\n{self.FOOTER_0171}"
