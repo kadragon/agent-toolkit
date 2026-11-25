@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 2.6.0
+version: 2.7.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
@@ -31,22 +31,31 @@ For `Dispatch mode: parallel-worktree`, classify and size only the assigned unit
 Infer the tag from the **Tag:** list in `../task-next/references/cycle.md` → *Sprint Contract* —
 the one that names the change (a docs-only request is `[DOCS]`, a harness change `[HARNESS]`).
 
-Size by independently testable outcome and unresolved decisions. A small feature or mechanical
-multi-file edit may fit one contract. Use `../task-next/references/cycle.md` → *Plan gate* for
+Size by independently testable outcome and unresolved decisions. For a record-only request,
+size the queue edit itself. A small feature or mechanical multi-file edit may fit one contract.
+Use `../task-next/references/cycle.md` → *Plan gate* for
 approval; tags and file counts are context, not gates. Inspect the relevant area before sizing.
 
 ## Step 2 — Route
 
 For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only the assigned
-unit; the quoted request and Git limits carry context and authority. If the assignment
-is missing, already queued, unclear, larger than one contract, or requires shared planning
-or queue edits, report the blocker to the home session and stop before writing. Otherwise
-proceed to Step 3 with the assigned unit.
+unit. Verify the original request and Git limits per
+`../task-next/references/git-authorization.md`. If the assignment is missing, already queued,
+unclear, larger than one contract, or requires shared planning or overlapping queue edits,
+report the blocker to the home session and stop before writing. Publishing an already scoped
+queue edit follows the **Queue without implementing** row below when the home session assigned
+it as the wave's only planned write to that backlog. Keep planning-only work in one session.
+For any other assignment requiring queue edits, report the blocker and stop before writing.
+Proceed to Step 3 for the remaining assignments.
 
 For other runs, first match wins. Size comes before clarity: a fully specified request
 can still be too large for one contract.
-- **Queue without implementing** (the user asks only to record it) → call the Skill tool with
-  "dev:task-tickets" on the request, then **stop**.
+- **Queue without implementing** (the user asks only to record it) → if the forwarded human
+  request and Git limits establish commit authority for the dispatched queue change per
+  `../task-next/references/git-authorization.md`, take *Queue documentation cycle* below.
+  A dispatched `--tree` run with unestablished commit authority reports that blocker and stops
+  before writing. For all remaining runs, call the Skill tool with "dev:task-tickets" on the
+  request, then stop after writing the tickets.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
   "dev:task-tickets"; then **stop** — no cycle runs this invocation.
@@ -63,6 +72,26 @@ can still be too large for one contract.
 At most one cycle runs per invocation. Several unrelated requests → handle the first, tell the
 user to re-invoke (or queue them for `task-next --all`).
 
+### Queue documentation cycle
+
+Use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording the assigned
+tickets, with the verified Git authority and limits. Apply `--tree` for checkout isolation
+only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's checkout.
+After writing the approved tickets, return to this cycle with the ticket list in place of the
+ticket skill's standalone handoff. If ticketing is blocked or leaves no queue delta, report
+that outcome and the saved branch and contract, then stop before review. Verify the ticket
+entries and continue through applicable release steps, *Validation evidence*, and Step 4.
+The tickets remain open for a later implementation cycle.
+
+At handoff, pass `--pr` when feature push and PR write are authorized. The review cycle owns
+commit, PR and merge within the saved limits. Report the result at the applicable limit,
+such as a reviewed local commit under `no-push`. For a parallel dispatch with a PR, honor its
+pre-merge stop and report `ready` after review and required CI, with the checkout, archived
+contract and PR. When the home session explicitly releases that PR's pre-merge stop for
+serial merge, recover the archive from the same checkout and re-enter Step 4 for the existing
+PR. Recheck the saved merge permission and final head at the review cycle's merge gate.
+Report `merged` only after confirmation.
+
 ## Step 3 — Run the cycle
 
 Follow `../task-next/references/cycle.md` end to end (its `CYCLE_DIR` is that references
@@ -76,8 +105,10 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
   cycle as a `cycle.md` → *Worktree cycle* from any branch or dirty state (the gate's `--tree` row). Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
-- **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
-  when the repo maintains one. Do not scaffold a harness to finish standalone work.
+- **Cleanup** — skip `prune-tasks` and `prune-backlog`; this cycle claims no queue items.
+  When the repo maintains a `CHANGELOG.md`, record the completed scoped change. In a queue
+  documentation cycle, title the entry for the act of recording the tickets. Do not scaffold
+  a harness to finish standalone work.
 
 ## Step 4 — Hand off
 
