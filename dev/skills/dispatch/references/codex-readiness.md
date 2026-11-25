@@ -1,5 +1,25 @@
 # Codex readiness
 
+## Before a Codex wave
+
+Never start a new Codex child while another Codex child is mid-cycle. A startup update can
+invalidate the running child's approval for the dev plugin hooks, even when the hook files are
+identical. If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
+send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+
+When the dev plugin version may have changed, such as after an agent-toolkit merge, wait for
+active Codex cycles to finish, then prepare the wave:
+
+1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
+2. Start a second idle Codex child. Use **Review hooks** in the startup dialog, or `/hooks`
+   if the dialog is absent. Verify that the required hooks are trusted and active, then close the child.
+3. Launch the task children once both warm-up children are closed.
+
+Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
+it is the idle child started for this preparation.
+
+## Readiness blockers
+
 Read the live screen with `hc read --lines 0 <address>` before resolving a blocked send.
 
 - **Hooks need review** — select **Review hooks** in the startup dialog. In the event list,
@@ -15,22 +35,27 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
   if the live `/hooks` view has nothing to approve, restart the child without a task and use
   **Review hooks** at startup. Restart after approval if the failure remains on screen or if
   a SessionStart hook had already been skipped.
+- **Plugin hook approval required after a send** — stop the affected child before it proceeds
+  with hooks disabled. Keep its receipt, preserve any work already produced, and review the
+  hooks in a fresh idle child once the other Codex cycles have finished. Check what the affected
+  child already did before deciding whether to resend the task.
 - **Repository trust** — tell the user before accepting a known target directory. Select
   **Yes, continue** in its own dialog and then check for hook review.
 
-Retry the guarded `send` only with the hooks approved and the composer clear. If the source
-cannot be verified, approval is unavailable, or a warning remains, report the blocker and
-withhold the task. For an unconfirmed send, inspect whether the task already started before
-retrying.
+Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` only with the hooks
+approved and the composer clear. If the source cannot be verified, approval is unavailable, or
+a warning remains, report the blocker and withhold the task. For an unconfirmed send, inspect
+whether the task already started before retrying.
 
 A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using
 the current installed script. By default an unconfirmed receipt blocks another scripted send until
 the child writes a new result or starts a turn past the one recorded at send; then `send`
-accepts it as delivered. Otherwise inspect the transcript and result file first. If the task started, let the existing session
-finish. If the text is still in its composer, confirm that it is the intended task and submit
-it once there. If the task never started, the composer is clear, and the child is still on
-the recorded turn, use `dispatch.py send --run <receipt> --resend -- <address> '<same message>'`.
+accepts it as delivered. Otherwise inspect the transcript and result file first. If the task
+started and its hooks are trusted, let the existing session finish. If the text is still in its
+composer, confirm that it is the intended task and submit it once there. If the task never
+started, the composer is clear, and the child is still on the recorded turn, use
+`dispatch.py send --run <receipt> --resend -- <address> '<same message>'`.
 The child must be idle or on the previous completed turn of a follow-up. A matching prompt in
 the transcript blocks resend. Relaunch only after verifying that the task never started and
 preserving any changes. A startup can report turn 1.
@@ -48,6 +73,8 @@ For older receipts missing the delivery phase, a resend on turn 1 requires the s
   after the send rules that out.
 - An unconfirmed receipt is accepted as delivered once the child writes a new result. After
   Herdr acknowledges a send, a clear composer and a working or completed turn can also
-  confirm it.
+  confirm it. The send checks for plugin hook approval failures for two seconds after
+  delivery first appears confirmed. If the failure appears later while watching the child,
+  follow the same stop and review procedure under *Readiness blockers*.
 
 Codex documents [hook trust and the /hooks browser](https://learn.chatgpt.com/docs/hooks).

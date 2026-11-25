@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
 from dispatch import (
+    POST_SEND_SETTLE_SECONDS,
     child_argv,
     codex_screen,
     collect,
@@ -537,6 +538,9 @@ class CodexSendTests(unittest.TestCase):
         "›    Review hooks\n     Trust all and continue\n     Continue without trusting (hooks\n     won't run)"
     )
 
+    def setUp(self):
+        self.enterContext(patch("dispatch.POST_SEND_SETTLE_SECONDS", 0))
+
     def test_codex_0171_two_line_footer(self):
         footer = self.FOOTER_0171
         ready = f"› Ask Codex to do anything\n\n{footer}"
@@ -856,7 +860,7 @@ class CodexSendTests(unittest.TestCase):
             self.screen(self.READY), self.IDLE, {"started": False},
             self.screen(self.PASTE), self.IDLE,
             self.screen(self.PASTE), self.IDLE, {},
-            self.screen(self.READY), self.WORKING,
+            self.screen(self.READY), self.WORKING, self.screen(self.READY),
         ]
         with patch("dispatch.hc_json", side_effect=responses) as hc, \
                 patch("dispatch.time.sleep"), patch("builtins.print") as output:
@@ -866,7 +870,7 @@ class CodexSendTests(unittest.TestCase):
             call("send", "--if", "idle", "--", "t7", message),
             call("read", "--lines", "0", "t7"), call("get", "t7"),
             call("read", "--lines", "0", "t7"), call("get", "t7"), call("keys", "t7", "enter"),
-            call("read", "--lines", "0", "t7"), call("get", "t7"),
+            call("read", "--lines", "0", "t7"), call("get", "t7"), call("read", "--lines", "0", "t7"),
         ])
         output.assert_any_call("warning: no dispatch receipt. Use --run to carry handoff metadata",
                                file=sys.stderr)
@@ -876,7 +880,7 @@ class CodexSendTests(unittest.TestCase):
         with patch("dispatch.hc_json", side_effect=[
             self.screen(self.READY), self.IDLE, {"started": True},
             self.screen(self.PASTE), {**self.WORKING, "turn": 1},
-            self.screen(self.READY), {**self.WORKING, "turn": 1},
+            self.screen(self.READY), {**self.WORKING, "turn": 1}, self.screen(self.READY),
         ]) as hc, patch("builtins.print"):
             send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
@@ -896,7 +900,7 @@ class CodexSendTests(unittest.TestCase):
                 expanded = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
                 ready = self.screen(self.READY)
                 responses = {
-                    "read": iter((ready, expanded, expanded, expanded, expanded, ready)),
+                    "read": iter((ready, expanded, expanded, expanded, expanded, ready, ready)),
                     "get": iter((self.IDLE, working, idle, idle, idle, working)),
                 }
 
@@ -907,7 +911,7 @@ class CodexSendTests(unittest.TestCase):
                         patch("dispatch.time.sleep"), patch("builtins.print") as output:
                     send(SimpleNamespace(address="t7", message=message))
                 self.assertEqual(hc.call_args_list.count(call("keys", "t7", "enter")), 1)
-                self.assertEqual(hc.call_count, 14)
+                self.assertEqual(hc.call_count, 15)
                 self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
 
     def test_send_requires_working_status_and_a_clear_composer_in_the_same_poll(self):
@@ -916,10 +920,10 @@ class CodexSendTests(unittest.TestCase):
             self.screen(self.READY), self.IDLE, {"started": True},
             self.screen("› a task\n\n• Working"), self.WORKING,
             self.screen(self.READY), idle,
-            self.screen(self.READY), self.WORKING,
+            self.screen(self.READY), self.WORKING, self.screen(self.READY),
         ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
             send(self.ARGS)
-        self.assertEqual(hc.call_count, 9)
+        self.assertEqual(hc.call_count, 10)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
         self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
 
@@ -929,7 +933,7 @@ class CodexSendTests(unittest.TestCase):
                 draft = self.screen(f"{prompt}\n\n  GPT-6.2-Sol default · ~/repo")
                 ready = self.screen(self.READY)
                 responses = {
-                    "read": iter((ready, draft, draft, ready)),
+                    "read": iter((ready, draft, draft, ready, ready)),
                     "get": iter((self.IDLE, self.IDLE, self.IDLE, self.WORKING)),
                 }
 
@@ -945,20 +949,122 @@ class CodexSendTests(unittest.TestCase):
         echoed = f"› Investigate the following\n  Hook failed on SessionStart\n\n{self.READY}"
         with patch("dispatch.hc_json", side_effect=[
             self.screen(self.READY), self.IDLE, {"started": True},
-            self.screen(echoed), self.WORKING,
+            self.screen(echoed), self.WORKING, self.screen(echoed),
         ]) as hc, patch("builtins.print") as output:
             send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
         self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_send_does_not_mistake_quoted_plugin_failure_for_the_cause(self):
+        message = "Investigate this example:\nHook failed\n└ plugin contents changed; hook approval required"
+        echoed = message.replace("\n", "\n  ")
+        failed = f"› {echoed}\n\n• Hook failed\n  └ Policy prevented this action.\n\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True}, self.screen(failed),
+        ]), redirect_stderr(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(SimpleNamespace(address="t7", message=message))
+
+    def test_send_confirms_delivery_when_an_unrelated_warning_appears_late(self):
+        warning = f"{self.READY}\n  ⚠ 1 warning · f2 to view"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen(self.READY), self.WORKING, self.screen(warning),
+        ]), redirect_stdout(StringIO()) as output, redirect_stderr(StringIO()):
+            send(self.ARGS)
+        self.assertIs(json.loads(output.getvalue())["submitted"], True)
 
     def test_send_reports_a_real_hook_failure_after_delivery(self):
         failed = f"› Investigate\n\n• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}"
         with patch("dispatch.hc_json", side_effect=[
             self.screen(self.READY), self.IDLE, {"started": True}, self.screen(failed),
         ]) as hc:
-            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+            with self.assertRaisesRegex(SystemExit, "blocked after the send.*hook approval required"):
                 send(self.ARGS)
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
+
+    def test_plugin_hook_failure_can_follow_the_first_working_frame(self):
+        failed = f"› a task\n\n• Hook failed\n  └ plugin contents changed; hook approval required\n\n{self.READY}"
+        for launch_task in (False, True):
+            with self.subTest(launch_task=launch_task), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                reads = iter((self.READY, self.READY, failed))
+                operations = []
+
+                def respond(command, *_args):
+                    if command == "read":
+                        return self.screen(next(reads))
+                    if command == "get":
+                        turn = self.WORKING if operations else self.IDLE
+                        return {**DispatchReceiptTests.TERMINAL, **turn}
+                    operations.append(command)
+                    return {"started": True}
+
+                with (patch("builtins.print", wraps=print) as output, redirect_stdout(StringIO()),
+                      redirect_stderr(StringIO()), patch("dispatch.time.sleep")):
+                    with self.assertRaisesRegex(SystemExit, "plugin contents changed.*hook approval required"):
+                        if launch_task:
+                            self.launch_codex(directory, respond)
+                        else:
+                            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+                            with patch("dispatch.hc_json", side_effect=respond):
+                                send(SimpleNamespace(address="t7", message="a task", run=receipt))
+                self.assertFalse(any('"submitted": true' in entry.args[0] for entry in output.call_args_list))
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["sent"], "unconfirmed")
+                self.assertEqual(operations, ["send"])
+
+    def test_send_detects_approval_failures_that_render_during_the_settle_window(self):
+        reason = "plugin contents changed; hook approval required"
+        for failure, shows_at in (
+            (f"⚠ {reason}", 0.25),
+            (f"• Hook failed\n  └ SessionStart hook\n  └ {reason}", 0.25),
+            (f"• Hook failed\n  └ {reason}", 1.5),
+        ):
+            with self.subTest(failure=failure, shows_at=shows_at):
+                now = 0.0
+                sent = False
+
+                def advance(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def respond(command, *_args):
+                    nonlocal sent
+                    if command == "read":
+                        shown = f"{failure}\n\n{self.READY}" if shows_at <= now < shows_at + 0.25 else self.READY
+                        return self.screen(shown)
+                    if command == "get":
+                        return self.WORKING if sent else self.IDLE
+                    self.assertEqual(command, "send")
+                    sent = True
+                    return {"started": True}
+
+                with (patch("dispatch.hc_json", side_effect=respond),
+                      patch("dispatch.POST_SEND_SETTLE_SECONDS", POST_SEND_SETTLE_SECONDS),
+                      patch("dispatch.time.monotonic", side_effect=lambda: now),
+                      patch("dispatch.time.sleep", side_effect=advance), redirect_stderr(StringIO()),
+                      redirect_stdout(StringIO()) as output):
+                    with self.assertRaisesRegex(SystemExit, "plugin contents changed.*hook approval required"):
+                        send(self.ARGS)
+                self.assertEqual(output.getvalue(), "")
+
+    def test_lost_send_does_not_retry_when_an_indented_hook_blocker_appears(self):
+        reads = iter((self.READY, self.READY))
+        sends = []
+
+        def respond(command, *_args):
+            if command == "read":
+                return self.screen(next(reads, f"  └ hook approval required\n\n{self.READY}"))
+            if command == "get":
+                return self.IDLE
+            sends.append(command)
+            return {"started": False}
+
+        with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+              patch("dispatch.time.monotonic", side_effect=range(0, 120, 6)), redirect_stderr(StringIO())):
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(self.ARGS)
+        self.assertEqual(sends, ["send"])
 
     def test_send_withholds_enter_when_dialog_opens_after_reading_a_paste(self):
         blocked = {"turn": 0, "status": {"state": "blocked"}}
@@ -989,7 +1095,7 @@ class CodexSendTests(unittest.TestCase):
                 receipt.resolve().with_name("result.json"))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
-                startup, idle, startup, {"started": True}, self.screen(ready), busy,
+                startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
             ]) as hc, redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO):
                 send(args)
             prompt = next(c.args[-1] for c in hc.call_args_list if c.args[0] == "send")
@@ -1058,7 +1164,7 @@ class CodexSendTests(unittest.TestCase):
                             send(args)
                         self.assertFalse(any(c.args[0] in {"keys", "send"} for c in hc.call_args_list))
                         self.assertEqual("Press enter to continue" in stderr.getvalue(), frames[0] == dialog)
-                with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working]) as hc, \
+                with patch("dispatch.hc_json", side_effect=[ready, idle, {}, ready, working, ready]) as hc, \
                         redirect_stdout(StringIO()):
                     send(args)
                 prompt = hc.call_args_list[2].args
@@ -1086,7 +1192,7 @@ class CodexSendTests(unittest.TestCase):
                         send(args)
                     self.assertEqual(hc.call_count, 2)
 
-            with patch("dispatch.hc_json", side_effect=[ready, done, done, {}, ready, working]) as hc, \
+            with patch("dispatch.hc_json", side_effect=[ready, done, done, {}, ready, working, ready]) as hc, \
                     redirect_stdout(StringIO()):
                 send(args)
             self.assertEqual(hc.call_args_list[3].args[:3], ("send", "--", "t7"))
@@ -1108,7 +1214,7 @@ class CodexSendTests(unittest.TestCase):
                     send(args)
                 self.assertEqual(hc.call_count, 2)
             startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n{self.READY}")
-            with patch("dispatch.hc_json", side_effect=[startup, idle, {}, ready, working]) as hc, \
+            with patch("dispatch.hc_json", side_effect=[startup, idle, {}, ready, working, ready]) as hc, \
                     redirect_stdout(StringIO()):
                 send(args)
             expected = "$task-next" + DispatchReceiptTests.BLOCK
@@ -1169,6 +1275,7 @@ class CodexSendTests(unittest.TestCase):
                                encoding="utf-8")
             with patch("dispatch.hc_json", side_effect=[
                 draft, idle, {}, self.screen(self.READY), idle, {"started": True}, self.screen(self.READY), working,
+                self.screen(self.READY),
             ]) as hc, patch("dispatch.time.sleep"), patch("builtins.print") as output:
                 send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
             self.assertIn(call("keys", "t7", "ctrl+u"), hc.call_args_list)
@@ -1182,7 +1289,8 @@ class CodexSendTests(unittest.TestCase):
         working = {**owner, "turn": 1, "status": {"state": "working"}}
         two_rows = self.screen("› foo\n  bar\n\n  GPT-6.2-Sol default · ~/repo")
         one_row = self.screen("› foo\n\n  GPT-6.2-Sol default · ~/repo")
-        reads = iter((two_rows, two_rows, one_row, self.screen(self.READY), self.screen(self.READY)))
+        ready = self.screen(self.READY)
+        reads = iter((two_rows, two_rows, one_row, ready, ready, ready))
         gets = iter((idle, idle, idle, idle, working))
 
         def respond(command, *_args):
@@ -1338,7 +1446,7 @@ class CodexSendTests(unittest.TestCase):
             self.assertNotIn("send", [entry.args[0] for entry in hc.call_args_list])
             self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")), saved)
             with patch("dispatch.hc_json", side_effect=[
-                self.screen(self.READY), done, done, {}, self.screen(self.READY), working,
+                self.screen(self.READY), done, done, {}, self.screen(self.READY), working, self.screen(self.READY),
             ]) as hc, patch("builtins.print"):
                 send(args)
             prompts = [entry.args[-1] for entry in hc.call_args_list if entry.args[0] == "send"]
@@ -1357,7 +1465,7 @@ class CodexSendTests(unittest.TestCase):
                 json.dumps({"phase": "review", "pr": 779, "summary": "PR open"}), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="next", run=receipt, continuation=True)
             with patch("dispatch.hc_json", side_effect=[
-                self.screen(self.READY), done, done, {}, self.screen(self.READY), working,
+                self.screen(self.READY), done, done, {}, self.screen(self.READY), working, self.screen(self.READY),
             ]) as hc, patch("builtins.print"):
                 send(args)
             self.assertEqual(len([entry for entry in hc.call_args_list if entry.args[0] == "send"]), 1)

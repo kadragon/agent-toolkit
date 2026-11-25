@@ -36,6 +36,12 @@ HOOK_BLOCKER = re.compile(
     r"^(?:[•└⚠]\ufe0f?\s*)?(?:(?:\d+\s+)?hooks? needs? review|"
     r"hook (?:failed|stopped)|blocked by hook|(?:plugin contents changed;\s*)?hook approval required)\b",
     re.IGNORECASE)
+# Codex can show this cause on its own or as a detail of a hook failure.
+PLUGIN_HOOK_FAILURE = re.compile(
+    r"^(?:[•└⚠]\ufe0f?[ \t]*|(?:•[ \t]*)?hook failed\b[^\n]*?"
+    r"(?:[ \t]+|\n(?:[ \t]+[│├└][^\n]*\n)*[ \t]*[└├][ \t]*))?"
+    r"plugin contents changed;\s*hook approval required\b",
+    re.IGNORECASE | re.MULTILINE)
 HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
 HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
 HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
@@ -49,6 +55,7 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 SCREEN_POLL_SECONDS = 0.25
+POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
@@ -571,18 +578,28 @@ def send_task(args, run_path):
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
 
+        def post_send_screen(*, message=sent_message, approval_only=False):
+            nonlocal screen_reads
+            screen_reads += 1
+            screen, text = read_codex_screen(address, sent_message=message, with_text=True)
+            if screen == "hooks":
+                if PLUGIN_HOOK_FAILURE.search(text):
+                    raise SystemExit(f"{address}: Codex blocked after the send: plugin contents changed; "
+                                     "hook approval required. Stop this child and review hooks at restart.")
+                if not approval_only:
+                    raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
+            if screen == "warning" and not approval_only:
+                raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
+            return screen, text
+
         def confirmed(send_failed):
             """Return (submitted, saw_trace)."""
-            nonlocal screen_reads
             deadline = time.monotonic() + 5
             previous_idle_paste = False
             retried_enter = False
             saw_trace = False
             while True:
-                screen_reads += 1
-                screen, text = read_codex_screen(address, sent_message=sent_message, with_text=True)
-                if screen == "hooks":
-                    raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
+                screen, text = post_send_screen()
                 terminal = hc_json("get", address)
                 if run:
                     verify_terminal(run, terminal)
@@ -598,10 +615,8 @@ def send_task(args, run_path):
                         not echoed_before and transcript_echoed(text, sent_message)
                     )
                     if completed or (status == "working" and delivered):
-                        return True, True
+                        break
                 saw_trace = saw_trace or screen in ("paste", "collapsed", "draft") or status == "working"
-                if screen == "warning":
-                    raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
                 # A collapsed paste shows no text. Trust it only when Herdr confirmed typing the message.
                 matches_paste = screen == "paste" or (screen == "collapsed" and not send_failed)
                 idle_paste = (status == "idle" or (continuation and status == "done")) and matches_paste
@@ -613,14 +628,21 @@ def send_task(args, run_path):
                 previous_idle_paste = idle_paste
                 time.sleep(SCREEN_POLL_SECONDS)
 
+            # Herdr can see the turn start before Codex renders a hook failure.
+            settle_until = time.monotonic() + POST_SEND_SETTLE_SECONDS
+            while True:
+                remaining = max(0, settle_until - time.monotonic())
+                time.sleep(min(SCREEN_POLL_SECONDS, remaining))
+                post_send_screen(approval_only=True)
+                if time.monotonic() >= settle_until:
+                    return True, True
+
         first_line = sent_message.splitlines()[0].strip()
 
         def lost():
-            nonlocal screen_reads
             deadline = time.monotonic() + LOST_SETTLE_SECONDS
             while True:
-                screen_reads += 1
-                screen, text = read_codex_screen(address, with_text=True)
+                screen, text = post_send_screen(message=None)
                 current = hc_json("get", address)
                 if run:
                     verify_terminal(run, current)
