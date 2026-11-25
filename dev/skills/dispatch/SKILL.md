@@ -156,7 +156,7 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-Before starting Codex children, follow `references/codex-readiness.md` → *Before a Codex wave*.
+Before launching or replacing a Codex child, follow `references/codex-readiness.md` → *Before a Codex wave*.
 For a single Codex child, launch and send in one invocation:
 
 ```sh
@@ -167,18 +167,17 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
 
 - `send` checks the idle composer before sending and checks the screen again before confirming
   submission. For blockers and retries, follow `references/codex-readiness.md`.
-- With explicit authorization to trust every hook in the Codex startup dialog, add
-  `--trust-hooks` to `launch --task` to select **Trust all and continue**. The default
-  withholds the task for review.
+- For a single-child `launch --task`, add `--trust-hooks` only with explicit authorization to
+  select **Trust all and continue**. In a wave, resolve any startup review while the child is idle.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
 
 More than one session:
 
 - At most one task session per repo uses the main checkout. For concurrent children, let the
   launcher choose each name. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
-  Launching inside a linked worktree can keep Windows from deleting it at cleanup. For the
-  next `task-next --tree` child on the same queue, use
-  `pick --tree --full-scan` to confirm the preceding queue child's worktree claim in stderr.
+  Launching inside a linked worktree can keep Windows from deleting it at cleanup. Before
+  sending the next `task-next --tree` prompt on the same queue, use `pick --tree --full-scan`
+  to confirm the preceding queue child's worktree claim in stderr.
 - Keep a wave to at most four live children (two under `both-hot`).
 
 ## 5. Watch and decide

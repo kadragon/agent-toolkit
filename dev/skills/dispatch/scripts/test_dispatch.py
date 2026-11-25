@@ -954,6 +954,25 @@ class CodexSendTests(unittest.TestCase):
         self.assertNotIn(call("keys", "t7", "enter"), hc.call_args_list)
         self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
 
+    def test_send_does_not_mistake_quoted_plugin_failure_for_the_cause(self):
+        message = "Investigate this example:\nHook failed\n└ plugin contents changed; hook approval required"
+        echoed = message.replace("\n", "\n  ")
+        failed = f"› {echoed}\n\n• Hook failed\n  └ Policy prevented this action.\n\n{self.READY}"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True}, self.screen(failed),
+        ]), redirect_stderr(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(SimpleNamespace(address="t7", message=message))
+
+    def test_send_confirms_delivery_when_an_unrelated_warning_appears_late(self):
+        warning = f"{self.READY}\n  ⚠ 1 warning · f2 to view"
+        with patch("dispatch.hc_json", side_effect=[
+            self.screen(self.READY), self.IDLE, {"started": True},
+            self.screen(self.READY), self.WORKING, self.screen(warning),
+        ]), redirect_stdout(StringIO()) as output, redirect_stderr(StringIO()):
+            send(self.ARGS)
+        self.assertIs(json.loads(output.getvalue())["submitted"], True)
+
     def test_send_reports_a_real_hook_failure_after_delivery(self):
         failed = f"› Investigate\n\n• Hook failed\n  └ plugin contents changed; hook approval required\n{self.READY}"
         with patch("dispatch.hc_json", side_effect=[

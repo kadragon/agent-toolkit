@@ -36,7 +36,10 @@ HOOK_BLOCKER = re.compile(
     r"^(?:[•└⚠]\ufe0f?\s*)?(?:(?:\d+\s+)?hooks? needs? review|"
     r"hook (?:failed|stopped)|blocked by hook|(?:plugin contents changed;\s*)?hook approval required)\b",
     re.IGNORECASE)
-HOOK_APPROVAL_REQUIRED = re.compile(r"\bplugin contents changed;\s*hook approval required\b", re.IGNORECASE)
+PLUGIN_HOOK_FAILURE = re.compile(
+    r"^(?:•[ \t]*)?hook failed\b[^\n]*?(?:[ \t]+|\n[ \t]*└[ \t]*)"
+    r"plugin contents changed;\s*hook approval required\b",
+    re.IGNORECASE | re.MULTILINE)
 HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
 HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
 HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
@@ -573,16 +576,17 @@ def send_task(args, run_path):
         attempted_send = True
         guard = ["--if", "idle"] if status == "idle" else []
 
-        def post_send_screen():
+        def post_send_screen(*, approval_only=False):
             nonlocal screen_reads
             screen_reads += 1
             screen, text = read_codex_screen(address, sent_message=sent_message, with_text=True)
             if screen == "hooks":
-                if HOOK_APPROVAL_REQUIRED.search(text):
+                if PLUGIN_HOOK_FAILURE.search(text):
                     raise SystemExit(f"{address}: Codex blocked after the send: plugin contents changed; "
                                      "hook approval required. Stop this child and review hooks at restart.")
-                raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
-            if screen == "warning":
+                if not approval_only:
+                    raise SystemExit(f"{address}: Codex reported a hook problem after the send; inspect before continuing")
+            if screen == "warning" and not approval_only:
                 raise SystemExit(f"{address}: Codex showed a warning after the send; inspect before continuing")
             return screen, text
 
@@ -611,7 +615,7 @@ def send_task(args, run_path):
                     if completed or (status == "working" and delivered):
                         # Herdr can see the turn start before Codex renders a hook failure.
                         time.sleep(POST_SEND_SETTLE_SECONDS)
-                        post_send_screen()
+                        post_send_screen(approval_only=True)
                         return True, True
                 saw_trace = saw_trace or screen in ("paste", "collapsed", "draft") or status == "working"
                 # A collapsed paste shows no text. Trust it only when Herdr confirmed typing the message.
