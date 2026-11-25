@@ -732,27 +732,28 @@ def warn_stale_local_base(repo):
         "env": {**os.environ, "GIT_NO_LAZY_FETCH": "1"},
     }
     try:
-        remote = subprocess.run(
+        base = subprocess.run([*git, "branch", "--show-current"], **options, check=True).stdout.strip()
+        if not base:
+            return
+        remote = f"{remote_prefix}{base}"
+        default = subprocess.run(
             [*git, "symbolic-ref", "--quiet", f"{remote_prefix}HEAD"], **options,
         ).stdout.strip()
-        if not remote.startswith(remote_prefix):
-            # Match task-next's base fallback when origin/HEAD is unset.
-            base = subprocess.run([*git, "branch", "--show-current"], **options).stdout.strip()
-            if base not in ("main", "master"):
-                return
-            remote = f"{remote_prefix}{base}"
-        base = remote.removeprefix(remote_prefix)
+        if default and default != remote:
+            return
+        if not default and base not in ("main", "master"):
+            return
         result = subprocess.run(
             [*git, "rev-list", "--count", f"refs/heads/{base}..{remote}", "--"],
             **options, check=True,
         )
-    except (OSError, subprocess.CalledProcessError):
+        behind = int(result.stdout)
+    except (OSError, subprocess.CalledProcessError, ValueError):
         return
-    behind = int(result.stdout)
     if behind:
         commits = "commit" if behind == 1 else "commits"
         print(f"warning: {base} is {behind} {commits} behind origin/{base}. "
-              "The local backlog may be stale.", file=sys.stderr)
+              "The local backlog may be stale. Update the local base or use pick --tree.", file=sys.stderr)
 
 
 def pick(args):

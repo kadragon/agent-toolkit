@@ -389,6 +389,12 @@ class PickTests(unittest.TestCase):
             self.assertEqual([item["title"] for item in json.loads(tree.stdout)], ["Remote queue"])
             self.assertNotIn("local backlog may be stale", tree.stderr)
 
+            subprocess.run([*git, "switch", "-q", "remote-history"], cwd=repo, check=True)
+            off_base = subprocess.run(dispatch, check=True, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual([item["title"] for item in json.loads(off_base.stdout)], ["Remote queue"])
+            self.assertNotIn("local backlog may be stale", off_base.stderr)
+
+            subprocess.run([*git, "switch", "-q", "release"], cwd=repo, check=True)
             for args in (["branch", "-m", "main"], ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"],
                          ["update-ref", "refs/remotes/origin/main", "refs/remotes/origin/release"]):
                 subprocess.run([*git, *args], cwd=repo, check=True)
