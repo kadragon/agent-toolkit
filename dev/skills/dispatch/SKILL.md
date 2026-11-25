@@ -236,9 +236,10 @@ reconfirm `state: finished` and use `collect --close --force`. For a live child,
 `--force` only when authorized to close it irrespective of its reported status.
 
 After close returns `"closed": true`, save any result or receipt details you still need.
-Use the exact `run.json` path printed by `launch`. Remove that file and its siblings
-`run.lock` and `result.json` if present, then remove the `dispatch-*` directory if empty.
-If close fails, keep the receipt files for a retry.
+Use the exact `run.json` path printed by `launch`. Remove that file, `run.lock`,
+`result.json`, and any identified temporary writes such as `run.tmp` or the child's
+temporary result file. Remove the directory if empty, or report its path if files remain.
+If close fails, keep the receipt files for diagnosis.
 
 ### Continue with another phase
 
