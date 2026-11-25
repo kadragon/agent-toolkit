@@ -799,11 +799,19 @@ def notice_reason(line):
 def screen_stop_reason(snapshot, cli):
     if snapshot.get("how") != "screen":
         return None
-    lines = snapshot["text"].splitlines()
+    lines = [line.rstrip() for line in snapshot["text"].rstrip().splitlines()]
     if cli == "codex":
-        if codex_screen(snapshot["text"]) in {"ready", "draft"}:
-            composer = max(i for i, line in enumerate(lines) if line.startswith("›"))
-            lines = lines[:composer]
+        # A warning footer or an older hook notice can mask the composer classification.
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.startswith((*CODEX_OUTPUT_MARKERS, "ⓘ", "ℹ")):
+                break
+            if row.startswith("›"):
+                prompt = row[1:].strip()
+                if (prompt in {"", "Ask Codex to do anything"} or PASTED_CONTENT.fullmatch(prompt)
+                        or footer_boundary(lines, index) is not None):
+                    lines = lines[:index]
+                break
     else:
         composer = next((i for i in reversed(range(len(lines))) if lines[i].strip() == "❯"), None)
         if composer is not None:
@@ -811,11 +819,12 @@ def screen_stop_reason(snapshot, cli):
     for row in reversed(lines):
         if row.startswith(("›", "❯")):
             break
-        # CLI notices use an icon or a top-level line. Skip indented tool output and quotes.
-        if row.startswith(("ⓘ", "ℹ", "■", "⚠", "⎿", "•")) or row == row.lstrip():
-            reason = notice_reason(row.lstrip("ⓘℹ■⚠⎿•\ufe0f ").rstrip())
-            if reason:
-                return reason
+        line = row.lstrip()
+        notice = line.lstrip("ⓘℹ■⚠⎿•\ufe0f ")
+        if line != row and not (cli == "claude" and line.startswith("⎿") and not FILTER_NOTICE.fullmatch(notice)):
+            continue
+        if reason := notice_reason(notice):
+            return reason
     return None
 
 
@@ -846,11 +855,12 @@ def child_stop_reason(terminal, run, result, written, stall_minutes):
     if state == "blocked" and facts.get("kind") in {"permission", "question", "auth"}:
         return "Waiting for a dialog", 0
     status = result["status"] if result else None
-    if state != "error" and (status in {"ready", "blocked"} or (status in {"done", "merged"} and state == "done")):
+    if status in {"done", "merged"} and state == "done":
         return None, 0
 
     stale = False
-    if run.get("sent") and state in {"working", "idle", "done"} and terminal.get("status_ms") is not None:
+    track_idle = state in {"idle", "done"} and status not in {"ready", "blocked"}
+    if run.get("sent") and (state == "working" or track_idle) and terminal.get("status_ms") is not None:
         cutoff_ms = time.time_ns() // 1_000_000 - stall_minutes * 60_000
         # Herdr timestamps the current status; a new turn re-enters working.
         if max(terminal["status_ms"], (written or 0) // 1_000_000) <= cutoff_ms:

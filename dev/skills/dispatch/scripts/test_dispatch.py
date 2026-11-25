@@ -379,9 +379,9 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "invalid status, phase, or summary"):
                     collect(SimpleNamespace(run=receipt, close=False))
 
-    def collect_report(self, directory, status, *, screen="", result=None, **terminal_fields):
+    def collect_report(self, directory, status, *, screen="", result=None, cli="codex", **terminal_fields):
         receipt = Path(directory) / "run.json"
-        receipt.write_text(json.dumps({**self.RECEIPT, "sent": True}), encoding="utf-8")
+        receipt.write_text(json.dumps({**self.RECEIPT, "sent": True, "cli": cli}), encoding="utf-8")
         if result is not None:
             receipt.with_name("result.json").write_text(json.dumps(result), encoding="utf-8")
         terminal = {**self.TERMINAL, "status": status, **terminal_fields}
@@ -441,6 +441,38 @@ class DispatchReceiptTests(unittest.TestCase):
                     report, _ = self.collect_report(directory, {"state": "error"}, result=result)
                     self.assertEqual(report["stop_reason"], "Child stopped on an error")
 
+    def test_collect_detects_a_resumed_child_stopping_after_a_previous_pause(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now_ms = time.time_ns() // 1_000_000
+            screen = "› Next task\n\nⓘ This content can’t be shown\n\n› Ask Codex to do anything"
+            for status in ("ready", "blocked"):
+                with self.subTest(status=status):
+                    result = {"status": status, "phase": "review", "summary": "Previous pause"}
+                    report, _ = self.collect_report(directory, {"state": "done"}, result=result, screen=screen)
+                    self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+                    with patch("dispatch.time.time_ns", return_value=(now_ms + 6 * 60_000) * 1_000_000):
+                        report, _ = self.collect_report(directory, {"state": "working"}, result=result,
+                                                        status_ms=now_ms)
+                        self.assertEqual(report["stop_reason"], "No new turn or commit for 5 minutes")
+
+    def test_collect_reads_notices_above_codex_composer_with_unrelated_warnings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            notice = "› task\n\nⓘ This content can’t be shown\n\n"
+            for screen in (
+                f"{notice}› Ask Codex to do anything\n\n  ⚠ 1 warning · f2 to view",
+                f"• Hook failed in the previous turn\n\n{notice}› Ask Codex to do anything",
+                f"{notice}› [Pasted Content 150 chars]",
+            ):
+                with self.subTest(screen=screen):
+                    report, _ = self.collect_report(directory, {"state": "done"}, screen=screen)
+                    self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+
+    def test_collect_reads_indented_claude_policy_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            screen = "❯ task\n\n  ⎿  API Error: Usage Policy\n\n❯ "
+            report, _ = self.collect_report(directory, {"state": "error"}, screen=screen, cli="claude")
+            self.assertEqual(report["stop_reason"], "Stopped by a safety or usage-policy filter")
+
     def test_collect_reports_stall_after_both_turn_and_commit_are_old(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "repo"
@@ -486,7 +518,7 @@ class DispatchReceiptTests(unittest.TestCase):
                               "review_sendbacks": history}
                     report, calls = self.collect_report(directory, {"state": "done"}, result=result)
                     self.assertEqual(report["scope_decision_categories"], expected)
-                    self.assertEqual(calls, [call("get", "t7")])
+                    self.assertEqual(calls, [call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY)])
             report, _ = self.collect_report(directory, {"state": "done"}, result={
                 "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
             })
