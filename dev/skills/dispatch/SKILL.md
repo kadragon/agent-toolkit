@@ -192,9 +192,9 @@ Tell the user each terminal's name, address and repo. Watch in the background an
   Keep the timeout under the prompt-cache lifetime (1 hour on a subscription).
 - On a status change or timeout, run `dispatch.py collect <receipt>` before waiting again. Report
   its `stop_reason` when present. `--stall-minutes N` overrides the 30-minute inactivity threshold.
-  Collect checks the current status, recent child report and worktree commit, with a screen read
-  for missing CLI notices. Read the screen yourself if a decision remains unclear. Report
-  model, effort, screen reads and any measured token totals or review retries.
+  Check the screen yourself if a decision remains unclear. Report model, effort and measured
+  token totals or review retries. `screen_reads` counts delivery reads; `collect_screen_reads`
+  counts extra reads for this call.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.

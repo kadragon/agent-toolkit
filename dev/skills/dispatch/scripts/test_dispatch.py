@@ -404,7 +404,8 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.subTest(expected=expected):
                     report, calls = self.collect_report(directory, status, screen=screen)
                     self.assertEqual(report["stop_reason"], expected)
-                    self.assertEqual(report["screen_reads"], reads)
+                    self.assertEqual(report["screen_reads"], self.RECEIPT["screen_reads"])
+                    self.assertEqual(report["collect_screen_reads"], reads)
                     self.assertEqual(calls[0], call("get", "t7"))
                     self.assertEqual(calls[1:], [call("read", "--lines", "0", "t7", timeout=ANY)] if reads else [])
 
@@ -428,6 +429,17 @@ class DispatchReceiptTests(unittest.TestCase):
             )
             self.assertIsNone(report["stop_reason"])
             self.assertEqual(calls, [call("get", "t7")])
+
+    def test_collect_reports_terminal_errors_even_with_a_child_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for status in ("ready", "blocked", "done"):
+                with self.subTest(status=status):
+                    result = {"status": status, "phase": "review", "summary": "Review status"}
+                    report, calls = self.collect_report(directory, None, result=result, state="finished", exit_code=1)
+                    self.assertEqual(report["stop_reason"], "Child exited with an error")
+                    self.assertEqual(calls, [call("get", "t7")])
+                    report, _ = self.collect_report(directory, {"state": "error"}, result=result)
+                    self.assertEqual(report["stop_reason"], "Child stopped on an error")
 
     def test_collect_reports_stall_after_both_turn_and_commit_are_old(self):
         with tempfile.TemporaryDirectory() as directory:

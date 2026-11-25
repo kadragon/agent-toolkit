@@ -836,18 +836,17 @@ def child_stop_reason(terminal, run, result, written, stall_minutes):
     """Return a one-line diagnosis and the number of extra screen reads."""
     facts = terminal.get("status") or {}
     state = facts.get("state")
-    status = result["status"] if result else None
-    finished = terminal["state"] == "finished"
-    if status in {"ready", "blocked"} or (status in {"done", "merged"} and (finished or state == "done")):
+    if terminal["state"] == "finished":
+        if terminal.get("exit_code") not in (None, 0) or terminal.get("signal"):
+            return "Child exited with an error", 0
         return None, 0
     notice = notice_reason(facts.get("msg") or "")
     if notice:
         return notice, 0
     if state == "blocked" and facts.get("kind") in {"permission", "question", "auth"}:
         return "Waiting for a dialog", 0
-    if finished:
-        if terminal.get("exit_code") not in (None, 0) or terminal.get("signal"):
-            return "Child exited with an error", 0
+    status = result["status"] if result else None
+    if state != "error" and (status in {"ready", "blocked"} or (status in {"done", "merged"} and state == "done")):
         return None, 0
 
     stale = False
@@ -928,7 +927,7 @@ def collect_result(path, close, force, stall_minutes):
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
                       "result": result, "stop_reason": reason,
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
-                      "screen_reads": run["screen_reads"] + reads, **closed},
+                      "screen_reads": run["screen_reads"], "collect_screen_reads": reads, **closed},
                      ensure_ascii=False))
 
 
