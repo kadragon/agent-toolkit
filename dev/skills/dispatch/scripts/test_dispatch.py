@@ -362,6 +362,43 @@ class DispatchReceiptTests(unittest.TestCase):
 
 
 class PickTests(unittest.TestCase):
+    def test_pick_warns_when_local_base_is_behind_origin(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch stale base ") as directory:
+            repo = Path(directory)
+            git = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+            subprocess.run([*git, "init", "-q", "-b", "release"], cwd=repo, check=True)
+            backlog = repo / "backlog.md"
+            backlog.write_text("# Backlog\n\n## Local queue\n\n- [ ] [FEAT] Local item\n", encoding="utf-8")
+            for args in (["add", "backlog.md"], ["commit", "-qm", "local queue"],
+                         ["switch", "-qc", "remote-history"]):
+                subprocess.run([*git, *args], cwd=repo, check=True)
+            backlog.write_text("# Backlog\n\n## Remote queue\n\n- [ ] [FEAT] Remote item\n", encoding="utf-8")
+            for args in (["commit", "-qam", "remote queue"], ["update-ref", "refs/remotes/origin/release", "HEAD"],
+                         ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/release"],
+                         ["switch", "-q", "release"]):
+                subprocess.run([*git, *args], cwd=repo, check=True)
+
+            dispatch = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "pick", str(repo)]
+            local = subprocess.run(dispatch, check=True, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual([item["title"] for item in json.loads(local.stdout)], ["Local queue"])
+            self.assertIn("release is 1 commit behind origin/release", local.stderr)
+            self.assertIn("local backlog may be stale", local.stderr)
+
+            tree = subprocess.run([*dispatch, "--tree"], check=True, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual([item["title"] for item in json.loads(tree.stdout)], ["Remote queue"])
+            self.assertNotIn("local backlog may be stale", tree.stderr)
+
+            for args in (["branch", "-m", "main"], ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"],
+                         ["update-ref", "refs/remotes/origin/main", "refs/remotes/origin/release"]):
+                subprocess.run([*git, *args], cwd=repo, check=True)
+            fallback = subprocess.run(dispatch, check=True, capture_output=True, text=True, encoding="utf-8")
+            self.assertIn("main is 1 commit behind origin/main", fallback.stderr)
+
+            subprocess.run([*git, "merge", "-q", "--ff-only", "origin/main"], cwd=repo, check=True)
+            current = subprocess.run(dispatch, check=True, capture_output=True, text=True, encoding="utf-8")
+            self.assertNotIn("local backlog may be stale", current.stderr)
+
     def test_pick_reads_worktree_queue_or_base_without_plugin_registry(self):
         with tempfile.TemporaryDirectory(prefix="dispatch pick ") as directory:
             root = Path(directory)
@@ -409,6 +446,7 @@ class PickTests(unittest.TestCase):
                                             capture_output=True, text=True, encoding="utf-8")
                     candidates = json.loads(result.stdout)
                     self.assertEqual([item["title"] for item in candidates], expected, result.stderr)
+                    self.assertNotIn("local backlog may be stale", result.stderr)
                     for item in candidates:
                         counts = tuple(item[key] for key in ("items", "open", "deferred", "blocked"))
                         if item["title"] == live_title:
