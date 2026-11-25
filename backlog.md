@@ -29,12 +29,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   Done when: Two consecutive send-backs sharing a category prompt the user to narrow or explicitly bound the guarantees and exclusions, and dispatch pauses model escalation pending that decision. Two send-backs with distinct categories follow the existing escalation path.
   Approach: Include a category for each blocking finding in task-review output and apply the comparison in `dev/skills/dispatch/references/escalation.md`.
 
-## Review Backlog
-
-### PR #429 — Recover dispatch first-task delivery and close killed children (2026-11-23)
-
-- [ ] [debt] `collect --close` removes the Herdr terminal but leaves the receipt directory (`%TEMP%/dispatch-*`: run.json, lock, result.json); delete what dispatch created after printing the result, or document a cleanup step (source: codex) — dev/skills/dispatch/scripts/dispatch.py
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

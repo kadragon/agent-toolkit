@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.0.1
+version: 2.1.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -234,6 +234,11 @@ to report `state: finished`, then removes the terminal and records `closed_reaso
 A finished terminal closes without a final result. If the result file is unreadable,
 reconfirm `state: finished` and use `collect --close --force`. For a live child, use
 `--force` only when authorized to close it irrespective of its reported status.
+
+After close returns `"closed": true`, save any result or receipt details you still need.
+Use the exact `run.json` path printed by `launch`. Remove that file and its siblings
+`run.lock` and `result.json` if present, then remove the `dispatch-*` directory if empty.
+If close fails, keep the receipt files for a retry.
 
 ### Continue with another phase
 

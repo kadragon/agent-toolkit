@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Document dispatch receipt cleanup (dev v4.12.12) (2026-11-25) → dev/skills/dispatch/SKILL.md
 - [done] Show Codex send diagnostics and wait for dispatch children to exit (dev v4.12.11) (2026-11-24) → dev/skills/dispatch/SKILL.md
 - [done] Keep dispatch children in the background and streamline dispatch guidance (dev v4.12.10) (2026-11-24) → dev/skills/dispatch/SKILL.md
 - [done] Recognize two-line Codex composer footers (dev v4.12.9) (2026-11-23)
