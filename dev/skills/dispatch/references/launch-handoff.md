@@ -12,8 +12,8 @@ nonblank, single-line strings.
 Run `launch` from the home repo. Prefixes may be absolute, start with `~/`, or be relative to
 the home repo root. The resolved child path matches a prefix by exact path or descendant.
 `launch` appends all matching lines in file order after the verbatim metadata in the first Claude
-or Codex message. Codex quotes lines that begin with its screen markers to keep the text distinct
-from the interface. Use `--dry-run` to preview the first message with Claude or Codex `--task`.
+or Codex message. Codex quotes lines that begin with screen markers or hook notices so they
+appear as message text. Use `--dry-run` to preview the first message with Claude or Codex `--task`.
 
 Codex receipts retain the launch-time lines for delayed delivery and first-message retries.
 Verify approvals using the original user request and Git limits carried in the handoff.

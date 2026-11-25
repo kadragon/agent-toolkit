@@ -233,8 +233,11 @@ def first_prompt(cli, message, handoff):
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
         if cli == "codex":
-            extra_lines = [(f"> {line}" if line.lstrip().startswith(("›", *CODEX_OUTPUT_MARKERS)) else line)
-                           for line in extra_lines]
+            extra_lines = [
+                f"> {line}" if (line.lstrip().startswith(("›", *CODEX_OUTPUT_MARKERS))
+                                 or HOOK_BLOCKER.match(line.lstrip())) else line
+                for line in extra_lines
+            ]
         prompt += "\n\n" + "\n".join(extra_lines)
     return prompt
 
@@ -340,7 +343,11 @@ def transcript_echoed(text, message):
     prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
     if len(prompts) < 2:
         return False
-    last_prompt, composer = prompts[-2:]
+    composer = prompts[-1]
+    prompt_column = lines[composer].index("›")
+    last_prompt = next((i for i in reversed(prompts[:-1]) if lines[i].index("›") == prompt_column), None)
+    if last_prompt is None:
+        return False
     end = next((i for i in range(last_prompt + 1, composer)
                 if lines[i].startswith(CODEX_OUTPUT_MARKERS)), composer)
     rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
@@ -373,6 +380,8 @@ def codex_screen(text, *, sent_message=None):
 
     # A transcript prompt can appear above output while the actual composer is hidden.
     for index in reversed(range(len(lines))):
+        if sent_message is not None and lines[index].startswith("  "):
+            continue  # Expanded prompt rows are indented and may wrap at a screen marker.
         line = lines[index].lstrip()
         if line.startswith(CODEX_OUTPUT_MARKERS):
             break

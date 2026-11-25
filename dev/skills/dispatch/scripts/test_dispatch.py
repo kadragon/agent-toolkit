@@ -854,6 +854,14 @@ class CodexSendTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(codex_screen(text), expected)
 
+    def test_screen_markers_at_wrapped_prompt_rows_are_text(self):
+        for marker in ("•", "■", "›", "─ Worked for"):
+            with self.subTest(marker=marker):
+                message = f"Review the checklist {marker} then run the tests."
+                shown = f"› Review the checklist\n  {marker} then run the tests."
+                self.assertEqual(codex_screen(f"{shown}\n\n{self.FOOTER_0171}", sent_message=message), "paste")
+                self.assertTrue(transcript_echoed(f"{shown}\n\n• Completed\n\n{self.READY}", message))
+
     def test_send_withholds_task_on_visible_hook_or_warning(self):
         for text, reason in (
             ("Hooks need review\n› 1. Review hooks", "/hooks"),
@@ -1152,7 +1160,8 @@ class CodexSendTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
-                           "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run."]
+                           "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
+                           "Hook approval required for the local workflow."]
             handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
             run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
             receipt.write_text(json.dumps(run), encoding="utf-8")
@@ -1169,7 +1178,9 @@ class CodexSendTests(unittest.TestCase):
             rows = prompt.replace("\n", "\n  ")
             self.assertEqual(codex_screen(f"› {rows}\n\n{self.FOOTER_0171}", sent_message=prompt),
                              "paste")
-            self.assertTrue(transcript_echoed(f"› {rows}\n\n• Completed\n\n{ready}", prompt))
+            echoed = f"› {rows}\n\n• Completed\n\n{ready}"
+            self.assertTrue(transcript_echoed(echoed, prompt))
+            self.assertEqual(codex_screen(echoed), "ready")
             self.assertEqual(prompt, expected)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
