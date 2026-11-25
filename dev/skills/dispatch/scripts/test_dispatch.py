@@ -212,6 +212,21 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertEqual(json.loads(stdout.getvalue())["task"],
                              "$task-next" + self.BLOCK + "\n\nUse the team review checklist.")
 
+    def test_launch_directory_config_takes_priority_over_an_ancestor_repo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outer = Path(directory)
+            subprocess.run(["git", "init", "-q", str(outer)], check=True)
+            home = outer / "home"
+            (home / "repos").mkdir(parents=True)
+            (home / "repos" / "handoff.json").write_text(
+                json.dumps({"projects": ["Use the team review checklist."]}), encoding="utf-8"
+            )
+            args = self.launch_args("projects/app", dry_run=True)
+            with patch("dispatch.Path.cwd", return_value=home), redirect_stdout(StringIO()) as stdout:
+                launch(args)
+            self.assertEqual(json.loads(stdout.getvalue())["task"],
+                             "$task-next" + self.BLOCK + "\n\nUse the team review checklist.")
+
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
@@ -861,6 +876,16 @@ class CodexSendTests(unittest.TestCase):
                 shown = f"› Review the checklist\n  {marker} then run the tests."
                 self.assertEqual(codex_screen(f"{shown}\n\n{self.FOOTER_0171}", sent_message=message), "paste")
                 self.assertTrue(transcript_echoed(f"{shown}\n\n• Completed\n\n{self.READY}", message))
+
+    def test_wrapped_hook_words_are_text_but_a_visible_hook_failure_is_a_blocker(self):
+        shown = "› A note about what to do when a\n  hook failed again."
+        self.assertEqual(codex_screen(f"{shown}\n\n{self.READY}"), "ready")
+        failure = "• Hook failed\n  └ plugin contents changed; hook approval required"
+        self.assertEqual(codex_screen(f"{shown}\n\n{failure}\n\n{self.READY}"), "hooks")
+
+    def test_screen_with_indented_tool_output_and_no_composer_is_waiting(self):
+        screen = f"› a task\n\n  • Completed\n\n{self.FOOTER_0171}"
+        self.assertEqual(codex_screen(screen, sent_message="a task"), "waiting")
 
     def test_send_withholds_task_on_visible_hook_or_warning(self):
         for text, reason in (

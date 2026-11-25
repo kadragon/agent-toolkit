@@ -181,11 +181,12 @@ def free_name(base, explicit, taken):
 
 def configured_handoff_lines(launch_dir, cwd):
     home = launch_dir
-    for directory in (launch_dir, *launch_dir.parents):
-        git_path = directory / ".git"
-        if git_path.is_file() or (git_path / "HEAD").is_file():
-            home = directory
-            break
+    if not (home / "repos" / "handoff.json").exists():
+        for directory in (launch_dir, *launch_dir.parents):
+            git_path = directory / ".git"
+            if git_path.is_file() or (git_path / "HEAD").is_file():
+                home = directory
+                break
     config = home / "repos" / "handoff.json"
     try:
         prefixes = json.loads(config.read_text(encoding="utf-8"))
@@ -340,14 +341,10 @@ def matches_sent_message(rows, message):
 def transcript_echoed(text, message):
     """Look for the complete message in the last prompt above the clear composer."""
     lines = text.splitlines()
-    prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+    prompts = [i for i, line in enumerate(lines) if line.startswith("›")]
     if len(prompts) < 2:
         return False
-    composer = prompts[-1]
-    prompt_column = lines[composer].index("›")
-    last_prompt = next((i for i in reversed(prompts[:-1]) if lines[i].index("›") == prompt_column), None)
-    if last_prompt is None:
-        return False
+    last_prompt, composer = prompts[-2:]
     end = next((i for i in range(last_prompt + 1, composer)
                 if lines[i].startswith(CODEX_OUTPUT_MARKERS)), composer)
     rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
@@ -369,24 +366,37 @@ def footer_boundary(lines, composer, *, placeholder=False):
     return None
 
 
+def codex_hook_rows(lines):
+    in_prompt = False
+    for line in lines:
+        if line.startswith("›"):
+            in_prompt = True
+        elif line and not line.startswith("  "):
+            in_prompt = False
+        if not in_prompt:
+            yield line.lstrip()
+
+
 def codex_screen(text, *, sent_message=None):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
-    # Codex indents continued lines of the submitted prompt in its transcript.
-    hook_lines = lines if sent_message is not None else (line.lstrip() for line in lines)
+    hook_lines = lines if sent_message is not None else codex_hook_rows(lines)
     if any(HOOK_BLOCKER.match(line) for line in hook_lines):
         return "hooks"
     if lines and WARNING_FOOTER.search(lines[-1]):
         return "warning"
 
     # A transcript prompt can appear above output while the actual composer is hidden.
+    indented_marker = False
     for index in reversed(range(len(lines))):
-        if sent_message is not None and lines[index].startswith("  "):
-            continue  # Expanded prompt rows are indented and may wrap at a screen marker.
-        line = lines[index].lstrip()
-        if line.startswith(CODEX_OUTPUT_MARKERS):
+        row = lines[index]
+        line = row.lstrip()
+        if line.startswith(("›", *CODEX_OUTPUT_MARKERS)) and row != line:
+            indented_marker = True
+            continue
+        if row.startswith(CODEX_OUTPUT_MARKERS):
             break
-        if line.startswith("›"):
-            prompt = line[1:].strip()
+        if row.startswith("›"):
+            prompt = row[1:].strip()
             placeholder = prompt == "Ask Codex to do anything"
             status_row = footer_boundary(lines, index, placeholder=placeholder)
             if status_row is not None and WARNING_FOOTER.search(lines[status_row + 1]):
@@ -398,7 +408,7 @@ def codex_screen(text, *, sent_message=None):
                 return "ready"
             if sent_message is not None and matches_sent_message(body, sent_message):
                 return "paste"
-            if status_row is not None:
+            if not indented_marker and status_row is not None:
                 return "draft"
             break
     return "waiting"

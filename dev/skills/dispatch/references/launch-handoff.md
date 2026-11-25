@@ -9,8 +9,10 @@ nonblank, single-line strings.
 }
 ```
 
-Run `launch` from the home repo. Prefixes may be absolute, start with `~/`, or be relative to
-the home repo root. The resolved child path matches a prefix by exact path or descendant.
+Run `launch` from the home repo. The launch directory's config takes priority and the Git root
+is the fallback for launches from subdirectories. Prefixes may be absolute, start with `~/`, or
+be relative to the directory that owns the `repos/` registry. The resolved child path matches a
+prefix by exact path or descendant.
 `launch` appends all matching lines in file order after the verbatim metadata in the first Claude
 or Codex message. Codex quotes lines that begin with screen markers or hook notices so they
 appear as message text. Use `--dry-run` to preview the first message with Claude or Codex `--task`.
