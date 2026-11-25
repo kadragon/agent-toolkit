@@ -301,8 +301,8 @@ def _loose_key(name):
     """Case/underscore/hyphen-insensitive key for fuzzy-matching an encoded dir name.
 
     Claude Code's own project-dir naming has drifted across versions (e.g. some
-    transcripts landed under 'C--Dev-workspace-knue-patis', others under
-    'c--dev-workspace_knue-patis' for the SAME repo) — different case and different
+    transcripts landed under 'C--Dev-work-space-my-app', others under
+    'c--dev-work_space-my-app' for the SAME repo) — different case and different
     treatment of '_' vs '-'. encode_project() only produces one exact candidate, so
     an exact-match lookup silently misses real data sitting under a sibling encoding.
     """
