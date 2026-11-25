@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.1.0
+version: 2.2.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -156,8 +156,8 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-A Codex child starts idle. Launch and send in one invocation to avoid a version change between
-the two commands:
+Before starting Codex children, follow `references/codex-readiness.md` → *Before a Codex wave*.
+For a single Codex child, launch and send in one invocation:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-sol \
@@ -165,11 +165,8 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model gpt-6.2-s
   --unit='<assigned unit>' --git-limits='<verbatim Git limits>' --task '<first message>'
 ```
 
-- `send` waits for the idle composer, withholds the task on a dialog, warning, or hook
-  failure, and confirms submission when Herdr reports a working turn and the composer is clear.
-  Draft, paste, and lost-submit recovery: `references/codex-readiness.md` → *Send recovery*.
-- When blocked, read `references/codex-readiness.md` before launching another child. After
-  clearing the gate, retry with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+- `send` checks the idle composer before sending and checks the screen again before confirming
+  submission. For blockers and retries, follow `references/codex-readiness.md`.
 - With explicit authorization to trust every hook in the Codex startup dialog, add
   `--trust-hooks` to `launch --task` to select **Trust all and continue**. The default
   withholds the task for review.
