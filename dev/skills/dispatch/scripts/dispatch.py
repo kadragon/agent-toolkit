@@ -12,8 +12,8 @@
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
-  dispatch.py collect RECEIPT [--close [--force]]
-      Read the result and status without reading the screen. Close an owned child.
+  dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
+      Read the result, status and any stop reason. Close an owned child.
 """
 import argparse
 import json
@@ -55,6 +55,15 @@ CODEX_STATUS_LINE = re.compile(
     re.IGNORECASE,
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
+CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
+USAGE_NOTICE = re.compile(
+    r"(?:you(?:'ve|’ve| have)? (?:hit|reached) (?:your|the) (?:chatgpt )?(?:usage )?limit\b|"
+    r"(?:(?:individual )?quota|usage limit|rate limit) (?:reached|exceeded)\b)", re.IGNORECASE)
+FILTER_NOTICE = re.compile(r"This content can['’]t be shown\.?", re.IGNORECASE)
+POLICY_ERROR = re.compile(r"API Error:.*\busage policy\b", re.IGNORECASE)
+STOP_USAGE = "Usage limit reached"
+STOP_FILTER = "Stopped by a safety or usage-policy filter"
+STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
@@ -103,7 +112,8 @@ def report_instruction(result):
     return (f"Write progress at phase boundaries and the final report as UTF-8 JSON to {result} "
             "(write a temporary sibling, then rename over it). Fields: status (done, ready, "
             "blocked, or merged), phase, summary (at most three lines), and optional worktree, "
-            "contract, head, pr, ci, evidence, tokens (measured totals only), or review_retries. "
+            "contract, head, pr, ci, evidence, tokens (measured totals only), review_retries, "
+            "or review_sendbacks (per the task-review-cycle consolidation guide). "
             "Write ready when pausing before the merge, and merged only after confirming the merge. "
             "Use file paths for details. Do not send reports by hc send.")
 
@@ -187,6 +197,43 @@ def free_name(base, explicit, taken):
     return f"{base[:29]}-{n}"
 
 
+def configured_handoff_lines(launch_dir, cwd):
+    home = launch_dir
+    if not (home / "repos" / "handoff.json").exists():
+        for directory in (launch_dir, *launch_dir.parents):
+            git_path = directory / ".git"
+            if git_path.is_file() or (git_path / "HEAD").is_file():
+                home = directory
+                break
+    config = home / "repos" / "handoff.json"
+    try:
+        prefixes = json.loads(config.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{config}: {exc}") from exc
+    if not isinstance(prefixes, dict):
+        raise SystemExit(f"{config}: expected an object mapping path prefixes to lists of lines")
+
+    target = (launch_dir / cwd).resolve()
+    extra_lines = []
+    for prefix, lines in prefixes.items():
+        if not prefix.strip():
+            raise SystemExit(f"{config}: path prefixes must be nonblank")
+        if not isinstance(lines, list) or any(
+            not isinstance(line, str) or not line.strip() or line.splitlines() != [line] or "\0" in line
+            for line in lines
+        ):
+            raise SystemExit(f"{config}: {prefix!r} must map to a list of nonblank single lines")
+        try:
+            prefix_path = (home / Path(prefix).expanduser()).resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"{config}: invalid path prefix {prefix!r}: {exc}") from exc
+        if target.is_relative_to(prefix_path):
+            extra_lines.extend(lines)
+    return extra_lines
+
+
 def first_prompt(cli, message, handoff):
     if not message.strip():
         raise SystemExit("first message is empty")
@@ -197,11 +244,21 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
-    return (f"{message}\n\nHandoff metadata (JSON):\n"
-            "Task-cycle mode and flags come exclusively from the invocation above.\n"
-            "<dispatch-handoff>\n"
-            f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
-            "</dispatch-handoff>")
+    prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
+              "Task-cycle mode and flags come exclusively from the invocation above.\n"
+              "<dispatch-handoff>\n"
+              f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+              "</dispatch-handoff>")
+    extra_lines = handoff.get("extra_lines")
+    if extra_lines:
+        if cli == "codex":
+            extra_lines = [
+                f"> {line}" if (line.lstrip().startswith(("›", *CODEX_OUTPUT_MARKERS))
+                                 or HOOK_BLOCKER.match(line.lstrip())) else line
+                for line in extra_lines
+            ]
+        prompt += "\n\n" + "\n".join(extra_lines)
+    return prompt
 
 
 def warn_linked_worktree(cwd):
@@ -235,6 +292,9 @@ def launch(args):
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    extra_lines = configured_handoff_lines(Path.cwd(), cwd)
+    if extra_lines:
+        handoff["extra_lines"] = extra_lines
     message = args.message
     if args.cli == "claude" and message is not None:
         message = first_prompt(args.cli, message, handoff)
@@ -309,12 +369,12 @@ def matches_sent_message(rows, message):
 def transcript_echoed(text, message):
     """Look for the complete message in the last prompt above the clear composer."""
     lines = text.splitlines()
-    prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+    prompts = [i for i, line in enumerate(lines) if line.startswith("›")]
     if len(prompts) < 2:
         return False
     last_prompt, composer = prompts[-2:]
     end = next((i for i in range(last_prompt + 1, composer)
-                if lines[i].startswith(("•", "■", "─ Worked for"))), composer)
+                if lines[i].startswith(CODEX_OUTPUT_MARKERS)), composer)
     rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
     return matches_sent_message(rows, message)
 
@@ -334,22 +394,39 @@ def footer_boundary(lines, composer, *, placeholder=False):
     return None
 
 
+def codex_hook_rows(lines):
+    in_prompt = False
+    previous_blank = False
+    for line in lines:
+        if line.startswith("›"):
+            in_prompt = True
+        elif line and not line.startswith("  "):
+            in_prompt = False
+        if not in_prompt or previous_blank:
+            yield line.lstrip()
+        previous_blank = not line
+
+
 def codex_screen(text, *, sent_message=None):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
-    # Codex indents continued lines of the submitted prompt in its transcript.
-    hook_lines = lines if sent_message is not None else (line.lstrip() for line in lines)
+    hook_lines = lines if sent_message is not None else codex_hook_rows(lines)
     if any(HOOK_BLOCKER.match(line) for line in hook_lines):
         return "hooks"
     if lines and WARNING_FOOTER.search(lines[-1]):
         return "warning"
 
     # A transcript prompt can appear above output while the actual composer is hidden.
+    indented_marker = False
     for index in reversed(range(len(lines))):
-        line = lines[index].lstrip()
-        if line.startswith(("•", "■", "─ Worked for")):
+        row = lines[index]
+        line = row.lstrip()
+        if line.startswith(("›", *CODEX_OUTPUT_MARKERS)) and row != line:
+            indented_marker = True
+            continue
+        if row.startswith(CODEX_OUTPUT_MARKERS):
             break
-        if line.startswith("›"):
-            prompt = line[1:].strip()
+        if row.startswith("›"):
+            prompt = row[1:].strip()
             placeholder = prompt == "Ask Codex to do anything"
             status_row = footer_boundary(lines, index, placeholder=placeholder)
             if status_row is not None and WARNING_FOOTER.search(lines[status_row + 1]):
@@ -361,7 +438,7 @@ def codex_screen(text, *, sent_message=None):
                 return "ready"
             if sent_message is not None and matches_sent_message(body, sent_message):
                 return "paste"
-            if status_row is not None:
+            if not indented_marker and status_row is not None:
                 return "draft"
             break
     return "waiting"
@@ -712,7 +789,7 @@ def collect(args):
     if force and not args.close:
         raise SystemExit("--force requires --close")
     with lock_run(path) if args.close else nullcontext():
-        collect_result(path, args.close, force)
+        collect_result(path, args.close, force, getattr(args, "stall_minutes", STALL_MINUTES))
 
 
 def wait_for_terminal_exit(run):
@@ -730,7 +807,123 @@ def wait_for_terminal_exit(run):
     raise SystemExit(f"{address}: terminal did not reach state: finished within {CLOSE_WAIT_SECONDS}s; receipt left open")
 
 
-def collect_result(path, close, force):
+def notice_reason(line):
+    if USAGE_NOTICE.match(line):
+        return STOP_USAGE
+    if FILTER_NOTICE.fullmatch(line) or POLICY_ERROR.match(line):
+        return STOP_FILTER
+    return None
+
+
+def screen_stop_reason(snapshot, cli):
+    if snapshot.get("how") != "screen":
+        return None
+    lines = [line.rstrip() for line in snapshot["text"].rstrip().splitlines()]
+    if cli == "codex":
+        # A warning footer or an older hook notice can mask the composer classification.
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.startswith((*CODEX_OUTPUT_MARKERS, "ⓘ", "ℹ")):
+                break
+            if row.startswith("›"):
+                prompt = row[1:].strip()
+                if (prompt in {"", "Ask Codex to do anything"} or PASTED_CONTENT.fullmatch(prompt)
+                        or footer_boundary(lines, index) is not None):
+                    lines = lines[:index]
+                break
+    else:
+        composer = next((i for i in reversed(range(len(lines))) if lines[i].strip() == "❯"), None)
+        if composer is not None:
+            lines = lines[:composer]
+    for row in reversed(lines):
+        if row.startswith(("›", "❯")):
+            break
+        line = row.lstrip()
+        notice = line.lstrip("ⓘℹ■⚠⎿•\ufe0f ")
+        if line != row and not (cli == "claude" and line.startswith("⎿") and not FILTER_NOTICE.fullmatch(notice)):
+            continue
+        if reason := notice_reason(notice):
+            return reason
+    return None
+
+
+def last_commit_ms(cwd):
+    if not cwd:
+        return 0
+    try:
+        commit = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", "HEAD", "--"], cwd=cwd, capture_output=True,
+            text=True, check=True, timeout=2, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+        )
+        return int(commit.stdout) * 1000
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def child_stop_reason(terminal, run, result, written, stall_minutes):
+    """Return a one-line diagnosis and the number of extra screen reads."""
+    facts = terminal.get("status") or {}
+    state = facts.get("state")
+    if terminal["state"] == "finished":
+        if terminal.get("exit_code") not in (None, 0) or terminal.get("signal"):
+            return "Child exited with an error", 0
+        return None, 0
+    notice = notice_reason(facts.get("msg") or "")
+    if notice:
+        return notice, 0
+    if state == "blocked" and facts.get("kind") in {"permission", "question", "auth"}:
+        return "Waiting for a dialog", 0
+    status = result["status"] if result else None
+    if status in {"done", "merged"} and state == "done":
+        return None, 0
+
+    stale = False
+    track_idle = state in {"idle", "done"} and status not in {"ready", "blocked"}
+    if run.get("sent") and (state == "working" or track_idle) and terminal.get("status_ms") is not None:
+        cutoff_ms = time.time_ns() // 1_000_000 - stall_minutes * 60_000
+        # Herdr timestamps the current status; a new turn re-enters working.
+        if max(terminal["status_ms"], (written or 0) // 1_000_000) <= cutoff_ms:
+            worktree = (result or {}).get("worktree")
+            cwd = ((worktree if isinstance(worktree, str) else None)
+                   or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
+            stale = last_commit_ms(cwd) <= cutoff_ms
+    if not stale and state not in {"blocked", "error", "idle", "done"}:
+        return None, 0
+    try:
+        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=2)
+        notice = screen_stop_reason(snapshot, run["cli"])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        notice = None
+    if notice:
+        return notice, 1
+    if state == "blocked":
+        return "Waiting for a dialog", 1
+    if state == "error":
+        return "Child stopped on an error", 1
+    if stale:
+        return f"No new turn or commit for {stall_minutes} minutes", 1
+    return None, 1
+
+
+def repeated_review_categories(result):
+    if not result or result["status"] != "blocked":
+        return []
+    history = result.get("review_sendbacks")
+    if not isinstance(history, list) or len(history) < 2:
+        return []
+    earlier, later = history[-2:]
+    for verdict in (earlier, later):
+        if (not isinstance(verdict, dict) or not isinstance(verdict.get("change"), str)
+                or not verdict["change"].strip() or type(verdict.get("round")) is not int
+                or verdict["round"] < 1 or not isinstance(verdict.get("categories"), list)
+                or any(not isinstance(category, str) or not category.strip() for category in verdict["categories"])):
+            return []
+    if earlier["change"] != later["change"] or earlier["round"] + 1 != later["round"]:
+        return []
+    return sorted(set(earlier["categories"]).intersection(later["categories"]))
+
+
+def collect_result(path, close, force, stall_minutes):
     run = load_run(path)
     try:
         result, written = read_result(path)
@@ -740,12 +933,13 @@ def collect_result(path, close, force):
         print(error, file=sys.stderr)
         result, written = None, None
     if written == run.get("previous_result"):
-        result = None
+        result, written = None, None
     terminal = hc_json("get", run["address"])
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
     closed = {}
+    reason, reads = None, 0
     if close:
         final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
         if not (force or finished or final):
@@ -754,11 +948,15 @@ def collect_result(path, close, force):
             hc_json("kill", run["address"])
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
-        reason = "forced" if force else ("finished" if finished else "final_result")
-        closed = {"closed_reason": reason}
+        closed_reason = "forced" if force else ("finished" if finished else "final_result")
+        closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
+    else:
+        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes)
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "closed": close, "screen_reads": run["screen_reads"], **closed},
+                      "result": result, "stop_reason": reason,
+                      "scope_decision_categories": repeated_review_categories(result), "closed": close,
+                      "screen_reads": run["screen_reads"], "collect_screen_reads": reads, **closed},
                      ensure_ascii=False))
 
 
@@ -854,10 +1052,13 @@ def main(argv):
     send_parser.set_defaults(func=send)
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
+    collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
     collect_parser.add_argument("--close", action="store_true")
     collect_parser.add_argument("--force", action="store_true", help="close even when the owned child has no final result")
     collect_parser.set_defaults(func=collect)
     args = parser.parse_args(argv)
+    if args.command == "collect" and args.stall_minutes < 1:
+        collect_parser.error("--stall-minutes must be positive")
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     args.func(args)

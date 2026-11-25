@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.3.0
+version: 2.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -64,10 +64,10 @@ Route by rules, not by a guess at the outcome: give each session the cheapest pa
 finish it, and escalate on evidence. Pick the two independently — the model by the capability
 the work needs, the effort by how ambiguous or risky it is. The user naming a CLI, model or
 effort overrides both tables and every rule below, except the ban on `fable` and `gpt-6.2-astra`.
-
 Tiers are equal across CLIs: `haiku` = Codex `gpt-6-luna` < `sonnet` = `gpt-6.1-terra` < `opus` = `gpt-6.2-sol`.
 Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal
 Claude tier stands in when Codex is unavailable. Never use `fable` or `gpt-6.2-astra`; `max`/`ultra` only on request (`ultra` not on luna).
+A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
@@ -99,9 +99,6 @@ Model tier — capability (Default CLI applies under bias `none`):
 | low | `haiku` | `gpt-6-luna` | Codex | factual lookups and mechanical edits with nothing to decide |
 | mid | `sonnet` | `gpt-6.1-terra` | Codex | ordinary features, fixes or reviews with settled scope |
 | top | `opus` | `gpt-6.2-sol` | Claude | open-ended design or review, uncertain diagnosis, work requiring substantial domain judgment, or work starting at xhigh |
-
-Inside a child, whoever spawns a subagent picks its model and effort per spawn (Claude Agent tool
-`model`/`effort`; Codex agent fields) by the same tiers and the same ban.
 
 Effort — ambiguity and risk:
 
@@ -140,8 +137,7 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
   --unit='<assigned unit>' --git-limits='<verbatim Git limits>' '<first message>'
 ```
 
-Always pass `--title`, a short summary of the unit in the user's language: the Herdr label `title`
-(the sidebar) and the receipt carry it, and without `--name` it names the terminal `<repo>-<slug>`.
+Always pass `--title`, a short unit summary in the user's language (Herdr label `title`, receipt, name `<repo>-<slug>`).
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
 as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workflow invocation
@@ -149,6 +145,9 @@ grants the required Git writes and sets no narrower limits, pass `--git-limits='
 For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
+
+To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
+in the home repo. See `references/launch-handoff.md` for the schema and path matching.
 
 Children run in the background. Keep the printed child address and receipt (`run`) with its
 result path. Use `hc read <address>` to inspect the terminal. If `$HC_TERMINAL_ID` is stale,
@@ -190,11 +189,12 @@ Tell the user each terminal's name, address and repo. Watch in the background an
 
 - Start `hc wait --children any --timeout 1800` in the background after confirming task
   delivery to every new child. A child still idle at startup can wake the wait immediately.
-  On timeout, start another wait. Keep the timeout under the prompt-cache lifetime (1 hour
-  on a subscription).
-- On a status change, run `dispatch.py collect <receipt>` for compact results. Read the visible
-  screen only when the result is missing or a decision is unclear. Report model, effort, and
-  screen reads with measured token totals or review retries when available.
+  Keep the timeout under the prompt-cache lifetime (1 hour on a subscription).
+- On a status change or timeout, run `dispatch.py collect <receipt>` before waiting again. Report
+  its `stop_reason` when present. `--stall-minutes N` overrides the 30-minute inactivity threshold.
+  Check the screen yourself if a decision remains unclear. Report model, effort and measured
+  token totals or review retries. `screen_reads` counts delivery reads; `collect_screen_reads`
+  counts extra reads for this call.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.
@@ -217,8 +217,8 @@ The user delegates the session's decisions to this session:
   required checks on the final head. This keeps pushes fast-forward and the merge commit
   stays off main when the PR is squash-merged.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
-  cleanup, anything else destructive, and any decision the user kept. Tell the user what is
-  waiting and stop watching that session.
+  cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
+  in collect), and any decision the user kept. Tell the user what is waiting and stop watching.
 
 Once a session's work has merged or its authorized non-merge task is complete, verify its
 result and [close the child terminal](#close-the-child-terminal). Remove any clone or worktree

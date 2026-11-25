@@ -3,6 +3,22 @@
 Read this when a child stalls, its review cycle sends the change back, or its result turns out
 wrong, and when a later phase of an escalated task launches.
 
+## Review send-backs
+
+Before choosing the next rung for two consecutive send-backs, check `dispatch.py collect` →
+`scope_decision_categories`. It compares blocking categories in reviews of the same change,
+including reviews of different candidate commits. Count each verdict once. For a child that
+reports without `review_sendbacks`, compare the last two confirmed verdicts for that change
+using their review output.
+
+When the two verdicts share a category, keep the current child and pause escalation. Show the
+user the shared category and a concrete finding from each verdict. Ask them to narrow the
+guarantee or explicitly bound what it covers and excludes. Resume after they choose and the
+child records the clarified contract. When the two verdicts have distinct categories, follow
+the existing ladder below.
+
+## Ladder
+
 - Escalate one step when the session stalls on the same blocker twice, its review cycle sends
   the change back twice, or its result turns out wrong. Raise effort before the model, since
   it is the cheaper step. `luna`, `terra` and `sol` are Codex `gpt-6-luna`, `gpt-6.1-terra` and
