@@ -522,7 +522,7 @@ class CodexSendTests(unittest.TestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
     FOOTER_0171 = (
-        "  GPT-6.2-Sol high · main · weekly 54% left · Context 0% used · knue-bookflow\n"
+        "  GPT-6.2-Sol high · main · weekly 54% left · Context 0% used · my-app\n"
         "  ← for agents · ? for shortcuts"
     )
     ARGS = SimpleNamespace(address="t7", message="a task")
