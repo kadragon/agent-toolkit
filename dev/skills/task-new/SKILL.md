@@ -42,11 +42,11 @@ For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only th
 unit. Verify the original request and Git limits per
 `../task-next/references/git-authorization.md`. If the assignment is missing, already queued,
 unclear, larger than one contract, or requires shared planning or overlapping queue edits,
-report the blocker to the home session and stop before writing. A record-only documentation
-unit follows the **Queue without implementing** row below when the home session scoped it
-as the only planned write to its backlog in this wave. For any other assignment requiring
-queue edits, report the blocker and stop before writing. Proceed to Step 3 for the remaining
-assignments.
+report the blocker to the home session and stop before writing. Publishing an already scoped
+queue edit follows the **Queue without implementing** row below when the home session assigned
+it as the wave's only planned write to that backlog. Keep planning-only work in one session.
+For any other assignment requiring queue edits, report the blocker and stop before writing.
+Proceed to Step 3 for the remaining assignments.
 
 For other runs, first match wins. Size comes before clarity: a fully specified request
 can still be too large for one contract.
@@ -84,11 +84,13 @@ entries and continue through applicable release steps, *Validation evidence*, an
 The tickets remain open for a later implementation cycle.
 
 At handoff, pass `--pr` when feature push and PR write are authorized. The review cycle owns
-commit, PR and merge within the saved limits. Honor its pre-merge stop for parallel dispatch
-and report `ready` after review and required CI, with the branch or worktree, archived contract
-and PR. On the home session's serial-merge continuation, load the archive from that checkout
-and re-enter Step 4 to resume the existing PR at the review cycle's merge gate. Report
-`merged` only after confirmation.
+commit, PR and merge within the saved limits. Report the result at the applicable limit,
+such as a reviewed local commit under `no-push`. For a parallel dispatch with a PR, honor its
+pre-merge stop and report `ready` after review and required CI, with the checkout, archived
+contract and PR. When the home session explicitly releases that PR's pre-merge stop for
+serial merge, recover the archive from the same checkout and re-enter Step 4 for the existing
+PR. Recheck the saved merge permission and final head at the review cycle's merge gate.
+Report `merged` only after confirmation.
 
 ## Step 3 — Run the cycle
 
