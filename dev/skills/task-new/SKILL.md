@@ -42,19 +42,20 @@ For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only th
 unit. Verify the original request and Git limits per
 `../task-next/references/git-authorization.md`. If the assignment is missing, already queued,
 unclear, larger than one contract, or requires shared planning or overlapping queue edits,
-report the blocker to the home session and stop before writing. Concurrent appends to the
-same backlog count as overlapping queue edits. A record-only assignment follows the
-**Queue without implementing** row below. For other assignments that require queue edits,
-report the blocker and stop before writing. Proceed to Step 3 for the remaining assignments.
+report the blocker to the home session and stop before writing. A record-only documentation
+unit follows the **Queue without implementing** row below when the home session scoped it
+as the only planned write to its backlog in this wave. For any other assignment requiring
+queue edits, report the blocker and stop before writing. Proceed to Step 3 for the remaining
+assignments.
 
 For other runs, first match wins. Size comes before clarity: a fully specified request
 can still be too large for one contract.
-- **Queue without implementing** (the user asks only to record it) → if a dispatch handoff
-  establishes commit authority for the queue change per
+- **Queue without implementing** (the user asks only to record it) → if the forwarded human
+  request and Git limits establish commit authority for the dispatched queue change per
   `../task-next/references/git-authorization.md`, take *Queue documentation cycle* below.
-  With unestablished commit authority in a parallel-worktree handoff, report that blocker
-  and stop before writing. For all remaining runs, call the Skill tool with "dev:task-tickets"
-  on the request, then stop after writing the tickets.
+  A dispatched `--tree` run with unestablished commit authority reports that blocker and stops
+  before writing. For all remaining runs, call the Skill tool with "dev:task-tickets" on the
+  request, then stop after writing the tickets.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
   "dev:task-tickets"; then **stop** — no cycle runs this invocation.
@@ -74,18 +75,20 @@ user to re-invoke (or queue them for `task-next --all`).
 ### Queue documentation cycle
 
 Use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording the assigned
-tickets, with the verified dispatch Git authority and limits. Apply `--tree` for checkout
-isolation only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's
-checkout. After writing the approved tickets, return to this cycle with the ticket list in
-place of the ticket skill's standalone handoff. If ticketing is blocked or leaves no queue
-delta, report that outcome and stop. Verify the ticket entries and continue through applicable
-release steps, *Validation evidence*, and Step 4. The tickets remain open for a later
-implementation cycle.
+tickets, with the verified Git authority and limits. Apply `--tree` for checkout isolation
+only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's checkout.
+After writing the approved tickets, return to this cycle with the ticket list in place of the
+ticket skill's standalone handoff. If ticketing is blocked or leaves no queue delta, report
+that outcome and the saved branch and contract, then stop before review. Verify the ticket
+entries and continue through applicable release steps, *Validation evidence*, and Step 4.
+The tickets remain open for a later implementation cycle.
 
 At handoff, pass `--pr` when feature push and PR write are authorized. The review cycle owns
 commit, PR and merge within the saved limits. Honor its pre-merge stop for parallel dispatch
-and report `ready` after review and required CI. On the home session's authorized serial-merge
-handoff, resume the same branch and contract. Report `merged` only after confirmation.
+and report `ready` after review and required CI, with the branch or worktree, archived contract
+and PR. On the home session's serial-merge continuation, load the archive from that checkout
+and re-enter Step 4 to resume the existing PR at the review cycle's merge gate. Report
+`merged` only after confirmation.
 
 ## Step 3 — Run the cycle
 
@@ -100,8 +103,10 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
   cycle as a `cycle.md` → *Worktree cycle* from any branch or dirty state (the gate's `--tree` row). Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
-- **Cleanup** — no `prune-tasks`/`prune-backlog`, since nothing was queued; update `CHANGELOG.md`
-  when the repo maintains one. Do not scaffold a harness to finish standalone work.
+- **Cleanup** — skip `prune-tasks` and `prune-backlog`; this cycle claims no queue items.
+  When the repo maintains a `CHANGELOG.md`, record the completed scoped change. In a queue
+  documentation cycle, title the entry for the act of recording the tickets. Do not scaffold
+  a harness to finish standalone work.
 
 ## Step 4 — Hand off
 
