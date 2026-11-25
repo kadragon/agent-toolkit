@@ -14,6 +14,7 @@ from unittest.mock import ANY, call, patch
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
     child_argv,
+    child_name,
     codex_screen,
     collect,
     composer_draft,
@@ -187,6 +188,9 @@ class DispatchReceiptTests(unittest.TestCase):
                     self.assertEqual(argv[label + 1], f"title={title}")
                     self.assertLess(label, argv.index("claude"))
                     self.assertEqual(payload["title"], title)
+
+    def test_child_name_keeps_the_repo_when_the_title_cannot_fit(self):
+        self.assertEqual(child_name("_" * 40, "Fix login timeout"), "_" * 32)
 
     def test_blank_title_stops_launch(self):
         with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "--title must not be blank"):

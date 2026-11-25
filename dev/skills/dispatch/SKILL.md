@@ -66,8 +66,8 @@ the work needs, the effort by how ambiguous or risky it is. The user naming a CL
 effort overrides both tables and every rule below, except the ban on `fable` and `gpt-6.2-astra`.
 
 Tiers are equal across CLIs: `haiku` = Codex `gpt-6-luna` < `sonnet` = `gpt-6.1-terra` < `opus` = `gpt-6.2-sol`.
-Pick the tier by capability first, then the CLI by the quota bias; the base table keeps Claude
-for opus judgment. Never launch `fable` or `gpt-6.2-astra`; reserve `max`/`ultra` for user requests.
+Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal
+Claude tier stands in when Codex is unavailable. Never use `fable` or `gpt-6.2-astra`; `max`/`ultra` only on request (`ultra` not on luna).
 
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported

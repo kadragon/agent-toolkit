@@ -75,12 +75,11 @@ def terminal_name(raw):
 
 
 def child_name(repo, title):
-    """Name a child repo-slug from its title, or repo alone when the title has no ASCII slug."""
     base = terminal_name(repo)
     slug = re.sub(r"[^a-z0-9_-]+", "-", (title or "").lower()).strip("-_")
     if not slug:
         return base
-    return f"{base}-{slug}"[:32].rstrip("-_")
+    return f"{base}-{slug}"[:32].rstrip("-")
 
 
 def child_argv(cli, model, effort, message, keep_connectors, result=None):
@@ -284,7 +283,7 @@ def launch(args):
         run["title"] = title
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
-    print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}), flush=True)
+    print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
     if terminal.get("parent") != home:
         detail = ("Claude may have received its launch prompt; inspect before retrying"
                   if args.cli == "claude" else "task withheld")

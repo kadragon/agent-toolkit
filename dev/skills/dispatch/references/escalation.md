@@ -16,11 +16,14 @@ wrong, and when a later phase of an escalated task launches.
 
 - A pair on the ladder takes the next rung. Any other pair takes the lowest rung that is at
   least as high on both axes and higher on at least one (haiku = luna < sonnet = terra < opus = sol).
+- Work the `codex` bias keeps on `opus` (SKILL.md step 3), or the user put on `opus`, escalates on
+  the `none` ladder.
 - When the next rung is on a `critical` CLI, ask the user. A stall at the top rung (opus/xhigh
   or sol/xhigh) goes to the user; `fable` and `gpt-6.2-astra` are never a rung.
 - Carry the latest escalated pair as the floor for later phases as a tier and an effort: take
   the higher tier and effort from that pair and the new phase's starting pair, then pick the
-  CLI for that tier by the new phase's bias. Without escalation, each phase uses its own
+  CLI for that tier by the new phase's bias. A `terra/xhigh` floor under a bias whose ladder
+  lacks a mid-tier xhigh rung becomes `opus/xhigh`. Without escalation, each phase uses its own
   starting pair.
 
 ## Relaunch
