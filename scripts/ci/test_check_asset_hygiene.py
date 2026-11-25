@@ -172,7 +172,7 @@ def main() -> int:
     )
     check(
         "a Windows personal path is caught",
-        len(mod.check_personal_paths("C:\\Users\\KNUE\\dev\\x\n")) == 1,
+        len(mod.check_personal_paths("C:\\Users\\Alice\\dev\\x\n")) == 1,
     )
     check(
         "a Linux personal path is caught",
@@ -245,11 +245,11 @@ def main() -> int:
     # shell snippets actually use slipped through.
     check(
         "lowercase `c:\\users\\...` is caught",
-        len(mod.check_personal_paths("c:\\users\\knue\\dev\n")) == 1,
+        len(mod.check_personal_paths("c:\\users\\alice\\dev\n")) == 1,
     )
     check(
         "lowercase `/c/users/...` is caught",
-        len(mod.check_personal_paths("/c/users/knue/dev\n")) == 1,
+        len(mod.check_personal_paths("/c/users/alice/dev\n")) == 1,
     )
     check(
         "bare lowercase `/users/123` stays unflagged — it is a REST path, not a home dir",

@@ -308,7 +308,7 @@ def selftest():
     for t in spacing_ok:
         assert "R14" not in {r[1] for r in lint([" ○ " + t])}, (t, lint([" ○ " + t]))
     # --gongmun keeps notation rules only: polite endings and numbered items are 공문 form
-    gongmun = ["1. 관련: 학사관리과-1234(2026. 9. 1.)", "2. 위와 관련하여, 자료를 제출합니다.",
+    gongmun = ["1. 관련: 총무과-1234(2026. 9. 1.)", "2. 위와 관련하여, 자료를 제출합니다.",
                "3. 필요시 연장합니다.  끝."]
     assert lint(gongmun, gongmun=True) == [], lint(gongmun, gongmun=True)
     got = {r[1] for r in lint(["1. 계약시 2026.10.15. 까지 제출합니다."], gongmun=True)}
