@@ -36,7 +36,8 @@ the existing ladder below.
 
 - A pair on the ladder takes the next rung. Any other pair takes the lowest rung that is at
   least as high on both axes and higher on at least one (haiku = luna < sonnet < opus = sol).
-  A "not know enough" diagnosis may skip the remaining effort rungs of its tier.
+  A "not know enough" diagnosis may skip the remaining effort rungs of its tier. `sol` has no larger
+  Codex model, so under bias `codex` that diagnosis moves it to `opus/high`.
 - `terra` writing or visual work raises effort on `terra` up to `xhigh`, then takes
   `opus/high` (`sol/high` under bias `codex`) and continues on that bias's ladder.
 - Work the `codex` bias keeps on `opus` (SKILL.md step 3), or the user put on `opus`, escalates on
@@ -46,7 +47,8 @@ the existing ladder below.
 - Carry the latest escalated pair as the floor for later phases as a tier and an effort: take
   the higher tier and effort from that pair and the new phase's starting pair, then pick the
   CLI for that tier by the new phase's bias. A floor that is not a rung of that bias's ladder
-  takes its lowest rung at least as high on both axes. Without escalation, each phase uses its own
+  takes its lowest rung at least as high on both axes. A `terra` floor carries only its effort:
+  a later writing or visual phase starts `terra` at that effort, and any other phase ignores it. Without escalation, each phase uses its own
   starting pair.
 
 ## Relaunch

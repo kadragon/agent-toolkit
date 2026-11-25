@@ -835,20 +835,26 @@ class CodexModelTests(unittest.TestCase):
                                                   message="/dev:task-next" if cli == "claude" else None)
 
     def test_family_resolves_to_newest_listed_non_retiring_slug(self):
-        for family, slug in (("sol", "gpt-6.2-sol"), ("terra", "gpt-6.1-terra"), ("luna", "gpt-6-luna")):
+        for family, slug in (("sol", "gpt-6.2-sol"), ("terra", "gpt-6.1-terra"), ("luna", "gpt-6-luna"),
+                             ("Sol", "gpt-6.2-sol"), ("LUNA", "gpt-6-luna")):
             with self.subTest(family=family):
                 self.assertEqual(resolve_codex_model(family), slug)
 
-    def test_full_slug_passes_through_without_reading_the_cache(self):
+    def test_full_slug_or_other_model_id_passes_through_without_reading_the_cache(self):
         (self.home / "models_cache.json").unlink()
-        for slug in ("gpt-5.6-terra", "gpt-reserve", "gpt-9-sol"):
+        for slug in ("gpt-5.6-terra", "gpt-reserve", "gpt-9-sol", "llama", "nova"):
             with self.subTest(slug=slug):
                 self.assertEqual(resolve_codex_model(slug), slug)
 
     def test_missing_unreadable_or_unmatched_cache_is_a_hard_error(self):
-        with self.assertRaisesRegex(SystemExit, "no listed, non-retiring gpt-<version>-nova"):
-            resolve_codex_model("nova")
         cache = self.home / "models_cache.json"
+        cache.write_text(json.dumps({"models": [
+            {"slug": "gpt-5.6-terra", "visibility": "list", "upgrade": {"model": "gpt-6.1-terra"}},
+            {"slug": "gpt-6.1-terra", "visibility": "hide", "upgrade": None},
+            {"slug": "terra", "visibility": "list", "upgrade": None},
+        ]}), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "no listed, non-retiring gpt-<version>-terra"):
+            resolve_codex_model("terra")
         for content in (None, "not json", json.dumps({"other": []})):
             with self.subTest(content=content):
                 if content is None:
@@ -864,6 +870,7 @@ class CodexModelTests(unittest.TestCase):
 
     def test_dry_run_records_family_and_resolved_slug(self):
         for model, expected in (("sol", {"model": "gpt-6.2-sol", "model_family": "sol"}),
+                                ("Sol", {"model": "gpt-6.2-sol", "model_family": "Sol"}),
                                 ("gpt-6.1-sol", {"model": "gpt-6.1-sol"})):
             with self.subTest(model=model), patch("sys.stdout", new_callable=StringIO) as stdout:
                 launch(self.launch_args(model))

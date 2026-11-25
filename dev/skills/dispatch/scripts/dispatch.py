@@ -10,7 +10,7 @@
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
       --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
-      A bare Codex family (luna, terra, sol) resolves to its newest listed slug in
+      A Codex family (luna, terra, sol, any case) resolves to its newest listed slug in
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
@@ -76,7 +76,7 @@ RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
 BANNED_MODELS = ("fable", "astra")
-CODEX_FAMILY = re.compile(r"[a-z]+")
+CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
 
 
@@ -125,14 +125,14 @@ def codex_models_cache():
 
 
 def resolve_codex_model(model):
-    """Return the newest listed, non-retiring slug of a bare family; pass a full slug through."""
-    if not CODEX_FAMILY.fullmatch(model):
+    family = model.lower()
+    if family not in CODEX_FAMILIES:
         return model
     cache = codex_models_cache()
     try:
         entries = json.loads(cache.read_text(encoding="utf-8"))["models"]
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise SystemExit(f"cannot resolve Codex family {model!r}: unreadable models cache {cache} ({error}); "
+        raise SystemExit(f"cannot resolve Codex family {family!r}: unreadable models cache {cache} ({error}); "
                          "start Codex once to refresh it, or pass a full model slug") from None
     versions = []
     for entry in entries if isinstance(entries, list) else ():
@@ -140,10 +140,10 @@ def resolve_codex_model(model):
             continue
         slug = entry.get("slug")
         match = CODEX_SLUG.fullmatch(slug) if isinstance(slug, str) else None
-        if match and match[2] == model:
+        if match and match[2] == family:
             versions.append((tuple(int(part) for part in match[1].split(".")), slug))
     if not versions:
-        raise SystemExit(f"no listed, non-retiring gpt-<version>-{model} model in {cache}; "
+        raise SystemExit(f"no listed, non-retiring gpt-<version>-{family} model in {cache}; "
                          "pass a full model slug")
     return max(versions)[1]
 
