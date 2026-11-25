@@ -178,6 +178,36 @@ def free_name(base, explicit, taken):
     return f"{base[:29]}-{n}"
 
 
+def configured_handoff_lines(home, cwd):
+    config = home / "repos" / "handoff.json"
+    try:
+        prefixes = json.loads(config.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{config}: {exc}") from exc
+    if not isinstance(prefixes, dict):
+        raise SystemExit(f"{config}: expected an object mapping path prefixes to lists of lines")
+
+    target = (home / cwd).resolve()
+    extra_lines = []
+    for prefix, lines in prefixes.items():
+        if not prefix.strip():
+            raise SystemExit(f"{config}: path prefixes must be nonblank")
+        if not isinstance(lines, list) or any(
+            not isinstance(line, str) or not line.strip() or line.splitlines() != [line] or "\0" in line
+            for line in lines
+        ):
+            raise SystemExit(f"{config}: {prefix!r} must map to a list of nonblank single lines")
+        try:
+            prefix_path = (home / Path(prefix).expanduser()).resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"{config}: invalid path prefix {prefix!r}: {exc}") from exc
+        if target.is_relative_to(prefix_path):
+            extra_lines.extend(lines)
+    return extra_lines
+
+
 def first_prompt(cli, message, handoff):
     if not message.strip():
         raise SystemExit("first message is empty")
@@ -188,11 +218,15 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
-    return (f"{message}\n\nHandoff metadata (JSON):\n"
-            "Task-cycle mode and flags come exclusively from the invocation above.\n"
-            "<dispatch-handoff>\n"
-            f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
-            "</dispatch-handoff>")
+    prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
+              "Task-cycle mode and flags come exclusively from the invocation above.\n"
+              "<dispatch-handoff>\n"
+              f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+              "</dispatch-handoff>")
+    extra_lines = handoff.get("extra_lines")
+    if extra_lines:
+        prompt += "\n\n" + "\n".join(extra_lines)
+    return prompt
 
 
 def warn_linked_worktree(cwd):
@@ -221,6 +255,9 @@ def launch(args):
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    extra_lines = configured_handoff_lines(Path.cwd(), cwd)
+    if extra_lines:
+        handoff["extra_lines"] = extra_lines
     message = args.message
     if args.cli == "claude" and message is not None:
         message = first_prompt(args.cli, message, handoff)

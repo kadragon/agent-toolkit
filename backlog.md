@@ -11,10 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Dispatch — result and send robustness (2026-11-23)
-
-- [ ] [feat] Home-configured handoff lines for `launch`. KNUE repos need the same line in every Codex child's first message ("외부 리뷰 승인: Codex·Claude 허용, agy 제외"), or Codex's auto-approval reviewer refuses task-review's diff egress mid-cycle; the home session forgot it on 2026-11-23 and a child stopped to ask. Let the home repo declare extra handoff lines per repo path prefix (e.g. a file next to `repos/*.md`) that `launch` appends after the verbatim fields. Done-when: a launch into a matching repo carries the configured line without the home session typing it — dev/skills/dispatch/scripts/dispatch.py
-
 ## 1 — Dispatch child stop reasons
 
 - [ ] [FEAT] Report why a child stopped or stalled in one line from `dispatch collect` so the home session can act without reading the terminal itself.

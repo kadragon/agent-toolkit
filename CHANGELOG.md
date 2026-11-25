@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Append home-configured handoff lines at dispatch launch (dev v4.12.16) (2026-11-25) → dev/skills/dispatch/references/launch-handoff.md
 - [done] Block Codex dispatch on plugin hook approval failures (dev v4.12.15) (2026-11-25) → dev/skills/dispatch/references/codex-readiness.md
 - [done] Finish dispatched queue-only documentation cycles (dev v4.12.14) (2026-11-25)
 - [done] Warn when dispatch pick reads a stale local base (dev v4.12.13) (2026-11-25)

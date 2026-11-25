@@ -154,6 +154,48 @@ class DispatchReceiptTests(unittest.TestCase):
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
 
+    def test_home_handoff_lines_follow_verbatim_fields_for_matching_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            registry = home / "repos"
+            registry.mkdir()
+            team_line = "팀 리뷰 체크리스트를 사용하세요."
+            app_line = "Use the app review checklist."
+            (registry / "handoff.json").write_text(json.dumps({
+                "projects": [team_line],
+                str(home / "projects" / "app"): [app_line],
+            }, ensure_ascii=False), encoding="utf-8")
+            for cli, invocation in (("claude", "/dev:task-next"), ("codex", "$task-next")):
+                for target, extra in (
+                    ("projects/app", f"\n\n{team_line}\n{app_line}"),
+                    ("projects/app-sibling", f"\n\n{team_line}"),
+                    ("projects-other/app", ""),
+                ):
+                    with self.subTest(cli=cli, target=target), patch("dispatch.Path.cwd", return_value=home):
+                        args = self.launch_args(home / target, cli=cli, dry_run=True,
+                                                message=invocation if cli == "claude" else None,
+                                                task=invocation if cli == "codex" else None)
+                        with redirect_stdout(StringIO()) as stdout:
+                            launch(args)
+                        payload = json.loads(stdout.getvalue())
+                        prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
+                        self.assertEqual(prompt, invocation + self.BLOCK + extra)
+
+    def test_invalid_home_handoff_config_stops_before_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            registry = home / "repos"
+            registry.mkdir()
+            config = registry / "handoff.json"
+            for invalid in ("{", "[]", '{"projects": "single string"}',
+                            json.dumps({"projects": ["multiple\nlines"]})):
+                config.write_text(invalid, encoding="utf-8")
+                with self.subTest(invalid=invalid), patch("dispatch.Path.cwd", return_value=home), \
+                        patch("dispatch.hc_json") as hc:
+                    with self.assertRaisesRegex(SystemExit, r"repos[/\\]handoff\.json"):
+                        launch(self.launch_args(home))
+                    hc.assert_not_called()
+
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
@@ -170,12 +212,17 @@ class DispatchReceiptTests(unittest.TestCase):
 
     def test_launch_runs_in_background_and_emits_receipt_before_send(self):
         with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "repos").mkdir()
+            extra_lines = ["Use the launch-time checklist."]
+            (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
             args = self.launch_args(directory)
-            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
-            live_owner = {**owner, "foreground": {"cwd": str(Path.cwd())}}
+            owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
+            live_owner = {**owner, "foreground": {"cwd": str(home)}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             calls = [{"terminals": [owner]}, live_owner, self.TERMINAL]
             with (
+                patch("dispatch.Path.cwd", return_value=home),
                 patch("dispatch.hc_json", side_effect=calls),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -195,7 +242,7 @@ class DispatchReceiptTests(unittest.TestCase):
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
             self.assertFalse(receipt["sent"])
-            self.assertEqual(receipt["handoff"], self.HANDOFF)
+            self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
 
@@ -1088,10 +1135,12 @@ class CodexSendTests(unittest.TestCase):
         busy = {**idle, "turn": 2, "status": {"state": "working"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            run = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
+            extra_line = "Use the team review checklist."
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": [extra_line]}
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = "a task" + DispatchReceiptTests.BLOCK + "\n\n" + report_instruction(
+            expected = "a task" + DispatchReceiptTests.BLOCK + f"\n\n{extra_line}\n\n" + report_instruction(
                 receipt.resolve().with_name("result.json"))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
