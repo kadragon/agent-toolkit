@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.2.0
+version: 2.3.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -145,6 +145,9 @@ grants the required Git writes and sets no narrower limits, pass `--git-limits='
 For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
+
+To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
+in the home repo. See `references/launch-handoff.md` for the schema and path matching.
 
 Children run in the background. Keep the printed child address and receipt (`run`) with its
 result path. Use `hc read <address>` to inspect the terminal. If `$HC_TERMINAL_ID` is stale,

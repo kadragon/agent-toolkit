@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Append home-configured handoff lines at dispatch launch (dev v4.12.17) (2026-11-25) → dev/skills/dispatch/references/launch-handoff.md
 - [done] Replace organization-specific names in fixtures and examples (dev v4.12.16, prod v3.2.17) (2026-11-25)
 - [done] Block Codex dispatch on plugin hook approval failures (dev v4.12.15) (2026-11-25) → dev/skills/dispatch/references/codex-readiness.md
 - [done] Finish dispatched queue-only documentation cycles (dev v4.12.14) (2026-11-25)

@@ -54,6 +54,7 @@ CODEX_STATUS_LINE = re.compile(
     re.IGNORECASE,
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
+CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
@@ -178,6 +179,43 @@ def free_name(base, explicit, taken):
     return f"{base[:29]}-{n}"
 
 
+def configured_handoff_lines(launch_dir, cwd):
+    home = launch_dir
+    if not (home / "repos" / "handoff.json").exists():
+        for directory in (launch_dir, *launch_dir.parents):
+            git_path = directory / ".git"
+            if git_path.is_file() or (git_path / "HEAD").is_file():
+                home = directory
+                break
+    config = home / "repos" / "handoff.json"
+    try:
+        prefixes = json.loads(config.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{config}: {exc}") from exc
+    if not isinstance(prefixes, dict):
+        raise SystemExit(f"{config}: expected an object mapping path prefixes to lists of lines")
+
+    target = (launch_dir / cwd).resolve()
+    extra_lines = []
+    for prefix, lines in prefixes.items():
+        if not prefix.strip():
+            raise SystemExit(f"{config}: path prefixes must be nonblank")
+        if not isinstance(lines, list) or any(
+            not isinstance(line, str) or not line.strip() or line.splitlines() != [line] or "\0" in line
+            for line in lines
+        ):
+            raise SystemExit(f"{config}: {prefix!r} must map to a list of nonblank single lines")
+        try:
+            prefix_path = (home / Path(prefix).expanduser()).resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"{config}: invalid path prefix {prefix!r}: {exc}") from exc
+        if target.is_relative_to(prefix_path):
+            extra_lines.extend(lines)
+    return extra_lines
+
+
 def first_prompt(cli, message, handoff):
     if not message.strip():
         raise SystemExit("first message is empty")
@@ -188,11 +226,21 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
-    return (f"{message}\n\nHandoff metadata (JSON):\n"
-            "Task-cycle mode and flags come exclusively from the invocation above.\n"
-            "<dispatch-handoff>\n"
-            f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
-            "</dispatch-handoff>")
+    prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
+              "Task-cycle mode and flags come exclusively from the invocation above.\n"
+              "<dispatch-handoff>\n"
+              f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
+              "</dispatch-handoff>")
+    extra_lines = handoff.get("extra_lines")
+    if extra_lines:
+        if cli == "codex":
+            extra_lines = [
+                f"> {line}" if (line.lstrip().startswith(("›", *CODEX_OUTPUT_MARKERS))
+                                 or HOOK_BLOCKER.match(line.lstrip())) else line
+                for line in extra_lines
+            ]
+        prompt += "\n\n" + "\n".join(extra_lines)
+    return prompt
 
 
 def warn_linked_worktree(cwd):
@@ -221,6 +269,9 @@ def launch(args):
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    extra_lines = configured_handoff_lines(Path.cwd(), cwd)
+    if extra_lines:
+        handoff["extra_lines"] = extra_lines
     message = args.message
     if args.cli == "claude" and message is not None:
         message = first_prompt(args.cli, message, handoff)
@@ -290,12 +341,12 @@ def matches_sent_message(rows, message):
 def transcript_echoed(text, message):
     """Look for the complete message in the last prompt above the clear composer."""
     lines = text.splitlines()
-    prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+    prompts = [i for i, line in enumerate(lines) if line.startswith("›")]
     if len(prompts) < 2:
         return False
     last_prompt, composer = prompts[-2:]
     end = next((i for i in range(last_prompt + 1, composer)
-                if lines[i].startswith(("•", "■", "─ Worked for"))), composer)
+                if lines[i].startswith(CODEX_OUTPUT_MARKERS)), composer)
     rows = (lines[last_prompt].lstrip()[1:], *lines[last_prompt + 1:end])
     return matches_sent_message(rows, message)
 
@@ -315,22 +366,39 @@ def footer_boundary(lines, composer, *, placeholder=False):
     return None
 
 
+def codex_hook_rows(lines):
+    in_prompt = False
+    previous_blank = False
+    for line in lines:
+        if line.startswith("›"):
+            in_prompt = True
+        elif line and not line.startswith("  "):
+            in_prompt = False
+        if not in_prompt or previous_blank:
+            yield line.lstrip()
+        previous_blank = not line
+
+
 def codex_screen(text, *, sent_message=None):
     lines = [line.rstrip() for line in text.rstrip().splitlines()]
-    # Codex indents continued lines of the submitted prompt in its transcript.
-    hook_lines = lines if sent_message is not None else (line.lstrip() for line in lines)
+    hook_lines = lines if sent_message is not None else codex_hook_rows(lines)
     if any(HOOK_BLOCKER.match(line) for line in hook_lines):
         return "hooks"
     if lines and WARNING_FOOTER.search(lines[-1]):
         return "warning"
 
     # A transcript prompt can appear above output while the actual composer is hidden.
+    indented_marker = False
     for index in reversed(range(len(lines))):
-        line = lines[index].lstrip()
-        if line.startswith(("•", "■", "─ Worked for")):
+        row = lines[index]
+        line = row.lstrip()
+        if line.startswith(("›", *CODEX_OUTPUT_MARKERS)) and row != line:
+            indented_marker = True
+            continue
+        if row.startswith(CODEX_OUTPUT_MARKERS):
             break
-        if line.startswith("›"):
-            prompt = line[1:].strip()
+        if row.startswith("›"):
+            prompt = row[1:].strip()
             placeholder = prompt == "Ask Codex to do anything"
             status_row = footer_boundary(lines, index, placeholder=placeholder)
             if status_row is not None and WARNING_FOOTER.search(lines[status_row + 1]):
@@ -342,7 +410,7 @@ def codex_screen(text, *, sent_message=None):
                 return "ready"
             if sent_message is not None and matches_sent_message(body, sent_message):
                 return "paste"
-            if status_row is not None:
+            if not indented_marker and status_row is not None:
                 return "draft"
             break
     return "waiting"

@@ -23,6 +23,7 @@ from dispatch import (
     report_instruction,
     send,
     terminal_name,
+    transcript_echoed,
 )
 from quota import WEEK, assess
 
@@ -154,6 +155,78 @@ class DispatchReceiptTests(unittest.TestCase):
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
 
+    def test_home_handoff_lines_follow_verbatim_fields_for_matching_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            registry = home / "repos"
+            registry.mkdir()
+            team_line = "팀 리뷰 체크리스트를 사용하세요."
+            app_line = "Use the app review checklist."
+            (registry / "handoff.json").write_text(json.dumps({
+                "projects": [team_line],
+                str(home / "projects" / "app"): [app_line],
+            }, ensure_ascii=False), encoding="utf-8")
+            for cli, invocation in (("claude", "/dev:task-next"), ("codex", "$task-next")):
+                for target, extra in (
+                    ("projects/app", f"\n\n{team_line}\n{app_line}"),
+                    ("projects/app-sibling", f"\n\n{team_line}"),
+                    ("projects-other/app", ""),
+                ):
+                    with self.subTest(cli=cli, target=target), patch("dispatch.Path.cwd", return_value=home):
+                        args = self.launch_args(home / target, cli=cli, dry_run=True,
+                                                message=invocation if cli == "claude" else None,
+                                                task=invocation if cli == "codex" else None)
+                        with redirect_stdout(StringIO()) as stdout:
+                            launch(args)
+                        payload = json.loads(stdout.getvalue())
+                        prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
+                        self.assertEqual(prompt, invocation + self.BLOCK + extra)
+
+    def test_invalid_home_handoff_config_stops_before_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            registry = home / "repos"
+            registry.mkdir()
+            config = registry / "handoff.json"
+            for invalid in ("{", "[]", '{"projects": "single string"}',
+                            json.dumps({"projects": ["multiple\nlines"]})):
+                config.write_text(invalid, encoding="utf-8")
+                with self.subTest(invalid=invalid), patch("dispatch.Path.cwd", return_value=home), \
+                        patch("dispatch.hc_json") as hc:
+                    with self.assertRaisesRegex(SystemExit, r"repos[/\\]handoff\.json"):
+                        launch(self.launch_args(home))
+                    hc.assert_not_called()
+
+    def test_home_handoff_reads_repo_config_from_a_subdirectory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            subprocess.run(["git", "init", "-q", str(home)], check=True)
+            (home / "tools").mkdir()
+            (home / "repos").mkdir()
+            (home / "repos" / "handoff.json").write_text(
+                json.dumps({"projects": ["Use the team review checklist."]}), encoding="utf-8"
+            )
+            args = self.launch_args("../projects/app", dry_run=True)
+            with patch("dispatch.Path.cwd", return_value=home / "tools"), redirect_stdout(StringIO()) as stdout:
+                launch(args)
+            self.assertEqual(json.loads(stdout.getvalue())["task"],
+                             "$task-next" + self.BLOCK + "\n\nUse the team review checklist.")
+
+    def test_launch_directory_config_takes_priority_over_an_ancestor_repo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outer = Path(directory)
+            subprocess.run(["git", "init", "-q", str(outer)], check=True)
+            home = outer / "home"
+            (home / "repos").mkdir(parents=True)
+            (home / "repos" / "handoff.json").write_text(
+                json.dumps({"projects": ["Use the team review checklist."]}), encoding="utf-8"
+            )
+            args = self.launch_args("projects/app", dry_run=True)
+            with patch("dispatch.Path.cwd", return_value=home), redirect_stdout(StringIO()) as stdout:
+                launch(args)
+            self.assertEqual(json.loads(stdout.getvalue())["task"],
+                             "$task-next" + self.BLOCK + "\n\nUse the team review checklist.")
+
     def test_launch_rejects_stale_parent_before_start(self):
         args = self.launch_args(Path.cwd())
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
@@ -170,12 +243,17 @@ class DispatchReceiptTests(unittest.TestCase):
 
     def test_launch_runs_in_background_and_emits_receipt_before_send(self):
         with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "repos").mkdir()
+            extra_lines = ["Use the launch-time checklist."]
+            (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
             args = self.launch_args(directory)
-            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent)}
-            live_owner = {**owner, "foreground": {"cwd": str(Path.cwd())}}
+            owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
+            live_owner = {**owner, "foreground": {"cwd": str(home)}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             calls = [{"terminals": [owner]}, live_owner, self.TERMINAL]
             with (
+                patch("dispatch.Path.cwd", return_value=home),
                 patch("dispatch.hc_json", side_effect=calls),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -195,7 +273,7 @@ class DispatchReceiptTests(unittest.TestCase):
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
             self.assertFalse(receipt["sent"])
-            self.assertEqual(receipt["handoff"], self.HANDOFF)
+            self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
 
@@ -791,6 +869,27 @@ class CodexSendTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(codex_screen(text), expected)
 
+    def test_screen_markers_at_wrapped_prompt_rows_are_text(self):
+        for marker in ("•", "■", "›", "─ Worked for"):
+            with self.subTest(marker=marker):
+                message = f"Review the checklist {marker} then run the tests."
+                shown = f"› Review the checklist\n  {marker} then run the tests."
+                self.assertEqual(codex_screen(f"{shown}\n\n{self.FOOTER_0171}", sent_message=message), "paste")
+                self.assertTrue(transcript_echoed(f"{shown}\n\n• Completed\n\n{self.READY}", message))
+
+    def test_wrapped_hook_words_are_text_but_a_visible_hook_failure_is_a_blocker(self):
+        shown = "› Review instructions\n\n  A note about what to do when a\n  hook failed again."
+        self.assertEqual(codex_screen(f"{shown}\n\n{self.READY}"), "ready")
+        failure = "• Hook failed\n  └ plugin contents changed; hook approval required"
+        self.assertEqual(codex_screen(f"{shown}\n\n{failure}\n\n{self.READY}"), "hooks")
+        for notice in ("  └ hook approval required", "  Hooks need review"):
+            with self.subTest(notice=notice):
+                self.assertEqual(codex_screen(f"{shown}\n\n{notice}\n\n{self.READY}"), "hooks")
+
+    def test_screen_with_indented_tool_output_and_no_composer_is_waiting(self):
+        screen = f"› a task\n\n  • Completed\n\n{self.FOOTER_0171}"
+        self.assertEqual(codex_screen(screen, sent_message="a task"), "waiting")
+
     def test_send_withholds_task_on_visible_hook_or_warning(self):
         for text, reason in (
             ("Hooks need review\n› 1. Review hooks", "/hooks"),
@@ -1088,11 +1187,16 @@ class CodexSendTests(unittest.TestCase):
         busy = {**idle, "turn": 2, "status": {"state": "working"}}
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            run = {**DispatchReceiptTests.RECEIPT, "handoff": DispatchReceiptTests.HANDOFF}
+            extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
+                           "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
+                           "Hook approval required for the local workflow."]
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = "a task" + DispatchReceiptTests.BLOCK + "\n\n" + report_instruction(
-                receipt.resolve().with_name("result.json"))
+            expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
+                        + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
+                        + report_instruction(receipt.resolve().with_name("result.json")))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
@@ -1102,6 +1206,9 @@ class CodexSendTests(unittest.TestCase):
             rows = prompt.replace("\n", "\n  ")
             self.assertEqual(codex_screen(f"› {rows}\n\n{self.FOOTER_0171}", sent_message=prompt),
                              "paste")
+            echoed = f"› {rows}\n\n• Completed\n\n{ready}"
+            self.assertTrue(transcript_echoed(echoed, prompt))
+            self.assertEqual(codex_screen(echoed), "ready")
             self.assertEqual(prompt, expected)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
