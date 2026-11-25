@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
 from dispatch import (
+    POST_SEND_SETTLE_SECONDS,
     child_argv,
     codex_screen,
     collect,
@@ -1011,6 +1012,59 @@ class CodexSendTests(unittest.TestCase):
                 self.assertFalse(any('"submitted": true' in entry.args[0] for entry in output.call_args_list))
                 self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["sent"], "unconfirmed")
                 self.assertEqual(operations, ["send"])
+
+    def test_send_detects_approval_failures_that_render_during_the_settle_window(self):
+        reason = "plugin contents changed; hook approval required"
+        for failure, shows_at in (
+            (f"⚠ {reason}", 0.25),
+            (f"• Hook failed\n  └ SessionStart hook\n  └ {reason}", 0.25),
+            (f"• Hook failed\n  └ {reason}", 1.5),
+        ):
+            with self.subTest(failure=failure, shows_at=shows_at):
+                now = 0.0
+                sent = False
+
+                def advance(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def respond(command, *_args):
+                    nonlocal sent
+                    if command == "read":
+                        shown = f"{failure}\n\n{self.READY}" if shows_at <= now < shows_at + 0.25 else self.READY
+                        return self.screen(shown)
+                    if command == "get":
+                        return self.WORKING if sent else self.IDLE
+                    self.assertEqual(command, "send")
+                    sent = True
+                    return {"started": True}
+
+                with (patch("dispatch.hc_json", side_effect=respond),
+                      patch("dispatch.POST_SEND_SETTLE_SECONDS", POST_SEND_SETTLE_SECONDS),
+                      patch("dispatch.time.monotonic", side_effect=lambda: now),
+                      patch("dispatch.time.sleep", side_effect=advance), redirect_stderr(StringIO()),
+                      redirect_stdout(StringIO()) as output):
+                    with self.assertRaisesRegex(SystemExit, "plugin contents changed.*hook approval required"):
+                        send(self.ARGS)
+                self.assertEqual(output.getvalue(), "")
+
+    def test_lost_send_does_not_retry_when_an_indented_hook_blocker_appears(self):
+        reads = iter((self.READY, self.READY))
+        sends = []
+
+        def respond(command, *_args):
+            if command == "read":
+                return self.screen(next(reads, f"  └ hook approval required\n\n{self.READY}"))
+            if command == "get":
+                return self.IDLE
+            sends.append(command)
+            return {"started": False}
+
+        with (patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"),
+              patch("dispatch.time.monotonic", side_effect=range(0, 120, 6)), redirect_stderr(StringIO())):
+            with self.assertRaisesRegex(SystemExit, "hook problem after the send"):
+                send(self.ARGS)
+        self.assertEqual(sends, ["send"])
 
     def test_send_withholds_enter_when_dialog_opens_after_reading_a_paste(self):
         blocked = {"turn": 0, "status": {"state": "blocked"}}

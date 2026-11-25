@@ -73,7 +73,7 @@ For older receipts missing the delivery phase, a resend on turn 1 requires the s
   after the send rules that out.
 - An unconfirmed receipt is accepted as delivered once the child writes a new result. After
   Herdr acknowledges a send, a clear composer and a working or completed turn can also
-  confirm it. The send checks for plugin hook approval failures once more, one second after
+  confirm it. The send checks for plugin hook approval failures for two seconds after
   delivery first appears confirmed. If the failure appears later while watching the child,
   follow the same stop and review procedure under *Readiness blockers*.
 
