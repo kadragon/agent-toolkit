@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from dispatch import (
     POST_SEND_SETTLE_SECONDS,
     child_argv,
     child_name,
+    codex_models_cache,
     codex_screen,
     collect,
     composer_draft,
@@ -22,6 +24,7 @@ from dispatch import (
     launch,
     lock_run,
     report_instruction,
+    resolve_codex_model,
     send,
     terminal_name,
     transcript_echoed,
@@ -795,11 +798,117 @@ class PickTests(unittest.TestCase):
                 nested = checkout / "nested"
                 nested.mkdir()
                 args = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch", "--dry-run",
-                        "--cli", "codex", "--model", "model", "--effort", "low", "--cwd", str(nested),
+                        "--cli", "codex", "--model", "gpt-6-luna", "--effort", "low", "--cwd", str(nested),
                         "--work-kind", "new", "--request", "Task", "--unit", "Task", "--git-limits", "none"]
                 result = subprocess.run(args, check=True, capture_output=True, text=True, encoding="utf-8")
                 self.assertEqual("inside a linked worktree" in result.stderr, checkout == linked)
                 self.assertEqual("Launch from the main checkout and add --tree" in result.stderr, checkout == linked)
+
+
+class CodexModelTests(unittest.TestCase):
+    CACHE = {"models": [
+        {"slug": "gpt-6.2-sol", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-6.10-sol", "visibility": "hide", "upgrade": None},
+        {"slug": "gpt-6.1-sol", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-7-sol", "visibility": "list", "upgrade": {"model": "gpt-6.2-sol"}},
+        {"slug": "gpt-6.1-terra", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-5.6-terra", "visibility": "list", "upgrade": {"model": "gpt-6.1-terra"}},
+        {"slug": "gpt-5.6-luna", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-6-luna", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-6.2-astra", "visibility": "list", "upgrade": None},
+        {"slug": "gpt-reserve", "visibility": "hide", "upgrade": None},
+        {"slug": "codex-auto-review", "visibility": "hide"},
+    ]}
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.home = Path(directory.name)
+        (self.home / "models_cache.json").write_text(json.dumps(self.CACHE), encoding="utf-8")
+        environment = patch.dict(os.environ, {"CODEX_HOME": str(self.home)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def launch_args(self, model, cli="codex", dry_run=True):
+        return DispatchReceiptTests().launch_args(Path.cwd(), cli=cli, model=model, dry_run=dry_run,
+                                                  task="$task-next" if cli == "codex" else None,
+                                                  message="/dev:task-next" if cli == "claude" else None)
+
+    def test_family_resolves_to_newest_listed_non_retiring_slug(self):
+        for family, slug in (("sol", "gpt-6.2-sol"), ("terra", "gpt-6.1-terra"), ("luna", "gpt-6-luna")):
+            with self.subTest(family=family):
+                self.assertEqual(resolve_codex_model(family), slug)
+
+    def test_full_slug_passes_through_without_reading_the_cache(self):
+        (self.home / "models_cache.json").unlink()
+        for slug in ("gpt-5.6-terra", "gpt-reserve", "gpt-9-sol"):
+            with self.subTest(slug=slug):
+                self.assertEqual(resolve_codex_model(slug), slug)
+
+    def test_missing_unreadable_or_unmatched_cache_is_a_hard_error(self):
+        with self.assertRaisesRegex(SystemExit, "no listed, non-retiring gpt-<version>-nova"):
+            resolve_codex_model("nova")
+        cache = self.home / "models_cache.json"
+        for content in (None, "not json", json.dumps({"other": []})):
+            with self.subTest(content=content):
+                if content is None:
+                    cache.unlink(missing_ok=True)
+                else:
+                    cache.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "unreadable models cache"):
+                    resolve_codex_model("sol")
+
+    def test_default_cache_is_under_the_home_codex_directory(self):
+        with patch.dict(os.environ, {"CODEX_HOME": ""}), patch("dispatch.Path.home", return_value=self.home):
+            self.assertEqual(codex_models_cache(), self.home / ".codex" / "models_cache.json")
+
+    def test_dry_run_records_family_and_resolved_slug(self):
+        for model, expected in (("sol", {"model": "gpt-6.2-sol", "model_family": "sol"}),
+                                ("gpt-6.1-sol", {"model": "gpt-6.1-sol"})):
+            with self.subTest(model=model), patch("sys.stdout", new_callable=StringIO) as stdout:
+                launch(self.launch_args(model))
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual({key: payload.get(key) for key in expected}, expected)
+                self.assertEqual("model_family" in payload, "model_family" in expected)
+                argv = payload["argv"]
+                self.assertEqual(argv[argv.index("-m") + 1], expected["model"])
+
+    def test_receipt_records_family_and_resolved_slug(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.launch_args("luna", dry_run=False)
+            args.cwd = directory
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
+                     "foreground": {"cwd": str(Path.cwd())}}
+            child = SimpleNamespace(stdout=json.dumps(DispatchReceiptTests.TERMINAL))
+            with (
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, DispatchReceiptTests.TERMINAL]),
+                patch("dispatch.subprocess.run", return_value=child) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                patch("dispatch.send"),
+                patch("builtins.print") as output,
+            ):
+                launch(args)
+            argv = run.call_args_list[-1].args[0]
+            self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-luna")
+            payload = json.loads(output.call_args.args[0])
+            receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+            for record in (payload, receipt):
+                self.assertEqual((record["model"], record["model_family"]), ("gpt-6-luna", "luna"))
+
+    def test_fable_and_astra_are_refused_before_any_launch_step(self):
+        for cli, model in (("codex", "astra"), ("codex", "gpt-6.2-astra"), ("codex", "GPT-7-Astra"),
+                           ("claude", "fable"), ("claude", "claude-fable-5-2"), ("codex", "fable")):
+            with (
+                self.subTest(cli=cli, model=model),
+                patch("dispatch.hc_json") as hc,
+                patch("dispatch.subprocess.run") as run,
+                patch("dispatch.codex_models_cache") as cache,
+            ):
+                with self.assertRaisesRegex(SystemExit, "never launches fable or astra"):
+                    launch(self.launch_args(model, cli=cli, dry_run=False))
+                hc.assert_not_called()
+                run.assert_not_called()
+                cache.assert_not_called()
 
 
 class WorkflowDocsTests(unittest.TestCase):
@@ -820,6 +929,12 @@ class WorkflowDocsTests(unittest.TestCase):
                       "pass `--git-limits='not specified'`.", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
+
+    def test_docs_name_codex_models_by_family_only(self):
+        docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]
+        for doc in docs:
+            with self.subTest(doc=doc.name):
+                self.assertIsNone(re.search(r"gpt-\d", doc.read_text(encoding="utf-8"), re.IGNORECASE))
 
 
 class CodexSendTests(unittest.TestCase):
