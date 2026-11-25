@@ -42,18 +42,19 @@ For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only th
 unit. Verify the original request and Git limits per
 `../task-next/references/git-authorization.md`. If the assignment is missing, already queued,
 unclear, larger than one contract, or requires shared planning or overlapping queue edits,
-report the blocker to the home session and stop before writing. A record-only unit takes
-*Queue documentation cycle* below if its commit authority is established. Otherwise report
-the missing authority and stop before writing. Other units that require queue edits stop
-before writing. Proceed to Step 3 for the remaining units.
+report the blocker to the home session and stop before writing. Concurrent appends to the
+same backlog count as overlapping queue edits. A record-only assignment follows the
+**Queue without implementing** row below. For other assignments that require queue edits,
+report the blocker and stop before writing. Proceed to Step 3 for the remaining assignments.
 
 For other runs, first match wins. Size comes before clarity: a fully specified request
 can still be too large for one contract.
 - **Queue without implementing** (the user asks only to record it) → if a dispatch handoff
   establishes commit authority for the queue change per
   `../task-next/references/git-authorization.md`, take *Queue documentation cycle* below.
-  Otherwise call the Skill tool with "dev:task-tickets" on the request, then stop after writing
-  the tickets.
+  With unestablished commit authority in a parallel-worktree handoff, report that blocker
+  and stop before writing. For all remaining runs, call the Skill tool with "dev:task-tickets"
+  on the request, then stop after writing the tickets.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
   "dev:task-tickets"; then **stop** — no cycle runs this invocation.
@@ -75,14 +76,16 @@ user to re-invoke (or queue them for `task-next --all`).
 Use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording the assigned
 tickets, with the verified dispatch Git authority and limits. Apply `--tree` for checkout
 isolation only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's
-checkout and write the approved tickets there. If ticketing is blocked or leaves no queue
-delta, report that outcome and stop. Verify the ticket entries and run *Validation evidence*
-on the completed documentation change. The tickets remain open for a later implementation cycle.
+checkout. After writing the approved tickets, return to this cycle with the ticket list in
+place of the ticket skill's standalone handoff. If ticketing is blocked or leaves no queue
+delta, report that outcome and stop. Verify the ticket entries and continue through applicable
+release steps, *Validation evidence*, and Step 4. The tickets remain open for a later
+implementation cycle.
 
 At handoff, pass `--pr` when feature push and PR write are authorized. The review cycle owns
 commit, PR and merge within the saved limits. Honor its pre-merge stop for parallel dispatch
-and report `ready` after review and required CI. Resume the same branch and contract for the
-authorized serial merge. Report `merged` only after confirmation.
+and report `ready` after review and required CI. On the home session's authorized serial-merge
+handoff, resume the same branch and contract. Report `merged` only after confirmation.
 
 ## Step 3 — Run the cycle
 
