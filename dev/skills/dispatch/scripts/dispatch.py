@@ -10,6 +10,8 @@
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
       --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
+      A Codex family (luna, terra, sol, any case) resolves to its newest listed slug in
+      $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
@@ -73,6 +75,9 @@ LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
+BANNED_MODELS = ("fable", "astra")
+CODEX_FAMILIES = ("luna", "terra", "sol")
+CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
 
 
 def terminal_name(raw):
@@ -106,6 +111,41 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None):
     report = ["--append-system-prompt", report_instruction(result)] if result else []
     return ["claude", "--model", model, "--effort", effort,
             "--settings", json.dumps(settings, separators=(",", ":")), *report, message]
+
+
+def refuse_banned_model(model):
+    words = re.split(r"[^a-z0-9]+", model.lower())
+    banned = next((name for name in BANNED_MODELS if name in words), None)
+    if banned:
+        raise SystemExit(f"model {model!r} is a {banned} model; dispatch never launches {' or '.join(BANNED_MODELS)}")
+
+
+def codex_models_cache():
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "models_cache.json"
+
+
+def resolve_codex_model(model):
+    family = model.lower()
+    if family not in CODEX_FAMILIES:
+        return model
+    cache = codex_models_cache()
+    try:
+        entries = json.loads(cache.read_text(encoding="utf-8"))["models"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f"cannot resolve Codex family {family!r}: unreadable models cache {cache} ({error}); "
+                         "start Codex once to refresh it, or pass a full model slug") from None
+    versions = []
+    for entry in entries if isinstance(entries, list) else ():
+        if not isinstance(entry, dict) or entry.get("visibility") != "list" or entry.get("upgrade"):
+            continue
+        slug = entry.get("slug")
+        match = CODEX_SLUG.fullmatch(slug) if isinstance(slug, str) else None
+        if match and match[2] == family:
+            versions.append((tuple(int(part) for part in match[1].split(".")), slug))
+    if not versions:
+        raise SystemExit(f"no listed, non-retiring gpt-<version>-{family} model in {cache}; "
+                         "pass a full model slug")
+    return max(versions)[1]
 
 
 def report_instruction(result):
@@ -288,6 +328,9 @@ def launch(args):
     trust_hooks = getattr(args, "trust_hooks", False)
     if trust_hooks and args.task is None:
         raise SystemExit("--trust-hooks requires a Codex --task")
+    refuse_banned_model(args.model)
+    model = resolve_codex_model(args.model) if args.cli == "codex" else args.model
+    resolved = {"model": model, **({"model_family": args.model} if model != args.model else {})}
     handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
@@ -323,9 +366,9 @@ def launch(args):
     argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
             "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
             *(["--parent", home] if home else ["--no-parent"]),
-            *child_argv(args.cli, args.model, args.effort, message, args.keep_connectors, result_path)]
+            *child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path)]
     if args.dry_run:
-        preview = {"name": name, "argv": argv}
+        preview = {"name": name, **resolved, "argv": argv}
         if title:
             preview["title"] = title
         if args.task is not None:
@@ -337,7 +380,7 @@ def launch(args):
     address = result["address"]
     terminal = hc_json("get", address)
     run = {"name": name, "address": address, "parent": home,
-           "created_ms": terminal["created_ms"], "cli": args.cli, "model": args.model,
+           "created_ms": terminal["created_ms"], "cli": args.cli, **resolved,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
     if title:
         run["title"] = title

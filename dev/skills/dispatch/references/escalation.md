@@ -20,27 +20,38 @@ the existing ladder below.
 ## Ladder
 
 - Escalate one step when the session stalls on the same blocker twice, its review cycle sends
-  the change back twice, or its result turns out wrong. Raise effort before the model, since
-  it is the cheaper step. `luna`, `terra` and `sol` are Codex `gpt-6-luna`, `gpt-6.1-terra` and
-  `gpt-6.2-sol`.
+  the change back twice, or its result turns out wrong. `luna`, `terra` and `sol` are Codex
+  model families; the launcher resolves each to its newest listed slug.
+- First ask: did it not try hard enough, or did it not know enough? (Claude Code team's
+  model-versus-effort heuristic.) Skipped searches, files or tests, an early stop or an unchecked
+  result is not trying hard enough — raise effort. Confident errors of fact, API or domain, or a
+  wrong approach that persists at the raised effort, is not knowing enough — raise the model tier.
+  When the evidence does not say which, raise effort first, since it is the cheaper step.
 
 | Effective quota bias | Ladder |
 |----------------------|--------|
-| `none` | `terra/medium → terra/high → opus/high → opus/xhigh` |
-| `codex` | `terra/medium → terra/high → terra/xhigh → sol/high → sol/xhigh` |
+| `none` | `sol/medium → sol/high → opus/high → opus/xhigh` |
+| `codex` | `sol/medium → sol/high → sol/xhigh` |
 | `claude` | `sonnet/medium → sonnet/high → opus/high → opus/xhigh` |
 
 - A pair on the ladder takes the next rung. Any other pair takes the lowest rung that is at
-  least as high on both axes and higher on at least one (haiku = luna < sonnet = terra < opus = sol).
-- Work the `codex` bias keeps on `opus` (SKILL.md step 3), or the user put on `opus`, escalates on
-  the `none` ladder.
+  least as high on both axes and higher on at least one (haiku = luna < sonnet < opus = sol).
+  A "not know enough" diagnosis may skip the remaining effort rungs of its tier. `sol` has no larger
+  Codex model, so under bias `codex` that diagnosis moves it to `opus/high`.
+- `terra` writing or visual work raises effort on `terra` up to `xhigh`, then takes
+  `opus/high` (`sol/high` under bias `codex`) and continues on that bias's ladder.
+- A pair on `opus` stays on Claude: `opus/medium → opus/high → opus/xhigh`. This covers top-tier
+  work under bias `none`, work the `codex` bias keeps on `opus` (SKILL.md step 3), and work the
+  user put on `opus`; the `opus` = `sol` tie never moves it to Codex.
 - When the next rung is on a `critical` CLI, ask the user. A stall at the top rung (opus/xhigh
-  or sol/xhigh) goes to the user; `fable` and `gpt-6.2-astra` are never a rung.
+  or sol/xhigh) goes to the user; `fable` and `astra` are never a rung.
 - Carry the latest escalated pair as the floor for later phases as a tier and an effort: take
   the higher tier and effort from that pair and the new phase's starting pair, then pick the
-  CLI for that tier by the new phase's bias. A `terra/xhigh` floor under a bias whose ladder
-  lacks a mid-tier xhigh rung becomes `opus/xhigh`. Without escalation, each phase uses its own
-  starting pair.
+  CLI for that tier by the new phase's bias. An `opus` floor stays on `opus` (line above). Any
+  other floor that is not a rung of that bias's ladder takes its lowest rung at least as high on
+  both axes. A `terra` floor carries only its effort: a later writing or visual phase starts
+  `terra` at that effort, and any other phase ignores it. Without escalation, each phase uses its
+  own starting pair.
 
 ## Relaunch
 
