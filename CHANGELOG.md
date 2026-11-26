@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- [done] Treat incomplete Claude quota snapshots as unknown in dispatch (dev v4.12.25) (2026-11-26) → dev/skills/dispatch/references/quota-snapshot.md
+- [done] Treat incomplete Claude quota snapshots as unknown in dispatch (dev v4.12.26) (2026-11-26) → dev/skills/dispatch/references/quota-snapshot.md
+- [done] Label the Herdr terminal with the task-next worktree path (dev v4.12.25) (2026-11-26) → dev/skills/task-next/references/cycle.md
 - [done] Account for Codex reset passes in dispatch routing (dev v4.12.24) (2026-11-26) → dev/skills/dispatch/references/quota-snapshot.md
 - [done] Relax dispatch weekly quota pace thresholds (dev v4.12.23) (2026-11-26) → dev/skills/dispatch/SKILL.md
 - [done] Slim the status band to a context percent and one figure row with the cache countdown (mods v1.1.4) (2026-11-26)

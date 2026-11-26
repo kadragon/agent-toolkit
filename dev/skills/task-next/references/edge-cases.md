@@ -24,7 +24,7 @@ worktree — any other may be a live session's, so its mere presence never trigg
 (`SKILL.md` → *Working tree gate*). Prefix the probe with `cd "<absolute .worktrees/<slug> path>"
 &&`, not main's unrelated dirty state; no matching worktree → say so and stop. A resumed
 `.worktrees/<slug>` run finishes every remaining stage in that worktree as a `cycle.md` →
-*Worktree cycle* (hub route, `worktree_path` on the merge) — under `references/tree.md`'s
+*Worktree cycle* (hub route, `worktree_path` on the merge; re-set the Herdr label with the claim's `hc label` line) — under `references/tree.md`'s
 implementer/QA rules when its `tasks.md` holds a claim block. Two explicit resumes report and stop
 instead: a worktree on a `wt/<slug>` branch is a parallel batch unit, resumed through the batch row
 below while its batch is unmerged — after that merge, name the unit and its archive and ask
