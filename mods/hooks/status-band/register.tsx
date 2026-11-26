@@ -351,6 +351,7 @@ export const register: Register = (on, options) => {
     }
 
     const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
+    const epoch = live.setupEpoch
     const result = yield* next(e)
 
     // The step does not wait for the band: the countdown is written behind it.
@@ -361,10 +362,9 @@ export const register: Register = (on, options) => {
 
           const cacheExpiresAt = at + cacheTtlMs
           const cacheModel = e.model || undefined
-          // The band's own model lags a switch the session has made, so the
-          // session is asked: a step that ran under a model it has left made
-          // a cache nothing now draws on.
           const sessionModel = await $.session.model().catch(() => '')
+
+          if (epoch !== live.setupEpoch) return
 
           if (
             cacheModel !== undefined &&
