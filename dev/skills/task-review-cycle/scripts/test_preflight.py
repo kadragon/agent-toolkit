@@ -158,7 +158,7 @@ def main() -> int:
         print("\n-- a sort without -V still selects a cached Codex companion --")
         fallback = make_repo(tmp, "sort-fallback")
         cache = fallback / "home" / ".claude" / "plugins" / "cache" / "test" / "codex"
-        for version in ("1.1", "1.2"):
+        for version in ("1.9", "1.10"):
             companion = cache / version / "scripts" / "codex-companion.mjs"
             companion.parent.mkdir(parents=True)
             companion.touch()
@@ -183,10 +183,10 @@ def main() -> int:
             b'export HOME="$PWD/home" PATH="$PWD/bin:$PATH"\n'
         )
         result = run(fallback, "--no-hub", BASH_ENV=bash_env, PREFLIGHT_CACHE=0)
-        check("lexical fallback keeps preflight in plugin mode and selects the latest cached path",
+        check("numeric fallback keeps preflight in plugin mode and ranks 1.10 above 1.9",
               result.get("has_errors") is False and result.get("codex_mode") == "plugin"
               and result.get("codex_companion_path", "").endswith(
-                  "/codex/1.2/scripts/codex-companion.mjs"),
+                  "/codex/1.10/scripts/codex-companion.mjs"),
               f"got {result}")
 
         print("\n-- a live run writes the cache; the next run is served from it --")

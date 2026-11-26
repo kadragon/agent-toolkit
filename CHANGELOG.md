@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Keep numeric version order in the preflight sort fallback (dev v4.12.30) (2026-11-26)
 - [done] Keep cache visible on narrow status bands and scope effort and Windows installs correctly (mods v1.1.7) (2026-11-26)
 - [done] Keep Codex companion discovery working without sort -V (dev v4.12.29) (2026-11-26)
 - [done] Keep a stale cache countdown off a switched model; match project paths across separators (mods v1.1.6) (2026-11-26)
