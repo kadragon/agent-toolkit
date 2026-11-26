@@ -54,6 +54,7 @@ type World = {
   switchedTo?: string
   holdNextNow?: Promise<void>
   holdNextModel?: Promise<void>
+  isModelDown?: boolean
   isUncached: boolean
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
@@ -114,6 +115,8 @@ const world = (on: On): World => {
 
     state.holdNextModel = undefined
     await gate
+
+    if (state.isModelDown) throw new Error('model read is down')
 
     return { value: state.model }
   })
@@ -374,6 +377,43 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
 
   expect(returned.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
   await returned.ui.unmount()
+})
+
+test('a failed session model read preserves a new model step effort until the next successful read', async ($, on) => {
+  const state = world(on)
+  state.isUncached = true
+
+  await start($)
+  state.model = 'claude-haiku-5-5'
+  await step($, { model: state.model, effort: 'high' })
+  state.isModelDown = true
+  await measure($)
+  state.isModelDown = false
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◑ high] │ agent-toolkit git:(main)')
+  await ui.unmount()
+})
+
+test('a different dated snapshot of the same model does not inherit effort', async ($, on) => {
+  const state = world(on)
+  state.model = 'claude-opus-5-5-20261001'
+
+  await start($)
+  await step($, { model: state.model, effort: 'high' })
+  await measure($)
+  const first = await drawn($)
+
+  expect(first.texts[0]).toBe('[Opus 5.5 ◑ high] │ agent-toolkit git:(main)')
+  await first.ui.unmount()
+
+  state.model = 'claude-opus-5-5-20261002'
+  await measure($)
+  const second = await drawn($)
+
+  expect(second.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await second.ui.unmount()
 })
 
 test('a model read held across an old-model step still clears its effort on switching', async ($, on) => {
@@ -786,6 +826,7 @@ test('a model named with a context suffix or a date is the same model for the ca
   await measure($)
   const { ui, texts } = await drawn($)
 
+  expect(texts[0]).toBe('[Opus 5.5[1m] ◔ medium] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
   await ui.unmount()
 })

@@ -51,10 +51,14 @@ export const modelLabel = (model: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}${suffix ?? ''}`
 }
 
-const modelKey = (model: string): string =>
-  model.trim().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '')
+const withoutContextSuffix = (model: string): string => model.trim().replace(/\[[^\]]*\]$/, '')
+
+const modelKey = (model: string): string => withoutContextSuffix(model).replace(/-\d{8}$/, '')
 
 export const isSameModel = (a: string, b: string): boolean => modelKey(a) === modelKey(b)
+
+export const isSameEffortModel = (a: string, b: string): boolean =>
+  withoutContextSuffix(a) === withoutContextSuffix(b)
 
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))

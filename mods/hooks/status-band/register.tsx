@@ -8,6 +8,7 @@ import {
   contextSegments,
   curateText,
   headlineSegments,
+  isSameEffortModel,
   isSameModel,
   levelOf,
   timesSegments,
@@ -200,14 +201,15 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       live.drawn = order
       const name = model === '' ? (current?.model ?? '') : model
       const stepEffort = live.stepEffort
-      const sameModel = current !== null && isSameModel(current.model, name)
+      const sameModel = current !== null && isSameEffortModel(current.model, name)
       let effort = sameModel ? current.effort : undefined
 
       if (stepEffort !== undefined) {
-        effort = isSameModel(stepEffort.model, name) ? stepEffort.value : undefined
-        const wasCurrentModel = current !== null && isSameModel(stepEffort.model, current.model)
+        const matches = isSameEffortModel(stepEffort.model, name)
+        const wasCurrentModel = current !== null && isSameEffortModel(stepEffort.model, current.model)
 
-        if ((stepEffort === effortAtStart || wasCurrentModel) && ranUnderLeftModel(stepEffort.model, name)) {
+        effort = matches ? stepEffort.value : undefined
+        if (!matches && model !== '' && (stepEffort === effortAtStart || wasCurrentModel)) {
           discardedEffort = stepEffort
         }
       }
@@ -346,7 +348,7 @@ export const register: Register = (on, options) => {
 
       live.stepEffort = stepEffort
       await update($, statusBand, current => {
-        if (current === null || live.stepEffort !== stepEffort || !isSameModel(current.model, e.model)) {
+        if (current === null || live.stepEffort !== stepEffort || !isSameEffortModel(current.model, e.model)) {
           return current
         }
 

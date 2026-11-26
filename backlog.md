@@ -19,9 +19,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #456 — Preserve cache and model effort on the status band (2026-11-26)
 
-- [ ] [debt] Keep a delayed step from restoring the cache countdown on another model when the session model lookup fails (source: codex) — `mods/hooks/status-band/register.tsx:368` (pre_existing)
+- [ ] [debt] Keep a delayed step from restoring the cache countdown on another model when the session model lookup fails (source: codex) — `mods/hooks/status-band/register.tsx:370` (pre_existing)
 - [ ] [debt] Avoid selecting an unrelated project install when the active path has no matching project or user install (source: codex) — `mods/hooks/status-band/count.ts:75` (pre_existing)
-- [ ] [debt] Keep a refresh that read the old model from forfeiting a cache recorded by a newer model while the refresh was pending (source: agy) — `mods/hooks/status-band/register.tsx:189` (pre_existing)
+- [ ] [debt] Keep a refresh that read the old model from forfeiting a cache recorded by a newer model while the refresh was pending (source: agy) — `mods/hooks/status-band/register.tsx:190` (pre_existing)
 
 ## Rejected — do not re-file
 
