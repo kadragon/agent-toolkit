@@ -54,7 +54,8 @@ that block to `status: active` in the worktree's copy. The shared claim step cov
 collisions and the re-check after writing the claim. A declined plan → revert only this claim
 (delete the `tasks.md` it created, or restore the base-tracked file with `git restore tasks.md`),
 confirm `git status --porcelain` in the worktree is empty, then `git worktree remove` it and
-`git branch -d` the branch — no forced removal.
+`git branch -d` the branch — no forced removal — and clear the Herdr label
+(`cycle.md` → *Worktree cycle*).
 
 **Mark active:** after the plan gate, add the Sprint Contract to that same worktree `tasks.md`
 block — every `--tree` run writes it, even for one item. Archive the contract per `cycle.md` →
@@ -81,7 +82,7 @@ response carries the verdict. One fix-and-re-verify retry.
 **If QA fails after one retry:** stop and report unmet criteria; the worktree, branch and
 archive are preserved per *Worktree cycle* → *Stopped run*. Resuming is the default. Only when
 the user explicitly authorizes abandoning the run, remove the worktree and branch — its
-`tasks.md` goes with the worktree.
+`tasks.md` goes with the worktree — and clear the Herdr label (`cycle.md` → *Worktree cycle*).
 
 **After QA passes:** in the worktree, `cycle.md` → *Version bump*, *Cleanup* (`prune-tasks` on
 the worktree `tasks.md`, `prune-backlog` on the worktree `backlog.md`, `changelog`), then
