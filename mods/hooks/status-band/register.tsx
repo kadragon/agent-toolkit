@@ -2,24 +2,13 @@ import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { StatusBand } from '../../types'
+import { enabledPlugins, installPaths, under } from './count'
 import {
-  connectedServers,
-  enabledPlugins,
-  hookCommands,
-  hooksFileCommands,
-  installPaths,
-  manifestHooks,
-  under,
-} from './count'
-import {
-  barCells,
   contextSegments,
   curateText,
   headlineSegments,
   levelOf,
-  limitsSegments,
-  mergedSegments,
-  setupSegments,
+  timesSegments,
   UNICODE,
 } from './format'
 import type { Glyphs, Segment } from './format'
@@ -28,14 +17,13 @@ import type { Glyphs, Segment } from './format'
 // Read this file in ranges, not whole: find a name with `grep -n '<name>'` and read only
 // its range. Pure counting and text helpers live in count.ts and format.ts. The names
 // below are checked against the real top-level functions by `scripts/check_mods.py`.
-//   setup reads (plugins, hooks, skills, MCP, curate due): pluginHooks, readInstallPaths, readDevRoot, python, readCurateDue, countHooks, readContext
-//   setup loads and reset: loadSetup, loadCurate, resetSetup
+//   curate-due reads: readInstallPaths, readDevRoot, python, readCurateDue
+//   curate load and reset: loadCurate, resetSetup
 //   live refresh (git, cache window, tick): isCached, refresh, watch
 //   entry points (register holds every on(...) hook handler): startStatusBand, register
 //   rendering the band rows: runs, statusRows
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
-// The elapsed time and the reset countdowns read in minutes.
 const TICK_MS = 60_000
 const GIT_TIMEOUT_MS = 2000
 const MINUTE_MS = 60_000
@@ -64,40 +52,16 @@ type Live = {
   // Null once the session ended or the model changed: nothing is cached.
   cacheExpiresAt?: number | null
   cacheModel?: string
-  // The counts of what the session is set up with, as last read.
   setup: Setup
-  // False until this load read or reset them: a reload keeps what is drawn.
   hasSetup: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
-  setupRead?: Promise<void>
-  // A read was asked for while one ran: the window moved, so it runs again.
-  isSetupStale: boolean
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
 }
 
-type Setup = Pick<StatusBand, 'hooks' | 'skills' | 'mcp' | 'curateDue' | 'contextParts'>
-
-// The handlers a plugin's default hooks file, its manifest and the files the
-// manifest names add; a file that is not there adds none.
-async function pluginHooks($: EngineInterface, root: string): Promise<number> {
-  const { files, inline } = await $.fs
-    .read(under(root, '.claude-plugin/plugin.json'))
-    .then(manifestHooks)
-    .catch(() => manifestHooks('{}'))
-  const counts = await Promise.all(
-    files.map(file =>
-      $.fs
-        .read(under(root, file))
-        .then(hooksFileCommands)
-        .catch(() => 0),
-    ),
-  )
-
-  return counts.reduce((total, count) => total + count, inline)
-}
+type Setup = Pick<StatusBand, 'curateDue'>
 
 // Where the installed-plugins file says each plugin's directory is.
 async function readInstallPaths($: EngineInterface): Promise<Record<string, string>> {
@@ -150,95 +114,6 @@ async function readCurateDue($: EngineInterface): Promise<boolean> {
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
 }
 
-// The hook handlers in force: the settings' own and every enabled plugin's.
-// The engine lists none, so they are counted off the files that declare them.
-async function countHooks($: EngineInterface): Promise<number> {
-  const settings = await $.settings.read()
-
-  if (settings.disableAllHooks === true) return 0
-
-  if (settings.allowManagedHooksOnly === true) {
-    return hookCommands((await $.settings.read({ source: 'policy' })).hooks)
-  }
-
-  const own = hookCommands(settings.hooks)
-  const enabled = enabledPlugins(settings)
-
-  if (enabled.length === 0) return own
-
-  const paths = await readInstallPaths($)
-  const counts = await Promise.all(
-    enabled.map(id => (paths[id] === undefined ? 0 : pluginHooks($, paths[id]))),
-  )
-
-  return counts.reduce((total, count) => total + count, own)
-}
-
-// The skill listing, the MCP servers and what fills the window as /context
-// counts them, estimated locally: no request is sent.
-async function readContext(
-  $: EngineInterface,
-): Promise<Pick<StatusBand, 'skills' | 'mcp' | 'contextParts'>> {
-  const { context } = await $.session.usage({ breakdown: 'summary' })
-  const breakdown = context.breakdown
-
-  if (breakdown === undefined) return {}
-
-  const skills = breakdown.skills
-
-  return {
-    skills: skills === undefined ? undefined : { count: skills.totalSkills, tokens: skills.tokens },
-    mcp: connectedServers(breakdown.mcpTools),
-    contextParts: (breakdown.categories ?? []).flatMap(({ kind, tokens, color }) =>
-      kind === 'deferred' ? [] : [{ kind, tokens, color }],
-    ),
-  }
-}
-
-// Reads the counts apart from the other figures, which must not wait for the
-// files: one read at a time, and a count that cannot be read keeps the last
-// one this session gave.
-function loadSetup($: EngineInterface, live: Live): void {
-  if (live.setupRead !== undefined) {
-    live.isSetupStale = true
-
-    return
-  }
-
-  live.isSetupStale = false
-
-  const epoch = live.setupEpoch
-
-  live.setupRead = (async () => {
-    const [hooks, context] = await Promise.all([
-      countHooks($).catch(() => undefined),
-      readContext($).catch(() => undefined),
-    ])
-
-    if (epoch !== live.setupEpoch) return
-
-    const setup = {
-      hooks: hooks ?? live.setup.hooks,
-      skills: context?.skills ?? live.setup.skills,
-      mcp: context?.mcp ?? live.setup.mcp,
-      contextParts: context?.contextParts ?? live.setup.contextParts,
-    }
-
-    live.setup = { ...live.setup, ...setup }
-    live.hasSetup = true
-    await update($, statusBand, current => (current === null ? null : { ...current, ...setup }))
-  })()
-    .catch(() => undefined)
-    .finally(() => {
-      live.setupRead = undefined
-      // A reset or a measure came while this read ran: what fills the window
-      // moved, and the counts may be the new session's to read.
-      if (epoch !== live.setupEpoch || live.isSetupStale) loadSetup($, live)
-    })
-}
-
-// The curate check spawns a scan, so it runs apart from the counts and at most
-// once in a while; between runs, or when a run fails, the last answer stands.
 function loadCurate($: EngineInterface, live: Live): void {
   if (live.curateRead !== undefined) return
 
@@ -267,7 +142,6 @@ function loadCurate($: EngineInterface, live: Live): void {
     })
 }
 
-// The counts were another session's: they are left out until read again.
 const resetSetup = (live: Live): void => {
   live.setup = {}
   live.hasSetup = true
@@ -337,7 +211,6 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
         effort,
         cwd: cwd === '' ? (current?.cwd ?? '') : cwd,
         branch: branch === null ? current?.branch : branch === '' ? undefined : branch,
-        startedAt: usage?.startedAt ?? current?.startedAt,
         now,
         // Before the first prompt nothing is in the window: that 0 is a reading.
         contextPercent:
@@ -349,10 +222,6 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
           ? undefined
           : (live.cacheExpiresAt ?? current?.cacheExpiresAt),
         cacheModel: isCacheGone ? undefined : cacheModel,
-        hooks: live.hasSetup ? live.setup.hooks : current?.hooks,
-        skills: live.hasSetup ? live.setup.skills : current?.skills,
-        mcp: live.hasSetup ? live.setup.mcp : current?.mcp,
-        contextParts: live.hasSetup ? live.setup.contextParts : current?.contextParts,
         curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
       }
     })
@@ -385,7 +254,6 @@ async function watch($: EngineInterface, live: Live): Promise<void> {
     }
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
-    loadSetup($, live)
     loadCurate($, live)
     await refresh($, live)
   } catch {
@@ -422,7 +290,6 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSetup: false,
     setupEpoch: 0,
-    isSetupStale: false,
   }
 
   loaded.live = live
@@ -455,7 +322,7 @@ export const register: Register = (on, options) => {
 
   // A `/clear` empties the window and starts the timer over; no measure follows it.
   // Whatever ends the session, the conversation that follows has its own cache
-  // and its own counts, and where the process goes on the band shows it at once.
+  // and where the process goes on the band shows it at once.
   on('session.end', async ($, e, next) => {
     const result = await next(e)
 
@@ -522,54 +389,39 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
   ))
 
 // This mod's rows of the band above the prompt, under a blank row that keeps
-// them off the line above where the band has a row to spare. The setup gets
-// a row of its own where `isSplit`, else it rides on the headline; `glyphs` is
-// the set the rows draw beyond plain letters, and `columns` the terminal's
-// width, which the Context bar shrinks to fit. `hooks/band.tsx`
-// draws them: the engine takes one band hook per plugin, and `$` stays in that
-// hook's file.
+// them off the line above where the band has a row to spare: the headline,
+// then the context fill, the windows and the cache countdown. `glyphs` is the
+// set the rows draw beyond plain letters. `hooks/band.tsx` draws them: the
+// engine takes one band hook per plugin, and `$` stays in that hook's file.
 export const statusRows = (
   elements: BandElements,
   status: StatusBand,
-  {
-    hasMargin,
-    isSplit,
-    glyphs = UNICODE,
-    columns,
-  }: { hasMargin: boolean; isSplit: boolean; glyphs?: Glyphs; columns?: number },
+  { hasMargin, glyphs = UNICODE }: { hasMargin: boolean; glyphs?: Glyphs },
 ): RenderElement => {
   const { Box, Text } = elements
-  const setup = isSplit ? setupSegments(status, glyphs) : []
-  const contextRuns = contextSegments(status, glyphs, barCells(columns))
-  const context = contextRuns.map(segment => segment.text).join('')
-  const limits = limitsSegments(status, glyphs)
+  const context = contextSegments(status)
+  const times = timesSegments(status, glyphs)
   const curate = curateText(status)
 
   return (
     <Box key="status-band" flexDirection="column" marginTop={hasMargin ? 1 : 0}>
-      <Text wrap="truncate-end">
-        {runs(
-          elements,
-          isSplit ? headlineSegments(status, glyphs) : mergedSegments(status, glyphs),
-        )}
-      </Text>
-      {setup.length === 0 ? null : <Text wrap="truncate-end">{runs(elements, setup)}</Text>}
-      {context === '' && limits.length === 0 && curate === '' ? null : (
+      <Text wrap="truncate-end">{runs(elements, headlineSegments(status, glyphs))}</Text>
+      {context.length === 0 && times.length === 0 && curate === '' ? null : (
         <Box>
-          {context === '' ? null : (
+          {context.length === 0 ? null : (
             <Text color={levelOf(status.contextPercent)} wrap="truncate-end">
-              {runs(elements, contextRuns)}
+              {runs(elements, context)}
             </Text>
           )}
-          {limits.length === 0 ? null : (
+          {times.length === 0 ? null : (
             <Text wrap="truncate-end">
-              {context === '' ? null : <Text dimColor>{glyphs.separator}</Text>}
-              {runs(elements, limits)}
+              {context.length === 0 ? null : <Text dimColor>{glyphs.separator}</Text>}
+              {runs(elements, times)}
             </Text>
           )}
           {curate === '' ? null : (
             <Box>
-              {context === '' && limits.length === 0 ? null : (
+              {context.length === 0 && times.length === 0 ? null : (
                 <Text dimColor>{glyphs.separator}</Text>
               )}
               <Text color="warning" wrap="truncate-end">

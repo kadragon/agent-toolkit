@@ -1,7 +1,7 @@
 {
   "name": "mods",
   "description": "Claude Code interface mods by kadragon. Claude Code only; built on the early-access function-hooks API.",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "author": {
     "name": "kadragon"
   },
@@ -18,7 +18,7 @@
     "statusBandEnabled": {
       "type": "boolean",
       "title": "Status band",
-      "description": "Show the model, effort, directory, git branch, session time, prompt-cache time left, hook, skill and MCP server counts, context fill, rate limits and a due harness-curate run above the prompt, in three rows.",
+      "description": "Show the model, effort, directory and git branch, then the context fill, rate limits, prompt-cache time left and a due harness-curate run above the prompt, in two rows.",
       "default": true
     },
     "statusBandCacheTtlMinutes": {
@@ -30,7 +30,7 @@
     "statusBandAscii": {
       "type": "boolean",
       "title": "Status band in plain ASCII",
-      "description": "Draw the status band's separators, effort mark, context bar and cut branch names in ASCII, for a terminal that leaves stale cells or broken glyphs behind on redraw (Wave on Windows).",
+      "description": "Draw the status band's separators, effort mark and cut branch names in ASCII, for a terminal that leaves stale cells or broken glyphs behind on redraw (Wave on Windows).",
       "default": false
     },
     "limitNoticeHidden": {
