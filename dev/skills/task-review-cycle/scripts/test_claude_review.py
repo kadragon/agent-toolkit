@@ -171,7 +171,7 @@ def case_contract_is_not_executed(tmp):
 
 
 def case_blocking_scope_and_failure_field(tmp):
-    """Opus 5.5 review guidance: list only merge-blocking problems, each with how it fails.
+    """Require failure evidence for blocking and pre-existing bugs.
 
     consolidation-guide.md keys off both: P2/P3 never gate a merge, and a code-review finding
     with an empty failure field is folded into the low-confidence note.
@@ -179,22 +179,40 @@ def case_blocking_scope_and_failure_field(tmp):
     print("\ncase: prompt scopes to merge-blocking findings and requires a failure field")
     _, prompt = run(tmp, ["main", ""], stdout=envelope("[]"))
     flat = " ".join(prompt.split())
-    check("scoped to merge-blocking problems", "only problems you would block the merge for" in flat, prompt[:800])
-    check("schema severity is P0/P1 only", '"severity":"P0"|"P1",' in flat and '"P2"' not in flat and "P3" not in flat, prompt[:800])
+    check("scoped to merge-blocking problems and touched pre-existing bugs",
+          "merge-blocking problems introduced or worsened by the diff and concrete pre-existing bugs" in flat)
+    check("only P0/P1 plus pre_existing allowed", '"severity":"P0"|"P1"|"pre_existing",' in flat)
     check("schema carries a failure field", '"failure":"' in flat, prompt[:800])
     check("failure is defined as a concrete demonstration", "how to show it fails" in flat, prompt[:800])
     # Blocking-only and the passthrough rule must agree, or the headless run gets two opposite orders.
     check("passthrough never drops a blocking finding", "never re-rank, re-judge, merge, summarize or drop a blocking finding" in flat, prompt[:1600])
+    check("regular review excludes comment rules", '"source":"comments"' not in prompt and "## Keep list" not in prompt)
 
 
 def case_comment_rules_reach_prompt(tmp):
     """The comments axis is appended from references/comment-rules.md verbatim, backticks inert."""
     print("\ncase: comment rules appended verbatim with their own source tag")
     rules = (SCRIPT.parent.parent / "references" / "comment-rules.md").read_text()
-    _, prompt = run(tmp, ["main", "", CONTRACT], stdout=envelope("[]"))
+    _, prompt = run(tmp, ["main", "--comments"], stdout=envelope("[]"))
     check("rules text appears verbatim", rules in prompt, prompt[-400:])
     check('comment findings tagged', '"source":"comments"' in prompt)
-    check("rules follow the contract block", prompt.index(CONTRACT) < prompt.index(rules))
+    check("comment mode excludes blocking and contract grading", 'Skill "code-review"' not in prompt and
+          "Sprint Contract:" not in prompt and "All these findings are advisory" in prompt)
+
+
+def case_repo_guidance_is_loaded_once(tmp):
+    print("\ncase: let the built-in load REVIEW.md first")
+    subprocess.run(["git", "init", "-q", str(tmp)], check=True)
+    nested = tmp / "nested"
+    nested.mkdir()
+    rules = "Only the root rules apply."
+    (tmp / "REVIEW.md").write_text(rules, encoding="utf-8")
+    (nested / "REVIEW.md").write_text("NESTED RULES", encoding="utf-8")
+    _, prompt = run(nested, ["main"], stdout=envelope("[]"))
+    check("wrapper does not append either file", rules not in prompt and "NESTED RULES" not in prompt)
+    check("prompt prefers the built-in root guidance", "local skill can read repository-root REVIEW.md" in prompt)
+    check("missing native guidance is read once", "read it once and apply its failure criteria" in prompt)
+    check("already loaded guidance is not fetched again", "Do not reload guidance the skill already read" in prompt)
 
 
 def case_missing_comment_rules_exits_nonzero(tmp):
@@ -208,7 +226,7 @@ def case_missing_comment_rules_exits_nonzero(tmp):
     stub.write_text(STUB)
     stub.chmod(0o755)
     proc = subprocess.run(
-        ["bash", str(lone / SCRIPT.name), "main", ""],
+        ["bash", str(lone / SCRIPT.name), "main", "--comments"],
         capture_output=True,
         text=True,
         cwd=tmp,
@@ -231,7 +249,7 @@ def case_bare_name_from_own_folder(tmp):
     stub.chmod(0o755)
     capture = tmp / "bare.txt"
     proc = subprocess.run(
-        ["bash", SCRIPT.name, "main", ""],
+        ["bash", SCRIPT.name, "main", "--comments"],
         capture_output=True,
         text=True,
         cwd=SCRIPT.parent,
@@ -346,6 +364,7 @@ def main():
             case_unparseable_emits_sentinel,
             case_missing_cli_exits_nonzero,
             case_cli_failure_propagates,
+            case_repo_guidance_is_loaded_once,
         ):
             case(tmp)
     failed = _results.count(False)

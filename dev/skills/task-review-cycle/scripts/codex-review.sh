@@ -18,6 +18,13 @@ CODEX_MODE="${1:?Usage: codex-review.sh <codex_mode> <base_branch> [codex_compan
 BASE_BRANCH="${2:?Usage: codex-review.sh <codex_mode> <base_branch> [codex_companion_path]}"
 CODEX_COMPANION_PATH="${3:-}"
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$SCRIPT_DIR/review-guidance.sh"
+GUIDANCE=$(review_repo_guidance)
+REVIEW_PROMPT="Review the current branch against ${BASE_BRANCH} using git diff ${BASE_BRANCH}...HEAD. Use git and file reads only; do not edit files or run checks. Identify actionable defects introduced or worsened by the diff, with file:line and a concrete failure scenario. Skip cleanup and style nits.
+Also report real bugs in code the diff touches or reads if verified at the base and not worsened by the diff. Put [pre_existing] in each such finding title, even if the output schema also requires a numeric priority. These findings are advisory and must not make the overall verdict blocking.
+${GUIDANCE}"
+
 # Bytes of review text emitted before head/tail truncation kicks in. A real review runs a few
 # KB; anything past this is a transcript that leaked into the review field, and dumping it
 # would blow the caller's output budget and push the findings out of view.
@@ -663,7 +670,9 @@ case "$CODEX_MODE" in
     while :; do
       RAW=""
       codex_status=0
-      RAW=$(node "$CODEX_COMPANION_PATH" review --base "$BASE_BRANCH" --json 2>"$LOG_FILE") || codex_status=$?
+      # The companion's native review does not accept focus text. Its branch-scoped
+      # adversarial review accepts the same instructions as the standalone CLI.
+      RAW=$(node "$CODEX_COMPANION_PATH" adversarial-review --base "$BASE_BRANCH" --scope branch --json "$REVIEW_PROMPT" 2>"$LOG_FILE") || codex_status=$?
       if [ "$codex_status" -ne 0 ]; then
         printf 'WARN: codex companion exited %s\n' "$codex_status" >&2
         [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
@@ -776,7 +785,8 @@ case "$CODEX_MODE" in
     # on one branch would erase each other's pending and publish a meta mixing both.
     acquire_workspace_lock || exit "$EX_LOCKED"
     init_result_dir
-    TEXT=$(codex review --base "$BASE_BRANCH" 2>"$LOG_FILE") || codex_status=$?
+    # The CLI rejects --base with a custom prompt; the prompt names the same comparison.
+    TEXT=$(codex review - <<<"$REVIEW_PROMPT" 2>"$LOG_FILE") || codex_status=$?
     if [ "$codex_status" -ne 0 ]; then
       printf 'WARN: codex review exited %s\n' "$codex_status" >&2
       emit_log_tail "$LOG_FILE" "codex CLI transcript"

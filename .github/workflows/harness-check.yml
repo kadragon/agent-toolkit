@@ -80,12 +80,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Run scripts/ci/test_check_harness_drift.py
         run: python3 scripts/ci/test_check_harness_drift.py
 
       - name: Run scripts/ci/check_harness_drift.py
         run: python3 scripts/ci/check_harness_drift.py
+
+      - name: Verify review-recall scorecard freshness
+        env:
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+        run: bash dev/skills/task-review-cycle/evals/review-recall/check-results.sh "$REVIEW_BASE"
 
   changelog-entries:
     name: CHANGELOG Entry Contract check

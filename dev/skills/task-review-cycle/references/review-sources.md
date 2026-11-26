@@ -11,6 +11,16 @@ Select an allowed independent reviewer for any gate that requires one. If none c
 the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer
 must not be retried through another tool.
 
+## Advisory comments pass
+
+After the primary review returns, run `claude-review.sh <base> --comments` as a separate read-only
+pass using the same data-sharing policy as Step 2 and a foreground timeout at most 600 seconds.
+If Claude is excluded, unavailable, times out or returns a sentinel, record the reason and apply
+`comment-rules.md` inline when possible. Tag both forms `comments`. The pass cannot request changes
+or trigger a blocking re-review. Cleanup decisions follow `comment-rules.md` → *Applying*.
+Measure their dispositions before changing where the pass runs. The separate pass follows
+https://claude.dev/blog/solving-code-review-at-anthropic/ (2026-10-15).
+
 ## Panel source launch
 
 Lite reuses the codex block below, run in the foreground, whenever `risk-routing.md` → *Lite reviewer* selects it — as the reviewer or as the fallback (`risk-routing.md` → *Lite

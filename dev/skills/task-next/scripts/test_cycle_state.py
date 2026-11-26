@@ -448,6 +448,22 @@ class RecoveryTest(unittest.TestCase):
     def test_retire_is_idempotent(self):
         self.assertFalse(self.state("retire")["retired"])
 
+    def test_review_dispositions_survive_retirement_and_scope_replacement(self):
+        self.state("save", text=contract("first_cycle"))
+        disposition = {"head": "abc", "id": "same-defect", "sources": ["code-review", "codex"],
+                       "disposition": "dropped", "reason": "wrong"}
+        note = "Review passed\nReview disposition " + json.dumps(disposition)
+        self.state("note", text=note)
+        self.state("save", "--replace", text=contract("second_cycle"))
+        self.assertIsNone(self.state("inspect")["notes"])
+        disposition = {**disposition, "head": "def", "sources": ["agy"], "reason": "out-of-scope"}
+        self.state("note", text="Review disposition " + json.dumps(disposition))
+        retired = self.state("retire")
+        latest = Path(retired["review_dispositions_path"])
+        self.assertEqual(json.loads(latest.read_text(encoding="utf-8")), disposition)
+        self.assertEqual(len(list(latest.parent.glob("*.jsonl"))), 2)
+        self.assertIsNone(self.state("inspect")["notes"])
+
     def test_contract_without_criteria_refused(self):
         self.assertIn("Acceptance criteria", self.state("save", text="just prose", ok=False))
         empty = "**Acceptance criteria:**\n**Out of scope:** none\n"
