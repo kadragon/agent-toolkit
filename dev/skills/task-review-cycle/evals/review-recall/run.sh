@@ -28,8 +28,6 @@ OUT="${1:?Usage: run.sh <out-dir> [fixture-id ...]}"
 shift
 FULL_RUN=$#
 EFFORT="${REVIEW_RECALL_EFFORT:-medium}"
-# The clone's branch at the introducing commit. codex-review.sh keys its result sidecar by the
-# current branch name, so adopt_codex_sidecar reads `$BENCH_BRANCH.meta` / `.review.txt`.
 BENCH_BRANCH=bench
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -50,7 +48,6 @@ WORK=""
 LOCK=""
 cleanup() {
   local pid
-  # A second signal must not abort the cleanup that is already running.
   trap '' INT TERM
   # ${arr[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
   for pid in ${PIDS[@]+"${PIDS[@]}"}; do
@@ -64,13 +61,9 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-# A cancelled run must still reach cleanup: exit from the signal trap runs the EXIT trap, which
-# kills the background fixtures and releases the lock.
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# One run per out-dir. mkdir is the atomic claim; the holder's pid tells a live run from a lock
-# left by a killed one, which is removed by hand.
 claim_out_dir_lock() {
   local holder
   if ! mkdir "$OUT/.run.lock" 2>/dev/null; then

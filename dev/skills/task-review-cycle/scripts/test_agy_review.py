@@ -151,7 +151,6 @@ def case_failing_diff_is_an_error_not_an_empty_diff(tmp):
     tree = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "main^{tree}"], check=True, capture_output=True, text=True
     ).stdout.strip()
-    # `main` still resolves to a commit, but its tree is gone, so both diff forms fail.
     obj = repo / ".git" / "objects" / tree[:2] / tree[2:]
     check("main's tree is a loose object the case can remove", obj.exists(), str(obj))
     obj.chmod(0o600)

@@ -19,7 +19,6 @@ require_commit_ref "$BASE_BRANCH"
 # Gate on empty diff up front so we don't spin up agy for nothing.
 # The diff itself is fetched by agy via its shell tool — embedding large
 # diffs directly in the prompt can overload context.
-# A failing diff is an error, never an empty diff: only a successful empty comparison skips.
 if ! CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only 2>/dev/null \
   || git diff "${BASE_BRANCH}" --name-only); then
   echo "ERROR: git diff against ${BASE_BRANCH} failed — Antigravity review not run." >&2
