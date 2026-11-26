@@ -31,7 +31,7 @@ const covered = (projectPath: string, cwd: string): Coverage | undefined => {
   return { length, caseVariant: cwd.slice(0, end) }
 }
 
-// Pick the nearest project install, then the user's, then the first eligible install.
+// Pick the nearest project install, then the user's: another project's install is not this one's.
 export const installPath = async (
   text: string,
   cwd: string,
@@ -44,7 +44,6 @@ export const installPath = async (
 
   if (!Array.isArray(installs)) return undefined
 
-  let first: string | undefined
   let user: string | undefined
   let nearest: { path: string; length: number } | undefined
 
@@ -65,14 +64,12 @@ export const installPath = async (
           nearest = { path: install.installPath, length: match.length }
         }
       }
-    } else if (projectPath === undefined) {
+    } else {
       user ??= install.installPath
     }
-
-    first ??= install.installPath
   }
 
-  return nearest?.path ?? user ?? first
+  return nearest?.path ?? user
 }
 
 // `path` beneath `base`, in the separator `base` is written with: a Windows

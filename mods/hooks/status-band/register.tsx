@@ -170,6 +170,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
   const effortAtStart = live.stepEffort
+  const cacheAtStart = live.cacheExpiresAt
 
   try {
     const [model, cwd, usage, turns, now, git] = await Promise.all([
@@ -187,7 +188,6 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
     // What the write decided, kept for after it: the engine may run the
     // function again, so it reads `live` and leaves it as it is.
-    const beforeCache = live.cacheExpiresAt
     let effortChange: { step: StepEffort; model?: string } | undefined
     let isForfeit = false
 
@@ -245,7 +245,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       if (model === undefined) live.stepEffort = undefined
       else step.model = effortModelFor(step.model, model) ?? step.model
     }
-    if (isForfeit && live.cacheExpiresAt === beforeCache) {
+    if (isForfeit && live.cacheExpiresAt === cacheAtStart) {
       live.cacheExpiresAt = null
       live.cacheModel = undefined
     }
@@ -383,9 +383,13 @@ export const register: Register = (on, options) => {
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
-          await update($, statusBand, current =>
-            current === null ? null : { ...current, cacheExpiresAt, cacheModel },
-          )
+          await update($, statusBand, current => {
+            if (current === null) return null
+
+            const shownModel = sessionModel === '' ? current.model : sessionModel
+
+            return ranUnderLeftModel(cacheModel, shownModel) ? current : { ...current, cacheExpiresAt, cacheModel }
+          })
         })
         .catch(() => undefined)
     }
