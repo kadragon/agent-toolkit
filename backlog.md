@@ -22,6 +22,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] Name the model check for the removed comment: extract `cacheModel !== undefined && sessionModel !== '' && !isSameModel(...)` in the step hook into a predicate such as `ranUnderLeftModel` (source: comments) — mods/hooks/status-band/register.tsx:364
 - [ ] [debt] Name the test gates for the removed comment: rename `World.nowGate` and `World.modelGate` to say they hold back only the next reading, e.g. `holdNextNow` and `holdNextModel` (source: comments) — mods/hooks/status-band/register.test.tsx:54
 
+### PR #455 — Fall back when preflight sort lacks version support (2026-11-26)
+
+- [ ] [harness] Preserve numeric version order in the portable Codex companion fallback so a cached version such as `1.10` ranks above `1.9` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:120` (introduced here)
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
