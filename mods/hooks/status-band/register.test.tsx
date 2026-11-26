@@ -44,7 +44,6 @@ type World = {
   gitCalls: number
   // Set to hold the next git call open until the test lets it go.
   gitGate?: Promise<void>
-  // Unset, the settings read fails.
   settings?: Record<string, unknown>
   files: Record<string, string>
   // What the environment holds; a name not listed is unset.
@@ -842,7 +841,6 @@ test('the band is two rows at most, with no count row and no session time', asyn
     ' │ 5h: 88% (2h 4m) │ cache 60m',
   ])
   expect(await four.ui.find({ type: 'Text', text: /\b(hooks?|skills?|mcp)\b| up (<|\d)/ })).toBeUndefined()
-  // Two rows in a band of four leave the blank one above them.
   expect((await four.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await four.ui.unmount()
 

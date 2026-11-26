@@ -10,7 +10,6 @@ const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
 // The engine takes one hook per plugin on the band above the prompt, so a mod
 // that draws there hands its rows over here.
-// The status rows are two, under a blank one where another row fits.
 const STATUS_ROWS = 2
 
 export const register: Register = (on, options) => {

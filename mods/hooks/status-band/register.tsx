@@ -24,7 +24,6 @@ import type { Glyphs, Segment } from './format'
 //   rendering the band rows: runs, statusRows
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
-// The reset and cache countdowns read in minutes.
 const TICK_MS = 60_000
 const GIT_TIMEOUT_MS = 2000
 const MINUTE_MS = 60_000
@@ -53,9 +52,7 @@ type Live = {
   // Null once the session ended or the model changed: nothing is cached.
   cacheExpiresAt?: number | null
   cacheModel?: string
-  // The curate verdict, as last read.
   setup: Setup
-  // False until this load read or reset it: a reload keeps what is drawn.
   hasSetup: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
@@ -117,8 +114,6 @@ async function readCurateDue($: EngineInterface): Promise<boolean> {
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
 }
 
-// The curate check spawns a scan, so it runs apart from the other figures and at most
-// once in a while; between runs, or when a run fails, the last answer stands.
 function loadCurate($: EngineInterface, live: Live): void {
   if (live.curateRead !== undefined) return
 
@@ -147,7 +142,6 @@ function loadCurate($: EngineInterface, live: Live): void {
     })
 }
 
-// The verdict was another session's: it is left out until read again.
 const resetSetup = (live: Live): void => {
   live.setup = {}
   live.hasSetup = true
@@ -328,7 +322,7 @@ export const register: Register = (on, options) => {
 
   // A `/clear` empties the window and starts the timer over; no measure follows it.
   // Whatever ends the session, the conversation that follows has its own cache
-  // and its own curate verdict, and where the process goes on the band shows it at once.
+  // and where the process goes on the band shows it at once.
   on('session.end', async ($, e, next) => {
     const result = await next(e)
 

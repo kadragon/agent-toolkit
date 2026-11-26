@@ -163,7 +163,6 @@ export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Se
     glyphs.separator,
   )
 
-// The cache countdown beside the windows, each a figure with the time it has left.
 export const timesSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] => {
   const cache = cacheText(status)
 
