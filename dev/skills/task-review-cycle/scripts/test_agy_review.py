@@ -80,7 +80,7 @@ def make_repo(tmp, review_guidance=None):
     return repo
 
 
-def run(tmp, stdout="", exit_code=0, review_guidance=None):
+def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main"):
     """Run agy-review.sh against main with a stubbed `agy`. Returns (proc, prompt, snapshot, dir)."""
     repo = make_repo(tmp, review_guidance)
     if review_guidance is not None:
@@ -104,7 +104,7 @@ def run(tmp, stdout="", exit_code=0, review_guidance=None):
         "AGY_STUB_EXIT": str(exit_code),
     }
     proc = subprocess.run(
-        ["bash", str(SCRIPT), "main"],
+        ["bash", str(SCRIPT), base],
         capture_output=True,
         text=True,
         cwd=repo,
@@ -127,6 +127,22 @@ def case_script_parses(_tmp):
     print("\ncase: the script parses")
     proc = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True, timeout=60)
     check("bash -n exits 0", proc.returncode == 0, proc.stderr)
+
+
+def case_base_ref_is_distinguished_from_empty_diff(tmp):
+    print("\ncase: an unknown comparison ref fails, an empty diff skips")
+    (tmp / "bad").mkdir()
+    proc, prompt, _, result_dir = run(tmp / "bad", stdout="LGTM\n", base="no-such-ref")
+    check("unknown ref exits non-zero", proc.returncode != 0, proc.stdout + proc.stderr)
+    check("unknown ref names the ref", "no-such-ref" in proc.stderr, proc.stderr)
+    check("unknown ref is not reported as an empty diff", "No changes detected" not in proc.stderr, proc.stderr)
+    check("agy is not launched for an unknown ref", prompt == "")
+    check("no result trio is written", not (result_dir / f"{KEY}.meta").exists())
+    (tmp / "same").mkdir()
+    proc, prompt, _, _ = run(tmp / "same", stdout="LGTM\n", base=BRANCH)
+    check("empty diff exits 0", proc.returncode == 0, proc.stderr)
+    check("empty diff is reported as such", "No changes detected" in proc.stderr, proc.stderr)
+    check("agy is not launched for an empty diff", prompt == "")
 
 
 def case_prompt_is_read_only(tmp):
@@ -218,6 +234,7 @@ def main():
         return 1
     cases = (
         case_script_parses,
+        case_base_ref_is_distinguished_from_empty_diff,
         case_prompt_is_read_only,
         case_repo_guidance_and_pre_existing,
         case_ok_run_persists_review,

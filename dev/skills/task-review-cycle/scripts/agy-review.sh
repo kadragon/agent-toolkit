@@ -8,6 +8,11 @@ set -euo pipefail
 
 BASE_BRANCH="${1:?Usage: agy-review.sh <base_branch>}"
 
+if ! git rev-parse --verify --quiet "${BASE_BRANCH}^{commit}" >/dev/null 2>&1; then
+  echo "ERROR: comparison ref ${BASE_BRANCH} not found — Antigravity review not run." >&2
+  exit 1
+fi
+
 # Gate on empty diff up front so we don't spin up agy for nothing.
 # The diff itself is fetched by agy via its shell tool — embedding large
 # diffs directly in the prompt can overload context.

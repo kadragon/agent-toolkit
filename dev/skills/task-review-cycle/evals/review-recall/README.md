@@ -72,6 +72,10 @@ review cycle. Each fixture runs in its own throwaway clone, fetched at depth 2 b
 the reviewer cannot reach the fix commit or this table, and the source repo's refs are not
 touched. Fixtures run in parallel. The Claude arm's effort is pinned by
 `REVIEW_RECALL_EFFORT` (default `medium`) and recorded in each `<id>-meta.txt`.
+One `run.sh` runs per out-dir at a time (`.run.lock` holds its pid); a second run on the same
+out-dir exits 1, and a lock left by a killed run is removed by hand. Codex's stdout is cut to head and tail past 40,000 bytes, so a truncated arm is
+replaced by the full review from `<id>-codex-result/`, and the arm fails when that sidecar is
+incomplete. `check-results.sh` fails when a `scripts/*-review.sh` launcher is not in its input list.
 `run.sh` exits 1 on a missing, failed or unreadable review. A full successful run writes
 `fingerprint.txt`. Score each code reviewer by hand against the gold table, tally comment
 findings separately, and record the date, reviewer versions/mode, effort and results in

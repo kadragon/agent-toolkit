@@ -13,18 +13,18 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #444 — Measure and focus the review cycle (2026-11-26)
-
-- [ ] [harness] Keep overlapping review-recall attempts from overwriting each other's artifacts (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:39` (introduced here)
-- [ ] [harness] Grade Codex recall from the complete review sidecar when wrapper stdout is truncated (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:45` (introduced here)
-- [ ] [harness] Distinguish an invalid agy comparison ref from an empty diff (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:14` (pre_existing)
-- [ ] [constraint] Verify that new reviewer launchers are included in the recall fingerprint inputs (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9`
-
 ### PR #451 — Keep the cache countdown on narrow status bands and tidy the status-band mod (2026-11-26)
 
 - [ ] [debt] The countdown a step writes behind it can land after a refresh forfeited that cache for a model switch, so the old model's `cache …` shows under the new one until the next tick: skip the write when `current.model` differs from the step's model (source: code-review, agy) — mods/hooks/status-band/register.tsx:358 (pre_existing)
 - [ ] [debt] `covered` compares a project path and the working directory with `startsWith` without unifying `\\` and `/`, so `C:\work\repo` misses `C:/work/repo/src` and the user-scope install is read instead (source: codex) — mods/hooks/status-band/count.ts:12 (pre_existing)
 - [ ] [debt] Rename for meaning where comments were removed: `widthOf` to carry the one-cell-per-character assumption, `room` in `timesSegments` to `cellsLeft`, `Live.isCurateOwned` to `hasSessionCurateVerdict` (source: comments) — mods/hooks/status-band/register.tsx:58
+
+### PR #452 — Harden review-recall runs and fingerprint coverage (2026-11-26)
+
+- [ ] [harness] Treat a failing fallback `git diff` in `agy-review.sh` as an error, not an empty diff, so only a successful empty comparison skips the review (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:21` (pre_existing)
+- [ ] [harness] Add `preflight.sh` to the recall fingerprint inputs, since it picks the Codex mode and companion path `run.sh` runs (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9` (pre_existing)
+- [ ] [debt] Name the code for the removed comments: a `claim_out_dir_lock` function in `run.sh`, a `BENCH_BRANCH` variable for the `bench` sidecar key, and a `require_commit_ref` guard in `agy-review.sh` (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:62`
+- [ ] [harness] Trap `INT` and `TERM` in `run.sh` so a cancelled run stops its background fixtures and releases its lock (source: agy) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:58` (introduced here)
 
 ## Rejected — do not re-file
 
