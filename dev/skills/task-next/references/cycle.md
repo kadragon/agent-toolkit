@@ -48,7 +48,13 @@ grep -Fxq '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '\n.worktrees/\n' >> "$
 git worktree add "$ROOT/.worktrees/$SLUG" -b "$BRANCH" "$BASE" \
   || { echo "claim collision: $BRANCH or .worktrees/$SLUG already exists" >&2; exit 1; }
 echo "worktree: $ROOT/.worktrees/$SLUG"
+# best-effort: record this session's worktree on its Herdr terminal; never fails the claim
+[[ -z "${HC_TERMINAL_ID:-}" ]] || hc label "$HC_TERMINAL_ID" "worktree=$ROOT/.worktrees/$SLUG" >/dev/null 2>&1 || true
 ```
+
+The label (`worktree=<absolute path>`) lets a Herdr status mod show the worktree, since the
+terminal's cwd stays at the main checkout. Clear it (`worktree=`, same best-effort form) once
+this session's worktree is removed. `batch.md` never labels: one parent owns many unit worktrees.
 
 **Claim.** The slug is derived from the selected heading, so `git worktree add` failing on an
 existing `$BRANCH` or `.worktrees/$SLUG` (two selections from one heading can differ only in the
@@ -89,7 +95,8 @@ starting checkout is never read, edited or switched. Nothing collapses back into
   matches: issue `cd "<printed worktree path>"` as its own Bash call first (the cwd carries to
   the next call; Codex resets it per call, so set the merge call's `workdir` instead), then the
   merge command. The merge deletes the worktree, so every step after it — `cycle_state.py
-  retire --branch <branch>` included — runs from the main worktree root (`ROOT`).
+  retire --branch <branch>` included — runs from the main worktree root (`ROOT`). After it, clear the label:
+  `[[ -z "${HC_TERMINAL_ID:-}" ]] || hc label "$HC_TERMINAL_ID" "worktree=" >/dev/null 2>&1 || true`.
 - **Stopped run.** A failed check, missing authority or a QA stop preserves the worktree, branch
   and archive; only an explicit user instruction removes them. The archive stays either way —
   `cycle_state.py retire` follows a merge, never an abandonment.
