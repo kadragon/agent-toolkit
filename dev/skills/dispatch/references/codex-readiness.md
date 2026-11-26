@@ -3,9 +3,9 @@
 ## Before a Codex wave
 
 A Codex startup that updates a kadragon plugin invalidates running Codex children's hook
-approval. Before starting one while another is mid-cycle, compare each plugin's version in
-agent-toolkit `origin/main` with `~/.codex/plugins/cache/kadragon/<plugin>/<version>`.
-Launch only if all match; otherwise wait and prepare the wave as below.
+approval. Before starting one while another is mid-cycle, fetch agent-toolkit, then compare each
+plugin's version in `origin/main` with `~/.codex/plugins/cache/kadragon/<plugin>/<version>`.
+Launch only if the fetch succeeds and all versions match; otherwise wait and prepare the wave as below.
 If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
 send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 
