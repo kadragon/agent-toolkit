@@ -47,6 +47,30 @@ describe('installPaths', () => {
   })
 })
 
+describe('installPaths across separators', () => {
+  test('matches a project path and a directory written with different separators', () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { scope: 'user', installPath: '/p/user' },
+          { scope: 'project', projectPath: 'C:\\work\\repo', installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    expect(installPaths(text, 'C:/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
+    expect(installPaths(text, 'C:/work/repository')).toEqual({ 'a@m': '/p/user' })
+    expect(
+      installPaths(
+        JSON.stringify({
+          plugins: { 'a@m': [{ projectPath: 'C:/work/repo', installPath: '/p/repo' }, { installPath: '/p/user' }] },
+        }),
+        'C:\\work\\repo\\src',
+      ),
+    ).toEqual({ 'a@m': '/p/repo' })
+  })
+})
+
 describe('under', () => {
   test('joins a POSIX base with a forward slash', () => {
     expect(under('/home/me', '.claude')).toBe('/home/me/.claude')

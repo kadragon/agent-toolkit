@@ -136,7 +136,8 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
-export const widthOf = (segments: Segment[]): number => textOf(segments).length
+// Terminal cells, counted as one per character: the band draws no wide glyphs.
+export const cellsByLength = (segments: Segment[]): number => textOf(segments).length
 
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
 
@@ -177,7 +178,7 @@ export const limitsSegments = (
 export const timesSegments = (
   status: StatusBand,
   glyphs: Glyphs = UNICODE,
-  room?: number,
+  cellsLeft?: number,
 ): Segment[] => {
   const cache = cacheText(status)
   const drawn = (resetCount: number): Segment[] =>
@@ -193,7 +194,7 @@ export const timesSegments = (
   let resetCount = WINDOWS.length
   let times = drawn(resetCount)
 
-  while (room !== undefined && widthOf(times) > room && resetCount > 0) {
+  while (cellsLeft !== undefined && cellsByLength(times) > cellsLeft && resetCount > 0) {
     resetCount -= 1
     times = drawn(resetCount)
   }

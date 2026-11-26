@@ -51,6 +51,8 @@ type World = {
   // How long the next responses take to come back.
   stepMs: number
   switchedTo?: string
+  // Set to hold the next clock reading open until the test lets it go.
+  nowGate?: Promise<void>
   isUncached: boolean
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
@@ -134,7 +136,14 @@ const world = (on: On): World => {
 
     return { value: text }
   })
-  on('clock.now', async () => ({ value: state.now }))
+  on('clock.now', async () => {
+    const gate = state.nowGate
+
+    state.nowGate = undefined
+    await gate
+
+    return { value: state.now }
+  })
   // A period ends when the test says so.
   on('clock.every', async () => {
     await new Promise<void>(resolve => state.ticks.push(resolve))
@@ -611,6 +620,26 @@ test('a cache made under one model is not handed to the model the session switch
   state.switchedTo = 'claude-haiku-5-5'
   await step($)
   await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
+  await ui.unmount()
+})
+
+test('a countdown that lands after the session moved to another model is not shown under it', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.nowGate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  await measure($)
+  release()
+  await settle()
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')

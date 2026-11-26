@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Keep a stale cache countdown off a switched model; match project paths across separators (mods v1.1.6) (2026-11-26)
 - [done] Harden review-recall runs and fingerprint coverage (dev v4.12.27) (2026-11-26) → dev/skills/task-review-cycle/evals/review-recall/README.md
 - [done] Narrow-terminal status band keeps the cache countdown; pure count module guarded (mods v1.1.5) (2026-11-26)
 - [done] Treat incomplete Claude quota snapshots as unknown in dispatch (dev v4.12.26) (2026-11-26) → dev/skills/dispatch/references/quota-snapshot.md
