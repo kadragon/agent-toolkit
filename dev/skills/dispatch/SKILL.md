@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.7.0
+version: 2.8.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -69,12 +69,12 @@ Tiers are equal across CLIs: `haiku` = `luna` < `sonnet` < `opus` = `sol`; `terr
 Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal Claude tier stands in when Codex is unavailable.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
-Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
+Balance by quota. Before picking each wave's pairs, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
-plus each CLI's `state` and one `bias`. Only actual usage ≥90% in either window is `critical`.
-From 24h elapsed, weekly pace can raise state to `hot` (≥15 percentage points ahead or >120% projected at reset). Recheck next wave.
-See `references/quota-snapshot.md` when wiring or diagnosing the Claude status-line snapshot.
+plus each CLI's `state` and one `bias`. Unexpired Codex passes lower its state one step before bias.
+When redeeming a pass, use the first entry in `reset_passes_before_weekly_reset` if present.
+See `references/quota-snapshot.md` for thresholds, the Claude snapshot, and the manually maintained Codex pass file.
 Apply the bias on top of the tables below:
 
 | bias | Change |
