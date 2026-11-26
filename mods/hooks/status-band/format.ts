@@ -51,10 +51,24 @@ export const modelLabel = (model: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}${suffix ?? ''}`
 }
 
-const modelKey = (model: string): string =>
-  model.trim().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '')
+const withoutContextSuffix = (model: string): string => model.trim().replace(/\[[^\]]*\]$/, '')
+
+const SNAPSHOT_DATE = /-\d{8}$/
+const modelKey = (model: string): string => withoutContextSuffix(model).replace(SNAPSHOT_DATE, '')
 
 export const isSameModel = (a: string, b: string): boolean => modelKey(a) === modelKey(b)
+
+export const effortModelFor = (stepModel: string, sessionModel: string): string | undefined => {
+  const step = withoutContextSuffix(stepModel)
+  const session = withoutContextSuffix(sessionModel)
+
+  if (step === session) return step
+  if (!isSameModel(step, session) || (SNAPSHOT_DATE.test(step) && SNAPSHOT_DATE.test(session))) {
+    return undefined
+  }
+
+  return SNAPSHOT_DATE.test(session) ? session : step
+}
 
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))
@@ -136,7 +150,6 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
-// Terminal cells, counted as one per character: the band draws no wide glyphs.
 export const cellsByLength = (segments: Segment[]): number => textOf(segments).length
 
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
@@ -154,9 +167,10 @@ export const limitsSegments = (
   status: StatusBand,
   glyphs: Glyphs = UNICODE,
   resetCount = WINDOWS.length,
+  windowCount = WINDOWS.length,
 ): Segment[] =>
   joined(
-    WINDOWS.map(([kind, label], index): Segment[] => {
+    WINDOWS.slice(0, windowCount).map(([kind, label], index): Segment[] => {
       const limit = status.rateLimits.find(candidate => candidate.kind === kind)
 
       if (limit === undefined) return []
@@ -181,22 +195,35 @@ export const timesSegments = (
   cellsLeft?: number,
 ): Segment[] => {
   const cache = cacheText(status)
-  const drawn = (resetCount: number): Segment[] =>
+  const isExpired = cache === 'cache expired'
+  const drawn = (resetCount: number, windowCount: number): Segment[] =>
     joined(
       [
-        limitsSegments(status, glyphs, resetCount),
+        limitsSegments(status, glyphs, resetCount, windowCount),
         cache === ''
           ? []
-          : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
+          : [{ text: cache, color: isExpired ? 'warning' : 'planMode' }],
       ],
       glyphs.separator,
     )
   let resetCount = WINDOWS.length
-  let times = drawn(resetCount)
+  let windowCount = WINDOWS.length
+  let times = drawn(resetCount, windowCount)
 
   while (cellsLeft !== undefined && cellsByLength(times) > cellsLeft && resetCount > 0) {
     resetCount -= 1
-    times = drawn(resetCount)
+    times = drawn(resetCount, windowCount)
+  }
+
+  if (cellsLeft !== undefined && isExpired && cellsByLength(times) > cellsLeft) {
+    return limitsSegments(status, glyphs, resetCount)
+  }
+
+  if (cellsLeft !== undefined && cache !== '' && cache.length <= cellsLeft) {
+    while (cellsByLength(times) > cellsLeft && windowCount > 0) {
+      windowCount -= 1
+      times = drawn(resetCount, windowCount)
+    }
   }
 
   return times

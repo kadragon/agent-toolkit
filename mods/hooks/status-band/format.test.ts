@@ -13,6 +13,7 @@ import {
   modelLabel,
   timesSegments,
   timesText,
+  UNICODE,
 } from './format'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
@@ -187,6 +188,16 @@ describe('segments', () => {
     ])
     expect(segments[0]).toEqual({ text: '[Opus 5.5 ◔ medium]', color: 'claude', isBold: true })
   })
+})
+
+test('each glyph uses one UTF-16 code unit and one terminal cell', () => {
+  const defaultSingleCell = /^[\x20-\x7E│○◔◑◕●…]$/
+
+  for (const { separator, effort, ellipsis } of [UNICODE, ASCII]) {
+    for (const glyph of separator + Object.values(effort).join('') + ellipsis) {
+      expect(glyph).toMatch(defaultSingleCell)
+    }
+  }
 })
 
 describe('ascii', () => {

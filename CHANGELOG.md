@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Keep cache visible on narrow status bands and scope effort and Windows installs correctly (mods v1.1.7) (2026-11-26)
 - [done] Keep Codex companion discovery working without sort -V (dev v4.12.29) (2026-11-26)
 - [done] Keep a stale cache countdown off a switched model; match project paths across separators (mods v1.1.6) (2026-11-26)
 - [done] Fail agy review on a broken diff and stop recall runs on INT/TERM (dev v4.12.28) (2026-11-26)

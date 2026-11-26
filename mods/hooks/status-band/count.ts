@@ -9,42 +9,70 @@ export const enabledPlugins = (settings: Record<string, unknown>): string[] =>
 
 const slashed = (path: string): string => path.replace(/\\/g, '/')
 
-// How much of `cwd` a project path covers, in characters; 0 when it is not
-// that directory or one beneath it. Either separator ends a segment.
-const covered = (projectPath: unknown, cwd: string): number => {
-  if (typeof projectPath !== 'string') return 0
+const isWindowsPath = (path: string): boolean => /^(?:[a-z]:\/|\/\/[^/]+\/[^/]+)/i.test(path)
 
-  const root = slashed(projectPath).replace(/\/+$/, '')
+type Coverage = { length: number; caseVariant?: string }
+
+const covered = (projectPath: string, cwd: string): Coverage | undefined => {
+  const path = slashed(projectPath)
+  const root = path.replace(/\/+$/, '')
   const here = slashed(cwd)
-  const isWithin = here === root || (here.startsWith(root) && here.charAt(root.length) === '/')
+  const length = root.length + 1
 
-  return isWithin ? root.length + 1 : 0
+  if (here === root || here.startsWith(`${root}/`)) return { length }
+  if (!isWindowsPath(path) || !isWindowsPath(here)) return undefined
+
+  const ancestor = here.split('/').slice(0, root.split('/').length).join('/')
+
+  if (ancestor.toLowerCase() !== root.toLowerCase()) return undefined
+
+  const end = /^[a-z]:$/i.test(ancestor) ? ancestor.length + 1 : ancestor.length
+
+  return { length, caseVariant: cwd.slice(0, end) }
 }
 
-// Where the installed-plugins file says each plugin's directory is. A plugin
-// installed more than once is read from the install made for the nearest
-// project around `cwd`, else the user's own, else the first listed.
-export const installPaths = (text: string, cwd: string): Record<string, string> => {
+// Pick the nearest project install, then the user's, then the first eligible install.
+export const installPath = async (
+  text: string,
+  cwd: string,
+  id: string,
+  sameDirectory: (projectPath: string, ancestor: string) => Promise<boolean>,
+): Promise<string | undefined> => {
   const file: unknown = JSON.parse(text)
   const plugins = isRecord(file) && isRecord(file.plugins) ? file.plugins : {}
+  const installs = plugins[id]
 
-  return Object.fromEntries(
-    Object.entries(plugins).flatMap(([id, listed]) => {
-      const installs = (Array.isArray(listed) ? listed : []).filter(
-        (install): install is Record<string, unknown> & { installPath: string } =>
-          isRecord(install) && typeof install.installPath === 'string',
-      )
-      const nearest = installs.reduce<(typeof installs)[number] | undefined>(
-        (best, candidate) =>
-          covered(candidate.projectPath, cwd) > covered(best?.projectPath, cwd) ? candidate : best,
-        undefined,
-      )
-      const install =
-        nearest ?? installs.find(candidate => candidate.projectPath === undefined) ?? installs[0]
+  if (!Array.isArray(installs)) return undefined
 
-      return install === undefined ? [] : [[id, install.installPath]]
-    }),
-  )
+  let first: string | undefined
+  let user: string | undefined
+  let nearest: { path: string; length: number } | undefined
+
+  for (const install of installs) {
+    if (!isRecord(install) || typeof install.installPath !== 'string') continue
+
+    const projectPath = install.projectPath
+
+    if (typeof projectPath === 'string') {
+      const match = covered(projectPath, cwd)
+
+      if (match !== undefined) {
+        if (match.caseVariant !== undefined && !(await sameDirectory(projectPath, match.caseVariant))) {
+          continue
+        }
+
+        if (match.length > (nearest?.length ?? 0)) {
+          nearest = { path: install.installPath, length: match.length }
+        }
+      }
+    } else if (projectPath === undefined) {
+      user ??= install.installPath
+    }
+
+    first ??= install.installPath
+  }
+
+  return nearest?.path ?? user ?? first
 }
 
 // `path` beneath `base`, in the separator `base` is written with: a Windows

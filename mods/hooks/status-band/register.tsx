@@ -2,11 +2,12 @@ import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { StatusBand } from '../../types'
-import { enabledPlugins, installPaths, under } from './count'
+import { enabledPlugins, installPath, under } from './count'
 import {
   cellsByLength,
   contextSegments,
   curateText,
+  effortModelFor,
   headlineSegments,
   isSameModel,
   levelOf,
@@ -19,9 +20,9 @@ import type { Glyphs, Segment } from './format'
 // Read this file in ranges, not whole: find a name with `grep -n '<name>'` and read only
 // its range. Pure counting and text helpers live in count.ts and format.ts. The names
 // below are checked against the real top-level functions by `scripts/check_mods.py`.
-//   curate-due reads: readInstallPaths, readDevRoot, python, readCurateDue
+//   curate-due reads: readDevRoot, python, sameDirectory, readCurateDue
 //   curate check and verdict: checkCurateThrottled, dropCurateVerdict
-//   live refresh (git, cache window, tick): isCached, refresh, watch
+//   live refresh (git, cache window, tick): isCached, ranUnderLeftModel, refresh, watch
 //   entry points (register holds every on(...) hook handler): startStatusBand, register
 //   rendering the band rows: runs, statusRows
 
@@ -43,11 +44,11 @@ const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
 const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
+type StepEffort = { model: string; value: StatusBand['effort'] }
+
 // What one load of the module keeps between hooks.
 type Live = {
-  effort: StatusBand['effort']
-  // True from a main-loop step until the next read: that effort is the model's now.
-  isEffortFresh: boolean
+  stepEffort?: StepEffort
   tick?: { cancel: () => void }
   asked: number
   drawn: number
@@ -65,8 +66,10 @@ type Live = {
 
 type Setup = Pick<StatusBand, 'curateDue'>
 
-// Where the installed-plugins file says each plugin's directory is.
-async function readInstallPaths($: EngineInterface): Promise<Record<string, string>> {
+// Where the dev plugin is installed, when the settings switch it on.
+async function readDevRoot($: EngineInterface): Promise<string | undefined> {
+  if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
+
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 
@@ -74,17 +77,12 @@ async function readInstallPaths($: EngineInterface): Promise<Record<string, stri
 
   if (claudeDir === undefined) throw new Error('no home directory')
 
-  return installPaths(
+  return installPath(
     await $.fs.read(under(claudeDir, 'plugins/installed_plugins.json')),
     await $.session.cwd(),
+    DEV_PLUGIN,
+    (projectPath, ancestor) => sameDirectory($, projectPath, ancestor),
   )
-}
-
-// Where the dev plugin is installed, when the settings switch it on.
-async function readDevRoot($: EngineInterface): Promise<string | undefined> {
-  if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
-
-  return (await readInstallPaths($))[DEV_PLUGIN]
 }
 
 // As the hooks do: `python3`, else `python` where only that is installed.
@@ -94,6 +92,13 @@ function python(
   init: { timeoutMs: number; cwd?: string },
 ): Promise<{ exitCode: number; stdout: string }> {
   return $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+}
+
+async function sameDirectory($: EngineInterface, path: string, ancestor: string): Promise<boolean> {
+  const args = ['-c', 'import os, sys; sys.exit(not os.path.samefile(*sys.argv[1:]))', path, ancestor]
+  const result = await python($, args, { timeoutMs: CURATE_TIMEOUT_MS }).catch(() => null)
+
+  return result?.exitCode === 0
 }
 
 // Whether a harness-curate run is due here, judged as the session-start hook
@@ -156,11 +161,15 @@ const dropCurateVerdict = (live: Live): void => {
 const isCached = (usage: { cache_read_input_tokens: number; cache_creation_input_tokens: number } | null): boolean =>
   usage !== null && usage.cache_read_input_tokens + usage.cache_creation_input_tokens > 0
 
+const ranUnderLeftModel = (stepModel: string | undefined, sessionModel: string): boolean =>
+  stepModel !== undefined && sessionModel !== '' && !isSameModel(stepModel, sessionModel)
+
 // The band is a convenience: a figure the engine cannot give is left out or
 // kept as last read, and nothing here may fail a hook.
 async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
+  const effortAtStart = live.stepEffort
 
   try {
     const [model, cwd, usage, turns, now, git] = await Promise.all([
@@ -178,35 +187,37 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
     // What the write decided, kept for after it: the engine may run the
     // function again, so it reads `live` and leaves it as it is.
-    const before = { effort: live.effort, isFresh: live.isEffortFresh, cache: live.cacheExpiresAt }
-    let decided: { effort: StatusBand['effort']; isForfeit: boolean } | undefined
+    const beforeCache = live.cacheExpiresAt
+    let effortChange: { step: StepEffort; model?: string } | undefined
+    let isForfeit = false
 
     await update($, statusBand, current => {
-      decided = undefined
+      effortChange = undefined
+      isForfeit = false
 
       // A read that started earlier and ended later must not undo a newer one.
       if (order < live.drawn) return current
 
       live.drawn = order
       const name = model === '' ? (current?.model ?? '') : model
-      let effort = before.effort
+      const stepEffort = live.stepEffort
+      let effort = current?.model === name ? current.effort : undefined
 
-      if (before.isFresh) {
-        // The step that reported it ran under this model.
-      } else if (current !== null && current.model !== name) {
-        // The effort was the last model's; the next step reports this one's.
-        effort = undefined
-      } else if (effort === undefined) {
-        // A reload starts the module over; the session's value is still good.
-        effort = current?.effort
+      if (stepEffort !== undefined) {
+        const effortModel = effortModelFor(stepEffort.model, name)
+        const wasCurrentModel =
+          current !== null && effortModelFor(stepEffort.model, current.model) !== undefined
+
+        effort = effortModel === undefined ? undefined : stepEffort.value
+        if (effortModel !== undefined || (model !== '' && (stepEffort === effortAtStart || wasCurrentModel))) {
+          effortChange = { step: stepEffort, model: effortModel }
+        }
       }
 
       // The cache was the model's that made it: a switch forfeits it.
       const cacheModel = live.cacheModel ?? current?.cacheModel
-      const isForfeit = cacheModel !== undefined && name !== '' && !isSameModel(cacheModel, name)
+      isForfeit = ranUnderLeftModel(cacheModel, name)
       const isCacheGone = isForfeit || live.cacheExpiresAt === null
-
-      decided = { effort, isForfeit }
 
       return {
         model: name,
@@ -228,15 +239,15 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       }
     })
 
-    if (decided !== undefined) {
-      // A step that reported meanwhile is newer than what this read decided.
-      if (live.effort === before.effort) live.effort = decided.effort
-      if (before.isFresh) live.isEffortFresh = false
+    if (order === live.drawn && effortChange !== undefined && live.stepEffort === effortChange.step) {
+      const { step, model } = effortChange
 
-      if (decided.isForfeit && live.cacheExpiresAt === before.cache) {
-        live.cacheExpiresAt = null
-        live.cacheModel = undefined
-      }
+      if (model === undefined) live.stepEffort = undefined
+      else step.model = effortModelFor(step.model, model) ?? step.model
+    }
+    if (isForfeit && live.cacheExpiresAt === beforeCache) {
+      live.cacheExpiresAt = null
+      live.cacheModel = undefined
     }
   } catch {
     // Keeps what was last drawn.
@@ -285,8 +296,6 @@ export const register: Register = (on, options) => {
   const cacheTtlMs =
     (typeof ttl === 'number' && ttl > 0 ? ttl : DEFAULT_CACHE_TTL_MINUTES) * MINUTE_MS
   const live: Live = {
-    effort: undefined,
-    isEffortFresh: false,
     asked: 0,
     drawn: 0,
     setup: {},
@@ -336,27 +345,31 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // The request is passed on untouched: only its effort is read, and a
-  // response of the main loop renews the prompt cache from when it was sent.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) live.isEffortFresh = true
+    if (e.agentId === undefined) {
+      const stepEffort: StepEffort = { model: e.model, value: e.effort }
+      let model: string | undefined
 
-    if (e.agentId === undefined && e.effort !== live.effort) {
-      const effort = e.effort
+      live.stepEffort = stepEffort
+      await update($, statusBand, current => {
+        model = current !== null && live.stepEffort === stepEffort
+          ? effortModelFor(stepEffort.model, current.model)
+          : undefined
+        if (current === null || model === undefined) return current
 
-      live.effort = effort
-      await update($, statusBand, current =>
-        current === null ? null : { ...current, effort },
-      ).catch(() => undefined)
+        return current.effort === stepEffort.value ? current : { ...current, effort: stepEffort.value }
+      }).catch(() => undefined)
+      if (model !== undefined && live.stepEffort === stepEffort) {
+        stepEffort.model = effortModelFor(stepEffort.model, model) ?? stepEffort.model
+      }
     }
 
-    const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
+    const requestSentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
     const epoch = live.setupEpoch
     const result = yield* next(e)
 
-    // The step does not wait for the band: the countdown is written behind it.
-    if (sentAt !== undefined && isCached(result.usage)) {
-      void sentAt
+    if (requestSentAt !== undefined && isCached(result.usage)) {
+      void requestSentAt
         .then(async at => {
           if (at === undefined) return
 
@@ -366,13 +379,7 @@ export const register: Register = (on, options) => {
 
           if (epoch !== live.setupEpoch) return
 
-          if (
-            cacheModel !== undefined &&
-            sessionModel !== '' &&
-            !isSameModel(cacheModel, sessionModel)
-          ) {
-            return
-          }
+          if (ranUnderLeftModel(cacheModel, sessionModel)) return
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
@@ -405,7 +412,7 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
 // them off the line above where the band has a row to spare: the headline,
 // then the context fill, the windows and the cache countdown. `glyphs` is the
 // set the rows draw beyond plain letters; `columns` is the row's width, where
-// a figure row wider than it drops the reset times so the cache is not cut.
+// a figure row wider than it drops reset times and windows so the cache fits.
 // `hooks/band.tsx` draws them: the engine takes one band hook per plugin, and
 // `$` stays in that hook's file.
 export const statusRows = (

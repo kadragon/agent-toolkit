@@ -13,18 +13,15 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #454 — Skip a stale cache countdown after a model switch and match project paths across separators (2026-11-26)
-
-- [ ] [debt] A narrow band drops only the reset times to fit the row, so with several windows the usage figures still push the cache countdown off a row that has room for it: keep dropping windows until the cache fits (source: codex) — mods/hooks/status-band/format.ts:183 (pre_existing)
-- [ ] [debt] A step's effort is shown under whatever model the next refresh reads, so switching from Opus to Haiku right after a step shows Opus's effort before any Haiku step ran: store the model with the effort and keep it only for that model (source: codex) — mods/hooks/status-band/register.tsx:191 (pre_existing)
-- [ ] [debt] `covered` compares paths case-sensitively, so on Windows `C:\work\repo` misses `c:/work/repo/src` and the user-scope install is read: compare Windows-style paths case-insensitively (source: code-review) — mods/hooks/status-band/count.ts:17 (pre_existing)
-- [ ] [constraint] The band counts one terminal cell per character (`cellsByLength`): test that every glyph in `UNICODE` and the other `Glyphs` sets is one cell wide, then drop the comment on `cellsByLength` (source: comments) — mods/hooks/status-band/format.ts:139
-- [ ] [debt] Name the model check for the removed comment: extract `cacheModel !== undefined && sessionModel !== '' && !isSameModel(...)` in the step hook into a predicate such as `ranUnderLeftModel` (source: comments) — mods/hooks/status-band/register.tsx:364
-- [ ] [debt] Name the test gates for the removed comment: rename `World.nowGate` and `World.modelGate` to say they hold back only the next reading, e.g. `holdNextNow` and `holdNextModel` (source: comments) — mods/hooks/status-band/register.test.tsx:54
-
 ### PR #455 — Fall back when preflight sort lacks version support (2026-11-26)
 
 - [ ] [harness] Preserve numeric version order in the portable Codex companion fallback so a cached version such as `1.10` ranks above `1.9` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:120` (introduced here)
+
+### PR #456 — Preserve cache and model effort on the status band (2026-11-26)
+
+- [ ] [debt] Keep a delayed step from restoring the cache countdown on another model when the session model lookup fails (source: codex) — `mods/hooks/status-band/register.tsx:378` (pre_existing)
+- [ ] [debt] Avoid selecting an unrelated project install when the active path has no matching project or user install (source: codex) — `mods/hooks/status-band/count.ts:75` (pre_existing)
+- [ ] [debt] Keep a refresh that read the old model from forfeiting a cache recorded by a newer model while the refresh was pending (source: agy) — `mods/hooks/status-band/register.tsx:190` (pre_existing)
 
 ## Rejected — do not re-file
 

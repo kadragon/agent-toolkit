@@ -34,6 +34,7 @@ const USAGE = {
 type World = {
   now: number
   model: string
+  cwd: string
   branch: string | null
   percent: number | undefined
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]
@@ -51,12 +52,14 @@ type World = {
   // How long the next responses take to come back.
   stepMs: number
   switchedTo?: string
-  nowGate?: Promise<void>
-  modelGate?: Promise<void>
+  holdNextNow?: Promise<void>
+  holdNextModel?: Promise<void>
+  isModelDown?: boolean
   isUncached: boolean
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
   curateRuns: (readonly string[])[]
+  sameDirectory: boolean
   // Set to hold the next curate check open until the test lets it go.
   curateGate?: Promise<void>
   // True where only `python` is installed.
@@ -80,6 +83,7 @@ const world = (on: On): World => {
   const state: World = {
     now: NOW,
     model: 'claude-opus-5-5',
+    cwd: '/work/agent-toolkit',
     branch: 'main',
     percent: 12,
     rateLimits: [
@@ -97,6 +101,7 @@ const world = (on: On): World => {
     isUncached: false,
     curateOut: '',
     curateRuns: [],
+    sameDirectory: false,
     isPython3Missing: false,
   }
 
@@ -106,14 +111,16 @@ const world = (on: On): World => {
   on('session.detach', async ($, e) => ({ clientId: e.clientId }))
   on('session.end', async () => ({ sessionId: 's1' }))
   on('session.model', async () => {
-    const gate = state.modelGate
+    const gate = state.holdNextModel
 
-    state.modelGate = undefined
+    state.holdNextModel = undefined
     await gate
+
+    if (state.isModelDown) throw new Error('model read is down')
 
     return { value: state.model }
   })
-  on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
+  on('session.cwd', async () => ({ value: state.cwd }))
   on('session.turns', async () => ({ value: state.turns }))
   on('session.usage', async () => {
     if (state.isUsageDown) throw new Error('usage is down')
@@ -144,9 +151,9 @@ const world = (on: On): World => {
     return { value: text }
   })
   on('clock.now', async () => {
-    const gate = state.nowGate
+    const gate = state.holdNextNow
 
-    state.nowGate = undefined
+    state.holdNextNow = undefined
     await gate
 
     return { value: state.now }
@@ -164,6 +171,8 @@ const world = (on: On): World => {
     if (e.argv[0] === 'git' && e.argv[1] === 'rev-parse') {
       return ran(0, '/work/agent-toolkit/.git\n')
     }
+
+    if (e.argv[1] === '-c') return ran(state.sameDirectory ? 0 : 1, '')
 
     if (e.argv[0] !== 'git') {
       state.curateRuns.push(e.argv)
@@ -360,6 +369,104 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
   const { ui, texts } = await drawn($)
 
   expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
+  await ui.unmount()
+
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  const returned = await drawn($)
+
+  expect(returned.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await returned.ui.unmount()
+})
+
+test('a failed session model read preserves a new model step effort until the next successful read', async ($, on) => {
+  const state = world(on)
+  state.isUncached = true
+
+  await start($)
+  state.model = 'claude-haiku-5-5'
+  await step($, { model: state.model, effort: 'high' })
+  state.isModelDown = true
+  await measure($)
+  state.isModelDown = false
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◑ high] │ agent-toolkit git:(main)')
+  await ui.unmount()
+})
+
+test('a different dated snapshot of the same model does not inherit effort', async ($, on) => {
+  const state = world(on)
+  state.model = 'claude-opus-5-5-20261001'
+
+  await start($)
+  await step($, { model: state.model, effort: 'high' })
+  await measure($)
+  const first = await drawn($)
+
+  expect(first.texts[0]).toBe('[Opus 5.5 ◑ high] │ agent-toolkit git:(main)')
+  await first.ui.unmount()
+
+  state.model = 'claude-opus-5-5-20261002'
+  await measure($)
+  const second = await drawn($)
+
+  expect(second.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await second.ui.unmount()
+})
+
+test('a step and the session can name the same model by alias and snapshot', async ($, on) => {
+  const state = world(on)
+  state.model = 'claude-opus-5-5[1m]'
+
+  await start($)
+  await step($, { model: 'claude-opus-5-5-20261001', effort: 'high' })
+  await measure($)
+  const alias = await drawn($)
+
+  expect(alias.texts[0]).toBe('[Opus 5.5[1m] ◑ high] │ agent-toolkit git:(main)')
+  await alias.ui.unmount()
+
+  state.model = 'claude-opus-5-5-20261002'
+  await measure($)
+  await step($, { model: 'claude-opus-5-5', effort: 'medium' })
+  const snapshot = await drawn($)
+
+  expect(snapshot.texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  await snapshot.ui.unmount()
+
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  state.model = 'claude-opus-5-5-20261001'
+  await measure($)
+  const changed = await drawn($)
+
+  expect(changed.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await changed.ui.unmount()
+})
+
+test('a model read held across an old-model step still clears its effort on switching', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.isUncached = true
+  state.holdNextModel = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const pending = measure($)
+  await settle()
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  release()
+  await pending
+  await measure($)
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
   await ui.unmount()
 })
 
@@ -629,7 +736,7 @@ test('a cache made under one model is not handed to the model the session switch
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
 })
@@ -639,7 +746,7 @@ test('a countdown that lands after the session moved to another model is not sho
   let release = () => {}
 
   await start($)
-  state.nowGate = new Promise<void>(resolve => {
+  state.holdNextNow = new Promise<void>(resolve => {
     release = resolve
   })
   await step($)
@@ -649,7 +756,7 @@ test('a countdown that lands after the session moved to another model is not sho
   await settle()
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
 })
@@ -659,7 +766,7 @@ test('a countdown whose model check ends after a /clear is not written back', as
   let release = () => {}
 
   await start($)
-  state.modelGate = new Promise<void>(resolve => {
+  state.holdNextModel = new Promise<void>(resolve => {
     release = resolve
   })
   await step($)
@@ -698,9 +805,14 @@ test('in a narrow terminal the reset times go before the cache countdown', async
   expect(narrow.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
   await narrow.ui.unmount()
 
-  const tiny = await drawn($, 'terminal', { bodyColumns: 20 })
+  const tight = await drawn($, 'terminal', { bodyColumns: 34 })
 
-  expect(tiny.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
+  expect(tight.texts[2]).toBe(' │ 5h: 88% │ cache 60m')
+  await tight.ui.unmount()
+
+  const tiny = await drawn($, 'terminal', { bodyColumns: 24 })
+
+  expect(tiny.texts[2]).toBe(' │ cache 60m')
   await tiny.ui.unmount()
 })
 
@@ -718,6 +830,20 @@ test('a window whose reset still fits keeps it where the cache is not counting',
   const { ui, texts } = await drawn($, 'terminal', { bodyColumns: 40 })
 
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ 7d: 40%')
+  await ui.unmount()
+})
+
+test('an expired cache does not displace usage figures on a narrow row', async ($, on) => {
+  const state = world(on)
+  state.rateLimits.push({ kind: 'seven_day', percentUsed: 99 })
+
+  await start($)
+  await step($)
+  state.now = NOW + 60 * MINUTE
+  await measure($)
+  const { ui, texts } = await drawn($, 'terminal', { bodyColumns: 40 })
+
+  expect(texts[2]).toBe(' │ 5h: 88% │ 7d: 99%')
   await ui.unmount()
 })
 
@@ -744,6 +870,7 @@ test('a model named with a context suffix or a date is the same model for the ca
   await measure($)
   const { ui, texts } = await drawn($)
 
+  expect(texts[0]).toBe('[Opus 5.5[1m] ◔ medium] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
   await ui.unmount()
 })
@@ -989,6 +1116,32 @@ test('a Windows home is read through backslashes alone', async ($, on) => {
   expect(state.curateRuns.map(argv => argv[1])).toEqual([
     'C:\\p\\dev\\skills\\harness-curate\\scripts\\record_run.py',
   ])
+})
+
+test('a Windows project install is used only when the differently cased ancestor is confirmed', async ($, on) => {
+  const state = curateWorld(on)
+  state.cwd = 'c:/work/repo/src'
+  state.files['c:/work/repo/src/AGENTS.md'] = '# agents'
+  state.files['/home/me/.claude/plugins/installed_plugins.json'] = JSON.stringify({
+    plugins: {
+      'dev@kadragon': [
+        { projectPath: 'C:\\work\\Repo', installPath: '/p/project' },
+        { installPath: '/p/user' },
+      ],
+    },
+  })
+
+  await start($)
+
+  expect(state.curateRuns.map(argv => argv[1])).toEqual([
+    '/p/user/skills/harness-curate/scripts/record_run.py',
+  ])
+
+  state.sameDirectory = true
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+
+  expect(state.curateRuns.at(-1)?.[1]).toBe('/p/project/skills/harness-curate/scripts/record_run.py')
 })
 
 test('the band is two rows at most, with no count row and no session time', async ($, on) => {

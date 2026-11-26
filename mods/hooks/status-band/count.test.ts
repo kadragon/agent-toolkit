@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { enabledPlugins, installPaths, under } from './count'
+import { enabledPlugins, installPath, under } from './count'
 
 describe('enabledPlugins', () => {
   test('keeps the plugins switched on', () => {
@@ -9,16 +9,23 @@ describe('enabledPlugins', () => {
   })
 })
 
-describe('installPaths', () => {
-  test('takes the first install of each plugin', () => {
+const selectInstall = (
+  text: string,
+  cwd: string,
+  sameDirectory = async (_project: string, _ancestor: string): Promise<boolean> => false,
+) => installPath(text, cwd, 'a@m', sameDirectory)
+
+describe('installPath', () => {
+  test('takes the first install for the named plugin', async () => {
     const text = JSON.stringify({
       plugins: { 'a@m': [{ installPath: '/p/a' }, { installPath: '/p/old' }], 'b@m': [] },
     })
 
-    expect(installPaths(text, '/work/repo')).toEqual({ 'a@m': '/p/a' })
+    expect(await selectInstall(text, '/work/repo')).toBe('/p/a')
+    expect(await installPath(text, '/work/repo', 'b@m', async () => false)).toBeUndefined()
   })
 
-  test("prefers this project's install, then the user's own", () => {
+  test("prefers this project's install, then the user's own", async () => {
     const text = JSON.stringify({
       plugins: {
         'a@m': [
@@ -29,11 +36,11 @@ describe('installPaths', () => {
       },
     })
 
-    expect(installPaths(text, '/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
-    expect(installPaths(text, '/work/repository')).toEqual({ 'a@m': '/p/user' })
+    expect(await selectInstall(text, '/work/repo/src')).toBe('/p/repo')
+    expect(await selectInstall(text, '/work/repository')).toBe('/p/user')
   })
 
-  test('takes the nearest project around the directory, whichever separator it uses', () => {
+  test('takes the nearest project around the directory, whichever separator it uses', async () => {
     const text = JSON.stringify({
       plugins: {
         'a@m': [
@@ -43,12 +50,12 @@ describe('installPaths', () => {
       },
     })
 
-    expect(installPaths(text, 'C:\\work\\repo\\src')).toEqual({ 'a@m': '/p/inner' })
+    expect(await selectInstall(text, 'C:\\work\\repo\\src')).toBe('/p/inner')
   })
 })
 
-describe('installPaths across separators', () => {
-  test('matches a project path and a directory written with different separators', () => {
+describe('installPath across separators', () => {
+  test('matches a project path and a directory written with different separators', async () => {
     const text = JSON.stringify({
       plugins: {
         'a@m': [
@@ -58,16 +65,67 @@ describe('installPaths across separators', () => {
       },
     })
 
-    expect(installPaths(text, 'C:/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
-    expect(installPaths(text, 'C:/work/repository')).toEqual({ 'a@m': '/p/user' })
+    expect(await selectInstall(text, 'C:/work/repo/src')).toBe('/p/repo')
+    expect(await selectInstall(text, 'c:/WORK/Repository', async () => true)).toBe('/p/user')
     expect(
-      installPaths(
+      await selectInstall(
         JSON.stringify({
           plugins: { 'a@m': [{ projectPath: 'C:/work/repo', installPath: '/p/repo' }, { installPath: '/p/user' }] },
         }),
         'C:\\work\\repo\\src',
       ),
-    ).toEqual({ 'a@m': '/p/repo' })
+    ).toBe('/p/repo')
+  })
+})
+
+describe('installPath path case', () => {
+  test('matches a confirmed Windows ancestor across separators and case', async () => {
+    const projectPath = 'C:\\work\\repo'
+    const text = JSON.stringify({
+      plugins: { 'a@m': [{ projectPath, installPath: '/p/repo' }, { installPath: '/p/user' }] },
+    })
+    const sameDirectory = async (project: string, ancestor: string) =>
+      project === projectPath && ancestor === 'c:/WORK/Repo'
+
+    expect(await selectInstall(text, 'c:/WORK/Repo/src', sameDirectory)).toBe('/p/repo')
+  })
+
+  test('skips a different Windows ancestor even when it is the only installed copy', async () => {
+    const text = JSON.stringify({
+      plugins: { 'a@m': [{ projectPath: 'C:\\work\\Repo', installPath: '/p/repo' }] },
+    })
+
+    expect(await selectInstall(text, 'C:\\work\\repo\\src')).toBeUndefined()
+  })
+
+  test('matches a confirmed UNC ancestor across separators and case', async () => {
+    const projectPath = '\\\\Server\\Share\\Repo'
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { installPath: '/p/user' },
+          { projectPath, installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    const sameDirectory = async (project: string, ancestor: string) =>
+      project === projectPath && ancestor === '//server/share/repo'
+
+    expect(await selectInstall(text, '//server/share/repo/src', sameDirectory)).toBe('/p/repo')
+  })
+
+  test('keeps POSIX project paths case sensitive', async () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { installPath: '/p/user' },
+          { projectPath: '/work/Repo', installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    expect(await selectInstall(text, '/work/repo/src', async () => true)).toBe('/p/user')
   })
 })
 
