@@ -27,6 +27,9 @@ HOT_USED = 75
 CRITICAL_USED = 90
 HOT_5H = 80
 CRITICAL_5H = 90
+MIN_PACE_HOURS = 24
+HOT_AHEAD = 15
+HOT_PROJECTED = 120
 RANK = {"ok": 0, "hot": 1, "critical": 2}
 
 
@@ -109,9 +112,12 @@ def assess(snapshot, now):
         runway_h = 0.0
     elif used > 0 and elapsed_h > 0:
         runway_h = elapsed_h * (100 - used) / used
-    if used >= CRITICAL_USED or (runway_h is not None and runway_h < reset_in_h):
+    pace_hot = elapsed_h >= MIN_PACE_HOURS and (
+        ahead >= HOT_AHEAD or used > HOT_PROJECTED * elapsed_h / (WEEK / 3600)
+    )
+    if used >= CRITICAL_USED:
         state = "critical"
-    elif used >= HOT_USED:
+    elif used >= HOT_USED or pace_hot:
         state = "hot"
     else:
         state = "ok"

@@ -27,3 +27,10 @@ environments. The writer atomically replaces the snapshot after receiving a vali
 in seconds. The top-level fields describe the weekly window; `five_hour` is optional and
 uses the same fields. If the file is missing, unreadable, or invalid JSON, the reader emits
 `"claude": {"state": "unknown"}` and evaluates Codex independently.
+
+Dispatch classifies either CLI as `critical` when actual usage in an active weekly or
+five-hour window reaches 90%. Actual weekly usage from 75% and five-hour usage from 80%
+are `hot` below the critical threshold. From 24 hours into the weekly window, pace also
+qualifies as `hot` if `ahead` (usage minus elapsed percentage) is at least 15 percentage
+points or the straight-line projection at reset exceeds 120%. The reader still reports
+`runway_h` whenever it can estimate hours to 100%, including during the first 24 hours.
