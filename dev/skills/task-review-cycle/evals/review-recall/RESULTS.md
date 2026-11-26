@@ -135,7 +135,13 @@ path before and after the fix. These are the only preflight values the runner fo
 reviewer commands and fixtures are unchanged. The existing scores are carried forward without
 a new reviewer run.
 
-Review recall fingerprint: 3e8057e8b0ee759ee0b743c550b8977e8843bdf7
+Follow-up from the PR #455 backlog: the lexical fallback in `preflight.sh` now ranks cached Codex
+versions numerically, so `1.10` outranks `1.9`. Under GNU sort, the path `run.sh` uses, uncached
+preflight returned the same Codex mode and companion path before and after the change, because the
+change only touches the fallback taken when `sort -V` is unavailable. The reviewer commands and
+fixtures are unchanged, so the existing scores carry forward without a new reviewer run.
+
+Review recall fingerprint: 09b4e1f3bfa1c7207314660dcea9b4d4f91bbb28
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).
