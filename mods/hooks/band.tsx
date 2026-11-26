@@ -27,6 +27,7 @@ export const register: Register = (on, options) => {
     return statusRows($.ui.resolve(e), status, {
       hasMargin: STATUS_ROWS < e.props.maxRows,
       glyphs: options.statusBandAscii === true ? ASCII : UNICODE,
+      columns: e.props.bodyColumns,
     })
   })
 }

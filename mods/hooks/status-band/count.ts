@@ -1,5 +1,3 @@
-// Pure plugin and path reads: no engine types, so it runs and tests without `$`.
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 

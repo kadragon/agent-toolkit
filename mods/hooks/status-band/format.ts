@@ -131,6 +131,9 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
+// Cells a row of segments takes: the band draws no wide character in a figure row.
+export const widthOf = (segments: Segment[]): number => textOf(segments).length
+
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
 
 // A fill the engine has no reading for is left out, never drawn as 0%.
@@ -142,7 +145,11 @@ export const contextSegments = (status: StatusBand): Segment[] =>
 export const contextText = (status: StatusBand): string => textOf(contextSegments(status))
 
 // A window the engine has no reading for is left out, never drawn as 0%.
-export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] =>
+export const limitsSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  isResetShown = true,
+): Segment[] =>
   joined(
     WINDOWS.map(([kind, label]): Segment[] => {
       const limit = status.rateLimits.find(candidate => candidate.kind === kind)
@@ -156,25 +163,34 @@ export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Se
         { text: `${Math.round(limit.percentUsed)}%`, color: levelOf(limit.percentUsed) },
       ]
 
-      return Number.isNaN(left) || left <= 0
+      return !isResetShown || Number.isNaN(left) || left <= 0
         ? used
         : [...used, { text: ` (${duration(left)})`, isDim: true }]
     }),
     glyphs.separator,
   )
 
-export const timesSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] => {
+// `room` is the cells left for the figures: past it the reset times go first,
+// so the cache countdown at the end is not the figure a narrow row cuts.
+export const timesSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  room?: number,
+): Segment[] => {
   const cache = cacheText(status)
+  const drawn = (isResetShown: boolean): Segment[] =>
+    joined(
+      [
+        limitsSegments(status, glyphs, isResetShown),
+        cache === ''
+          ? []
+          : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
+      ],
+      glyphs.separator,
+    )
+  const full = drawn(true)
 
-  return joined(
-    [
-      limitsSegments(status, glyphs),
-      cache === ''
-        ? []
-        : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
-    ],
-    glyphs.separator,
-  )
+  return room === undefined || widthOf(full) <= room ? full : drawn(false)
 }
 
 // A harness-curate run the dev plugin judges due; nothing otherwise.

@@ -6,10 +6,12 @@
 included, naming the `Validating hooks: <path>` section each sits under. PR #398 shipped a
 TS2741 in `mods/hooks/status-band/register.tsx` past the old count-the-warnings habit.
 
-It also fails when a large hook file's SECTION MAP comment drifts from its top-level functions.
+It also fails when a large hook file's SECTION MAP comment drifts from its top-level functions,
+and when a pure module (`count.ts`) imports from `claude-code`: those files run and test without
+the engine's `$`, and a type import would tie them to it again.
 
 Local only: CI does not install `claude`, so only the `--test` self-test runs there; it checks
-the parser and the shipped SECTION MAPs.
+the parser, the shipped SECTION MAPs and the pure modules' imports.
 
 Usage:
   python3 scripts/check_mods.py [mods-dir]   # default ./mods
@@ -87,6 +89,26 @@ def section_map_reasons(mods_dir: str) -> list[str]:
     return reasons
 
 
+PURE_MODULES = ("hooks/status-band/count.ts",)
+# A top-level `import` or `export … from` naming `claude-code` or one of its subpaths.
+ENGINE_IMPORT_RE = re.compile(
+    r"""^(?:import|export)\b(?:[^'";]*?\bfrom)?\s*['"]claude-code(?:/[^'"]*)?['"]""", re.MULTILINE
+)
+
+
+def engine_imports(src: str) -> list[str]:
+    """Return each top-level import in `src` that comes from `claude-code`."""
+    return [" ".join(match.group(0).split()) for match in ENGINE_IMPORT_RE.finditer(src)]
+
+
+def pure_module_reasons(mods_dir: str) -> list[str]:
+    reasons = []
+    for rel in PURE_MODULES:
+        with open(f"{mods_dir}/{rel}", encoding="utf-8") as handle:
+            reasons.extend(f"{rel}: imports from claude-code ({i})" for i in engine_imports(handle.read()))
+    return reasons
+
+
 def run(argv: list[str]) -> tuple[int, str]:
     proc = subprocess.run(argv, capture_output=True, text=True, check=False)
     return proc.returncode, proc.stdout + proc.stderr
@@ -116,7 +138,11 @@ def main(mods_dir: str) -> int:
     test_rc, test_output = run(["claude", "plugin", "test", mods_dir])
     print(test_output, end="")
 
-    reasons = verdict(validate_rc, validate_output, test_rc) + section_map_reasons(mods_dir)
+    reasons = (
+        verdict(validate_rc, validate_output, test_rc)
+        + section_map_reasons(mods_dir)
+        + pure_module_reasons(mods_dir)
+    )
     for reason in reasons:
         print(f"check_mods: {reason}", file=sys.stderr)
     print("check_mods: FAIL" if reasons else "check_mods: OK", file=sys.stderr)
@@ -198,7 +224,30 @@ def selftest() -> int:
         failures += 1
         print(f"FAIL shipped section maps: {shipped_drift!r}", file=sys.stderr)
 
-    total = len(cases) + len(verdict_cases) + len(map_cases) + 1
+    # engine_imports(): the pure modules stay free of `claude-code`, type imports included.
+    import_cases = [
+        ("value import", "import { atom } from 'claude-code'\n", 1),
+        ("type import", "import type { Elements } from 'claude-code'\n", 1),
+        ("subpath import", 'import { test } from "claude-code/testing"\n', 1),
+        ("multi-line import", "import {\n  atom,\n  update,\n} from 'claude-code'\n", 1),
+        ("bare import", "import 'claude-code'\n", 1),
+        ("re-export", "export type { Register } from 'claude-code'\n", 1),
+        ("local import", "import type { StatusBand } from '../../types'\n", 0),
+        ("similar package", "import { x } from 'claude-code-extras'\n", 0),
+        ("comment mention", "// import { atom } from 'claude-code'\nconst a = 1\n", 0),
+        ("indented mention", "const s = `\n  import x from 'claude-code'\n`\n", 0),
+    ]
+    for name, src, want in import_cases:
+        found = engine_imports(src)
+        if len(found) != want:
+            failures += 1
+            print(f"FAIL engine import {name}: {found!r} (want {want})", file=sys.stderr)
+    shipped_pure = pure_module_reasons(mods_dir)
+    if shipped_pure:
+        failures += 1
+        print(f"FAIL shipped pure modules: {shipped_pure!r}", file=sys.stderr)
+
+    total = len(cases) + len(verdict_cases) + len(map_cases) + len(import_cases) + 2
     print(f"check_mods selftest: {total - failures}/{total} passed", file=sys.stderr)
     return 1 if failures else 0
 

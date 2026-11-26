@@ -10,6 +10,7 @@ import {
   levelOf,
   timesSegments,
   UNICODE,
+  widthOf,
 } from './format'
 import type { Glyphs, Segment } from './format'
 
@@ -18,15 +19,16 @@ import type { Glyphs, Segment } from './format'
 // its range. Pure counting and text helpers live in count.ts and format.ts. The names
 // below are checked against the real top-level functions by `scripts/check_mods.py`.
 //   curate-due reads: readInstallPaths, readDevRoot, python, readCurateDue
-//   curate load and reset: loadCurate, resetSetup
+//   curate check and verdict: checkCurateThrottled, dropCurateVerdict
 //   live refresh (git, cache window, tick): isCached, refresh, watch
 //   entry points (register holds every on(...) hook handler): startStatusBand, register
 //   rendering the band rows: runs, statusRows
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
-const TICK_MS = 60_000
-const GIT_TIMEOUT_MS = 2000
 const MINUTE_MS = 60_000
+// The countdown reads in whole minutes, so the band is redrawn once a minute.
+const TICK_MS = MINUTE_MS
+const GIT_TIMEOUT_MS = 2000
 const DEFAULT_CACHE_TTL_MINUTES = 60
 // The dev plugin's session-start hook nudges about a due harness-curate run
 // once a day; the band keeps it in sight, asking the same script.
@@ -53,7 +55,8 @@ type Live = {
   cacheExpiresAt?: number | null
   cacheModel?: string
   setup: Setup
-  hasSetup: boolean
+  // True once a session start gave this load the verdict; until then the band keeps the one it had.
+  isCurateOwned: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
   // When the curate check last ran; unset, the next read runs it.
@@ -114,7 +117,8 @@ async function readCurateDue($: EngineInterface): Promise<boolean> {
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
 }
 
-function loadCurate($: EngineInterface, live: Live): void {
+// A background read, at most once in CURATE_EVERY_MS; one at a time.
+function checkCurateThrottled($: EngineInterface, live: Live): void {
   if (live.curateRead !== undefined) return
 
   const epoch = live.setupEpoch
@@ -131,20 +135,21 @@ function loadCurate($: EngineInterface, live: Live): void {
     if (epoch !== live.setupEpoch || curateDue === undefined) return
 
     live.setup = { ...live.setup, curateDue }
-    live.hasSetup = true
+    live.isCurateOwned = true
     await update($, statusBand, current => (current === null ? null : { ...current, curateDue }))
   })()
     .catch(() => undefined)
     .finally(() => {
       live.curateRead = undefined
       // A reset came while this read ran: the new session asks again.
-      if (epoch !== live.setupEpoch) loadCurate($, live)
+      if (epoch !== live.setupEpoch) checkCurateThrottled($, live)
     })
 }
 
-const resetSetup = (live: Live): void => {
+// A new session has no verdict yet: drop the last one and ask again.
+const dropCurateVerdict = (live: Live): void => {
   live.setup = {}
-  live.hasSetup = true
+  live.isCurateOwned = true
   live.setupEpoch += 1
   // A run in the last session stamped its record: ask again.
   live.curateCheckedAt = undefined
@@ -222,7 +227,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
           ? undefined
           : (live.cacheExpiresAt ?? current?.cacheExpiresAt),
         cacheModel: isCacheGone ? undefined : cacheModel,
-        curateDue: live.hasSetup ? live.setup.curateDue : current?.curateDue,
+        curateDue: live.isCurateOwned ? live.setup.curateDue : current?.curateDue,
       }
     })
 
@@ -254,7 +259,7 @@ async function watch($: EngineInterface, live: Live): Promise<void> {
     }
 
     live.tick ??= $.clock.every(TICK_MS, () => void refresh($, live))
-    loadCurate($, live)
+    checkCurateThrottled($, live)
     await refresh($, live)
   } catch {
     // Nothing to draw on.
@@ -271,7 +276,7 @@ export function startStatusBand($: EngineInterface): void {
 
   if (live === undefined) return
 
-  resetSetup(live)
+  dropCurateVerdict(live)
   void watch($, live)
 }
 
@@ -288,7 +293,7 @@ export const register: Register = (on, options) => {
     asked: 0,
     drawn: 0,
     setup: {},
-    hasSetup: false,
+    isCurateOwned: false,
     setupEpoch: 0,
   }
 
@@ -328,7 +333,7 @@ export const register: Register = (on, options) => {
 
     live.cacheExpiresAt = null
     live.cacheModel = undefined
-    resetSetup(live)
+    dropCurateVerdict(live)
     void watch($, live)
 
     return result
@@ -348,17 +353,22 @@ export const register: Register = (on, options) => {
       ).catch(() => undefined)
     }
 
-    const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
+    // The model is read with the send time: a switch while the response comes
+    // back must not hand this step's cache to the next model.
+    const sent =
+      e.agentId === undefined
+        ? Promise.all([$.clock.now(), $.session.model().catch(() => '')]).catch(() => undefined)
+        : undefined
     const result = yield* next(e)
 
     // The step does not wait for the band: the countdown is written behind it.
-    if (sentAt !== undefined && isCached(result.usage)) {
-      void sentAt
-        .then(async at => {
-          if (at === undefined) return
+    if (sent !== undefined && isCached(result.usage)) {
+      void sent
+        .then(async read => {
+          if (read === undefined) return
 
+          const [at, model] = read
           const cacheExpiresAt = at + cacheTtlMs
-          const model = await $.session.model().catch(() => '')
           const cacheModel = model === '' ? undefined : model
 
           live.cacheExpiresAt = cacheExpiresAt
@@ -391,17 +401,27 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
 // This mod's rows of the band above the prompt, under a blank row that keeps
 // them off the line above where the band has a row to spare: the headline,
 // then the context fill, the windows and the cache countdown. `glyphs` is the
-// set the rows draw beyond plain letters. `hooks/band.tsx` draws them: the
-// engine takes one band hook per plugin, and `$` stays in that hook's file.
+// set the rows draw beyond plain letters; `columns` is the row's width, where
+// a figure row wider than it drops the reset times so the cache is not cut.
+// `hooks/band.tsx` draws them: the engine takes one band hook per plugin, and
+// `$` stays in that hook's file.
 export const statusRows = (
   elements: BandElements,
   status: StatusBand,
-  { hasMargin, glyphs = UNICODE }: { hasMargin: boolean; glyphs?: Glyphs },
+  {
+    hasMargin,
+    glyphs = UNICODE,
+    columns,
+  }: { hasMargin: boolean; glyphs?: Glyphs; columns?: number },
 ): RenderElement => {
   const { Box, Text } = elements
   const context = contextSegments(status)
-  const times = timesSegments(status, glyphs)
   const curate = curateText(status)
+  const separator = glyphs.separator.length
+  const taken =
+    (context.length === 0 ? 0 : widthOf(context) + separator) +
+    (curate === '' ? 0 : curate.length + separator)
+  const times = timesSegments(status, glyphs, columns === undefined ? undefined : columns - taken)
 
   return (
     <Box key="status-band" flexDirection="column" marginTop={hasMargin ? 1 : 0}>
