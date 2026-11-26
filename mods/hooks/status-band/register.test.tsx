@@ -44,14 +44,12 @@ type World = {
   gitCalls: number
   // Set to hold the next git call open until the test lets it go.
   gitGate?: Promise<void>
-  // What the settings file holds; 'unreadable' makes reading it fail.
   settings: Record<string, unknown> | 'unreadable'
   files: Record<string, string>
   // What the environment holds; a name not listed is unset.
   env: Record<string, string>
   // How long the next responses take to come back.
   stepMs: number
-  // A model the session switches to while the next response comes back.
   switchedTo?: string
   isUncached: boolean
   // What the curate check prints; null makes it fail to start.
@@ -635,17 +633,64 @@ test('in a narrow terminal the reset times go before the cache countdown', async
   expect(wide.texts[2]).toBe(' │ 5h: 88% (2h 4m) │ 7d: 40% (3d 0h) │ cache 60m')
   await wide.ui.unmount()
 
-  // `Context 12%` and the row in full take 59 cells; the same row without resets, 43.
+  const some = await drawn($, 'terminal', { bodyColumns: 52 })
+
+  expect(some.texts[2]).toBe(' │ 5h: 88% (2h 4m) │ 7d: 40% │ cache 60m')
+  await some.ui.unmount()
+
   const narrow = await drawn($, 'terminal', { bodyColumns: 50 })
 
   expect(narrow.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
   await narrow.ui.unmount()
 
-  // Narrower still, nothing more is dropped: the end of the row is cut as before.
   const tiny = await drawn($, 'terminal', { bodyColumns: 20 })
 
   expect(tiny.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
   await tiny.ui.unmount()
+})
+
+test('a window whose reset still fits keeps it where the cache is not counting', async ($, on) => {
+  const state = world(on)
+  state.isUncached = true
+  state.rateLimits.push({
+    kind: 'seven_day',
+    percentUsed: 40,
+    resetsAt: new Date(NOW + 3 * 24 * 60 * MINUTE).toISOString(),
+  })
+
+  await start($)
+  await step($)
+  const { ui, texts } = await drawn($, 'terminal', { bodyColumns: 40 })
+
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ 7d: 40%')
+  await ui.unmount()
+})
+
+test('a cache is the model the step ran under, whichever model the session names at that moment', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  state.switchedTo = 'claude-haiku-5-5'
+  await step($, { model: 'claude-haiku-5-5' })
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
+  await ui.unmount()
+})
+
+test('a model named with a context suffix or a date is the same model for the cache', async ($, on) => {
+  const state = world(on)
+  state.model = 'claude-opus-5-5[1m]'
+
+  await start($)
+  await step($)
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
+  await ui.unmount()
 })
 
 test('a due curate run takes room from the reset times', async ($, on) => {

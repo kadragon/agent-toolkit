@@ -7,6 +7,7 @@ import {
   contextSegments,
   curateText,
   headlineSegments,
+  isSameModel,
   levelOf,
   timesSegments,
   UNICODE,
@@ -26,7 +27,6 @@ import type { Glyphs, Segment } from './format'
 
 // Layout after the claude-hud status line (github.com/jarrodwatts/claude-hud).
 const MINUTE_MS = 60_000
-// The countdown reads in whole minutes, so the band is redrawn once a minute.
 const TICK_MS = MINUTE_MS
 const GIT_TIMEOUT_MS = 2000
 const DEFAULT_CACHE_TTL_MINUTES = 60
@@ -55,7 +55,6 @@ type Live = {
   cacheExpiresAt?: number | null
   cacheModel?: string
   setup: Setup
-  // True once a session start gave this load the verdict; until then the band keeps the one it had.
   isCurateOwned: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
@@ -117,7 +116,6 @@ async function readCurateDue($: EngineInterface): Promise<boolean> {
   return exitCode === 0 && stdout.startsWith(CURATE_DUE_PREFIX)
 }
 
-// A background read, at most once in CURATE_EVERY_MS; one at a time.
 function checkCurateThrottled($: EngineInterface, live: Live): void {
   if (live.curateRead !== undefined) return
 
@@ -146,7 +144,6 @@ function checkCurateThrottled($: EngineInterface, live: Live): void {
     })
 }
 
-// A new session has no verdict yet: drop the last one and ask again.
 const dropCurateVerdict = (live: Live): void => {
   live.setup = {}
   live.isCurateOwned = true
@@ -206,7 +203,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
       // The cache was the model's that made it: a switch forfeits it.
       const cacheModel = live.cacheModel ?? current?.cacheModel
-      const isForfeit = cacheModel !== undefined && name !== '' && cacheModel !== name
+      const isForfeit = cacheModel !== undefined && name !== '' && !isSameModel(cacheModel, name)
       const isCacheGone = isForfeit || live.cacheExpiresAt === null
 
       decided = { effort, isForfeit }
@@ -353,23 +350,17 @@ export const register: Register = (on, options) => {
       ).catch(() => undefined)
     }
 
-    // The model is read with the send time: a switch while the response comes
-    // back must not hand this step's cache to the next model.
-    const sent =
-      e.agentId === undefined
-        ? Promise.all([$.clock.now(), $.session.model().catch(() => '')]).catch(() => undefined)
-        : undefined
+    const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
     const result = yield* next(e)
 
     // The step does not wait for the band: the countdown is written behind it.
-    if (sent !== undefined && isCached(result.usage)) {
-      void sent
-        .then(async read => {
-          if (read === undefined) return
+    if (sentAt !== undefined && isCached(result.usage)) {
+      void sentAt
+        .then(async at => {
+          if (at === undefined) return
 
-          const [at, model] = read
           const cacheExpiresAt = at + cacheTtlMs
-          const cacheModel = model === '' ? undefined : model
+          const cacheModel = e.model || undefined
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel

@@ -90,14 +90,14 @@ def section_map_reasons(mods_dir: str) -> list[str]:
 
 
 PURE_MODULES = ("hooks/status-band/count.ts",)
-# A top-level `import` or `export … from` naming `claude-code` or one of its subpaths.
 ENGINE_IMPORT_RE = re.compile(
-    r"""^(?:import|export)\b(?:[^'";]*?\bfrom)?\s*['"]claude-code(?:/[^'"]*)?['"]""", re.MULTILINE
+    r"""^(?:import\b(?:[^'";=`/]*?\bfrom)?|export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from)"""
+    r"""\s*['"]claude-code(?:/[^'"]*)?['"]""",
+    re.MULTILINE,
 )
 
 
 def engine_imports(src: str) -> list[str]:
-    """Return each top-level import in `src` that comes from `claude-code`."""
     return [" ".join(match.group(0).split()) for match in ENGINE_IMPORT_RE.finditer(src)]
 
 
@@ -224,7 +224,6 @@ def selftest() -> int:
         failures += 1
         print(f"FAIL shipped section maps: {shipped_drift!r}", file=sys.stderr)
 
-    # engine_imports(): the pure modules stay free of `claude-code`, type imports included.
     import_cases = [
         ("value import", "import { atom } from 'claude-code'\n", 1),
         ("type import", "import type { Elements } from 'claude-code'\n", 1),
@@ -236,6 +235,9 @@ def selftest() -> int:
         ("similar package", "import { x } from 'claude-code-extras'\n", 0),
         ("comment mention", "// import { atom } from 'claude-code'\nconst a = 1\n", 0),
         ("indented mention", "const s = `\n  import x from 'claude-code'\n`\n", 0),
+        ("export before a comment", "export const a = 1\n// import { atom } from 'claude-code'\n", 0),
+        ("export before a template", "export const s = `\n  import x from 'claude-code'\n`\n", 0),
+        ("star re-export", "export * from 'claude-code'\n", 1),
     ]
     for name, src, want in import_cases:
         found = engine_imports(src)

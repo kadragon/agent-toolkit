@@ -51,6 +51,11 @@ export const modelLabel = (model: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}${suffix ?? ''}`
 }
 
+const modelKey = (model: string): string =>
+  model.trim().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '')
+
+export const isSameModel = (a: string, b: string): boolean => modelKey(a) === modelKey(b)
+
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))
 
@@ -131,7 +136,6 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
-// Cells a row of segments takes: the band draws no wide character in a figure row.
 export const widthOf = (segments: Segment[]): number => textOf(segments).length
 
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
@@ -148,10 +152,10 @@ export const contextText = (status: StatusBand): string => textOf(contextSegment
 export const limitsSegments = (
   status: StatusBand,
   glyphs: Glyphs = UNICODE,
-  isResetShown = true,
+  resetCount = WINDOWS.length,
 ): Segment[] =>
   joined(
-    WINDOWS.map(([kind, label]): Segment[] => {
+    WINDOWS.map(([kind, label], index): Segment[] => {
       const limit = status.rateLimits.find(candidate => candidate.kind === kind)
 
       if (limit === undefined) return []
@@ -163,34 +167,38 @@ export const limitsSegments = (
         { text: `${Math.round(limit.percentUsed)}%`, color: levelOf(limit.percentUsed) },
       ]
 
-      return !isResetShown || Number.isNaN(left) || left <= 0
+      return index >= resetCount || Number.isNaN(left) || left <= 0
         ? used
         : [...used, { text: ` (${duration(left)})`, isDim: true }]
     }),
     glyphs.separator,
   )
 
-// `room` is the cells left for the figures: past it the reset times go first,
-// so the cache countdown at the end is not the figure a narrow row cuts.
 export const timesSegments = (
   status: StatusBand,
   glyphs: Glyphs = UNICODE,
   room?: number,
 ): Segment[] => {
   const cache = cacheText(status)
-  const drawn = (isResetShown: boolean): Segment[] =>
+  const drawn = (resetCount: number): Segment[] =>
     joined(
       [
-        limitsSegments(status, glyphs, isResetShown),
+        limitsSegments(status, glyphs, resetCount),
         cache === ''
           ? []
           : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
       ],
       glyphs.separator,
     )
-  const full = drawn(true)
+  let resetCount = WINDOWS.length
+  let times = drawn(resetCount)
 
-  return room === undefined || widthOf(full) <= room ? full : drawn(false)
+  while (room !== undefined && widthOf(times) > room && resetCount > 0) {
+    resetCount -= 1
+    times = drawn(resetCount)
+  }
+
+  return times
 }
 
 // A harness-curate run the dev plugin judges due; nothing otherwise.
