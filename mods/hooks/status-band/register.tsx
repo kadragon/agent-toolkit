@@ -7,8 +7,8 @@ import {
   cellsByLength,
   contextSegments,
   curateText,
+  effortModelFor,
   headlineSegments,
-  isSameEffortModel,
   isSameModel,
   levelOf,
   timesSegments,
@@ -188,11 +188,11 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
     // What the write decided, kept for after it: the engine may run the
     // function again, so it reads `live` and leaves it as it is.
     const beforeCache = live.cacheExpiresAt
-    let discardedEffort: StepEffort | undefined
+    let effortChange: { step: StepEffort; model?: string } | undefined
     let isForfeit = false
 
     await update($, statusBand, current => {
-      discardedEffort = undefined
+      effortChange = undefined
       isForfeit = false
 
       // A read that started earlier and ended later must not undo a newer one.
@@ -201,16 +201,16 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       live.drawn = order
       const name = model === '' ? (current?.model ?? '') : model
       const stepEffort = live.stepEffort
-      const sameModel = current !== null && isSameEffortModel(current.model, name)
-      let effort = sameModel ? current.effort : undefined
+      let effort = current?.model === name ? current.effort : undefined
 
       if (stepEffort !== undefined) {
-        const matches = isSameEffortModel(stepEffort.model, name)
-        const wasCurrentModel = current !== null && isSameEffortModel(stepEffort.model, current.model)
+        const effortModel = effortModelFor(stepEffort.model, name)
+        const wasCurrentModel =
+          current !== null && effortModelFor(stepEffort.model, current.model) !== undefined
 
-        effort = matches ? stepEffort.value : undefined
-        if (!matches && model !== '' && (stepEffort === effortAtStart || wasCurrentModel)) {
-          discardedEffort = stepEffort
+        effort = effortModel === undefined ? undefined : stepEffort.value
+        if (effortModel !== undefined || (model !== '' && (stepEffort === effortAtStart || wasCurrentModel))) {
+          effortChange = { step: stepEffort, model: effortModel }
         }
       }
 
@@ -239,8 +239,11 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       }
     })
 
-    if (order === live.drawn && discardedEffort !== undefined && live.stepEffort === discardedEffort) {
-      live.stepEffort = undefined
+    if (order === live.drawn && effortChange !== undefined && live.stepEffort === effortChange.step) {
+      const { step, model } = effortChange
+
+      if (model === undefined) live.stepEffort = undefined
+      else step.model = effortModelFor(step.model, model) ?? step.model
     }
     if (isForfeit && live.cacheExpiresAt === beforeCache) {
       live.cacheExpiresAt = null
@@ -345,15 +348,20 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       const stepEffort: StepEffort = { model: e.model, value: e.effort }
+      let model: string | undefined
 
       live.stepEffort = stepEffort
       await update($, statusBand, current => {
-        if (current === null || live.stepEffort !== stepEffort || !isSameEffortModel(current.model, e.model)) {
-          return current
-        }
+        model = current !== null && live.stepEffort === stepEffort
+          ? effortModelFor(stepEffort.model, current.model)
+          : undefined
+        if (current === null || model === undefined) return current
 
         return current.effort === stepEffort.value ? current : { ...current, effort: stepEffort.value }
       }).catch(() => undefined)
+      if (model !== undefined && live.stepEffort === stepEffort) {
+        stepEffort.model = effortModelFor(stepEffort.model, model) ?? stepEffort.model
+      }
     }
 
     const requestSentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined

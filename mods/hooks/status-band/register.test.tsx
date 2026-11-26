@@ -416,6 +416,36 @@ test('a different dated snapshot of the same model does not inherit effort', asy
   await second.ui.unmount()
 })
 
+test('a step and the session can name the same model by alias and snapshot', async ($, on) => {
+  const state = world(on)
+  state.model = 'claude-opus-5-5[1m]'
+
+  await start($)
+  await step($, { model: 'claude-opus-5-5-20261001', effort: 'high' })
+  await measure($)
+  const alias = await drawn($)
+
+  expect(alias.texts[0]).toBe('[Opus 5.5[1m] ◑ high] │ agent-toolkit git:(main)')
+  await alias.ui.unmount()
+
+  state.model = 'claude-opus-5-5-20261002'
+  await measure($)
+  await step($, { model: 'claude-opus-5-5', effort: 'medium' })
+  const snapshot = await drawn($)
+
+  expect(snapshot.texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  await snapshot.ui.unmount()
+
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  state.model = 'claude-opus-5-5-20261001'
+  await measure($)
+  const changed = await drawn($)
+
+  expect(changed.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await changed.ui.unmount()
+})
+
 test('a model read held across an old-model step still clears its effort on switching', async ($, on) => {
   const state = world(on)
   let release = () => {}
@@ -800,6 +830,20 @@ test('a window whose reset still fits keeps it where the cache is not counting',
   const { ui, texts } = await drawn($, 'terminal', { bodyColumns: 40 })
 
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ 7d: 40%')
+  await ui.unmount()
+})
+
+test('an expired cache does not displace usage figures on a narrow row', async ($, on) => {
+  const state = world(on)
+  state.rateLimits.push({ kind: 'seven_day', percentUsed: 99 })
+
+  await start($)
+  await step($)
+  state.now = NOW + 60 * MINUTE
+  await measure($)
+  const { ui, texts } = await drawn($, 'terminal', { bodyColumns: 40 })
+
+  expect(texts[2]).toBe(' │ 5h: 88% │ 7d: 99%')
   await ui.unmount()
 })
 

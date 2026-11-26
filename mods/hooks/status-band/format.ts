@@ -53,12 +53,22 @@ export const modelLabel = (model: string): string => {
 
 const withoutContextSuffix = (model: string): string => model.trim().replace(/\[[^\]]*\]$/, '')
 
-const modelKey = (model: string): string => withoutContextSuffix(model).replace(/-\d{8}$/, '')
+const SNAPSHOT_DATE = /-\d{8}$/
+const modelKey = (model: string): string => withoutContextSuffix(model).replace(SNAPSHOT_DATE, '')
 
 export const isSameModel = (a: string, b: string): boolean => modelKey(a) === modelKey(b)
 
-export const isSameEffortModel = (a: string, b: string): boolean =>
-  withoutContextSuffix(a) === withoutContextSuffix(b)
+export const effortModelFor = (stepModel: string, sessionModel: string): string | undefined => {
+  const step = withoutContextSuffix(stepModel)
+  const session = withoutContextSuffix(sessionModel)
+
+  if (step === session) return step
+  if (!isSameModel(step, session) || (SNAPSHOT_DATE.test(step) && SNAPSHOT_DATE.test(session))) {
+    return undefined
+  }
+
+  return SNAPSHOT_DATE.test(session) ? session : step
+}
 
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))
@@ -185,13 +195,14 @@ export const timesSegments = (
   cellsLeft?: number,
 ): Segment[] => {
   const cache = cacheText(status)
+  const isExpired = cache === 'cache expired'
   const drawn = (resetCount: number, windowCount: number): Segment[] =>
     joined(
       [
         limitsSegments(status, glyphs, resetCount, windowCount),
         cache === ''
           ? []
-          : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
+          : [{ text: cache, color: isExpired ? 'warning' : 'planMode' }],
       ],
       glyphs.separator,
     )
@@ -202,6 +213,10 @@ export const timesSegments = (
   while (cellsLeft !== undefined && cellsByLength(times) > cellsLeft && resetCount > 0) {
     resetCount -= 1
     times = drawn(resetCount, windowCount)
+  }
+
+  if (cellsLeft !== undefined && isExpired && cellsByLength(times) > cellsLeft) {
+    return limitsSegments(status, glyphs, resetCount)
   }
 
   if (cellsLeft !== undefined && cache !== '' && cache.length <= cellsLeft) {
