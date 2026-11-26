@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import os
 import re
@@ -30,6 +31,7 @@ from dispatch import (
     transcript_echoed,
 )
 from quota import WEEK, assess
+from quota import main as quota_main
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -1928,6 +1930,76 @@ class CodexSendTests(unittest.TestCase):
 
 
 class QuotaTests(unittest.TestCase):
+    def test_codex_reset_passes_change_routing_and_flag_expiries(self):
+        now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        reset = now + dt.timedelta(days=1)
+        soon = (now + dt.timedelta(hours=1)).astimezone(dt.timezone(dt.timedelta(hours=9)))
+        later = now + dt.timedelta(hours=2)
+        expiries = [
+            (reset + dt.timedelta(days=1)).isoformat(), later.isoformat(), reset.isoformat(),
+            (now - dt.timedelta(hours=1)).isoformat(), soon.isoformat(),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {**os.environ, "CODEX_HOME": str(root), "QUOTA_CLAUDE_CACHE": str(root / "missing")}
+            command = [sys.executable, "-I", str(SCRIPTS / "quota.py")]
+            passes = root / "reset-passes.json"
+            passes.write_text(json.dumps(expiries), encoding="utf-8")
+            unknown = json.loads(subprocess.check_output(command, cwd=root, env=env))["codex"]
+            self.assertEqual(unknown, {
+                "state": "unknown", "reset_passes": 4, "reset_passes_before_weekly_reset": [],
+            })
+
+            session = root / "sessions" / now.strftime("%Y/%m/%d") / "session.jsonl"
+            session.parent.mkdir(parents=True)
+            for used, expected_state, expected_bias in (
+                (90, "hot", "claude"), (75, "ok", "none"), (10, "ok", "none"),
+            ):
+                with self.subTest(used=used):
+                    session.write_text(json.dumps({
+                        "type": "event_msg", "timestamp": now.isoformat(), "payload": {
+                            "type": "token_count", "rate_limits": {
+                                "primary": {"window_minutes": 10080, "used_percent": used,
+                                            "resets_at": reset.timestamp()},
+                            },
+                        },
+                    }), encoding="utf-8")
+                    result = json.loads(subprocess.check_output(command, cwd=root, env=env))
+                    self.assertEqual(result["codex"]["used"], used)
+                    self.assertEqual(result["codex"]["state"], expected_state)
+                    self.assertEqual(result["codex"]["reset_passes"], 4)
+                    self.assertEqual(result["codex"]["reset_passes_before_weekly_reset"],
+                                     [soon.isoformat(), later.isoformat()])
+                    self.assertEqual(result["bias"], expected_bias)
+
+    def test_codex_reset_passes_missing_malformed_or_expired(self):
+        now = dt.datetime(2026, 11, 26, tzinfo=dt.timezone.utc)
+        snapshot = {"used": 90, "reset": now.timestamp() + WEEK, "observed": now.timestamp()}
+        with tempfile.TemporaryDirectory() as directory:
+            passes = Path(directory) / ".codex" / "reset-passes.json"
+            passes.parent.mkdir()
+            for data, count in (
+                (None, 0), (b"\xff", 0), (b"[", 0), (b"{}", 0), (b"[null]", 0),
+                (b'["2026-11-27T00:00:00Z", "invalid"]', 0),
+                (b'["2026-12-04"]', 0),
+                (b'["2026-11-25T00:00:00Z", "2026-11-26T00:00:00Z"]', 0),
+                (b'["2026-12-04T00:00:00Z", "2026-12-05T00:00:00"]', 2),
+            ):
+                with self.subTest(data=data):
+                    if data is not None:
+                        passes.write_bytes(data)
+                    with patch("quota.codex_snapshot", return_value=snapshot), \
+                            patch("quota.claude_snapshot", return_value=None), \
+                            patch("quota.time.time", return_value=now.timestamp()), \
+                            patch.dict(os.environ, {"CODEX_HOME": ""}), \
+                            patch("quota.Path.home", return_value=Path(directory)), \
+                            redirect_stdout(StringIO()) as output:
+                        quota_main()
+                    codex = json.loads(output.getvalue())["codex"]
+                    self.assertEqual(codex["state"], "hot" if count else "critical")
+                    self.assertEqual(codex["reset_passes"], count)
+                    self.assertEqual(codex["reset_passes_before_weekly_reset"], [])
+
     def test_weekly_pace_is_at_most_hot_and_preserves_runway(self):
         now = 1_800_000_000
         result = assess({"used": 83, "reset": now + WEEK * 0.554, "observed": now}, now)

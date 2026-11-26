@@ -1,10 +1,10 @@
 """Weekly and 5-hour quota pace for dispatch: which CLI has room for the next wave.
 
-Reads only limits the servers reported; never counts tokens.
+Uses server-reported limits and locally tracked Codex reset passes.
 - Claude: read the snapshot written by the home repo's status line. See
   references/quota-snapshot.md for the file contract.
 - Codex: the latest token_count.rate_limits event in recent session JSONL files
-  under $CODEX_HOME (default ~/.codex).
+  under $CODEX_HOME (default ~/.codex), plus reset-passes.json in that directory.
 
 Without arguments it prints one JSON object:
   {"claude": {...}, "codex": {...}, "bias": "none|codex|claude|both-hot"}
@@ -12,6 +12,7 @@ Each CLI gets used (weekly percent), elapsed (percent of its 7-day window),
 ahead (used - elapsed), reset_in_h, runway_h (hours to 100% at the weekly pace,
 null when there is no estimate), age_h (snapshot age), five_hour_used when
 reported, and state ok|hot|critical|unknown.
+Codex also gets reset_passes and reset_passes_before_weekly_reset.
 """
 import datetime as dt
 import json
@@ -52,8 +53,12 @@ def claude_snapshot(path=CLAUDE_CACHE):
         return None
 
 
+def codex_home():
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
 def codex_snapshot(home=None):
-    home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    home = Path(home) if home else codex_home()
     today = dt.datetime.now(dt.timezone.utc).date()
     files = []
     for days in range(9):
@@ -94,6 +99,26 @@ def codex_snapshot(home=None):
             except (ValueError, TypeError, KeyError, AttributeError):
                 continue
     return latest
+
+
+def codex_reset_passes(home, now):
+    try:
+        values = json.loads((home / "reset-passes.json").read_text(encoding="utf-8-sig"))
+        if not isinstance(values, list):
+            return []
+        unexpired = []
+        for value in values:
+            if not isinstance(value, str) or "T" not in value:
+                return []
+            expiry = dt.datetime.fromisoformat(value)
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=dt.timezone.utc)
+            timestamp = expiry.timestamp()
+            if timestamp > now:
+                unexpired.append((timestamp, value))
+        return sorted(unexpired, key=lambda item: item[0])
+    except (OSError, ValueError, OverflowError, RecursionError):
+        return []
 
 
 def assess(snapshot, now):
@@ -155,7 +180,16 @@ def bias(claude, codex):
 
 def main():
     now = time.time()
-    claude, codex = assess(claude_snapshot(), now), assess(codex_snapshot(), now)
+    home = codex_home()
+    snapshot = codex_snapshot(home)
+    claude, codex = assess(claude_snapshot(), now), assess(snapshot, now)
+    passes = codex_reset_passes(home, now)
+    codex["reset_passes"] = len(passes)
+    codex["reset_passes_before_weekly_reset"] = [
+        value for expiry, value in passes if snapshot and expiry < snapshot["reset"]
+    ]
+    if passes:
+        codex["state"] = {"critical": "hot", "hot": "ok"}.get(codex["state"], codex["state"])
     print(json.dumps({"claude": claude, "codex": codex, "bias": bias(claude, codex)}))
 
 
