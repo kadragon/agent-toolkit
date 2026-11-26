@@ -380,11 +380,14 @@ export const register: Register = (on, options) => {
           if (epoch !== live.setupEpoch) return
 
           if (ranUnderLeftModel(cacheModel, sessionModel)) return
+          if (live.cacheExpiresAt != null && live.cacheExpiresAt > cacheExpiresAt) return
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
           await update($, statusBand, current => {
             if (current === null) return null
+            // A /clear or a later step may have landed since the checks above.
+            if (epoch !== live.setupEpoch || live.cacheExpiresAt !== cacheExpiresAt) return current
 
             const shownModel = sessionModel === '' ? current.model : sessionModel
 

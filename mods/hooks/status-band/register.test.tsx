@@ -780,6 +780,29 @@ test('a countdown whose model check ends after a /clear is not written back', as
   await ui.unmount()
 })
 
+test('a step sent earlier that ends later does not shorten the countdown a later step set', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.holdNextNow = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await step($)
+  state.now = NOW + 10 * MINUTE
+  await step($)
+  // The earlier step's clock read lands last, still reading the time it was sent.
+  state.now = NOW
+  release()
+  await settle()
+  state.now = NOW + 10 * MINUTE
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[2]).toBe(' │ 5h: 88% (1h 54m) │ cache 60m')
+  await ui.unmount()
+})
+
 test('a countdown whose model lookup fails is not shown under the model the band moved to', async ($, on) => {
   const state = world(on)
   let release = () => {}

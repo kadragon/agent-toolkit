@@ -11,13 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## Review Backlog
-
-### PR #458 — Keep the status band's cache and install picks tied to the right model and project (2026-11-26)
-
-- [ ] [debt] Check the session epoch again inside the cache write so a /clear landing between the check and the write cannot restore the old conversation's countdown (source: code-review) — `mods/hooks/status-band/register.tsx:380` (pre_existing)
-- [ ] [debt] Keep a cached step sent earlier from overwriting a later expiry when two steps finish out of order (source: code-review, codex) — `mods/hooks/status-band/register.tsx:384` (pre_existing)
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
