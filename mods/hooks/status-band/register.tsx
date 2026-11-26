@@ -2,7 +2,7 @@ import { atom, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { StatusBand } from '../../types'
-import { enabledPlugins, installPaths, under } from './count'
+import { enabledPlugins, installPath, under } from './count'
 import {
   cellsByLength,
   contextSegments,
@@ -19,7 +19,7 @@ import type { Glyphs, Segment } from './format'
 // Read this file in ranges, not whole: find a name with `grep -n '<name>'` and read only
 // its range. Pure counting and text helpers live in count.ts and format.ts. The names
 // below are checked against the real top-level functions by `scripts/check_mods.py`.
-//   curate-due reads: readInstallPaths, readDevRoot, python, readCurateDue
+//   curate-due reads: readDevRoot, python, sameDirectory, readCurateDue
 //   curate check and verdict: checkCurateThrottled, dropCurateVerdict
 //   live refresh (git, cache window, tick): isCached, ranUnderLeftModel, refresh, watch
 //   entry points (register holds every on(...) hook handler): startStatusBand, register
@@ -65,8 +65,10 @@ type Live = {
 
 type Setup = Pick<StatusBand, 'curateDue'>
 
-// Where the installed-plugins file says each plugin's directory is.
-async function readInstallPaths($: EngineInterface): Promise<Record<string, string>> {
+// Where the dev plugin is installed, when the settings switch it on.
+async function readDevRoot($: EngineInterface): Promise<string | undefined> {
+  if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
+
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 
@@ -74,17 +76,12 @@ async function readInstallPaths($: EngineInterface): Promise<Record<string, stri
 
   if (claudeDir === undefined) throw new Error('no home directory')
 
-  return installPaths(
+  return installPath(
     await $.fs.read(under(claudeDir, 'plugins/installed_plugins.json')),
     await $.session.cwd(),
+    DEV_PLUGIN,
+    (projectPath, ancestor) => sameDirectory($, projectPath, ancestor),
   )
-}
-
-// Where the dev plugin is installed, when the settings switch it on.
-async function readDevRoot($: EngineInterface): Promise<string | undefined> {
-  if (!enabledPlugins(await $.settings.read()).includes(DEV_PLUGIN)) return undefined
-
-  return (await readInstallPaths($))[DEV_PLUGIN]
 }
 
 // As the hooks do: `python3`, else `python` where only that is installed.
@@ -94,6 +91,13 @@ function python(
   init: { timeoutMs: number; cwd?: string },
 ): Promise<{ exitCode: number; stdout: string }> {
   return $.process.run(['python3', ...args], init).catch(() => $.process.run(['python', ...args], init))
+}
+
+async function sameDirectory($: EngineInterface, path: string, ancestor: string): Promise<boolean> {
+  const args = ['-c', 'import os, sys; sys.exit(not os.path.samefile(*sys.argv[1:]))', path, ancestor]
+  const result = await python($, args, { timeoutMs: CURATE_TIMEOUT_MS }).catch(() => null)
+
+  return result?.exitCode === 0
 }
 
 // Whether a harness-curate run is due here, judged as the session-start hook
@@ -201,7 +205,9 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
       if (stepEffort !== undefined) {
         effort = isSameModel(stepEffort.model, name) ? stepEffort.value : undefined
-        if (!sameModel && stepEffort === effortAtStart && ranUnderLeftModel(stepEffort.model, name)) {
+        const wasCurrentModel = current !== null && isSameModel(stepEffort.model, current.model)
+
+        if ((stepEffort === effortAtStart || wasCurrentModel) && ranUnderLeftModel(stepEffort.model, name)) {
           discardedEffort = stepEffort
         }
       }
@@ -334,7 +340,6 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // A response of the main loop renews the prompt cache from when it was sent.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       const stepEffort: StepEffort = { model: e.model, value: e.effort }
@@ -349,13 +354,12 @@ export const register: Register = (on, options) => {
       }).catch(() => undefined)
     }
 
-    const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
+    const requestSentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
     const epoch = live.setupEpoch
     const result = yield* next(e)
 
-    // The step does not wait for the band: the countdown is written behind it.
-    if (sentAt !== undefined && isCached(result.usage)) {
-      void sentAt
+    if (requestSentAt !== undefined && isCached(result.usage)) {
+      void requestSentAt
         .then(async at => {
           if (at === undefined) return
 

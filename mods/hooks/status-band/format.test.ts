@@ -191,12 +191,11 @@ describe('segments', () => {
 })
 
 test('each glyph uses one UTF-16 code unit and one terminal cell', () => {
-  // Printable ASCII and single-cell punctuation and symbols in the default width mode.
-  const singleCell = /^[\x20-\x7E│○◔◑◕●…]$/
+  const defaultSingleCell = /^[\x20-\x7E│○◔◑◕●…]$/
 
   for (const { separator, effort, ellipsis } of [UNICODE, ASCII]) {
     for (const glyph of separator + Object.values(effort).join('') + ellipsis) {
-      expect(glyph).toMatch(singleCell)
+      expect(glyph).toMatch(defaultSingleCell)
     }
   }
 })

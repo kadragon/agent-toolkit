@@ -34,6 +34,7 @@ const USAGE = {
 type World = {
   now: number
   model: string
+  cwd: string
   branch: string | null
   percent: number | undefined
   rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[]
@@ -57,6 +58,7 @@ type World = {
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
   curateRuns: (readonly string[])[]
+  sameDirectory: boolean
   // Set to hold the next curate check open until the test lets it go.
   curateGate?: Promise<void>
   // True where only `python` is installed.
@@ -80,6 +82,7 @@ const world = (on: On): World => {
   const state: World = {
     now: NOW,
     model: 'claude-opus-5-5',
+    cwd: '/work/agent-toolkit',
     branch: 'main',
     percent: 12,
     rateLimits: [
@@ -97,6 +100,7 @@ const world = (on: On): World => {
     isUncached: false,
     curateOut: '',
     curateRuns: [],
+    sameDirectory: false,
     isPython3Missing: false,
   }
 
@@ -113,7 +117,7 @@ const world = (on: On): World => {
 
     return { value: state.model }
   })
-  on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
+  on('session.cwd', async () => ({ value: state.cwd }))
   on('session.turns', async () => ({ value: state.turns }))
   on('session.usage', async () => {
     if (state.isUsageDown) throw new Error('usage is down')
@@ -164,6 +168,8 @@ const world = (on: On): World => {
     if (e.argv[0] === 'git' && e.argv[1] === 'rev-parse') {
       return ran(0, '/work/agent-toolkit/.git\n')
     }
+
+    if (e.argv[1] === '-c') return ran(state.sameDirectory ? 0 : 1, '')
 
     if (e.argv[0] !== 'git') {
       state.curateRuns.push(e.argv)
@@ -368,6 +374,30 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
 
   expect(returned.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
   await returned.ui.unmount()
+})
+
+test('a model read held across an old-model step still clears its effort on switching', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.isUncached = true
+  state.holdNextModel = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const pending = measure($)
+  await settle()
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  release()
+  await pending
+  await measure($)
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await ui.unmount()
 })
 
 test('a git call that fails keeps the last branch, one that names none drops it', async ($, on) => {
@@ -1001,6 +1031,32 @@ test('a Windows home is read through backslashes alone', async ($, on) => {
   expect(state.curateRuns.map(argv => argv[1])).toEqual([
     'C:\\p\\dev\\skills\\harness-curate\\scripts\\record_run.py',
   ])
+})
+
+test('a Windows project install is used only when the differently cased ancestor is confirmed', async ($, on) => {
+  const state = curateWorld(on)
+  state.cwd = 'c:/work/repo/src'
+  state.files['c:/work/repo/src/AGENTS.md'] = '# agents'
+  state.files['/home/me/.claude/plugins/installed_plugins.json'] = JSON.stringify({
+    plugins: {
+      'dev@kadragon': [
+        { projectPath: 'C:\\work\\Repo', installPath: '/p/project' },
+        { installPath: '/p/user' },
+      ],
+    },
+  })
+
+  await start($)
+
+  expect(state.curateRuns.map(argv => argv[1])).toEqual([
+    '/p/user/skills/harness-curate/scripts/record_run.py',
+  ])
+
+  state.sameDirectory = true
+  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
+  await settle()
+
+  expect(state.curateRuns.at(-1)?.[1]).toBe('/p/project/skills/harness-curate/scripts/record_run.py')
 })
 
 test('the band is two rows at most, with no count row and no session time', async ($, on) => {

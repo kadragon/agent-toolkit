@@ -17,6 +17,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
 
+### PR #456 — Preserve cache and model effort on the status band (2026-11-26)
+
+- [ ] [debt] Keep a delayed step from restoring the cache countdown on another model when the session model lookup fails (source: codex) — `mods/hooks/status-band/register.tsx:368` (pre_existing)
+- [ ] [debt] Avoid selecting an unrelated project install when the active path has no matching project or user install (source: codex) — `mods/hooks/status-band/count.ts:75` (pre_existing)
+- [ ] [debt] Keep a refresh that read the old model from forfeiting a cache recorded by a newer model while the refresh was pending (source: agy) — `mods/hooks/status-band/register.tsx:189` (pre_existing)
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
