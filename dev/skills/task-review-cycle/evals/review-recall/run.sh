@@ -98,7 +98,6 @@ cleanup() {
   done
   wait 2>/dev/null || true
   # A Windows reviewer broker can keep its clone directory open after finishing.
-  # Report that separately from the fixture verdict and preserve the run's exit status.
   rm -rf "$WORK" || printf 'WARN: could not remove all temporary fixture clones under %s\n' "$WORK" >&2
 }
 trap cleanup EXIT

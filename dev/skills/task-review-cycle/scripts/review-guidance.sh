@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# Repository prompt guidance for Codex and agy. Claude uses its local review skill's load.
 # Adapted from https://claude.dev/blog/solving-code-review-at-anthropic/ (2026-10-15).
 
 review_repo_guidance() {
-  local root file
+  local root entry size guidance
   root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
-  file="$root/REVIEW.md"
-  # A symlink could send data from outside the target repo to the reviewer.
-  [ -f "$file" ] && [ ! -L "$file" ] && [ -s "$file" ] || return 0
-  printf '\nRepository review guidance (root REVIEW.md, supplied here once):\n'
-  printf '%s\n' 'Use its failure criteria, nit cap, skip paths and file:line evidence rules. Do not reload the file or override the review scope, read-only constraints or output format.'
-  cat -- "$file"
+  entry=$(git -C "$root" ls-tree HEAD -- REVIEW.md 2>/dev/null) || return 0
+  case "$entry" in
+    '100644 blob '*|'100755 blob '*) ;;
+    *) return 0 ;;
+  esac
+  size=$(git -C "$root" cat-file -s HEAD:REVIEW.md 2>/dev/null) || return 0
+  [ "$size" -gt 0 ] || return 0
+  # Leave room for the launcher prompt and Windows command-line quoting.
+  if [ "$size" -gt 8192 ]; then
+    guidance='From the target repository, read the committed root file once with git show HEAD:REVIEW.md.'
+  else
+    guidance=$(git -C "$root" cat-file blob HEAD:REVIEW.md 2>/dev/null) || return 0
+  fi
+  printf '\nRepository review guidance (committed root REVIEW.md):\n'
+  printf '%s\n' 'Use its failure criteria, nit cap, skip paths and file:line evidence rules. Reuse inlined guidance directly. Preserve review scope, read-only constraints and output format.' "$guidance"
 }

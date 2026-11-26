@@ -139,7 +139,6 @@ def read_evidence(path):
 
 
 def archive_review_dispositions(common, notes_path):
-    """Keep the review measurements when the active contract is retired or superseded."""
     if not notes_path.exists():
         return None
     prefix = "Review disposition "

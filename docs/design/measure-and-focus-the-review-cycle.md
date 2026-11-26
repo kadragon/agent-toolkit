@@ -29,7 +29,9 @@ This design follows [How the Claude Code team does code review](https://claude.d
   Code 2.1.332 read and cited root `REVIEW.md` in an isolated fixture. Reuse its guidance and read
   the file once if the skill omitted it. Codex companion requires branch-scoped adversarial
   mode for custom instructions. Standalone `codex review` cannot combine `--base` and custom
-  instructions, so supply the branch comparison in the custom prompt.
+  instructions, so supply the branch comparison in the custom prompt. Codex and agy use the
+  committed root file to keep local edits out of the review request. For files over 8 KiB, the
+  prompt directs the reviewer to read that same Git object to stay within process argument limits.
 - The comment scheduler can change independently of the comment rules. If advisory edits break
   required checks, withdraw them and check the remaining candidate before merge.
 - Exercise both Claude modes, Codex prompt transport and agy's priority tags with launcher

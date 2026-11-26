@@ -5,7 +5,9 @@ The non-Claude engines (agy, Codex).
 ## Data-sharing policy
 
 Before selecting a primary, panel, or fallback reviewer, check the repository policy and user
-authorization for sharing source, diffs, and contracts with that engine. Set each block's
+authorization for sharing source, diffs, contracts and any root `REVIEW.md` the engine can read.
+Codex and agy receive guidance from the committed root file; Claude's local skill can read its
+working copy. If that working copy is outside the approved scope, exclude that Claude run. Set each block's
 `*_ALLOWED` only from that decision. Record exclusions without probing prohibited engines.
 Select an allowed independent reviewer for any gate that requires one. If none can satisfy
 the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer

@@ -77,7 +77,7 @@ All 10 fixtures have completed output from all four arms. The first attempt with
 inputs hit HTTP 429. The resumed evaluation ran the eight missing Claude code reviews once at
 the suite default of medium. It reused two completed Claude code reviews, all ten Codex reviews,
 and three agy reviews from that attempt. Seven agy and ten comments outputs came from the earlier
-run. Its agy launcher was unchanged and the shared helper differed only in a shell comment. The
+run. At resume, its agy launcher was unchanged and the shared helper differed only in a shell comment. The
 saved comments prompts matched the current prompt after normalizing line endings. The fixture
 commit, parent, and CLI versions agreed across reused runs.
 
@@ -114,7 +114,13 @@ The historical run used different reviewer modes and unpinned models, and this r
 completed arms with equivalent inputs across attempts. It does not isolate the impact of a
 single change or measure precision.
 
-Review recall fingerprint: c33c6843b161084c502c316bdb0ddf3e5f59f238
+The PR review follow-up restricted automatically inlined repository guidance to committed files
+and bounded its size. For every isolated fixture, the old and new helpers returned the same
+empty output because the fixture has no root `REVIEW.md`. The launchers, comments rules and
+fixture commits were unchanged, and the runner changed only in a shell comment. The same 40
+outputs therefore cover the final fixture inputs without another reviewer call.
+
+Review recall fingerprint: b9a96d1901c09b343b1e1e95ad960aa121fa43fb
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).

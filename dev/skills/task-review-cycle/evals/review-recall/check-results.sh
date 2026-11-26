@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Check the scorecard against the exact review inputs. CI does not have reviewer credentials.
 # Adapted from https://claude.dev/blog/solving-code-review-at-anthropic/ (2026-10-15).
 set -euo pipefail
 
