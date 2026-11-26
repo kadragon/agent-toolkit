@@ -127,7 +127,7 @@ unchanged, and every fixture passes a valid `base` ref, so no reviewer call was 
 arms above were graded from stdout and were not re-collected; a review over the 40,000-byte limit
 would have been graded from its head and tail.
 
-Review recall fingerprint: b8bfeb7bd00052ef16faf847dc4c81e0d9e2ce09
+Review recall fingerprint: bc5a507d9ad51f21df335e6c34d0f620ec94d475
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).
