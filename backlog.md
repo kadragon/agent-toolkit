@@ -20,10 +20,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] Distinguish an invalid agy comparison ref from an empty diff (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:14` (pre_existing)
 - [ ] [constraint] Verify that new reviewer launchers are included in the recall fingerprint inputs (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9`
 
-### PR #447 — Relax dispatch weekly quota pace (2026-11-26)
-
-- [ ] [debt] Treat Claude quota snapshots with missing required fields as unknown so Codex assessment still runs (source: codex) — `dev/skills/dispatch/scripts/quota.py:102` (pre_existing)
-
 ### PR #451 — Keep the cache countdown on narrow status bands and tidy the status-band mod (2026-11-26)
 
 - [ ] [debt] The countdown a step writes behind it can land after a refresh forfeited that cache for a model switch, so the old model's `cache …` shows under the new one until the next tick: skip the write when `current.model` differs from the step's model (source: code-review, agy) — mods/hooks/status-band/register.tsx:358 (pre_existing)
