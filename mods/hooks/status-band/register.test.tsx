@@ -799,6 +799,29 @@ test('a countdown whose model lookup fails is not shown under the model the band
   expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
+
+  state.isModelDown = false
+  await measure($)
+  const settled = await drawn($)
+
+  expect(settled.texts[2]).toBe(' │ 5h: 88% (2h 4m)')
+  await settled.ui.unmount()
+})
+
+test('a countdown whose model lookup fails is kept for the next read to confirm', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  state.model = 'claude-haiku-5-5'
+  state.isModelDown = true
+  await step($, { model: 'claude-haiku-5-5' })
+  state.isModelDown = false
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('[Haiku 5.5')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
+  await ui.unmount()
 })
 
 test('a refresh that read the old model keeps a cache a newer model recorded meanwhile', async ($, on) => {
@@ -814,6 +837,11 @@ test('a refresh that read the old model keeps a cache a newer model recorded mea
   await step($, { model: 'claude-haiku-5-5' })
   release()
   await settle()
+  const pending = await drawn($)
+
+  expect(pending.texts[2]).toBe(' │ 5h: 88% (2h 4m)')
+  await pending.ui.unmount()
+
   await measure($)
   const { ui, texts } = await drawn($)
 

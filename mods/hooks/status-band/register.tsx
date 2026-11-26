@@ -170,7 +170,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
   const effortAtStart = live.stepEffort
-  const cacheAtStart = { expiresAt: live.cacheExpiresAt, model: live.cacheModel }
+  const cacheAtStart = live.cacheExpiresAt
 
   try {
     const [model, cwd, usage, turns, now, git] = await Promise.all([
@@ -188,7 +188,6 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
     // What the write decided, kept for after it: the engine may run the
     // function again, so it reads `live` and leaves it as it is.
-    const beforeCache = live.cacheExpiresAt
     let effortChange: { step: StepEffort; model?: string } | undefined
     let isForfeit = false
 
@@ -215,13 +214,9 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
         }
       }
 
-      // The cache was the model's that made it: a switch forfeits it. One recorded
-      // while this read was pending was checked against a newer model than `name`.
+      // The cache was the model's that made it: a switch forfeits it.
       const cacheModel = live.cacheModel ?? current?.cacheModel
-      const isNewerCache =
-        live.cacheExpiresAt !== cacheAtStart.expiresAt || live.cacheModel !== cacheAtStart.model
-
-      isForfeit = !isNewerCache && ranUnderLeftModel(cacheModel, name)
+      isForfeit = ranUnderLeftModel(cacheModel, name)
       const isCacheGone = isForfeit || live.cacheExpiresAt === null
 
       return {
@@ -250,7 +245,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       if (model === undefined) live.stepEffort = undefined
       else step.model = effortModelFor(step.model, model) ?? step.model
     }
-    if (isForfeit && live.cacheExpiresAt === beforeCache) {
+    if (isForfeit && live.cacheExpiresAt === cacheAtStart) {
       live.cacheExpiresAt = null
       live.cacheModel = undefined
     }
@@ -380,24 +375,21 @@ export const register: Register = (on, options) => {
 
           const cacheExpiresAt = at + cacheTtlMs
           const cacheModel = e.model || undefined
-          const sessionModel = await $.session.model().catch(() => undefined)
+          const sessionModel = await $.session.model().catch(() => '')
 
           if (epoch !== live.setupEpoch) return
 
-          // A lookup that fails is judged against the model the band last drew, as
-          // refresh does; the write reads `live` only to leave it as it is.
-          let isRecorded = false
+          if (ranUnderLeftModel(cacheModel, sessionModel)) return
 
+          live.cacheExpiresAt = cacheExpiresAt
+          live.cacheModel = cacheModel
           await update($, statusBand, current => {
-            isRecorded = !ranUnderLeftModel(cacheModel, sessionModel ?? current?.model ?? '')
+            if (current === null) return null
 
-            return current === null || !isRecorded ? current : { ...current, cacheExpiresAt, cacheModel }
+            const shownModel = sessionModel === '' ? current.model : sessionModel
+
+            return ranUnderLeftModel(cacheModel, shownModel) ? current : { ...current, cacheExpiresAt, cacheModel }
           })
-
-          if (isRecorded && epoch === live.setupEpoch) {
-            live.cacheExpiresAt = cacheExpiresAt
-            live.cacheModel = cacheModel
-          }
         })
         .catch(() => undefined)
     }
