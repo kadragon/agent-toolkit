@@ -82,7 +82,7 @@ response carries the verdict. One fix-and-re-verify retry.
 **If QA fails after one retry:** stop and report unmet criteria; the worktree, branch and
 archive are preserved per *Worktree cycle* → *Stopped run*. Resuming is the default. Only when
 the user explicitly authorizes abandoning the run, remove the worktree and branch — its
-`tasks.md` goes with the worktree.
+`tasks.md` goes with the worktree — and clear the Herdr label (`cycle.md` → *Worktree cycle*).
 
 **After QA passes:** in the worktree, `cycle.md` → *Version bump*, *Cleanup* (`prune-tasks` on
 the worktree `tasks.md`, `prune-backlog` on the worktree `backlog.md`, `changelog`), then

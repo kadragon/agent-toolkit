@@ -95,10 +95,10 @@ starting checkout is never read, edited or switched. Nothing collapses back into
   matches: issue `cd "<printed worktree path>"` as its own Bash call first (the cwd carries to
   the next call; Codex resets it per call, so set the merge call's `workdir` instead), then the
   merge command. The merge deletes the worktree, so every step after it — `cycle_state.py
-  retire --branch <branch>` included — runs from the main worktree root (`ROOT`). After it, clear the label:
+  retire --branch <branch>` included — runs from the main worktree root (`ROOT`). After it, only when the script's JSON shows the worktree removed (no "Could not remove" warning), clear the label:
   `[[ -z "${HC_TERMINAL_ID:-}" ]] || hc label "$HC_TERMINAL_ID" "worktree=" >/dev/null 2>&1 || true`.
 - **Stopped run.** A failed check, missing authority or a QA stop preserves the worktree, branch
-  and archive; only an explicit user instruction removes them. The archive stays either way —
+  and archive; only an explicit user instruction removes them (clear the label when it does). The archive stays either way —
   `cycle_state.py retire` follows a merge, never an abandonment.
 
 ## Scope
