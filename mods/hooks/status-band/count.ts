@@ -7,13 +7,16 @@ export const enabledPlugins = (settings: Record<string, unknown>): string[] =>
     ? Object.entries(settings.enabledPlugins).flatMap(([id, isOn]) => (isOn === true ? [id] : []))
     : []
 
+const slashed = (path: string): string => path.replace(/\\/g, '/')
+
 // How much of `cwd` a project path covers, in characters; 0 when it is not
 // that directory or one beneath it. Either separator ends a segment.
 const covered = (projectPath: unknown, cwd: string): number => {
   if (typeof projectPath !== 'string') return 0
 
-  const root = projectPath.replace(/[\\/]+$/, '')
-  const isWithin = cwd === root || (cwd.startsWith(root) && /[\\/]/.test(cwd.charAt(root.length)))
+  const root = slashed(projectPath).replace(/\/+$/, '')
+  const here = slashed(cwd)
+  const isWithin = here === root || (here.startsWith(root) && here.charAt(root.length) === '/')
 
   return isWithin ? root.length + 1 : 0
 }

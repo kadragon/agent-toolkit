@@ -4,6 +4,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 import type { StatusBand } from '../../types'
 import { enabledPlugins, installPaths, under } from './count'
 import {
+  cellsByLength,
   contextSegments,
   curateText,
   headlineSegments,
@@ -11,7 +12,6 @@ import {
   levelOf,
   timesSegments,
   UNICODE,
-  widthOf,
 } from './format'
 import type { Glyphs, Segment } from './format'
 
@@ -55,7 +55,7 @@ type Live = {
   cacheExpiresAt?: number | null
   cacheModel?: string
   setup: Setup
-  isCurateOwned: boolean
+  hasSessionCurateVerdict: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
   // When the curate check last ran; unset, the next read runs it.
@@ -133,7 +133,7 @@ function checkCurateThrottled($: EngineInterface, live: Live): void {
     if (epoch !== live.setupEpoch || curateDue === undefined) return
 
     live.setup = { ...live.setup, curateDue }
-    live.isCurateOwned = true
+    live.hasSessionCurateVerdict = true
     await update($, statusBand, current => (current === null ? null : { ...current, curateDue }))
   })()
     .catch(() => undefined)
@@ -146,7 +146,7 @@ function checkCurateThrottled($: EngineInterface, live: Live): void {
 
 const dropCurateVerdict = (live: Live): void => {
   live.setup = {}
-  live.isCurateOwned = true
+  live.hasSessionCurateVerdict = true
   live.setupEpoch += 1
   // A run in the last session stamped its record: ask again.
   live.curateCheckedAt = undefined
@@ -224,7 +224,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
           ? undefined
           : (live.cacheExpiresAt ?? current?.cacheExpiresAt),
         cacheModel: isCacheGone ? undefined : cacheModel,
-        curateDue: live.isCurateOwned ? live.setup.curateDue : current?.curateDue,
+        curateDue: live.hasSessionCurateVerdict ? live.setup.curateDue : current?.curateDue,
       }
     })
 
@@ -290,7 +290,7 @@ export const register: Register = (on, options) => {
     asked: 0,
     drawn: 0,
     setup: {},
-    isCurateOwned: false,
+    hasSessionCurateVerdict: false,
     setupEpoch: 0,
   }
 
@@ -351,6 +351,7 @@ export const register: Register = (on, options) => {
     }
 
     const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
+    const epoch = live.setupEpoch
     const result = yield* next(e)
 
     // The step does not wait for the band: the countdown is written behind it.
@@ -361,6 +362,17 @@ export const register: Register = (on, options) => {
 
           const cacheExpiresAt = at + cacheTtlMs
           const cacheModel = e.model || undefined
+          const sessionModel = await $.session.model().catch(() => '')
+
+          if (epoch !== live.setupEpoch) return
+
+          if (
+            cacheModel !== undefined &&
+            sessionModel !== '' &&
+            !isSameModel(cacheModel, sessionModel)
+          ) {
+            return
+          }
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
@@ -410,7 +422,7 @@ export const statusRows = (
   const curate = curateText(status)
   const separator = glyphs.separator.length
   const taken =
-    (context.length === 0 ? 0 : widthOf(context) + separator) +
+    (context.length === 0 ? 0 : cellsByLength(context) + separator) +
     (curate === '' ? 0 : curate.length + separator)
   const times = timesSegments(status, glyphs, columns === undefined ? undefined : columns - taken)
 
