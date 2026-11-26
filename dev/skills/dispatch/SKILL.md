@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.6.0
+version: 2.7.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo
   listed in the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to run a
@@ -72,8 +72,10 @@ A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
-plus each CLI's `state` and one `bias`. Any weekly pace that exhausts quota before reset is
-`critical`. Recheck next wave because the 5-hour window can reset.
+plus each CLI's `state` and one `bias`. Only actual usage of 90% or more in either window
+is `critical`. Once 24 hours of the weekly window have elapsed, pace can raise the state to
+`hot` if usage is at least 15 percentage points ahead of elapsed time or projected weekly
+usage at reset exceeds 120%. Recheck next wave because the 5-hour window can reset.
 See `references/quota-snapshot.md` when wiring or diagnosing the Claude status-line snapshot.
 Apply the bias on top of the tables below:
 

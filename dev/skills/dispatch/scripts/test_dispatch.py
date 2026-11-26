@@ -1928,21 +1928,39 @@ class CodexSendTests(unittest.TestCase):
 
 
 class QuotaTests(unittest.TestCase):
-    def test_critical_when_weekly_runway_ends_before_reset(self):
+    def test_weekly_pace_is_at_most_hot_and_preserves_runway(self):
         now = 1_800_000_000
         result = assess({"used": 83, "reset": now + WEEK * 0.554, "observed": now}, now)
-        self.assertEqual(result["state"], "critical")
+        self.assertEqual(result["state"], "hot")
         self.assertEqual(result["elapsed"], 44.6)
         self.assertEqual(result["runway_h"], 15.3)
         self.assertEqual(result["reset_in_h"], 93.1)
 
-    def test_weekly_runway_compares_unrounded_values(self):
+    def test_small_early_weekly_pace_does_not_raise_state(self):
         now = 1_800_000_000
-        for used, state in ((49.99, "ok"), (50, "ok"), (50.01, "critical")):
-            with self.subTest(used=used):
-                result = assess({"used": used, "reset": now + WEEK / 2, "observed": now}, now)
+        result = assess({"used": 11, "reset": now + WEEK * 0.892, "observed": now}, now)
+        self.assertEqual(result["elapsed"], 10.8)
+        self.assertEqual(result["state"], "ok")
+        self.assertLess(result["runway_h"], result["reset_in_h"])
+
+    def test_weekly_state_thresholds_use_unrounded_values(self):
+        now = 1_800_000_000
+        for used, elapsed_h, state in (
+            (89.99, 1, "hot"),
+            (90, 1, "critical"),
+            (74.99, 1, "ok"),
+            (75, 1, "hot"),
+            (18, 24 - 1 / 3600, "ok"),
+            (18, 24, "hot"),
+            (59.99, 84, "ok"),
+            (60, 84, "ok"),
+            (60.01, 84, "hot"),
+            (70, 92.4, "hot"),
+        ):
+            with self.subTest(used=used, elapsed_h=elapsed_h):
+                reset = now + WEEK - elapsed_h * 3600
+                result = assess({"used": used, "reset": reset, "observed": now}, now)
                 self.assertEqual(result["state"], state)
-                self.assertEqual(result["runway_h"], 84)
 
     def test_weekly_runway_without_a_measurable_pace(self):
         now = 1_800_000_000
@@ -1961,6 +1979,7 @@ class QuotaTests(unittest.TestCase):
         for used, reset, state in (
             (79, now + 3600, "ok"),
             (80, now + 3600, "hot"),
+            (89.99, now + 3600, "hot"),
             (90, now + 3600, "critical"),
             (90, now, "ok"),
         ):
