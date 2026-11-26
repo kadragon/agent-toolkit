@@ -2087,7 +2087,8 @@ class QuotaTests(unittest.TestCase):
         broken = [
             [], {}, {"used": 42}, {"used": 42, "reset": now + 86400},
             {**valid, "used": "42"}, {**valid, "used": 101}, {**valid, "reset": None},
-            {**valid, "observed": True},
+            {**valid, "observed": True}, {**valid, "reset": 10 ** 400},
+        {**valid, "observed": 10 ** 400},
         ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2100,6 +2101,9 @@ class QuotaTests(unittest.TestCase):
                     out = json.loads(subprocess.check_output(command, cwd=root, env=env))
                     self.assertEqual(out["claude"], {"state": "unknown"})
                     self.assertIn("state", out["codex"])
+            snapshot.write_text("[" * 100000, encoding="utf-8")
+            out = json.loads(subprocess.check_output(command, cwd=root, env=env))
+            self.assertEqual(out["claude"], {"state": "unknown"})
             snapshot.write_text(json.dumps({**valid, "five_hour": {"used": 91}}), encoding="utf-8")
             out = json.loads(subprocess.check_output(command, cwd=root, env=env))
             self.assertEqual(out["claude"]["used"], 42)
