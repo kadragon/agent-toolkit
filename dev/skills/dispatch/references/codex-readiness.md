@@ -2,9 +2,11 @@
 
 ## Before a Codex wave
 
-Never start a new Codex child while another Codex child is mid-cycle. A startup update can
-invalidate the running child's approval for the dev plugin hooks, even when the hook files are
-identical. If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
+A Codex startup that updates a kadragon plugin invalidates running Codex children's hook
+approval. Before starting one while another is mid-cycle, compare each plugin's version in
+agent-toolkit `origin/main` with `~/.codex/plugins/cache/kadragon/<plugin>/<version>`.
+Launch only if all match; otherwise wait and prepare the wave as below.
+If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
 send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 
 When the dev plugin version may have changed, such as after an agent-toolkit merge, wait for
