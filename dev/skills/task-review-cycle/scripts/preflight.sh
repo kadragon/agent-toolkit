@@ -115,10 +115,11 @@ CODEX_COMPANION=""
 if [ -n "$CODEX_CACHED" ]; then
   # `sort -V` is absent on some BSD/macOS sorts. Falling through to CLI mode there would be the
   # exact silent degradation this block exists to stop, so retry with a plain lexical sort —
-  # wrong only when versions cross a digit-count boundary, still better than no companion.
+  # keyed numerically on the first four dot-separated version components so `1.10` still ranks
+  # above `1.9`; a prerelease suffix or a fifth component is ignored.
   if ! CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -V -k1,1 2>/dev/null | tail -1 | cut -f2-) \
     || [ -z "$CODEX_COMPANION" ]; then
-    CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -k1,1 | tail -1 | cut -f2-)
+    CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | cut -f2-)
   fi
 fi
 if [ -z "$CODEX_COMPANION" ]; then

@@ -13,10 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #455 — Fall back when preflight sort lacks version support (2026-11-26)
-
-- [ ] [harness] Preserve numeric version order in the portable Codex companion fallback so a cached version such as `1.10` ranks above `1.9` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:120` (introduced here)
-
 ### PR #458 — Keep the status band's cache and install picks tied to the right model and project (2026-11-26)
 
 - [ ] [debt] Check the session epoch again inside the cache write so a /clear landing between the check and the write cannot restore the old conversation's countdown (source: code-review) — `mods/hooks/status-band/register.tsx:380` (pre_existing)
