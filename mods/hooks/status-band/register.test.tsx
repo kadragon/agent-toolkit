@@ -791,7 +791,6 @@ test('a step sent earlier that ends later does not shorten the countdown a later
   await step($)
   state.now = NOW + 10 * MINUTE
   await step($)
-  // The earlier step's clock read lands last, still reading the time it was sent.
   state.now = NOW
   release()
   await settle()
@@ -800,6 +799,20 @@ test('a step sent earlier that ends later does not shorten the countdown a later
   const { ui, texts } = await drawn($)
 
   expect(texts[2]).toBe(' │ 5h: 88% (1h 54m) │ cache 60m')
+  await ui.unmount()
+})
+
+test('a clock set back between two steps does not hold the countdown of the earlier one', async ($, on) => {
+  const state = world(on)
+
+  await start($)
+  await step($)
+  state.now = NOW - 20 * MINUTE
+  await step($)
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 24m) │ cache 60m')
   await ui.unmount()
 })
 
