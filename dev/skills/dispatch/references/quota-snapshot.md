@@ -42,9 +42,9 @@ points or the straight-line projection at reset exceeds 120%. The reader still r
 ## Codex reset passes
 
 Maintain `$CODEX_HOME/reset-passes.json` by hand. When `CODEX_HOME` is unset, use
-`~/.codex/reset-passes.json`. Store one ISO-8601 expiry timestamp per pass in a JSON array.
-Use explicit offsets such as `Z` or `+09:00`. The reader interprets timestamps without an
-offset as UTC.
+`~/.codex/reset-passes.json`. Store one ISO-8601 expiry timestamp per pass in a JSON array,
+with `T` between the date and time. Use explicit offsets such as `Z` or `+09:00`. The reader
+interprets timestamps without an offset as UTC.
 
 ```json
 ["2026-12-01T09:00:00+09:00", "2026-12-14T00:00:00Z"]

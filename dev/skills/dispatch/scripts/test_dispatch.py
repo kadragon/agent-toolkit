@@ -1981,8 +1981,9 @@ class QuotaTests(unittest.TestCase):
             for data, count in (
                 (None, 0), (b"\xff", 0), (b"[", 0), (b"{}", 0), (b"[null]", 0),
                 (b'["2026-11-27T00:00:00Z", "invalid"]', 0),
+                (b'["2026-12-04"]', 0),
                 (b'["2026-11-25T00:00:00Z", "2026-11-26T00:00:00Z"]', 0),
-                (b'["2026-12-04T00:00:00Z"]', 1),
+                (b'["2026-12-04T00:00:00Z", "2026-12-05T00:00:00"]', 2),
             ):
                 with self.subTest(data=data):
                     if data is not None:

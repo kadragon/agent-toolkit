@@ -108,7 +108,7 @@ def codex_reset_passes(home, now):
             return []
         unexpired = []
         for value in values:
-            if not isinstance(value, str):
+            if not isinstance(value, str) or "T" not in value:
                 return []
             expiry = dt.datetime.fromisoformat(value)
             if expiry.tzinfo is None:
