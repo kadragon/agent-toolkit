@@ -51,6 +51,11 @@ export const modelLabel = (model: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}${suffix ?? ''}`
 }
 
+const modelKey = (model: string): string =>
+  model.trim().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '')
+
+export const isSameModel = (a: string, b: string): boolean => modelKey(a) === modelKey(b)
+
 export const clampPercent = (percent: number | undefined): number =>
   percent === undefined || Number.isNaN(percent) ? 0 : Math.min(100, Math.max(0, percent))
 
@@ -131,6 +136,8 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
+export const widthOf = (segments: Segment[]): number => textOf(segments).length
+
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
 
 // A fill the engine has no reading for is left out, never drawn as 0%.
@@ -142,9 +149,13 @@ export const contextSegments = (status: StatusBand): Segment[] =>
 export const contextText = (status: StatusBand): string => textOf(contextSegments(status))
 
 // A window the engine has no reading for is left out, never drawn as 0%.
-export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] =>
+export const limitsSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  resetCount = WINDOWS.length,
+): Segment[] =>
   joined(
-    WINDOWS.map(([kind, label]): Segment[] => {
+    WINDOWS.map(([kind, label], index): Segment[] => {
       const limit = status.rateLimits.find(candidate => candidate.kind === kind)
 
       if (limit === undefined) return []
@@ -156,25 +167,38 @@ export const limitsSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Se
         { text: `${Math.round(limit.percentUsed)}%`, color: levelOf(limit.percentUsed) },
       ]
 
-      return Number.isNaN(left) || left <= 0
+      return index >= resetCount || Number.isNaN(left) || left <= 0
         ? used
         : [...used, { text: ` (${duration(left)})`, isDim: true }]
     }),
     glyphs.separator,
   )
 
-export const timesSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): Segment[] => {
+export const timesSegments = (
+  status: StatusBand,
+  glyphs: Glyphs = UNICODE,
+  room?: number,
+): Segment[] => {
   const cache = cacheText(status)
+  const drawn = (resetCount: number): Segment[] =>
+    joined(
+      [
+        limitsSegments(status, glyphs, resetCount),
+        cache === ''
+          ? []
+          : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
+      ],
+      glyphs.separator,
+    )
+  let resetCount = WINDOWS.length
+  let times = drawn(resetCount)
 
-  return joined(
-    [
-      limitsSegments(status, glyphs),
-      cache === ''
-        ? []
-        : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
-    ],
-    glyphs.separator,
-  )
+  while (room !== undefined && widthOf(times) > room && resetCount > 0) {
+    resetCount -= 1
+    times = drawn(resetCount)
+  }
+
+  return times
 }
 
 // A harness-curate run the dev plugin judges due; nothing otherwise.
