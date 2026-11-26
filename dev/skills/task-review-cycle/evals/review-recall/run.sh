@@ -20,11 +20,15 @@
 # Exit 1 when any fixture failed to produce its outputs. Scoring is by hand against
 # README.md → Fixtures; see RESULTS.md.
 set -euo pipefail
+# Job control gives each background fixture its own process group, so cleanup can signal the
+# reviewer children a fixture is blocked on, not only the fixture subshell.
+set -m
 
 OUT="${1:?Usage: run.sh <out-dir> [fixture-id ...]}"
 shift
 FULL_RUN=$#
 EFFORT="${REVIEW_RECALL_EFFORT:-medium}"
+BENCH_BRANCH=bench
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 [[ -n "$HERE" ]] || { echo "ERROR: cannot resolve script dir" >&2; exit 1; }
@@ -44,9 +48,10 @@ WORK=""
 LOCK=""
 cleanup() {
   local pid
+  trap '' INT TERM
   # ${arr[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
   for pid in ${PIDS[@]+"${PIDS[@]}"}; do
-    kill "$pid" 2>/dev/null || true
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
   if [[ -n "$LOCK" ]]; then rm -rf "$LOCK"; fi
@@ -56,20 +61,27 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+claim_out_dir_lock() {
+  local holder
+  if ! mkdir "$OUT/.run.lock" 2>/dev/null; then
+    holder=$(cat "$OUT/.run.lock/pid" 2>/dev/null || true)
+    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+      echo "ERROR: another run.sh (pid $holder) is writing to $OUT — use a separate out-dir" >&2
+    else
+      echo "ERROR: $OUT/.run.lock was left by pid ${holder:-unknown} — remove it if no run is active" >&2
+    fi
+    exit 1
+  fi
+  LOCK="$OUT/.run.lock"
+  printf '%s\n' "$$" >"$LOCK/pid"
+}
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-if ! mkdir "$OUT/.run.lock" 2>/dev/null; then
-  HOLDER=$(cat "$OUT/.run.lock/pid" 2>/dev/null || true)
-  if [[ -n "$HOLDER" ]] && kill -0 "$HOLDER" 2>/dev/null; then
-    echo "ERROR: another run.sh (pid $HOLDER) is writing to $OUT — use a separate out-dir" >&2
-  else
-    echo "ERROR: $OUT/.run.lock was left by pid ${HOLDER:-unknown} — remove it if no run is active" >&2
-  fi
-  exit 1
-fi
-LOCK="$OUT/.run.lock"
-printf '%s\n' "$$" >"$LOCK/pid"
+claim_out_dir_lock
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-recall.XXXXXX")
 [[ -d "$WORK" ]] || { echo "ERROR: mktemp failed" >&2; exit 1; }
 rm -f "$OUT/fingerprint.txt"
@@ -92,8 +104,8 @@ run_reviewer() {
 adopt_codex_sidecar() {
   local id="$1" dir="$OUT/$1-codex-result" text="$OUT/$1-codex.txt"
   grep -q '^\[\.\.\. truncated by codex-review\.sh' "$text" || return 0
-  if grep -qx 'status=ok' "$dir/bench.meta" 2>/dev/null && [[ -s "$dir/bench.review.txt" ]] \
-    && cp "$dir/bench.review.txt" "$text.tmp" && mv -f "$text.tmp" "$text"; then
+  if grep -qx 'status=ok' "$dir/$BENCH_BRANCH.meta" 2>/dev/null \
+    && [[ -s "$dir/$BENCH_BRANCH.review.txt" ]] && cp "$dir/$BENCH_BRANCH.review.txt" "$text.tmp" && mv -f "$text.tmp" "$text"; then
     echo "codex_text=full-sidecar" >>"$OUT/$id-meta.txt"
     return 0
   fi
@@ -109,7 +121,7 @@ run_one() {
   clone="$WORK/$id"
   git init -q "$clone"
   git -C "$clone" -c protocol.version=2 fetch -q --depth=2 "$REPO" "$full"
-  git -C "$clone" checkout -q -b bench FETCH_HEAD
+  git -C "$clone" checkout -q -b "$BENCH_BRANCH" FETCH_HEAD
   git -C "$clone" branch base HEAD^
 
   {

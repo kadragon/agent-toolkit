@@ -13,12 +13,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #452 — Harden review-recall runs and fingerprint coverage (2026-11-26)
+### PR #453 — Fail agy review on a broken diff and stop recall runs on INT/TERM (2026-11-26)
 
-- [ ] [harness] Treat a failing fallback `git diff` in `agy-review.sh` as an error, not an empty diff, so only a successful empty comparison skips the review (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:21` (pre_existing)
-- [ ] [harness] Add `preflight.sh` to the recall fingerprint inputs, since it picks the Codex mode and companion path `run.sh` runs (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9` (pre_existing)
-- [ ] [debt] Name the code for the removed comments: a `claim_out_dir_lock` function in `run.sh`, a `BENCH_BRANCH` variable for the `bench` sidecar key, and a `require_commit_ref` guard in `agy-review.sh` (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:62`
-- [ ] [harness] Trap `INT` and `TERM` in `run.sh` so a cancelled run stops its background fixtures and releases its lock (source: agy) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:58` (introduced here)
+- [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
 
 ### PR #454 — Skip a stale cache countdown after a model switch and match project paths across separators (2026-11-26)
 
