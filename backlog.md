@@ -13,10 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #453 — Fail agy review on a broken diff and stop recall runs on INT/TERM (2026-11-26)
-
-- [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
-
 ### PR #454 — Skip a stale cache countdown after a model switch and match project paths across separators (2026-11-26)
 
 - [ ] [debt] A narrow band drops only the reset times to fit the row, so with several windows the usage figures still push the cache countdown off a row that has room for it: keep dropping windows until the cache fits (source: codex) — mods/hooks/status-band/format.ts:183 (pre_existing)
@@ -25,6 +21,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [constraint] The band counts one terminal cell per character (`cellsByLength`): test that every glyph in `UNICODE` and the other `Glyphs` sets is one cell wide, then drop the comment on `cellsByLength` (source: comments) — mods/hooks/status-band/format.ts:139
 - [ ] [debt] Name the model check for the removed comment: extract `cacheModel !== undefined && sessionModel !== '' && !isSameModel(...)` in the step hook into a predicate such as `ranUnderLeftModel` (source: comments) — mods/hooks/status-band/register.tsx:364
 - [ ] [debt] Name the test gates for the removed comment: rename `World.nowGate` and `World.modelGate` to say they hold back only the next reading, e.g. `holdNextNow` and `holdNextModel` (source: comments) — mods/hooks/status-band/register.test.tsx:54
+
+### PR #455 — Fall back when preflight sort lacks version support (2026-11-26)
+
+- [ ] [harness] Preserve numeric version order in the portable Codex companion fallback so a cached version such as `1.10` ranks above `1.9` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:120` (introduced here)
 
 ## Rejected — do not re-file
 

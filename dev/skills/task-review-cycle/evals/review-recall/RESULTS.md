@@ -129,7 +129,13 @@ would have been graded from its head and tail.
 
 Follow-up from the PR #452 backlog: `run.sh` names its lock and sidecar-key code and stops its fixtures' process groups and releases the lock on `INT`/`TERM`, `agy-review.sh` exits 1 when its fallback `git diff` fails instead of skipping as an empty diff, and the fingerprint now also covers `preflight.sh`. Reviewer invocations, prompts, comments rules and fixtures are unchanged, and every fixture has a computable diff, so no reviewer call was repeated.
 
-Review recall fingerprint: 7980c159f74ae746f7baf663a09a337517c6daca
+Follow-up from the PR #453 backlog: `preflight.sh` falls back to lexical sorting when version
+sorting fails. Under GNU sort, uncached preflight returned the same Codex mode and companion
+path before and after the fix. These are the only preflight values the runner forwards, and the
+reviewer commands and fixtures are unchanged. The existing scores are carried forward without
+a new reviewer run.
+
+Review recall fingerprint: 3e8057e8b0ee759ee0b743c550b8977e8843bdf7
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).

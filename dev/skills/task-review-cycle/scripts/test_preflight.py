@@ -155,6 +155,40 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
 
+        print("\n-- a sort without -V still selects a cached Codex companion --")
+        fallback = make_repo(tmp, "sort-fallback")
+        cache = fallback / "home" / ".claude" / "plugins" / "cache" / "test" / "codex"
+        for version in ("1.1", "1.2"):
+            companion = cache / version / "scripts" / "codex-companion.mjs"
+            companion.parent.mkdir(parents=True)
+            companion.touch()
+
+        bin_dir = fallback / "bin"
+        bin_dir.mkdir()
+        sort = bin_dir / "sort"
+        sort.write_text(
+            '#!/bin/sh\n'
+            'if [ "$1" = -V ]; then exit 2; fi\n'
+            'exec "$PREFLIGHT_TEST_SORT" "$@"\n',
+            encoding="utf-8", newline="\n",
+        )
+        sort.chmod(0o755)
+        for name in ("codex", "node"):
+            stub = bin_dir / name
+            stub.write_bytes(b"#!/bin/sh\nexit 0\n")
+            stub.chmod(0o755)
+        bash_env = fallback / "bash-env"
+        bash_env.write_bytes(
+            b'export PREFLIGHT_TEST_SORT="$(command -v sort)"\n'
+            b'export HOME="$PWD/home" PATH="$PWD/bin:$PATH"\n'
+        )
+        result = run(fallback, "--no-hub", BASH_ENV=bash_env, PREFLIGHT_CACHE=0)
+        check("lexical fallback keeps preflight in plugin mode and selects the latest cached path",
+              result.get("has_errors") is False and result.get("codex_mode") == "plugin"
+              and result.get("codex_companion_path", "").endswith(
+                  "/codex/1.2/scripts/codex-companion.mjs"),
+              f"got {result}")
+
         print("\n-- a live run writes the cache; the next run is served from it --")
         repo = make_repo(tmp, "hit")
         first = run(repo)
