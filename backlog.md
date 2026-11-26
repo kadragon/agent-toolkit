@@ -28,6 +28,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] Type the unreadable-settings case in the test `World` (e.g. `settings: Record<string, unknown> | 'unreadable'`) (source: comments) — mods/hooks/status-band/register.test.tsx:47
 - [ ] [constraint] Fail `scripts/check_mods.py` when `mods/hooks/status-band/count.ts` imports from `claude-code`, then drop its header rule (source: comments) — mods/hooks/status-band/count.ts:1
 
+### PR #447 — Relax dispatch weekly quota pace (2026-11-26)
+
+- [ ] [debt] Treat Claude quota snapshots with missing required fields as unknown so Codex assessment still runs (source: codex) — `dev/skills/dispatch/scripts/quota.py:102` (pre_existing)
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

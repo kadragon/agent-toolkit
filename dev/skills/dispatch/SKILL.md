@@ -72,10 +72,8 @@ A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/
 Balance by quota. Before picking the pairs of a wave, run `python3 -I "<dispatch>/scripts/quota.py"`
 once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
 and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
-plus each CLI's `state` and one `bias`. Only actual usage of 90% or more in either window
-is `critical`. Once 24 hours of the weekly window have elapsed, pace can raise the state to
-`hot` if usage is at least 15 percentage points ahead of elapsed time or projected weekly
-usage at reset exceeds 120%. Recheck next wave because the 5-hour window can reset.
+plus each CLI's `state` and one `bias`. Only actual usage ≥90% in either window is `critical`.
+From 24h elapsed, weekly pace can raise state to `hot` (≥15 percentage points ahead or >120% projected at reset). Recheck next wave.
 See `references/quota-snapshot.md` when wiring or diagnosing the Claude status-line snapshot.
 Apply the bias on top of the tables below:
 
