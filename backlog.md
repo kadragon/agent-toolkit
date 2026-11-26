@@ -20,13 +20,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [harness] Distinguish an invalid agy comparison ref from an empty diff (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:14` (pre_existing)
 - [ ] [constraint] Verify that new reviewer launchers are included in the recall fingerprint inputs (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9`
 
-### PR #445 — Slim the status band to a context percent and one figure row (2026-11-26)
+### PR #451 — Keep the cache countdown on narrow status bands and tidy the status-band mod (2026-11-26)
 
-- [ ] [debt] Record the cache owner from the step's own model, not a later `$.session.model()` read: a switch between response end and that read tags A's expiry as B's (source: codex) — mods/hooks/status-band/register.tsx:361 (pre_existing)
-- [ ] [debt] In a narrow terminal the trailing `cache …` figure is cut first; pass the width and drop reset times before the cache (source: codex) — mods/hooks/status-band/register.tsx:422 (introduced here)
-- [ ] [debt] Rename for meaning where comments were removed: `TICK_MS` from `MINUTE_MS`, `Live.hasSetup`, `loadCurate` (throttled background check), `resetSetup` (drops the session's curate verdict) (source: comments) — mods/hooks/status-band/register.tsx
-- [ ] [debt] Type the unreadable-settings case in the test `World` (e.g. `settings: Record<string, unknown> | 'unreadable'`) (source: comments) — mods/hooks/status-band/register.test.tsx:47
-- [ ] [constraint] Fail `scripts/check_mods.py` when `mods/hooks/status-band/count.ts` imports from `claude-code`, then drop its header rule (source: comments) — mods/hooks/status-band/count.ts:1
+- [ ] [debt] The countdown a step writes behind it can land after a refresh forfeited that cache for a model switch, so the old model's `cache …` shows under the new one until the next tick: skip the write when `current.model` differs from the step's model (source: code-review, agy) — mods/hooks/status-band/register.tsx:358 (pre_existing)
+- [ ] [debt] `covered` compares a project path and the working directory with `startsWith` without unifying `\\` and `/`, so `C:\work\repo` misses `C:/work/repo/src` and the user-scope install is read instead (source: codex) — mods/hooks/status-band/count.ts:12 (pre_existing)
+- [ ] [debt] Rename for meaning where comments were removed: `widthOf` to carry the one-cell-per-character assumption, `room` in `timesSegments` to `cellsLeft`, `Live.isCurateOwned` to `hasSessionCurateVerdict` (source: comments) — mods/hooks/status-band/register.tsx:58
 
 ## Rejected — do not re-file
 
