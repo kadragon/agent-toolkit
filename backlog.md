@@ -13,10 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #453 — Fail agy review on a broken diff and stop recall runs on INT/TERM (2026-11-26)
-
-- [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
-
 ### PR #454 — Skip a stale cache countdown after a model switch and match project paths across separators (2026-11-26)
 
 - [ ] [debt] A narrow band drops only the reset times to fit the row, so with several windows the usage figures still push the cache countdown off a row that has room for it: keep dropping windows until the cache fits (source: codex) — mods/hooks/status-band/format.ts:183 (pre_existing)
