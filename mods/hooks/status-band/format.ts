@@ -136,7 +136,6 @@ export const headlineSegments = (status: StatusBand, glyphs: Glyphs = UNICODE): 
 
 const textOf = (segments: Segment[]): string => segments.map(segment => segment.text).join('')
 
-// Terminal cells, counted as one per character: the band draws no wide glyphs.
 export const cellsByLength = (segments: Segment[]): number => textOf(segments).length
 
 export const headline = (status: StatusBand): string => textOf(headlineSegments(status))
@@ -154,9 +153,10 @@ export const limitsSegments = (
   status: StatusBand,
   glyphs: Glyphs = UNICODE,
   resetCount = WINDOWS.length,
+  windowCount = WINDOWS.length,
 ): Segment[] =>
   joined(
-    WINDOWS.map(([kind, label], index): Segment[] => {
+    WINDOWS.slice(0, windowCount).map(([kind, label], index): Segment[] => {
       const limit = status.rateLimits.find(candidate => candidate.kind === kind)
 
       if (limit === undefined) return []
@@ -181,10 +181,10 @@ export const timesSegments = (
   cellsLeft?: number,
 ): Segment[] => {
   const cache = cacheText(status)
-  const drawn = (resetCount: number): Segment[] =>
+  const drawn = (resetCount: number, windowCount: number): Segment[] =>
     joined(
       [
-        limitsSegments(status, glyphs, resetCount),
+        limitsSegments(status, glyphs, resetCount, windowCount),
         cache === ''
           ? []
           : [{ text: cache, color: cache === 'cache expired' ? 'warning' : 'planMode' }],
@@ -192,11 +192,19 @@ export const timesSegments = (
       glyphs.separator,
     )
   let resetCount = WINDOWS.length
-  let times = drawn(resetCount)
+  let windowCount = WINDOWS.length
+  let times = drawn(resetCount, windowCount)
 
   while (cellsLeft !== undefined && cellsByLength(times) > cellsLeft && resetCount > 0) {
     resetCount -= 1
-    times = drawn(resetCount)
+    times = drawn(resetCount, windowCount)
+  }
+
+  if (cellsLeft !== undefined && cache !== '' && cache.length <= cellsLeft) {
+    while (cellsByLength(times) > cellsLeft && windowCount > 0) {
+      windowCount -= 1
+      times = drawn(resetCount, windowCount)
+    }
   }
 
   return times

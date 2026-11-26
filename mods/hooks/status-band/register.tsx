@@ -21,7 +21,7 @@ import type { Glyphs, Segment } from './format'
 // below are checked against the real top-level functions by `scripts/check_mods.py`.
 //   curate-due reads: readInstallPaths, readDevRoot, python, readCurateDue
 //   curate check and verdict: checkCurateThrottled, dropCurateVerdict
-//   live refresh (git, cache window, tick): isCached, refresh, watch
+//   live refresh (git, cache window, tick): isCached, ranUnderLeftModel, refresh, watch
 //   entry points (register holds every on(...) hook handler): startStatusBand, register
 //   rendering the band rows: runs, statusRows
 
@@ -43,11 +43,11 @@ const BAND_SURFACES: readonly string[] = ['terminal', 'desktop']
 
 const statusBand = atom({ plugin: 'mods', key: 'statusBand' } as const, null)
 
+type StepEffort = { model: string; value: StatusBand['effort'] }
+
 // What one load of the module keeps between hooks.
 type Live = {
-  effort: StatusBand['effort']
-  // True from a main-loop step until the next read: that effort is the model's now.
-  isEffortFresh: boolean
+  stepEffort?: StepEffort
   tick?: { cancel: () => void }
   asked: number
   drawn: number
@@ -156,11 +156,15 @@ const dropCurateVerdict = (live: Live): void => {
 const isCached = (usage: { cache_read_input_tokens: number; cache_creation_input_tokens: number } | null): boolean =>
   usage !== null && usage.cache_read_input_tokens + usage.cache_creation_input_tokens > 0
 
+const ranUnderLeftModel = (stepModel: string | undefined, sessionModel: string): boolean =>
+  stepModel !== undefined && sessionModel !== '' && !isSameModel(stepModel, sessionModel)
+
 // The band is a convenience: a figure the engine cannot give is left out or
 // kept as last read, and nothing here may fail a hook.
 async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
+  const effortAtStart = live.stepEffort
 
   try {
     const [model, cwd, usage, turns, now, git] = await Promise.all([
@@ -178,35 +182,34 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
 
     // What the write decided, kept for after it: the engine may run the
     // function again, so it reads `live` and leaves it as it is.
-    const before = { effort: live.effort, isFresh: live.isEffortFresh, cache: live.cacheExpiresAt }
-    let decided: { effort: StatusBand['effort']; isForfeit: boolean } | undefined
+    const beforeCache = live.cacheExpiresAt
+    let discardedEffort: StepEffort | undefined
+    let isForfeit = false
 
     await update($, statusBand, current => {
-      decided = undefined
+      discardedEffort = undefined
+      isForfeit = false
 
       // A read that started earlier and ended later must not undo a newer one.
       if (order < live.drawn) return current
 
       live.drawn = order
       const name = model === '' ? (current?.model ?? '') : model
-      let effort = before.effort
+      const stepEffort = live.stepEffort
+      const sameModel = current !== null && isSameModel(current.model, name)
+      let effort = sameModel ? current.effort : undefined
 
-      if (before.isFresh) {
-        // The step that reported it ran under this model.
-      } else if (current !== null && current.model !== name) {
-        // The effort was the last model's; the next step reports this one's.
-        effort = undefined
-      } else if (effort === undefined) {
-        // A reload starts the module over; the session's value is still good.
-        effort = current?.effort
+      if (stepEffort !== undefined) {
+        effort = isSameModel(stepEffort.model, name) ? stepEffort.value : undefined
+        if (!sameModel && stepEffort === effortAtStart && ranUnderLeftModel(stepEffort.model, name)) {
+          discardedEffort = stepEffort
+        }
       }
 
       // The cache was the model's that made it: a switch forfeits it.
       const cacheModel = live.cacheModel ?? current?.cacheModel
-      const isForfeit = cacheModel !== undefined && name !== '' && !isSameModel(cacheModel, name)
+      isForfeit = ranUnderLeftModel(cacheModel, name)
       const isCacheGone = isForfeit || live.cacheExpiresAt === null
-
-      decided = { effort, isForfeit }
 
       return {
         model: name,
@@ -228,15 +231,12 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
       }
     })
 
-    if (decided !== undefined) {
-      // A step that reported meanwhile is newer than what this read decided.
-      if (live.effort === before.effort) live.effort = decided.effort
-      if (before.isFresh) live.isEffortFresh = false
-
-      if (decided.isForfeit && live.cacheExpiresAt === before.cache) {
-        live.cacheExpiresAt = null
-        live.cacheModel = undefined
-      }
+    if (order === live.drawn && discardedEffort !== undefined && live.stepEffort === discardedEffort) {
+      live.stepEffort = undefined
+    }
+    if (isForfeit && live.cacheExpiresAt === beforeCache) {
+      live.cacheExpiresAt = null
+      live.cacheModel = undefined
     }
   } catch {
     // Keeps what was last drawn.
@@ -285,8 +285,6 @@ export const register: Register = (on, options) => {
   const cacheTtlMs =
     (typeof ttl === 'number' && ttl > 0 ? ttl : DEFAULT_CACHE_TTL_MINUTES) * MINUTE_MS
   const live: Live = {
-    effort: undefined,
-    isEffortFresh: false,
     asked: 0,
     drawn: 0,
     setup: {},
@@ -336,18 +334,19 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // The request is passed on untouched: only its effort is read, and a
-  // response of the main loop renews the prompt cache from when it was sent.
+  // A response of the main loop renews the prompt cache from when it was sent.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) live.isEffortFresh = true
+    if (e.agentId === undefined) {
+      const stepEffort: StepEffort = { model: e.model, value: e.effort }
 
-    if (e.agentId === undefined && e.effort !== live.effort) {
-      const effort = e.effort
+      live.stepEffort = stepEffort
+      await update($, statusBand, current => {
+        if (current === null || live.stepEffort !== stepEffort || !isSameModel(current.model, e.model)) {
+          return current
+        }
 
-      live.effort = effort
-      await update($, statusBand, current =>
-        current === null ? null : { ...current, effort },
-      ).catch(() => undefined)
+        return current.effort === stepEffort.value ? current : { ...current, effort: stepEffort.value }
+      }).catch(() => undefined)
     }
 
     const sentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
@@ -366,13 +365,7 @@ export const register: Register = (on, options) => {
 
           if (epoch !== live.setupEpoch) return
 
-          if (
-            cacheModel !== undefined &&
-            sessionModel !== '' &&
-            !isSameModel(cacheModel, sessionModel)
-          ) {
-            return
-          }
+          if (ranUnderLeftModel(cacheModel, sessionModel)) return
 
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
@@ -405,7 +398,7 @@ const runs = ({ Text }: BandElements, segments: Segment[]): RenderElement[] =>
 // them off the line above where the band has a row to spare: the headline,
 // then the context fill, the windows and the cache countdown. `glyphs` is the
 // set the rows draw beyond plain letters; `columns` is the row's width, where
-// a figure row wider than it drops the reset times so the cache is not cut.
+// a figure row wider than it drops reset times and windows so the cache fits.
 // `hooks/band.tsx` draws them: the engine takes one band hook per plugin, and
 // `$` stays in that hook's file.
 export const statusRows = (

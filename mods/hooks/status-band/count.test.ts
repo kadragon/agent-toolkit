@@ -58,8 +58,8 @@ describe('installPaths across separators', () => {
       },
     })
 
-    expect(installPaths(text, 'C:/work/repo/src')).toEqual({ 'a@m': '/p/repo' })
-    expect(installPaths(text, 'C:/work/repository')).toEqual({ 'a@m': '/p/user' })
+    expect(installPaths(text, 'c:/WORK/Repo/src')).toEqual({ 'a@m': '/p/repo' })
+    expect(installPaths(text, 'c:/WORK/Repository')).toEqual({ 'a@m': '/p/user' })
     expect(
       installPaths(
         JSON.stringify({
@@ -68,6 +68,34 @@ describe('installPaths across separators', () => {
         'C:\\work\\repo\\src',
       ),
     ).toEqual({ 'a@m': '/p/repo' })
+  })
+})
+
+describe('installPaths path case', () => {
+  test('matches a UNC project path across separators and case', () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { installPath: '/p/user' },
+          { projectPath: '\\\\Server\\Share\\Repo', installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    expect(installPaths(text, '//server/share/repo/src')).toEqual({ 'a@m': '/p/repo' })
+  })
+
+  test('keeps POSIX project paths case sensitive', () => {
+    const text = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { installPath: '/p/user' },
+          { projectPath: '/work/Repo', installPath: '/p/repo' },
+        ],
+      },
+    })
+
+    expect(installPaths(text, '/work/repo/src')).toEqual({ 'a@m': '/p/user' })
   })
 })
 

@@ -51,8 +51,8 @@ type World = {
   // How long the next responses take to come back.
   stepMs: number
   switchedTo?: string
-  nowGate?: Promise<void>
-  modelGate?: Promise<void>
+  holdNextNow?: Promise<void>
+  holdNextModel?: Promise<void>
   isUncached: boolean
   // What the curate check prints; null makes it fail to start.
   curateOut: string | null
@@ -106,9 +106,9 @@ const world = (on: On): World => {
   on('session.detach', async ($, e) => ({ clientId: e.clientId }))
   on('session.end', async () => ({ sessionId: 's1' }))
   on('session.model', async () => {
-    const gate = state.modelGate
+    const gate = state.holdNextModel
 
-    state.modelGate = undefined
+    state.holdNextModel = undefined
     await gate
 
     return { value: state.model }
@@ -144,9 +144,9 @@ const world = (on: On): World => {
     return { value: text }
   })
   on('clock.now', async () => {
-    const gate = state.nowGate
+    const gate = state.holdNextNow
 
-    state.nowGate = undefined
+    state.holdNextNow = undefined
     await gate
 
     return { value: state.now }
@@ -361,6 +361,13 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
 
   expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   await ui.unmount()
+
+  state.model = 'claude-opus-5-5'
+  await measure($)
+  const returned = await drawn($)
+
+  expect(returned.texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
+  await returned.ui.unmount()
 })
 
 test('a git call that fails keeps the last branch, one that names none drops it', async ($, on) => {
@@ -629,7 +636,7 @@ test('a cache made under one model is not handed to the model the session switch
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
 })
@@ -639,7 +646,7 @@ test('a countdown that lands after the session moved to another model is not sho
   let release = () => {}
 
   await start($)
-  state.nowGate = new Promise<void>(resolve => {
+  state.holdNextNow = new Promise<void>(resolve => {
     release = resolve
   })
   await step($)
@@ -649,7 +656,7 @@ test('a countdown that lands after the session moved to another model is not sho
   await settle()
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
 })
@@ -659,7 +666,7 @@ test('a countdown whose model check ends after a /clear is not written back', as
   let release = () => {}
 
   await start($)
-  state.modelGate = new Promise<void>(resolve => {
+  state.holdNextModel = new Promise<void>(resolve => {
     release = resolve
   })
   await step($)
@@ -698,9 +705,14 @@ test('in a narrow terminal the reset times go before the cache countdown', async
   expect(narrow.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
   await narrow.ui.unmount()
 
-  const tiny = await drawn($, 'terminal', { bodyColumns: 20 })
+  const tight = await drawn($, 'terminal', { bodyColumns: 34 })
 
-  expect(tiny.texts[2]).toBe(' │ 5h: 88% │ 7d: 40% │ cache 60m')
+  expect(tight.texts[2]).toBe(' │ 5h: 88% │ cache 60m')
+  await tight.ui.unmount()
+
+  const tiny = await drawn($, 'terminal', { bodyColumns: 24 })
+
+  expect(tiny.texts[2]).toBe(' │ cache 60m')
   await tiny.ui.unmount()
 })
 

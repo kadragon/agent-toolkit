@@ -9,13 +9,19 @@ export const enabledPlugins = (settings: Record<string, unknown>): string[] =>
 
 const slashed = (path: string): string => path.replace(/\\/g, '/')
 
+const projectKey = (path: string): string => {
+  const key = slashed(path)
+
+  return /^(?:[a-z]:\/|\/\/[^/]+\/[^/]+)/i.test(key) ? key.toLowerCase() : key
+}
+
 // How much of `cwd` a project path covers, in characters; 0 when it is not
 // that directory or one beneath it. Either separator ends a segment.
 const covered = (projectPath: unknown, cwd: string): number => {
   if (typeof projectPath !== 'string') return 0
 
-  const root = slashed(projectPath).replace(/\/+$/, '')
-  const here = slashed(cwd)
+  const root = projectKey(projectPath).replace(/\/+$/, '')
+  const here = projectKey(cwd)
   const isWithin = here === root || (here.startsWith(root) && here.charAt(root.length) === '/')
 
   return isWithin ? root.length + 1 : 0
