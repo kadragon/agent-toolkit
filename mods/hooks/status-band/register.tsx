@@ -170,6 +170,7 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
   live.asked += 1
   const order = live.asked
   const effortAtStart = live.stepEffort
+  const cacheAtStart = { expiresAt: live.cacheExpiresAt, model: live.cacheModel }
 
   try {
     const [model, cwd, usage, turns, now, git] = await Promise.all([
@@ -214,9 +215,13 @@ async function refresh($: EngineInterface, live: Live): Promise<void> {
         }
       }
 
-      // The cache was the model's that made it: a switch forfeits it.
+      // The cache was the model's that made it: a switch forfeits it. One recorded
+      // while this read was pending was checked against a newer model than `name`.
       const cacheModel = live.cacheModel ?? current?.cacheModel
-      isForfeit = ranUnderLeftModel(cacheModel, name)
+      const isNewerCache =
+        live.cacheExpiresAt !== cacheAtStart.expiresAt || live.cacheModel !== cacheAtStart.model
+
+      isForfeit = !isNewerCache && ranUnderLeftModel(cacheModel, name)
       const isCacheGone = isForfeit || live.cacheExpiresAt === null
 
       return {
@@ -375,17 +380,24 @@ export const register: Register = (on, options) => {
 
           const cacheExpiresAt = at + cacheTtlMs
           const cacheModel = e.model || undefined
-          const sessionModel = await $.session.model().catch(() => '')
+          const sessionModel = await $.session.model().catch(() => undefined)
 
           if (epoch !== live.setupEpoch) return
 
-          if (ranUnderLeftModel(cacheModel, sessionModel)) return
+          // A lookup that fails is judged against the model the band last drew, as
+          // refresh does; the write reads `live` only to leave it as it is.
+          let isRecorded = false
 
-          live.cacheExpiresAt = cacheExpiresAt
-          live.cacheModel = cacheModel
-          await update($, statusBand, current =>
-            current === null ? null : { ...current, cacheExpiresAt, cacheModel },
-          )
+          await update($, statusBand, current => {
+            isRecorded = !ranUnderLeftModel(cacheModel, sessionModel ?? current?.model ?? '')
+
+            return current === null || !isRecorded ? current : { ...current, cacheExpiresAt, cacheModel }
+          })
+
+          if (isRecorded && epoch === live.setupEpoch) {
+            live.cacheExpiresAt = cacheExpiresAt
+            live.cacheModel = cacheModel
+          }
         })
         .catch(() => undefined)
     }

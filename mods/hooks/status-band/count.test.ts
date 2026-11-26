@@ -54,6 +54,25 @@ describe('installPath', () => {
   })
 })
 
+describe('installPath without a matching install', () => {
+  test("does not borrow another project's install when this directory has none", async () => {
+    const other = JSON.stringify({
+      plugins: { 'a@m': [{ scope: 'project', projectPath: '/work/other', installPath: '/p/other' }] },
+    })
+    const withUser = JSON.stringify({
+      plugins: {
+        'a@m': [
+          { scope: 'project', projectPath: '/work/other', installPath: '/p/other' },
+          { scope: 'user', installPath: '/p/user' },
+        ],
+      },
+    })
+
+    expect(await selectInstall(other, '/work/repo')).toBeUndefined()
+    expect(await selectInstall(withUser, '/work/repo')).toBe('/p/user')
+  })
+})
+
 describe('installPath across separators', () => {
   test('matches a project path and a directory written with different separators', async () => {
     const text = JSON.stringify({

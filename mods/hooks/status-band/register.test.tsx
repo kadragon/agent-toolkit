@@ -780,6 +780,48 @@ test('a countdown whose model check ends after a /clear is not written back', as
   await ui.unmount()
 })
 
+test('a countdown whose model lookup fails is not shown under the model the band moved to', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.holdNextModel = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await step($)
+  state.model = 'claude-haiku-5-5'
+  await measure($)
+  state.isModelDown = true
+  release()
+  await settle()
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
+  await ui.unmount()
+})
+
+test('a refresh that read the old model keeps a cache a newer model recorded meanwhile', async ($, on) => {
+  const state = world(on)
+  let release = () => {}
+
+  await start($)
+  state.gitGate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await measure($)
+  state.model = 'claude-haiku-5-5'
+  await step($, { model: 'claude-haiku-5-5' })
+  release()
+  await settle()
+  await measure($)
+  const { ui, texts } = await drawn($)
+
+  expect(texts[0]).toContain('[Haiku 5.5')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
+  await ui.unmount()
+})
+
 test('in a narrow terminal the reset times go before the cache countdown', async ($, on) => {
   const state = world(on)
   state.rateLimits.push({

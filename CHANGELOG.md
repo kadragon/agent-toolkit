@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Keep the status band's cache and install picks tied to the right model and project (mods v1.1.8) (2026-11-26)
 - [done] Keep cache visible on narrow status bands and scope effort and Windows installs correctly (mods v1.1.7) (2026-11-26)
 - [done] Keep Codex companion discovery working without sort -V (dev v4.12.29) (2026-11-26)
 - [done] Keep a stale cache countdown off a switched model; match project paths across separators (mods v1.1.6) (2026-11-26)
