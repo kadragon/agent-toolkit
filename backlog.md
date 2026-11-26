@@ -19,6 +19,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] `covered` compares a project path and the working directory with `startsWith` without unifying `\\` and `/`, so `C:\work\repo` misses `C:/work/repo/src` and the user-scope install is read instead (source: codex) — mods/hooks/status-band/count.ts:12 (pre_existing)
 - [ ] [debt] Rename for meaning where comments were removed: `widthOf` to carry the one-cell-per-character assumption, `room` in `timesSegments` to `cellsLeft`, `Live.isCurateOwned` to `hasSessionCurateVerdict` (source: comments) — mods/hooks/status-band/register.tsx:58
 
+### PR #453 — Fail agy review on a broken diff and stop recall runs on INT/TERM (2026-11-26)
+
+- [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

@@ -20,6 +20,9 @@
 # Exit 1 when any fixture failed to produce its outputs. Scoring is by hand against
 # README.md → Fixtures; see RESULTS.md.
 set -euo pipefail
+# Job control gives each background fixture its own process group, so cleanup can signal the
+# reviewer children a fixture is blocked on, not only the fixture subshell.
+set -m
 
 OUT="${1:?Usage: run.sh <out-dir> [fixture-id ...]}"
 shift
@@ -47,9 +50,11 @@ WORK=""
 LOCK=""
 cleanup() {
   local pid
+  # A second signal must not abort the cleanup that is already running.
+  trap '' INT TERM
   # ${arr[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
   for pid in ${PIDS[@]+"${PIDS[@]}"}; do
-    kill "$pid" 2>/dev/null || true
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
   if [[ -n "$LOCK" ]]; then rm -rf "$LOCK"; fi
