@@ -3,9 +3,11 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.12.0
+version: 1.13.0
 ---
 # Dev Review Cycle
+Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
+
 ## Caller gate
 
 Require `--from <caller>` before Setup; absent → stop without Git writes and direct the human
@@ -30,13 +32,12 @@ STATE="<absolute parent directory of the loaded SKILL.md>/../task-next/scripts/c
 python3 "$STATE" inspect
 ```
 
-Implementation callers with no contract return to recovery. Only standalone `task-review`
-without an original may grade the diff alone; archive its verified authority and disclose that
-limit. Preserve the archive through merge. Check reuse: shared cycle's *Validation evidence*.
+Recover a missing implementation contract first. Only standalone `task-review` without a contract
+can grade the diff alone; archive verified authority and disclose the limit. Preserve the archive
+through merge. For check reuse, see the shared cycle's *Validation evidence*.
 ## Prerequisites and Setup
 
-Hub auth problems surface in preflight `errors[]`; `--no-hub` needs no auth. `SKILL_DIR` is the
-absolute parent directory of the `SKILL.md` loaded this turn.
+Set `SKILL_DIR` to the absolute parent of the loaded `SKILL.md`. Preflight reports hub auth errors.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -49,8 +50,7 @@ CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
 ```
 
-Stop if the bundled scripts cannot be resolved or `has_errors` is `true`. Shell state does not
-persist: later blocks paste these values where they show `<from Setup>`.
+Stop on missing scripts or `has_errors: true`. Substitute the Setup values in later blocks.
 
 ## Step 1: Commit, route, PR
 
@@ -104,12 +104,11 @@ PR_NUMBER=$(jq -r '.pr_number' <<<"$RESULT")
 PR_URL=$(jq -r '.pr_url' <<<"$RESULT")
 ```
 
-Idempotent: `--no-commit` reuses the commit above and never stages a stray dirty file.
 `pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
 Apply `references/review-sources.md` → *Data-sharing policy* to every primary, panel, and fallback reviewer.
-**Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then Step 3.** Otherwise
+**Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then the advisory pass below.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
 (latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
 evidence per the shared cycle; execute missing/stale required checks before review. A failed or
@@ -131,41 +130,44 @@ bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTR
   || echo '{"code_review_slot":"inner-run-unavailable","detail":"claude-review.sh exited non-zero"}'
 ```
 
-It returns requirements and code findings on stdout in one read-only pass. In plan mode it
-grades execution-based criteria only when given the lint/test evidence above.
+The read-only pass returns code and contract findings, grading execution criteria from supplied evidence.
 
 `CLAUDE_CLI_AVAILABLE` `false`, a `code_review_slot` sentinel, or timeout → record `Reviewers Skipped: <reason>`.
 Use the permitted fallback on lite, or grade the diff against the contract inline. Apply
-`references/comment-rules.md` inline when Claude did not run, tagged `"source":"comments"`.
-Disclose inline grading as self-grading and satisfy any required independence with an allowed reviewer.
+the same review scope to any fallback. Disclose inline grading as self-grading and satisfy any
+required independence with an allowed reviewer.
 
-**Panel** (when `references/risk-routing.md` → *Panel* runs it) — launch agy + Codex per
-`references/review-sources.md` in the turn *before* the reviewer call. **Never wait on, stop, or `sleep`-bound one**: the pre-merge
-reclaim (`references/late-source-reclaim.md`) is what makes not waiting safe.
+**Panel** (`references/risk-routing.md` → *Panel*) — launch agy + Codex per
+`references/review-sources.md` one turn before the reviewer call. **Never wait on, stop, or
+`sleep`-bound** either; reclaim results per `references/late-source-reclaim.md`.
+
+**Advisory comments** — run `references/review-sources.md` → *Advisory comments pass* once
+per cycle. A skipped or empty pass leaves the blocking verdict unchanged.
 
 ## Step 3: Consolidate and confirm
-Follow `references/consolidation-guide.md` for the review table, approval gate and backlog.
-Apply `comments` findings per `references/comment-rules.md` → *Applying*.
-For dispatched work, follow *Report review send-backs to dispatch* for each verdict,
-including the Step 4 re-review.
+Follow `references/consolidation-guide.md` for the review table, approval, backlog and dispositions.
+Follow *Report review send-backs to dispatch* for each verdict, including the Step 4 re-review.
 
 ## Step 4: Apply
 
-In this order, because everything before the last step changes the tree the checks must run on:
-
-1. Apply approved findings with focused checks. A check fails → fix forward within that finding's
-   scope once. Still failing: a `contract` finding → stop, never merge; any other → undo that
+1. Apply approved findings with focused checks. For each blocking finding, search the branch
+   diff for the same bug pattern under its Blocking category; verify, fix and check every in-scope
+   instance in the same pass. A check fails → fix forward within that finding's scope once.
+   Still failing: a `contract` finding → stop, never merge; any other → undo that
    finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
    applied finding touched the file), file it under `backlog.md` → `## Review Backlog`, and
    continue. A fixed `contract` finding → re-run the reviewer once; still failing → stop, never
-   merge. A `comments` finding follows `references/comment-rules.md` → *Applying*.
+   merge. Then handle advisory `comments` findings per `references/comment-rules.md` → *Applying*;
+   keep their edits separable from blocking fixes so failed cleanup can be withdrawn independently.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
    cycle → call the Skill tool with "dev:harness-capture" now. Review has already run, so it
    writes auto-memory only and files every docs/`AGENTS.md`/skill delta to `backlog.md`.
 4. Run full required checks on the final changed candidate and refresh evidence per the shared
-   cycle — last, so the recorded tree is the tree that was checked.
+   cycle. If checks fail after advisory comment edits, withdraw those edits and rerun the required
+   checks on the remaining candidate; defer the cleanup and base the merge gate on that candidate.
+   Finalize the dispositions after checks confirm which edits remain.
 
 ## Step 5: Commit
 ```bash
@@ -182,9 +184,8 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit when Step 4 changed nothing. GitHub hub only (`hub.sh` has no edit verb): after
-`authorize --action pr-write`, put the rebuilt body on the PR (`gh pr edit <PR_NUMBER> --body`).
-`--no-hub`, either way: reclaim a late panel source (`references/late-source-reclaim.md`), report, end.
+Skip the commit if Step 4 made no changes. GitHub: authorize `pr-write`, then update the PR body
+with `gh pr edit`. `--no-hub`: reclaim late panel sources, report and stop.
 
 ## Step 6: Merge
 
@@ -212,8 +213,8 @@ git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 A failed step ends the block — report it. Push rejected → keep the local merge and feature branch,
 never reset hard; recover within established authority. Lite is done only once the base push lands.
 
-**Retire the archive on either path** once the merge is confirmed, a merge the user ran included (a leftover resurrects for the next
-same-named branch): `python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
+**Retire the archive only after confirming merge on either path**, including a user-run merge:
+`python3 "<SKILL_DIR>/../task-next/scripts/cycle_state.py" retire --branch "<FEATURE_BRANCH>"`.
 
 **Hub path** — first, in the feature checkout (its worktree, if any), `python3
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`

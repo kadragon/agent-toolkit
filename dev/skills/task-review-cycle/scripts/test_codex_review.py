@@ -73,7 +73,7 @@ def selector_compat_shell() -> str | None:
     candidates = ["/bin/bash", shutil.which("bash")]
     seen = set()
     for candidate in candidates:
-        if not candidate or candidate in seen:
+        if not candidate or candidate in seen or not Path(candidate).is_file():
             continue
         seen.add(candidate)
         proc = subprocess.run(
@@ -166,10 +166,11 @@ def make_repo(tmp: Path, name: str) -> Path:
     (repo / "scripts").mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     shutil.copy(SCRIPT, repo / "scripts" / "codex-review.sh")
+    shutil.copy(SCRIPT.with_name("review-guidance.sh"), repo / "scripts")
     return repo
 
 
-def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/companion.mjs", **env_overrides):
+def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/companion.mjs", mode="plugin", **env_overrides):
     env = dict(os.environ)
     env.update(
         {
@@ -186,7 +187,7 @@ def run(repo: Path, tmp: Path, platform="posix", companion="/nonexistent/compani
         env["CODEX_REVIEW_PLATFORM"] = platform
     env.update({k: str(v) for k, v in env_overrides.items()})
     return subprocess.run(
-        ["bash", str(repo / "scripts" / "codex-review.sh"), "plugin", "main", companion],
+        ["bash", str(repo / "scripts" / "codex-review.sh"), mode, "main", companion],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -643,9 +644,12 @@ def case_malformed_state_is_survivable(tmp: Path, _live: int):
 # pending carries a probe-able pid) are load-bearing and tested here rather than assumed.
 
 
-def make_review_repo(tmp: Path, name: str, branch: str = "feat/x") -> Path:
+def make_review_repo(tmp: Path, name: str, branch: str = "feat/x", *, review_guidance=None) -> Path:
     """A git repo with a real commit and a named branch — the sidecar keys on the branch name."""
     repo = make_repo(tmp, name)
+    if review_guidance is not None:
+        (repo / "REVIEW.md").write_text(review_guidance, encoding="utf-8")
+        subprocess.run(["git", "add", "--", "REVIEW.md"], cwd=repo, check=True)
     # Neutralizers passed per-command, per docs/conventions.md → Throwaway Git Fixtures Need the
     # Ambient Config Neutralized. `--no-verify` alone is not enough: it skips hooks but not
     # signing, so a global `commit.gpgsign=true` aborts the commit before any assertion runs.
@@ -698,6 +702,59 @@ def meta_fields(path: Path) -> dict:
         for line in path.read_text(encoding="utf-8").splitlines()
         if "=" in line
     )
+
+
+def case_custom_prompts(tmp: Path, _live: int):
+    print("\nrepository guidance reaches both Codex review modes")
+    guidance = "Skip generated paths and cite file:line."
+    repo = make_review_repo(tmp, "wsprompts", review_guidance=guidance)
+    local = "Private working copy should stay local."
+    (repo / "REVIEW.md").write_text(local, encoding="utf-8")
+    companion = tmp / "prompt.mjs"
+    companion.write_text(
+        "process.stdout.write(JSON.stringify({codex: {status: 0, stdout: process.argv.slice(2).join(' ')}}));\n",
+        encoding="utf-8",
+    )
+    plugin = run(repo, tmp, companion=bash_path(companion))
+    check("companion uses a branch-scoped custom review", plugin.returncode == 0 and
+          "adversarial-review --base main --scope branch --json" in plugin.stdout, plugin.stderr)
+    bin_dir = tmp / "prompt-bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_bytes(b'#!/usr/bin/env bash\nprintf "%s\\n" "$@"\ncat\n')
+    stub.chmod(0o755)
+    cli = run(repo, tmp, mode="cli", PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    check("CLI uses custom stdin with the base comparison in its prompt", cli.returncode == 0 and
+          cli.stdout.startswith("review\n-\n") and "git diff main...HEAD" in cli.stdout, cli.stderr)
+    for label, result in (("plugin", plugin), ("CLI", cli)):
+        check(f"{label} root guidance appended once", result.stdout.count(guidance) == 1, result.stdout)
+        check(f"{label} excludes local edits", local not in result.stdout, result.stdout)
+        check(f"{label} receives advisory tag", "[pre_existing]" in result.stdout, result.stdout)
+
+    untracked = make_review_repo(tmp, "wsuntrackedrules")
+    (untracked / "REVIEW.md").write_text(local, encoding="utf-8")
+    result = run(untracked, tmp, companion=bash_path(companion))
+    check("plugin ignores untracked root guidance", result.returncode == 0 and local not in result.stdout,
+          result.stderr)
+
+    long_guidance = "Long committed guidance " * 400
+    large = make_review_repo(tmp, "wslargerules", review_guidance=long_guidance)
+    result = run(large, tmp, companion=bash_path(companion))
+    check("plugin refers to the committed large file without inlining it", result.returncode == 0 and
+          "git show HEAD:REVIEW.md" in result.stdout and long_guidance not in result.stdout, result.stderr)
+
+    linked = make_review_repo(tmp, "wslinkedrules")
+    target = "../local-review-guide.md"
+    blob = subprocess.check_output(["git", "hash-object", "-w", "--stdin"], cwd=linked,
+                                   input=target, text=True).strip()
+    subprocess.run(["git", "update-index", "--add", "--cacheinfo", f"120000,{blob},REVIEW.md"],
+                   cwd=linked, check=True)
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                    "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                    "commit", "-qm", "[TEST] Add guidance symlink"], cwd=linked, check=True)
+    result = run(linked, tmp, companion=bash_path(companion))
+    check("plugin ignores committed guidance symlinks", result.returncode == 0 and
+          "Repository review guidance" not in result.stdout and target not in result.stdout, result.stderr)
 
 
 def case_sidecar_written_on_success(tmp: Path, _live: int):
@@ -863,6 +920,7 @@ def case_non_git_dir_is_not_fatal(tmp: Path, _live: int):
     outside = tmp / "not-a-repo"
     (outside / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, outside / "scripts" / "codex-review.sh")
+    shutil.copy(SCRIPT.with_name("review-guidance.sh"), outside / "scripts")
     companion = ok_companion(tmp, "comp-nogit", "P3 still reviewed\n")
     env = dict(os.environ)
     env.update({
@@ -917,6 +975,7 @@ def main():
             case_unparseable_payload_retries_then_fails,
             case_lock,
             case_malformed_state_is_survivable,
+            case_custom_prompts,
             case_sidecar_written_on_success,
             case_pending_visible_while_running,
             case_sidecar_records_failure,

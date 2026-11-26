@@ -5,11 +5,23 @@ The non-Claude engines (agy, Codex).
 ## Data-sharing policy
 
 Before selecting a primary, panel, or fallback reviewer, check the repository policy and user
-authorization for sharing source, diffs, and contracts with that engine. Set each block's
+authorization for sharing source, diffs, contracts and any root `REVIEW.md` the engine can read.
+Codex and agy receive guidance from the committed root file; Claude's local skill can read its
+working copy. If that working copy is outside the approved scope, exclude that Claude run. Set each block's
 `*_ALLOWED` only from that decision. Record exclusions without probing prohibited engines.
 Select an allowed independent reviewer for any gate that requires one. If none can satisfy
 the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer
 must not be retried through another tool.
+
+## Advisory comments pass
+
+After the primary review returns, run `claude-review.sh <base> --comments` as a separate read-only
+pass using the same data-sharing policy as Step 2 and a foreground timeout at most 600 seconds.
+If Claude is excluded, unavailable, times out or returns a sentinel, record the reason and apply
+`comment-rules.md` inline when possible. Tag both forms `comments`. The pass cannot request changes
+or trigger a blocking re-review. Cleanup decisions follow `comment-rules.md` → *Applying*.
+Measure their dispositions before changing where the pass runs. The separate pass follows
+https://claude.dev/blog/solving-code-review-at-anthropic/ (2026-10-15).
 
 ## Panel source launch
 

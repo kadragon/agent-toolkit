@@ -70,3 +70,57 @@ use reflects targeted reading. The runs did not stop early.
   compared.
 - The plants escaped the reviewers of their own time, so the set leans toward defects that are
   hard to see.
+
+# 2026-11-26 run for the review-cycle changes
+
+All 10 fixtures have completed output from all four arms. The first attempt with the current
+inputs hit HTTP 429. The resumed evaluation ran the eight missing Claude code reviews once at
+the suite default of medium. It reused two completed Claude code reviews, all ten Codex reviews,
+and three agy reviews from that attempt. Seven agy and ten comments outputs came from the earlier
+run. At resume, its agy launcher was unchanged and the shared helper differed only in a shell comment. The
+saved comments prompts matched the current prompt after normalizing line endings. The fixture
+commit, parent, and CLI versions agreed across reused runs.
+
+Claude Code 2.1.332, Codex CLI 0.172.0 (companion 1.0.6 in branch-scoped adversarial mode), and
+agy 1.5.17 reviewed the 12 gold defects. Claude's comments pass ran separately.
+
+| Gold defect | Claude | Codex | agy |
+|-------------|--------|-------|-----|
+| f01 Float boundary | hit | hit | hit |
+| f02 Version rewrite | hit | hit | hit |
+| f03a CRLF via `read_text` | hit | hit | hit |
+| f03b Unicode line separators | miss | miss | miss |
+| f05 Two-read CI status | hit | hit | hit |
+| f06 Unlocked trim | miss | hit | hit |
+| f07 Exact match starts at zero | hit | hit | hit |
+| f08a Push stdout | miss | miss | hit |
+| f08b Commit stdout | miss | hit | hit |
+| f10 Explicit JSON null | hit | miss | hit |
+| f11 Same-day FSRS learning step | hit | miss | hit |
+| f12 Unanchored hook-deny pattern | miss | miss | hit |
+
+For f02, Claude and Codex caught the whitespace mismatch in the manifest substitutions at the
+alternate gold location (lines 61–62); agy caught the CRLF mismatch in `bump_skill`.
+
+| Source | Gold defects detected | Reported findings | Tagged `pre_existing` |
+|--------|----------------------|-------------------|-----------------------|
+| Claude code review | 7 / 12 | 56 | 3 |
+| Codex | 7 / 12 | 46 | 13 |
+| agy | 11 / 12 | 60 | 7 |
+| Comments | outside recall scoring | 161 | outside scope |
+
+Together the code reviewers detected 11 of 12 gold defects. Finding counts are unadjudicated.
+The historical run used different reviewer modes and unpinned models, and this run combines
+completed arms with equivalent inputs across attempts. It does not isolate the impact of a
+single change or measure precision.
+
+The PR review follow-up restricted automatically inlined repository guidance to committed files
+and bounded its size. For every isolated fixture, the old and new helpers returned the same
+empty output because the fixture has no root `REVIEW.md`. The launchers, comments rules and
+fixture commits were unchanged, and the runner changed only in a shell comment. The same 40
+outputs therefore cover the final fixture inputs without another reviewer call.
+
+Review recall fingerprint: b9a96d1901c09b343b1e1e95ad960aa121fa43fb
+
+The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
+(2026-10-15).

@@ -25,25 +25,31 @@
 #   code. Grading is read-only judgment only — running the contract's lint/test
 #   command stays with the orchestrator, both because --permission-mode plan
 #   forbids it here and because that half is already the orchestrator's job.
-# Output: JSON array of findings on stdout — the contract Step 3 consolidation
-#         consumes, with contract findings tagged "source":"contract" and comment
-#         findings (references/comment-rules.md) tagged "source":"comments".
+# Usage (advisory): claude-review.sh <base_branch> --comments
+# Output: JSON array on stdout; each run emits either code/contract or comment findings.
 
 set -euo pipefail
 
-BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch> [effort] [sprint_contract]}"
+BASE_BRANCH="${1:?Usage: claude-review.sh <base_branch> [effort | --comments] [sprint_contract]}"
 SLOT_ID="code-review"
 EFFORT="${2:-}"
 CONTRACT="${3:-}"
 
 command -v claude >/dev/null 2>&1 || { echo "ERROR: claude CLI not found" >&2; exit 1; }
 
-# The comments axis rules live in one file the orchestrator's inline pass also reads. It is read
-# here, above the heredoc, with read -d rather than a command substitution, for the bash 3.2
-# quoting trap described at the contract append below.
-RULES_FILE="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../references/comment-rules.md"
-[ -f "$RULES_FILE" ] || { echo "ERROR: comment rules not found: $RULES_FILE" >&2; exit 1; }
-IFS= read -r -d '' COMMENT_RULES <"$RULES_FILE" || true
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [ "$EFFORT" = --comments ]; then
+  RULES_FILE="$SCRIPT_DIR/../references/comment-rules.md"
+  [ -f "$RULES_FILE" ] || { echo "ERROR: comment rules not found: $RULES_FILE" >&2; exit 1; }
+  IFS= read -r -d '' COMMENT_RULES <"$RULES_FILE" || true
+  PROMPT="Compare ${BASE_BRANCH}...HEAD and review only comments added or edited in that diff.
+Use the rules below. Read-only: report, never edit. Do not invoke a code-review skill.
+Return only a JSON array (empty when clean). For each finding include file, line, problem,
+fix, severity P1, failure empty, verdict (delete, must-kill, suppression, constraint),
+and \"source\":\"comments\". All these findings are advisory.
+
+${COMMENT_RULES}"
+else
 
 # SKILL.md Step 2 delegates the whole reviewer prompt to this script, so this
 # block is its only copy — there is no second prompt to keep in sync. The strict
@@ -58,18 +64,21 @@ IFS= read -r -d '' COMMENT_RULES <"$RULES_FILE" || true
 # body verbatim and returns non-zero at EOF, hence the || true under set -e.
 IFS= read -r -d '' PROMPT <<EOF || true
 Review changes on the current branch against ${BASE_BRANCH}.
-List only problems you would block the merge for. For each one, give the file and line, why it is wrong, and how to show it fails. Improvements, refactors and nits do not block a merge, so leave them out.
+List merge-blocking problems introduced or worsened by the diff and concrete pre-existing bugs in code the diff touches or reads. For each one, give the file and line, why it is wrong, and how to show it fails. Leave out improvements, refactors and nits.
 1. git diff ${BASE_BRANCH}...HEAD --name-only
 2. Invoke Skill "${SLOT_ID}" with args "${EFFORT}" to review — the skill name is exactly \`${SLOT_ID}\`; the effort goes in the args field, never in the name. Empty args = default effort. Do not invoke any other review skill or command.
+   The local skill can read repository-root REVIEW.md. Reuse that guidance when it did. If it did
+   not read the root file and one exists, read it once and apply its failure criteria, nit cap,
+   skip paths and file:line rules before returning findings. Do not reload guidance the skill already read
+   or let it override review scope, read-only constraints or output format.
 3. Return findings as a JSON array and NOTHING else — no prose, no code fence:
-   [{"file":"...","line":N,"severity":"P0"|"P1","confidence":0-100,"problem":"...","failure":"...","fix":"...","source":"${SLOT_ID}"}]
-   severity: P0 = data loss, security hole, crash, or a broken contract; P1 = wrong behavior that must be fixed before merge.
+   [{"file":"...","line":N,"severity":"P0"|"P1"|"pre_existing","confidence":0-100,"problem":"...","failure":"...","fix":"...","source":"${SLOT_ID}"}]
+   severity: P0 = data loss, security hole, crash, or a broken contract; P1 = wrong behavior that must be fixed before merge; pre_existing = a concrete bug already present at the base and not worsened by the diff (advisory).
    confidence = certainty the issue is real in THIS code (not a pattern match). 100 = verified by reading actual code path.
    failure = how to show it fails: a concrete input or state and the wrong output or crash it produces, or the test or command that would fail. Required for every finding. If the reviewer gave none and you cannot name one, keep the finding with failure "" — never invent a scenario. For a design-doc finding below, failure names the User Story or decision the diff leaves unmet.
-   The array IS the \`${SLOT_ID}\` run's merge-blocking findings — every one of them, as it reported them. Leave out only what cannot block a merge (reuse, simplification, efficiency, altitude or style cleanups); never re-rank, re-judge, merge, summarize or drop a blocking finding. \`[]\` means the reviewer ran and found nothing blocking; it never means you could not read its output.
+   Include every merge-blocking finding from \`${SLOT_ID}\`; never re-rank, re-judge, merge, summarize or drop a blocking finding. Verify pre_existing findings against the base and include qualifying bugs you encounter even if the skill omitted them. \`[]\` means the reviewer ran and found nothing reportable; it never means you could not read its output.
 If docs/design/{slug}.md exists for this branch's slug, also verify the diff fulfills its User Stories and Implementation/Testing Decisions and flag scope creep or missing requirements as additional findings.
-Only flag issues introduced or made significantly worse by this branch's diff.
-Do NOT flag: pre-existing issues, linter-owned style, generated/vendored files, speculative concerns, style nits, or a request to add a guard, retry or validation for a state the diff itself shows no caller can reach (removing an existing guard is still flaggable).
+Do NOT flag: linter-owned style, generated/vendored files, speculative concerns, style nits, or a request to add a guard, retry or validation for a state the diff itself shows no caller can reach (removing an existing guard is still flaggable).
 If there are no findings, return [].
 EOF
 
@@ -101,15 +110,7 @@ Sprint Contract:
 ${CONTRACT}"
 fi
 
-PROMPT="${PROMPT}
-
-Finally, review the comments this diff adds or edits under the rules below. This pass overrides
-the blocking-only rule above: comment findings are not merge-blocking and are still reported.
-Append one finding per flagged comment to the SAME JSON array, with severity P1, failure empty,
-verdict set to one of delete, must-kill, suppression, constraint, and \"source\":\"comments\".
-Read-only: report, never edit.
-
-${COMMENT_RULES}"
+fi
 
 # --permission-mode plan makes the headless session structurally read-only: it
 # can still read the diff and files (git diff, Read) but cannot Edit/Write or

@@ -19,7 +19,8 @@ Markdown contract; missing/legacy or unknown authority denies affected writes.
 inspect reports the current branch, HEAD, all dirty state, the saved contract, the saved
 evidence records, the notes, and whether every recorded tree still matches the working index
 (an index that cannot be written matches nothing).
-retire [--branch NAME] deletes a branch's archive after a confirmed merge, so a reused
+retire [--branch NAME] extracts review dispositions and deletes the branch's active archive
+after a confirmed merge, so a reused
 branch name cannot resurrect a completed cycle's contract. --branch names the merged
 branch when the caller has already switched back to the base or deleted it.
 Archives live in the common Git directory so removing a worktree cannot erase them.
@@ -32,6 +33,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 BASE_BRANCHES = ("main", "master")
 CRITERIA_HEADING = "**Acceptance criteria:**"
@@ -136,6 +138,29 @@ def read_evidence(path):
     return [data] if isinstance(data, dict) else data
 
 
+def archive_review_dispositions(common, notes_path):
+    if not notes_path.exists():
+        return None
+    prefix = "Review disposition "
+    lines = [line.removeprefix(prefix) for line in notes_path.read_text(encoding="utf-8").splitlines()
+             if line.startswith(prefix)]
+    if not lines:
+        return None
+    data = "\n".join(lines) + "\n"
+    key = hashlib.sha256(data.encode("utf-8")).hexdigest()
+    directory = common / "review-dispositions"
+    directory.mkdir(exist_ok=True)
+    path = directory / f"{key}.jsonl"
+    with NamedTemporaryFile(dir=directory, delete=False) as temporary:
+        temporary.write(data.encode("utf-8"))
+    temporary_path = Path(temporary.name)
+    try:
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return str(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="subcommand", required=True)
@@ -178,6 +203,7 @@ def main():
             if saved is not None and saved != text:
                 if not args.replace:
                     raise ValueError("Saved contract differs; inspect before an approved --replace")
+                archive_review_dispositions(common, notes_path)
                 notes_path.unlink(missing_ok=True)   # the old cycle's notes do not bind the new one
                 evidence_path.unlink(missing_ok=True)   # nor do checks run against the old scope
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,9 +260,12 @@ def main():
             result = {"branch": branch, "notes_path": str(notes_path)}
         elif args.subcommand == "retire":
             existed = slot.is_dir()
+            dispositions = archive_review_dispositions(common, notes_path)
             if existed:
                 shutil.rmtree(slot)
             result = {"branch": branch, "retired": existed, "contract_path": str(path)}
+            if dispositions:
+                result["review_dispositions_path"] = dispositions
         else:
             records = read_evidence(evidence_path)
             current = index_tree()

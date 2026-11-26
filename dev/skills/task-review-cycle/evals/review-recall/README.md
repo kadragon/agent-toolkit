@@ -5,11 +5,12 @@ PR shipped and a later `[FIX]` PR repaired. The reviewer sees the bug inside its
 full-size introducing diff, which is mostly benign code. That is the regime
 `../security-effort/RESULTS.md` names as untested: a planted bug inside a large diff.
 
-Use it to compare the two review engines: the Claude reviewer (`claude-review.sh`) and Codex
-(`codex-review.sh`). On the lite path, only one of them runs: the engine that did not drive the
+Compare the Claude code reviewer, Codex and agy. The separate Claude comments pass is also
+run so a change to its prompt or rules is exercised. Its findings are advisory and don't count
+toward bug recall. On the lite path, the blocking reviewer is the engine that did not drive the
 cycle (`../../references/risk-routing.md` → *Lite reviewer*). That is Codex when Claude Code
-drives and Claude when Codex drives. Re-run it on every reviewer-prompt change or routing
-change.
+drives and Claude when Codex drives. The full re-scoring gate follows
+https://claude.dev/blog/solving-code-review-at-anthropic/ (2026-10-15).
 
 ## Fixtures
 
@@ -45,6 +46,18 @@ Near-misses that were rejected, and why:
 - 3610e73: the folding arrived later.
 - 9ce16c3: Windows curl codepage only.
 
+### Add an escaped defect
+
+When a fix lands for a bug the original review cycle missed, verify the failure at the
+introducing commit and the repair at the fix commit. Use `git blame -w -M -C <fix>^` on
+the changed lines and inspect the candidate introducer and its parent. Confirm the failure
+was introduced by that diff, and check the original review record when available. If the
+introducer or the miss cannot be established, record that gap and leave the fixture out.
+After both commits are reachable from the evaluation repo, add a new ID, introducing SHA
+and fix SHA to `fixtures.tsv`, plus the gold location and mechanism in the table above.
+Reuse the fixture ID when several independently scored bugs share one introducing diff.
+Re-run the entire set, then add the new scores to `RESULTS.md`.
+
 ## Re-run
 
 ```bash
@@ -54,11 +67,20 @@ bash dev/skills/task-review-cycle/evals/review-recall/run.sh "$OUT_DIR"         
 bash dev/skills/task-review-cycle/evals/review-recall/run.sh "$OUT_DIR" f01 f07   # a subset
 ```
 
-Run it from a checkout of this repo, with `claude`, `codex` and `jq` set up as they are for a
+Run it from a checkout of this repo, with `claude`, `codex`, `agy` and `jq` set up as they are for a
 review cycle. Each fixture runs in its own throwaway clone, fetched at depth 2 by commit sha, so
 the reviewer cannot reach the fix commit or this table, and the source repo's refs are not
 touched. Fixtures run in parallel. The Claude arm's effort is pinned by
 `REVIEW_RECALL_EFFORT` (default `medium`) and recorded in each `<id>-meta.txt`.
-`run.sh` exits 1 if any fixture produced no output.
-Score each output by hand against the table above, then add a dated section to `RESULTS.md`.
-Raw outputs from earlier runs are kept in `runs/`; worktree paths are replaced with `<worktree>/`.
+`run.sh` exits 1 on a missing, failed or unreadable review. A full successful run writes
+`fingerprint.txt`. Score each code reviewer by hand against the gold table, tally comment
+findings separately, and record the date, reviewer versions/mode, effort and results in
+`RESULTS.md`. Copy the full-run fingerprint beside those scores and retain the raw evidence.
+Raw outputs from earlier runs are kept in `runs/`; replace throwaway paths with `<worktree>/`
+when checking in output.
+
+Changes to a launcher, shared review guidance, `comment-rules.md`, `fixtures.tsv` or `run.sh`
+invalidate the scorecard. CI's `check-results.sh` checks the latest fingerprint and requires a
+scorecard update when the inputs differ from the PR base. CI does not
+run the authenticated engines or grade findings. On routing, model or tool changes outside
+those files, run the full set and update the scorecard even if the fingerprint stays the same.

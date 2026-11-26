@@ -61,7 +61,7 @@ def git(repo, *args):
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
 
 
-def make_repo(tmp):
+def make_repo(tmp, review_guidance=None):
     """A repo whose BRANCH differs from main by one file, so the empty-diff gate passes."""
     repo = tmp / "repo"
     repo.mkdir()
@@ -69,6 +69,8 @@ def make_repo(tmp):
     git(repo, "config", "user.email", "t@example.com")
     git(repo, "config", "user.name", "t")
     (repo / "a.txt").write_text("a\n")
+    if review_guidance is not None:
+        (repo / "REVIEW.md").write_text(review_guidance, encoding="utf-8")
     git(repo, "add", ".")
     git(repo, "commit", "-q", "-m", "base")
     git(repo, "checkout", "-q", "-b", BRANCH)
@@ -78,9 +80,11 @@ def make_repo(tmp):
     return repo
 
 
-def run(tmp, stdout="", exit_code=0):
+def run(tmp, stdout="", exit_code=0, review_guidance=None):
     """Run agy-review.sh against main with a stubbed `agy`. Returns (proc, prompt, snapshot, dir)."""
-    repo = make_repo(tmp)
+    repo = make_repo(tmp, review_guidance)
+    if review_guidance is not None:
+        (repo / "REVIEW.md").write_text("Private working copy should stay local.", encoding="utf-8")
     bin_dir = tmp / "bin"
     bin_dir.mkdir()
     stub = bin_dir / "agy"
@@ -131,6 +135,17 @@ def case_prompt_is_read_only(tmp):
     check("script exits 0", proc.returncode == 0, proc.stderr)
     check("prompt forbids running tests", "Do NOT run tests" in prompt, prompt[:300])
     check("prompt forbids background commands", "in the background" in prompt, prompt[:300])
+
+
+def case_repo_guidance_and_pre_existing(tmp):
+    print("\ncase: repository guidance and advisory severity")
+    guidance = "Require file:line evidence for migration bugs."
+    proc, prompt, _, _ = run(tmp, stdout="LGTM\n", review_guidance=guidance)
+    check("script exits 0", proc.returncode == 0, proc.stderr)
+    check("guidance appended once", prompt.count(guidance) == 1)
+    check("working copy is excluded", "Private working copy should stay local." not in prompt)
+    check("pre-existing bugs are advisory", "[pre_existing] Advisory" in prompt)
+    check("only P0/P1 affect the verdict", "LGTM\" if no P0/P1 issues" in prompt)
 
 
 def case_ok_run_persists_review(tmp):
@@ -204,6 +219,7 @@ def main():
     cases = (
         case_script_parses,
         case_prompt_is_read_only,
+        case_repo_guidance_and_pre_existing,
         case_ok_run_persists_review,
         case_failed_run_records_failure,
         case_empty_run_records_empty,

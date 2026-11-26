@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Measure reviewer noise and re-score prompt changes (dev v4.12.21) (2026-11-26) → docs/design/measure-and-focus-the-review-cycle.md
 - [done] Resolve dispatch Codex model families from the models cache and re-tier effort guidance (dev v4.12.20) (2026-11-26) → dev/skills/dispatch/SKILL.md
 - [done] Label dispatch children with task titles and map Codex models to Claude tiers (dev v4.12.19) (2026-11-26)
 - [done] Report dispatch stop reasons and repeated review categories (2 units) (dev v4.12.18) (2026-11-25)

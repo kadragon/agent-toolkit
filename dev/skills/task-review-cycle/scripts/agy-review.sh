@@ -20,6 +20,9 @@ fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$SCRIPT_DIR/review-guidance.sh"
+GUIDANCE=$(review_repo_guidance)
 
 REVIEW_PROMPT="You are reviewing a proposed code change in the repository at ${REPO_ROOT}.
 
@@ -40,7 +43,7 @@ This is a static review. Use only git commands and file reads. Do NOT run tests,
 
 ## What to flag
 
-Only flag issues introduced by this change — not pre-existing problems. Each finding must be:
+Flag issues introduced or worsened by this change. Also report real bugs in code the diff touches or reads if you verify the same bug exists at the base and the diff did not worsen it. Each finding must be:
 - A concrete bug, security vulnerability, or performance regression with a clear reproduction scenario
 - Discrete and actionable (one issue per finding, not vague observations)
 - Something the author would fix if made aware of it
@@ -54,6 +57,7 @@ Tag each finding:
 - [P1] Urgent — incorrect behavior under normal conditions
 - [P2] Normal — edge case bugs, performance issues, maintainability risks
 - [P3] Low — minor improvements worth noting
+- [pre_existing] Advisory — a verified bug already present at the base and not worsened by the change
 
 ## Comment format
 
@@ -66,9 +70,10 @@ For each finding, provide:
 
 ## Output structure
 
-List findings ordered by priority (P0 first). After all findings, add:
+List findings ordered by priority (P0 first, pre_existing last). After all findings, add:
 - **Overall verdict**: \"LGTM\" if no P0/P1 issues, or \"Changes Requested\" with a 1-sentence explanation.
-- If no issues worth flagging exist, say so plainly — do not invent findings."
+- If no issues worth flagging exist, say so plainly — do not invent findings.
+${GUIDANCE}"
 
 # --print-timeout is agy's ONLY deadline. Nothing outside this script bounds it: the cycle
 # launches it in the background and moves on without waiting (SKILL.md Step 2), and
