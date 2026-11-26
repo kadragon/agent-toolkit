@@ -3,22 +3,16 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { StatusBand } from '../../types'
 import {
   ASCII,
-  UNICODE,
-  bar,
-  barCells,
   cacheText,
-  contextBarSegments,
   contextText,
   duration,
   headline,
   headlineSegments,
   levelOf,
-  limitsSegments,
   limitsText,
-  mergedSegments,
   modelLabel,
-  setupText,
-  tokens,
+  timesSegments,
+  timesText,
 } from './format'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
@@ -31,7 +25,6 @@ const STATUS: StatusBand = {
   effort: 'medium',
   cwd: '/work/agent-toolkit',
   branch: 'main',
-  startedAt: NOW - 30_000,
   now: NOW,
   contextPercent: 0,
   rateLimits: [
@@ -41,40 +34,34 @@ const STATUS: StatusBand = {
 }
 
 describe('headline', () => {
-  test('reads model, effort, directory, branch and elapsed time', () => {
-    expect(headline(STATUS)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
+  test('reads model, effort, directory and branch, with no session time', () => {
+    expect(headline(STATUS)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)')
   })
 
   test('leaves the effort out until a turn reported one', () => {
     expect(headline({ ...STATUS, effort: undefined })).toBe(
-      '[Opus 5.5] │ agent-toolkit git:(main) │ up <1m',
+      '[Opus 5.5] │ agent-toolkit git:(main)',
     )
   })
 
   test('leaves the git segment out with no branch', () => {
     expect(headline({ ...STATUS, branch: undefined })).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit │ up <1m',
+      '[Opus 5.5 ◔ medium] │ agent-toolkit',
     )
   })
 
   test('draws the branch alone when the directory has no name', () => {
-    expect(headline({ ...STATUS, cwd: '/' })).toBe('[Opus 5.5 ◔ medium] │ git:(main) │ up <1m')
-    expect(headline({ ...STATUS, cwd: '', branch: undefined })).toBe('[Opus 5.5 ◔ medium] │ up <1m')
+    expect(headline({ ...STATUS, cwd: '/' })).toBe('[Opus 5.5 ◔ medium] │ git:(main)')
+    expect(headline({ ...STATUS, cwd: '', branch: undefined })).toBe('[Opus 5.5 ◔ medium]')
   })
 
   test('leaves the model out when the engine named none', () => {
-    expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main) │ up <1m')
-  })
-
-  test('leaves the elapsed time out when the session start is unknown', () => {
-    expect(headline({ ...STATUS, startedAt: undefined })).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)',
-    )
+    expect(headline({ ...STATUS, model: '' })).toBe('agent-toolkit git:(main)')
   })
 
   test('cuts a long branch name so the figures after it stay on the row', () => {
     expect(headline({ ...STATUS, branch: 'feat/status-band-colors-cache-countdown' })).toBe(
-      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…) │ up <1m',
+      '[Opus 5.5 ◔ medium] │ agent-toolkit git:(feat/status-band-colors…)',
     )
   })
 
@@ -99,92 +86,15 @@ describe('modelLabel', () => {
 })
 
 describe('context', () => {
-  test('draws a thirty-cell bar and a whole percentage', () => {
-    expect(contextText(STATUS)).toBe('Context ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0%')
-    expect(contextText({ ...STATUS, contextPercent: 42 })).toBe('Context █████████████░░░░░░░░░░░░░░░░░ 42%')
-    expect(contextText({ ...STATUS, contextPercent: 100 })).toBe('Context ██████████████████████████████ 100%')
+  test('draws a whole percentage and no bar', () => {
+    expect(contextText(STATUS)).toBe('Context 0%')
+    expect(contextText({ ...STATUS, contextPercent: 41.6 })).toBe('Context 42%')
+    expect(contextText({ ...STATUS, contextPercent: 250 })).toBe('Context 100%')
+    expect(contextText({ ...STATUS, contextPercent: -5 })).toBe('Context 0%')
   })
 
   test('is left out with no reading', () => {
     expect(contextText({ ...STATUS, contextPercent: undefined })).toBe('')
-  })
-
-  test('keeps the bar inside its thirty cells', () => {
-    expect(bar(250)).toBe('██████████████████████████████')
-    expect(bar(-5)).toBe('░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░')
-  })
-
-  // 200k window: 20k system prompt and tools, 40k messages, 100k free, 40k reserve.
-  const PARTS: StatusBand['contextParts'] = [
-    { kind: 'used', tokens: 6_000, color: 'promptBorder' },
-    { kind: 'used', tokens: 14_000, color: 'inactive' },
-    { kind: 'used', tokens: 40_000, color: 'permission' },
-    { kind: 'free', tokens: 100_000, color: 'promptBorder' },
-    { kind: 'buffer', tokens: 40_000, color: 'inactive' },
-  ]
-  const split = (percent: number, parts = PARTS, glyphs = UNICODE) =>
-    contextBarSegments({ ...STATUS, contextPercent: percent, contextParts: parts }, glyphs).map(
-      ({ text, color, isDim }) => [text, color ?? (isDim === true ? 'dim' : '')],
-    )
-
-  test('splits the fill by what holds it, each in its own color, with no labels', () => {
-    expect(split(30)).toEqual([
-      ['██', 'promptBorder'],
-      ['██', 'inactive'],
-      ['█████', 'permission'],
-      ['───────────────', 'dim'],
-      ['░░░░░░', 'dim'],
-    ])
-    expect(contextText({ ...STATUS, contextPercent: 30, contextParts: PARTS })).toBe(
-      `Context ${'█'.repeat(9)}${'─'.repeat(15)}░░░░░░ 30%`,
-    )
-  })
-
-  test('the fill follows the percentage and stays inside the bar', () => {
-    const cells = (percent: number) => split(percent).map(([text]) => text).join('')
-
-    expect(cells(30)).toHaveLength(30)
-    expect(cells(100)).toBe('█'.repeat(30))
-    expect(cells(90)).toBe(`${'█'.repeat(27)}░░░`)
-  })
-
-  test('a row with tokens keeps a cell while cells go round', () => {
-    expect(split(10).slice(0, 3)).toEqual([
-      ['█', 'promptBorder'],
-      ['█', 'inactive'],
-      ['█', 'permission'],
-    ])
-    // Fewer cells than rows: the largest takes the one there is.
-    expect(split(3).slice(0, 1)).toEqual([['█', 'permission']])
-  })
-
-  test('past the warning line the unfilled cells take the level color', () => {
-    expect(split(75).slice(-2)).toEqual([
-      ['─', 'warning'],
-      ['░░░░░░', 'warning'],
-    ])
-    expect(split(93).slice(-1)).toEqual([['░░', 'error']])
-  })
-
-  test('the bar shrinks to the terminal, keeping the figure on the row', () => {
-    expect(barCells(undefined)).toBe(30)
-    expect(barCells(80)).toBe(30)
-    expect(barCells(30)).toBe(17)
-    expect(barCells(10)).toBe(5)
-    expect(
-      contextText({ ...STATUS, contextPercent: 100, contextParts: PARTS }, UNICODE, barCells(30)),
-    ).toHaveLength(30)
-  })
-
-  test('without a breakdown it draws one fill', () => {
-    expect(split(42, [])).toEqual([[`${'█'.repeat(13)}${'░'.repeat(17)}`, '']])
-    expect(split(42, [{ kind: 'free', tokens: 1, color: 'x' }])).toHaveLength(1)
-  })
-
-  test('the ASCII set draws the split in plain letters', () => {
-    expect(split(30, PARTS, ASCII).map(([text]) => text).join('')).toBe(
-      `${'#'.repeat(9)}${'-'.repeat(15)}......`,
-    )
   })
 
   test('colors by how full the window is', () => {
@@ -246,38 +156,25 @@ describe('cache', () => {
   })
 })
 
-describe('counts', () => {
-  const COUNTED: StatusBand = {
-    ...STATUS,
-    cacheExpiresAt: NOW + 58 * MINUTE,
-    hooks: 21,
-    skills: { count: 49, tokens: 4234 },
-    mcp: 4,
-  }
-
-  test('make a row of their own: the cache, the hooks, the skills and their size, the MCP servers', () => {
-    expect(setupText(COUNTED)).toBe('cache 58m │ 21 hooks │ 49 skills (4.2k) │ 4 mcp')
-    expect(headline(COUNTED)).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up <1m')
-  })
-
-  test('leave out a setup not yet read', () => {
-    expect(setupText(STATUS)).toBe('')
-  })
-
-  test('leave out an MCP figure of none', () => {
-    expect(setupText({ ...STATUS, hooks: 2, mcp: 0 })).toBe('2 hooks')
-  })
-
-  test('name one of a thing in the singular', () => {
-    expect(setupText({ ...STATUS, hooks: 1, skills: { count: 1, tokens: 80 }, mcp: 1 })).toBe(
-      '1 hook │ 1 skill (80) │ 1 mcp',
+describe('times', () => {
+  test('put the cache countdown after the windows', () => {
+    expect(timesText({ ...STATUS, cacheExpiresAt: NOW + 58 * MINUTE })).toBe(
+      '5h: 88% (2h 4m) │ 7d: 9% (6d 7h) │ cache 58m',
     )
   })
 
-  test('write a thousand tokens and over in thousands', () => {
-    expect(tokens(999)).toBe('999')
-    expect(tokens(1000)).toBe('1.0k')
-    expect(tokens(12_345)).toBe('12.3k')
+  test('draw the cache alone off a subscription, and the windows alone before a response', () => {
+    expect(timesText({ ...STATUS, rateLimits: [], cacheExpiresAt: NOW + 58 * MINUTE })).toBe(
+      'cache 58m',
+    )
+    expect(timesText(STATUS)).toBe('5h: 88% (2h 4m) │ 7d: 9% (6d 7h)')
+  })
+
+  test('warn when the cache has lapsed', () => {
+    expect(timesSegments({ ...STATUS, rateLimits: [], cacheExpiresAt: NOW }).at(-1)).toEqual({
+      text: 'cache expired',
+      color: 'warning',
+    })
   })
 })
 
@@ -287,22 +184,24 @@ describe('segments', () => {
 
     expect(segments.filter(segment => segment.isDim).map(segment => segment.text)).toEqual([
       ' │ ',
-      ' │ ',
     ])
     expect(segments[0]).toEqual({ text: '[Opus 5.5 ◔ medium]', color: 'claude', isBold: true })
   })
 })
 
 describe('ascii', () => {
-  test('draws the separators, the effort, the bar and a cut branch in plain letters', () => {
-    const status = { ...STATUS, branch: 'feat/status-band-colors-cache-countdown', hooks: 2 }
+  test('draws the separators, the effort and a cut branch in plain letters', () => {
+    const status = {
+      ...STATUS,
+      branch: 'feat/status-band-colors-cache-countdown',
+      cacheExpiresAt: NOW + 58 * MINUTE,
+    }
 
-    expect(mergedSegments(status, ASCII).map(segment => segment.text).join('')).toBe(
-      '[Opus 5.5 medium] | agent-toolkit git:(feat/status-band-colors~) | up <1m | 2 hooks',
+    expect(headlineSegments(status, ASCII).map(segment => segment.text).join('')).toBe(
+      '[Opus 5.5 medium] | agent-toolkit git:(feat/status-band-colors~)',
     )
-    expect(contextText({ ...STATUS, contextPercent: 42 }, ASCII)).toBe('Context #############----------------- 42%')
-    expect(limitsSegments(STATUS, ASCII).map(segment => segment.text).join('')).toBe(
-      '5h: 88% (2h 4m) | 7d: 9% (6d 7h)',
+    expect(timesSegments(status, ASCII).map(segment => segment.text).join('')).toBe(
+      '5h: 88% (2h 4m) | 7d: 9% (6d 7h) | cache 58m',
     )
   })
 })

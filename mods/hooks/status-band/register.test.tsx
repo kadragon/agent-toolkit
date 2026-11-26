@@ -44,21 +44,11 @@ type World = {
   gitCalls: number
   // Set to hold the next git call open until the test lets it go.
   gitGate?: Promise<void>
-  // Unset, the settings read fails and the breakdown carries no skills.
+  // Unset, the settings read fails.
   settings?: Record<string, unknown>
   files: Record<string, string>
   // What the environment holds; a name not listed is unset.
   env: Record<string, string>
-  skills?: { totalSkills: number; tokens: number }
-  // The rows /context lists beside its grid; unset, the breakdown carries none.
-  categories?: { name: string; tokens: number; color: string; isDeferred: boolean; kind: string }[]
-  // Set to hold the next breakdown read open, with what it read, until the test lets it go.
-  breakdownGate?: Promise<void>
-  // The servers of the MCP tools the breakdown carries, one entry per tool.
-  mcpServers: string[]
-  // Servers that need a sign-in: they offer only the tools that start one.
-  mcpUnauthed: string[]
-  settingsReads: number
   // How long the next responses take to come back.
   stepMs: number
   isUncached: boolean
@@ -100,9 +90,6 @@ const world = (on: On): World => {
     gitCalls: 0,
     files: {},
     env: { HOME: '/home/me' },
-    mcpServers: [],
-    mcpUnauthed: [],
-    settingsReads: 0,
     stepMs: 0,
     isUncached: false,
     curateOut: '',
@@ -118,53 +105,18 @@ const world = (on: On): World => {
   on('session.model', async () => ({ value: state.model }))
   on('session.cwd', async () => ({ value: '/work/agent-toolkit' }))
   on('session.turns', async () => ({ value: state.turns }))
-  on('session.usage', async ($, e) => {
+  on('session.usage', async () => {
     if (state.isUsageDown) throw new Error('usage is down')
-
-    const breakdown =
-      e.breakdown === undefined || state.skills === undefined
-        ? {}
-        : {
-            breakdown: {
-              ...(state.categories === undefined ? {} : { categories: state.categories }),
-              skills: { ...state.skills, includedSkills: 0, skillFrontmatter: [] },
-              mcpTools: [
-                ...state.mcpServers.map((serverName, index) => ({
-                  name: `mcp__${serverName}__t${index}`,
-                  serverName,
-                  tokens: 10,
-                  isLoaded: true,
-                })),
-                ...state.mcpUnauthed.flatMap(serverName =>
-                  ['authenticate', 'complete_authentication'].map(tool => ({
-                    name: `mcp__${serverName.replace(/[^\w-]+/g, '_')}__${tool}`,
-                    serverName,
-                    tokens: 10,
-                    isLoaded: false,
-                  })),
-                ),
-              ],
-            },
-          }
-
-    if (e.breakdown !== undefined) {
-      const gate = state.breakdownGate
-
-      state.breakdownGate = undefined
-      await gate
-    }
 
     return {
       value: {
         startedAt: NOW - 5 * MINUTE,
-        context: { window: 200_000, percent: state.percent, ...breakdown },
+        context: { window: 200_000, percent: state.percent },
         rateLimits: state.rateLimits,
       },
     } as never
   })
   on('settings.read', async () => {
-    state.settingsReads += 1
-
     if (state.settings === undefined) throw new Error('settings are down')
 
     return { value: state.settings }
@@ -293,20 +245,18 @@ const measure = async ($: Engine) => {
   return result
 }
 
+const HEADLINE = /^\[|agent-toolkit/
+const TIMES = /\d[hd]: |cache (<|\d|expired)/
+
 const drawn = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', props = {}) => {
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, ...props }, surface })
   const context = await ui.find({ type: 'Text', text: /^Context / })
-  // A Text carries no key, so the rows are found by what they say. The setup
-  // row is read onto the headline, as a band of two rows draws it.
-  const headline = (await ui.find({ type: 'Text', text: / up (<|\d)/ }))?.text
-  const isSplit = ((props as { maxRows?: number }).maxRows ?? BAND.props.maxRows) >= 3
-  const setup = isSplit
-    ? (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b)/ }))?.text
-    : undefined
+  // A Text carries no key, so the rows are found by what they say: the
+  // headline, the context fill, then the windows and the cache countdown.
   const texts = [
-    setup === undefined || headline === undefined ? headline : `${headline} │ ${setup}`,
+    (await ui.find({ type: 'Text', text: HEADLINE }))?.text,
     context?.text,
-    (await ui.find({ type: 'Text', text: /\d[hd]: / }))?.text,
+    (await ui.find({ type: 'Text', text: TIMES }))?.text,
   ]
 
   return { ui, texts, color: context?.props.color }
@@ -342,7 +292,8 @@ test("a main-loop step shows its effort and a subagent's does not change it", as
   const { ui, texts } = await drawn($)
 
   expect(result.answer).toBe('ok')
-  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m │ cache 60m')
+  expect(texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m) │ cache 60m')
   await ui.unmount()
 })
 
@@ -358,15 +309,15 @@ test('a measurement redraws the figures and the branch', async ($, on) => {
 
   expect(measured.changed).toEqual(['context'])
   expect(texts).toEqual([
-    '[Opus 5.5] │ agent-toolkit git:(feat/x) │ up 5m',
-    'Context ███████████████████████████░░░ 91%',
+    '[Opus 5.5] │ agent-toolkit git:(feat/x)',
+    'Context 91%',
     undefined,
   ])
   expect(color).toBe('error')
   await ui.unmount()
 })
 
-test('the clock tick moves the elapsed time', async ($, on) => {
+test('the clock tick moves the countdowns, and the headline shows no session time', async ($, on) => {
   const state = world(on)
 
   await start($)
@@ -375,7 +326,7 @@ test('the clock tick moves the elapsed time', async ($, on) => {
   await settle()
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toContain('up 1h 5m')
+  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main)')
   expect(texts[2]).toBe(' │ 5h: 88% (1h 4m)')
   await ui.unmount()
 })
@@ -390,7 +341,7 @@ test('a changed model drops the effort the last one ran at', async ($, on) => {
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main) │ up 5m')
+  expect(texts[0]).toBe('[Haiku 5.5] │ agent-toolkit git:(main)')
   await ui.unmount()
 })
 
@@ -409,7 +360,7 @@ test('a git call that fails keeps the last branch, one that names none drops it'
   await measure($)
   const dropped = await drawn($)
 
-  expect(dropped.texts[0]).toBe('[Opus 5.5] │ agent-toolkit │ up 5m')
+  expect(dropped.texts[0]).toBe('[Opus 5.5] │ agent-toolkit')
   await dropped.ui.unmount()
 })
 
@@ -446,7 +397,7 @@ test('before the first prompt the context reads 0%, later a missing reading is l
   await start($)
   const fresh = await drawn($)
 
-  expect(fresh.texts[1]).toBe('Context ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0%')
+  expect(fresh.texts[1]).toBe('Context 0%')
   await fresh.ui.unmount()
 
   state.turns = 2
@@ -458,74 +409,7 @@ test('before the first prompt the context reads 0%, later a missing reading is l
   await later.ui.unmount()
 })
 
-test('the context bar is split by what fills the window, without labels', async ($, on) => {
-  const state = world(on)
-  state.settings = {}
-  state.skills = { totalSkills: 2, tokens: 300 }
-  state.percent = 30
-  const row = (name: string, tokens: number, color: string, kind: string) => ({
-    name,
-    tokens,
-    color,
-    kind,
-    isDeferred: kind === 'deferred',
-  })
-  state.categories = [
-    row('System prompt', 6_000, 'promptBorder', 'used'),
-    row('MCP tools (deferred)', 50_000, 'cyan_FOR_SUBAGENTS_ONLY', 'deferred'),
-    row('System tools', 14_000, 'inactive', 'used'),
-    row('Messages', 40_000, 'permission', 'used'),
-    row('Free space', 100_000, 'promptBorder', 'free'),
-    row('Autocompact buffer', 40_000, 'inactive', 'buffer'),
-  ]
-
-  await start($)
-  await measure($)
-  const { ui, texts, color } = await drawn($)
-  const runs = await ui.findAll({ type: 'Text', text: /^[█─░]+$/ })
-
-  expect(texts[1]).toBe(`Context ${'█'.repeat(9)}${'─'.repeat(15)}░░░░░░ 30%`)
-  expect(color).toBe('success')
-  expect(runs.map(run => [run.text, run.props.color ?? (run.props.dimColor ? 'dim' : '')])).toEqual([
-    ['██', 'promptBorder'],
-    ['██', 'inactive'],
-    ['█████', 'permission'],
-    ['─'.repeat(15), 'dim'],
-    ['░░░░░░', 'dim'],
-  ])
-  expect(texts[1]).not.toMatch(/System|Messages|Free/)
-  await ui.unmount()
-})
-
-test('a measure that lands while the breakdown is read reads it again', async ($, on) => {
-  const state = world(on)
-  state.settings = {}
-  state.skills = { totalSkills: 2, tokens: 300 }
-  state.percent = 30
-  const row = (tokens: number, color: string, kind: string) => ({
-    name: color,
-    tokens,
-    color,
-    kind,
-    isDeferred: false,
-  })
-  let release = () => {}
-  state.breakdownGate = new Promise<void>(resolve => (release = resolve))
-  state.categories = [row(60_000, 'promptBorder', 'used'), row(140_000, 'promptBorder', 'free')]
-
-  await start($)
-  state.categories = [row(60_000, 'permission', 'used'), row(140_000, 'promptBorder', 'free')]
-  await measure($)
-  release()
-  await settle()
-  const { ui } = await drawn($)
-  const runs = await ui.findAll({ type: 'Text', text: /^█+$/ })
-
-  expect(runs.map(run => run.props.color)).toEqual(['permission'])
-  await ui.unmount()
-})
-
-test('in a narrow terminal the bar shrinks so the figure stays on its row', async ($, on) => {
+test('the context reads as a percentage with no bar, cut at the row end', async ($, on) => {
   world(on)
 
   await start($)
@@ -536,7 +420,7 @@ test('in a narrow terminal the bar shrinks so the figure stays on its row', asyn
   })
   const context = await ui.find({ type: 'Text', text: /^Context / })
 
-  expect(context?.text).toBe(`Context ██${'░'.repeat(15)} 12%`)
+  expect(context?.text).toBe('Context 12%')
   expect(context?.props.wrap).toBe('truncate-end')
   await ui.unmount()
 })
@@ -551,8 +435,8 @@ test('a failed usage read keeps the last figures', async ($, on) => {
   const { ui, texts } = await drawn($)
 
   expect(texts).toEqual([
-    '[Opus 5.5] │ agent-toolkit git:(main) │ up 15m',
-    'Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12%',
+    '[Opus 5.5] │ agent-toolkit git:(main)',
+    'Context 12%',
     ' │ 5h: 88% (1h 54m)',
   ])
   await ui.unmount()
@@ -569,10 +453,7 @@ test('a failing git call or usage read leaves those figures out and fails nothin
 
   expect(started.cwd).toBe('/work/agent-toolkit')
   expect(measured.changed).toEqual(['context'])
-  expect(texts).toEqual([undefined, undefined, undefined])
-  expect((await ui.find({ type: 'Text', text: /agent-toolkit/ }))?.text).toBe(
-    '[Opus 5.5] │ agent-toolkit',
-  )
+  expect(texts).toEqual(['[Opus 5.5] │ agent-toolkit', undefined, undefined])
   await ui.unmount()
 })
 
@@ -620,10 +501,7 @@ const colorOf = async (ui: Awaited<ReturnType<typeof drawn>>['ui'], text: RegExp
     .color
 
 test('each segment of the rows is drawn in its own color', async ($, on) => {
-  const state = world(on)
-  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'true' }] }] } }
-  state.skills = { totalSkills: 2, tokens: 300 }
-  state.mcpServers = ['qmd']
+  world(on)
 
   await start($)
   await step($)
@@ -633,9 +511,6 @@ test('each segment of the rows is drawn in its own color', async ($, on) => {
   expect(await colorOf(ui, /^agent-toolkit$/)).toBe('suggestion')
   expect(await colorOf(ui, /^ git:\(main\)$/)).toBe('autoAccept')
   expect(await colorOf(ui, /^cache 60m$/)).toBe('planMode')
-  expect(await colorOf(ui, /^1 hook$/)).toBe('permission')
-  expect(await colorOf(ui, /^2 skills$/)).toBe('remember')
-  expect(await colorOf(ui, /^1 mcp$/)).toBe('ide')
   expect(await colorOf(ui, /^88%$/)).toBe('warning')
   expect((await ui.find({ type: 'Text', text: /^5h: $/ }))?.props.dimColor).toBe(true)
   await ui.unmount()
@@ -651,14 +526,15 @@ test("the cache counts down from the last main-loop response, a subagent's leave
   await measure($)
   const running = await drawn($)
 
-  expect(running.texts[0]).toContain('up 15m │ cache 50m')
+  expect(running.texts[0]).not.toContain('cache')
+  expect(running.texts[2]).toBe(' │ 5h: 88% (1h 54m) │ cache 50m')
   await running.ui.unmount()
 
   state.now = NOW + 60 * MINUTE
   await measure($)
   const lapsed = await drawn($)
 
-  expect(lapsed.texts[0]).toContain('up 1h 5m │ cache expired')
+  expect(lapsed.texts[2]).toBe(' │ 5h: 88% (1h 4m) │ cache expired')
   expect(await colorOf(lapsed.ui, /^cache expired$/)).toBe('warning')
   await lapsed.ui.unmount()
 })
@@ -672,13 +548,13 @@ test('a /clear takes the cache figure down until the next response', async ($, o
   await settle()
   const cleared = await drawn($)
 
-  expect(cleared.texts[0]).toBe('[Opus 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m')
+  expect(cleared.texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await cleared.ui.unmount()
 
   await step($)
   const renewed = await drawn($)
 
-  expect(renewed.texts[0]).toContain('│ cache 60m')
+  expect(renewed.texts[2]).toContain('│ cache 60m')
   await renewed.ui.unmount()
 })
 
@@ -692,65 +568,10 @@ test(
     await step($)
     const { ui, texts } = await drawn($)
 
-    expect(texts[0]).toContain('│ cache 5m')
+    expect(texts[2]).toContain('│ cache 5m')
     await ui.unmount()
   },
 )
-
-const hooksFile = (count: number): string =>
-  JSON.stringify({
-    hooks: { PostToolUse: [{ matcher: 'Bash', hooks: Array(count).fill({ type: 'command' }) }] },
-  })
-
-test("the hook count adds the enabled plugins' hooks to the settings' own", async ($, on) => {
-  const state = world(on)
-  state.settings = {
-    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command' }, { type: 'command' }] }] },
-    enabledPlugins: { 'plain@m': true, 'off@m': false, 'named@m': true, 'gone@m': true },
-  }
-  state.files = {
-    '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({
-      plugins: {
-        'plain@m': [{ installPath: '/p/plain' }],
-        'off@m': [{ installPath: '/p/off' }],
-        'named@m': [{ installPath: '/p/named' }],
-      },
-    }),
-    '/p/plain/hooks/hooks.json': hooksFile(3),
-    '/p/off/hooks/hooks.json': hooksFile(10),
-    '/p/named/.claude-plugin/plugin.json': JSON.stringify({ hooks: './hooks.json' }),
-    '/p/named/hooks.json': hooksFile(2),
-  }
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 7 hooks')
-  await ui.unmount()
-})
-
-test('a Windows home is read through backslashes alone', async ($, on) => {
-  const state = world(on)
-  state.env = { USERPROFILE: 'C:\\Users\\me' }
-  state.settings = { enabledPlugins: { 'plain@m': true, 'named@m': true } }
-  state.files = {
-    'C:\\Users\\me\\.claude\\plugins\\installed_plugins.json': JSON.stringify({
-      plugins: {
-        'plain@m': [{ installPath: 'C:\\p\\plain' }],
-        'named@m': [{ installPath: 'C:\\p\\named' }],
-      },
-    }),
-    'C:\\p\\plain\\hooks\\hooks.json': hooksFile(3),
-    'C:\\p\\named\\.claude-plugin\\plugin.json': JSON.stringify({ hooks: './sub/hooks.json' }),
-    'C:\\p\\named\\sub\\hooks.json': hooksFile(2),
-  }
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 5 hooks')
-  await ui.unmount()
-})
 
 test('the cache is counted from when the request was sent, not when the answer ended', async ($, on) => {
   const state = world(on)
@@ -761,57 +582,7 @@ test('the cache is counted from when the request was sent, not when the answer e
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toContain('up 9m │ cache 56m')
-  await ui.unmount()
-})
-
-test('the counts follow the settings turn by turn, and a failed read keeps the last one', async ($, on) => {
-  const state = world(on)
-  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
-  state.skills = { totalSkills: 2, tokens: 300 }
-
-  await start($)
-  state.settings = {}
-  state.skills = { totalSkills: 3, tokens: 450 }
-  await measure($)
-  const changed = await drawn($)
-
-  expect(changed.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
-  await changed.ui.unmount()
-
-  state.settings = undefined
-  await measure($)
-  const kept = await drawn($)
-
-  expect(kept.texts[0]).toContain('│ 0 hooks │ 3 skills (450)')
-  await kept.ui.unmount()
-})
-
-test("a new session does not keep the last one's counts", async ($, on) => {
-  const state = world(on)
-  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
-
-  await start($)
-  state.settings = undefined
-  await $.session.end({ reason: 'clear' } as Parameters<Engine['session']['end']>[0])
-  await settle()
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
-  await ui.unmount()
-})
-
-test('hooks switched off in the settings count as none', async ($, on) => {
-  const state = world(on)
-  state.settings = {
-    disableAllHooks: true,
-    hooks: { Stop: [{ hooks: [{ type: 'command' }] }] },
-  }
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('│ 0 hooks')
+  expect(texts[2]).toContain('│ cache 56m')
   await ui.unmount()
 })
 
@@ -826,97 +597,29 @@ test('a countdown started under one model is dropped under another, whatever ste
   await measure($)
   const { ui, texts } = await drawn($)
 
-  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main) │ up 5m')
-  await ui.unmount()
-})
-
-test('in a band of two rows the figures stay and the blank row gives way', async ($, on) => {
-  const state = world(on)
-  state.settings = {}
-  state.skills = { totalSkills: 2, tokens: 300 }
-
-  await start($)
-  const { ui, texts } = await drawn($, 'terminal', { maxRows: 2 })
-
-  // The setup rides on the headline.
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks │ 2 skills (300)')
-  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(0)
-  await ui.unmount()
-})
-
-test('in a band of three rows the setup takes the middle one and the blank row gives way', async ($, on) => {
-  const state = world(on)
-  state.settings = {}
-  state.skills = { totalSkills: 2, tokens: 300 }
-
-  await start($)
-  const { ui } = await drawn($, 'terminal', { maxRows: 3 })
-  const band = await ui.find({ key: 'status-band' })
-  const rows = await Promise.all([
-    ui.find({ type: 'Text', text: / up (<|\d)/ }),
-    ui.find({ type: 'Text', text: /^\d+ hooks?/ }),
-  ])
-
-  expect(rows.map(row => row?.text)).toEqual([
-    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m',
-    '0 hooks │ 2 skills (300)',
-  ])
-  expect(band?.props.marginTop).toBe(0)
+  expect(texts[0]).toBe('[Haiku 5.5 ◔ medium] │ agent-toolkit git:(main)')
+  expect(texts[2]).toBe(' │ 5h: 88% (2h 4m)')
   await ui.unmount()
 })
 
 test(
-  'in plain ASCII the rows draw no box, block or geometric glyph',
+  'in plain ASCII the rows draw no box or geometric glyph',
   { options: { statusBandAscii: true } },
   async ($, on) => {
-    const state = world(on)
-    state.settings = {}
-    state.skills = { totalSkills: 2, tokens: 300 }
+    world(on)
 
     await start($)
     await step($)
     const { ui, texts } = await drawn($)
-    const rows = await Promise.all([
-      ui.find({ type: 'Text', text: / up (<|\d)/ }),
-      ui.find({ type: 'Text', text: /^cache / }),
-    ])
 
-    expect(rows.map(row => row?.text)).toEqual([
-      '[Opus 5.5 medium] | agent-toolkit git:(main) | up 5m',
-      'cache 60m | 0 hooks | 2 skills (300)',
-    ])
-    expect(texts.slice(1)).toEqual([
-      'Context ####-------------------------- 12%',
-      ' | 5h: 88% (2h 4m)',
+    expect(texts).toEqual([
+      '[Opus 5.5 medium] | agent-toolkit git:(main)',
+      'Context 12%',
+      ' | 5h: 88% (2h 4m) | cache 60m',
     ])
     await ui.unmount()
   },
 )
-
-test('in a band of three rows with no setup figure yet, the blank row stays', async ($, on) => {
-  world(on)
-
-  await start($)
-  const { ui, texts } = await drawn($, 'terminal', { maxRows: 3 })
-
-  expect(texts[0]).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
-  expect((await ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
-  await ui.unmount()
-})
-
-test('the MCP figure counts each connected server once, however many tools it has', async ($, on) => {
-  const state = world(on)
-  state.settings = {}
-  state.skills = { totalSkills: 2, tokens: 300 }
-  state.mcpServers = ['context-mode', 'context-mode', 'qmd', 'claude.ai Gmail']
-  state.mcpUnauthed = ['claude.ai Asana', 'claude.ai Slack']
-
-  await start($)
-  const { ui, texts } = await drawn($)
-
-  expect(texts[0]).toContain('│ 2 skills (300) │ 3 mcp')
-  await ui.unmount()
-})
 
 const DUE = 'HARNESS-CURATE DUE: last run 20d ago, 12 sessions since. At the start of your next reply...\n'
 
@@ -1024,7 +727,7 @@ test('a curate check that cannot run fails nothing and keeps the rest of the ban
   // `python3` failed to start, then `python`.
   expect(state.curateRuns.map(argv => argv[0])).toEqual(['python3', 'python'])
   expect(await curateFlag(ui)).toBeUndefined()
-  expect(texts[1]).toBe('Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12%')
+  expect(texts[1]).toBe('Context 12%')
   await ui.unmount()
 })
 
@@ -1033,7 +736,7 @@ test('a curate check that cannot run fails nothing and keeps the rest of the ban
 const curateRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
   (await ui.findAll({ type: 'Box', text: /harness-curate due$/ }))
     .map(box => box.text)
-    .find(text => !/ up (<|\d)/.test(text))
+    .find(text => !text.includes('git:('))
 
 test('a due curate run follows the other figures on its row behind a separator', async ($, on) => {
   curateWorld(on)
@@ -1041,7 +744,7 @@ test('a due curate run follows the other figures on its row behind a separator',
   await start($)
   const { ui } = await drawn($)
 
-  expect(await curateRow(ui)).toBe('Context ████░░░░░░░░░░░░░░░░░░░░░░░░░░ 12% │ 5h: 88% (2h 4m) │ harness-curate due')
+  expect(await curateRow(ui)).toBe('Context 12% │ 5h: 88% (2h 4m) │ harness-curate due')
   await ui.unmount()
 })
 
@@ -1084,16 +787,15 @@ test('where only python is installed, the check runs under it', async ($, on) =>
   await ui.unmount()
 })
 
-test('a slow curate check holds neither the counts nor a /clear', async ($, on) => {
+test('a slow curate check holds neither the other figures nor a /clear', async ($, on) => {
   const state = curateWorld(on)
-  state.settings = { ...state.settings, hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
   let release = () => {}
   state.curateGate = new Promise<void>(resolve => (release = resolve))
 
   await start($)
   const held = await drawn($)
 
-  expect(held.texts[0]).toContain('│ 1 hook')
+  expect(held.texts[1]).toBe('Context 12%')
   expect(await curateFlag(held.ui)).toBeUndefined()
   await held.ui.unmount()
 
@@ -1109,27 +811,50 @@ test('a slow curate check holds neither the counts nor a /clear', async ($, on) 
   await ui.unmount()
 })
 
-const setupRow = async (ui: Awaited<ReturnType<typeof drawn>>['ui']) =>
-  (await ui.find({ type: 'Text', text: /^(cache |\d+ (hooks?|skills?|mcp)\b)/ }))?.text
-
-test('the band is three rows at most, the setup on a row of its own; in two it rides on the headline', async ($, on) => {
-  curateWorld(on, '')
+test('a Windows home is read through backslashes alone', async ($, on) => {
+  const state = curateWorld(on)
+  state.env = { USERPROFILE: 'C:\\Users\\me' }
+  state.files = {
+    'C:\\Users\\me\\.claude\\plugins\\installed_plugins.json': JSON.stringify({
+      plugins: { 'dev@kadragon': [{ installPath: 'C:\\p\\dev' }] },
+    }),
+    '/work/agent-toolkit/AGENTS.md': '# agents',
+  }
 
   await start($)
-  // Each row is found on its own: the headline alone, then the setup.
-  const headlineRow = { type: 'Text', text: / up (<|\d)/ } as const
+
+  expect(state.curateRuns.map(argv => argv[1])).toEqual([
+    'C:\\p\\dev\\skills\\harness-curate\\scripts\\record_run.py',
+  ])
+})
+
+test('the band is two rows at most, with no count row and no session time', async ($, on) => {
+  const state = world(on)
+  state.settings = { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }
+
+  await start($)
+  await step($)
   const four = await drawn($, 'terminal', { maxRows: 4 })
 
-  expect((await four.ui.find(headlineRow))?.text).toBe('[Opus 5.5] │ agent-toolkit git:(main) │ up 5m')
-  expect(await setupRow(four.ui)).toBe('0 hooks')
-  // Three rows in a band of four leave the blank one above them.
+  expect(four.texts).toEqual([
+    '[Opus 5.5 ◔ medium] │ agent-toolkit git:(main)',
+    'Context 12%',
+    ' │ 5h: 88% (2h 4m) │ cache 60m',
+  ])
+  expect(await four.ui.find({ type: 'Text', text: /\b(hooks?|skills?|mcp)\b| up (<|\d)/ })).toBeUndefined()
+  // Two rows in a band of four leave the blank one above them.
   expect((await four.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(1)
   await four.ui.unmount()
 
   const two = await drawn($, 'terminal', { maxRows: 2 })
 
-  expect((await two.ui.find(headlineRow))?.text).toBe(
-    '[Opus 5.5] │ agent-toolkit git:(main) │ up 5m │ 0 hooks',
-  )
+  expect(two.texts[1]).toBe('Context 12%')
+  expect((await two.ui.find({ key: 'status-band' }))?.props.marginTop).toBe(0)
   await two.ui.unmount()
+
+  const one = await drawn($, 'terminal', { maxRows: 1 })
+
+  expect(one.texts).toEqual([undefined, undefined, undefined])
+  expect(await one.ui.find({ key: 'engine-empty' })).toBeDefined()
+  await one.ui.unmount()
 })
