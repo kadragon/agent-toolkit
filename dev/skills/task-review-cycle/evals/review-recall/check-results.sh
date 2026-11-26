@@ -6,7 +6,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 cd "$HERE"
 # Hash normalized text with Git so CRLF checkouts and Linux CI agree. All launcher changes are
 # tracked: flags, tool selection and shared guidance can change the review as much as prose.
-INPUTS=(../../scripts/{claude-review,codex-review,agy-review,review-guidance}.sh
+INPUTS=(../../scripts/{claude-review,codex-review,agy-review,review-guidance,preflight}.sh
   ../../references/comment-rules.md fixtures.tsv run.sh)
 for launcher in ../../scripts/*-review.sh; do
   [[ " ${INPUTS[*]} " == *" $launcher "* ]] || {

@@ -25,6 +25,9 @@ OUT="${1:?Usage: run.sh <out-dir> [fixture-id ...]}"
 shift
 FULL_RUN=$#
 EFFORT="${REVIEW_RECALL_EFFORT:-medium}"
+# The clone's branch at the introducing commit. codex-review.sh keys its result sidecar by the
+# current branch name, so adopt_codex_sidecar reads `$BENCH_BRANCH.meta` / `.review.txt`.
+BENCH_BRANCH=bench
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 [[ -n "$HERE" ]] || { echo "ERROR: cannot resolve script dir" >&2; exit 1; }
@@ -56,20 +59,31 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+# A cancelled run must still reach cleanup: exit from the signal trap runs the EXIT trap, which
+# kills the background fixtures and releases the lock.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# One run per out-dir. mkdir is the atomic claim; the holder's pid tells a live run from a lock
+# left by a killed one, which is removed by hand.
+claim_out_dir_lock() {
+  local holder
+  if ! mkdir "$OUT/.run.lock" 2>/dev/null; then
+    holder=$(cat "$OUT/.run.lock/pid" 2>/dev/null || true)
+    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+      echo "ERROR: another run.sh (pid $holder) is writing to $OUT — use a separate out-dir" >&2
+    else
+      echo "ERROR: $OUT/.run.lock was left by pid ${holder:-unknown} — remove it if no run is active" >&2
+    fi
+    exit 1
+  fi
+  LOCK="$OUT/.run.lock"
+  printf '%s\n' "$$" >"$LOCK/pid"
+}
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-if ! mkdir "$OUT/.run.lock" 2>/dev/null; then
-  HOLDER=$(cat "$OUT/.run.lock/pid" 2>/dev/null || true)
-  if [[ -n "$HOLDER" ]] && kill -0 "$HOLDER" 2>/dev/null; then
-    echo "ERROR: another run.sh (pid $HOLDER) is writing to $OUT — use a separate out-dir" >&2
-  else
-    echo "ERROR: $OUT/.run.lock was left by pid ${HOLDER:-unknown} — remove it if no run is active" >&2
-  fi
-  exit 1
-fi
-LOCK="$OUT/.run.lock"
-printf '%s\n' "$$" >"$LOCK/pid"
+claim_out_dir_lock
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-recall.XXXXXX")
 [[ -d "$WORK" ]] || { echo "ERROR: mktemp failed" >&2; exit 1; }
 rm -f "$OUT/fingerprint.txt"
@@ -92,8 +106,8 @@ run_reviewer() {
 adopt_codex_sidecar() {
   local id="$1" dir="$OUT/$1-codex-result" text="$OUT/$1-codex.txt"
   grep -q '^\[\.\.\. truncated by codex-review\.sh' "$text" || return 0
-  if grep -qx 'status=ok' "$dir/bench.meta" 2>/dev/null && [[ -s "$dir/bench.review.txt" ]] \
-    && cp "$dir/bench.review.txt" "$text.tmp" && mv -f "$text.tmp" "$text"; then
+  if grep -qx 'status=ok' "$dir/$BENCH_BRANCH.meta" 2>/dev/null \
+    && [[ -s "$dir/$BENCH_BRANCH.review.txt" ]] && cp "$dir/$BENCH_BRANCH.review.txt" "$text.tmp" && mv -f "$text.tmp" "$text"; then
     echo "codex_text=full-sidecar" >>"$OUT/$id-meta.txt"
     return 0
   fi
@@ -109,7 +123,7 @@ run_one() {
   clone="$WORK/$id"
   git init -q "$clone"
   git -C "$clone" -c protocol.version=2 fetch -q --depth=2 "$REPO" "$full"
-  git -C "$clone" checkout -q -b bench FETCH_HEAD
+  git -C "$clone" checkout -q -b "$BENCH_BRANCH" FETCH_HEAD
   git -C "$clone" branch base HEAD^
 
   {

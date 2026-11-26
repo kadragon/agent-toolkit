@@ -145,6 +145,40 @@ def case_base_ref_is_distinguished_from_empty_diff(tmp):
     check("agy is not launched for an empty diff", prompt == "")
 
 
+def case_failing_diff_is_an_error_not_an_empty_diff(tmp):
+    print("\ncase: a diff that cannot be computed fails instead of skipping as empty")
+    repo = make_repo(tmp)
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "main^{tree}"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    # `main` still resolves to a commit, but its tree is gone, so both diff forms fail.
+    obj = repo / ".git" / "objects" / tree[:2] / tree[2:]
+    check("main's tree is a loose object the case can remove", obj.exists(), str(obj))
+    obj.chmod(0o600)
+    obj.unlink()
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "agy"
+    stub.write_text(STUB)
+    stub.chmod(0o755)
+    capture = tmp / "prompt.txt"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "AGY_REVIEW_RESULT_DIR": str(tmp / "results"),
+        "AGY_STUB_CAPTURE": str(capture),
+        "AGY_STUB_PENDING": str(tmp / "none"),
+        "AGY_STUB_PENDING_SNAPSHOT": str(tmp / "snap"),
+        "AGY_STUB_STDOUT": "LGTM\n",
+        "AGY_STUB_EXIT": "0",
+    }
+    proc = subprocess.run(["bash", str(SCRIPT), "main"], capture_output=True, text=True, cwd=repo, env=env, timeout=60)
+    check("failing diff exits non-zero", proc.returncode != 0, proc.stdout + proc.stderr)
+    check("failing diff is not reported as an empty diff", "No changes detected" not in proc.stderr, proc.stderr)
+    check("failing diff names the ref", "main" in proc.stderr, proc.stderr)
+    check("agy is not launched", not capture.exists())
+
+
 def case_prompt_is_read_only(tmp):
     print("\ncase: the prompt scopes agy to a read-only review")
     proc, prompt, _, _ = run(tmp, stdout="LGTM\n")
@@ -235,6 +269,7 @@ def main():
     cases = (
         case_script_parses,
         case_base_ref_is_distinguished_from_empty_diff,
+        case_failing_diff_is_an_error_not_an_empty_diff,
         case_prompt_is_read_only,
         case_repo_guidance_and_pre_existing,
         case_ok_run_persists_review,

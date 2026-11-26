@@ -127,7 +127,9 @@ unchanged, and every fixture passes a valid `base` ref, so no reviewer call was 
 arms above were graded from stdout and were not re-collected; a review over the 40,000-byte limit
 would have been graded from its head and tail.
 
-Review recall fingerprint: bc5a507d9ad51f21df335e6c34d0f620ec94d475
+Follow-up from the PR #452 backlog: `run.sh` names its lock and sidecar-key code and releases the lock on `INT`/`TERM`, `agy-review.sh` exits 1 when its fallback `git diff` fails instead of skipping as an empty diff, and the fingerprint now also covers `preflight.sh`. Reviewer invocations, prompts, comments rules and fixtures are unchanged, and every fixture has a computable diff, so no reviewer call was repeated.
+
+Review recall fingerprint: fdbbba4455b18e62cffba8f029a2b6b048173828
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).
