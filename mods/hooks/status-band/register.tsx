@@ -59,6 +59,10 @@ type Live = {
   hasSessionCurateVerdict: boolean
   // Raised by a reset, so a read that started before it is dropped.
   setupEpoch: number
+  // Counts the steps sent, so a response can tell whether a later step has recorded a cache since.
+  stepsSent: number
+  // The send order of the step whose cache the band last took.
+  cacheStep: number
   // When the curate check last ran; unset, the next read runs it.
   curateCheckedAt?: number
   curateRead?: Promise<void>
@@ -301,6 +305,8 @@ export const register: Register = (on, options) => {
     setup: {},
     hasSessionCurateVerdict: false,
     setupEpoch: 0,
+    stepsSent: 0,
+    cacheStep: 0,
   }
 
   loaded.live = live
@@ -366,6 +372,7 @@ export const register: Register = (on, options) => {
 
     const requestSentAt = e.agentId === undefined ? $.clock.now().catch(() => undefined) : undefined
     const epoch = live.setupEpoch
+    const sentStep = (live.stepsSent += 1)
     const result = yield* next(e)
 
     if (requestSentAt !== undefined && isCached(result.usage)) {
@@ -380,11 +387,17 @@ export const register: Register = (on, options) => {
           if (epoch !== live.setupEpoch) return
 
           if (ranUnderLeftModel(cacheModel, sessionModel)) return
+          // A step sent earlier that ends later must not undo a later one; the send
+          // order decides, as the clock may have been set back in between.
+          if (sentStep < live.cacheStep) return
 
+          live.cacheStep = sentStep
           live.cacheExpiresAt = cacheExpiresAt
           live.cacheModel = cacheModel
           await update($, statusBand, current => {
             if (current === null) return null
+            // A /clear or a later step may have landed since the checks above.
+            if (epoch !== live.setupEpoch || live.cacheStep !== sentStep) return current
 
             const shownModel = sessionModel === '' ? current.model : sessionModel
 
