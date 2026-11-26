@@ -14,6 +14,9 @@
 # directory's gold table, and nothing in the source repo's refs is created or touched.
 # The clone has branch `base` at the parent and `HEAD` at the introducing commit, then
 # the production reviewers run against `base` — the same calls the cycle makes.
+# One run per out-dir: a second run on the same out-dir is refused while the first is alive.
+# Codex's stdout is head+tail truncated past CODEX_REVIEW_MAX_BYTES; a truncated arm is graded
+# from the full review in <id>-codex-result/ (the codex-review.sh sidecar) instead.
 # Exit 1 when any fixture failed to produce its outputs. Scoring is by hand against
 # README.md → Fixtures; see RESULTS.md.
 set -euo pipefail
@@ -36,8 +39,43 @@ CODEX_MODE=$(jq -r '.codex_mode' <<<"$PREFLIGHT")
 COMPANION=$(jq -r '.codex_companion_path' <<<"$PREFLIGHT")
 [[ -n "$CODEX_MODE" && "$CODEX_MODE" != "null" ]] || { echo "ERROR: preflight gave no codex_mode" >&2; exit 1; }
 
+PIDS=()
+WORK=""
+LOCK=""
+cleanup() {
+  local pid
+  # ${arr[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
+  for pid in ${PIDS[@]+"${PIDS[@]}"}; do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  if [[ -n "$LOCK" ]]; then rm -rf "$LOCK"; fi
+  if [[ -n "$WORK" ]]; then
+    # A Windows reviewer broker can keep its clone directory open after finishing.
+    rm -rf "$WORK" || printf 'WARN: could not remove all temporary fixture clones under %s\n' "$WORK" >&2
+  fi
+}
+trap cleanup EXIT
+
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
+# Two runs on one out-dir would overwrite each other's reviewer outputs and interleave the meta
+# files. mkdir is the atomic claim; a lock whose owner pid is gone is left by a killed run.
+if ! mkdir "$OUT/.run.lock" 2>/dev/null; then
+  HOLDER=$(cat "$OUT/.run.lock/pid" 2>/dev/null || true)
+  if [[ -z "$HOLDER" ]]; then
+    echo "ERROR: $OUT/.run.lock has no owner pid — remove it if no run is active" >&2
+    exit 1
+  fi
+  if kill -0 "$HOLDER" 2>/dev/null; then
+    echo "ERROR: another run.sh (pid $HOLDER) is writing to $OUT — use a separate out-dir" >&2
+    exit 1
+  fi
+  rm -rf "$OUT/.run.lock"
+  mkdir "$OUT/.run.lock" || { echo "ERROR: cannot take $OUT/.run.lock" >&2; exit 1; }
+fi
+LOCK="$OUT/.run.lock"
+printf '%s\n' "$$" >"$LOCK/pid"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-recall.XXXXXX")
 [[ -d "$WORK" ]] || { echo "ERROR: mktemp failed" >&2; exit 1; }
 rm -f "$OUT/fingerprint.txt"
@@ -55,6 +93,20 @@ run_reviewer() {
   else
     grep -q '[^[:space:]]' "$OUT/$id-$name.$extension"
   fi
+}
+
+# codex-review.sh emits head+tail past CODEX_REVIEW_MAX_BYTES, which would drop findings from the
+# graded text, but it always leaves the whole review in its sidecar (branch `bench` → key `bench`).
+adopt_codex_sidecar() {
+  local id="$1" dir="$OUT/$1-codex-result"
+  grep -q '^\[\.\.\. truncated by codex-review\.sh' "$OUT/$id-codex.txt" || return 0
+  if grep -qx 'status=ok' "$dir/bench.meta" 2>/dev/null && [[ -s "$dir/bench.review.txt" ]]; then
+    cp "$dir/bench.review.txt" "$OUT/$id-codex.txt"
+    echo "codex_text=full-sidecar" >>"$OUT/$id-meta.txt"
+    return 0
+  fi
+  echo "ERROR: $id codex output is truncated and its sidecar is incomplete" >&2
+  return 1
 }
 
 run_one() {
@@ -82,25 +134,15 @@ run_one() {
 
   cd "$clone"
   run_reviewer "$id" claude json bash "$SCRIPTS/claude-review.sh" base "$EFFORT" "" || status=1
-  run_reviewer "$id" codex txt bash "$SCRIPTS/codex-review.sh" "$CODEX_MODE" base "$COMPANION" || status=1
+  rm -rf "$OUT/$id-codex-result"
+  run_reviewer "$id" codex txt env CODEX_REVIEW_RESULT_DIR="$OUT/$id-codex-result" \
+    bash "$SCRIPTS/codex-review.sh" "$CODEX_MODE" base "$COMPANION" || status=1
+  adopt_codex_sidecar "$id" || status=1
   run_reviewer "$id" agy txt bash "$SCRIPTS/agy-review.sh" base || status=1
   run_reviewer "$id" comments json bash "$SCRIPTS/claude-review.sh" base --comments || status=1
   echo "finished=$(date -u +%FT%TZ)" >>"$OUT/$id-meta.txt"
   return "$status"
 }
-
-PIDS=()
-cleanup() {
-  local pid
-  # ${arr[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
-  for pid in ${PIDS[@]+"${PIDS[@]}"}; do
-    kill "$pid" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
-  # A Windows reviewer broker can keep its clone directory open after finishing.
-  rm -rf "$WORK" || printf 'WARN: could not remove all temporary fixture clones under %s\n' "$WORK" >&2
-}
-trap cleanup EXIT
 
 KNOWN=()
 IDS=()

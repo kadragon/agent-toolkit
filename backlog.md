@@ -13,13 +13,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #444 — Measure and focus the review cycle (2026-11-26)
-
-- [ ] [harness] Keep overlapping review-recall attempts from overwriting each other's artifacts (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:39` (introduced here)
-- [ ] [harness] Grade Codex recall from the complete review sidecar when wrapper stdout is truncated (source: codex) — `dev/skills/task-review-cycle/evals/review-recall/run.sh:45` (introduced here)
-- [ ] [harness] Distinguish an invalid agy comparison ref from an empty diff (source: codex) — `dev/skills/task-review-cycle/scripts/agy-review.sh:14` (pre_existing)
-- [ ] [constraint] Verify that new reviewer launchers are included in the recall fingerprint inputs (source: comments) — `dev/skills/task-review-cycle/evals/review-recall/check-results.sh:9`
-
 ### PR #445 — Slim the status band to a context percent and one figure row (2026-11-26)
 
 - [ ] [debt] Record the cache owner from the step's own model, not a later `$.session.model()` read: a switch between response end and that read tags A's expiry as B's (source: codex) — mods/hooks/status-band/register.tsx:361 (pre_existing)

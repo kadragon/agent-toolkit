@@ -8,6 +8,13 @@ set -euo pipefail
 
 BASE_BRANCH="${1:?Usage: agy-review.sh <base_branch>}"
 
+# An unknown comparison ref is a failure, not an empty diff: git diff errors on it the same way
+# it errors on a missing merge-base, and the fallback below would then read as "no changes".
+if ! git rev-parse --verify --quiet "${BASE_BRANCH}^{commit}" >/dev/null 2>&1; then
+  echo "ERROR: comparison ref ${BASE_BRANCH} not found — Antigravity review not run." >&2
+  exit 1
+fi
+
 # Gate on empty diff up front so we don't spin up agy for nothing.
 # The diff itself is fetched by agy via its shell tool — embedding large
 # diffs directly in the prompt can overload context.

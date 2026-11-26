@@ -8,6 +8,14 @@ cd "$HERE"
 # tracked: flags, tool selection and shared guidance can change the review as much as prose.
 INPUTS=(../../scripts/{claude-review,codex-review,agy-review,review-guidance}.sh
   ../../references/comment-rules.md fixtures.tsv run.sh)
+# A launcher outside INPUTS could change the review with the fingerprint still fresh, so every
+# `*-review.sh` under scripts/ must be listed there.
+for launcher in ../../scripts/*-review.sh; do
+  [[ " ${INPUTS[*]} " == *" $launcher "* ]] || {
+    echo "ERROR: $launcher is a reviewer launcher missing from the fingerprint INPUTS in check-results.sh." >&2
+    exit 1
+  }
+done
 input_hashes() {
   local file hash
   for file in "${INPUTS[@]}"; do

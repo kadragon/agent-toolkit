@@ -120,7 +120,14 @@ empty output because the fixture has no root `REVIEW.md`. The launchers, comment
 fixture commits were unchanged, and the runner changed only in a shell comment. The same 40
 outputs therefore cover the final fixture inputs without another reviewer call.
 
-Review recall fingerprint: b9a96d1901c09b343b1e1e95ad960aa121fa43fb
+Follow-up from the PR #444 backlog: `run.sh` now holds a per-out-dir lock and grades a truncated
+Codex stdout from the full sidecar, and `agy-review.sh` exits 1 on an unknown comparison ref
+instead of reporting an empty diff. Reviewer invocations, prompts, comments rules and fixtures are
+unchanged, and every fixture passes a valid `base` ref, so no reviewer call was repeated. The Codex
+arms above were graded from stdout and were not re-collected; a review over the 40,000-byte limit
+would have been graded from its head and tail.
+
+Review recall fingerprint: b8bfeb7bd00052ef16faf847dc4c81e0d9e2ce09
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).
