@@ -34,10 +34,10 @@ HOT_PROJECTED = 120
 RANK = {"ok": 0, "hot": 1, "critical": 2}
 
 
-def window(value, percent_key, observed):
+def window(value, percent_key, observed, reset_key="resets_at"):
     if not isinstance(value, dict):
         return None
-    percent, reset = value.get(percent_key), value.get("resets_at")
+    percent, reset = value.get(percent_key), value.get(reset_key)
     if isinstance(percent, bool) or not isinstance(percent, (int, float)) \
             or not math.isfinite(percent) or not 0 <= percent <= 100:
         return None
@@ -48,9 +48,21 @@ def window(value, percent_key, observed):
 
 def claude_snapshot(path=CLAUDE_CACHE):
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
+    if not isinstance(data, dict):
+        return None
+    observed = data.get("observed")
+    if isinstance(observed, bool) or not isinstance(observed, (int, float)) \
+            or not math.isfinite(observed):
+        return None
+    snap = window(data, "used", observed, "reset")
+    if snap and isinstance(data.get("five_hour"), dict):
+        short = window(data["five_hour"], "used", observed, "reset")
+        if short:
+            snap["five_hour"] = short
+    return snap
 
 
 def codex_home():

@@ -2081,6 +2081,30 @@ class QuotaTests(unittest.TestCase):
             self.assertEqual(present["claude"]["state"], "critical")
             self.assertEqual(present["bias"], "codex")
 
+    def test_reader_treats_incomplete_claude_snapshot_as_unknown(self):
+        now = time.time()
+        valid = {"used": 42, "reset": now + 86400, "observed": now}
+        broken = [
+            [], {}, {"used": 42}, {"used": 42, "reset": now + 86400},
+            {**valid, "used": "42"}, {**valid, "used": 101}, {**valid, "reset": None},
+            {**valid, "observed": True},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "status-line.json"
+            env = {**os.environ, "QUOTA_CLAUDE_CACHE": str(snapshot), "CODEX_HOME": str(root)}
+            command = [sys.executable, "-I", str(SCRIPTS / "quota.py")]
+            for data in broken:
+                with self.subTest(data=data):
+                    snapshot.write_text(json.dumps(data), encoding="utf-8")
+                    out = json.loads(subprocess.check_output(command, cwd=root, env=env))
+                    self.assertEqual(out["claude"], {"state": "unknown"})
+                    self.assertIn("state", out["codex"])
+            snapshot.write_text(json.dumps({**valid, "five_hour": {"used": 91}}), encoding="utf-8")
+            out = json.loads(subprocess.check_output(command, cwd=root, env=env))
+            self.assertEqual(out["claude"]["used"], 42)
+            self.assertNotIn("five_hour_used", out["claude"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,8 +27,8 @@ environments. The writer atomically replaces the snapshot after receiving a vali
 
 `used` is a numeric percentage from 0 to 100. `reset` and `observed` are Unix timestamps
 in seconds. The top-level fields describe the weekly window; `five_hour` is optional and
-uses the same fields. If the file is missing, unreadable, or invalid JSON, the reader emits
-`"claude": {"state": "unknown"}` and evaluates Codex independently.
+uses the same fields. If the file is missing, unreadable, invalid JSON, or lacks a valid weekly `used`, `reset`, or `observed`, the reader emits
+`"claude": {"state": "unknown"}` and evaluates Codex independently. An invalid `five_hour` object is ignored.
 
 ## Quota states
 
