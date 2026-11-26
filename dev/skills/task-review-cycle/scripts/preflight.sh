@@ -116,9 +116,10 @@ if [ -n "$CODEX_CACHED" ]; then
   # `sort -V` is absent on some BSD/macOS sorts. Falling through to CLI mode there would be the
   # exact silent degradation this block exists to stop, so retry with a plain lexical sort —
   # wrong only when versions cross a digit-count boundary, still better than no companion.
-  CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -V -k1,1 2>/dev/null | tail -1 | cut -f2-)
-  [ -z "$CODEX_COMPANION" ] && \
+  if ! CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -V -k1,1 2>/dev/null | tail -1 | cut -f2-) \
+    || [ -z "$CODEX_COMPANION" ]; then
     CODEX_COMPANION=$(printf '%s\n' "$CODEX_CACHED" | sort -k1,1 | tail -1 | cut -f2-)
+  fi
 fi
 if [ -z "$CODEX_COMPANION" ]; then
   CODEX_COMPANION=$(ls ~/.claude/plugins/marketplaces/*/plugins/codex/scripts/codex-companion.mjs \

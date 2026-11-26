@@ -13,9 +13,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #453 — Fail agy review on a broken diff and stop recall runs on INT/TERM (2026-11-26)
+### PR #455 — Fall back when preflight sort lacks version support (2026-11-26)
 
-- [ ] [harness] Run the `sort -V` pipeline that picks the Codex companion path in a conditional, so a missing `sort -V` reaches the fallback sort instead of aborting `preflight.sh` under `set -euo pipefail` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:115` (pre_existing)
+- [ ] [harness] Preserve numeric version order in the portable Codex companion fallback so a cached version such as `1.10` ranks above `1.9` (source: codex) — `dev/skills/task-review-cycle/scripts/preflight.sh:120` (introduced here)
 
 ### PR #456 — Preserve cache and model effort on the status band (2026-11-26)
 
