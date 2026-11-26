@@ -8,16 +8,22 @@ set -euo pipefail
 
 BASE_BRANCH="${1:?Usage: agy-review.sh <base_branch>}"
 
-if ! git rev-parse --verify --quiet "${BASE_BRANCH}^{commit}" >/dev/null 2>&1; then
-  echo "ERROR: comparison ref ${BASE_BRANCH} not found — Antigravity review not run." >&2
-  exit 1
-fi
+require_commit_ref() {
+  if ! git rev-parse --verify --quiet "$1^{commit}" >/dev/null 2>&1; then
+    echo "ERROR: comparison ref $1 not found — Antigravity review not run." >&2
+    exit 1
+  fi
+}
+require_commit_ref "$BASE_BRANCH"
 
 # Gate on empty diff up front so we don't spin up agy for nothing.
 # The diff itself is fetched by agy via its shell tool — embedding large
 # diffs directly in the prompt can overload context.
-CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only 2>/dev/null \
-  || git diff "${BASE_BRANCH}" --name-only 2>/dev/null || true)
+if ! CHANGED_FILES=$(git diff "${BASE_BRANCH}...HEAD" --name-only 2>/dev/null \
+  || git diff "${BASE_BRANCH}" --name-only); then
+  echo "ERROR: git diff against ${BASE_BRANCH} failed — Antigravity review not run." >&2
+  exit 1
+fi
 if [ -z "$CHANGED_FILES" ]; then
   echo "No changes detected against ${BASE_BRANCH} — skipping Antigravity review." >&2
   exit 0

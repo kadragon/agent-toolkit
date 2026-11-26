@@ -73,7 +73,8 @@ the reviewer cannot reach the fix commit or this table, and the source repo's re
 touched. Fixtures run in parallel. The Claude arm's effort is pinned by
 `REVIEW_RECALL_EFFORT` (default `medium`) and recorded in each `<id>-meta.txt`.
 One `run.sh` runs per out-dir at a time (`.run.lock` holds its pid); a second run on the same
-out-dir exits 1, and a lock left by a killed run is removed by hand. Codex's stdout is cut to head and tail past 40,000 bytes, so a truncated arm is
+out-dir exits 1, and a lock left by a run killed without a catchable signal (`SIGKILL`) is removed by hand;
+`INT` and `TERM` stop the background fixtures and release it. Codex's stdout is cut to head and tail past 40,000 bytes, so a truncated arm is
 replaced by the full review from `<id>-codex-result/`, and the arm fails when that sidecar is
 incomplete. `check-results.sh` fails when a `scripts/*-review.sh` launcher is not in its input list.
 `run.sh` exits 1 on a missing, failed or unreadable review. A full successful run writes
