@@ -969,8 +969,8 @@ class T3PromptTests(unittest.TestCase):
                 payload = self.render(self.prompt_args(home, cli=cli, model=model, effort="high",
                                                        message=message, title=" T3  run "), home)
                 result = Path(payload["result"])
-                guard = (f"Work in {home.resolve()}. If your working directory is anywhere else, stop before "
-                         "any change and report that in the result file.")
+                guard = (f"You start in {home.resolve()}. If you started anywhere else, stop before any change "
+                         "and report that in the result file; a worktree the task skill creates from there is fine.")
                 single = "Write summary as one JSON string (join its lines with \\n), never an array."
                 selection = {"instanceId": "claudeAgent" if cli == "claude" else "codex", "model": model,
                              "options": [{"id": option, "value": "high"}]}
@@ -997,6 +997,9 @@ class T3PromptTests(unittest.TestCase):
             ({"effort": "ultra"}, "claudeAgent effort must be one of .*ultrathink"),
             ({"cli": "codex", "model": "gpt-6.2-sol", "effort": "ultrathink", "message": "$task-next"},
              "codex effort must be one of .*ultra"),
+            ({"cli": "codex", "model": "gpt-6-luna", "effort": "ultra", "message": "$task-next"}, "no 'ultra' effort"),
+            ({"cli": "codex", "model": " sol ", "message": "$task-next"}, "Codex slug"),
+            ({"model": " \n "}, "--model must not be blank"),
         ):
             with self.subTest(**overrides), patch("dispatch.tempfile.mkdtemp") as mkdtemp, \
                     patch("dispatch.resolve_codex_model") as resolve:
@@ -1027,7 +1030,7 @@ class T3PromptTests(unittest.TestCase):
 
     def test_record_stores_one_thread_and_project_on_a_t3_receipt_only(self):
         def ids(thread="th-1", project="pr-1"):
-            return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project)
+            return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project, resume=False)
 
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
@@ -1048,7 +1051,7 @@ class T3PromptTests(unittest.TestCase):
             herdr = Path(directory) / "herdr.json"
             herdr.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "not a T3 receipt"):
-                record(SimpleNamespace(run=str(herdr), thread_id="th-1", project_id="pr-1"))
+                record(SimpleNamespace(run=str(herdr), thread_id="th-1", project_id="pr-1", resume=False))
             with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "is a T3 receipt"):
                 send(SimpleNamespace(address="t7", message="$task-next", run=str(receipt)))
             hc.assert_not_called()
@@ -1101,6 +1104,42 @@ class T3StallTests(unittest.TestCase):
             with self.subTest(result=result and result["status"], age=age), \
                     tempfile.TemporaryDirectory() as directory:
                 self.assertEqual(self.collect_t3(directory, created_ms, result, age), expected)
+
+
+class T3ResumeTests(unittest.TestCase):
+    def test_resume_hides_the_paused_result_and_restarts_the_stall_clock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            old_ms = time.time_ns() // 1_000_000 - 40 * 60_000
+            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms}), encoding="utf-8")
+            resume = SimpleNamespace(run=str(receipt), thread_id=None, project_id=None, resume=True)
+            with self.assertRaisesRegex(SystemExit, "records no thread yet"):
+                record(resume)
+            with self.assertRaisesRegex(SystemExit, "--resume takes no"):
+                record(SimpleNamespace(run=str(receipt), thread_id="th-1", project_id=None, resume=True))
+            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms, "thread_id": "th-1"}),
+                               encoding="utf-8")
+            paused = receipt.with_name("result.json")
+            paused.write_text(json.dumps({"status": "blocked", "phase": "grill", "summary": "question"}),
+                              encoding="utf-8")
+            stamp = time.time() - 35 * 60
+            os.utime(paused, (stamp, stamp))
+
+            def collected():
+                with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
+                    collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
+                hc.assert_not_called()
+                return json.loads(stdout.getvalue())
+
+            self.assertEqual(collected()["result"]["status"], "blocked")
+            with patch("sys.stdout", new_callable=StringIO):
+                record(resume)
+            stored = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(stored["previous_result"], paused.stat().st_mtime_ns)
+            payload = collected()
+            self.assertEqual((payload["result"], payload["stop_reason"]), (None, None))
+            receipt.write_text(json.dumps({**stored, "resumed_ms": old_ms}), encoding="utf-8")
+            self.assertEqual(collected()["stop_reason"], "No result file for 30 minutes")
 
 
 class WorkflowDocsTests(unittest.TestCase):

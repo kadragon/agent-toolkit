@@ -24,8 +24,8 @@ It applies `launch`'s handoff validation and `repos/handoff.json` lines, writes 
   (`instanceId` `claudeAgent` or `codex`, the full `model` id, and `options` as a list of
   `{id, value}` holding the routed effort under `effort` or `reasoningEffort`),
   `workspaceStrategy: {"type": "root"}`, and `message`. The message is the first message, the
-  `<dispatch-handoff>` block, configured lines, a line telling the child to stop if its working
-  directory is not the target repo, the result-report instruction (Herdr passes it as
+  `<dispatch-handoff>` block, configured lines, a line telling the child to stop if it did not
+  start in the target repo (a worktree its task skill creates from there is fine), the result-report instruction (Herdr passes it as
   `--append-system-prompt`), and a request to write `summary` as one string.
 - `project_lookup` — the target repo as `workspaceRoot`. Call `t3_project_list` and take the
   project whose `workspaceRoot` is that path; none → register it with `t3_project_create`.
@@ -42,6 +42,14 @@ Then record the `threadId` and `projectId` `t3_thread_launch` returned:
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" record "<run>" --thread-id '<threadId>' --project-id '<projectId>'
 ```
+
+If the launch response is lost (timeout, restart) before `record`, do not launch again: list the
+target project's threads and read the candidates for the receipt's `result` path, which only this
+child's message contains, then `record` that thread.
+
+**Confirm delivery** before the first wait, as Herdr does: `t3_thread_read` the thread and check
+that the child took the message and loaded the task skill (open item 3). If it did not, interrupt
+the thread and report; the user decides whether to dispatch again under Herdr.
 
 **Worktree units.** Keep `--tree` in the first message and `workspaceStrategy` `root`: the task
 skill creates and cleans its own worktree, and a T3 `worktree` strategy would nest it.
@@ -70,7 +78,9 @@ run `hc ls` too when Herdr is installed.
   the receipt's `run.json`, `run.lock`, `result.json` and any `run.tmp`, then the directory if
   empty (SKILL.md → *Close the child terminal*, without the close).
 - **Decide** — answer the child through the T3 thread tools instead of `hc send`; the
-  decision rules in SKILL.md step 5 apply as written.
+  decision rules in SKILL.md step 5 apply as written. Run `dispatch.py record <run> --resume`
+  just before each answer: it hides the paused result from `collect` until the child writes a
+  new one and restarts the stall clock, as `send --continue` does for Herdr.
 
 Not used under T3: `launch`, `send`, Codex readiness (`codex-readiness.md`), trust keys,
 `hc wait`, `hc read`.

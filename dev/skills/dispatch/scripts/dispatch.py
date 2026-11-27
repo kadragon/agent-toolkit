@@ -23,8 +23,9 @@
       backend "t3", and print the t3_thread_launch arguments (title, modelSelection,
       workspaceStrategy root, message: first message, handoff block, configured lines, cwd
       guard, result-report instruction) and the project lookup for the target repo.
-  dispatch.py record RECEIPT --thread-id ID --project-id ID
-      Store the thread and project t3_thread_launch returned in a T3 receipt.
+  dispatch.py record RECEIPT (--thread-id ID --project-id ID | --resume)
+      Store the thread and project t3_thread_launch returned in a T3 receipt. --resume, before
+      answering a paused child, hides its current result and restarts the stall clock.
 """
 import argparse
 import json
@@ -422,8 +423,10 @@ def launch(args):
 def render_t3_thread_launch(args):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
-    refuse_banned_model(args.model)
-    model = args.model
+    model = args.model.strip()
+    if not model:
+        raise SystemExit("--model must not be blank")
+    refuse_banned_model(model)
     if args.cli == "claude" and not model.startswith("claude-"):
         raise SystemExit(f"T3 takes a full Claude model id such as claude-sonnet-5-5, not {model!r}; "
                          "use the id orchestrator_capabilities lists")
@@ -432,6 +435,8 @@ def render_t3_thread_launch(args):
     target = T3_TARGETS[args.cli]
     if args.effort not in target["efforts"]:
         raise SystemExit(f"T3 {target['provider']} effort must be one of {', '.join(target['efforts'])}")
+    if args.effort == "ultra" and "luna" in re.split(r"[^a-z0-9]+", model.lower()):
+        raise SystemExit(f"T3 codex model {model!r} has no 'ultra' effort")
     handoff = launch_handoff(args, cwd)
     text = first_prompt(args.cli, args.message, handoff)
     if not cwd.is_dir():
@@ -446,8 +451,8 @@ def render_t3_thread_launch(args):
         run["title"] = title
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff})
-    guard = (f"Work in {cwd}. If your working directory is anywhere else, stop before any change "
-             "and report that in the result file.")
+    guard = (f"You start in {cwd}. If you started anywhere else, stop before any change and report that "
+             "in the result file; a worktree the task skill creates from there is fine.")
     single = "Write summary as one JSON string (join its lines with \\n), never an array."
     message = f"{text}\n\n{guard} {report_instruction(result_path)} {single}"
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path),
@@ -459,19 +464,30 @@ def render_t3_thread_launch(args):
 
 def record(args):
     path = Path(args.run).resolve()
-    ids = {"thread_id": args.thread_id.strip(), "project_id": args.project_id.strip()}
-    for key, value in ids.items():
-        if not value:
-            raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    resume = getattr(args, "resume", False)
+    ids = {key: (getattr(args, key) or "").strip() for key in ("thread_id", "project_id")}
+    if resume and any(getattr(args, key) is not None for key in ids):
+        raise SystemExit("--resume takes no --thread-id or --project-id")
+    if not resume:
+        for key, value in ids.items():
+            if not value:
+                raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
     with lock_run(path):
         run = load_run(path)
         if run.get("backend") != "t3":
             raise SystemExit(f"{path} is not a T3 receipt; a Herdr receipt records its terminal address at launch")
-        for key, value in ids.items():
-            if run.get(key) not in (None, value):
-                raise SystemExit(f"{path} already records {key} {run[key]}")
-        write_json(path, {**run, **ids})
-    print(json.dumps({"run": str(path), **ids}, ensure_ascii=False))
+        if resume:
+            if not run.get("thread_id"):
+                raise SystemExit(f"{path} records no thread yet; record --thread-id first")
+            _, written = read_result(path)
+            update = {"previous_result": written, "resumed_ms": time.time_ns() // 1_000_000}
+        else:
+            for key, value in ids.items():
+                if run.get(key) not in (None, value):
+                    raise SystemExit(f"{path} already records {key} {run[key]}")
+            update = ids
+        write_json(path, {**run, **update})
+    print(json.dumps({"run": str(path), **update}, ensure_ascii=False))
 
 
 def matches_sent_message(rows, message):
@@ -1050,7 +1066,7 @@ def repeated_review_categories(result):
 def t3_stop_reason(run, result, written, stall_minutes):
     if result and result["status"] in {"done", "merged", "ready", "blocked"}:
         return None
-    last_ms = max(run.get("created_ms") or 0, (written or 0) // 1_000_000)
+    last_ms = max(run.get("created_ms") or 0, run.get("resumed_ms") or 0, (written or 0) // 1_000_000)
     if last_ms > time.time_ns() // 1_000_000 - stall_minutes * 60_000:
         return None
     return f"No result {'update' if result else 'file'} for {stall_minutes} minutes"
@@ -1212,8 +1228,10 @@ def main(argv):
     prompt_parser.set_defaults(func=render_t3_thread_launch)
     record_parser = sub.add_parser("record")
     record_parser.add_argument("run")
-    record_parser.add_argument("--thread-id", required=True)
-    record_parser.add_argument("--project-id", required=True)
+    record_parser.add_argument("--thread-id")
+    record_parser.add_argument("--project-id")
+    record_parser.add_argument("--resume", action="store_true",
+                               help="before answering a paused T3 child: hide its current result, restart the stall clock")
     record_parser.set_defaults(func=record)
     args = parser.parse_args(argv)
     if args.command == "collect" and args.stall_minutes < 1:
