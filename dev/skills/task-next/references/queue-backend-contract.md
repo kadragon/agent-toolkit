@@ -54,7 +54,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
-| `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
+| `rejected` | yes | optional `rev` (historical file queue) | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
 | `publish` | no | optional `queue_limits` | as `create`, for the pending store's drafts |
@@ -63,6 +63,8 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
 (`blocked`/`deferred`), `payload`. `claimed[]`: `ref`, `by` (the worktree holding it). A
 `backlog` `list` also returns `rev`: the commit SHA its `ref` resolved to, or `null`.
+With automatic backend selection on GitHub, a historical file `show` or `rejected` request
+reads that snapshot even when it has no open items. An explicit backend override still applies.
 
 Forge constraints the contract keeps: a claim needs no remote write, closing happens through the
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
@@ -148,8 +150,9 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
   uncapped (issues have no h3/h2 kinds, so the backlog's type priority reduces to number order).
 - **Paging.** Every connection selection reads (issues, labels, blockers, sub-issues, closing
   PRs) is paged up to a page limit. Hitting it sets `incomplete: true` with a warning, leaves out
-  any issue read only in part or whose same-repo parent was not read, and fails with exit 1 when no candidate remains — never an empty
-  queue. `ref` and `tasks` in a `list` request are ignored.
+  any issue read only in part, any child whose same-repo parent was unread, and any parent with
+  a same-repo open queue child that was unread. It fails with exit 1 when no candidate remains.
+  `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.
 
@@ -161,10 +164,12 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
 - `create` validates every item first (one-line `key` without `-->`, unique in the batch, never
   its own parent or blocker; `title`; string `body`; `parent_key` and each `blocked_by` entry a
   batch key, a known `queue-key`, or `#N` / `owner/name#N`) — a bad request is exit 1 and stores
-  nothing. It then reads every issue a trusted author filed with a `<!-- queue-key: <key> -->`
-  body marker (open or closed, any label), creates each missing label (`task-queue` plus the
-  items' labels), files each unmatched item with the marker appended to its body, and reuses a
-  match (`reused: true`). A recurring finding can set `refile_completed: true` on its item.
+  nothing. It scans issue bodies for the batch's own and referenced
+  `<!-- queue-key: <key> -->` markers on issues filed by trusted authors (open or closed, any
+  label). The scan stops when all needed matches are found or the connection ends. It reads
+  relation details only for reused issues, creates missing labels (`task-queue` plus the items'
+  labels), files unmatched items with their marker, and reports matches with `reused: true`.
+  A recurring finding can set `refile_completed: true` on its item.
   When its match was closed as completed, `create` files the recurrence with a marker derived
   from its key and the completed issue number. Retries find the same recurrence. A match closed
   without completion is reported in `incomplete[]` as `relation: "rejected"` and is not stored.
@@ -197,7 +202,8 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   resolves, stays pending with an `incomplete[]` entry (`relation: "target"`) and never blocks the
   rest. Under `no-queue-write` it posts nothing.
 - `rejected`: closed `task-queue` issues with state reason `NOT_PLANNED` and a trusted author;
-  `reason` and `refile_bar` come from the latest trusted `<!-- queue-rejected -->` comment
+  comment details are fetched only for issues that pass both filters. `reason` and `refile_bar`
+  come from the latest trusted `<!-- queue-rejected -->` comment
   (`Reason: …`, `Re-file only with: …`), plus `url`.
 - `reject` (a trusted queue issue): posts that comment, then closes the issue as not planned.
 - `defer` (a trusted queue issue): creates the `deferred` label when missing, replaces any
