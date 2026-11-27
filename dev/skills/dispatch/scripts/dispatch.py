@@ -16,6 +16,8 @@
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
+      A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
+      was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
 """
 import argparse
 import json
@@ -45,6 +47,8 @@ PLUGIN_HOOK_FAILURE = re.compile(
     r"(?:[ \t]+|\n(?:[ \t]+[│├└][^\n]*\n)*[ \t]*[└├][ \t]*))?"
     r"plugin contents changed;\s*hook approval required\b",
     re.IGNORECASE | re.MULTILINE)
+# A hook failure event, not a prompt or command output that quotes the phrase.
+CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTILINE)
 HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
 HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
 HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
@@ -65,6 +69,8 @@ FILTER_NOTICE = re.compile(r"This content can['’]t be shown\.?", re.IGNORECASE
 POLICY_ERROR = re.compile(r"API Error:.*\busage policy\b", re.IGNORECASE)
 STOP_USAGE = "Usage limit reached"
 STOP_FILTER = "Stopped by a safety or usage-policy filter"
+STOP_HOOKS = "hooks_broken"
+PLUGIN_MARKETPLACE = "kadragon"
 STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
@@ -120,8 +126,46 @@ def refuse_banned_model(model):
         raise SystemExit(f"model {model!r} is a {banned} model; dispatch never launches {' or '.join(BANNED_MODELS)}")
 
 
+def codex_home():
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
 def codex_models_cache():
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "models_cache.json"
+    return codex_home() / "models_cache.json"
+
+
+def plugin_cache():
+    return codex_home() / "plugins" / "cache" / PLUGIN_MARKETPLACE
+
+
+def installed_plugin_versions():
+    """Return {plugin: newest installed version} from the Codex plugin cache."""
+    versions = {}
+    try:
+        plugins = sorted(entry for entry in plugin_cache().iterdir() if entry.is_dir())
+    except OSError:
+        return versions
+    for plugin in plugins:
+        try:
+            names = [entry.name for entry in plugin.iterdir() if entry.is_dir()]
+        except OSError:
+            continue
+        if names:
+            versions[plugin.name] = max(names, key=lambda name: ([int(n) for n in re.findall(r"\d+", name)], name))
+    return versions
+
+
+def plugin_drift(run):
+    """Compare the plugin versions recorded at launch with the installed ones."""
+    started = run.get("plugin_versions")
+    if not isinstance(started, dict) or not started:
+        return [], []
+    current = installed_plugin_versions()
+    changed = [f"{plugin} {version} -> {current.get(plugin, 'missing')}"
+               for plugin, version in sorted(started.items()) if current.get(plugin) != version]
+    removed = [plugin for plugin, version in sorted(started.items())
+               if not (plugin_cache() / plugin / version).is_dir()]
+    return changed, removed
 
 
 def resolve_codex_model(model):
@@ -382,6 +426,8 @@ def launch(args):
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal["created_ms"], "cli": args.cli, **resolved,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
+    if args.cli == "codex" and (versions := installed_plugin_versions()):
+        run["plugin_versions"] = versions
     if title:
         run["title"] = title
     receipt = result_path.with_name("run.json")
@@ -903,8 +949,9 @@ def last_commit_ms(cwd):
         return 0
 
 
-def child_stop_reason(terminal, run, result, written, stall_minutes):
+def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), ())):
     """Return a one-line diagnosis and the number of extra screen reads."""
+    changed, removed = drift
     facts = terminal.get("status") or {}
     state = facts.get("state")
     if terminal["state"] == "finished":
@@ -919,6 +966,9 @@ def child_stop_reason(terminal, run, result, written, stall_minutes):
     status = result["status"] if result else None
     if status in {"done", "merged"} and state == "done":
         return None, 0
+    # The child's hooks point into a plugin version directory a marketplace update deleted.
+    if removed:
+        return STOP_HOOKS, 0
 
     stale = False
     track_idle = state in {"idle", "done"} and status not in {"ready", "blocked"}
@@ -930,15 +980,18 @@ def child_stop_reason(terminal, run, result, written, stall_minutes):
             cwd = ((worktree if isinstance(worktree, str) else None)
                    or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
             stale = last_commit_ms(cwd) <= cutoff_ms
-    if not stale and state not in {"blocked", "error", "idle", "done"}:
+    if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
         snapshot = hc_json("read", "--lines", "0", run["address"], timeout=2)
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
-        notice = None
+        snapshot, notice = {}, None
     if notice:
         return notice, 1
+    if (run["cli"] == "codex" and snapshot.get("how") == "screen"
+            and CODEX_HOOK_FAILED.search(snapshot.get("text") or "")):
+        return STOP_HOOKS, 1
     if state == "blocked":
         return "Waiting for a dialog", 1
     if state == "error":
@@ -983,6 +1036,10 @@ def collect_result(path, close, force, stall_minutes):
     finished = terminal["state"] == "finished"
     closed = {}
     reason, reads = None, 0
+    changed, removed = plugin_drift(run) if run["cli"] == "codex" and not finished else ([], [])
+    if changed:
+        print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
+              "stop the child before its next Git write", file=sys.stderr)
     if close:
         final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
         if not (force or finished or final):
@@ -995,11 +1052,12 @@ def collect_result(path, close, force, stall_minutes):
         closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
     else:
-        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes)
+        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed))
     print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
                       "result": result, "stop_reason": reason,
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
-                      "screen_reads": run["screen_reads"], "collect_screen_reads": reads, **closed},
+                      "screen_reads": run["screen_reads"], "collect_screen_reads": reads,
+                      **({"plugin_drift": changed} if changed else {}), **closed},
                      ensure_ascii=False))
 
 
