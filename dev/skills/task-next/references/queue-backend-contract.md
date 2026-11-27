@@ -142,8 +142,8 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
   closed blocker is ignored. Label `deferred` parks it (`deferred`, payload: its `Deferred:
   <reason>` body line).
 - **Claims** (`claimed[]`, no remote write): (a) a live `.worktrees/` worktree's
-  `## Covers` in its `tasks.md` or branch's archived contract (this checkout and the main
-  worktree too when the request has `ref`); (b) an open PR in
+  `## Covers` in its `tasks.md` or an archived contract registered to that worktree
+  (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
   `closedByPullRequestsReferences` by an `OWNER`/`MEMBER`/`COLLABORATOR` author, `by` = its URL
   (another author's PR is ignored with a warning); (c) a closing keyword in a commit on the local
   default branch not yet on `origin` (`origin/HEAD`, else `origin/main`/`origin/master`;

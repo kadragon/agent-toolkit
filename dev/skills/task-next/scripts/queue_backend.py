@@ -38,13 +38,11 @@ import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import backlog_candidates as bc  # noqa: E402
-from cycle_state import contract_path  # noqa: E402
 
 CONTRACT = 1
 BACKLOG_OPS = ("describe", "list", "show", "create", "rejected")
@@ -632,6 +630,21 @@ def _covers_refs(tasks_text: str) -> set[int]:
     return found
 
 
+def _archived_covers_refs(worktree: str, common: str) -> set[int]:
+    git_dir = _git(worktree, "rev-parse", "--git-dir")
+    if not git_dir:
+        return set()
+    registration = os.path.join(worktree, git_dir, "task-cycle-contract")
+    saved_branch, _, key = (bc._read_optional(registration) or "").partition("\n")
+    key = key.strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", key) or saved_branch != _git(
+        worktree, "symbolic-ref", "--quiet", "--short", "HEAD"
+    ):
+        return set()
+    archive = os.path.join(common, "task-cycle", key, "contract.md")
+    return _covers_refs(bc._read_optional(archive) or "")
+
+
 def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
                   warnings: list[str]) -> dict[int, str]:
     """{issue number: claimant} from the three claim sources; none needs a remote write.
@@ -644,14 +657,12 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
     top = _git(repo, "rev-parse", "--show-toplevel")
     listing = _git(repo, "worktree", "list", "--porcelain")
     if top is not None and listing is not None:
-        common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        common = _git(repo, "rev-parse", "--git-common-dir")
         for wt in bc._claimants(listing, os.path.realpath(top), include_self):
             text = bc._read_optional(os.path.join(wt, "tasks.md")) or ""
             refs = _covers_refs(text)
-            branch = _git(wt, "symbolic-ref", "--quiet", "--short", "HEAD")
-            if common and branch:
-                archive = contract_path(Path(common), branch)
-                refs.update(_covers_refs(bc._read_optional(archive) or ""))
+            if common:
+                refs.update(_archived_covers_refs(wt, os.path.join(repo, common)))
             for n in sorted(refs):
                 claims.setdefault(n, wt)
     for issue in issues:
@@ -1693,6 +1704,7 @@ FIXTURE_TASKS = "# Running sprint\n\nstatus: open\n\n- [ ] sprint item\n"
 
 
 def run_tests() -> int:
+    import shutil
     import tempfile
     from unittest.mock import patch
 
@@ -1772,6 +1784,17 @@ def run_tests() -> int:
             os.makedirs(empty)
             git(empty, "init", "-q", "-b", "main")
             git(empty, "remote", "add", "origin", "https://github.com/owner/empty.git")
+            standalone = os.path.join(tmp, "installed-queue")
+            os.mkdir(standalone)
+            for filename in ("queue_backend.py", "backlog_candidates.py"):
+                shutil.copyfile(os.path.join(HERE, filename), os.path.join(standalone, filename))
+            described = subprocess.run(
+                [sys.executable, os.path.join(standalone, "queue_backend.py"), "describe"],
+                input=json.dumps({"contract": 1, "repo": empty, "verify_visibility": False}),
+                capture_output=True, text=True,
+            )
+            _assert(described.returncode == 0 and json.loads(described.stdout)["backend"] == "github",
+                    "the installed two-file queue works without cycle_state.py")
             write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Done\n\n- [x] closed\n")
             _assert(resolve(empty, dict(base_env)) == {"backend": "github", "source": "github-host"},
                     "github.com origin without open items → github")
@@ -2179,16 +2202,21 @@ def run_github_tests(tmp: str, git, write) -> None:
     tasks_path = os.path.join(wt, "tasks.md")
     subprocess.run(
         [sys.executable, os.path.join(HERE, "cycle_state.py"), "save"], cwd=wt, check=True,
-        input="**Acceptance criteria:**\n- [ ] Covers are saved → check\n\n"
+        input="**Acceptance criteria:**\n- [ ] Covers are saved -> check\n\n"
         + (bc._read_optional(tasks_path) or ""), text=True, capture_output=True,
     )
     os.remove(tasks_path)
     data = github_list(dict(req, full_scan=True), runner)
-    _assert({"ref": "#15", "by": wt} in data["claimed"] and "#15" not in {
+
+    def archive_claimed(result):
+        return any(c["ref"] == "#15" and os.path.realpath(c["by"]) == os.path.realpath(wt)
+                   for c in result["claimed"])
+
+    _assert(archive_claimed(data) and "#15" not in {
         c["ref"] for c in data["candidates"]
     }, "an archived Covers claim survives removal of tasks.md before a PR exists")
     _assert(not any(c["ref"] == "#15" for c in github_list(dict(req, repo=wt), runner)["claimed"])
-            and {"ref": "#15", "by": wt} in github_list(dict(req, repo=wt, ref=base), runner)["claimed"],
+            and archive_claimed(github_list(dict(req, repo=wt, ref=base), runner)),
             "a worktree counts its archived claims only on pinned scans")
     _assert(data["incomplete"] is False and not github_list(dict(req), runner)["parked"], "parked[] only when asked")
     fast = github_list(dict(req), runner)["candidates"]
@@ -2334,6 +2362,10 @@ def run_github_tests(tmp: str, git, write) -> None:
     git(repo, "worktree", "remove", wt)
     _assert(any(c["ref"] == "#15" for c in github_list(dict(req, full_scan=True), runner)["candidates"]),
             "an archive without a registered worktree does not claim an issue")
+    git(repo, "worktree", "add", "-q", wt, "cov")
+    _assert(any(c["ref"] == "#15" for c in github_list(dict(req, full_scan=True), runner)["candidates"]),
+            "recreating the worktree on the same branch does not revive the old registration")
+    git(repo, "worktree", "remove", wt)
 
 
 class _FakeGitHub:

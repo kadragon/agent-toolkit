@@ -27,12 +27,23 @@ includes claimed and parked issues, parents, and sub-issues. Resolve explicit qu
 `AGENT_QUEUE_BACKEND=github` for GitHub `show` so it also works when the selected backend
 came from a pinned base. A failed read or an `incomplete: true` result leaves tracking
 unconfirmed even if some items were readable. Apply *Queue unavailable* in that case.
+A `show` trust-gate refusal for an issue absent from a complete inventory only means that
+the issue is outside the queue. Text matching covers open issues. Use an explicit ref to
+check a closed queue issue.
 
-On other backends, use `list` with `full_scan: true` and `parked: true`, then use `show` on
-explicit, parked, and claimed refs to check their text. For a file snapshot use the `rev`
-returned by `list` in those `show` requests. Apply *Queue unavailable* if the read is incomplete.
-When a match is confirmed, report its ref and route to `task-next`. If a match is closed,
-claimed, or parked, report that status when known and end intake.
+On `backlog`, a missing `backlog.md` in the selected checkout or pinned snapshot means
+the file queue has no tickets yet. Skip `list` in that case and check any explicit
+`tasks.md` ref with `show` (pass the pinned SHA as `rev` for a snapshot). Report other
+read errors. On backends without `inventory`, use `list` with `full_scan: true` and
+`parked: true` when the queue exists, then use `show` on explicit, parked, and claimed refs
+to check their text. For a file snapshot pass the `rev` returned by `list` to `show`.
+Treat an unbalanced fence or other warning that hides queue items as an incomplete read.
+
+When a match is confirmed, report its ref. For an inventory match, check selection with
+`list` (`full_scan: true`, `parked: true`) only after finding the match. A candidate ref
+or an `item_refs[]` entry identifies selectable work. If the match is claimed, parked,
+closed, or its eligibility is unconfirmed, report its status and end intake. Route
+selectable matches to `task-next`.
 Read `docs/conventions.md` when present. On `backlog`, only create `backlog.md` when writing
 tickets or findings. A standalone task needs neither a backlog file nor harness initialization.
 

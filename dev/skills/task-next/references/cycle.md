@@ -151,7 +151,8 @@ recover it from the cited spec/summary before implementation.
 fails before and passes after; for other tags, write the test first where that sharpens the
 criterion. A multi-item
 group gets one checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
-approval source and exact selected backlog lines (issues backend: the `## Covers` ref lines).
+approval source and exact selected backlog lines. For the issues backend, include the
+`## Covers` heading and its exact ref lines in the archive.
 `tasks.md` remains the optional queue-facing copy when the caller needs a `## Covers` list.
 
 ### Covered refs (issues backend)
@@ -172,9 +173,11 @@ The refs are the claim (a `.worktrees/` run) and the closure list: no queue edit
 review cycle writes one `close_ref_template` line per ref (`Closes #12`) into the commit message,
 which `commit-and-push.sh --pr` turns into the PR body: the PR body closes each issue on merge
 whatever the repo's squash-message setting, and the commits a squash or lite `--no-ff` merge
-lands close it on a direct push to the default branch. On GitHub, the live worktree's archived
-contract keeps the same claim after `prune-tasks`, including before the PR exists. The archive
-alone does not claim issues once the worktree is removed.
+lands close it on a direct push to the default branch. On GitHub, saving the contract registers
+it with the worktree so the claim survives `prune-tasks`, including before the PR exists.
+A stopped worktree keeps its claim for resume, and removal releases it. When resuming a
+worktree with a contract saved before worktree registration was supported, re-save the
+archived contract verbatim from the worktree before cleanup.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"
