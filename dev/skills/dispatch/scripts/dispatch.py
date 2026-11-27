@@ -86,8 +86,12 @@ TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
-# T3 provider instance and the option that carries the routed effort (orchestrator_capabilities).
-T3_TARGETS = {"claude": ("claudeAgent", "effort"), "codex": ("codex", "reasoningEffort")}
+T3_TARGETS = {
+    "claude": {"provider": "claudeAgent", "effort_option": "effort",
+               "efforts": ("low", "medium", "high", "xhigh", "max", "ultrathink")},
+    "codex": {"provider": "codex", "effort_option": "reasoningEffort",
+              "efforts": ("low", "medium", "high", "xhigh", "max", "ultra")},
+}
 
 
 def terminal_name(raw):
@@ -414,29 +418,38 @@ def launch(args):
         send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
 
 
-def t3_prompt(args):
-    """Render a T3 delegate_task launch; the model makes the MCP call itself."""
+def render_t3_delegate_request(args):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
     refuse_banned_model(args.model)
-    model = resolve_codex_model(args.model) if args.cli == "codex" else args.model
-    resolved = {"model": model, **({"model_family": args.model} if model != args.model else {})}
+    model = args.model
+    if args.cli == "claude" and not model.startswith("claude-"):
+        raise SystemExit(f"T3 takes a full Claude model id such as claude-sonnet-5-5, not {model!r}; "
+                         "use the id orchestrator_capabilities lists")
+    if args.cli == "codex" and model.lower() in CODEX_FAMILIES:
+        raise SystemExit(f"T3 takes the Codex slug orchestrator_capabilities lists for {model!r}, not the family name")
+    target = T3_TARGETS[args.cli]
+    if args.effort not in target["efforts"]:
+        raise SystemExit(f"T3 {target['provider']} effort must be one of {', '.join(target['efforts'])}")
     handoff = launch_handoff(args, cwd)
     text = first_prompt(args.cli, args.message, handoff)
     if not cwd.is_dir():
         raise SystemExit(f"no such directory: {cwd}")
+    cwd = cwd.resolve()
     result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
-    provider, effort_option = T3_TARGETS[args.cli]
-    run = {"backend": "t3", "cli": args.cli, **resolved, "effort": args.effort,
-           "cwd": str(cwd.resolve()),
-           "target": {"provider": provider, "model": model, "options": {effort_option: args.effort}},
+    run = {"backend": "t3", "cli": args.cli, "model": model, "effort": args.effort,
+           "cwd": str(cwd),
+           "target": {"provider": target["provider"], "model": model,
+                      "options": {target["effort_option"]: args.effort}},
            "created_ms": time.time_ns() // 1_000_000}
     if title:
         run["title"] = title
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff})
+    guard = (f"Work in {cwd}. If your working directory is anywhere else, stop before any change "
+             "and report that in the result file.")
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path),
-                      "prompt": f"{text}\n\n{report_instruction(result_path)}"}, ensure_ascii=False))
+                      "prompt": f"{text}\n\n{guard} {report_instruction(result_path)}"}, ensure_ascii=False))
 
 
 def record(args):
@@ -621,6 +634,8 @@ def send_task(args, run_path):
     screen_reads = 0
     if run_path:
         run = load_run(run_path)
+        if run.get("backend") == "t3":
+            raise SystemExit(f"{run_path} is a T3 receipt; answer that child through the T3 thread tools")
         if run["cli"] != "codex" or run["address"] != address:
             raise SystemExit("receipt is for another terminal or CLI")
         if resend:
@@ -1025,6 +1040,15 @@ def repeated_review_categories(result):
     return sorted(set(earlier["categories"]).intersection(later["categories"]))
 
 
+def t3_stop_reason(run, result, written, stall_minutes):
+    if result and result["status"] in {"done", "merged", "ready", "blocked"}:
+        return None
+    last_ms = max(run.get("created_ms") or 0, (written or 0) // 1_000_000)
+    if last_ms > time.time_ns() // 1_000_000 - stall_minutes * 60_000:
+        return None
+    return f"No result {'update' if result else 'file'} for {stall_minutes} minutes"
+
+
 def collect_result(path, close, force, stall_minutes):
     run = load_run(path)
     try:
@@ -1039,7 +1063,8 @@ def collect_result(path, close, force, stall_minutes):
     if run.get("backend") == "t3":
         if close:
             raise SystemExit("a T3 child stops through task_cancel, not collect --close")
-        print(json.dumps({"backend": "t3", "task_id": run.get("task_id"), "result": result, "stop_reason": None,
+        print(json.dumps({"backend": "t3", "task_id": run.get("task_id"), "result": result,
+                          "stop_reason": t3_stop_reason(run, result, written, stall_minutes),
                           "scope_decision_categories": repeated_review_categories(result), "closed": False},
                          ensure_ascii=False))
         return
@@ -1176,7 +1201,7 @@ def main(argv):
     prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
     prompt_parser.add_argument("message")
-    prompt_parser.set_defaults(func=t3_prompt)
+    prompt_parser.set_defaults(func=render_t3_delegate_request)
     record_parser = sub.add_parser("record")
     record_parser.add_argument("run")
     record_parser.add_argument("--task-id", required=True)
