@@ -23,14 +23,18 @@ A free-text request not yet on the queue is `task-new`'s job.
 ## Prerequisites
 
 **Queue backend.** Every queue read goes through `scripts/queue_backend.py`
-(`references/queue-backend-contract.md`); resolve the backend once, first:
+(`references/queue-backend-contract.md`); resolve the backend once, first — under `--tree`, right
+after Step 1 pins `BASE_SHA`, with `REF="$BASE_SHA"`, so it resolves against the same base
+`backlog.md` the `list` calls read (this checkout's copy may differ):
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 QB="$SKILL_DIR/scripts/queue_backend.py"
 [[ -r "$QB" ]] || { echo "Bundled script missing or unreadable: $QB" >&2; exit 1; }
 REPO=$(git rev-parse --show-toplevel) || exit 1
-DESCRIBE=$(jq -nc --arg r "$REPO" '{contract: 1, repo: $r}' | python3 "$QB" describe) || exit 1
+REF="<BASE_SHA under --tree, else empty>"
+DESCRIBE=$(jq -nc --arg r "$REPO" --arg ref "$REF" \
+  '{contract: 1, repo: $r} + (if $ref == "" then {} else {ref: $ref} end)' | python3 "$QB" describe) || exit 1
 BACKEND=$(jq -r '.backend' <<<"$DESCRIBE")
 CLOSE_REF_TEMPLATE=$(jq -r '.close_ref_template // empty' <<<"$DESCRIBE")
 echo "queue backend: $BACKEND"
@@ -149,7 +153,9 @@ and stop before branch or worktree creation. Never substitute another candidate.
 
 Print every group as `[N] <source>: <title> (<M> items)` (issues backend: `[N] <ref>: <title> (<M> items)`) and wait for a number (unattended:
 `[1]`). Zero groups → read `warnings[]` first; report "backlog and tasks are clear" only when nothing
-was hidden. A group of >8 open items → offer all-or-subset (unattended: take the first 8 open items in
+was hidden. The issues backend prints no zero-candidate diagnosis or fast-path truncation note:
+run the parked list before reporting it clear, and offer the full scan whenever the fast path
+shows 3. A group of >8 open items → offer all-or-subset (unattended: take the first 8 open items in
 document order and name the remainder). A group whose every open item is deferred/blocked is not a candidate — surface the
 blocker.
 
@@ -188,7 +194,9 @@ Follow `references/cycle.md` end to end with these overrides; Git authority is
   the worktree before the plan gate (`references/cycle.md` → *Worktree cycle* → *Claim*).
 - issues backend, any item count → write `tasks.md`: `# <candidate title verbatim>`, `status:
   active`, the contract, and `## Covers` with one `- <ref> <title>` line per covered ref
-  (`references/cycle.md` → *Covered refs*). The issues are never edited.
+  (`references/cycle.md` → *Covered refs*). The issues are never edited. Before the plan gate,
+  read each selected ref's body with `show` (and the parent's): the Source / Done when a backlog
+  line carries inline lives there, and the contract takes its criteria from it.
 
 **Cleanup** runs `prune-tasks` only when a sprint block exists, and on `backlog` `prune-backlog`
 over the `## Covers` lines (or the single carried line). Post-merge, `backlog.md` and `tasks.md`

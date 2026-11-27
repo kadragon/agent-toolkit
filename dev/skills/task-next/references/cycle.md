@@ -74,8 +74,10 @@ with each selected line verbatim (issues backend: one line per covered ref, *Cov
 for one item. If the base tracks `tasks.md`, append the
 whole block under its own h1 and preserve the existing blocks. Otherwise, create the file.
 Then, from the worktree, re-run the Step 1 `list` without `ref`; its `warnings[]` (`backlog`) or
-`claimed[]` (issues backend: a covered ref whose `by` is another worktree or a PR) name what
-another run also claims. Yield those lines or refs — drop them from the covers and scope; none left → declined-plan teardown
+`claimed[]` (issues backend: any entry for a covered ref — another worktree, a PR or an unpushed
+default-branch commit) name what another run also claims. Yield those lines or refs — drop them
+from the covers and scope, and on the issues backend recompute `## Covers` per *Covered refs*
+(a yielded sub-issue drops the parent's ref); none left → declined-plan teardown
 (`tree.md` → *Claim*) and reselect. Both sessions may yield; that errs toward skipping.
 
 After the plan gate, add the contract to the active claim block. When an open sprint shares its
@@ -159,15 +161,21 @@ covered issue (`- #12 [FEAT] Add the export flag`), ref first. Which refs:
 
 - a lone issue → its `ref`;
 - a parent → each in-scope `item_refs[]` entry, plus the parent's own `ref` only when this cycle
-  covers every open sub-issue — `excluded[]` empty and no item dropped at the plan gate or by the
-  >8 subset. Otherwise the parent stays open with the rest and closes with the cycle that covers
-  its last sub-issue.
+  covers every open sub-issue — `excluded[]` empty and no item dropped at the plan gate, by the
+  >8 subset or by a claim yield. Otherwise the parent stays open with the rest and closes with
+  the cycle that covers its last sub-issue.
+
+Only the leading ref of a line counts — for the claim and for the closing lines; a `#N` quoted in
+the copied title is neither.
 
 The refs are the claim (a `.worktrees/` run) and the closure list: no queue edit at cleanup. The
 review cycle writes one `close_ref_template` line per ref (`Closes #12`) into the commit message,
 which `commit-and-push.sh --pr` turns into the PR body: the PR body closes each issue on merge
 whatever the repo's squash-message setting, and the commits a squash or lite `--no-ff` merge
-lands close it on a direct push to the default branch.
+lands close it on a direct push to the default branch. Known gap: cleanup's `prune-tasks` removes
+the worktree claim before the open PR claims the issue, so between cleanup and PR creation
+another run can list the issue again — keep that stretch short (validation evidence, then hand
+off at once).
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"

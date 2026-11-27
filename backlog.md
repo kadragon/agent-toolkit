@@ -73,6 +73,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [debt] Herdr `launch` exits before writing the receipt or printing the address when `hc get` fails right after a successful `hc run`; a Claude child may already hold its first message, so a retry can duplicate it (source: codex) (pre_existing) — dev/skills/dispatch/scripts/dispatch.py:397
 
+### PR #467 — Select task-next work through the queue backend and close covered issues from the PR (2026-11-27)
+
+- [ ] [debt] On the issues backend, cleanup's `prune-tasks` deletes the worktree `## Covers` claim before the PR exists, so between cleanup and PR creation another run's `list` offers the same issue; add a claim source that survives cleanup (e.g. the worktree branch's archived refs) in `github_claims` (source: code-review) (introduced here) — dev/skills/task-next/scripts/queue_backend.py:564
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
