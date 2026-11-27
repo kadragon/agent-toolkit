@@ -66,8 +66,9 @@ these passes when redeeming one. The list is empty if the upcoming reset is unkn
 
 When neither CLI is hot, passes expiring before the reset favor their CLI if only one CLI
 has them. A quota-driven preference takes precedence. For `both-hot`, `effective_bias`
-favors the only CLI that can run without critical approval, or the longer weekly runway
-when both estimates are available and differ. If the favored CLI is `ok` and has expiring
-passes, `prefer_expiring_passes` tightens the routing exceptions.
+favors the only CLI that can run without critical approval. If both can run, it favors the
+longer weekly runway when both estimates are available and differ. If both require approval,
+it leaves the choice to the user. If the favored CLI is `ok` and has expiring passes,
+`prefer_expiring_passes` tightens the routing exceptions.
 The launcher warns when a snapshot is unknown and uses the other CLI's data. If the quota
 helper fails or returns invalid output, the launcher warns and proceeds without a quota decision.

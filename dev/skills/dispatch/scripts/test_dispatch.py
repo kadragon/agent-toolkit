@@ -1234,6 +1234,12 @@ class T3PromptTests(DispatchTestCase):
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["bias_exception"], reason)
             self.assertEqual(receipt["quota_snapshot"], snapshot)
+            self.quota.return_value = {**QUOTA_OK, "bias": "claude", "effective_bias": "claude"}
+            with patch("dispatch.tempfile.mkdtemp") as mkdtemp:
+                with self.assertRaisesRegex(SystemExit, "quota bias claude refuses"):
+                    render_t3_thread_launch(self.prompt_args(home, cli="codex", model="gpt-6.2-sol",
+                                                             effort="high", message="$task-next"))
+                mkdtemp.assert_not_called()
 
     def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
         for cli, model, option in (("claude", "claude-sonnet-5-5", "effort"),
@@ -2496,9 +2502,10 @@ class LaunchQuotaTests(unittest.TestCase):
 
     def test_claude_bias_moves_codex_rows_and_keeps_top_tier(self):
         self.write_usage(10, 80)
-        for model in ("gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol"):
-            with self.subTest(model=model):
-                denied = self.preview("codex", model)
+        for model, effort in (("gpt-6-luna", "medium"), ("gpt-6.1-terra", "high"),
+                              ("gpt-6.2-sol", "medium"), ("gpt-6.2-sol", "high")):
+            with self.subTest(model=model, effort=effort):
+                denied = self.preview("codex", model, effort=effort)
                 self.assertEqual(denied.returncode, 1)
                 self.assertIn("quota bias claude refuses", denied.stderr)
         accepted = self.preview("codex", "gpt-6.2-sol", effort="xhigh")
@@ -2564,6 +2571,14 @@ class LaunchQuotaTests(unittest.TestCase):
         audit = json.loads(accepted.stdout)
         self.assertEqual(audit["bias"], "both-hot")
         self.assertEqual(audit["quota_snapshot"]["effective_bias"], "codex")
+
+    def test_both_critical_allows_the_cli_with_explicit_approval(self):
+        self.write_usage(90, 95)
+        accepted = self.preview("codex", "gpt-6-luna", "--approve-critical")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "both-hot")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
 
     def test_unreadable_codex_log_does_not_disable_claude_critical_gate(self):
         self.write_usage(90, 10)

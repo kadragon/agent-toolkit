@@ -475,7 +475,7 @@ def launch_quota(args, model):
         top = "opus" in words and not words.intersection(("haiku", "sonnet"))
     else:
         top = ("sol" in words and not words.intersection(("luna", "terra"))
-               and args.effort.lower() in ("high", "xhigh", "max", "ultra"))
+               and args.effort.lower() in ("xhigh", "max", "ultra"))
         if top and not strong:
             return audit
     if not top:

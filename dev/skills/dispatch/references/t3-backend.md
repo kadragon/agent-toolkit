@@ -72,8 +72,8 @@ run `hc ls` too when Herdr is installed.
   the thread yourself.
 - **Restart** — the receipt's `thread_id` is enough to `t3_thread_wait` or `t3_thread_read`
   the child again.
-- **Stop, relaunch, escalate** — `t3_thread_interrupt(threadId)`, then a new `prompt` +
-  `t3_thread_launch` per `escalation.md`. `collect --close` refuses a T3 receipt.
+- **Stop, relaunch, escalate** — prepare the replacement with `prompt` per `escalation.md`,
+  then call `t3_thread_interrupt(threadId)` and `t3_thread_launch`. `collect --close` refuses a T3 receipt.
 - **Clean up** — once the thread completed or was interrupted and you collected and saved what
   you need, call `t3_thread_organize` with action `settle` for the child. Then remove the receipt's
   `run.json`, `run.lock`, `result.json` and any `run.tmp`, then the directory if empty

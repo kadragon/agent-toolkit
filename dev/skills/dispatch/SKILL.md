@@ -71,7 +71,7 @@ the work needs, the effort by how ambiguous or risky it is. The user naming a CL
 effort overrides the routing tables. The bans on `fable` and `astra` and the critical gate still apply.
 Name Codex models by family — `luna`, `terra`, `sol`; the launcher resolves each to a slug (`references/model-effort.md`).
 Tiers are equal across CLIs: `haiku` = `luna` < `sonnet` < `opus` = `sol`; `terra` takes only writing and visual work.
-Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal Claude tier stands in when Codex is unavailable.
+Pick the tier by capability, then the CLI by quota bias.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
 For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"`. Use its `effective_bias`
@@ -82,7 +82,7 @@ and saves the snapshot and any override in `run.json`. See `references/quota-sna
 |------|--------|
 | `none` | the tables as written |
 | `codex` | Top-tier work goes to `sol`. For `opus`, pass `--bias-exception` with `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
-| `claude` (Codex running ahead) | Codex rows go to the equal Claude tier: `luna` → `haiku` and mid-tier `sol/medium` → `sonnet/medium`, each at its Claude tier's starting effort below; `terra` writing or visual work → `sonnet` at the same effort. |
+| `claude` | Route `luna` to `haiku`, `sol` below `xhigh` to `sonnet/medium`, and `terra` to `sonnet` at the chosen effort. |
 
 - When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
   where the task warrants it. Only `production DB` and `deploy` qualify as exceptions.
@@ -117,8 +117,6 @@ that edits no file may start one lower (`haiku/low`, `luna/medium`); `max`/`ultr
 - Effort is fixed per session (the model scales thinking per turn within it); each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
   an escalated task launches, read `references/escalation.md` for the ladder and the relaunch.
-  Before stopping a child, check the new pair with `launch --dry-run` (Herdr) or `prompt` (T3).
-  If the quota gate refuses the pair, keep the child and choose a permitted rung or ask the user.
 - Before launch, give the CLI, pair and reason in one line. If either state is other than `ok`,
   include both CLIs' weekly used, elapsed and runway in that line. Mark missing values as
   unavailable and include 5-hour usage when it raised the state.
@@ -144,7 +142,7 @@ as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workf
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
 For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
-Preview with `--dry-run`. A live mismatch warns on stderr and proceeds.
+Preview with `--dry-run`.
 
 To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
 in the home repo. See `references/launch-handoff.md` for the schema and path matching.

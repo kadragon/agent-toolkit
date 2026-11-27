@@ -36,13 +36,13 @@ the existing ladder below.
 
 - A pair on the ladder takes the next rung. Any other pair takes the lowest rung that is at
   least as high on both axes and higher on at least one (haiku = luna < sonnet < opus = sol).
-  A "not know enough" diagnosis may skip the remaining effort rungs of its tier. `sol` has no larger
-  Codex model, so under bias `codex` that diagnosis moves it to `opus/high`.
+  A "not know enough" diagnosis may skip the remaining effort rungs of its tier. Under bias `codex`,
+  move from `sol` to `opus/high` only with an allowed `--bias-exception` or an explicit user pin.
 - `terra` writing or visual work raises effort on `terra` up to `xhigh`, then takes
   `opus/high` (`sol/high` under bias `codex`) and continues on that bias's ladder.
 - A pair on `opus` stays on Claude: `opus/medium → opus/high → opus/xhigh`. This covers top-tier
   work under bias `none`, work the `codex` bias keeps on `opus` (SKILL.md step 3), and work the
-  user put on `opus`; the `opus` = `sol` tie never moves it to Codex.
+  user put on `opus`. Reapply the launch gate with the current quota and any valid override.
 - When the next rung is on a `critical` CLI, ask the user. A stall at the top rung (opus/xhigh
   or sol/xhigh) goes to the user; `fable` and `astra` are never a rung.
 - Carry the latest escalated pair as the floor for later phases as a tier and an effort: take
@@ -55,7 +55,9 @@ the existing ladder below.
 
 ## Relaunch
 
-Escalating relaunches the same phase. For a `--tree` run, read the worktree slug first
+Escalating relaunches the same phase. Check the replacement pair before stopping the current child
+with `launch --dry-run` (Herdr) or `prompt` (T3). If quota refuses it, keep the current child and
+choose a permitted rung or ask the user. For a `--tree` run, read the worktree slug first
 (`hc read --lines 60 <address>`). When authorized to end the old child, run
 `dispatch.py collect <old-receipt> --close --force` and confirm it closed. Clean up the old
 receipt per [Close the child terminal](../SKILL.md#close-the-child-terminal). Then launch per

@@ -234,7 +234,7 @@ def main():
         claude_runway, codex_runway = (clis[cli]["runway_h"] for cli in ("claude", "codex"))
         if len(eligible) == 1:
             effective = eligible[0]
-        elif claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
+        elif eligible and claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
             effective = "claude" if claude_runway > codex_runway else "codex"
     preferred = clis.get(effective, {})
     print(json.dumps({**clis, "bias": routing, "effective_bias": effective,
