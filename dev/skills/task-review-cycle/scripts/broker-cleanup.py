@@ -113,7 +113,7 @@ def process_args(pid=None, owned=None):
                 if Path(pid_file).read_text(encoding="ascii").strip() != number:
                     continue
             except FileNotFoundError:
-                if owned is None or canonical(pid_file).parent.parent != owned:
+                if pid is None and (owned is None or canonical(pid_file).parent.parent != owned):
                     continue
             except (OSError, UnicodeError):
                 continue
