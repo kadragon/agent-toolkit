@@ -4,7 +4,8 @@
       Print task-next's candidate snapshot as JSON, using the bundled selector.
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
-                     --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
+                     --work-kind queue|new|standalone --request REQUEST --unit UNIT
+                     [--git-limits LIMITS] [--no-git-writes]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
@@ -431,9 +432,20 @@ def normalized_title(title):
 
 def launch_handoff(args, cwd):
     handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
-    for key in ("request", "unit", "git_limits"):
+    for key in ("request", "unit"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    limits = " ".join((args.git_limits or "").casefold().split())
+    no_authority = limits in {"", "not specified", "unknown", "implementation-only"}
+    if getattr(args, "no_git_writes", False):
+        if not no_authority:
+            raise SystemExit("--no-git-writes conflicts with --git-limits that describe a Git grant")
+        handoff["git_limits"] = "implementation-only"
+    elif handoff["work_kind"] in {"queue", "new"} and no_authority:
+        raise SystemExit("--git-limits must carry a verified user grant; "
+                         "use --no-git-writes for implementation-only work")
+    elif not limits:
+        raise SystemExit("--git-limits must not be blank")
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines
@@ -1628,7 +1640,8 @@ def main(argv):
     launch_parser.add_argument("--work-kind", choices=["queue", "new", "standalone"], required=True)
     launch_parser.add_argument("--request", required=True, help="verbatim original user request")
     launch_parser.add_argument("--unit", required=True, help="assigned unit")
-    launch_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
+    launch_parser.add_argument("--git-limits", help="verbatim Git grant and limits (required unless --no-git-writes)")
+    launch_parser.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")

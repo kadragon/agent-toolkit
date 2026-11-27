@@ -189,6 +189,38 @@ class DispatchReceiptTests(DispatchTestCase):
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
 
+    def test_launch_requires_git_authority(self):
+        for kind in ("queue", "new"):
+            for limits in (None, "", " \n ", "  Not   Specified  ", "unknown", "implementation-only"):
+                with self.subTest(kind=kind, limits=limits), patch("dispatch.hc_json") as hc:
+                    with self.assertRaisesRegex(SystemExit, "--no-git-writes"):
+                        launch(self.launch_args(Path.cwd(), work_kind=kind, git_limits=limits))
+                    hc.assert_not_called()
+        with self.assertRaisesRegex(SystemExit, "--no-git-writes.*--git-limits"):
+            launch(self.launch_args(Path.cwd(), git_limits="pr-only", no_git_writes=True))
+
+    def test_launch_preserves_git_grant_or_marks_no_writes(self):
+        grant = "2026-11-27, repository owner: Commit, push the branch and open a PR.\n"
+        for kind, limits, no_writes, expected in (
+            ("queue", grant, False, grant),
+            ("new", "no-push", False, "no-push"),
+            ("new", "pr-only", False, "pr-only"),
+            ("queue", "none", False, "none"),
+            ("queue", "", True, "implementation-only"),
+            ("queue", "not specified", True, "implementation-only"),
+            ("new", None, True, "implementation-only"),
+            ("standalone", "not specified", False, "not specified"),
+        ):
+            with self.subTest(kind=kind, limits=limits, no_writes=no_writes):
+                task = "$task-new Update docs" if kind == "new" else "$task-next --tree"
+                args = self.launch_args(Path.cwd(), work_kind=kind, git_limits=limits, task=task,
+                                        no_git_writes=no_writes, dry_run=True)
+                with patch("dispatch.warn_linked_worktree"), redirect_stdout(StringIO()) as stdout:
+                    launch(args)
+                prompt = json.loads(stdout.getvalue())["task"]
+                handoff = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+                self.assertEqual(json.loads(handoff)["Git limits"], expected)
+
     def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
         cwd = Path(tempfile.gettempdir()) / "myrepo"
         for raw, name, title, expected in (
@@ -1617,7 +1649,7 @@ class WorkflowDocsTests(unittest.TestCase):
                       "which Git actions the user authorizes", launch_step)
         self.assertIn("If an explicit full-workflow invocation grants the required Git writes and sets no narrower "
                       "limits, pass `--git-limits='none'`.", launch_step)
-        self.assertIn("For work that needs no Git writes and has no user-provided limits, "
+        self.assertIn("For standalone work that needs no Git writes and has no user-provided limits, "
                       "pass `--git-limits='not specified'`.", launch_step)
         self.assertIn("After confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)

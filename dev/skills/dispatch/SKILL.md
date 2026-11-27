@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.0.0
+version: 3.1.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -121,7 +121,9 @@ Run `hc ls` first. A live task session in the repo — yours or another home ses
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
 Verify user authorization for the Git writes the task needs, including any grant from an explicit
 full-workflow invocation. If a required action is still unauthorized, ask once before launch
-which Git actions the user authorizes. Carry the answer in the handoff.
+which Git actions the user authorizes. Record the user's exact words, who gave the grant, and
+when in `--git-limits`. Keep `--request` as the verbatim originating request so the child can
+cite the grant and its scope in the Sprint Contract.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
@@ -131,10 +133,13 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> 
 
 Always pass `--title`, a short unit summary in the user's language (Herdr label `title`, receipt, name `<repo>-<slug>`).
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
-in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workflow invocation
+in step 2. Forward explicit Git grants and limits verbatim. If an explicit full-workflow invocation
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
-For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
+Queue and new launches reject missing, blank, or placeholder Git limits. For work authorized
+to proceed without Git writes, pass `--no-git-writes` in place of `--git-limits`. The child
+receives `implementation-only` and stops before any commit, push, or PR write.
+For standalone work that needs no Git writes and has no user-provided limits, pass
+`--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`.
 
