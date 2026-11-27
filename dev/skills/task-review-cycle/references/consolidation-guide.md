@@ -30,7 +30,7 @@ orchestrator's inline grading.
 5. **Scope.** In-scope = introduced or made worse by this branch and fixable without widening its
    purpose. Everything else is out-of-scope; when in doubt, out.
 6. **Gate.** Every in-scope P0/P1 finding is applied before merge, P0 first. Send verified
-   `pre_existing` findings and in-scope P2/P3 to `## Review Backlog` with no merge gate,
+   `pre_existing` findings and in-scope P2/P3 to the findings queue with no merge gate,
    including in late reclaim. Map Codex's structured `critical`/`high`/`medium`/`low` to
    P0/P1/P2/P3 respectively. A `contract` finding is in-scope P0 by construction and
    bypasses the confidence and `failure` filters and `--auto`. A `comments` finding carries no
@@ -65,8 +65,8 @@ Review disposition {"head":"<reviewed commit>","id":"<stable finding ID within t
 - `dropped` requires one reason: `wrong` for a mismatched or unsupported claim, `intentional`
   for verified deliberate behavior, `not-matter` for a valid observation with immaterial impact,
   or `out-of-scope` for a valid item deferred or outside the change, including verified
-  `pre_existing` and advisory cleanup deferred to the backlog. Use the actual adjudication for
-  low-confidence findings. Backlog filing counts as deferred, not applied.
+  `pre_existing` and advisory cleanup deferred to the queue. Use the actual adjudication for
+  low-confidence findings. Filing counts as deferred, not applied.
 
 Reuse the ID on re-review, resume, and late reclaim when the same defect appears again. Take the
 last record for an ID within the cycle and retain all contributing sources, including any newly
@@ -96,7 +96,24 @@ for each verdict. A newly approved scope starts a fresh sequence.
 
 ## Recording out-of-scope and non-blocking findings
 
-Verified `pre_existing`, valid out-of-scope findings, and in-scope P2/P3 go here. Append to `backlog.md` (never
+Verified `pre_existing`, valid out-of-scope findings, and in-scope P2/P3 go here, including
+advisory comment follow-ups and late findings. Use `queue_backend.py` (bundled with
+`dev:task-next`) → *Filing findings* in `../task-next/references/queue-backend-contract.md`
+(paths relative to the skill). Classify security findings before recording or reporting them.
+
+Read `rejected` before filing ordinary findings. Withhold a matching finding unless this
+cycle's evidence meets the entry's re-file bar. List each withheld finding and its matching entry
+in the cycle report. Then call `create` for the remaining findings.
+
+- **GitHub:** one finding becomes one issue. For two or more, include a parent
+  `Review follow-ups — PR #N` and set each finding's `parent_key` to the parent's key. Without a PR,
+  use `Review follow-ups — <branch>`. Use a stable review-cycle key (PR number, or the feature
+  branch and original reviewed commit for a local cycle), suffix it with the stable finding ID
+  for each child or standalone issue, and reserve a distinct key for the parent. The body carries
+  the evidence, source tags and file location. Build the batch from all eligible findings in the
+  cycle before filing. If a later reclaim takes the total past one, resend the earlier item under
+  its original key with the new `parent_key`; `create` reuses and links the issue.
+- **`edit_file`:** append to `backlog.md` (never
 `tasks.md`) under `## Review Backlog`, one `### PR #N — <title> (<date>)` group per cycle (`### <branch> — <commit summary> (<date>)` on the lite or `--no-hub`
 path):
 
@@ -108,6 +125,31 @@ Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing t
 `[harness]` tooling/CI. An in-scope P2/P3 line ends with `(introduced here)`. Append to an
 existing section; never overwrite earlier groups. Mark a verified pre-existing bug `(pre_existing)`.
 
-Before appending, check `backlog.md` → `## Rejected — do not re-file`: a finding that matches an
-entry there is not filed unless this cycle's evidence meets that entry's re-file bar. List each
-withheld finding in the cycle report with the entry it matched, so a near-miss stays visible.
+On private or non-GitHub file queues, use the existing format and flag security findings as
+`[security]` (the `security` label on GitHub).
+
+### Public security findings
+
+Identify `security` from the substance of each finding, regardless of its priority or source.
+Separate it before forming the queue batch or editing a file. On public GitHub repositories,
+file a draft repository security advisory under the standing grant. Resolve the owner and repo
+from `origin`. Send a JSON body with `summary`, `description` and the affected `vulnerabilities`
+array over stdin, using evidence-backed package and version data. For a repository with no package
+ecosystem use `other` and the affected product name. Follow the
+[GitHub advisory API](https://docs.github.com/en/rest/security-advisories/repository-advisories#create-a-repository-security-advisory).
+
+```bash
+QUEUE_SCRIPTS="<absolute task-next skill directory>/scripts"
+REPO=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from queue_backend import github_slug; print("/".join(github_slug(".")))' "$QUEUE_SCRIPTS") || exit 1
+# stdin is the in-memory JSON payload.
+gh api --hostname github.com --method POST "repos/$REPO/security-advisories" --input - --jq '.ghsa_id' 2>/dev/null
+```
+
+Run with shell tracing off and pass the payload directly over stdin, without a scratch file or
+inline shell expansion of the finding. Require a successful exit and a nonempty GHSA ID. Reuse
+the advisory ID on re-review for the same finding. Keep
+public PRs, cycle reports and saved dispositions to the GHSA ID, without details or file
+locations. With `no-queue-write`, unverified visibility, an unsupported host or a failed advisory
+call, keep the details in-session only and report the withheld count. The same applies when a
+public adapter has no approved advisory route. This step never sends public security findings to
+`create`, a queue file or the pending store.

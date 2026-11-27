@@ -145,3 +145,33 @@ Review recall fingerprint: 09b4e1f3bfa1c7207314660dcea9b4d4f91bbb28
 
 The re-scoring and disposition protocol follows [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/)
 (2026-10-15).
+
+# 2026-11-27 run for queue-backed review follow-ups
+
+The full suite completed all four arms on the ten introducing diffs in isolated clones. It used Claude Code 2.1.332 at medium effort, Codex CLI 0.172.0 in companion plugin mode, and agy 1.5.18. The comments pass used the updated applying guidance.
+
+| Gold defect | Claude | Codex | agy |
+|---|---|---|---|
+| f01 | miss | hit | hit |
+| f02 | hit | hit | hit |
+| f03a | miss | hit | hit |
+| f03b | miss | miss | miss |
+| f05 | hit | hit | hit |
+| f06 | hit | hit | miss |
+| f07 | hit | hit | hit |
+| f08a | miss | miss | hit |
+| f08b | hit | hit | hit |
+| f10 | hit | miss | hit |
+| f11 | hit | miss | hit |
+| f12 | hit | miss | hit |
+
+| Source | Gold defects detected | Reported findings | Tagged `pre_existing` |
+|---|---|---|---|
+| Claude | 8 / 12 | 50 | 2 |
+| Codex | 7 / 12 | 42 | 11 |
+| agy | 10 / 12 | 58 | 3 |
+| Comments | outside recall scoring | 188 | outside scope |
+
+The three code reviewers together detected 11 of 12 gold defects. Finding counts are unadjudicated. The raw outputs are in the dispatch evidence directory.
+
+Review recall fingerprint: af6b7fa32222ba106ad89c139bbc07f875d15e0e

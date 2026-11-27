@@ -2,9 +2,9 @@
 name: repo-architecture
 description: >-
   Scan this repo for deepening opportunities — shallow modules whose complexity should
-  collapse behind a smaller interface — and queue the ones you pick as backlog items.
+  collapse behind a smaller interface — and queue the ones you pick as work items.
 disable-model-invocation: true
-version: 1.1.2
+version: 1.2.0
 ---
 
 # Repo Architecture
@@ -13,7 +13,7 @@ version: 1.1.2
 > `skills/engineering/improve-codebase-architecture` and its `codebase-design` vocabulary.
 > Deviations: the candidates are presented as markdown in the conversation rather than as a
 > Tailwind/Mermaid HTML report (this repo ships nothing that renders one), and accepted
-> candidates land as `backlog.md` items instead of being explored inline — the queue is where
+> candidates land as work items instead of being explored inline — the queue is where
 > this repo's work already lives.
 
 Surface architectural friction and propose **deepening opportunities**: changes that turn
@@ -91,11 +91,17 @@ Two things to settle before queuing, because they decide the ticket's size:
 
 ## Step 4 — Queue it
 
-Append the accepted candidate to `backlog.md` as a normal item — scope, the acceptance
+Check `queue_backend.py rejected` before filing, then send the accepted candidate to
+`queue_backend.py create` (bundled with `dev:task-next`). Follow
+`../task-next/references/queue-backend-contract.md` → *Filing findings*. On GitHub, file it
+under the standing grant, with a stable key for the candidate, the agreed scope and acceptance
+criterion, and the vocabulary term for what gets deepened. Report the issue ref.
+
+On `edit_file`, append the accepted candidate to `backlog.md` as a normal item — scope, the acceptance
 criterion in one line, and the vocabulary term for what gets deepened. Do **not** implement it
 here; this skill produces queued work, not commits.
 
-**No `backlog.md` in this repo:** do not create one. The queue is scaffolding, not a side
+**`edit_file` and no `backlog.md` in this repo:** do not create one. The queue is scaffolding, not a side
 effect of this scan — report the candidate in the conversation and send the user to
 `dev:harness-init`, which owns the file.
 
@@ -103,9 +109,16 @@ If the candidate is large enough to span several sessions, call the Skill tool t
 "dev:task-spec" and "dev:task-tickets", instead of writing one oversized item by hand.
 
 When a candidate is **rejected for a load-bearing reason** — a constraint that would make a
-future scan re-propose it — record that reason where the next reader will meet it: `backlog.md` →
-`## Rejected — do not re-file` (format: `dev:harness-init`'s backlog template). Check that section
-before filing a candidate, too.
+future scan re-propose it — record that reason where the next reader will meet it. Resolve the
+backend with `describe` for a rejection that has no `create` response yet. On the file backend,
+use `backlog.md` → `## Rejected — do not re-file` (format: `dev:harness-init`'s backlog template).
+On GitHub, check `rejected` first to avoid duplicating a recorded decision. Call `reject` on an
+existing queue issue. For a new rejection, call `create` with the candidate's stable key, the
+reason and re-file bar in the body, and the `deferred` label so the item stays parked until closed.
+Call `reject` with the reason and re-file bar once `create` confirms the issue. If filing or
+closing cannot finish, report the pending key or parked issue ref and that closing it as
+not planned remains outstanding. With `no-queue-write`, pass the limit to `create` for a new
+rejection and leave existing issues untouched.
 Skip ephemeral reasons ("not worth it right now") and self-evident ones.
 
 Then tell the user to run `task-next` themselves when they want the queued item built
