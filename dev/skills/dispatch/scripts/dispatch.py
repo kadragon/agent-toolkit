@@ -231,8 +231,8 @@ def report_instruction(result, *, require_review_sources=False):
     instruction += (
         ' For a pre-merge report, set review to {"head": "<reviewed commit SHA or null>", '
         '"sources": ["<reviewer name>"], "status": "passed|missing|pending"}. '
-        "Report ready only with passed review on head and passing CI. Keep the review record in "
-        "any later PR completion report."
+        "Report ready only with passed review on head and passing CI. In every PR completion "
+        "report, keep the review record and use the PR's head commit in head."
     )
     if require_review_sources:
         instruction += (

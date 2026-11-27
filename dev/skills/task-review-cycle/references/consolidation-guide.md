@@ -124,8 +124,9 @@ the final evidence in the merge commit message before retiring the archive.
 
 ## Dispatch pre-merge report
 
-Dispatched Codex task cycles require the hub's Claude primary and the agy and Codex panel
-sources. Use their consolidated outcomes from Step 3 and late reclaim. The primary slot
+All dispatched PRs report the reviewed head and sources. Dispatched Codex task cycles require
+the hub's Claude primary and the agy and Codex panel sources. Use their consolidated outcomes
+from Step 3 and late reclaim. The primary slot
 requires the independent Claude result. A missing source blocks both readiness and an
 authorized base merge. Keep a pending process running and preserve its result path for resume.
 Follow the existing review budget when reclaiming the result.
@@ -172,7 +173,8 @@ REPORT_JSON
 For a pre-merge stop, pass `status: ready` once all required reviews and final gates pass on
 the reported head. For a failed gate, pass `status: blocked` and state the blocker. A child
 authorized to merge proceeds to the merge helper only when the review and final gates pass on
-the current PR head. Carry the review record and source outcomes into the confirmed merge report.
+the current PR head. In the confirmed merge report, keep that PR head in `head` and carry forward
+the review record and source outcomes.
 
 ## Record finding dispositions
 

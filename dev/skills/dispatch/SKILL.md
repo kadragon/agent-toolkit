@@ -210,13 +210,12 @@ The user delegates the session's decisions to this session:
   was chosen and why. Honor Git limits and step 2's batch authorization rule.
 - **Push and merge** — merge one PR at a time. Once a parallel PR branch has been pushed,
   fetch and merge its PR base, preserving both sides of shared file-queue entries.
-  If the head changes or a legacy report lacks review evidence, resume the child with
-  `dispatch.py send --continue` for the review cycle's *Dispatch pre-merge report* on the current head.
+  If the head changes or a legacy report lacks review evidence, use *Continue with another phase*
+  below to refresh the review cycle's *Dispatch pre-merge report* on the current head.
   Require full `collect` to show `result.status == "ready"` and `result.review.status == "passed"`.
   Match `result.review.head` and `result.head` to the current PR head and verify required CI there.
-  Require the merge owner's archived `base-merge` authority per
-  [Git authorization](../task-next/references/git-authorization.md). On GitHub, pin the verified SHA
-  using `--expected-head` or `gh pr merge --match-head-commit`.
+  For authority and the GitHub SHA check, follow *Home merges a child PR* in
+  `references/launch-handoff.md`.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
   in collect), and any decision the user kept. Tell the user what is waiting and stop watching.
@@ -246,5 +245,6 @@ remain. If close fails, keep the receipt files for diagnosis.
 Reuse the Codex session and worktree for the next authorized phase with
 `dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`.
 Use the same receipt for send and close. Point to the contract and evidence that still applies.
-Preserve the original authority and record new verified grants in the contract. For a Claude
-slash-only phase, launch again with the command first and include the contract and worktree.
+Preserve the original authority and archive any new grant. Relaunch Claude with the command first,
+passing the prior contract, worktree and review evidence. For review, include the PR and current SHA.
+Collect the updated review result from the continuation's receipt.

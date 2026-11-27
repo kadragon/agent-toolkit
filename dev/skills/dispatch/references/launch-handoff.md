@@ -33,3 +33,17 @@ restriction by itself cannot establish a grant. For implementation-only work, us
 `--no-git-writes`. The child receives `implementation-only` and stops before commits, pushes
 or PR writes. Any additional restrictions from `--git-limits` apply from worktree preparation
 onward. The child quotes them separately in the Sprint Contract for handoff and resume.
+
+## Home merges a child PR
+
+Verify the original user grant authorizes the home session to merge the exact repository
+and PR under the handoff limits. If the child's archived contract is `pr-only`, preserve it.
+Archive the home grant with `cycle_state.py save` from a separate home-owned feature branch in
+the target repo. Scope that contract to the repository, PR and feature branch to be merged and
+record the verified grant with `base-merge` as its allowed action.
+
+Before merging, match the live PR to that scope and apply the review and CI checks in
+`SKILL.md` → *Push and merge*. In the target repo, run `cycle_state.py authorize --branch
+<home-contract-branch> --action base-merge` per
+`../../task-next/references/git-authorization.md` → *Check before execution*. On GitHub, pass the
+same checked SHA to `gh pr merge --match-head-commit` and use the merge strategy the user granted.
