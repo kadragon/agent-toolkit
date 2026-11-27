@@ -35,10 +35,25 @@ from dispatch import (
     transcript_echoed,
     verify_terminal,
 )
-from quota import WEEK, assess
+from quota import WEEK, assess, claude_snapshot
 from quota import main as quota_main
 
 SCRIPTS = Path(__file__).resolve().parent
+QUOTA_OK = {"claude": {"state": "ok"}, "codex": {"state": "ok"},
+            "bias": "none", "effective_bias": "none", "prefer_expiring_passes": False}
+
+
+def setUpModule():
+    home = Path(unittest.enterModuleContext(tempfile.TemporaryDirectory()))
+    unittest.enterModuleContext(patch.dict(os.environ, {
+        "CODEX_HOME": str(home / "codex"), "CLAUDE_CONFIG_DIR": str(home / "claude"),
+        "QUOTA_CLAUDE_CACHE": str(home / "quota.json"),
+    }))
+
+
+class DispatchTestCase(unittest.TestCase):
+    def setUp(self):
+        self.quota = self.enterContext(patch("dispatch.read_quota_snapshot", return_value=QUOTA_OK))
 
 
 class TerminalTests(unittest.TestCase):
@@ -105,7 +120,7 @@ class ChildArgvTests(unittest.TestCase):
         self.assertEqual(argv[-1], "/dev:task-next")
 
 
-class DispatchReceiptTests(unittest.TestCase):
+class DispatchReceiptTests(DispatchTestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
@@ -155,7 +170,8 @@ class DispatchReceiptTests(unittest.TestCase):
                                         message=message if cli == "claude" else None,
                                         task=message if cli == "codex" else None)
                 stderr = StringIO()
-                with redirect_stderr(stderr), patch("sys.stdout", new_callable=StringIO) as stdout:
+                with (patch("dispatch.warn_linked_worktree"), redirect_stderr(stderr),
+                      patch("sys.stdout", new_callable=StringIO) as stdout):
                     launch(args)
                 payload = json.loads(stdout.getvalue())
                 prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
@@ -314,7 +330,9 @@ class DispatchReceiptTests(unittest.TestCase):
             (home / "repos").mkdir()
             extra_lines = ["Use the launch-time checklist."]
             (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
-            args = self.launch_args(directory)
+            args = self.launch_args(directory, user_pinned=True)
+            snapshot = {**QUOTA_OK, "bias": "claude", "effective_bias": "claude"}
+            self.quota.return_value = snapshot
             owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
             live_owner = {**owner, "foreground": {"cwd": str(home)}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
@@ -340,6 +358,9 @@ class DispatchReceiptTests(unittest.TestCase):
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
             self.assertFalse(receipt["sent"])
+            self.assertEqual(receipt["quota_snapshot"], snapshot)
+            self.assertEqual(receipt["bias"], "claude")
+            self.assertIn("explicitly selected", receipt["user_pin_reason"])
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
@@ -1050,7 +1071,7 @@ class PickTests(unittest.TestCase):
                 self.assertEqual("Launch from the main checkout and add --tree" in result.stderr, checkout == linked)
 
 
-class CodexModelTests(unittest.TestCase):
+class CodexModelTests(DispatchTestCase):
     CACHE = {"models": [
         {"slug": "gpt-6.2-sol", "visibility": "list", "upgrade": None},
         {"slug": "gpt-6.10-sol", "visibility": "hide", "upgrade": None},
@@ -1066,6 +1087,7 @@ class CodexModelTests(unittest.TestCase):
     ]}
 
     def setUp(self):
+        super().setUp()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.home = Path(directory.name)
@@ -1163,7 +1185,7 @@ class CodexModelTests(unittest.TestCase):
                 cache.assert_not_called()
 
 
-class T3PromptTests(unittest.TestCase):
+class T3PromptTests(DispatchTestCase):
     FIELDS = DispatchReceiptTests.FIELDS
     HANDOFF = DispatchReceiptTests.HANDOFF
     BLOCK = DispatchReceiptTests.BLOCK
@@ -1197,6 +1219,27 @@ class T3PromptTests(unittest.TestCase):
         with patch("dispatch.tempfile.mkdtemp") as mkdtemp, self.assertRaisesRegex(SystemExit, "fable"):
             render_t3_thread_launch(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
         mkdtemp.assert_not_called()
+
+    def test_prompt_enforces_quota_and_records_the_exception(self):
+        snapshot = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex"}
+        self.quota.return_value = snapshot
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            with patch("dispatch.tempfile.mkdtemp") as mkdtemp:
+                with self.assertRaisesRegex(SystemExit, "quota bias codex refuses"):
+                    render_t3_thread_launch(self.prompt_args(home))
+                mkdtemp.assert_not_called()
+            reason = "production DB: execution plan"
+            payload = self.render(self.prompt_args(home, model="claude-opus-5-5", bias_exception=reason), home)
+            receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["bias_exception"], reason)
+            self.assertEqual(receipt["quota_snapshot"], snapshot)
+            self.quota.return_value = {**QUOTA_OK, "bias": "claude", "effective_bias": "claude"}
+            with patch("dispatch.tempfile.mkdtemp") as mkdtemp:
+                with self.assertRaisesRegex(SystemExit, "quota bias claude refuses"):
+                    render_t3_thread_launch(self.prompt_args(home, cli="codex", model="gpt-6.2-sol",
+                                                             effort="high", message="$task-next"))
+                mkdtemp.assert_not_called()
 
     def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
         for cli, model, option in (("claude", "claude-sonnet-5-5", "effort"),
@@ -1423,7 +1466,7 @@ class WorkflowDocsTests(unittest.TestCase):
                 self.assertIsNone(re.search(r"gpt-\d", doc.read_text(encoding="utf-8"), re.IGNORECASE))
 
 
-class CodexSendTests(unittest.TestCase):
+class CodexSendTests(DispatchTestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
     FOOTER_0171 = (
@@ -1444,6 +1487,7 @@ class CodexSendTests(unittest.TestCase):
     )
 
     def setUp(self):
+        super().setUp()
         self.enterContext(patch("dispatch.POST_SEND_SETTLE_SECONDS", 0))
 
     def test_codex_0171_two_line_footer(self):
@@ -2406,7 +2450,226 @@ class CodexSendTests(unittest.TestCase):
             self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
 
+class LaunchQuotaTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.claude, self.codex = self.root / "claude", self.root / "codex"
+        self.claude.mkdir()
+        self.now = dt.datetime.now(dt.timezone.utc)
+        self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.claude), "CODEX_HOME": str(self.codex),
+                    "QUOTA_CLAUDE_CACHE": str(self.claude / "quota.json")}
+
+    def write_usage(self, claude, codex, *, claude_five_hour=None):
+        reset = (self.now + dt.timedelta(days=1)).timestamp()
+        snapshot = {"used": claude, "reset": reset, "observed": self.now.timestamp()}
+        if claude_five_hour is not None:
+            snapshot["five_hour"] = {"used": claude_five_hour, "reset": self.now.timestamp() + 3600}
+        (self.claude / "quota.json").write_text(json.dumps(snapshot), encoding="utf-8")
+        session = self.codex / "sessions" / self.now.strftime("%Y/%m/%d") / "session.jsonl"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        session.write_text(json.dumps({
+            "type": "event_msg", "timestamp": self.now.isoformat(), "payload": {
+                "type": "token_count", "rate_limits": {
+                    "secondary": {"window_minutes": 10080, "used_percent": codex, "resets_at": reset},
+                },
+            },
+        }), encoding="utf-8")
+
+    def preview(self, cli, model, *options, effort="medium"):
+        first_message = ["Example"] if cli == "claude" else ["--task", "Example"]
+        return subprocess.run([
+            sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch", "--dry-run",
+            "--cli", cli, "--model", model, "--effort", effort, "--cwd", str(self.root),
+            "--work-kind", "standalone", "--request", "Example", "--unit", "Example",
+            "--git-limits", "not specified", *options, *first_message,
+        ], env=self.env, cwd=self.root, capture_output=True, text=True, encoding="utf-8")
+
+    def test_codex_bias_requires_a_named_exception_for_opus_and_refuses_lower_tiers(self):
+        self.write_usage(80, 10)
+        for model in ("haiku", "claude-sonnet-4-6", "default"):
+            with self.subTest(model=model):
+                denied = self.preview("claude", model, "--bias-exception", "security")
+                self.assertEqual(denied.returncode, 1)
+                self.assertIn("quota bias codex refuses", denied.stderr)
+        for options in ((), ("--bias-exception", "  "), ("--bias-exception", "mentions security")):
+            with self.subTest(options=options):
+                denied = self.preview("claude", "opus", *options)
+                self.assertEqual(denied.returncode, 1)
+                self.assertIn("requires --bias-exception", denied.stderr)
+        accepted = self.preview("claude", "claude-opus-4-6", "--bias-exception", "Auth: SSO")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(json.loads(accepted.stdout)["bias_exception"], "Auth: SSO")
+
+    def test_claude_bias_moves_codex_rows_and_keeps_top_tier(self):
+        self.write_usage(10, 80)
+        for model, effort in (("gpt-6-luna", "medium"), ("gpt-6.1-terra", "high"),
+                              ("gpt-6.2-sol", "medium"), ("gpt-6.2-sol", "high")):
+            with self.subTest(model=model, effort=effort):
+                denied = self.preview("codex", model, effort=effort)
+                self.assertEqual(denied.returncode, 1)
+                self.assertIn("quota bias claude refuses", denied.stderr)
+        accepted = self.preview("codex", "gpt-6.2-sol", effort="xhigh")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+    def test_expiring_passes_tighten_top_tier_exceptions_in_either_direction(self):
+        self.write_usage(10, 10)
+        for cli, model, home, preferred in (
+            ("claude", "opus", self.codex, "codex"),
+            ("codex", "gpt-6.2-sol", self.claude, "claude"),
+        ):
+            with self.subTest(cli=cli):
+                path = home / "reset-passes.json"
+                path.write_text(json.dumps([(self.now + dt.timedelta(hours=1)).isoformat()]), encoding="utf-8")
+                denied = self.preview(cli, model, "--bias-exception", "data migration", effort="xhigh")
+                self.assertEqual(denied.returncode, 1)
+                self.assertIn("requires --bias-exception with one of: production DB, deploy", denied.stderr)
+                accepted = self.preview(cli, model, "--bias-exception", "production DB", effort="xhigh")
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                audit = json.loads(accepted.stdout)
+                self.assertEqual(audit["bias"], preferred)
+                self.assertTrue(audit["quota_snapshot"]["prefer_expiring_passes"])
+                path.unlink()
+
+    def test_critical_approval_is_independent_of_pin_and_passes(self):
+        for cli, model, home, usage in (
+            ("claude", "sonnet", self.claude, (90, 10)),
+            ("codex", "gpt-6-luna", self.codex, (10, 90)),
+        ):
+            with self.subTest(cli=cli):
+                self.write_usage(*usage)
+                (home / "reset-passes.json").write_text(
+                    json.dumps([(self.now + dt.timedelta(hours=1)).isoformat()]), encoding="utf-8")
+                denied = self.preview(cli, model, "--user-pinned")
+                self.assertEqual(denied.returncode, 1)
+                self.assertIn("requires explicit user approval", denied.stderr)
+                still_biased = self.preview(cli, model, "--approve-critical")
+                self.assertEqual(still_biased.returncode, 1)
+                self.assertIn("quota bias", still_biased.stderr)
+                accepted = self.preview(cli, model, "--user-pinned", "--approve-critical")
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                audit = json.loads(accepted.stdout)
+                self.assertEqual(audit["quota_snapshot"][cli]["raw_state"], "critical")
+                self.assertTrue(audit["critical_approved"])
+                self.assertIn("user_pin_reason", audit)
+
+    def test_both_hot_uses_the_longer_runway_or_the_base_table_on_a_tie(self):
+        self.write_usage(80, 75)
+        denied = self.preview("claude", "sonnet")
+        self.assertEqual(denied.returncode, 1)
+        self.assertIn("quota bias codex", denied.stderr)
+        self.write_usage(75, 75)
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "both-hot")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
+
+    def test_both_hot_prefers_the_cli_that_can_launch_without_critical_approval(self):
+        self.write_usage(10, 80, claude_five_hour=90)
+        accepted = self.preview("codex", "gpt-6-luna")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "both-hot")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "codex")
+
+    def test_both_critical_allows_the_cli_with_explicit_approval(self):
+        self.write_usage(90, 95)
+        accepted = self.preview("codex", "gpt-6-luna", "--approve-critical")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "both-hot")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
+
+    def test_unreadable_codex_log_does_not_disable_claude_critical_gate(self):
+        self.write_usage(90, 10)
+        original_stat = Path.stat
+
+        def stat(path, *args, **kwargs):
+            if path.name == "session.jsonl":
+                raise FileNotFoundError(path)
+            return original_stat(path, *args, **kwargs)
+
+        snapshot_path = self.claude / "quota.json"
+        with (patch.dict(os.environ, self.env), patch("quota.claude_snapshot", return_value=claude_snapshot(snapshot_path)),
+              patch("quota.Path.stat", stat), redirect_stdout(StringIO()) as output):
+            quota_main()
+        snapshot = json.loads(output.getvalue())
+        self.assertEqual(snapshot["codex"]["state"], "unknown")
+        self.assertEqual(snapshot["claude"]["state"], "critical")
+        args = SimpleNamespace(cwd=str(self.root), name=None, parent=None, cli="claude", model="sonnet",
+                               effort="medium", task=None, message="Example", keep_connectors=False,
+                               dry_run=True, **(DispatchReceiptTests.HANDOFF | {"work_kind": "standalone"}))
+        with patch("dispatch.read_quota_snapshot", return_value=snapshot):
+            with self.assertRaisesRegex(SystemExit, "requires explicit user approval"):
+                launch(args)
+
+    def test_unknown_snapshots_warn_and_leave_the_base_route_available(self):
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        for cli in ("claude", "codex"):
+            self.assertIn(f"{cli} quota snapshot is unavailable", accepted.stderr)
+        self.assertEqual(json.loads(accepted.stdout)["bias"], "none")
+
+    def test_unknown_preferred_cli_does_not_block_an_available_hot_cli(self):
+        self.write_usage(80, 10)
+        (self.codex / "sessions" / self.now.strftime("%Y/%m/%d") / "session.jsonl").unlink()
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("codex quota snapshot is unavailable", accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "codex")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
+
+    def test_known_expiring_pass_does_not_block_a_cli_with_an_unknown_snapshot(self):
+        self.write_usage(10, 10)
+        (self.claude / "quota.json").unlink()
+        (self.codex / "reset-passes.json").write_text(
+            json.dumps([(self.now + dt.timedelta(hours=1)).isoformat()]), encoding="utf-8")
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("claude quota snapshot is unavailable", accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "codex")
+        self.assertTrue(audit["quota_snapshot"]["prefer_expiring_passes"])
+
+    def test_quota_process_failure_or_invalid_output_warns_and_allows_launch(self):
+        args = SimpleNamespace(cwd=str(self.root), name=None, parent=None, cli="claude", model="sonnet",
+                               effort="medium", task=None, message="Example", keep_connectors=False,
+                               dry_run=True, **(DispatchReceiptTests.HANDOFF | {"work_kind": "standalone"}))
+        for response in (subprocess.TimeoutExpired(["quota.py"], 10), SimpleNamespace(stdout="bad JSON"),
+                         SimpleNamespace(stdout='{"bias":"none"}')):
+            with self.subTest(response=response), patch("dispatch.subprocess.run", side_effect=[response]) as run, \
+                    patch("dispatch.warn_linked_worktree"), redirect_stdout(StringIO()) as output, \
+                    redirect_stderr(StringIO()) as errors:
+                launch(args)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0], [sys.executable, "-I", "-X", "utf8", str(SCRIPTS / "quota.py")])
+                self.assertIsNone(json.loads(output.getvalue())["quota_snapshot"])
+                self.assertIn("warning: quota check unavailable", errors.getvalue())
+
+
 class QuotaTests(unittest.TestCase):
+    def test_claude_pass_defaults_to_claude_home_and_filters_by_weekly_reset(self):
+        now = dt.datetime(2026, 12, 10, tzinfo=dt.timezone.utc).timestamp()
+        snapshot = {"used": 75, "reset": now + 2 * 86400, "observed": now}
+        expiry = "2026-12-11T07:00:00+09:00"
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            path = home / ".claude" / "reset-passes.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps([expiry]), encoding="utf-8")
+            with (patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}),
+                  patch("quota.Path.home", return_value=home), patch("quota.time.time", return_value=now),
+                  patch("quota.claude_snapshot", return_value=snapshot), redirect_stdout(StringIO()) as output):
+                quota_main()
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["claude"]["state"], "ok")
+            self.assertEqual(result["claude"]["raw_state"], "hot")
+            self.assertEqual(result["claude"]["reset_passes"], 1)
+            self.assertEqual(result["claude"]["reset_passes_before_weekly_reset"], [expiry])
+            self.assertEqual(result["bias"], "claude")
+            self.assertTrue(result["prefer_expiring_passes"])
+
     def test_codex_reset_passes_change_routing_and_flag_expiries(self):
         now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
         reset = now + dt.timedelta(days=1)
@@ -2430,7 +2693,7 @@ class QuotaTests(unittest.TestCase):
             session = root / "sessions" / now.strftime("%Y/%m/%d") / "session.jsonl"
             session.parent.mkdir(parents=True)
             for used, expected_state, expected_bias in (
-                (90, "hot", "claude"), (75, "ok", "none"), (10, "ok", "none"),
+                (90, "hot", "claude"), (75, "ok", "codex"), (10, "ok", "codex"),
             ):
                 with self.subTest(used=used):
                     session.write_text(json.dumps({
@@ -2448,6 +2711,7 @@ class QuotaTests(unittest.TestCase):
                     self.assertEqual(result["codex"]["reset_passes_before_weekly_reset"],
                                      [soon.isoformat(), later.isoformat()])
                     self.assertEqual(result["bias"], expected_bias)
+                    self.assertEqual(result["prefer_expiring_passes"], expected_bias == "codex")
 
     def test_codex_reset_passes_missing_malformed_or_expired(self):
         now = dt.datetime(2026, 11, 26, tzinfo=dt.timezone.utc)
@@ -2544,7 +2808,8 @@ class QuotaTests(unittest.TestCase):
             env = {**os.environ, "QUOTA_CLAUDE_CACHE": str(snapshot), "CODEX_HOME": str(root)}
             command = [sys.executable, "-I", str(SCRIPTS / "quota.py")]
             missing = json.loads(subprocess.check_output(command, cwd=root, env=env))
-            self.assertEqual(missing["claude"], {"state": "unknown"})
+            unknown = {"state": "unknown", "reset_passes": 0, "reset_passes_before_weekly_reset": []}
+            self.assertEqual(missing["claude"], unknown)
             self.assertEqual(missing["bias"], "none")
 
             now = time.time()
@@ -2576,11 +2841,11 @@ class QuotaTests(unittest.TestCase):
                 with self.subTest(data=data):
                     snapshot.write_text(json.dumps(data), encoding="utf-8")
                     out = json.loads(subprocess.check_output(command, cwd=root, env=env))
-                    self.assertEqual(out["claude"], {"state": "unknown"})
+                    self.assertEqual(out["claude"]["state"], "unknown")
                     self.assertIn("state", out["codex"])
             snapshot.write_text("[" * 100000, encoding="utf-8")
             out = json.loads(subprocess.check_output(command, cwd=root, env=env))
-            self.assertEqual(out["claude"], {"state": "unknown"})
+            self.assertEqual(out["claude"]["state"], "unknown")
             snapshot.write_text(json.dumps({**valid, "five_hour": {"used": 91}}), encoding="utf-8")
             out = json.loads(subprocess.check_output(command, cwd=root, env=env))
             self.assertEqual(out["claude"]["used"], 42)
