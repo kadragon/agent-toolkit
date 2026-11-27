@@ -82,7 +82,7 @@ and saves the snapshot and any override in `run.json`. See `references/quota-sna
 |------|--------|
 | `none` | the tables as written |
 | `codex` | Top-tier work goes to `sol`. For `opus`, pass `--bias-exception` with `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
-| `claude` | Route `luna` to `haiku`, `sol` below `xhigh` to `sonnet/medium`, and `terra` to `sonnet` at the chosen effort. |
+| `claude` | Route `luna` to `haiku`, mid-tier `sol` below `xhigh` to `sonnet`, top-tier `sol/high` to `opus/high`, and `terra` to `sonnet` at the chosen effort. Carry any escalation floor. |
 
 - When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
   where the task warrants it. Only `production DB` and `deploy` qualify as exceptions.

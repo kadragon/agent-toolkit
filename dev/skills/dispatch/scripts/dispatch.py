@@ -466,7 +466,7 @@ def launch_quota(args, model):
     if quota.get("raw_state", quota["state"]) == "critical" and not approved:
         raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
     preferred = snapshot["effective_bias"]
-    if pinned or preferred in ("none", args.cli):
+    if pinned or quota["state"] == "unknown" or preferred in ("none", args.cli):
         return audit
 
     words = set(re.split(r"[^a-z0-9]+", model.lower()))

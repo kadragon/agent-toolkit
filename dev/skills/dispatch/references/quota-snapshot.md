@@ -70,5 +70,7 @@ favors the only CLI that can run without critical approval. If both can run, it 
 longer weekly runway when both estimates are available and differ. If both require approval,
 it leaves the choice to the user. If the favored CLI is `ok` and has expiring passes,
 `prefer_expiring_passes` tightens the routing exceptions.
-The launcher warns when a snapshot is unknown and uses the other CLI's data. If the quota
-helper fails or returns invalid output, the launcher warns and proceeds without a quota decision.
+The launcher warns when a snapshot is unknown. It skips the routing gate for that CLI and
+when the preferred CLI's snapshot is unknown. A known critical state still requires approval.
+If the quota helper fails or returns invalid output, the launcher warns and proceeds without
+a quota decision.

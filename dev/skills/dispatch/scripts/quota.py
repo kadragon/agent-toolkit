@@ -236,6 +236,8 @@ def main():
             effective = eligible[0]
         elif eligible and claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
             effective = "claude" if claude_runway > codex_runway else "codex"
+    if effective in clis and clis[effective]["state"] == "unknown":
+        effective = "none"
     preferred = clis.get(effective, {})
     print(json.dumps({**clis, "bias": routing, "effective_bias": effective,
                       "prefer_expiring_passes": bool(preferred.get("state") == "ok"

@@ -2610,6 +2610,28 @@ class LaunchQuotaTests(unittest.TestCase):
             self.assertIn(f"{cli} quota snapshot is unavailable", accepted.stderr)
         self.assertEqual(json.loads(accepted.stdout)["bias"], "none")
 
+    def test_unknown_preferred_cli_does_not_block_an_available_hot_cli(self):
+        self.write_usage(80, 10)
+        (self.codex / "sessions" / self.now.strftime("%Y/%m/%d") / "session.jsonl").unlink()
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("codex quota snapshot is unavailable", accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "codex")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
+
+    def test_known_expiring_pass_does_not_block_a_cli_with_an_unknown_snapshot(self):
+        self.write_usage(10, 10)
+        (self.claude / "quota.json").unlink()
+        (self.codex / "reset-passes.json").write_text(
+            json.dumps([(self.now + dt.timedelta(hours=1)).isoformat()]), encoding="utf-8")
+        accepted = self.preview("claude", "sonnet")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("claude quota snapshot is unavailable", accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "codex")
+        self.assertTrue(audit["quota_snapshot"]["prefer_expiring_passes"])
+
     def test_quota_process_failure_or_invalid_output_warns_and_allows_launch(self):
         args = SimpleNamespace(cwd=str(self.root), name=None, parent=None, cli="claude", model="sonnet",
                                effort="medium", task=None, message="Example", keep_connectors=False,
