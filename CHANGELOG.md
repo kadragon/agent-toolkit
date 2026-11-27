@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Add the github queue backend read path: describe, list and show (dev v4.12.34) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Flag Codex children whose hooks broke after a mid-wave plugin update (dev v4.12.33) (2026-11-27) → dev/skills/dispatch/references/codex-readiness.md
 - [done] Add a T3 Code thread backend to dispatch with Herdr kept as the fallback (dev v4.12.32) (2026-11-27) → dev/skills/dispatch/references/t3-backend.md
 - [done] Add the queue backend resolver and its built-in backlog backend (dev v4.12.31) (2026-11-27) → docs/design/github-issues-queue.md

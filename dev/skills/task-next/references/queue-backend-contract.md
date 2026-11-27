@@ -86,5 +86,37 @@ existing item.
 
 ## `github` backend
 
-Resolves today but answers exit 2 for every op until its read path lands; `gh` missing or
-unauthenticated will be a hard error, never a `backlog.md` fallback.
+Reads `origin`'s `owner/name` and queries `gh api graphql`. `gh` missing or unauthenticated is a
+hard error (exit 1, naming `gh auth login`), never a `backlog.md` fallback. `create`, `rejected`,
+`reject` and `defer` answer exit 2 until the write path lands.
+
+- `describe`: `visibility` from the repo's `isPrivate`, `ops` `describe`/`list`/`show`,
+  `close_ref_template` `"Closes {ref}"`.
+- **Trust gate.** Only open issues labelled `task-queue` **and** authored by
+  `OWNER`/`MEMBER`/`COLLABORATOR` are queue items; another author's labelled issue is skipped
+  with a warning. Comments are never read.
+- **Refs.** `#N` for this repo, `owner/name#N` for a linked issue elsewhere.
+- **Groups.** An open sub-issue of a queue issue is never a standalone candidate. A queue issue
+  with open sub-issues is one candidate whose `items[]` are its eligible sub-issues' titles —
+  each a same-repo queue item that is not claimed, blocked or deferred — with `item_refs[]`
+  (parallel refs) and `excluded[]` (`ref`, `reason`) naming the rest. `counts` cover every open
+  sub-issue. A lone issue carries itself: `items` `[title]`, `item_refs` `[ref]`. A parent with no
+  eligible sub-issue is parked (`deferred` when every non-claimed one is deferred, else
+  `blocked`), or left out when all are claimed. `tag` is the `[TYPE]` title prefix the items share.
+- **Parking.** An open `blockedBy` issue parks it (`blocked`, payload: the open blocker refs); a
+  closed blocker is ignored. Label `deferred` parks it (`deferred`, payload: its `Deferred:
+  <reason>` body line).
+- **Claims** (`claimed[]`, no remote write): (a) a `.worktrees/*/tasks.md` `## Covers` line naming
+  `#N` (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
+  `closedByPullRequestsReferences` by an `OWNER`/`MEMBER`/`COLLABORATOR` author, `by` = its URL
+  (another author's PR is ignored with a warning); (c) a closing keyword in a commit on the local
+  default branch not yet on `origin` (`origin/HEAD`, else `origin/main`/`origin/master`;
+  unresolvable → a warning, never a failed `list`).
+- **Order.** Issue number ascending, `someday` last; the fast path caps at 3, `full_scan` is
+  uncapped (issues have no h3/h2 kinds, so the backlog's type priority reduces to number order).
+- **Paging.** Every connection selection reads (issues, labels, blockers, sub-issues, closing
+  PRs) is paged up to a page limit. Hitting it sets `incomplete: true` with a warning, leaves out
+  any issue read only in part or whose same-repo parent was not read, and fails with exit 1 when no candidate remains — never an empty
+  queue. `ref` and `tasks` in a `list` request are ignored.
+- `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
+  open blockers plus the issue `state`.
