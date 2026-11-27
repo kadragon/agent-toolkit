@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "guard"
 DEV = ROOT / "dev"
 MANIFESTS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
+IGNORE_BYTECODE = shutil.ignore_patterns("__pycache__")
 
 
 class GuardPluginTests(unittest.TestCase):
@@ -38,7 +39,7 @@ class GuardPluginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             bundle = root / "installed guard"
-            shutil.copytree(GUARD, bundle)
+            shutil.copytree(GUARD, bundle, ignore=IGNORE_BYTECODE)
             project = root / "project"
             project.mkdir()
             (project / "AGENTS.md").write_text("Guidance\n", encoding="utf-8")
@@ -70,7 +71,7 @@ class GuardPluginTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            shutil.copytree(GUARD, root / "guard")
+            shutil.copytree(GUARD, root / "guard", ignore=IGNORE_BYTECODE)
             before = bundle_bytes(root / "guard")
             self.assertTrue(all(
                 (name == "hooks.json" or name.startswith("hooks/") or name in MANIFESTS) and not Path(name).name.startswith("test_")
