@@ -86,6 +86,12 @@ jobs:
       - name: Check harness portability and references
         run: python3 scripts/ci/check_harness_drift.py
 
+      - name: Test harness validation
+        run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
+
+      - name: Test harness reconciliation
+        run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
+
       - name: Check review recall scorecard freshness
         env:
           REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
@@ -119,7 +125,7 @@ jobs:
       - name: Test CI test-suite detection
         run: python3 scripts/ci/check_test_suites_wired.py --test
 
-      - name: Check CI test-suite coverage
+      - name: Check that all test suites are wired
         run: python3 scripts/ci/check_test_suites_wired.py
 
       - name: Test frontmatter validation
@@ -335,12 +341,6 @@ jobs:
 
       - name: Test plugin disabling
         run: python3 dev/skills/harness-curate/scripts/disable_plugins.py --test
-
-      - name: Test harness validation
-        run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
-
-      - name: Test harness reconciliation
-        run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
 
       - name: Test backlog candidate selection
         run: python3 dev/skills/task-next/scripts/backlog_candidates.py --test
