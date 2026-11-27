@@ -1,6 +1,6 @@
 # Backlog archive
 
-The active task queue and rejected decisions moved to GitHub issues.
+The active task queue and entries from the former Rejected section moved to GitHub issues.
 
 ## Harness — `task-*` edge enforcement (rescoped)
 
