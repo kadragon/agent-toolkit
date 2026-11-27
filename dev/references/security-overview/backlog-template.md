@@ -96,7 +96,7 @@ re-file bar. Require an exact match:
 
 A severity higher than the one the entry records also meets the bar. List each withheld alert
 with the matching entry. If every alert is withheld, file no GitHub issue. On the legacy route,
-remove an existing `## Security Fixes` section under the replacement rules and report the Withheld line.
+apply the replacement rules per type and report the Withheld line.
 
 ### Idempotency
 
@@ -104,12 +104,14 @@ If `backlog.md` already contains a `## Security Fixes` section:
 
 Before replacing: run `git -C "$(git rev-parse --show-toplevel)" log -1 --format=%ai -- backlog.md`. If the file was modified by a human after last scan, prompt: "backlog.md has manual edits — overwrite? [y/N]". Proceed only on "y".
 
-On confirmation (or if no human edit detected):
-- **Replace** that section with fresh scan results.
-- **Preserve** all other content in the file — other `##` groups and `## Review Backlog` findings
-  live in the same file and must survive untouched.
+On confirmation (or if no human edit detected), update each alert type independently:
 
-This prevents duplicate entries from repeated runs.
+- For a complete scan, replace that type's subsection with its eligible items. Remove the
+  subsection if none remain, including when all were withheld.
+- For a failed, truncated, or disabled scan, retain that type's existing subsection verbatim
+  and report its status. Do not build a replacement from partial data.
+- Remove `## Security Fixes` only when all three types had complete scans and no items remain.
+  Preserve all other groups and findings in `backlog.md`.
 
 ## Example Output
 

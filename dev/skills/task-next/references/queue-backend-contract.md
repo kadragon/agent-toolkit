@@ -183,9 +183,10 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   failing mid-write (the response carries `error`), an `incomplete[]` relation, or
   `"queue_limits": "no-queue-write"` (no remote writes) — are kept by key, bound to the
   `owner/name` they were meant for, in `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
-  (outside the working tree and history; every read-merge-write holds `pending.json.lock`), and
+  (outside the working tree and history, indexed by target and key). A Git common directory lock
+  serializes issue lookup, filing, and pending-store updates across worktrees. Drafts are
   named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
-  path. A clean run writes no file.
+  path. A clean run creates no pending file.
   - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
     require the `security` label, no relations, and confirmed private visibility. The backend
     appends `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
@@ -195,10 +196,9 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
     when visibility is unconfirmed. A failed visibility request puts a new alert batch in the
     pending store for retry. With `no-queue-write`, batches without generic security findings
     require no visibility lookup.
-- `publish` re-sends the stored drafts bound to the current `origin` through `create`
-  (retry-safe, so an issue whose response was lost is reused and its missing relations
-  completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes
-  the file when it empties. A draft bound to another repository, or naming a target that no longer
+- `publish` re-sends the stored drafts bound to the current `origin` through the same retry-safe
+  filing path as `create`. It retires fully filed drafts before releasing the write lock and
+  removes the file when it empties. A draft bound to another repository, or naming a target that no longer
   resolves, stays pending with an `incomplete[]` entry (`relation: "target"`) and never blocks the
   rest. Under `no-queue-write` it posts nothing.
 - `rejected`: closed `task-queue` issues with state reason `NOT_PLANNED` and a trusted author;
@@ -215,8 +215,9 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
 `backlog.md` onto the `github` backend; the mapping is in its docstring. The default run is a dry
 run that prints the plan — check it against `backlog.md` line by line before `--apply`, which
 files through `create` under the standing `queue-write` grant. A line is deleted only once its
-issue and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
-together); exit 3 means lines were kept — re-run, and the filed issues are reused by their
+issue content and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
+together). If a reused issue's title or body differs from the plan, reconcile the GitHub issue
+with `backlog.md` before retrying. Exit 3 means lines were kept — re-run, and the filed issues are reused by their
 `backlog-migrated:<sha1>` keys. An item the plan refuses (a `Security Fixes` item on a public repo, an
 unresolvable blocker) stops `--apply` before it files anything: left behind, it would keep the repo on
 the file queue and hide the filed issues. The

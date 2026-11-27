@@ -44,7 +44,7 @@ import re
 import subprocess
 import sys
 import textwrap
-from typing import Any
+from typing import Literal, NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -52,7 +52,6 @@ import backlog_candidates as bc  # noqa: E402
 import queue_backend as qb  # noqa: E402
 import task_nodes as tn  # noqa: E402
 
-KEY_PREFIX = "backlog-migrated:"
 TITLE_MAX = 240  # GitHub caps titles at 256; a longer first sentence is cut and kept whole in the body
 EXIT_OK, EXIT_ERROR, EXIT_PARTIAL = 0, 1, 3
 ROLE_LABELS = (("review backlog", "review"), ("security fixes", "security"), ("someday", "someday"))
@@ -68,7 +67,7 @@ class MigrateError(Exception):
 
 
 def migration_key(*parts: str) -> str:
-    return KEY_PREFIX + hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+    return qb.MIGRATION_KEY_PREFIX + hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _role(path: list[dict]) -> str | None:
@@ -122,7 +121,12 @@ def _strip_markers(text: str) -> str:
                                and bc._is_placeholder_payload(m.group(2)) else "", text)
 
 
-def split_title(text: str) -> tuple[str, str]:
+class SplitTitle(NamedTuple):
+    title: str
+    rest: str
+
+
+def split_title(text: str) -> SplitTitle:
     """(title, rest): the first sentence of `text` as one line, and what follows it. A sentence past
     `TITLE_MAX` is cut at a word with an ellipsis and the whole text becomes the rest."""
     end = None
@@ -136,7 +140,7 @@ def split_title(text: str) -> tuple[str, str]:
         cut = title[:TITLE_MAX - 1]
         title = (cut.rsplit(" ", 1)[0] if " " in cut else cut).rstrip(",;:—- ") + "…"
         rest = text
-    return title, rest.strip()
+    return SplitTitle(title, rest.strip())
 
 
 _META_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+\.\s|[A-Z][\w /-]{0,30}:\s)")
@@ -185,97 +189,37 @@ def _rejected_entries(lines: list[str], masked: list[str], headings: list[dict])
     return out
 
 
-def _prunable(text: str, line: str) -> str | None:
+def _unprunable_reason(text: str, line: str) -> str | None:
     _, problems = tn.prune_lines(text, [line])
     return "; ".join(problems) if problems else None
 
 
-def _resolve_blocker(payload: str, groups: list[dict], items: list[dict], me: dict) -> tuple[str, Any]:
+class BlockerResolution(NamedTuple):
+    kind: Literal["none", "heading", "item"]
+    match: dict | str
+
+
+def _resolve_blocker(payload: str, groups: list[dict], items: list[dict], me: dict) -> BlockerResolution:
     tokens = tn._blocker_tokens(payload)
     if not tokens:
-        return "none", f"blocker {payload.strip()!r} names nothing resolvable"
+        return BlockerResolution("none", f"blocker {payload.strip()!r} names nothing resolvable")
     exact = [g for g in groups if tn._blocker_tokens(g["heading"]["title"]) == tokens]
     hits = exact or [g for g in groups if tn._contains_run(tn._slug_tokens(g["heading"]["title"]), tokens)]
     if len(hits) == 1:
-        return "heading", hits[0]
+        return BlockerResolution("heading", hits[0])
     if len(hits) > 1:
-        return "none", f"blocker {payload.strip()!r} matches {len(hits)} headings"
+        return BlockerResolution("none", f"blocker {payload.strip()!r} matches {len(hits)} headings")
     found = [it for it in items if it is not me and tn._contains_run(tn._slug_tokens(it["clean"]), tokens)]
     if len(found) == 1:
-        return "item", found[0]
+        return BlockerResolution("item", found[0])
     if len(found) > 1:
-        return "none", f"blocker {payload.strip()!r} matches {len(found)} items"
-    return "none", f"blocker {payload.strip()!r} matches no heading or item in backlog.md"
+        return BlockerResolution("none", f"blocker {payload.strip()!r} matches {len(found)} items")
+    return BlockerResolution("none", f"blocker {payload.strip()!r} matches no heading or item in backlog.md")
 
 
-def build_plan(text: str, visibility: str) -> dict:
-    """The issue plan for `text` (backlog.md). Pure: no gh, no file writes."""
-    lines = text.splitlines()
-    masked = bc._strip_fenced_blocks(bc._strip_html_comments(text)).splitlines()
-    if len(masked) != len(lines):
-        raise MigrateError("internal: masked line count does not match backlog.md")
-    tokens = bc.tokenize(text)
-    headings = bc._headings(tokens)
-    paths = _paths(headings)
-    owners, _ = tn._line_owners(text)
-
-    items: list[dict] = []
-    inflight: list[list[dict]] = []  # heading paths of [>] items: work still running in a sprint
-    left: list[dict] = []
-    done: list[dict] = []
-    refused: list[dict] = []
-    for t in tokens:
-        if t["type"] != "checkbox":
-            continue
-        i = t["line"] - 1
-        h = _owner_heading(headings, t["line"])
-        path = paths[h["line"]] if h else []
-        entry = {"line": t["line"], "source": lines[i], "text": t["text"]}
-        if t["state"] in "xX":
-            why = _prunable(text, lines[i])
-            if why:
-                left.append(dict(entry, reason=f"[x] item that cannot be deleted mechanically ({why})"))
-            else:
-                done.append(entry)
-            continue
-        if t["state"] == ">":
-            left.append(dict(entry, reason="[>] item (moved to a sprint): not migrated"))
-            inflight.append(path)
-            continue
-        span = _item_span(lines, masked, owners, i)
-        raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
-        markers = list(_MARKER_SPAN_RE.finditer(raw_body))
-        deferred = [" ".join(m.group(2).split()) for m in markers if m.group(1).lower() == "deferred"]
-        blockers = [m.group(2) for m in markers if m.group(1).lower() == "blocked by"
-                    and not bc._is_placeholder_payload(m.group(2))]
-        clean = _strip_markers(raw_body)
-        title, rest = _title_and_rest(clean)
-        role = _role(path)
-        items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
-                          blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
-                          key=migration_key(*(x["title"] for x in path), t["text"])))
-
-    for t in tokens:  # plain bullets outside the Rejected section are not queue items
-        if t["type"] == "bullet":
-            h = _owner_heading(headings, t["line"])
-            in_item = owners.get(t["line"] - 1) is not None or any(t["line"] - 1 in it["span"] for it in items)
-            if not in_item and not (h and _is_rejected(h)) and _PLAIN_BULLET_RE.match(masked[t["line"] - 1]):
-                left.append({"line": t["line"], "source": lines[t["line"] - 1],
-                             "reason": "plain bullet (not a - [ ] item): not migrated"})
-
-    bad: dict[int, str] = {}
-    for it in items:
-        why = _prunable(text, it["source"])
-        if why:
-            bad[it["line"]] = f"cannot be deleted mechanically ({why})"
-        elif not it["title"].strip():
-            bad[it["line"]] = "no title left once its markers are stripped"
-        elif it["role"] == "security" and visibility != "private":
-            bad[it["line"]] = (f"security item on a {visibility} repository: never filed there "
-                               "(report it privately, or fix it with /dev:task-new)")
-
-    # Groups and blockers depend on which items are refused, and a refusal can cascade to an item
-    # blocked by it, so settle both to a fixpoint.
+def _settle_refusals(items: list[dict], headings: list[dict], paths: dict[int, list[dict]],
+                     inflight: list[list[dict]], bad: dict[int, str]) -> tuple[list[dict], dict[int, str]]:
+    """Propagate refusals through blockers until the issue groups stabilize."""
     while True:
         live = [it for it in items if it["line"] not in bad]
         by_heading: dict[int, list[dict]] = {}
@@ -347,10 +291,80 @@ def build_plan(text: str, visibility: str) -> dict:
             it["blocked_by"], it["notes"] = keys, notes
         if not changed:
             break
+    return parents, parent_of
+
+
+def build_plan(text: str, visibility: str) -> dict:
+    """The issue plan for `text` (backlog.md). Pure: no gh, no file writes."""
+    lines = text.splitlines()
+    masked = bc._strip_fenced_blocks(bc._strip_html_comments(text)).splitlines()
+    if len(masked) != len(lines):
+        raise MigrateError("internal: masked line count does not match backlog.md")
+    tokens = bc.tokenize(text)
+    headings = bc._headings(tokens)
+    paths = _paths(headings)
+    owners, _ = tn._line_owners(text)
+
+    items: list[dict] = []
+    inflight: list[list[dict]] = []  # heading paths of [>] items: work still running in a sprint
+    left: list[dict] = []
+    done: list[dict] = []
+    refused: list[dict] = []
+    for t in tokens:
+        if t["type"] != "checkbox":
+            continue
+        i = t["line"] - 1
+        h = _owner_heading(headings, t["line"])
+        path = paths[h["line"]] if h else []
+        entry = {"line": t["line"], "source": lines[i], "text": t["text"]}
+        if t["state"] in "xX":
+            why = _unprunable_reason(text, lines[i])
+            if why:
+                left.append(dict(entry, reason=f"[x] item that cannot be deleted mechanically ({why})"))
+            else:
+                done.append(entry)
+            continue
+        if t["state"] == ">":
+            left.append(dict(entry, reason="[>] item (moved to a sprint): not migrated"))
+            inflight.append(path)
+            continue
+        span = _item_span(lines, masked, owners, i)
+        raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
+        markers = list(_MARKER_SPAN_RE.finditer(raw_body))
+        deferred = [" ".join(m.group(2).split()) for m in markers if m.group(1).lower() == "deferred"]
+        blockers = [m.group(2) for m in markers if m.group(1).lower() == "blocked by"
+                    and not bc._is_placeholder_payload(m.group(2))]
+        clean = _strip_markers(raw_body)
+        title, rest = _title_and_rest(clean)
+        role = _role(path)
+        items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
+                          blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
+                          key=migration_key(*(x["title"] for x in path), t["text"])))
+
+    for t in tokens:  # plain bullets outside the Rejected section are not queue items
+        if t["type"] == "bullet":
+            h = _owner_heading(headings, t["line"])
+            in_item = owners.get(t["line"] - 1) is not None or any(t["line"] - 1 in it["span"] for it in items)
+            if not in_item and not (h and _is_rejected(h)) and _PLAIN_BULLET_RE.match(masked[t["line"] - 1]):
+                left.append({"line": t["line"], "source": lines[t["line"] - 1],
+                             "reason": "plain bullet (not a - [ ] item): not migrated"})
+
+    bad: dict[int, str] = {}
+    for it in items:
+        why = _unprunable_reason(text, it["source"])
+        if why:
+            bad[it["line"]] = f"cannot be deleted mechanically ({why})"
+        elif not it["title"].strip():
+            bad[it["line"]] = "no title left once its markers are stripped"
+        elif it["role"] == "security" and visibility != "private":
+            bad[it["line"]] = (f"security item on a {visibility} repository: never filed there "
+                               "(report it privately, or fix it with /dev:task-new)")
+
+    parents, parent_of = _settle_refusals(items, headings, paths, inflight, bad)
 
     def path_notes(path: list[dict]) -> str:
         """Prose of each heading on `path` that the deletion may drain away, outermost first."""
-        return _body([_heading_notes(lines, masked, headings, x, owners, items) for x in path
+        return _body([_orphan_heading_prose(lines, masked, headings, x, owners, items) for x in path
                       if x["level"] > 1 and not _is_role_heading(x) and not _is_rejected(x)])
 
     issues: list[dict] = []
@@ -381,7 +395,7 @@ def build_plan(text: str, visibility: str) -> dict:
                             "reason": "Rejected entry inside a multi-line HTML comment: move it by hand"})
             continue
         title, reason, bar = qb._split_rejected(r["text"])
-        title = split_title(title)[0] if len(title) > TITLE_MAX else title
+        title = split_title(title).title if len(title) > TITLE_MAX else title
         body = _body([f"Reason: {reason}" if reason else "", f"Re-file only with: {bar}" if bar else "",
                       "Deferred: rejected before the move to issues; closed as not planned on migration",
                       _source_line(paths[r["heading"]["line"]])])
@@ -404,8 +418,8 @@ def build_plan(text: str, visibility: str) -> dict:
             "issues": issues, "refused": refused, "left": left, "done": done}
 
 
-def _heading_notes(lines: list[str], masked: list[str], headings: list[dict], h: dict, owners: dict[int, int],
-                   items: list[dict]) -> str:
+def _orphan_heading_prose(lines: list[str], masked: list[str], headings: list[dict], h: dict, owners: dict[int, int],
+                          items: list[dict]) -> str:
     """Prose under `h` before its next heading that belongs to no item (lost with the heading otherwise)."""
     end = bc._region_end(h, headings)
     stop = len(lines) if end == float("inf") else int(end) - 1
@@ -886,6 +900,15 @@ def _plan_tests() -> None:
     t, rest = split_title(long[6:])
     _assert(len(t) <= TITLE_MAX and t.endswith("…") and rest.startswith("[FEAT] word"),
             "an over-long first sentence is cut with an ellipsis and kept whole in the body")
+    for indent in ("  ", "\t"):
+        text = ("# Backlog\n\n## Group\n\n- [ ] First task\n"
+                f"{indent}Wrapped detail\n{indent}- Nested detail\n- [ ] Keep this task\n")
+        item = _by_title(build_plan(text, "public"), "First task")
+        pruned, problems = tn.prune_lines(text, [item["source"]])
+        expected = "".join(line for n, line in enumerate(text.splitlines(keepends=True), 1)
+                           if n not in item["lines"])
+        _assert(not problems and pruned == expected,
+                f"the planned item span matches exactly what prune_lines removes ({indent!r})")
 
 
 def _review_regression_tests(tmp: str, make_repo, read, write) -> None:
@@ -1001,8 +1024,20 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     _assert(quiet(main, ["--repo", repo, "--apply", "--json"], runner=gh) == EXIT_PARTIAL, "the CLI exits 3 on a partial run")
     gh.refuse_blockers = False
     n_before = len(gh.issues)
+    edited = text.replace("*(blocked by: 1-alpha-feature)*\n",
+                          "*(blocked by: 1-alpha-feature)*\n  - edited nested note\n")
+    write(path, edited)
+    edited_plan = build_plan(edited, "public")
+    beta = _by_title(edited_plan, "[FIX] Beta")
+    beta_n = next(n for n, i in gh.issues.items() if i["title"] == beta["title"])
+    filed_body = gh.issues[beta_n]["body"]
+    report = apply_plan(repo, edited_plan, gh)
+    _assert(read(path) == edited and len(gh.issues) == n_before and gh.issues[beta_n]["body"] == filed_body
+            and any(i["key"] == beta["key"] and i["relation"] == "content" and i["ref"] == f"#{beta_n}"
+                    for i in report["incomplete"]),
+            "a same-key edit keeps the backlog text and identifies the differing GitHub issue")
+    gh.issues[beta_n]["body"] = filed_body.replace("Body text.", "Body text.\n- edited nested note").replace("\n", "\r\n")
     report = apply_plan(repo, build_plan(read(path), "public"), gh)
-    beta_n = next(n for n, i in gh.issues.items() if i["title"].startswith("[FIX] Beta"))
     _assert(len(gh.issues) == n_before and all(c["reused"] for c in report["created"])
             and bool(gh.issues[beta_n]["blockedBy"]) and "Beta fix" not in read(path) and "First alpha" not in read(path),
             "a re-run reuses the filed issue, completes the relation and deletes the line")
