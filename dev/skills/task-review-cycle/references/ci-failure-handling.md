@@ -19,7 +19,10 @@ Allow 600000ms — the Bash tool's ceiling; the script's own 9-minute deadline f
 
 - `PASSED` is `true` → confirm the CI snapshot from `hub.sh ci-status <PR_NUMBER>` still
   describes the current candidate's SHA before continuing. When the hub reports no configured
-  checks, verify the remote PR head directly. A changed head requires new candidate evidence.
+  checks, verify the remote PR head directly. If the remote head moved, fetch and inspect it.
+  Fast-forward the feature checkout only if the commits fit the approved scope. Run targeted
+  checks and resume with the existing review budget and new candidate evidence. If the change
+  is out of scope or fast-forward is impossible, report the blocker and keep the PR open.
 - `PASSED` is `false` and `REASON` is empty → a real CI failure (an actual check failed). Go to "Handle CI Failure" below. The script has already counted this strike and reports the running total in `.failures`; you do not track it yourself.
 - `PASSED` is `false` and `REASON == "rework-cap"` → the 3rd consecutive real failure. **Hard stop** — do not fetch logs, do not attempt another fix. Report the PR number and `.failures` to the user and ask for guidance. If the user decides to keep going anyway, clear the counter with `rm -f "$(git rev-parse --git-dir)/task-review-ci-strikes-<pr>"` — resolve the git dir with that command rather than assuming `.git/`, which is wrong inside a `--tree` worktree.
 - `PASSED` is `false` and `REASON == "timeout"` → CI has not finished after 9 minutes. This is NOT a failure — do not fetch logs, do not count toward 3-strikes. Re-run `ci-wait.sh` once; if it times out again, stop and ask the user: "CI hasn't completed after 18 min on PR #<PR_NUMBER>. (a) keep waiting — re-run ci-wait.sh, (b) check the CI dashboard yourself and report back, (c) abandon this PR." One automatic re-run only — a second timeout waits for the user's choice.

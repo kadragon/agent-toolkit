@@ -61,9 +61,9 @@ assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if
 the base is empty and no review remains, report no work and stop here. End the body with
 `Verification:` and the exact commands and exits from the hand-off's targeted evidence
 or cycle notes, if they match the candidate tree. Use `none recorded` if no evidence matches.
-Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref
-(`Closes #12`; refs from the hand-off or archived `## Covers`), kept in every later message
-(`../task-next/references/cycle.md` → *Covered refs*). For PR metadata, see that guide's *Cleanup*.
+Issues backend: just above `Verification:`, keep one `close_ref_template` line per covered ref
+(`Closes #12`) in every message. Use the hand-off refs, else the archived `## Covers`. Exclude
+uncovered refs. See `../task-next/references/cycle.md` → *Covered refs* and *Cleanup*.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -210,7 +210,8 @@ python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```
 
-A failed step ends the block — report it. Push rejected → keep the local merge and feature branch,
+An ancestry check failure resumes on the hub route above. Other failures end the block.
+Push rejected → keep the local merge and feature branch,
 never reset hard; recover within established authority. Lite is done only once the base push lands.
 
 **Retire the archive only after confirming merge on either path**, including a user-run merge:
