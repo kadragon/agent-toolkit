@@ -121,7 +121,8 @@ if [ "$MERGE_OK" = "true" ]; then
   # may be another agent's: on a different branch, base is left un-updated and cleanup continues.
   if [ -n "$WORKTREE_PATH" ]; then
     WORKTREE_PATH=$(CDPATH= cd -- "$WORKTREE_PATH" 2>/dev/null && pwd -P || printf '%s' "$WORKTREE_PATH")
-    if [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$WORKTREE_PATH" ]; then
+    WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -n "$WORKTREE_ROOT" ] && [ "$WORKTREE_ROOT" -ef "$WORKTREE_PATH" ]; then
       IN_TARGET=true
       MAIN_WORKTREE=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
       if ! cd "$MAIN_WORKTREE" 2>/dev/null; then
@@ -155,16 +156,37 @@ if [ "$MERGE_OK" = "true" ]; then
   if [ "$CAN_CLEAN" = "true" ]; then
     # Worktree first: a worktree holding the feature branch blocks `git branch -D`.
     if [ -n "$WORKTREE_PATH" ]; then
-      if git worktree remove "$WORKTREE_PATH" 2>/dev/null; then
+      PY=$(command -v python3 || command -v python || true)
+      BROKER_NOTE=""
+      HOLDER=""
+      if [ -n "$PY" ] && [ -d "$WORKTREE_PATH" ]; then
+        BROKER_NOTE=$("$PY" -I -X utf8 "$SCRIPT_DIR/broker-cleanup.py" --idle-only "$WORKTREE_PATH" 2>&1) || true
+        SWEEP="$SCRIPT_DIR/../../task-next/scripts/worktree_sweep.py"
+        # Windows can partially remove a locked worktree before encountering the
+        # holder. On POSIX a waiting caller's cwd does not prevent removal.
+        case "$(uname -s)" in
+          MINGW* | MSYS* | CYGWIN*)
+            HOLDER=$("$PY" -I -X utf8 "$SWEEP" --holder "$WORKTREE_PATH" 2>&1) || true
+            ;;
+        esac
+      fi
+      if [ -n "$HOLDER" ] || [ -n "$BROKER_NOTE" ]; then
+        WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': ${BROKER_NOTE} ${HOLDER}"
+      elif REMOVE_ERR=$(git worktree remove "$WORKTREE_PATH" 2>&1); then
         WORKTREE_MSG="Worktree '${WORKTREE_PATH}' removed"
       else
-        WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}'. Clean up manually."
+        if [ -n "$PY" ]; then
+          HOLDER=$("$PY" -I -X utf8 "$SWEEP" --holder "$WORKTREE_PATH" 2>&1) || true
+        fi
+        WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': ${REMOVE_ERR}${HOLDER:+ (${HOLDER})}"
       fi
     fi
 
     # squash/rebase merges change commit hash so -d sees "not fully merged"; -D is safe here
     # because we already confirmed merge_ok above.
-    if ! git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}"; then
+    if [[ "$WORKTREE_MSG" == WARNING:* ]] && [ -d "$WORKTREE_PATH" ]; then
+      CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' kept with its worktree"
+    elif ! git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}"; then
       CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' not found — check the branch name"
     elif DELETE_ERR=$(git branch -D "$FEATURE_BRANCH" 2>&1 >/dev/null); then
       CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' deleted"
