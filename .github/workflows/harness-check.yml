@@ -1,12 +1,12 @@
-name: harness-check
+name: Harness CI
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  static-checks:
-    name: Static and harness checks
+  repository-checks:
+    name: Repository checks
     runs-on: ubuntu-latest
     steps:
       # Review recall and trigger checks compare against the PR base.
@@ -22,7 +22,7 @@ jobs:
       - name: Install Ruff and PyYAML
         run: python3 -m pip install --quiet 'ruff==0.16.0' pyyaml
 
-      - name: Check shell and Python scripts use LF
+      - name: Check script line endings
         run: |
           python3 - <<'PY'
           import pathlib
@@ -56,7 +56,7 @@ jobs:
           print("OK: executable text files use LF line endings.")
           PY
 
-      - name: Check JSON files carry no UTF-8 BOM
+      - name: Check JSON encoding
         run: |
           python3 - <<'PY'
           import subprocess
@@ -80,13 +80,13 @@ jobs:
           print(f"OK: {len(paths)} tracked JSON files are BOM-free.")
           PY
 
-      - name: Run scripts/ci/test_check_harness_drift.py
+      - name: Test harness drift detection
         run: python3 scripts/ci/test_check_harness_drift.py
 
-      - name: Run scripts/ci/check_harness_drift.py
+      - name: Check harness portability and references
         run: python3 scripts/ci/check_harness_drift.py
 
-      - name: Verify review-recall scorecard freshness
+      - name: Check review recall scorecard freshness
         env:
           REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
         run: bash dev/skills/task-review-cycle/evals/review-recall/check-results.sh "$REVIEW_BASE"
@@ -96,7 +96,7 @@ jobs:
       # `.python-version`, and setup-python only picks the interpreter that runs pip.
       # Left unchecked they drift silently — bumping one while the other stays put
       # goes unnoticed. Assert they agree so the doc's claim is actually enforced.
-      - name: Assert .python-version matches ruff target-version
+      - name: Check Python version alignment
         run: |
           floor="py$(tr -d '.[:space:]' < .python-version)"
           target=$(grep -E '^target-version' ruff.toml | sed -E 's/.*"(.*)".*/\1/')
@@ -113,41 +113,41 @@ jobs:
       # version-aware parser report 6 E9 invalid-syntax errors on the PEP 701
       # f-strings in prod/skills/hwpx/scripts/table.py. Until this job existed
       # that floor was asserted in a comment alone.
-      - name: Run ruff check
+      - name: Check Python code with Ruff
         run: ruff check --no-cache .
 
-      - name: Run scripts/ci/check_test_suites_wired.py --test
+      - name: Test CI test-suite detection
         run: python3 scripts/ci/check_test_suites_wired.py --test
 
-      - name: Run scripts/ci/check_test_suites_wired.py
+      - name: Check CI test-suite coverage
         run: python3 scripts/ci/check_test_suites_wired.py
 
-      - name: Run scripts/ci/test_check_skill_frontmatter.py
+      - name: Test frontmatter validation
         run: python3 scripts/ci/test_check_skill_frontmatter.py
 
-      - name: Run scripts/ci/check_skill_frontmatter.py
+      - name: Check skill, agent, and command frontmatter
         run: python3 scripts/ci/check_skill_frontmatter.py
 
-      - name: Run scripts/ci/check_skill_size.py --test
+      - name: Test skill size validation
         run: python3 scripts/ci/check_skill_size.py --test
 
-      - name: Run scripts/ci/check_skill_size.py
+      - name: Check skill line limits
         run: python3 scripts/ci/check_skill_size.py
 
-      - name: Run scripts/ci/test_check_asset_hygiene.py
+      - name: Test bundled asset validation
         run: python3 scripts/ci/test_check_asset_hygiene.py
 
-      - name: Run scripts/ci/check_asset_hygiene.py
+      - name: Check bundled asset hygiene
         run: python3 scripts/ci/check_asset_hygiene.py
 
-      - name: Run scripts/ci/test_check_skill_triggers.py
+      - name: Test skill trigger ranking
         run: python3 scripts/ci/test_check_skill_triggers.py
 
-      - name: Run scripts/ci/check_skill_triggers.py
+      - name: Check skill trigger ranking
         run: python3 scripts/ci/check_skill_triggers.py
 
   release-checks:
-    name: Release contract checks
+    name: Release checks
     runs-on: ubuntu-latest
     steps:
       # Version checks use the merge base with origin/main.
@@ -159,26 +159,26 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Run scripts/ci/test_check_changelog_entries.py
+      - name: Test changelog validation
         run: python3 scripts/ci/test_check_changelog_entries.py
 
-      - name: Run scripts/ci/check_changelog_entries.py
+      - name: Check changelog entries
         run: python3 scripts/ci/check_changelog_entries.py
 
-      - name: Run scripts/ci/test_bump_version.py
+      - name: Test version bump script
         run: python3 scripts/ci/test_bump_version.py
 
       # Parser self-test only: the gate itself needs the `claude` CLI and stays local.
-      - name: Run scripts/check_mods.py --test
+      - name: Test mods validation script
         run: python3 scripts/check_mods.py --test
 
-      - name: Run scripts/ci/test_check_skill_version_bump.py
+      - name: Test skill version validation
         run: python3 scripts/ci/test_check_skill_version_bump.py
 
-      - name: Run scripts/ci/check_skill_version_bump.py
+      - name: Check skill version bumps
         run: python3 scripts/ci/check_skill_version_bump.py
 
-      - name: Check dev version bumped
+      - name: Check dev plugin version bump
         run: |
           ver_gt() {
             local IFS=.
@@ -230,7 +230,7 @@ jobs:
             echo "SKIP: dev/ not changed."
           fi
 
-      - name: Check prod version bumped
+      - name: Check prod plugin version bump
         run: |
           ver_gt() {
             local IFS=.
@@ -283,7 +283,7 @@ jobs:
           fi
 
       # mods is Claude Code only: one manifest, no Codex pair to keep in sync.
-      - name: Check mods version bumped
+      - name: Check mods plugin version bump
         run: |
           ver_gt() {
             local IFS=.
@@ -317,8 +317,8 @@ jobs:
             echo "SKIP: mods/ not changed."
           fi
 
-  dev-skill-self-tests:
-    name: dev skill script self-tests
+  dev-tests:
+    name: Dev regression tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -327,50 +327,50 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Run dev/skills/harness-curate/scripts/test_scan_transcripts.py
+      - name: Test transcript scanning
         run: python3 dev/skills/harness-curate/scripts/test_scan_transcripts.py
 
-      - name: Run dev/skills/harness-curate/scripts/check_plugin_contracts.py --test
+      - name: Test plugin contract checks
         run: python3 dev/skills/harness-curate/scripts/check_plugin_contracts.py --test
 
-      - name: Run dev/skills/harness-curate/scripts/disable_plugins.py --test
+      - name: Test plugin disabling
         run: python3 dev/skills/harness-curate/scripts/disable_plugins.py --test
 
-      - name: Run dev/skills/harness-init/scripts/test_validate_harness.py
+      - name: Test harness validation
         run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
 
-      - name: Run dev/skills/harness-init/scripts/test_reconcile_harness.py
+      - name: Test harness reconciliation
         run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
 
-      - name: Run dev/skills/task-next/scripts/backlog_candidates.py --test
+      - name: Test backlog candidate selection
         run: python3 dev/skills/task-next/scripts/backlog_candidates.py --test
 
-      - name: Run dev/skills/task-next/scripts/queue_backend.py --test
+      - name: Test queue backend selection
         run: python3 dev/skills/task-next/scripts/queue_backend.py --test
 
-      - name: Run dev/skills/task-next/scripts/migrate_backlog.py --test
+      - name: Test backlog migration
         run: python3 dev/skills/task-next/scripts/migrate_backlog.py --test
 
-      - name: Run dev/skills/dispatch/scripts/test_dispatch.py
+      - name: Test repository dispatch
         run: python3 dev/skills/dispatch/scripts/test_dispatch.py
 
-      - name: Run dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
+      - name: Test dependency consolidation
         run: python3 dev/skills/repo-dependabot/scripts/consolidate-deps.py --selftest
 
       # Owns the branch-keyed contract/evidence archive both cycles resume from, and pins
       # review-cycle Step 1's clean-tree branch against skipping commit-guard on a resume.
-      - name: Run dev/skills/task-next/scripts/test_cycle_state.py
+      - name: Test task cycle state
         run: python3 dev/skills/task-next/scripts/test_cycle_state.py
 
       # Both task-next and task-new invoke this one copy; a break here breaks both cycles.
-      - name: Run dev/skills/task-next/scripts/task_nodes.py --test
+      - name: Test task graph operations
         run: python3 dev/skills/task-next/scripts/task_nodes.py --test
 
-      - name: Run dev/skills/harness-curate/scripts/record_run.py --test
+      - name: Test run recording
         run: python3 dev/skills/harness-curate/scripts/record_run.py --test
 
-  prod-skill-self-tests:
-    name: prod skill script self-tests
+  prod-tests:
+    name: Prod regression tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -384,37 +384,37 @@ jobs:
       - name: Install defusedxml and fsrs
         run: python3 -m pip install --quiet defusedxml fsrs
 
-      - name: Run prod/skills/hwpx/scripts/_common.py --test
+      - name: Test HWPX shared utilities
         run: python3 prod/skills/hwpx/scripts/_common.py --test
 
-      - name: Run prod/skills/hwpx/scripts/build.py --test
+      - name: Test HWPX document building
         run: python3 prod/skills/hwpx/scripts/build.py --test
 
-      - name: Run prod/skills/hwpx/scripts/office.py --test
+      - name: Test HWPX office operations
         run: python3 prod/skills/hwpx/scripts/office.py --test
 
-      - name: Run prod/skills/hwpx/scripts/table.py --test
+      - name: Test HWPX table operations
         run: python3 prod/skills/hwpx/scripts/table.py --test
 
-      - name: Run prod/skills/hwpx/scripts/text.py --test
+      - name: Test HWPX text operations
         run: python3 prod/skills/hwpx/scripts/text.py --test
 
-      - name: Run HWPX content comparison regressions
+      - name: Test HWPX content comparison
         run: python3 prod/skills/hwpx/scripts/test_compare.py
 
-      - name: Run prod/skills/hwpx/scripts/validate.py --test
+      - name: Test HWPX validation
         run: python3 prod/skills/hwpx/scripts/validate.py --test
 
-      - name: Run prod/skills/kr-style/scripts/kr_audit.py --test
+      - name: Test Korean style auditing
         run: python3 prod/skills/kr-style/scripts/kr_audit.py --test
 
-      - name: Run prod/skills/repo-quiz/scripts/quiz_state.py --test
+      - name: Test quiz scheduling
         run: python3 prod/skills/repo-quiz/scripts/quiz_state.py --test
 
-      - name: Run prod/skills/report-draft/scripts/lint_report.py --test
+      - name: Test report linting
         run: python3 prod/skills/report-draft/scripts/lint_report.py --test
 
-  review-regression-tests:
+  review-tests:
     name: Review and merge regression tests
     runs-on: ubuntu-latest
     steps:
@@ -424,42 +424,42 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Run dev/hooks/commit-guard/guard.py --test
+      - name: Test commit guard self-checks
         run: python3 dev/hooks/commit-guard/guard.py --test
 
-      - name: Run dev/hooks/commit-guard/test_guard.py
+      - name: Test commit guard regressions
         run: python3 dev/hooks/commit-guard/test_guard.py
 
-      - name: Run dev/hooks/memory-guard/guard.py --test
+      - name: Test memory guard
         run: python3 dev/hooks/memory-guard/guard.py --test
 
-      - name: Run dev/skills/task-review-cycle/scripts/test_commit_and_push.py
+      - name: Test commit and push
         run: python3 dev/skills/task-review-cycle/scripts/test_commit_and_push.py
 
-      - name: Run dev/skills/task-review-cycle/scripts/test_ci_wait.py
+      - name: Test CI status polling
         run: python3 dev/skills/task-review-cycle/scripts/test_ci_wait.py
 
-      - name: Run dev/skills/task-review-cycle/scripts/test_merge_and_cleanup.py
+      - name: Test merge and cleanup
         run: python3 dev/skills/task-review-cycle/scripts/test_merge_and_cleanup.py
 
-      - name: Run dev/skills/task-review-cycle/scripts/test_pre_merge_resync.py
+      - name: Test pre-merge synchronization
         run: python3 dev/skills/task-review-cycle/scripts/test_pre_merge_resync.py
 
       # Cache hits are asserted by counting hub.sh calls, so this needs no network and no gh.
-      - name: Run dev/skills/task-review-cycle/scripts/test_preflight.py
+      - name: Test review preflight
         run: python3 dev/skills/task-review-cycle/scripts/test_preflight.py
 
       # Covers both probe branches on a Linux runner: the platform selector is env-overridable, and
       # the Windows case stubs `tasklist` on PATH — which is what pins the `/NH` vs `//NH` flag form
       # whose failure silently disables the prune on MINGW.
-      - name: Run dev/skills/task-review-cycle/scripts/test_codex_review.py
+      - name: Test Codex reviewer launcher
         run: python3 dev/skills/task-review-cycle/scripts/test_codex_review.py
 
       # Guards the Sprint Contract argument against shell injection, and the prompt
       # assembly against the bash 3.2 heredoc trap that CI's bash 5 cannot reproduce.
-      - name: Run dev/skills/task-review-cycle/scripts/test_claude_review.py
+      - name: Test Claude reviewer launcher
         run: python3 dev/skills/task-review-cycle/scripts/test_claude_review.py
 
       # Pins the read-only prompt scope and the late-reclaim sidecar (pending → review + meta).
-      - name: Run dev/skills/task-review-cycle/scripts/test_agy_review.py
+      - name: Test AGY reviewer launcher
         run: python3 dev/skills/task-review-cycle/scripts/test_agy_review.py
