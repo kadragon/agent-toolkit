@@ -1,5 +1,19 @@
 # Codex readiness
 
+## Hook trust at launch
+
+Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex
+with or without `--task`. Check `codex --help` for support (verified on Codex CLI 0.172.0).
+Verify the enabled hook sources and commands and get explicit authorization for the bypass.
+The flag runs enabled hooks without requiring persisted trust for this process and does not
+save approval. Repository trust, hook failures, plugin cache checks and delivery checks still apply.
+On the first send for a verified opt-in receipt, dispatch opens a single warning with F2.
+It closes the viewer with Esc only when the sole Startup page contains the exact native
+hook-trust bypass notice. It then rechecks the composer and waits for the terminal to be idle
+before sending. Other warnings still require manual review.
+Omit `--trust-hooks` to use the manual review below. T3 has no startup argument field in this
+dispatch path. See [the T3 backend](t3-backend.md#launch).
+
 ## Before a Codex wave
 
 A Codex startup that updates a kadragon plugin invalidates running Codex children's hook
@@ -14,9 +28,11 @@ When the dev plugin version may have changed, such as after an agent-toolkit mer
 active Codex cycles to finish, then prepare the wave:
 
 1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
-2. Start a second idle Codex child. Use **Review hooks** in the startup dialog, or `/hooks`
-   if the dialog is absent. Verify that the required hooks are trusted and active, then close the child.
-3. Launch the task children once both warm-up children are closed.
+2. If any task child will rely on persisted trust, start a second idle Codex child. Use
+   **Review hooks** in the startup dialog, or `/hooks` if the dialog is absent. Verify that the
+   required hooks are trusted and active, then close the child.
+3. Launch the task children once the warm-up children are closed. Pass `--trust-hooks` at
+   launch for each child authorized to use it.
 
 Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
 it is the idle child started for this preparation.
@@ -64,10 +80,10 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
 - **Repository trust** — tell the user before accepting a known target directory. Select
   **Yes, continue** in its own dialog and then check for hook review.
 
-Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` only with the hooks
-approved and the composer clear. If the source cannot be verified, approval is unavailable, or
-a warning remains, report the blocker and withhold the task. For an unconfirmed send, inspect
-whether the task already started before retrying.
+Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` once the hooks are
+active, all blockers are resolved, and the composer is clear. If the source cannot be verified,
+approval is unavailable during manual review, or a warning remains, report the blocker and
+withhold the task. For an unconfirmed send, inspect whether the task already started before retrying.
 
 A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using

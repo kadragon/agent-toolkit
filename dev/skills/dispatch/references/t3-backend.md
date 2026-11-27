@@ -31,6 +31,10 @@ It applies `launch`'s handoff validation and `repos/handoff.json` lines, writes 
   project whose `workspaceRoot` is that path; none → register it with `t3_project_create`.
   Pass that id as `projectId`.
 
+`t3_thread_launch` in this dispatch path takes provider model options and has no Codex startup
+argument field. `dispatch.py prompt --trust-hooks` stops before creating a receipt. Use Herdr
+for an authorized `--dangerously-bypass-hook-trust` launch.
+
 Always pass the effort: T3's defaults differ from the routing tables (Claude `sonnet` defaults to
 `high`). Pass the model as the id `orchestrator_capabilities` lists for the routed tier: a full
 Claude id (e.g. `claude-sonnet-5-5`) or the Codex slug for the family. `prompt` refuses a bare
@@ -83,8 +87,8 @@ run `hc ls` too when Herdr is installed.
   just before each answer: it hides the paused result from `collect` until the child writes a
   new one and restarts the stall clock, as `send --continue` does for Herdr.
 
-Not used under T3: `launch`, `send`, Codex readiness (`codex-readiness.md`), trust keys,
-`hc wait`, `hc read`.
+T3 uses its thread tools for launch, delivery and monitoring. The Herdr readiness and terminal
+commands apply to Herdr sessions.
 
 ## Findings (2026-11-27, home session with the `t3-code` MCP connected)
 

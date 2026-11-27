@@ -238,6 +238,34 @@ class DispatchReceiptTests(DispatchTestCase):
         self.assertEqual(payload["name"], "scripts-fix")
         self.assertIn("title=제목 Fix", payload["argv"])
 
+    def test_cli_hook_trust_bypass_is_opt_in_for_both_single_and_idle_codex_launches(self):
+        base = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                "--cli", "codex", "--model", "gpt-6.2-sol", "--effort", "medium", "--cwd", str(SCRIPTS),
+                "--work-kind", "queue", "--request", "request", "--unit", "unit", "--git-limits", "none",
+                "--dry-run"]
+        for trust in (False, True):
+            for task in ([], ["--task", "$task-next"]):
+                with self.subTest(trust=trust, single=bool(task)):
+                    flags = ["--trust-hooks"] if trust else []
+                    result = subprocess.run([*base, *flags, *task], capture_output=True, text=True, encoding="utf-8")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    payload = json.loads(result.stdout)
+                    argv = payload["argv"]
+                    native = "--dangerously-bypass-hook-trust"
+                    self.assertEqual(argv.count(native), int(trust))
+                    if trust:
+                        self.assertGreater(argv.index(native), argv.index("codex"))
+                    self.assertEqual("task" in payload, bool(task))
+
+    def test_claude_rejects_hook_trust_bypass_before_start(self):
+        args = self.launch_args(Path.cwd(), cli="claude", model="sonnet", task=None,
+                                message="/dev:task-next", trust_hooks=True)
+        with patch("dispatch.hc_json") as hc, patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "--trust-hooks is only supported for Herdr Codex launches"):
+                launch(args)
+            hc.assert_not_called()
+            run.assert_not_called()
+
     def test_home_handoff_lines_follow_verbatim_fields_for_matching_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -330,7 +358,7 @@ class DispatchReceiptTests(DispatchTestCase):
             (home / "repos").mkdir()
             extra_lines = ["Use the launch-time checklist."]
             (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
-            args = self.launch_args(directory, user_pinned=True)
+            args = self.launch_args(directory, user_pinned=True, trust_hooks=True)
             snapshot = {**QUOTA_OK, "bias": "claude", "effective_bias": "claude"}
             self.quota.return_value = snapshot
             owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
@@ -352,6 +380,7 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertEqual(argv[:3], ["hc", "run", "--bg"])
             self.assertIn("--no-notify", argv)
             self.assertEqual(argv[argv.index("--parent") + 1], "t6")
+            self.assertIn("--dangerously-bypass-hook-trust", argv[argv.index("codex") + 1:])
             payload = json.loads(output.call_args.args[0])
             self.assertNotIn("shown", payload)
             self.assertNotIn("handoff", payload)
@@ -1312,6 +1341,18 @@ class T3PromptTests(DispatchTestCase):
                 Path(payload["run"]).with_name(name).unlink(missing_ok=True)
             Path(payload["run"]).parent.rmdir()
 
+    def test_cli_prompt_rejects_hook_trust_bypass_on_t3(self):
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "prompt", "--cli", "codex",
+             "--model", "gpt-6.2-sol", "--effort", "medium", "--cwd", str(SCRIPTS), "--work-kind", "queue",
+             "--request", "request", "--unit", "unit", "--git-limits", "none", "--trust-hooks", "$task-next"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("--trust-hooks is unavailable on T3: t3_thread_launch has no Codex startup argv field",
+                      result.stderr)
+
     def test_record_stores_one_thread_and_project_on_a_t3_receipt_only(self):
         def ids(thread="th-1", project="pr-1"):
             return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project, resume=False)
@@ -1476,14 +1517,17 @@ class CodexSendTests(DispatchTestCase):
     ARGS = SimpleNamespace(address="t7", message="a task")
     IDLE = {"turn": 0, "status": {"state": "idle"}}
     WORKING = {"turn": 0, "status": {"state": "working"}}
+    SINGLE_WARNING = f"{READY}\n  ⚠ 1 warning · f2 to view"
+    BYPASS_NOTICE = (
+        "  Warnings · 1 of 1 · Startup\n\n"
+        "  `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run\n"
+        "  without review for this invocation.\n\n"
+        "  k keep & next · esc dismiss & close · ctrl+shift+c copy · ←/→ warning"
+    )
     HOOK_REVIEW = (
         "  Hooks need review\n  2 hooks are new or changed.\n\n"
         "› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n"
         "  enter confirm · esc skip"
-    )
-    TRUSTING_HOOKS = (
-        "  Hooks need review\n  2 hooks are new or changed.\n  Trusting hooks...\n\n"
-        "›    Review hooks\n     Trust all and continue\n     Continue without trusting (hooks\n     won't run)"
     )
 
     def setUp(self):
@@ -1549,60 +1593,121 @@ class CodexSendTests(DispatchTestCase):
             launch(saved.launch_args(directory, **options))
         return mocked_hc.call_args_list
 
-    def test_launch_trusts_only_the_opted_in_startup_dialog(self):
-        for trust, dialog in ((True, self.HOOK_REVIEW), (False, self.HOOK_REVIEW),
-                              (True, "Hook failed: task is blocked\n  2. Trust all and continue")):
+    def test_launch_withholds_task_on_visible_hook_review_or_failure(self):
+        for trust, dialog in ((False, self.HOOK_REVIEW), (True, self.HOOK_REVIEW),
+                              (True, f"• Hook failed\n  └ SessionStart hook exited with code 1\n\n{self.READY}")):
             with self.subTest(trust=trust, dialog=dialog), tempfile.TemporaryDirectory() as directory:
-                operations = []
-                approved_frames = iter([self.TRUSTING_HOOKS, self.TRUSTING_HOOKS])
-
                 def respond(command, *args):
                     if command == "get":
-                        turn = self.WORKING if "send" in operations else self.IDLE
-                        return {**DispatchReceiptTests.TERMINAL, **turn}
+                        return {**DispatchReceiptTests.TERMINAL, **self.IDLE}
                     if command == "read":
-                        shown = dialog
-                        if ("enter",) in operations:
-                            shown = next(approved_frames, self.READY)
-                        elif ("down",) in operations:
-                            shown = dialog.replace("› 1. Review hooks\n  2.", "  1. Review hooks\n› 2.")
-                        return self.screen(shown)
-                    operations.append(args[1:] if command == "keys" else command)
+                        return self.screen(dialog)
+                    self.fail(f"Task was withheld, but launch called hc {command} {args}")
+
+                with self.assertRaisesRegex(SystemExit, "task withheld.*?/hooks"):
+                    self.launch_codex(directory, respond, trust_hooks=trust)
+
+    def test_authorized_launch_sends_after_closing_exact_startup_notice(self):
+        for mode in ("immediate", "deferred", "already open"):
+            deferred = mode != "immediate"
+            already_open = mode == "already open"
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                operations = []
+                banner = "  >_ OpenAI Codex (v0.172.0)\n\n"
+                checked_after_escape = False
+                warning_frames = iter([
+                    self.screen(banner + self.SINGLE_WARNING),
+                    {**self.screen(banner + self.BYPASS_NOTICE), "complete": False},
+                    self.screen(banner + self.BYPASS_NOTICE),
+                ])
+                open_frames = iter([self.screen(banner + self.BYPASS_NOTICE)])
+
+                def respond(command, *args):
+                    nonlocal checked_after_escape
+                    if command == "get":
+                        viewer_open = operations == ["f2"] or (already_open and not operations)
+                        state = self.WORKING if viewer_open or operations[-1:] == ["send"] else self.IDLE
+                        if operations[-1:] == ["esc"] and not checked_after_escape:
+                            checked_after_escape = True
+                            state = self.WORKING
+                        return {**DispatchReceiptTests.TERMINAL, **state, "turn": int(deferred)}
+                    if command == "read":
+                        if not operations:
+                            return next(open_frames) if already_open else self.screen(banner + self.SINGLE_WARNING)
+                        if operations == ["f2"]:
+                            return next(warning_frames)
+                        return self.screen(banner + self.READY)
+                    if command == "keys":
+                        operations.append(args[-1])
+                        return {}
+                    self.assertEqual(command, "send")
+                    self.assertEqual(args[:4], ("--if", "idle", "--", "t7"))
+                    self.assertTrue(checked_after_escape)
+                    operations.append("send")
                     return {}
 
-                if trust and dialog == self.HOOK_REVIEW:
-                    try:
-                        self.launch_codex(directory, respond, trust_hooks=True)
-                    except SystemExit as error:
-                        self.fail(f"Launch should wait for hook trust to finish: {error}")
-                    self.assertEqual(operations, [("down",), ("enter",), "send"])
-                else:
-                    with self.assertRaisesRegex(SystemExit, "task withheld.*?/hooks"):
-                        self.launch_codex(directory, respond, trust_hooks=trust)
+                self.launch_codex(directory, respond, trust_hooks=True, task=None if deferred else "$task-next")
+                receipt = Path(directory) / "run.json"
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["trust_hooks"], True)
+                if deferred:
                     self.assertEqual(operations, [])
+                    with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                            redirect_stdout(StringIO()):
+                        send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+                self.assertEqual(operations, ["esc", "send"] if already_open else ["f2", "esc", "send"])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
-    def test_launch_reports_a_hook_trust_write_error(self):
-        with tempfile.TemporaryDirectory() as directory:
-            choices = []
-
-            def respond(command, *args):
-                if command == "get":
-                    return {**DispatchReceiptTests.TERMINAL, **self.IDLE}
-                if command == "read":
-                    if not choices:
-                        return self.screen(self.HOOK_REVIEW)
-                    selected = self.HOOK_REVIEW.replace("› 1. Review hooks\n  2.", "  1. Review hooks\n› 2.")
-                    if choices == ["down"]:
-                        return self.screen(selected)
-                    return self.screen(selected.replace("  2 hooks are new or changed.",
-                                                        "  Failed to trust hooks: access denied"))
-                self.assertEqual(command, "keys")
-                choices.append(args[-1])
-                return {}
-
-            with self.assertRaisesRegex(SystemExit, "Failed to trust hooks: access denied"):
-                self.launch_codex(directory, respond, trust_hooks=True)
-            self.assertEqual(choices, ["down", "enter"])
+    def test_startup_notice_requires_opt_in_and_exact_single_page(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
+        for label, opt_in, shown, responses, keys, reason in (
+            ("no opt-in", False, self.SINGLE_WARNING, [], [], "F2"),
+            ("open without opt-in", False, self.BYPASS_NOTICE, [], [], "F2"),
+            ("open after startup", True, self.BYPASS_NOTICE, [{**terminal, "turn": 2}], [], "F2"),
+            ("unrelated open page", True, self.BYPASS_NOTICE.replace("Startup", "Runtime"), [], [], "F2"),
+            ("multiple footer", True, self.SINGLE_WARNING.replace("1 warning", "2 warnings"), [], [], "F2"),
+            ("wrong owner", True, self.SINGLE_WARNING,
+             [{**terminal, "created_ms": 51}], [], "terminal identity changed"),
+            ("busy", True, self.SINGLE_WARNING, [{**terminal, **self.WORKING}], [], "F2"),
+            ("visible failure", True, f"{failure}\n\n{self.SINGLE_WARNING}", [], [], "/hooks"),
+            ("unrelated body", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("is enabled", "is disabled"))], ["f2"], "F2"),
+            ("extra body", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("\n\n  k", "\n  Extra warning\n\n  k"))],
+             ["f2"], "F2"),
+            ("multiple pages", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))], ["f2"], "F2"),
+            ("wrong source", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("Startup", "Runtime"))], ["f2"], "F2"),
+            ("incomplete page", True, self.SINGLE_WARNING,
+             [terminal, {}, {**self.screen(self.BYPASS_NOTICE), "complete": False}], ["f2"], "F2"),
+            ("changed owner before Esc", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE), {**terminal, "created_ms": 51}],
+             ["f2"], "terminal identity changed"),
+            ("changed turn before Esc", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE), {**terminal, "turn": 1}], ["f2"], "F2"),
+            ("warning after Esc", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE), terminal, {}, self.screen(self.SINGLE_WARNING)],
+             ["f2", "esc"], "F2"),
+            ("failure after Esc", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.BYPASS_NOTICE), terminal, {}, self.screen(failure)],
+             ["f2", "esc"], "/hooks"),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                data = DispatchReceiptTests.RECEIPT
+                if opt_in:
+                    data = {**data, "trust_hooks": True}
+                receipt.write_text(json.dumps(data), encoding="utf-8")
+                clock = [0, 0, 31] if label == "incomplete page" else None
+                with patch("dispatch.hc_json", side_effect=[self.screen(shown), *responses]) as hc, \
+                        patch("dispatch.time.sleep"), patch("dispatch.time.monotonic", side_effect=clock,
+                                                            wraps=time.monotonic), \
+                        self.assertRaisesRegex(SystemExit, reason):
+                    send(SimpleNamespace(address="t7", message="a task", run=receipt))
+                mutations = [action for action in hc.call_args_list if action.args[0] not in {"get", "read"}]
+                self.assertEqual(mutations, [call("keys", "t7", key) for key in keys])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], False)
 
     def test_launch_recovers_paste_when_herdr_could_not_confirm_submission(self):
         for acknowledged in (False, True):

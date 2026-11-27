@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Use process-scoped hook trust for Herdr Codex dispatch (dev v4.12.47) (2026-11-27)
 - [done] Adopt GitHub issues as the agent-toolkit task queue (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Shorten harness CI and streamline its gates (dev v4.12.46) (2026-11-27)
 - [done] Split harness tooling by queue backend (dev v4.12.45) (2026-11-27) → docs/design/github-issues-queue.md
