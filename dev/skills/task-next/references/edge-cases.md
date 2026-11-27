@@ -69,10 +69,19 @@ preserve work and ask which action the user wants; do not infer authorization to
 **Deferred backlog item (≥2 candidates)** — surface the blocker and confirm it is resolved; if
 not, skip to the next candidate. All deferred → stop with the blocker report in `SKILL.md`
 Step 2, adding each candidate just inspected with the same label: an item deferred in prose
-carries no marker, so `--parked` does not list it.
+carries no marker, so the parked list does not list it. On the issues backend a deferred issue
+carries the `deferred` label and is already parked; one deferred only in its body prose is handled
+the same way, and the fix (adding the label) is the user's, not this cycle's.
 
 **Deferred item in a group** — warn and continue with the group's non-deferred items; all
-deferred → skip the group.
+deferred → skip the group. On the issues backend the deferred sub-issues are already in the
+candidate's `excluded[]`; name them, and leave the parent out of `## Covers` (`cycle.md` →
+*Covered refs*).
+
+**Parent issue with no open sub-issue** (issues backend) — two cycles that each covered part of a
+parent leave it open with nothing under it, and it then lists as a lone candidate. Check that its
+sub-issues closed through merged PRs; then the cycle covers just its ref, with no implementation
+beyond what its body still asks for.
 
 **Review finding spans multiple PRs** — scope narrowly to the specific `file:line`; record the
-broader items back to `backlog.md` via the review cycle's out-of-scope path.
+broader items back to the queue via the review cycle's out-of-scope path.
