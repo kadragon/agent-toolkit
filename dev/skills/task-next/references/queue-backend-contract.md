@@ -186,7 +186,7 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   (outside the working tree and history, indexed by target and key). A Git common directory lock
   serializes issue lookup, filing, and pending-store updates across worktrees. Drafts are
   named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
-  path. A clean run writes no file.
+  path. A clean run creates no pending file.
   - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
     require the `security` label, no relations, and confirmed private visibility. The backend
     appends `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
@@ -196,10 +196,9 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
     when visibility is unconfirmed. A failed visibility request puts a new alert batch in the
     pending store for retry. With `no-queue-write`, batches without generic security findings
     require no visibility lookup.
-- `publish` re-sends the stored drafts bound to the current `origin` through `create`
-  (retry-safe, so an issue whose response was lost is reused and its missing relations
-  completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes
-  the file when it empties. A draft bound to another repository, or naming a target that no longer
+- `publish` re-sends the stored drafts bound to the current `origin` through the same retry-safe
+  filing path as `create`. It retires fully filed drafts before releasing the write lock and
+  removes the file when it empties. A draft bound to another repository, or naming a target that no longer
   resolves, stays pending with an `incomplete[]` entry (`relation: "target"`) and never blocks the
   rest. Under `no-queue-write` it posts nothing.
 - `rejected`: closed `task-queue` issues with state reason `NOT_PLANNED` and a trusted author;
