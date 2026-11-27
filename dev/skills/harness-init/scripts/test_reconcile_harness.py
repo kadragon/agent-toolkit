@@ -8,9 +8,12 @@ Run: python test_reconcile_harness.py
 import contextlib
 import importlib.util
 import io
+import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Load module without executing __main__
@@ -210,7 +213,10 @@ def _read_raw(path: Path) -> str:
         return handle.read()
 
 
-def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | None = None) -> dict:
+def _run_main_in_tmp(
+    tasks_text: str | None, backlog_text: str, changelog_text: str | None = None, *, github_origin: bool = False,
+    force_file_queue: bool = False,
+) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
     Returns a dict snapshotting file existence/contents and captured streams
@@ -220,15 +226,26 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         tpath, bpath, cpath = tmp / "tasks.md", tmp / "backlog.md", tmp / "CHANGELOG.md"
-        tpath.write_bytes(tasks_text.encode("utf-8"))
+        if tasks_text is not None:
+            tpath.write_bytes(tasks_text.encode("utf-8"))
         bpath.write_bytes(backlog_text.encode("utf-8"))
         if changelog_text is not None:
             cpath.write_bytes(changelog_text.encode("utf-8"))
+        if github_origin:
+            subprocess.run(["git", "init", "-q", str(tmp)], check=True)
+            subprocess.run(
+                ["git", "-C", str(tmp), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+                check=True,
+            )
+        env = dict(os.environ)
+        env.pop("AGENT_QUEUE_BACKEND", None)
+        if force_file_queue:
+            env["AGENT_QUEUE_BACKEND"] = "backlog"
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
         mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
         try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            with patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 mod.main()
         finally:
             mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
@@ -240,6 +257,55 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
             "stdout": out.getvalue(),
             "stderr": err.getvalue(),
         }
+
+
+def test_main_github_origin_reconciles_only_the_sprint():
+    backlog = "# Backlog\n\n## Old queue\n- [x] historical item\n\n## Empty heading\n"
+    for status in (None, "failed", "done"):
+        tasks = f"# Example sprint\n\nstatus: {status}\n" if status else None
+        result = _run_main_in_tmp(tasks, backlog, "# Changelog\n", github_origin=True)
+        check(f"{status}: legacy file unchanged", result["backlog_body"] == backlog, result)
+        check(f"{status}: no file-queue report", "Backlog" not in result["stdout"] and
+              "reverted" not in result["stdout"], result)
+        check(f"{status}: no sprint file remains", not result["tasks_exists"], result)
+        check(f"{status}: only done is logged", ("Example sprint" in result["changelog_body"]) == (status == "done"))
+
+    legacy = "# Backlog\n\n## Last file item\n- [>] Restore me\n"
+    tasks = "# Example sprint\n\nstatus: failed\n\n## Covers\n\n- [ ] Restore me\n"
+    result = _run_main_in_tmp(tasks, legacy, github_origin=True)
+    check("failed file sprint: final claimed item returns to the queue",
+          result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
+          "Backlog: 1 queued, 0 active" in result["stdout"] and not result["tasks_exists"], result)
+    idle = _run_main_in_tmp(None, legacy, github_origin=True)
+    check("already migrated GitHub repo leaves an unclaimed legacy marker unchanged",
+          idle["backlog_body"] == legacy and not idle["stdout"], idle)
+    old_sprint = "# Example sprint\n\nstatus: failed\n"
+    unresolved = _run_main_in_tmp(old_sprint, legacy, github_origin=True)
+    check("failed sprint with no Covers is kept while legacy file work is unresolved",
+          unresolved["tasks_body"] == old_sprint and unresolved["backlog_body"] == legacy and
+          "AGENT_QUEUE_BACKEND=backlog" in unresolved["stderr"], unresolved)
+    issues = _run_main_in_tmp(old_sprint + "\n## Covers\n\n- #17 Issue work\n", legacy, github_origin=True)
+    check("failed issues sprint closes without writing unclaimed file markers",
+          not issues["tasks_exists"] and issues["backlog_body"] == legacy, issues)
+    explicit = _run_main_in_tmp(None, legacy, github_origin=True, force_file_queue=True)
+    check("explicit file backend can recover confirmed orphaned work",
+          explicit["backlog_body"] == legacy.replace("- [>]", "- [ ]"), explicit)
+
+
+def test_main_queue_resolution_failure_preserves_failed_sprint():
+    backlog = "# Backlog\n\n## Sprint\n- [>] Restore me\n"
+    with patch.object(mod, "resolve", side_effect=mod.QueueError("invalid registry")) as resolve:
+        active = _run_main_in_tmp("# Example\nstatus: active\n", backlog)
+        check("active sprint skips queue resolution",
+              not resolve.called and active["stdout"] == "Sprint active: Example\n", active)
+        failed_tasks = "# Example\nstatus: failed\n"
+        failed = _run_main_in_tmp(failed_tasks, backlog)
+        check("failed sprint with unknown backend remains recoverable",
+              failed["tasks_body"] == failed_tasks and failed["backlog_body"] == backlog and
+              "invalid registry" in failed["stderr"], failed)
+        idle = _run_main_in_tmp(None, backlog)
+        check("idle cleanup leaves the file intact on resolution failure",
+              idle["backlog_body"] == backlog and not idle["stdout"] and "invalid registry" in idle["stderr"], idle)
 
 
 def test_main_done_preserves_review_backlog():
@@ -572,6 +638,8 @@ SUITES = [
     ("strip_sprint_block: ignores fenced heading-like lines", test_strip_ignores_fenced_heading_like_lines),
     ("tasks_title: ignores fenced heading-like lines", test_tasks_title_ignores_fenced_heading_like_lines),
     ("strip_sprint_block: status probe is fence-aware", test_strip_status_probe_is_fence_aware),
+    ("main: GitHub origins respect the selected backend", test_main_github_origin_reconciles_only_the_sprint),
+    ("main: backend resolution failures preserve recoverable state", test_main_queue_resolution_failure_preserves_failed_sprint),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
     ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),

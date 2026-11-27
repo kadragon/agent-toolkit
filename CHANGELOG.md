@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Split harness tooling by queue backend (dev v4.12.45) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Route task-new queue-only requests through the selected backend (dev v4.12.44) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Enforce dispatch quota bias and prioritize expiring reset passes (dev v4.12.43) (2026-11-27) → dev/skills/dispatch/references/quota-snapshot.md
 - [done] Route security-overview findings by queue backend and repository visibility (dev v4.12.42) (2026-11-27) → docs/design/github-issues-queue.md

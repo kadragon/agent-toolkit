@@ -23,7 +23,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 | `docs/conventions.md` | rules exist that the linter does not already own |
 | `docs/workflows.md` | the repo runs a defined work cycle worth writing down |
 | `docs/eval-criteria.md` | the repo runs the Sprint Contract flow |
-| `backlog.md` | the repo adopts the backlog/sprint flow |
+| `backlog.md` | the repo adopts the `backlog` backend. GitHub issues queues use the forge for persistent work |
 | Golden Principles | real project invariants exist; no minimum count |
 | Delegation guidance | configured Claude/Codex roles or an actual delegation workflow exist |
 | Token Economy | useful project-specific guidance exists; optional |
@@ -51,6 +51,10 @@ Size warnings above 100 (strong above 200) do not fail a level; session checks w
 - [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `path-scoped-rules.md` *(manual check — not enforced by `validate-harness.sh`)*
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
+
+Run the validator from the plugin bundle for backend-aware checks. If CI runs a copy
+in the target repo, set `AGENT_QUEUE_BACKEND_SCRIPT` to the matching `queue_backend.py`
+with its sibling `backlog_candidates.py` installed beside it.
 
 **Time to reach:** 30 min – 2 hours (depends on CI setup complexity).
 

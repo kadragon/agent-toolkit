@@ -485,6 +485,13 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
         raise MigrateError(f"{len(held)} open item(s) cannot be migrated, and one left in backlog.md keeps the "
                            "repo on the file queue, hiding the issues filed now — resolve these first (dry run "
                            "lists why): " + "; ".join(f"line {r['line']}: {r['reason']}" for r in held))
+    active = [r for r in plan["left"]
+              if (item := bc._CHECKBOX_RE.match(r["source"].strip())) and item[1] == ">"]
+    if active:
+        lines = ", ".join(str(r["line"]) for r in active)
+        raise MigrateError(f"resolve legacy [>] items on line(s) {lines} before --apply: finish the sprint, "
+                           "or run reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog for confirmed file work. "
+                           "Remove obsolete markers before retrying.")
     report: dict = {"created": [], "incomplete": [], "pending": [], "rejected_closed": [], "deleted": [],
                     "kept": [], "file_deleted": False}
     drafts = [_draft(i) for i in plan["issues"]]
@@ -748,10 +755,10 @@ FIXTURE = """# Backlog
 """
 
 
-# FIXTURE without its refused open items (gamma, delta, the public-repo security fix): --apply moves
-# all open items or none
+# FIXTURE without refused items or the legacy sprint marker, which both block --apply.
 FIXTURE_APPLY = re.sub(r"## 3 — gamma\n\n.*?\n\n## 4 — delta\n\n.*?\n\n", "", FIXTURE, flags=re.DOTALL)
 FIXTURE_APPLY = re.sub(r"## Security Fixes — repo\n\n.*?\n\n", "", FIXTURE_APPLY, flags=re.DOTALL)
+FIXTURE_APPLY = FIXTURE_APPLY.replace("- [>] [debt] Item already in a sprint\n", "")
 
 
 class _FakeGh(qb._FakeGitHub):
@@ -938,6 +945,16 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
         gated = "3 open item(s)" in str(e)
     _assert(gated and not gh.issues and read(os.path.join(repo, "backlog.md")) == FIXTURE,
             "a refused open item stops --apply before anything is filed (it would hide the filed issues)")
+    active = FIXTURE_APPLY + "\n- [>] [debt] Finish the legacy sprint\n"
+    repo = make_repo(tmp, "inflight", "https://github.com/owner/repo.git", active)
+    gh = _FakeGh()
+    try:
+        apply_plan(repo, build_plan(active, "public"), gh)
+        gated = False
+    except MigrateError as e:
+        gated = "reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog" in str(e)
+    _assert(gated and not gh.issues and read(os.path.join(repo, "backlog.md")) == active,
+            "an in-flight marker stops --apply before any issue creation or file deletion")
     repo = make_repo(tmp, "apply", "https://github.com/owner/repo.git")
     path = os.path.join(repo, "backlog.md")
     gh = _FakeGh()
@@ -963,7 +980,7 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
                                         "nested note", "Wrapped continuation")),
             "confirmed items, their wrapped lines and rejected bullets are deleted")
     _assert("Done thing" not in text, "a complete run deletes the [x] lines too")
-    _assert(all(s in text for s in ("[>] [debt] Item already", "plain note")), "[>] and plain-bullet lines stay")
+    _assert("plain note" in text, "plain-bullet lines stay")
     _assert("## 1 — alpha feature" not in text and "## Rejected" not in text and "## Someday" in text,
             "emptied headings go; headings with surviving lines stay")
     _assert(not report["kept"] and not report.get("error"), "a clean apply keeps nothing it planned to move")

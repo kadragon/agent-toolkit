@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.6.0
+version: 2.6.1
 disable-model-invocation: true
 ---
 
@@ -212,7 +212,7 @@ land on confirmation, disclosed as unverified.
   moves the same way, then the memory file is deleted through the Skill tool with
   "dev:harness-capture" (Memory hygiene), which owns destructive memory prunes.
 - **Contract drift** — edit the repo rules and gates the check lists, per its proposed fix. Show
-  the diff and confirm before any deletion of existing lines (for example `[x]` backlog history).
+  the diff and confirm before deleting existing lines (for example `[x]` history on the file queue).
   The accepting check: `check_plugin_contracts.py` exits 0 on the repo, and the repo's own
   validation still passes. Retire a repo gate only when it exists solely for the conflicting rule.
 - **A global `~/.claude/CLAUDE.md` line** is never edited here — surface it, the user decides.

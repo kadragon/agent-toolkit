@@ -15,7 +15,7 @@ value changes here, update both in the same commit.
 | `CLAUDE.md` | Exactly one line: `@AGENTS.md` | init Step 8 | maintenance B (`sync-claude-md.sh`) |
 | `AGENTS.md` | Target ≤100 lines, hard warn >200 | init Step 3 | maintenance F (`check-context-size.sh`) |
 | `.agents/skills` | Symlink → `../.claude/skills` (or regular text file containing `../.claude/skills` on Windows with `core.symlinks=false`) | init Step 8 | maintenance E (`symlink-guard.sh`) |
-| `backlog.md` | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings (`## Rejected — do not re-file` holds plain bullets) | init Step 4 | maintenance C + D-1 |
+| `backlog.md` (file backend) | Items use `[ ]` / `[>]` / `[x]` checkboxes under `##` headings (`## Rejected — do not re-file` holds plain bullets) | init Step 4 | maintenance C + D-1 |
 | `tasks.md` | `# Title`, `status:`, Sprint Contract fields, optional `## Covers` (`tasks-template.md`) | first sprint (never init) | maintenance C + D-1 |
 | `docs/architecture.md` etc. | Referenced from AGENTS.md docs index | init Step 4 | `validate-harness.sh` |
 | `.claude/agents/{role}.md` | YAML frontmatter (`name`, `description`; `tools` and `model` optional) + body with Objective / Spawn Prompt Contract / Effort Tier / Exit Criteria, unless the role declares `spine-exempt: true` | **not init** — created later by `dev:harness-curate` on transcript evidence (init Step 4b creates no roles) | `validate-harness.sh` §11 (presence only — WARN; skipped entirely when no role files exist) |
@@ -174,7 +174,7 @@ return value / PR body. A silently applied default violates this contract.
 | `task-next` Step 2 selection | Run the full scan first, then take candidate `[1]` | Only the full scan orders by type priority; fast-path output is document-ordered and capped, so its `[1]` is not the highest-priority group |
 | Code-cycle approval (`task-next` and `task-new`) | Apply `task-next/references/cycle.md` → *Plan gate* | Approved constraints carry forward; unresolved material decisions are not auto-approved |
 | `task-next --all` selection | Take ready units within approved scope; execution mode per `task-next/references/batch.md` | Batch selection does not authorize parallel-agent cost |
-| `task-next` large group (>8 open items) | Take the first 8 open items in document order; name the remainder in the hand-off | A fixed cut is decidable; the remainder stays in `backlog.md` for the next run |
+| `task-next` large group (>8 open items) | Take the first 8 open items in candidate order; name the remainder in the hand-off | A fixed cut is decidable; the remainder stays in the active queue for the next run |
 | Version-bump level, repo states no release policy | Choose by semver; state level and reason in the hand-off and PR body | A local, reviewed edit — the PR review sees it before anything ships |
 | Review-cycle CI `reason:"timeout"` | Re-run `ci-wait.sh` once | A slow run is not a failure and counts no strike; a second timeout is a stop below |
 
@@ -205,29 +205,33 @@ Record the chosen trigger in `docs/runbook.md` so future sessions know.
 
 ## Reconciliation Contract (maintenance C)
 
-`reconcile-harness.py` closes the `tasks.md` sprint block. It writes no `backlog.md`
-line deletions — those are owned by `task_nodes.py prune-backlog` at `task-next`
-pre-merge cleanup (verbatim match, refuses on ambiguity). Its only `backlog.md` writes are the
-`failed` and `tasks.md`-absent rows below, and both are marker rewrites (`[>]` → `[ ]`) plus
-empty-heading pruning — never a line deletion:
+`reconcile-harness.py` resolves the active queue and closes the local sprint block. It
+updates file-queue markers and reports backlog counts only on the `backlog` backend.
+On the issues backend it leaves any legacy file and remote issues untouched. The normal
+task cycle hands issue closure to the PR; file item deletion belongs to
+`task_nodes.py prune-backlog` at pre-merge cleanup (verbatim match, refuses ambiguity).
 
-| `tasks.md` `status:` | Action | Outcome |
-|----------------------|--------|---------|
-| `open` / `active` | Leave intact; report sprint title (`open` = queued block `task-next` selects) | Nothing moves |
-| `done` | Delete tasks.md (or strip the sprint block if other content remains); append CHANGELOG entry if present | Sprint block closed; backlog line deletion happens separately via `prune-backlog` |
-| `failed` | Delete tasks.md (or strip the sprint block if other content remains); revert `[>]` → `[ ]` in backlog | Sprint block closed; backlog items returned to the queue, no line removed |
-| (no tasks.md) | Revert orphan `[>]` → `[ ]` in backlog; prune empty headings | Backlog idle state |
+| `tasks.md` `status:` | Local sprint action | File queue only |
+|----------------------|---------------------|-----------------|
+| `open` / `active` | Keep the block and report the sprint title | An open block is selectable work |
+| `done` | Close the block; append a CHANGELOG entry if the file exists | Covered item deletion happens separately through `prune-backlog` |
+| `failed` | Close the block | Revert `[>]` to `[ ]` and prune empty headings |
+| No `tasks.md` | Sprint is idle | Revert orphan `[>]` to `[ ]` and prune empty headings |
 
-For this contract to hold, init MUST create `backlog.md` with the exact schema above, and the
-first sprint MUST write `tasks.md` to it (init never creates `tasks.md` — the idle state is its
-absence).
+Closing removes `tasks.md` if no content remains. Init only creates `backlog.md` for repos
+adopting the file backend. GitHub origins with open file items or legacy items held by a file
+sprint remain on the file backend. Finish or reconcile legacy sprints before running
+`migrate_backlog.py`. On the issues backend, an unclaimed legacy marker leaves the queue
+on issues. Use `AGENT_QUEUE_BACKEND=backlog` for reconciliation if it is confirmed file work.
+If backend resolution fails, reconcile leaves file queue state and any failed sprint available
+for retry. Active and queued sprint status can be reported without resolving the queue.
+With unclaimed legacy markers, a failed sprint without a known issues claim stays available
+for recovery as well.
 
-**File-role invariant.** `tasks.md` is the Sprint Contract and nothing else; `backlog.md` is the
-only persistent queue. Deleting `tasks.md` on sprint close is safe *because* nothing that must
-outlive the sprint is in it. Review findings, security findings, sweep findings and follow-ups all
-append to `backlog.md`. Enforced at both ends: `task_nodes.py prune-tasks` refuses on a `tasks.md`
-holding a `## Review Backlog` / `## Security Fixes` section, and `backlog_candidates.py` warns on
-the same shape instead of offering it as work.
+**File-role invariant.** `tasks.md` carries only Sprint Contracts. Keep persistent work and
+findings in the resolved queue. `task_nodes.py prune-tasks` refuses a sprint file holding
+a `## Review Backlog` or `## Security Fixes` section, and `backlog_candidates.py` warns about
+the same shape on the file backend. Transfer those entries to the active queue before cleanup.
 
 ## CHANGELOG Entry Contract
 
@@ -260,7 +264,7 @@ in a plugin repo it may be a skill's `references/*.md`). No link when no doc hol
 
 | Material | Destination |
 |----------|-------------|
-| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (a reviewed cycle lands it; the review cycle's `harness-capture` retrospect queues it to `backlog.md`), then link it from the changelog line |
+| Reusable knowledge — a gotcha, convention, or rule that changes future behavior | the owning `docs/*.md` (a reviewed cycle lands it; the review cycle's `harness-capture` retrospect queues the follow-up), then link it from the changelog line |
 | Narrative of what was changed and how | **dropped** — `git log` and the PR body already hold it verbatim |
 
 Never create a changelog-detail file. Moving the bloat to a second file that nobody reads is

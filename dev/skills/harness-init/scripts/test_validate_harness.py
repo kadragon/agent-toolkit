@@ -39,8 +39,9 @@ class HarnessTests(unittest.TestCase):
     def run_script(self, name="validate-harness.sh", **env):
         result = subprocess.run(
             ["bash", str(SCRIPTS / name)], cwd=self.root,
-            env={**os.environ, "CONTEXT_SIZE_LIMIT": "200", **env},
-            text=True, capture_output=True, check=False,
+            env={**os.environ, "AGENT_QUEUE_BACKEND": "", "AGENT_QUEUE_BACKEND_SCRIPT": "",
+                 "CONTEXT_SIZE_LIMIT": "200", **env},
+            text=True, encoding="utf-8", capture_output=True, check=False,
         )
         self.assertEqual(result.stderr, "", result.stderr)
         return result
@@ -50,6 +51,42 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("WARN: 0", result.stdout)
         self.assertIn("LEVEL 1", result.stdout)
+
+    def test_github_origin_without_a_file_queue(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "git@github.com:fixture/repo.git"],
+            check=True,
+        )
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md absent — expected on the github queue backend", result.stdout)
+        self.assertIn("WARN: 0", result.stdout)
+
+        self.write("backlog.md", "## Old queue\n- [?] stale\n\n```md\n- [ ] snippet\n```\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
+        self.assertNotIn("migrate_backlog.py", result.stdout)
+
+        self.write("backlog.md", "## Queue\n- [ ] Deferred item *(deferred: waiting)*\n\n```md\n- [ ] snippet\n```\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md has 1 open item(s); this repo stays on the file queue", result.stdout)
+        self.assertIn("migrate_backlog.py", result.stdout)
+        self.assertIn("uses standard checkbox items", result.stdout)
+
+        self.write("backlog.md", "## Queue\n- [>] Last legacy sprint item\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unclaimed legacy [>] item(s); the issues queue stays active", result.stdout)
+        self.assertIn("AGENT_QUEUE_BACKEND=backlog", result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
+
+        self.write("tasks.md", "# Sprint\nstatus: failed\n\n## Covers\n\n- [ ] Last legacy sprint item\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("legacy [>] item(s); finish the sprint or run reconcile-harness.py", result.stdout)
+        self.assertIn("uses standard checkbox items", result.stdout)
 
     def test_existing_non_numbered_policy_and_one_invariant(self):
         self.write("AGENTS.md", BASE + "## Golden Principles\n- Validate public input → tests.\n")
@@ -91,7 +128,7 @@ class HarnessTests(unittest.TestCase):
                 if path.startswith(".agents/skills/"):
                     (self.root / ".agents/skills").unlink()
                     (self.root / ".claude/skills").mkdir(parents=True)
-                    (self.root / ".agents/skills").symlink_to("../.claude/skills", target_is_directory=True)
+                    (self.root / ".agents/skills").symlink_to(Path("../.claude/skills"), target_is_directory=True)
                 self.write(path, content)
                 result = self.run_script()
                 self.assertEqual(result.returncode, 0, result.stdout)
@@ -132,6 +169,59 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("cannot be validated", result.stdout)
         self.assertNotIn("malformed TOML", result.stdout)
+
+    def test_queue_resolution_without_tomllib(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+            check=True,
+        )
+        shim = f'#!/bin/sh\n[ "$2" != "import tomllib" ] || exit 1\nexec "{sys.executable}" "$@"\n'
+        for name in ("python3", "python"):
+            self.write(f"bin/{name}", shim)
+            (self.root / "bin" / name).chmod(0o755)
+        result = self.run_script(PATH=f"{self.root / 'bin'}:{os.environ['PATH']}")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md absent — expected on the github queue backend", result.stdout)
+
+    def test_missing_queue_python_still_checks_local_schema(self):
+        for name in ("python3", "python"):
+            self.write(f"bin/{name}", "#!/bin/sh\nexit 127\n")
+            (self.root / "bin" / name).chmod(0o755)
+        path = f"{self.root / 'bin'}:{os.environ['PATH']}"
+        self.write("backlog.md", "## Queue\n- [ ] Work\n")
+        result = self.run_script(PATH=path)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("checking the local file schema only", result.stdout)
+        self.write("backlog.md", "## Queue\n- [?] Work\n")
+        result = self.run_script(PATH=path)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("non-standard checkboxes", result.stdout)
+
+    def test_queue_resolver_unavailable_still_checks_local_schema(self):
+        self.write("backlog.md", "## Queue\n- [ ] Work\n")
+        for settings, detail in (
+            ({"AGENT_QUEUE_BACKEND_SCRIPT": str(self.root / "missing.py")}, "queue resolver unavailable"),
+            ({"AGENT_QUEUE_BACKEND": "'unterminated"}, "AGENT_QUEUE_BACKEND is not a valid command line"),
+        ):
+            with self.subTest(detail=detail):
+                result = self.run_script(**settings)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(detail, result.stdout)
+                self.assertIn("uses standard checkbox items", result.stdout)
+
+    def test_copied_validator_can_use_explicit_resolver(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+            check=True,
+        )
+        self.write("backlog.md", "## Legacy\n- [?] stale\n")
+        copy = self.root / "scripts" / "validate-harness.sh"
+        copy.parent.mkdir()
+        copy.write_bytes((SCRIPTS / "validate-harness.sh").read_bytes())
+        resolver = SCRIPTS.parents[1] / "task-next" / "scripts" / "queue_backend.py"
+        result = self.run_script(copy, AGENT_QUEUE_BACKEND_SCRIPT=resolver.as_posix())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
 
     def test_workflow_only_delegation(self):
         self.write("docs/workflows.md", "# Code\n## Delegation workflow\nDelegate to the built-in reviewer when authorized.\n")

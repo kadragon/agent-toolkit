@@ -93,7 +93,7 @@ new Golden Principles section or another copy in every repository.
 - Feature flag names and default values
 - Dependency versions and package names
 
-**In spec/plan files:** When generating `spec.md`, `backlog.md`, or task descriptions, mark any value not directly read as `[unknown]`. Future sessions that read the spec see a concrete work item: "resolve `[unknown]`", not a silent lie.
+**In plans and queue entries:** Mark values you have not directly verified as `[unknown]` in specs, file queue entries, and issue descriptions. A future session can find and resolve the unknown value.
 
 ## From Principle to Enforcement
 

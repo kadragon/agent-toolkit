@@ -11,8 +11,8 @@ Every request carries `"contract": 1` and `"repo": "<abs toplevel>"`.
 
 Backend resolution, first match wins:
   1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command (shell-split).
-  2. `origin` host `github.com` → `github`, unless `backlog.md` still has an open `- [ ]` item
-     (parked ones included), which keeps the repo on `backlog`.
+  2. `origin` host `github.com` → `github`, unless `backlog.md` still has open `- [ ]`
+     items (including parked items) or legacy `- [>]` items with a file sprint claim.
   3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`
      (`{"hosts": {"<origin host>": ["cmd", "arg", ...]}}`) → that adapter command.
   4. `backlog`.
@@ -111,23 +111,53 @@ def _registry_command(host: str, env: dict[str, str]) -> list[str] | None:
     return cmd
 
 
-def backlog_open_items(repo: str, rev: str | None = None) -> int:
-    """Unchecked `- [ ]` items in `<repo>/backlog.md` (as committed at `rev` when given), parked
-    ones included; 0 when absent."""
+def _backlog_items(repo: str, rev: str | None = None) -> tuple[int, list[str]]:
     if rev:
         sha = _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
         if not sha:
             raise QueueError(f"ref {rev!r} does not resolve to a commit in {repo}")
         text = _git(repo, "show", f"{sha}:backlog.md") or ""
-        return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
-    try:
-        with open(os.path.join(repo, "backlog.md"), encoding="utf-8") as fh:
-            text = fh.read()
-    except FileNotFoundError:
-        return 0
-    except (OSError, ValueError) as e:  # unreadable is not "empty": never flip to github on it
-        raise QueueError(f"cannot read {os.path.join(repo, 'backlog.md')}: {e}") from e
-    return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
+    else:
+        path = os.path.join(repo, "backlog.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except FileNotFoundError:
+            return 0, []
+        except (OSError, ValueError) as e:  # unreadable is not "empty": never flip to github on it
+            raise QueueError(f"cannot read {path}: {e}") from e
+    items = [t for t in bc.tokenize(text) if t["type"] == "checkbox"]
+    lines = text.splitlines()
+    open_count = sum(1 for item in items if item["state"] == " ")
+    in_flight = [lines[item["line"] - 1].split("]", 1)[1].strip() for item in items if item["state"] == ">"]
+    return open_count, in_flight
+
+
+def backlog_open_items(repo: str, rev: str | None = None) -> int:
+    """Count unchecked file items, including parked items and excluding legacy in-flight items."""
+    return _backlog_items(repo, rev)[0]
+
+
+def _has_file_claim(repo: str, rev: str | None, in_flight: list[str]) -> bool:
+    if rev:
+        entry = _git(repo, "ls-tree", rev, "--", "tasks.md")
+        if entry is None:
+            raise QueueError(f"cannot inspect tasks.md at {rev}")
+        if not entry:
+            return False
+        tasks = _git(repo, "show", f"{rev}:tasks.md")
+        if tasks is None or entry.split()[1] != "blob":
+            raise QueueError(f"cannot read tasks.md at {rev}")
+    else:
+        path = os.path.join(repo, "tasks.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                tasks = fh.read()
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError) as e:
+            raise QueueError(f"cannot read {path}: {e}") from e
+    return bool(tasks and not bc.item_keys(tasks, under="Covers").isdisjoint(in_flight))
 
 
 def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None) -> dict:
@@ -140,9 +170,13 @@ def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None
         return {"backend": "adapter", "source": "env", "command": split_command(explicit)}
     host = origin_host(_git(repo, "remote", "get-url", "origin"))
     if host == "github.com":
-        open_items = backlog_open_items(repo, rev)  # the queue `list` will read, not this checkout's
-        if open_items:
-            return {"backend": "backlog", "source": "github-open-backlog", "open_items": open_items}
+        open_items, in_flight = _backlog_items(repo, rev)
+        active_items = len(in_flight)
+        if open_items or (in_flight and _has_file_claim(repo, rev, in_flight)):
+            return {"backend": "backlog", "source": "github-open-backlog",
+                    "open_items": open_items, "active_items": active_items}
+        if active_items:
+            return {"backend": "github", "source": "github-host", "active_items": active_items}
         return {"backend": "github", "source": "github-host"}
     if host:
         cmd = _registry_command(host, env)
@@ -1346,7 +1380,8 @@ def github_visibility(repo: str, runner) -> str:
 
 def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
     if op == "describe":
-        visibility = github_visibility(req["repo"], runner)
+        # Local harness checks need the backend itself, not a GitHub visibility query.
+        visibility = "unknown" if req.get("verify_visibility") is False else github_visibility(req["repo"], runner)
         if req.get("verify_visibility") is True and visibility == "unknown":
             raise QueueError("GitHub did not confirm public or private repository visibility")
         return EXIT_OK, {
@@ -1416,13 +1451,25 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
                 raise QueueError("GitHub did not confirm public or private repository visibility")
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
-        elif op == "list" and backend["source"] == "github-open-backlog" and data is not None:
-            data["warnings"].append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
+        elif op in ("describe", "list") and backend["source"] == "github-open-backlog" and data is not None:
+            warnings = data.setdefault("warnings", [])
+            if backend["open_items"]:
+                warnings.append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
+            if backend["active_items"]:
+                warnings.append(
+                    f"backlog.md has {backend['active_items']} legacy [>] item(s); finish the sprint or run "
+                    "reconcile-harness.py before migrating with migrate_backlog.py"
+                )
         return code, data
     if backend["backend"] == "github":
         code, data = github_op(op, req, runner)
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the github backend does not support {op!r}\n")
+        elif op in ("describe", "list") and data is not None and backend.get("active_items"):
+            data.setdefault("warnings", []).append(
+                f"backlog.md has {backend['active_items']} unclaimed legacy [>] item(s); the issues queue stays "
+                "active. To recover confirmed file work, run reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog"
+            )
         return code, data
     return _run_adapter(backend["command"], op, req)
 
@@ -1586,8 +1633,32 @@ def run_tests() -> int:
             write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Done\n\n- [x] closed\n")
             _assert(resolve(empty, dict(base_env)) == {"backend": "github", "source": "github-host"},
                     "github.com origin without open items → github")
+            write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Sprint\n\n- [>] last active item\n")
+            _assert(resolve(empty, dict(base_env))["backend"] == "github",
+                    "unclaimed legacy marker does not switch a migrated GitHub repo back to backlog")
+            os.mkdir(os.path.join(empty, "tasks.md"))
+            try:
+                resolve(empty, dict(base_env))
+                _assert(False, "unreadable claims must not switch the queue")
+            except QueueError as e:
+                _assert("tasks.md" in str(e), "unreadable claims fail backend resolution")
+            os.rmdir(os.path.join(empty, "tasks.md"))
+            write(os.path.join(empty, "tasks.md"), "# Sprint\nstatus: failed\n\n## Covers\n\n- #17 issue claim\n")
+            _assert(resolve(empty, dict(base_env))["backend"] == "github",
+                    "an issues sprint does not claim an old file item")
+            write(os.path.join(empty, "tasks.md"), "# Sprint\nstatus: failed\n\n## Covers\n\n- [ ] different file item\n")
+            _assert(resolve(empty, dict(base_env))["backend"] == "github",
+                    "an unrelated file claim does not switch the queue")
+            write(os.path.join(empty, "tasks.md"), "# Sprint\nstatus: failed\n\n## Covers\n\n- [ ] last active item\n")
+            git(empty, "add", "backlog.md", "tasks.md")
+            git(empty, "commit", "-q", "--no-verify", "-m", "in flight")
+            active = resolve(empty, dict(base_env))
+            _assert(active["backend"] == "backlog" and active["open_items"] == 0 and active["active_items"] == 1,
+                    "claimed legacy in-flight item keeps the file queue even without open items")
             os.remove(os.path.join(empty, "backlog.md"))
             _assert(resolve(empty, dict(base_env))["backend"] == "github", "github.com origin, no backlog.md → github")
+            _assert(resolve(empty, dict(base_env), "HEAD") == active,
+                    "pinned ref retains legacy in-flight file items")
             forge = os.path.realpath(os.path.join(tmp, "forge"))
             os.makedirs(forge)
             git(forge, "init", "-q", "-b", "main")
@@ -1893,6 +1964,9 @@ def run_github_tests(tmp: str, git, write) -> None:
     _, described = handle("describe", req, {ENV_VAR: "backlog"}, runner)
     _assert(described["visibility"] == "unknown" and not calls,
             "ordinary file queue descriptions leave visibility unknown without contacting GitHub")
+    _, described = handle("describe", dict(req, verify_visibility=False), {ENV_VAR: "github"}, runner)
+    _assert(described["backend"] == "github" and described["visibility"] == "unknown" and not calls,
+            "harness checks can describe the github backend without contacting GitHub")
     data = github_list(dict(req, full_scan=True, parked=True), runner)
     refs = [c["ref"] for c in data["candidates"]]
     _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#23", "#25", "#13"],

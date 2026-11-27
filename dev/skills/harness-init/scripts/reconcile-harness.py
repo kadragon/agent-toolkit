@@ -2,7 +2,7 @@
 """
 C) Harness Reconciliation
 
-Closes a finished tasks.md sprint block (done/failed) and reports sprint/backlog state.
+Closes a finished tasks.md sprint block (done/failed) and reports local queue state.
 
 Exit codes:
   0  Normal completion
@@ -13,6 +13,9 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
+from queue_backend import QueueError, _covers_refs, resolve  # noqa: E402
 
 TASKS = Path("tasks.md")
 BACKLOG = Path("backlog.md")
@@ -325,10 +328,19 @@ def count_items(backlog: str) -> tuple[int, int] | None:
 # Main
 # ---------------------------------------------------------------------------
 
+def queue_state() -> dict | None:
+    try:
+        return resolve(str(BACKLOG.parent.resolve()))
+    except QueueError as exc:
+        print(f"Queue backend unavailable: {exc}. Leaving file queue state intact.", file=sys.stderr)
+        return None
+
+
 def main() -> None:
     tasks_content = read(TASKS)
+    backend = None
 
-    # C-1: Sync tasks.md -> backlog.md
+    # C-1: Close the sprint block, restoring file-queue markers where applicable.
     if tasks_content is not None:
         raw_status = tasks_field(tasks_content, "status")
         status = raw_status.lower() if raw_status else None
@@ -345,7 +357,19 @@ def main() -> None:
                 print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
-            if BACKLOG.exists():
+            backend = queue_state()
+            if backend is None:
+                return  # Keep the failed sprint so recovery can be retried.
+            file_queue = backend["backend"] == "backlog"
+            if not file_queue and backend.get("active_items") and not _covers_refs(tasks_content):
+                print(
+                    f"Sprint '{title}' failed. Leaving it intact while legacy [>] items are unclaimed. "
+                    "For confirmed file work, retry with AGENT_QUEUE_BACKEND=backlog.",
+                    file=sys.stderr,
+                )
+                return
+            suffix = "; backlog items reverted to [ ]" if file_queue else ""
+            if file_queue and BACKLOG.exists():
                 backlog_content = read_text_preserving_eol(BACKLOG)
                 reverted = revert_orphan_markers(backlog_content)
                 cleaned = remove_empty_headings(reverted)
@@ -355,10 +379,10 @@ def main() -> None:
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:
                 TASKS.unlink()
-                print(f"Sprint '{title}' failed. Sprint block closed; backlog items reverted to [ ].")
+                print(f"Sprint '{title}' failed. Sprint block closed{suffix}.")
             else:
                 TASKS.write_text(remainder, encoding="utf-8")
-                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained; backlog items reverted to [ ].")
+                print(f"Sprint '{title}' failed. Sprint block stripped, tasks.md retained{suffix}.")
 
         elif status in ("active", "evaluating"):
             print(f"Sprint active: {title}")
@@ -392,17 +416,21 @@ def main() -> None:
 
     else:
         # C-2: tasks.md absent — clean orphan markers from backlog
-        if not BACKLOG.exists():
-            print("Backlog clear.")
+        backend = queue_state()
+        if backend is None:
             return
-
-        content = read_text_preserving_eol(BACKLOG)
-        cleaned = revert_orphan_markers(content)
-        cleaned = remove_empty_headings(cleaned)
-        if cleaned != content:
-            BACKLOG.write_bytes(cleaned.encode("utf-8"))
+        if backend["backend"] == "backlog" and BACKLOG.exists():
+            content = read_text_preserving_eol(BACKLOG)
+            cleaned = revert_orphan_markers(content)
+            cleaned = remove_empty_headings(cleaned)
+            if cleaned != content:
+                BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
     # C-3: Report
+    if backend is None:
+        backend = queue_state()
+    if backend is None or backend["backend"] != "backlog":
+        return
     if not BACKLOG.exists():
         print("Backlog clear.")
         return

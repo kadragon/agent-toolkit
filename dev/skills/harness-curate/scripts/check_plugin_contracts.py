@@ -8,7 +8,7 @@ check makes the conflict visible to `harness-curate`, which proposes the repo-si
 
 Contracts checked:
 
-  backlog-history   Closed items leave `backlog.md`: `task_nodes.py prune-backlog` deletes them at
+  backlog-history   On the file backend, closed items leave `backlog.md`: `task_nodes.py prune-backlog` deletes them at
                     cleanup, and the closure record is the `CHANGELOG.md` entry. A repo that keeps
                     `- [x]` lines in `backlog.md`, or documents a rule to keep them, conflicts.
 
@@ -31,12 +31,14 @@ Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures live in a tempdir.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
 from backlog_candidates import _strip_fenced_blocks, _strip_html_comments  # noqa: E402
+from queue_backend import QueueError, resolve  # noqa: E402
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _DONE_RE = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
@@ -90,8 +92,10 @@ def grep_docs(root: Path, match) -> list[str]:
     return hits
 
 
-def check_backlog_history(root: Path) -> list[str]:
+def check_backlog_history(root: Path, env: dict[str, str] | None = None) -> list[str]:
     """Report lines for the backlog-history contract; empty when the repo conforms."""
+    if resolve(str(root.resolve()), env)["backend"] != "backlog":
+        return []
     backlog = root / "backlog.md"
     items = done_items(backlog.read_text(encoding="utf-8", errors="replace")) if backlog.is_file() else []
     rules = grep_docs(root, is_keep_rule)
@@ -125,10 +129,10 @@ def check_backlog_history(root: Path) -> list[str]:
 CHECKS = (check_backlog_history,)
 
 
-def run(root: Path) -> tuple[int, list[str]]:
+def run(root: Path, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
     for check in CHECKS:
-        lines.extend(check(root))
+        lines.extend(check(root, env))
     return (1 if lines else 0), lines
 
 
@@ -145,7 +149,11 @@ def main(argv: list[str]) -> int:
     if not root.is_dir():
         print(f"Error: not a directory: {root}", file=sys.stderr)
         return 2
-    code, lines = run(root)
+    try:
+        code, lines = run(root)
+    except QueueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     print("\n".join(lines) if lines else "OK: no plugin-contract conflicts")
     return code
 
@@ -180,20 +188,39 @@ def _repo(files: dict[str, str]) -> Path:
 def run_tests() -> int:
     print("=== check_plugin_contracts.py --test ===\n")
 
-    code, lines = run(_repo({"backlog.md": "# Backlog\n\n## Now\n\n- [ ] open item\n"}))
+    def check(root):
+        return run(root, env={})
+
+    code, lines = check(_repo({"backlog.md": "# Backlog\n\n## Now\n\n- [ ] open item\n"}))
     _assert(code == 0 and not lines, "open items only, no rule → no conflict")
 
-    code, _ = run(_repo({}))
+    code, _ = check(_repo({}))
     _assert(code == 0, "no backlog.md, no docs → no conflict")
 
-    code, lines = run(_repo({
+    code, lines = check(_repo({
         "backlog.md": "## Review Backlog\n\n### PR #100 — x\n\n- [x] done — verdict\n- [ ] open\n",
     }))
     text = "\n".join(lines)
     _assert(code == 1, "`[x]` item in backlog.md → conflict")
     _assert("backlog.md:5: - [x] done — verdict" in text, "conflict names the `[x]` line and number")
 
-    code, lines = run(_repo({
+    github = _repo({
+        "backlog.md": "## Old queue\n- [x] closed\n",
+        "docs/conventions.md": "Keep `[x]` items as history.\n",
+    })
+    subprocess.run(["git", "init", "-q", str(github)], check=True)
+    subprocess.run(
+        ["git", "-C", str(github), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+        check=True,
+    )
+    code, lines = check(github)
+    _assert(code == 0 and not lines, "issues backend skips file lines and local history rules")
+    with (github / "backlog.md").open("a", encoding="utf-8") as backlog:
+        backlog.write("- [ ] still queued\n")
+    code, lines = check(github)
+    _assert(code == 1 and "backlog.md holds 1" in "\n".join(lines), "unmigrated GitHub backlog is still checked")
+
+    code, lines = check(_repo({
         "backlog.md": "## Now\n\n- [ ] open\n",
         "docs/conventions.md": "- Thematic bucket — keep `[x]` items as history.\n"
                                "- After a run, re-add what `prune-backlog` removed.\n",
@@ -203,20 +230,20 @@ def run_tests() -> int:
     _assert("docs/conventions.md:1:" in text, "conflict names the rule line")
     _assert("docs/conventions.md:2:" in text, "related `prune-backlog` doc line is listed")
 
-    code, _ = run(_repo({
+    code, _ = check(_repo({
         "backlog.md": "## Now\n\n<!--\n- [x] template sample\n-->\n```\n- [x] fenced sample\n```\n",
         "docs/x.md": "```\nkeep [x] as history\n```\n",
     }))
     _assert(code == 0, "`[x]` and rule text inside comments/fences are ignored")
 
-    code, _ = run(_repo({
+    code, _ = check(_repo({
         "backlog.md": "## Now\n\n- [ ] open\n",
         "docs/architecture.md": "line deletion is owned by `task_nodes.py prune-backlog`\n",
         "docs/design/old.md": "keep [x] as history\n",
     }))
     _assert(code == 0, "a doc naming `prune-backlog` alone, or a rule under docs/design/, is not a conflict")
 
-    code, _ = run(_repo({
+    code, _ = check(_repo({
         "backlog.md": "## Now\n\n- [ ] open\n",
         "docs/harness-log.md": "- The thematic-bucket \"keep `[x]` as history\" rule and\n"
                                "  the \"re-add after `prune-backlog`\" workaround are gone.\n",
@@ -224,13 +251,13 @@ def run_tests() -> int:
     }))
     _assert(code == 0, "a change-record doc quoting the retired rule is not a conflict")
 
-    code, _ = run(_repo({"docs/catalog.md": "- Thematic bucket — keep `[x]` items as history.\n"}))
+    code, _ = check(_repo({"docs/catalog.md": "- Thematic bucket — keep `[x]` items as history.\n"}))
     _assert(code == 1, "a doc whose name only ends in the letters `log` (`catalog.md`) is still scanned")
 
-    code, _ = run(_repo({"AGENTS.md": "- Done items: do not keep `[x]` lines as history.\n"}))
+    code, _ = check(_repo({"AGENTS.md": "- Done items: do not keep `[x]` lines as history.\n"}))
     _assert(code == 0, "a rule that forbids `[x]` history states the contract → no conflict")
 
-    code, _ = run(_repo({"backlog.md": "## Now\n\n````md\n```\n- [x] template only\n```\n````\n"}))
+    code, _ = check(_repo({"backlog.md": "## Now\n\n````md\n```\n- [x] template only\n```\n````\n"}))
     _assert(code == 0, "a shorter fence inside a longer one does not close it")
 
     print(f"\n{PASS_COUNT} passed, {FAIL_COUNT} failed")

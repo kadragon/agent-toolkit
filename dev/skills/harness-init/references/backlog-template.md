@@ -1,7 +1,7 @@
 # backlog.md Template
 
-`backlog.md` is the **only** persistent queue: work not yet in flight, plus every finding that
-outlives the cycle that produced it — review findings, security findings, deferred follow-ups.
+`backlog.md` is the persistent queue on the `backlog` backend only. It holds work not yet in
+flight and findings that outlive their cycle, including review, security, and deferred follow-ups.
 Who writes which transition: `harness-invariants.md` → *Reconciliation Contract*.
 
 ## Required Schema

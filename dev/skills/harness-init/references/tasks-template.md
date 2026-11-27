@@ -3,9 +3,10 @@
 `tasks.md` holds Sprint Contract blocks and **nothing else**. It is optional: `dev:task-next`
 writes it only when a `## Covers` list is needed (a ≥2-item backlog group, `--tree`, or the
 issues backend), and it is absent when idle. Persistent content — queued work, review and security findings,
-follow-ups — goes to `backlog.md` (`backlog-template.md`). `task_nodes.py prune-tasks` refuses a
-`tasks.md` carrying a `## Review Backlog` / `## Security Fixes` section; move it to `backlog.md`
-verbatim.
+follow-ups — goes to the resolved queue. Use `backlog.md` (`backlog-template.md`) on the
+file backend or issue refs on the issues backend. `task_nodes.py prune-tasks` refuses a
+`tasks.md` carrying a `## Review Backlog` / `## Security Fixes` section. Transfer those entries
+to the active queue before closing the sprint.
 
 ## Required Schema
 

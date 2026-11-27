@@ -27,13 +27,18 @@ First match wins:
 
 1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command line (shell-split; on
    Windows backslashes stay literal).
-2. `origin` host `github.com` → `github`, **unless `backlog.md` has an open `- [ ]` item**
-   (parked ones included); such a repo stays on `backlog` until its file queue is empty. For a
+2. `origin` host `github.com` → `github`, **unless `backlog.md` has open `- [ ]` items**
+   (including parked items) **or legacy `- [>]` items with a file sprint claim** in
+   `tasks.md` under `## Covers`. For a
    `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
    absent) `backlog.md` is an error, never a switch to `github`. `describe` honors `ref` the same way,
-   so a caller resolves the backend its `list` calls will use. `list` on such a repo appends the
+   so a caller resolves the backend its `list` calls will use. `describe` and `list` on such a repo include the
    warning `backlog.md has N open item(s); this repo stays on the file queue until you run
-   migrate_backlog.py` (*Moving a file queue to issues*).
+   migrate_backlog.py` for unchecked items (*Moving a file queue to issues*).
+   For legacy in-flight items, they warn to finish the sprint or reconcile it before migration.
+   The dry run lists these items and `migrate_backlog.py --apply` stops until they are resolved.
+   A legacy marker without a file claim leaves the issues backend active and emits a recovery
+   warning. Use the explicit `backlog` backend for reconciliation only when the marker is confirmed file work.
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.
@@ -45,7 +50,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
-| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
+| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template`, optional `warnings[]` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
@@ -116,8 +121,9 @@ guide for the draft advisory route.
 Reads `origin`'s `owner/name` and queries `gh api graphql`. `gh` missing or unauthenticated is a
 hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fallback.
 
-- `describe`: `visibility` from the repo's `isPrivate`, `ops` every op above,
-  `close_ref_template` `"Closes {ref}"`.
+- `describe`: `visibility` from GitHub, `ops` every op above, `close_ref_template`
+  `"Closes {ref}"`. Pass `verify_visibility: false` for local checks that only need the
+  backend. It skips the GitHub request and reports `visibility: unknown`.
 - **Trust gate.** Only open issues labelled `task-queue` **and** authored by
   `OWNER`/`MEMBER`/`COLLABORATOR` are queue items; another author's labelled issue is skipped
   with a warning. Comments are never read.
