@@ -3025,6 +3025,15 @@ assert not sys.stdin.readline(), "unexpected extra request"
         self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 2)
         self.assertFalse(self.marker.exists())
 
+    def test_run_codex_from_resolved_executable_path(self):
+        executable = (self.home / "codex").rename(self.home / "codex.cmd")
+        with (patch.dict(os.environ, {**self.env, "PATH": str(self.home)}),
+              patch("shutil.which", return_value=str(executable)) as which,
+              redirect_stdout(StringIO()) as out, redirect_stderr(StringIO()) as err):
+            quota_main(["--refresh-if-stale"])
+        self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 1, err.getvalue())
+        which.assert_called_once_with("codex")
+
 
 class QuotaTests(unittest.TestCase):
     def test_claude_pass_defaults_to_claude_home_and_filters_by_weekly_reset(self):

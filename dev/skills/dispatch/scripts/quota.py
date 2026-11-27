@@ -21,6 +21,7 @@ import errno
 import json
 import math
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -157,7 +158,10 @@ def read_codex_reset_passes(home):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from codex_app_server import request
 
-    result = request("codex", home, "account/rateLimits/read", {"excludeResetCreditDetails": False},
+    binary = shutil.which("codex")
+    if binary is None:
+        raise FileNotFoundError("Codex CLI executable not found")
+    result = request(binary, home, "account/rateLimits/read", {"excludeResetCreditDetails": False},
                      timeout=RESET_PASS_LOOKUP_TIMEOUT)
     summary = result.get("rateLimitResetCredits") if isinstance(result, dict) else None
     count = summary.get("availableCount") if isinstance(summary, dict) else None

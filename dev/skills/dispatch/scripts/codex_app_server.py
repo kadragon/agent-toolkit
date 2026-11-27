@@ -26,7 +26,7 @@ def request(binary, home, method, params, *, timeout, cwd=None, experimental=Fal
 
         def read():
             try:
-                # Only the reader owns this buffer, so cleanup can close the raw pipe independently.
+                # Python's BufferedReader can hold its lock during a blocking read.
                 for line in io.BufferedReader(process.stdout):
                     incoming.put(line)
             except (OSError, ValueError):
@@ -68,7 +68,7 @@ def request(binary, home, method, params, *, timeout, cwd=None, experimental=Fal
         except queue.Empty:
             raise AppServerError("Codex app server timed out") from None
         finally:
-            # The executable can be a shim that starts the real app server as its child.
+            # The npm Codex launcher can start the real app server as a child.
             try:
                 if os.name == "nt":
                     process.kill()
