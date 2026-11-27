@@ -86,15 +86,15 @@ needs these gates is the one running without them. The floor, one line per gate:
 4. No new `$var` reference without a visible `var=$(cmd)` capture
 5. No out-of-scope edits — every changed path traces to a line in the contract's **Scope**. A path
    outside it fails unless the contract was amended to cover it. Cycle-owned changes to `tasks.md`
-   and the plugin manifests are exempt from the scope check. When the cycle selected the
-   `backlog` backend, this exemption also covers its bookkeeping in `backlog.md` and
-   `CHANGELOG.md`. On the issues backend, changes to those two files must be in scope.
+   and the plugin manifests are exempt from the scope check. Use the backend recorded in the
+   brief. Apply the scope check to `backlog.md` and `CHANGELOG.md` unless the brief identifies
+   `backlog` as the selected backend and the edits are cycle-owned bookkeeping.
 6. Owning doc synced — a change that alters a rule stated in `docs/` or `AGENTS.md` updates that
    doc and its sibling references in the same change set (a new or renamed `docs/` file also
    updates the `AGENTS.md` Docs Index)
 
-For gate 1, record **N/A** for paths outside every plugin tree. Gate 5 applies its own scope
-rules to those paths.
+For gate 1, record **N/A** for paths outside every plugin tree. A repo-root path outside the
+contract's scope still fails gate 5 unless gate 5's own exception applies.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
 same commit. Cited by *Absent-Role Fallbacks* below, which `dev:task-next`'s `--tree` and `--all`
@@ -142,8 +142,9 @@ code quality and never replaces required checks. For task cycles,
 brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
 (Objective / Output format / Tools to use / Boundaries) plus effort tier and its stop rule (at the
 tool-call cap, return the table with ungraded criteria marked `unverified`) — filled with the Sprint
-Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test command, and telling
-it to verify against those criteria rather than impressions and to change nothing. **Carry the
+Contract's acceptance criteria verbatim, the in-scope paths, the cycle's selected queue backend,
+and the lint/test command, and telling it to verify against those criteria rather than impressions
+and to change nothing. **Carry the
 standing-checks floor in the brief too** — with no role file there is no `## Checks (always run)`
 for the brief to point at, so the gates every contract inherits reach the verifier only if the brief
 states them. Take them from *Verifier Standing-Checks Floor* above; do not reconstruct the list from

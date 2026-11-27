@@ -75,7 +75,8 @@ that worktree/branch; exclude them from integration and report why.
 ### A4 — Unit QA
 
 Use a separate `qa-verifier` per successful unit, with the same brief rules and ownership limits.
-Brief pre-review QA with each unit's targeted checks. Grade requirements and code quality
+Brief pre-review QA with the backend selected for the batch and each unit's targeted checks.
+Grade requirements and code quality
 against the unit contract; reuse eligible test evidence per
 `cycle.md` → *Validation evidence*. One fix-and-QA retry for a blocking finding. Still blocked
 or verifier unavailable → preserve the unit and exclude it from integration; report the limit.
