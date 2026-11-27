@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Add github queue writes, the queue-write grant and issue filing in task-tickets (dev v4.12.38) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Select task-next work through the queue backend and close covered issues from the PR (dev v4.12.37) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Settle collected T3 dispatch threads (dev v4.12.36) (2026-11-27) → dev/skills/dispatch/references/t3-backend.md
 - [done] Route dispatch pick through the queue backend (dev v4.12.35) (2026-11-27) → docs/design/github-issues-queue.md

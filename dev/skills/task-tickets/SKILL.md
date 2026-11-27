@@ -1,20 +1,21 @@
 ---
 name: task-tickets
 description: >-
-  Break an approved `docs/design/{slug}.md` spec into vertical-slice
-  `backlog.md` items, each sized for exactly one Sprint Contract, in dependency
-  order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
+  Break an approved `docs/design/{slug}.md` spec into vertical-slice queue
+  items (GitHub issues, or `backlog.md` items), each sized for exactly one
+  Sprint Contract, in dependency order. Reuses approved granularity; confirms new slicing decisions. NOT for authoring the design
   doc itself → task-spec. A single trivial task skips this — write one Sprint
   Contract directly.
-version: 1.3.1
+version: 1.4.0
 ---
 
 # To Tickets
 
-> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
+> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's queue backends (GitHub issues or `backlog.md`; no CONTEXT.md/ADR pipeline).
 
-Breaks a spec (or a resolved conversation) into `backlog.md` items sized for individual Sprint
-Contracts, ordered so dependencies land before dependents.
+Breaks a spec (or a resolved conversation) into queue items sized for individual Sprint
+Contracts, ordered so dependencies land before dependents. Every queue access goes through
+`../task-next/scripts/queue_backend.py` (`../task-next/references/queue-backend-contract.md`).
 
 ## When to use
 
@@ -22,7 +23,7 @@ Input is either an approved `docs/design/{slug}.md` (the common case, produced b
 or a conversation that has already resolved enough scope to
 decompose directly (skip `task-spec` for smaller multi-ticket work that doesn't warrant a full
 spec doc). Automates `docs/workflows.md` `plan` workflow **step 3** ("Generate `backlog.md`
-items from approved spec").
+items from approved spec" — queue items on whichever backend the repo resolves to).
 
 ## Flow
 
@@ -56,8 +57,29 @@ items from approved spec").
    `../task-grill/references/skill-extraction.md` → *Carrying the slots*.
    Cite the approved source in each ticket. Apply `../task-next/references/cycle.md` → *Plan gate*:
    reuse approved granularity/order; ask only about new slicing decisions or changed scope before
-   writing. Create `backlog.md` if this authorized ticket-writing path needs it.
-5. **Write to `backlog.md`.** Give each confirmed ticket its **own** new `## <n> — <short name>`
+   writing. Filing itself needs no approval on the `github` backend (below).
+5. **Write to the queue.** Read the repository's `rejected` entries first and drop or flag a
+   ticket that matches one without meeting its re-file bar. Then send the confirmed tickets to
+   `create`, in topological order:
+   ```bash
+   top=$(git rev-parse --show-toplevel)
+   [[ -n "$top" ]] || { echo "not in a git repository" >&2; exit 1; }
+   QB="<absolute task-next skill directory>/scripts/queue_backend.py"
+   printf '{"contract": 1, "repo": "%s"}' "$top" | python3 "$QB" rejected
+   # then the same request plus "items": [...] on stdin of: python3 "$QB" create
+   ```
+   - **`github` backend** — each ticket becomes **one issue, no parent**: `key`
+     `tickets:<slug>:<n>` (stable, so a re-run reuses issues already filed), `title` the
+     `[type]`-tagged ticket line, `body` the Source / Done when / Approach lines, `labels` `[]`,
+     `blocked_by` the keys of its blocking tickets in this batch (or `#N` refs to existing
+     issues). Filing runs under the standing `queue-write` grant
+     (`../task-next/references/git-authorization.md` → *Queue writes*): no per-run approval,
+     attended and unattended alike, and no working-tree change. Pass `"queue_limits":
+     "no-queue-write"` only when the user forbade queue writes for this run. Report the
+     `created[]` refs; report every `incomplete[]` relation and `pending[]` key with
+     `pending_path` — those drafts wait in the pending store for `queue_backend.py publish`.
+   - **`{"edit_file": "backlog.md"}`** (the `backlog` backend) — hand-edit `backlog.md`,
+     creating it if needed. Give each confirmed ticket its **own** new `## <n> — <short name>`
    heading — never
    append a task-tickets-generated ticket into an existing heading that already owns other open
    items, and never put two new tickets under one shared heading. `task-next` treats a
@@ -74,7 +96,8 @@ items from approved spec").
      Done when: <criterion → check>
      Approach: <one line>
    ```
-6. **Mark blocked items.** Any ticket that must not start before another ticket in this same
+6. **Mark blocked items** (`backlog` backend; on `github`, `blocked_by` in Step 5 already filed
+   the dependencies). Any ticket that must not start before another ticket in this same
    batch (or an existing unresolved backlog item) completes gets the marker appended to its
    item line, verbatim format:
    ```
@@ -95,11 +118,12 @@ items from approved spec").
    one at a time as each blocker lands. This is the existing syntax repeated, not a new one.
    `backlog_candidates.py` already skips a heading whose every open item carries a
    `*(deferred: ...)*` or `*(blocked by: ...)*` marker.
-7. **Hand off.** Report the written tickets and their order, and tell the user to run `task-next` themselves when they are ready (`/dev:task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written; blocked items stay invisible to candidate selection until their `*(blocked by: ...)*` marker is removed — by the blocking ticket's own cycle at cleanup (`../task-next/references/cycle.md` → *Cleanup*), where `prune-backlog` warns on it, not by hand.
+7. **Hand off.** Report the written tickets (issue refs or headings) and their order, and tell the user to run `task-next` themselves when they are ready (`/dev:task-next` in Claude Code; the skill-picker entry in Codex) — it is user-invoked, so no skill may call it. Its Step 1 candidate-gathering picks the tickets up naturally in the order written. A blocked issue stays parked until its blocker closes (no edit); a blocked `backlog.md` item stays invisible until its `*(blocked by: ...)*` marker is removed — by the blocking ticket's own cycle at cleanup (`../task-next/references/cycle.md` → *Cleanup*), where `prune-backlog` warns on it, not by hand.
 
 ## Boundaries
 
 - Do not write production code from this skill.
-- Do not build a Wayfinder-style ticket-graph/map file or a new marker syntax — the
-  `blocked by` marker on the item line is the only dependency mechanism.
+- Do not build a Wayfinder-style ticket-graph/map file or a new marker syntax — issue
+  dependencies (`github`) or the `blocked by` marker on the item line (`backlog`) are the only
+  dependency mechanisms.
 - Write only within approved scope and slicing decisions; approval rules live in the shared cycle.

@@ -59,6 +59,15 @@ class RecoveryTest(unittest.TestCase):
                 with self.subTest(limit=limit, action=action):
                     self.state("authorize", "--action", action, ok=action in actions)
 
+    def test_queue_limits_field_leaves_git_authority_unchanged(self):
+        for queue in ("none", "no-queue-write"):
+            for limit, ok in (("none", True), ("pr-only", False)):
+                with self.subTest(queue=queue, limit=limit):
+                    self.state("save", "--replace",
+                               text=contract() + self.authority(limit) + f"**Queue limits:** {queue}\n")
+                    self.state("authorize", "--action", "commit")
+                    self.state("authorize", "--action", "base-merge", ok=ok)
+
     def test_missing_router_or_flag_source_denies(self):
         for auth in ("", self.authority(source="--from task-next --auto"),
                      self.authority(source="router: task-next"),
