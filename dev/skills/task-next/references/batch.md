@@ -6,7 +6,8 @@ separate cost/independence decision, not the meaning of the flag.
 
 ### A1 — Gather and select
 
-Run Step 1's full scan. One heading group is one unit. Preserve empty-queue, blocked/deferred,
+Run Step 1's full scan. One candidate is one unit (a heading group on `backlog`, a lone issue or
+a parent issue on the issues backend). Preserve empty-queue, blocked/deferred,
 and malformed-input behavior from the candidate selector. Zero eligible units → report and stop
 without creating a branch or contract; when the units are all blocked, that report is the blocker
 list in `SKILL.md` Step 2.
@@ -25,7 +26,8 @@ scope, criteria, and approach for each unit. Git authority for aggregate/unit co
 
 **Sequential (default):** small tasks, coupled units, shared-file edits, or work whose preparation
 and hand-off cost outweighs parallel savings. Use one branch and an aggregate Sprint Contract,
-with criteria and exact backlog lines per unit. Follow the shared cycle; run relevant checks
+with criteria and exact backlog lines per unit (issues backend: the unit's covered refs,
+`cycle.md` → *Covered refs*). Follow the shared cycle; run relevant checks
 per unit and full required checks on the final candidate. Review the combined result once.
 A failed unit stops dependent work; preserve changes and report the unmet criterion.
 
@@ -47,11 +49,11 @@ unit worktree from that same fetched base. Preserve any authorized backlog-only 
 integration checkout. Create a worktree with `git worktree add .worktrees/<slug> -b wt/<slug>
 <captured-base-commit>`; use actual values discovered this run. Right after creation, write an
 uncommitted `tasks.md` in each unit worktree — `# <unit heading verbatim>`, `status: active`,
-`## Covers` listing the unit's lines verbatim — its claim, so the clean-base gate and Step 1 skip
+`## Covers` listing the unit's lines verbatim (issues backend: its covered refs) — its claim, so the clean-base gate and Step 1 skip
 them. Never stage or commit it (`tasks.md` is integration-owned). When base already tracks a
 `tasks.md`, append that whole block (never a bare `## Covers`, which would fall under base's last
 h1), still uncommitted. Then re-check as `cycle.md` → *Worktree cycle* → *Claim* does: from each
-unit worktree, re-run the Step 1 candidate script without `--ref` and drop any line another
+unit worktree, re-run the Step 1 `list` without `ref` and drop any line or ref another
 worktree also claims from that unit before its implementer is spawned.
 
 Archive the aggregate contract from the integration branch before spawning. Each implementer
@@ -91,6 +93,8 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
    fresh session reads them through `inspect` — after any `save --replace`, which clears notes.
 3. Run the shared cycle from *Version bump* through *Validation evidence*: one bump per touched
    plugin, cleanup only for integrated units, and full required checks on the integrated candidate.
+   On the issues backend the hand-off carries only the integrated units' refs, so an excluded
+   unit's issues stay open.
    Pass `--units <N>` to the `changelog` command with the count of integrated units, so the entry
    reads as a batch. Worktree checks do not certify integration. Keep archives before pruning
    `tasks.md`.

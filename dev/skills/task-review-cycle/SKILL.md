@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.13.1
+version: 1.13.2
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -61,7 +61,7 @@ assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if
 the base is empty and no review remains, report no work and stop here. End the body with
 `Verification:` + the exact command and exit code of each `cycle_state.py inspect` → `evidence`
 record, only when `tree_matches_current` is true (else `none recorded`): `retire` deletes the
-archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`).
+archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`). Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref (`Closes #12`; refs from the hand-off, else the archived `## Covers`), kept in every later message (`../task-next/references/cycle.md` → *Covered refs*); none for the `backlog` backend or a ref outside `## Covers`.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -175,7 +175,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
 FILES_TO_STAGE="<exact files changed in Step 4, verified against git status --short>"
 COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
-<[TYPE] message from Step 1, its Verification: line rebuilt from the Step 4.4 evidence>
+<[TYPE] message from Step 1, closing lines kept, its Verification: line rebuilt from the Step 4.4 evidence>
 COMMIT_MSG
 )
 # lite or --no-hub:
@@ -185,7 +185,7 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --messa
 ```
 
 Skip the commit if Step 4 made no changes. GitHub: authorize `pr-write`, then update the PR body
-with `gh pr edit`. `--no-hub`: reclaim late panel sources, report and stop.
+with `gh pr edit`, keeping every closing line. `--no-hub`: reclaim late panel sources, report and stop.
 
 ## Step 6: Merge
 

@@ -10,7 +10,7 @@ of this file (`task-next/references/`), whichever skill is reading it.
 CYCLE_DIR="<absolute directory of this cycle.md>"
 NODES="$CYCLE_DIR/../scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
-# queue item(s): pipe each selected item line verbatim; free-text request: pass --tag <TYPE> and no stdin
+# queue item(s): pipe each selected item line verbatim (issues backend: each item title); free-text request: pass --tag <TYPE> and no stdin
 BRANCH=$(printf '%s\n' "<each selected item line, verbatim>" | python3 "$NODES" branch --title "<title>")
 rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
@@ -68,12 +68,14 @@ between `worktree add` and its `tasks.md`): then drop it from this run's selecti
 colliding branch — never retry the same item, never delete the branch unasked; a stale branch is
 the user's decision. Nothing left → report.
 
-For a backlog selection, right after a successful `worktree add`, before the plan gate, add a
+For a queue selection, right after a successful `worktree add`, before the plan gate, add a
 claim block to the worktree's `tasks.md`: `# <heading verbatim>`, `status: active`, and `## Covers`
-with each selected line verbatim, even for one item. If the base tracks `tasks.md`, append the
+with each selected line verbatim (issues backend: one line per covered ref, *Covered refs*), even
+for one item. If the base tracks `tasks.md`, append the
 whole block under its own h1 and preserve the existing blocks. Otherwise, create the file.
-Then, from the worktree, re-run the Step 1 candidate script without `--ref`; it lists lines another worktree also
-claims. Yield those lines — drop them from the covers and scope; none left → declined-plan teardown
+Then, from the worktree, re-run the Step 1 `list` without `ref`; its `warnings[]` (`backlog`) or
+`claimed[]` (issues backend: a covered ref whose `by` is another worktree or a PR) name what
+another run also claims. Yield those lines or refs — drop them from the covers and scope; none left → declined-plan teardown
 (`tree.md` → *Claim*) and reselect. Both sessions may yield; that errs toward skipping.
 
 After the plan gate, add the contract to the active claim block. When an open sprint shares its
@@ -147,8 +149,25 @@ recover it from the cited spec/summary before implementation.
 fails before and passes after; for other tags, write the test first where that sharpens the
 criterion. A multi-item
 group gets one checkbox per item. Keep the original contract in a branch-local archive before implementation, including the
-approval source and exact selected backlog lines. `tasks.md` remains the optional queue-facing
-copy when the caller needs a `## Covers` deletion list.
+approval source and exact selected backlog lines (issues backend: the `## Covers` ref lines).
+`tasks.md` remains the optional queue-facing copy when the caller needs a `## Covers` list.
+
+### Covered refs (issues backend)
+
+On the issues backend `## Covers` holds refs, not verbatim lines: one `- <ref> <title>` line per
+covered issue (`- #12 [FEAT] Add the export flag`), ref first. Which refs:
+
+- a lone issue → its `ref`;
+- a parent → each in-scope `item_refs[]` entry, plus the parent's own `ref` only when this cycle
+  covers every open sub-issue — `excluded[]` empty and no item dropped at the plan gate or by the
+  >8 subset. Otherwise the parent stays open with the rest and closes with the cycle that covers
+  its last sub-issue.
+
+The refs are the claim (a `.worktrees/` run) and the closure list: no queue edit at cleanup. The
+review cycle writes one `close_ref_template` line per ref (`Closes #12`) into the commit message,
+which `commit-and-push.sh --pr` turns into the PR body: the PR body closes each issue on merge
+whatever the repo's squash-message setting, and the commits a squash or lite `--no-ff` merge
+lands close it on a direct push to the default branch.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"
@@ -221,7 +240,10 @@ by semver and state it, with the reason, in the hand-off and PR body.
 ## Cleanup
 
 Confirm the branch archive can be read with `cycle_state.py inspect` before pruning any contract
-or backlog line. Cleanup changes are provisional until review and merge succeed.
+or backlog line. Cleanup changes are provisional until review and merge succeed. On the issues
+backend cleanup is `prune-tasks` and `changelog` only: skip `prune-backlog`, its marker warning
+and *Blocked-marker sync* — blockers are issue dependencies, and a closed blocker unblocks with
+no edit.
 
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
@@ -236,7 +258,7 @@ NODES="$CYCLE_DIR/../scripts/task_nodes.py"
 [[ -r "$NODES" ]] || { echo "Bundled script missing or unreadable: $NODES" >&2; exit 1; }
 # only when a sprint block exists in tasks.md
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
-# the backlog.md line(s) this cycle completed, verbatim
+# backlog backend only: the backlog.md line(s) this cycle completed, verbatim
 printf '%s\n' "<each completed - [ ] line>" | python3 "$NODES" prune-backlog --file backlog.md
 # one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
 python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
@@ -255,7 +277,7 @@ named marker before you hand off, or the marked item is invisible to candidate s
 nothing left to clear it. The warning is advisory because the marker's rewording is a judgment
 call, so an unread one is a silently unselectable item.
 
-**Blocked-marker sync** (queue items only, scoped to items inspected this run): an item you
+**Blocked-marker sync** (`backlog` backend only; queue items only, scoped to items inspected this run): an item you
 verified is blocked and carries no marker → append `*(blocked by: <slug>)*` or `*(deferred:
 <reason>)*`. A marker whose blocker you can see has landed (`[x]`, or removed in git) → delete
 it. Match on the slug by judgment, never on a numeric prefix; failing to find a match is not
@@ -293,11 +315,11 @@ checks on the final changed candidate. Additional reviewers never substitute for
 
 **Do not commit.** Call the Skill tool with "dev:task-review-cycle" and
 `args: --from <task-next|task-new> --auto`, and **restate the Sprint Contract verbatim** in the
-invocation, with the archive path, validation evidence, and the Git authorization fields
-(`git-authorization.md`). If the hand-off loses context, recover
+invocation, with the archive path, validation evidence, the Git authorization fields
+(`git-authorization.md`) and, on the issues backend, the covered refs and `close_ref_template`. If the hand-off loses context, recover
 the saved original rather than infer it from the diff. The review cycle commits, reviews the diff
-against the contract, routes by risk and required CI, applies findings, records out-of-scope items to
-`backlog.md`, and merges.
+against the contract, routes by risk and required CI, applies findings, records out-of-scope items
+per its consolidation guide, writes the closing lines for covered refs, and merges.
 
 If the cycle reports CI failure: preserve the PR, branch, and archive, and report. A failed check
 authorizes no closure or deletion (`git-authorization.md`). Only on an explicit user instruction to
