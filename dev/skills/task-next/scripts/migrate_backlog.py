@@ -18,7 +18,9 @@ Mapping (docs/design/github-issues-queue.md → Migration):
   - `## Rejected — do not re-file` bullets → issues closed as not planned with the reason comment
     `queue_backend.py rejected` reads (filed `deferred` first, so a failed close never leaves a
     selectable issue);
-  - `## Security Fixes` items on a public repo (or unknown visibility) → refused and listed;
+  - `## Security Fixes` items on a public repo (or unknown visibility) → refused and listed. Any
+    refused open item stops `--apply` before it files anything: one left in backlog.md keeps the
+    repo on the file queue and would hide every issue filed beside it;
   - `[x]` items are dropped (the CHANGELOG is the closure record); `[>]` items and plain bullets
     outside the Rejected section stay in place and are listed.
 
@@ -55,7 +57,6 @@ TITLE_MAX = 240  # GitHub caps titles at 256; a longer first sentence is cut and
 EXIT_OK, EXIT_ERROR, EXIT_PARTIAL = 0, 1, 3
 ROLE_LABELS = (("review backlog", "review"), ("security fixes", "security"), ("someday", "someday"))
 REJECT_DEFAULT_REASON = "rejected in backlog.md before the move to issues"
-# a sentence ends at . ! ? followed by whitespace and a capital, digit, code span, quote or bracket
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(\[*])")
 _ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig)\.)$", re.IGNORECASE)
 _MARKER_SPAN_RE = re.compile(bc._BLOCK_MARKER_RE.pattern, re.IGNORECASE | re.DOTALL)
@@ -63,16 +64,12 @@ _PLAIN_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
 
 
 class MigrateError(Exception):
-    """Reported on stderr with exit 1."""
+    pass
 
 
 def migration_key(*parts: str) -> str:
     return KEY_PREFIX + hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
 
-
-# ---------------------------------------------------------------------------
-# Plan
-# ---------------------------------------------------------------------------
 
 def _role(path: list[dict]) -> str | None:
     for h in path:
@@ -92,7 +89,6 @@ def _is_rejected(h: dict) -> bool:
 
 
 def _paths(headings: list[dict]) -> dict[int, list[dict]]:
-    """{heading line: [outermost … this heading]}."""
     stack: list[dict] = []
     out: dict[int, list[dict]] = {}
     for h in headings:
@@ -108,17 +104,13 @@ def _owner_heading(headings: list[dict], line: int) -> dict | None:
     return above[-1] if above else None
 
 
-def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
 def _item_span(lines: list[str], masked: list[str], owners: dict[int, int], i: int) -> list[int]:
     """0-based line indices of the item opened at `i`: its wrapped lines (`tokenize`'s folding) and the
     nested sub-bullets right after them — what `task_nodes.prune_lines` deletes with it."""
     span = sorted(j for j, o in owners.items() if o == i)
     stop = span[-1]
-    content = _indent(masked[i]) + 2
-    while (stop + 1 < len(lines) and lines[stop + 1].strip() and _indent(lines[stop + 1]) >= content
+    content = tn._indent(masked[i]) + 2  # task_nodes' own measure (tabs expanded), so both cut alike
+    while (stop + 1 < len(lines) and lines[stop + 1].strip() and tn._indent(lines[stop + 1]) >= content
            and not tn._CHECKBOX_LINE_RE.match(masked[stop + 1])):
         stop += 1
         span.append(stop)
@@ -147,6 +139,20 @@ def split_title(text: str) -> tuple[str, str]:
     return title, rest.strip()
 
 
+_META_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+\.\s|[A-Z][\w /-]{0,30}:\s)")
+
+
+def _title_and_rest(clean: str) -> tuple[str, str]:
+    """The title comes from the item's first paragraph only — its checkbox line and wrapped prose,
+    up to a sub-bullet or a `Key:` metadata line (`Source:`, `Done when:`) — so a line with no
+    sentence end never runs into its metadata."""
+    lines = clean.split("\n")
+    n = next((k for k in range(1, len(lines)) if _META_LINE_RE.match(lines[k]) or not lines[k].strip()), len(lines))
+    title, rest = split_title("\n".join(lines[:n]))
+    tail = "\n".join(lines[n:]).strip()
+    return title, (rest + "\n" + tail if rest and tail else rest or tail)
+
+
 def _body(parts: list[str]) -> str:
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
@@ -157,35 +163,34 @@ def _source_line(path: list[dict]) -> str:
 
 
 def _rejected_entries(lines: list[str], masked: list[str], headings: list[dict]) -> list[dict]:
-    """Plain bullets under `## Rejected — do not re-file`, with their wrapped lines."""
     out: list[dict] = []
     for h in headings:
         if not _is_rejected(h):
             continue
         end = bc._region_end(h, [x for x in headings if x["level"] <= h["level"]])
-        i = h["line"]  # 0-based index of the line after the heading
+        i = h["line"]
         stop = len(lines) if end == float("inf") else int(end) - 1
         while i < stop:
             m = _PLAIN_BULLET_RE.match(masked[i])
-            if m and not bc._CHECKBOX_RE.match(masked[i]) and masked[i] == lines[i]:
+            if m and not bc._CHECKBOX_RE.match(masked[i]):
                 span = [i]
                 while i + 1 < stop and lines[i + 1][:1].isspace() and lines[i + 1].strip():
                     i += 1
                     span.append(i)
-                text = " ".join(lines[j].strip() for j in span)[2:].strip()
-                out.append({"heading": h, "span": span, "text": text})
+                # an inline comment is markup, not part of the entry; a multi-line one cannot be cut
+                text = " ".join(" ".join(masked[j].split()) for j in span)[2:].strip()
+                safe = all(tn._inline_comments_only(lines[j], masked[j]) for j in span)
+                out.append({"heading": h, "span": span, "text": text, "safe": safe})
             i += 1
     return out
 
 
 def _prunable(text: str, line: str) -> str | None:
-    """None when `prune_lines` can delete this item line on its own, else its reason."""
     _, problems = tn.prune_lines(text, [line])
     return "; ".join(problems) if problems else None
 
 
 def _resolve_blocker(payload: str, groups: list[dict], items: list[dict], me: dict) -> tuple[str, Any]:
-    """('heading', group) | ('item', item) | ('none', reason) for one blocked-by payload."""
     tokens = tn._blocker_tokens(payload)
     if not tokens:
         return "none", f"blocker {payload.strip()!r} names nothing resolvable"
@@ -215,6 +220,7 @@ def build_plan(text: str, visibility: str) -> dict:
     owners, _ = tn._line_owners(text)
 
     items: list[dict] = []
+    inflight: list[list[dict]] = []  # heading paths of [>] items: work still running in a sprint
     left: list[dict] = []
     done: list[dict] = []
     refused: list[dict] = []
@@ -226,10 +232,15 @@ def build_plan(text: str, visibility: str) -> dict:
         path = paths[h["line"]] if h else []
         entry = {"line": t["line"], "source": lines[i], "text": t["text"]}
         if t["state"] in "xX":
-            done.append(entry)
+            why = _prunable(text, lines[i])
+            if why:
+                left.append(dict(entry, reason=f"[x] item that cannot be deleted mechanically ({why})"))
+            else:
+                done.append(entry)
             continue
         if t["state"] == ">":
             left.append(dict(entry, reason="[>] item (moved to a sprint): not migrated"))
+            inflight.append(path)
             continue
         span = _item_span(lines, masked, owners, i)
         raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
@@ -238,7 +249,7 @@ def build_plan(text: str, visibility: str) -> dict:
         blockers = [m.group(2) for m in markers if m.group(1).lower() == "blocked by"
                     and not bc._is_placeholder_payload(m.group(2))]
         clean = _strip_markers(raw_body)
-        title, rest = split_title(clean)
+        title, rest = _title_and_rest(clean)
         role = _role(path)
         items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
                           blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
@@ -257,6 +268,8 @@ def build_plan(text: str, visibility: str) -> dict:
         why = _prunable(text, it["source"])
         if why:
             bad[it["line"]] = f"cannot be deleted mechanically ({why})"
+        elif not it["title"].strip():
+            bad[it["line"]] = "no title left once its markers are stripped"
         elif it["role"] == "security" and visibility != "private":
             bad[it["line"]] = (f"security item on a {visibility} repository: never filed there "
                                "(report it privately, or fix it with /dev:task-new)")
@@ -278,18 +291,23 @@ def build_plan(text: str, visibility: str) -> dict:
                                and h["line"] not in by_heading]
         parent_of: dict[int, str] = {}
         parents: list[dict] = []
+        changed = False
         for g in groups:
             if len(g["items"]) >= 2:
                 path = paths[g["heading"]["line"]]
                 key = migration_key("group", *(x["title"] for x in path))
+                twin = next((p for p in parents if p["key"] == key), None)
+                if twin:  # one key, one parent issue: a repeated heading path cannot be told apart
+                    for it in g["items"]:
+                        bad[it["line"]] = f"heading path repeats line {twin['heading']['line']}: rename one heading"
+                    changed = True
+                    continue
                 parents.append({"key": key, "heading": g["heading"], "path": path})
                 for it in g["items"]:
                     parent_of[it["line"]] = key
-        group_key = {g["heading"]["line"]: (parent_of[g["items"][0]["line"]] if len(g["items"]) >= 2
-                                            else g["items"][0]["key"] if g["items"] else None)
-                     for g in all_groups}
-        changed = False
         for it in live:
+            if it["line"] in bad:
+                continue
             keys, notes = [], []
             for payload in it["blockers"]:
                 kind, hit = _resolve_blocker(payload, all_groups, items, it)
@@ -298,15 +316,26 @@ def build_plan(text: str, visibility: str) -> dict:
                     changed = True
                     break
                 if kind == "heading":
-                    key = group_key[hit["heading"]["line"]]
-                    if key is None:
-                        any_open = any(x["heading"] is hit["heading"] for x in items)
-                        if any_open:  # its open items were refused: the dependency cannot be filed
-                            bad[it["line"]] = f"blocker {payload.strip()!r} is refused itself"
-                            changed = True
-                            break
+                    # every open item in the heading's region, sub-headings included
+                    region = [x for x in items if x is not it
+                              and any(p["line"] == hit["heading"]["line"] for p in x["path"])]
+                    if any(x["line"] in bad for x in region):
+                        bad[it["line"]] = f"blocker {payload.strip()!r} is refused itself"
+                        changed = True
+                        break
+                    if any(any(p["line"] == hit["heading"]["line"] for p in path) for path in inflight):
+                        bad[it["line"]] = (f"blocker {payload.strip()!r} has a [>] item still in a sprint: "
+                                           "migrate once it lands")
+                        changed = True
+                        break
+                    if not region:
                         notes.append(f"blocker {payload.strip()!r} has no open item left: dependency dropped")
                         continue
+                    for x in region:
+                        key = parent_of.get(x["line"]) or x["key"]
+                        if key != it["key"] and key != parent_of.get(it["line"]) and key not in keys:
+                            keys.append(key)
+                    continue
                 else:
                     if hit["line"] in bad:
                         bad[it["line"]] = f"blocker {payload.strip()!r} is refused itself"
@@ -319,13 +348,18 @@ def build_plan(text: str, visibility: str) -> dict:
         if not changed:
             break
 
+    def path_notes(path: list[dict]) -> str:
+        """Prose of each heading on `path` that the deletion may drain away, outermost first."""
+        return _body([_heading_notes(lines, masked, headings, x, owners, items) for x in path
+                      if x["level"] > 1 and not _is_role_heading(x) and not _is_rejected(x)])
+
     issues: list[dict] = []
     for p in parents:
         h = p["heading"]
         role = _role(p["path"])
         members = [it for it in items if parent_of.get(it["line"]) == p["key"]]
         issues.append({"kind": "parent", "key": p["key"], "title": h["title"],
-                       "body": _body([_heading_notes(lines, masked, headings, h, items), _source_line(p["path"])]),
+                       "body": _body([path_notes(p["path"]), _source_line(p["path"])]),
                        "labels": [role] if role else [], "parent_key": None, "blocked_by": [],
                        "line": h["line"], "lines": [], "children": [m["line"] for m in members]})
     for it in items:
@@ -334,8 +368,7 @@ def build_plan(text: str, visibility: str) -> dict:
             continue
         labels = ([it["role"]] if it["role"] else []) + (["deferred"] if it["deferred"] else [])
         h = it["heading"]
-        notes = "" if it["line"] in parent_of or h is None or _is_role_heading(h) or h["level"] == 1 \
-            else _heading_notes(lines, masked, headings, h, items)
+        notes = "" if it["line"] in parent_of or h is None else path_notes(it["path"])
         body = _body([it["rest"], f"Deferred: {'; '.join(it['deferred'])}" if it["deferred"] else "",
                       notes, _source_line(it["path"])])
         issues.append({"kind": "item", "key": it["key"], "title": it["title"], "body": body, "labels": labels,
@@ -343,6 +376,10 @@ def build_plan(text: str, visibility: str) -> dict:
                        "line": it["line"], "lines": [j + 1 for j in it["span"]], "source": it["source"],
                        "notes": it["notes"]})
     for r in _rejected_entries(lines, masked, headings):
+        if not r["safe"]:
+            refused.append({"line": r["span"][0] + 1, "source": lines[r["span"][0]],
+                            "reason": "Rejected entry inside a multi-line HTML comment: move it by hand"})
+            continue
         title, reason, bar = qb._split_rejected(r["text"])
         title = split_title(title)[0] if len(title) > TITLE_MAX else title
         body = _body([f"Reason: {reason}" if reason else "", f"Re-file only with: {bar}" if bar else "",
@@ -353,32 +390,37 @@ def build_plan(text: str, visibility: str) -> dict:
                        "line": r["span"][0] + 1, "lines": [j + 1 for j in r["span"]], "source": lines[r["span"][0]],
                        "reason": reason or REJECT_DEFAULT_REASON, "refile_bar": bar})
     issues.sort(key=lambda x: (x["line"], x["kind"] != "parent"))
+    first: dict[str, int] = {}
+    for i in list(issues):  # one key, one issue: `create` refuses a batch with a repeated key
+        if i["key"] in first:
+            issues.remove(i)
+            refused.append({"line": i["line"], "source": i["source"],
+                            "reason": f"duplicate of line {first[i['key']]}: delete one by hand"})
+        else:
+            first[i["key"]] = i["line"]
     refused.sort(key=lambda x: x["line"])
     left.sort(key=lambda x: x["line"])
     return {"visibility": visibility, "source_sha1": hashlib.sha1(text.encode("utf-8")).hexdigest(),
             "issues": issues, "refused": refused, "left": left, "done": done}
 
 
-def _heading_notes(lines: list[str], masked: list[str], headings: list[dict], h: dict, items: list[dict]) -> str:
+def _heading_notes(lines: list[str], masked: list[str], headings: list[dict], h: dict, owners: dict[int, int],
+                   items: list[dict]) -> str:
     """Prose under `h` before its next heading that belongs to no item (lost with the heading otherwise)."""
     end = bc._region_end(h, headings)
     stop = len(lines) if end == float("inf") else int(end) - 1
-    owned = {j for it in items for j in it["span"]}
+    owned = {j for it in items for j in it["span"]} | set(owners)  # every checkbox's lines, [x]/[>] too
     prose = [lines[j] for j in range(h["line"], stop) if j not in owned and masked[j].strip()
              and not bc._CHECKBOX_RE.match(masked[j])]
     return textwrap.dedent("\n".join(prose)).strip()
 
 
-# ---------------------------------------------------------------------------
-# Apply
-# ---------------------------------------------------------------------------
-
 def _draft(issue: dict) -> dict:
     return {k: issue[k] for k in ("key", "title", "body", "labels", "parent_key", "blocked_by")}
 
 
-def _delete_lines(text: str, plan: dict, confirmed: set[str]) -> tuple[str, list[str]]:
-    """Remove confirmed rejected bullets, then prune confirmed items and every [x] line."""
+def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) -> tuple[str, list[str]]:
+    # [x] lines only on a complete run: a heading holding only [x] items may be what a kept item's blocker names
     lines = text.splitlines(keepends=True)
     drop: set[int] = set()
     rejected = [i for i in plan["issues"] if i["kind"] == "rejected"]
@@ -399,7 +441,7 @@ def _delete_lines(text: str, plan: dict, confirmed: set[str]) -> tuple[str, list
                 masked_kept = bc._strip_fenced_blocks(bc._strip_html_comments("".join(kept))).splitlines()
         text = "".join(kept)
     targets = [i["source"] for i in plan["issues"] if i["kind"] == "item" and i["key"] in confirmed]
-    targets += [d["source"] for d in plan["done"]]
+    targets += [d["source"] for d in plan["done"]] if prune_done else []
     if not targets:
         return text, []
     return tn.prune_lines(text, targets)
@@ -436,6 +478,13 @@ def _deletable(plan: dict, confirmed: set[str]) -> set[str]:
 
 def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
     path = os.path.join(repo, "backlog.md")
+    held = [r for r in plan["refused"] if bc._CHECKBOX_RE.match(r["source"].strip())]
+    if held:
+        # An open item left behind keeps the repo on the file queue, which would hide every issue
+        # filed here from selection: move all of them, or none.
+        raise MigrateError(f"{len(held)} open item(s) cannot be migrated, and one left in backlog.md keeps the "
+                           "repo on the file queue, hiding the issues filed now — resolve these first (dry run "
+                           "lists why): " + "; ".join(f"line {r['line']}: {r['reason']}" for r in held))
     report: dict = {"created": [], "incomplete": [], "pending": [], "rejected_closed": [], "deleted": [],
                     "kept": [], "file_deleted": False}
     drafts = [_draft(i) for i in plan["issues"]]
@@ -482,14 +531,16 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
     if hashlib.sha1(text.encode("utf-8")).hexdigest() != plan["source_sha1"]:
         raise MigrateError("backlog.md changed while migrating; no line was deleted. The filed issues are "
                            "reused on a re-run — run migrate_backlog.py --apply again")
-    new_text, problems = _delete_lines(text, plan, deletable)
+    prune_done = not plan["refused"] and all(i["key"] in deletable for i in plan["issues"])
+    new_text, problems = _delete_lines(text, plan, deletable, prune_done)
     if problems:
         raise MigrateError("no line was deleted; prune refused: " + "; ".join(problems))
     by_key = {i["key"]: i for i in plan["issues"]}
     for key in sorted(deletable, key=lambda k: by_key[k]["line"]):
         if by_key[key]["kind"] != "parent":
             report["deleted"].append({"line": by_key[key]["line"], "ref": refs[key], "title": by_key[key]["title"]})
-    report["deleted"] += [{"line": d["line"], "ref": None, "title": "[x] " + d["text"]} for d in plan["done"]]
+    report["deleted"] += [{"line": d["line"], "ref": None, "title": "[x] " + d["text"]}
+                          for d in plan["done"] if prune_done]
     report["kept"] = [{"line": i["line"], "key": i["key"], "title": i["title"],
                        "reason": "issue or relation not confirmed" if i["key"] not in confirmed
                        else "filed; kept until the items it groups or blocks are confirmed"}
@@ -502,10 +553,6 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
             fh.write(new_text)
     return report
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 def visibility(repo: str, runner=qb.gh_runner) -> str:
     code, data = qb.github_op("describe", {"contract": qb.CONTRACT, "repo": repo}, runner)
@@ -632,10 +679,6 @@ def _render_report(report: dict, path: str) -> str:
     return "\n".join(out)
 
 
-# ---------------------------------------------------------------------------
-# Self-check (--test) — temp repos and a fake gh only
-# ---------------------------------------------------------------------------
-
 PASS = 0
 FAIL = 0
 
@@ -705,8 +748,13 @@ FIXTURE = """# Backlog
 """
 
 
+# FIXTURE without its refused open items (gamma, delta, the public-repo security fix): --apply moves
+# all open items or none
+FIXTURE_APPLY = re.sub(r"## 3 — gamma\n\n.*?\n\n## 4 — delta\n\n.*?\n\n", "", FIXTURE, flags=re.DOTALL)
+FIXTURE_APPLY = re.sub(r"## Security Fixes — repo\n\n.*?\n\n", "", FIXTURE_APPLY, flags=re.DOTALL)
+
+
 class _FakeGh(qb._FakeGitHub):
-    """`_FakeGitHub` plus `describe` and a switch that refuses every addBlockedBy."""
 
     def __init__(self, private: bool = False):
         super().__init__(private=private)
@@ -745,11 +793,11 @@ def run_tests() -> int:
         with open(path, encoding="utf-8") as fh:
             return fh.read()
 
-    def make_repo(tmp: str, name: str, origin: str) -> str:
+    def make_repo(tmp: str, name: str, origin: str, text: str = FIXTURE_APPLY) -> str:
         repo = os.path.realpath(os.path.join(tmp, name))
         os.makedirs(repo)
         git(repo, "init", "-q", "-b", "main")
-        write(os.path.join(repo, "backlog.md"), FIXTURE)
+        write(os.path.join(repo, "backlog.md"), text)
         git(repo, "add", "backlog.md")
         git(repo, "commit", "-q", "--no-verify", "-m", "base")
         git(repo, "remote", "add", "origin", origin)
@@ -759,6 +807,7 @@ def run_tests() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             _plan_tests()
             _apply_tests(tmp, make_repo, read, write)
+            _review_regression_tests(tmp, make_repo, read, write)
             _warning_tests(tmp, make_repo)
     finally:
         os.environ.clear()
@@ -768,7 +817,6 @@ def run_tests() -> int:
 
 
 def quiet(fn, *args, **kwargs):
-    """Call `fn` with stdout captured: the CLI's report is not test output."""
     import contextlib
     import io
     with contextlib.redirect_stdout(io.StringIO()):
@@ -835,8 +883,63 @@ def _plan_tests() -> None:
             "an over-long first sentence is cut with an ellipsis and kept whole in the body")
 
 
+def _review_regression_tests(tmp: str, make_repo, read, write) -> None:
+    print("\nTest 6: review regressions — title scope, sub-heading blockers, [x] safety, comments, keys")
+    plan = build_plan("## 7 — t\n\n- [ ] [FEAT] Short item\n  Source: x.md\n  Done when: y passes. More.\n", "public")
+    item = _by_title(plan, "[FEAT] Short item")
+    _assert(item["title"] == "[FEAT] Short item" and item["body"].startswith("Source: x.md\nDone when: y passes."),
+            "a checkbox line with no sentence end never runs into its Source:/Done when: lines")
+    plan = build_plan("## 5 — big\n\n### 5a\n\n- [ ] [FEAT] a1\n- [ ] [FEAT] a2\n\n## 6 — next\n\n"
+                      "- [ ] [FEAT] n1 *(blocked by: 5-big)*\n", "public")
+    parent = _by_title(plan, "5a")
+    _assert(_by_title(plan, "[FEAT] n1")["blocked_by"] == [parent["key"]],
+            "a blocker heading whose items sit under a sub-heading → dependency on that sub-heading's issue")
+    text = "## A\n\n- [x] fixed\n- [ ] one\n\n## C\n\n- [x] fixed\n- [ ] two\n"
+    plan = build_plan(text, "public")
+    _assert(not plan["done"] and sum("[x] item" in r["reason"] for r in plan["left"]) == 2,
+            "identical [x] lines are left and listed in the dry run, never an --apply prune failure")
+    repo = make_repo(tmp, "dupdone", "git@github.com:owner/repo.git")
+    path = os.path.join(repo, "backlog.md")
+    write(path, text)
+    report = apply_plan(repo, build_plan(read(path), "public"), _FakeGh())
+    _assert(not report["kept"] and "- [ ] one" not in read(path) and read(path).count("- [x] fixed") == 2,
+            "--apply still deletes the migrated items around them")
+    plan = build_plan("## Rejected — do not re-file\n\n- **Use X** <!-- note --> — too big.\n"
+                      "- **Use Y** — meh.\n- **Use Y** — meh.\n", "public")
+    rej = [i["title"] for i in plan["issues"] if i["kind"] == "rejected"]
+    _assert(rej == ["Use X", "Use Y"] and any("duplicate of line" in r["reason"] for r in plan["refused"]),
+            "a Rejected bullet with an inline comment is migrated; a duplicate bullet is refused, not batched")
+    plan = build_plan("## Someday\n\n- [ ] *(deferred: later)*\n", "public")
+    _assert(not plan["issues"] and "no title" in plan["refused"][0]["reason"], "an item with no title is refused")
+    plan = build_plan("## 5 — big\n\n- [>] [FEAT] in a sprint\n\n## 6 — next\n\n"
+                      "- [ ] [FEAT] n1 *(blocked by: 5-big)*\n", "public")
+    _assert("still in a sprint" in plan["refused"][0]["reason"],
+            "a blocker heading with a [>] item still running refuses the blocked item")
+    plan = build_plan("## Export\n\nShared done-when: CSV opens in Excel.\n\n### UI\n\n- [ ] [FEAT] button\n"
+                      "- [ ] [FEAT] dialog\n", "public")
+    _assert("Shared done-when: CSV opens in Excel." in _by_title(plan, "UI")["body"],
+            "an outer heading's prose the deletion drains away is carried into the issue")
+    plan = build_plan("## Review Backlog\n\n### Cleanup\n\n- [ ] [debt] a\n- [ ] [debt] b\n\n"
+                      "### Cleanup\n\n- [ ] [debt] c\n- [ ] [debt] d\n", "public")
+    _assert(len([i for i in plan["issues"] if i["kind"] == "parent"]) == 1
+            and sum("repeats line" in r["reason"] for r in plan["refused"]) == 2,
+            "a repeated heading path is filed once; the twin's items are refused, never merged")
+    plan = build_plan("## 7 — t\n\n- [ ] [FEAT] Tabbed item\n\t- tab-indented detail\n", "public")
+    _assert("tab-indented detail" in _by_title(plan, "[FEAT] Tabbed item")["body"],
+            "a tab-indented sub-bullet lands in the body (prune deletes it too)")
+
+
 def _apply_tests(tmp: str, make_repo, read, write) -> None:
     print("\nTest 2: --apply — files, closes rejected, deletes confirmed lines only")
+    repo = make_repo(tmp, "refused", "https://github.com/owner/repo.git", FIXTURE)
+    gh = _FakeGh()
+    try:
+        apply_plan(repo, build_plan(read(os.path.join(repo, "backlog.md")), "public"), gh)
+        gated = False
+    except MigrateError as e:
+        gated = "3 open item(s)" in str(e)
+    _assert(gated and not gh.issues and read(os.path.join(repo, "backlog.md")) == FIXTURE,
+            "a refused open item stops --apply before anything is filed (it would hide the filed issues)")
     repo = make_repo(tmp, "apply", "https://github.com/owner/repo.git")
     path = os.path.join(repo, "backlog.md")
     gh = _FakeGh()
@@ -859,11 +962,11 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
             "queue_backend rejected lists the migrated entry")
     _assert(all(qb.QUEUE_LABEL in i["labels"] for i in gh.issues.values()), "every filed issue carries task-queue")
     _assert(not any(s in text for s in ("First alpha", "Beta fix", "Lone review", "Someday idea", "Use a database",
-                                        "Done thing", "nested note", "Wrapped continuation")),
-            "confirmed items, their wrapped lines, [x] lines and rejected bullets are deleted")
-    _assert(all(s in text for s in ("Gamma doc", "Delta waits", "CVE-1", "[>] [debt] Item already", "plain note")),
-            "refused, [>] and plain-bullet lines stay")
-    _assert("## 1 — alpha feature" not in text and "## Rejected" not in text and "## 3 — gamma" in text,
+                                        "nested note", "Wrapped continuation")),
+            "confirmed items, their wrapped lines and rejected bullets are deleted")
+    _assert("Done thing" not in text, "a complete run deletes the [x] lines too")
+    _assert(all(s in text for s in ("[>] [debt] Item already", "plain note")), "[>] and plain-bullet lines stay")
+    _assert("## 1 — alpha feature" not in text and "## Rejected" not in text and "## Someday" in text,
             "emptied headings go; headings with surviving lines stay")
     _assert(not report["kept"] and not report.get("error"), "a clean apply keeps nothing it planned to move")
 
@@ -908,10 +1011,10 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     print("\nTest 4: --apply — file deleted when only headings remain; changed file refuses deletion")
     repo = make_repo(tmp, "empty", "git@github.com:owner/repo.git")
     path = os.path.join(repo, "backlog.md")
-    write(path, "# Backlog\n\n## 7 — one\n\n- [ ] [FEAT] Only item\n\n## Someday\n\n- [ ] Idea\n")
+    write(path, "# Backlog\n\n## 7 — one\n\n- [ ] [FEAT] Only item\n- [x] [FEAT] Shipped\n\n## Someday\n\n- [ ] Idea\n")
     gh = _FakeGh()
     report = apply_plan(repo, build_plan(read(path), "public"), gh)
-    _assert(report["file_deleted"] and not os.path.exists(path), "nothing left → backlog.md is deleted")
+    _assert(report["file_deleted"] and not os.path.exists(path), "nothing left → backlog.md is deleted, [x] lines too")
     write(path, "# Backlog\n\n- [ ] [FEAT] Moving target\n")
     plan = build_plan(read(path), "public")
     write(path, "# Backlog\n\n- [ ] [FEAT] Moving target\n- [ ] [FEAT] added meanwhile\n")

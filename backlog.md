@@ -59,6 +59,13 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] On a truncated github `list`, a parent's sub-issue on an unread page is excluded as "not a trusted task-queue issue" instead of "incomplete read", and the parent is still offered (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:why_not
 - [ ] [debt] `handle()` resolves the backend for `show`/`rejected` from the working tree, ignoring the request's `rev`, so a github.com repo whose `backlog.md` has open items only at `rev` queries GitHub instead (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:handle
 
+### PR #473 — Add migrate_backlog.py to move a backlog.md queue onto GitHub issues (2026-11-27)
+
+- [ ] [debt] A migration re-run reuses an issue by its `backlog-migrated` key without comparing bodies, so an item edited (e.g. its nested sub-bullets) between a partial run and the re-run is deleted while the issue keeps the old text; refresh or compare the body before deleting the line (source: codex) (introduced here) — dev/skills/task-next/scripts/migrate_backlog.py:apply_plan
+- [ ] [debt] Two concurrent `create`/`publish`/migration runs can both miss a queue-key and file the same item twice; serialize the key lookup and filing under a lock in the git common dir (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_post_items
+- [ ] [debt] `_registry_command` raises AttributeError (a traceback) when the registry's `hosts` is a non-empty array instead of an object; report a QueueError naming the registry path (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_registry_command
+- [ ] [debt] Advisory comments pass on PR #473 asked to replace rationale comments in `migrate_backlog.py` with structure — rename `_prunable` → `_unprunable_reason`, `_heading_notes` → `_orphan_heading_prose`, return NamedTuples from `split_title`/`_resolve_blocker`, extract the refusal fixpoint as `_settle_refusals` — and to pin `_item_span` against `prune_lines` with a test; kept as comments under `--auto` (source: comments) (introduced here) — dev/skills/task-next/scripts/migrate_backlog.py
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

@@ -47,7 +47,6 @@ OPS = ("describe", "list", "show", "create", "rejected", "reject", "defer", "pub
 BACKLOG_OPS = ("describe", "list", "show", "create", "rejected")
 EXIT_OK, EXIT_ERROR, EXIT_UNSUPPORTED = 0, 1, 2
 ENV_VAR = "AGENT_QUEUE_BACKEND"
-# `list` on a github.com repo still held on the file queue by its open backlog.md items
 LEGACY_BACKLOG_WARNING = ("backlog.md has {n} open item(s); this repo stays on the file queue until you run "
                           "migrate_backlog.py")
 _TAG_RE = re.compile(r"^\[([^\[\]\s]+)\]")

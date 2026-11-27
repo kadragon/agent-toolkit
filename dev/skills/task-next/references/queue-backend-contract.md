@@ -169,6 +169,8 @@ run that prints the plan — check it against `backlog.md` line by line before `
 files through `create` under the standing `queue-write` grant. A line is deleted only once its
 issue and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
 together); exit 3 means lines were kept — re-run, and the filed issues are reused by their
-`backlog-migrated:<sha1>` keys. `Security Fixes` items on a public repo are refused and stay. The
+`backlog-migrated:<sha1>` keys. An item the plan refuses (a `Security Fixes` item on a public repo, an
+unresolvable blocker) stops `--apply` before it files anything: left behind, it would keep the repo on
+the file queue and hide the filed issues. The
 deletion is a working-tree change to commit; the repo resolves to `github` once no open item is
 left on the default branch.
