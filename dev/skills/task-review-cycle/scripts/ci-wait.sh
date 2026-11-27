@@ -160,7 +160,7 @@ while true; do
   if [ -n "$EXPECTED_HEAD" ] && [ -z "$STATUS_SHA" ]; then
     case "$STATUS" in
       success|failure) fail_verification head-missing ;;
-      *) STATUS=pending ;;
+      pending|none) STATUS=pending ;;
     esac
   elif [ -n "$WATCH_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$WATCH_SHA" ]; then
     if git merge-base --is-ancestor "$STATUS_SHA" "$WATCH_SHA" 2>/dev/null; then

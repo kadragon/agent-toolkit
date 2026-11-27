@@ -420,6 +420,14 @@ def main() -> int:
             check(f"exact mode waits for a SHA after an inconclusive {status} response",
                   result.get("passed") is True and call_count(repo) == 2, f"got {result}")
 
+        repo = make_repo(tmp, "error", name="exact_hub_error")
+        (repo / "scripts" / "hub.sh").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+        result = run(repo, expected_head="1" * 40, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
+        check("an explicit hub error in exact mode uses the status-error path immediately",
+              result.get("passed") is False and result.get("reason") == "ci-status returned: error"
+              and not sleep_intervals(repo),
+              f"got {result}")
+
         repo = make_repo(tmp, "none", name="exact_unidentified_empty_rollup")
         result = run(repo, expected_head="1" * 40, CI_WAIT_NO_CHECKS_GRACE_SECS=0,
                      CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
