@@ -38,7 +38,7 @@ report_findings() {
     for finding in "${FINDINGS[@]}"; do
         if ! is_security_finding "$finding"; then
             printf '  %s\n' "$finding"
-        elif [[ -t 2 ]]; then
+        elif ! $QUICK_MODE && [[ -t 2 ]]; then
             printf '  %s\n' "$finding" >&2
         fi
     done

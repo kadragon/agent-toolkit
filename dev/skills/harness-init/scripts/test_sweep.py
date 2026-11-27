@@ -26,8 +26,12 @@ class SweepTests(unittest.TestCase):
         self.backend.write_text('print(\'{"edit_file":"backlog.md"}\')\n', encoding="utf-8")
         git_local_vars = subprocess.check_output(["git", "rev-parse", "--local-env-vars"], text=True).splitlines()
         self.env = {key: value for key, value in os.environ.items() if key not in git_local_vars}
-        self.env["AGENT_QUEUE_BACKEND_SCRIPT"] = str(self.backend)
-        subprocess.run(["git", "init", "-q", str(self.root)], env=self.env, check=True)
+        self.env.update(
+            AGENT_QUEUE_BACKEND_SCRIPT=str(self.backend),
+            GIT_CONFIG_GLOBAL=os.devnull,
+            GIT_CONFIG_NOSYSTEM="1",
+        )
+        subprocess.run(["git", "init", "-q", "--template="], cwd=self.root, env=self.env, check=True)
 
     def sweep(self, *args, finding=None):
         template = SWEEP.read_text(encoding="utf-8")
