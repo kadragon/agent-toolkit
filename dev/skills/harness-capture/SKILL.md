@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.3.0
+version: 4.3.1
 ---
 
 # Capture Learnings — session retrospective
@@ -109,7 +109,7 @@ the same lesson to `AGENTS.md` with the same rules, and skip hygiene.
    ```sh
    SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
    DRAFT="<absolute path of the scratch file>"
-   GUARD="$SKILL_DIR/../../hooks/memory-guard/guard.py"
+   GUARD="$SKILL_DIR/guard.py"
    PY=$(command -v python3 || command -v python || true)
    if [ -r "$GUARD" ] && [ -n "$PY" ]; then "$PY" "$GUARD" --check-file "$DRAFT"; else echo "memory-guard unavailable — write, and let the hook judge" >&2; fi
    ```
@@ -151,7 +151,7 @@ repairs the index.
 
 - **`references/routing.md`** — two edge cases of the sibling and deferral rules, and the
   CC BY 4.0 attribution for the parts of this skill adapted from Task Observer.
-- **`hooks/memory-guard/guard.py`** — the `PreToolUse(Write|Edit)` gate behind step 4: blocks a
+- **`guard@kadragon`'s memory hook** — the `PreToolUse(Write|Edit)` gate behind step 4: blocks a
   memory write carrying a secret pattern, a control/bidi/zero-width character, an over-cap body,
   or a bad `status:`; `--check-file <path|->` is the same policy as a CLI. Fails open on
   unparseable payloads. `--test` covers each family.

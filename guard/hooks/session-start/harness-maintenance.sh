@@ -4,7 +4,7 @@
 # B) sync-claude-md.sh  — ensure CLAUDE.md = "@AGENTS.md"
 # E) symlink-guard.sh   — ensure .agents/skills symlink
 # F) check-context-size.sh — warn if AGENTS.md/CLAUDE.md > 200 lines
-# G) record_run.py --check-due — nudge when a harness-curate run is due
+# G) curate_due.py — nudge when a harness-curate run is due
 #
 # Run C (reconcile-harness.py) during explicit harness sync.
 #
@@ -14,17 +14,9 @@
 set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-if [[ -z "$PLUGIN_ROOT" ]] && [[ -n "$SCRIPT_DIR" ]]; then
-  PLUGIN_ROOT=$(cd -- "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P)
-fi
-SCRIPTS="${PLUGIN_ROOT}/skills/harness-init/scripts"
 
 # Guard: not a harness repo
 [[ -f "AGENTS.md" ]] || exit 0
-
-# Guard: scripts not available
-[[ -f "$SCRIPTS/sync-claude-md.sh" ]] || exit 0
 
 # Debounce: already ran today
 STAMP=".agents/.maintenance-stamp"
@@ -36,7 +28,7 @@ fi
 WARNINGS=""
 
 # B) CLAUDE.md sync
-sync_out=$(bash "$SCRIPTS/sync-claude-md.sh" 2>&1)
+sync_out=$(bash "$SCRIPT_DIR/sync-claude-md.sh" 2>&1)
 sync_code=$?
 if [[ $sync_code -eq 1 ]]; then
   WARNINGS+="[harness:B] CLAUDE.md was missing — created with @AGENTS.md\n"
@@ -47,19 +39,19 @@ elif [[ $sync_code -ne 0 ]]; then
 fi
 
 # E) Symlink guard
-symlink_out=$(bash "$SCRIPTS/symlink-guard.sh" 2>&1)
+symlink_out=$(bash "$SCRIPT_DIR/symlink-guard.sh" 2>&1)
 symlink_code=$?
 [[ $symlink_code -ne 0 ]] && WARNINGS+="[harness:E] $symlink_out\n"
 
 # F) Context size check
-size_out=$(bash "$SCRIPTS/check-context-size.sh" 2>&1) || true
+size_out=$(bash "$SCRIPT_DIR/check-context-size.sh" 2>&1) || true
 [[ -n "$size_out" ]] && WARNINGS+="[harness:F] $size_out\n"
 
 # G) harness-curate due check (>14d since last run AND >=10 new sessions)
-CURATE_RECORD="${PLUGIN_ROOT}/skills/harness-curate/scripts/record_run.py"
+CURATE_DUE="$SCRIPT_DIR/curate_due.py"
 PY=$(command -v python3 || command -v python || true)
-if [[ -n "$PY" ]] && [[ -f "$CURATE_RECORD" ]]; then
-  due_out=$("$PY" "$CURATE_RECORD" --check-due 2>/dev/null) || true
+if [[ -n "$PY" ]] && [[ -f "$CURATE_DUE" ]]; then
+  due_out=$("$PY" "$CURATE_DUE" 2>/dev/null) || true
   [[ -n "$due_out" ]] && WARNINGS+="[harness:G] $due_out\n"
 fi
 

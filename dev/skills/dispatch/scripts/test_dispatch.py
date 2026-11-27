@@ -1222,7 +1222,7 @@ class PinnedWaveTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
 
-    def make_wave(self, suffix, version):
+    def make_wave(self, suffix, version, *, legacy=False):
         root = self.tmp / ("dispatch-wave-" + suffix)
         root.mkdir()
         path = root / "wave.json"
@@ -1233,22 +1233,30 @@ class PinnedWaveTests(unittest.TestCase):
         (home / "config.toml").write_text("", encoding="utf-8")
         source = root / "source"
         source.mkdir()
-        wave = {"schema": 1, "market": root.name, "versions": {"dev": version, "prod": "1.0.0"},
+        versions = {"dev": version, "prod": "1.0.0"}
+        if not legacy:
+            versions["guard"] = "1.0.0"
+        hook_owner = "dev" if legacy else "guard"
+        wave = {"schema": 1, "market": root.name, "versions": versions,
                 "binary": str(binary), "binary_hash": pinned_wave.file_hash(binary),
                 "settings": {}, "cache_hash": {}, "hooks": {}, "children": []}
-        for name in pinned_wave.PLUGINS:
+        for name, plugin_version in versions.items():
             plugin = source / name
             (plugin / ".codex-plugin").mkdir(parents=True)
-            (plugin / pinned_wave.MANIFEST).write_text('{"hooks":"hooks.json"}', encoding="utf-8")
-            (plugin / "hooks.json").write_text('{"hooks":{}}', encoding="utf-8")
-            (plugin / "hooks").mkdir()
-            (plugin / "hooks/guard.py").write_text(f"# {version}", encoding="utf-8")
-            (plugin / "SKILL.md").write_text(f"Skill {version}", encoding="utf-8")
+            manifest = {"version": plugin_version}
+            if name == hook_owner:
+                manifest["hooks"] = "./hooks.json"
+                (plugin / "hooks.json").write_text('{"hooks":{}}', encoding="utf-8")
+                (plugin / "hooks").mkdir()
+                (plugin / "hooks/guard.py").write_text(f"# {plugin_version}", encoding="utf-8")
+            (plugin / pinned_wave.MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+            if name != "guard":
+                (plugin / "SKILL.md").write_text(f"Skill {plugin_version}", encoding="utf-8")
             cache = pinned_wave.cache_path(root, wave, name)
             shutil.copytree(plugin, cache)
             wave["cache_hash"][name] = pinned_wave.tree_hash(plugin)
         wave["source_hash"] = pinned_wave.tree_hash(source)
-        wave["hooks"] = {"first": [pinned_wave.cache_path(root, wave, "dev").relative_to(root).as_posix()
+        wave["hooks"] = {"first": [pinned_wave.cache_path(root, wave, hook_owner).relative_to(root).as_posix()
                                    + "/hooks.json", "sha256:first", 'python "$env:PLUGIN_ROOT/hooks/guard.py"']}
         path.write_text(json.dumps(wave), encoding="utf-8")
         return path, wave
@@ -1258,10 +1266,11 @@ class PinnedWaveTests(unittest.TestCase):
         plugins = {"installed": [
             {"pluginId": f"{name}@{wave['market']}", "enabled": True, "version": wave["versions"][name],
              "source": {"source": "local", "path": str(root / "source" / name)}}
-            for name in pinned_wave.PLUGINS
+            for name in wave["versions"]
         ]}
         hook_path, hook_hash, command = wave["hooks"]["first"]
-        hook = {"pluginId": f"dev@{wave['market']}", "source": "plugin", "key": "first",
+        hook_owner = "guard" if "guard" in wave["versions"] else "dev"
+        hook = {"pluginId": f"{hook_owner}@{wave['market']}", "source": "plugin", "key": "first",
                 "sourcePath": str(root / hook_path), "currentHash": hook_hash, "command": command,
                 "enabled": True, "isManaged": False, "trustStatus": "trusted" if trusted else "untrusted"}
         groups = {"data": [{"cwd": str(self.tmp), "warnings": [], "errors": [], "hooks": [hook]}]}
@@ -1284,7 +1293,16 @@ class PinnedWaveTests(unittest.TestCase):
                 cached = pinned_wave.cache_path(path.parent, wave, "dev")
                 self.assertEqual((cached / "SKILL.md").read_text(encoding="utf-8"),
                                  f"Skill {wave['versions']['dev']}")
-                self.assertEqual((cached / "hooks/guard.py").read_text(encoding="utf-8"), f"# {wave['versions']['dev']}")
+        self.assertNotEqual(old_wave["cache_hash"]["dev"], new_wave["cache_hash"]["dev"])
+        self.assertEqual(old_wave["cache_hash"]["guard"], new_wave["cache_hash"]["guard"])
+
+    def test_existing_wave_receipt_keeps_its_dev_hooks(self):
+        path, wave = self.make_wave("legacy", "1.0.0", legacy=True)
+        self.assertEqual(pinned_wave.read_wave(path), wave)
+        plugins, groups = self.verification_stubs(path, wave)
+        with patch("pinned_wave.codex_command", return_value=json.dumps(plugins)), \
+                patch("pinned_wave.inspect_hooks", return_value=groups):
+            self.assertTrue(pinned_wave.verify(path, wave, self.tmp))
 
     def test_modified_missing_or_untrusted_hooks_fail_the_delivery_gate(self):
         path, wave = self.make_wave("a", "1.0.0")
@@ -1307,7 +1325,7 @@ class PinnedWaveTests(unittest.TestCase):
             groups["data"][0]["hooks"] = []
             with self.assertRaisesRegex(SystemExit, "definitions differ"):
                 verify_pinned_delivery(run, terminal)
-            (pinned_wave.cache_path(path.parent, wave, "dev") / "hooks/guard.py").write_text("changed", encoding="utf-8")
+            (pinned_wave.cache_path(path.parent, wave, "guard") / "hooks/guard.py").write_text("changed", encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "cache changed"):
                 verify_pinned_delivery(run, terminal)
 

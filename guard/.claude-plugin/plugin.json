@@ -1,0 +1,11 @@
+{
+  "name": "guard",
+  "version": "1.0.0",
+  "description": "Commit and memory guards, plus session-start maintenance for agent-toolkit.",
+  "author": {
+    "name": "kadragon"
+  },
+  "repository": "https://github.com/kadragon/agent-toolkit",
+  "license": "MIT",
+  "hooks": "./hooks.json"
+}

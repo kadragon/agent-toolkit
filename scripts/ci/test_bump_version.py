@@ -99,17 +99,18 @@ def test_skill_bump(newline, label):
 
 
 def test_claude_only_bump():
-    """`mods` ships no Codex manifest; dev/prod must keep requiring both."""
+    """`mods` ships no Codex manifest; dev/prod/guard must keep requiring both."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         script = make_repo(root, "\n")
         mods = root / "mods" / ".claude-plugin" / "plugin.json"
         mods.parent.mkdir(parents=True, exist_ok=True)
         write(mods, MANIFEST.format(version="0.1.0"), "\n")
-        for platform in (".claude-plugin", ".codex-plugin"):
-            prod = root / "prod" / platform / "plugin.json"
-            prod.parent.mkdir(parents=True, exist_ok=True)
-            write(prod, MANIFEST.format(version="2.0.0"), "\n")
+        for name in ("prod", "guard"):
+            for platform in (".claude-plugin", ".codex-plugin"):
+                manifest = root / name / platform / "plugin.json"
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                write(manifest, MANIFEST.format(version="2.0.0"), "\n")
 
         result = run(script, "mods", "minor")
         check(result.returncode == 0, f"[mods] exit {result.returncode}: {result.stderr}")
@@ -128,6 +129,10 @@ def test_claude_only_bump():
             version_of(mods, '  "version": ') == "0.2.1",
             f"[all] mods not bumped: {version_of(mods, '  \"version\": ')!r}",
         )
+
+        for platform in (".claude-plugin", ".codex-plugin"):
+            manifest = root / "guard" / platform / "plugin.json"
+            check(version_of(manifest, '  "version": ') == "2.0.1", f"[all] guard {platform} not bumped")
 
         # `all` must read every plugin before it rewrites any: a half-applied
         # run would bump dev and prod a second time on the retry.

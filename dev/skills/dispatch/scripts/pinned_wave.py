@@ -18,7 +18,8 @@ from pathlib import Path, PurePosixPath
 
 CATALOG = ".agents/plugins/marketplace.json"
 MANIFEST = ".codex-plugin/plugin.json"
-PLUGINS = ("dev", "prod")
+LEGACY_PLUGINS = ("dev", "prod")
+PLUGINS = (*LEGACY_PLUGINS, "guard")
 WAVE_FILE = "wave.json"
 WAVE_LABEL = "dispatch_wave"
 PREFIX = "dispatch-wave-"
@@ -148,7 +149,7 @@ def verify_files(path, wave, *, check_binary=True):
         raise PinError("pinned marketplace source changed")
     if check_binary and file_hash(Path(wave["binary"])) != wave["binary_hash"]:
         raise PinError("pinned Codex executable changed")
-    for name in PLUGINS:
+    for name in wave["versions"]:
         cache = cache_path(root, wave, name)
         if (cache.resolve() != cache or {p.name for p in cache.parent.iterdir()} != {cache.name}
                 or tree_hash(cache) != wave["cache_hash"][name]):
@@ -158,7 +159,7 @@ def verify_files(path, wave, *, check_binary=True):
 def read_wave(path):
     wave = read_json(path)
     if (not isinstance(wave, dict) or wave.get("schema") != 1 or wave.get("market") != path.parent.name
-            or set(wave["versions"]) != set(PLUGINS)
+            or set(wave["versions"]) not in (set(PLUGINS), set(LEGACY_PLUGINS))
             or any(not re.fullmatch(r"\d+\.\d+\.\d+", v) for v in wave["versions"].values())):
         raise PinError("invalid or unsupported wave receipt")
     return wave
@@ -262,9 +263,10 @@ def hook_inventory(path, wave, cwd):
         raise PinError("Codex hook inventory could not be verified for the target directory")
     hooks = {}
     trusted = True
+    owner = "guard" if "guard" in wave["versions"] else "dev"
     for hook in group["hooks"]:
         name, _, market = (hook["pluginId"] or "").partition("@")
-        if (market != wave["market"] or name not in PLUGINS or hook["source"] != "plugin"
+        if (market != wave["market"] or name != owner or hook["source"] != "plugin"
                 or not hook["enabled"] or hook["isManaged"] or not hook["currentHash"]
                 or hook["key"] in hooks):
             raise PinError("an unexpected, inactive or managed hook is visible in the target")
@@ -341,9 +343,9 @@ def verify(path, wave, cwd):
     data = json.loads(codex_command(root, wave["binary"], "plugin", "list", "--marketplace",
                                    wave["market"], "--json", cwd=cwd))
     installed = {entry["pluginId"]: entry for entry in data["installed"]}
-    if set(installed) != {f"{p}@{wave['market']}" for p in PLUGINS}:
+    if set(installed) != {f"{p}@{wave['market']}" for p in wave["versions"]}:
         raise PinError("Codex did not load the complete pinned marketplace")
-    for name in PLUGINS:
+    for name in wave["versions"]:
         entry = installed[f"{name}@{wave['market']}"]
         if (not entry["enabled"] or entry["version"] != wave["versions"][name]
                 or entry["source"]["source"] != "local"

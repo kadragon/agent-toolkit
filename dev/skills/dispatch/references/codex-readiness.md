@@ -4,7 +4,7 @@
 
 Use `dispatch.py pin --repo "<agent-toolkit checkout>" --commit "<full verified commit SHA>"
 --codex "<absolute native Codex executable>"`. Review the chosen commit, including the
-hook manifests and the files their commands run. Each wave exports the dev and prod plugins
+hook manifests and the files their commands run. Each new wave exports the dev, prod, and guard plugins
 into its own local marketplace with a unique name and installs them in a private `CODEX_HOME`.
 A shared marketplace refresh cannot replace those files. Prepare a new wave for a later commit.
 Dispatch protects the snapshot files against ordinary edits and verifies the plugin trees,
@@ -63,21 +63,24 @@ Omit `--trust-hooks` to use the manual review below.
 
 ## Before a shared-cache Codex wave
 
-A Codex startup that updates a kadragon plugin invalidates running Codex children's hook
-approval. Before starting one while another is mid-cycle, fetch agent-toolkit, then compare each
-plugin's version in `origin/main` with `~/.codex/plugins/cache/kadragon/<plugin>/<version>`.
-Launch only if the fetch succeeds and all versions match; otherwise wait and prepare the wave as below.
-Treat a live agent-toolkit child that may merge as a mismatch.
+Install and enable `guard@kadragon` when updating from a dev release that bundled its hooks. Approve its hooks
+once in an idle Codex child. Codex fingerprints the full `guard` bundle, so a new guard release
+requires review. A dev-only or prod-only release preserves the guard approval.
+
+Before starting a shared-cache child while another is mid-cycle, fetch agent-toolkit and
+compare the plugin versions in `origin/main` with
+`~/.codex/plugins/cache/kadragon/<plugin>/<version>`. A changed version can remove files
+that a running session still uses. Launch only after the fetch succeeds and all versions
+match. Treat a live agent-toolkit child that may merge as a mismatch.
 If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
 send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 
-When the dev plugin version may have changed, such as after an agent-toolkit merge, wait for
-active Codex cycles to finish, then prepare the wave:
+When a plugin version may have changed, wait for active Codex cycles to finish, then prepare the wave:
 
 1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
-2. If any task child will rely on persisted trust, start a second idle Codex child. Use
-   **Review hooks** in the startup dialog, or `/hooks` if the dialog is absent. Verify that the
-   required hooks are trusted and active, then close the child.
+2. After installing or updating guard, start a second idle Codex child if a task child will
+   rely on persisted trust. Use **Review hooks** in the startup dialog or `/hooks` to check
+   that the guard hooks are trusted and active, then close the child.
 3. Launch the task children once the warm-up children are closed. Pass `--trust-hooks` at
    launch for each child authorized to use it.
 
@@ -89,9 +92,10 @@ startup during the wave finds a newer plugin to install.
 
 ## Plugin update during a shared-cache wave
 
-Any Codex startup outside the wave can update a kadragon plugin and delete the old version
-directory. Live children keep pointing at it: every tool call prints `• Hook failed … os error 2`
-and the session continues without its guards.
+A Codex startup outside the wave can update guard and delete its old version directory.
+Live children can still point at that directory and report `• Hook failed … os error 2`.
+A dev-only update leaves these hook entrypoints in guard in place. Before migration, the
+same hook failure can occur when the older dev plugin is updated.
 
 `launch` records the installed `~/.codex/plugins/cache/kadragon/<plugin>/<version>` for each
 plugin in the receipt, and each `collect` compares it with the installed one. A change prints a

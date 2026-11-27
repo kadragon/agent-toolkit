@@ -2,7 +2,7 @@
 # Bump plugin and/or skill versions atomically.
 # Usage: bump-version.sh <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 #
-# dev and prod carry a Claude and a Codex manifest, bumped in sync. mods is
+# dev, prod and guard carry a Claude and a Codex manifest, bumped in sync. mods is
 # Claude Code only (function hooks), so it has the Claude manifest alone.
 #
 # Semver rules — full table: docs/conventions.md → Plugin Version Bump Rules.
@@ -21,7 +21,7 @@ usage() {
   cat >&2 <<EOF
 Usage: $0 <plugin> <major|minor|patch> [--skill <name> [major|minor|patch]]
 
-  plugin:     dev | prod | mods | all
+  plugin:     dev | prod | guard | mods | all
   bump type:  major | minor | patch
 
   --skill <name> [major|minor|patch]
@@ -171,8 +171,8 @@ fi
 # Every manifest of every target is read here, so a missing or unparseable one
 # stops the run before anything is rewritten — `all` included.
 case "$PLUGIN" in
-  dev|prod|mods) check_plugin "$PLUGIN" ;;
-  all) for _plugin in dev prod mods; do check_plugin "$_plugin"; done ;;
+  dev|prod|guard|mods) check_plugin "$PLUGIN" ;;
+  all) for _plugin in dev prod guard mods; do check_plugin "$_plugin"; done ;;
   *) usage ;;
 esac
 
@@ -181,7 +181,7 @@ esac
 echo "Bumping versions (${BUMP_TYPE}):"
 
 case "$PLUGIN" in
-  dev|prod|mods)
+  dev|prod|guard|mods)
     bump_plugin "$PLUGIN" "$BUMP_TYPE"
     if [[ -n "$SKILL_NAME" ]]; then
       bump_skill "$PLUGIN" "$SKILL_NAME" "$SKILL_BUMP"
@@ -190,6 +190,7 @@ case "$PLUGIN" in
   all)
     bump_plugin "dev" "$BUMP_TYPE"
     bump_plugin "prod" "$BUMP_TYPE"
+    bump_plugin "guard" "$BUMP_TYPE"
     bump_plugin "mods" "$BUMP_TYPE"
     ;;
   *) usage ;;

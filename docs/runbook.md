@@ -15,6 +15,7 @@
 # Install plugins from local path
 claude plugin install ./dev
 claude plugin install ./prod
+claude plugin install ./guard
 claude plugin install ./mods   # Claude Code only; needs a build with function hooks
 ```
 
@@ -26,6 +27,7 @@ reloads on save.
 ```bash
 codex plugin add dev@kadragon
 codex plugin add prod@kadragon
+codex plugin add guard@kadragon
 ```
 
 ## Validate
@@ -81,7 +83,7 @@ git diff main -- dev/.claude-plugin/plugin.json prod/.claude-plugin/plugin.json 
 ### CI fails: "plugin.json version unchanged"
 
 **Symptom:** `harness-check.yml` exits 1 with "version not bumped"
-**Cause:** Modified files in `dev/` or `prod/` but didn't bump `plugin.json`
+**Cause:** A plugin directory changed without the required manifest version increment
 **Fix:** `bash scripts/bump-version.sh <plugin> patch` (or minor/major per semver table in `docs/conventions.md`)
 
 ### `check_skill_triggers.py` passes locally, then fails in CI

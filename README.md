@@ -2,7 +2,7 @@
 
 Personal agent plugin marketplace by kadragon.
 
-Three plugins:
+Four plugins
 
 ### `dev` — development
 
@@ -25,6 +25,11 @@ Three plugins:
 |---|---|---|---|
 | `hwpx` | Korean HWPX document creation and editing | ✅ | ✅ |
 | `persona-debate` | Structured debate among Korean personas | ✅ | ⚠️ |
+
+### `guard` — lifecycle hooks
+
+Commit and memory guards and session-start maintenance for Claude Code and Codex.
+Install `guard@kadragon` to keep these hooks when upgrading from a dev release that bundled them.
 
 ### `mods` — Claude Code interface mods
 
@@ -54,10 +59,9 @@ line above it.
 
 > **Migrating from `toolkit@kadragon`?** The former single plugin is now split into
 > `dev@kadragon` and `prod@kadragon`. Remove the old plugin
-> (`claude plugin uninstall toolkit@kadragon`) and install both below.
-> Also update any SessionStart hook that referenced `toolkit:harness-maintenance` —
-> maintenance now runs inside the `dev` plugin's single SessionStart dispatcher
-> (`hooks/session-start/run.sh`).
+> (`claude plugin uninstall toolkit@kadragon`) and install the plugins below.
+> Remove any separate SessionStart registration for `toolkit:harness-maintenance`.
+> The `guard` plugin now runs maintenance from `hooks/session-start/run.sh`.
 
 ### npx skills
 
@@ -79,6 +83,7 @@ npx skills add kadragon/agent-toolkit --skill harness-init
 claude plugin marketplace add kadragon/agent-toolkit
 claude plugin install dev@kadragon
 claude plugin install prod@kadragon
+claude plugin install guard@kadragon
 claude plugin install mods@kadragon   # optional
 ```
 
@@ -88,7 +93,8 @@ Via `~/.claude/settings.json`:
 {
   "enabledPlugins": {
     "dev@kadragon": true,
-    "prod@kadragon": true
+    "prod@kadragon": true,
+    "guard@kadragon": true
   },
   "extraKnownMarketplaces": {
     "kadragon": {
@@ -110,9 +116,14 @@ Codex uses `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json` ma
 codex plugin marketplace add kadragon/agent-toolkit
 codex plugin add dev@kadragon
 codex plugin add prod@kadragon
+codex plugin add guard@kadragon
 ```
 
-Install only ✅/⚠️ skills from table above.
+After the first install, review the three `guard` hooks in Codex with `/hooks`.
+Future `guard` releases require review again because Codex fingerprints the hook bundle.
+Releases that change only `dev` or `prod` preserve that approval.
+
+Install only ✅/⚠️ skills from the tables above.
 
 ## Prerequisites
 

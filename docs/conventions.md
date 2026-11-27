@@ -202,9 +202,10 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 
 ## Plugin Version Bump Rules
 
-`dev/.claude-plugin/plugin.json` and `prod/.claude-plugin/plugin.json` are independent semver manifests. Bump only the plugin that changed.
+`dev`, `prod`, and `guard` each have an independent release version. Bump the affected plugin's
+Claude Code and Codex manifests together.
 
-`mods/.claude-plugin/plugin.json` is a third independent line. `mods` is Claude Code only, so it
+`mods/.claude-plugin/plugin.json` has its own version. `mods` is Claude Code only, so it
 has no `.codex-plugin` manifest to keep in sync. It follows the table below with a mod read as a
 hook: a mod added is a minor, because it fires on its own; a mod or a `userConfig` key removed or
 renamed is a patch, because neither is invoked by name. Document a renamed key in the owning doc — the stored setting silently falls back to its default.
@@ -274,7 +275,9 @@ directories (`evals/`, `examples/`, `templates/`, …) fall under the same row, 
 not by CI. When the new file only moves existing `SKILL.md` content, a patch is correct: add the
 trailer `Skill-Bump-Exempt: <skill> — <reason>` (or `<plugin>:<skill>`) to a commit on the branch.
 
-Rule: if any file under `dev/` changed in the diff → `dev/plugin.json` version must differ from `main`. CI enforces this (`harness-check.yml`). The same job holds `prod/` and `mods/` to it.
+CI requires a strict version increment in the manifests of each changed plugin directory
+(`harness-check.yml`). A new plugin starts with matching versions on both supported platforms.
+Changes confined to another plugin keep the `guard` version and bundle intact.
 
 Use `scripts/bump-version.sh` to update all version fields atomically (both platform manifests + optional skill):
 

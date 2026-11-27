@@ -144,9 +144,9 @@ GUARD_SKIPPED=false
 run_commit_guard() {
   guard_message="$1"
   guard_action="$2"
-  GUARD="$SCRIPT_DIR/../../../hooks/commit-guard/guard.py"
+  GUARD="$SCRIPT_DIR/../guard.py"
   # Resolve the interpreter rather than hardcoding python3. Windows installs
-  # routinely ship only `python` — dev/hooks.json's own commit-guard entry uses
+  # routinely ship only `python` — guard/hooks.json's own commit-guard entry uses
   # `commandWindows: python ...` for exactly that reason, and
   # hooks/session-start/run.sh already resolves the same way. Hardcoding python3
   # here would leave every task-review-cycle commit unguarded on those installs
