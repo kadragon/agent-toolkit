@@ -73,6 +73,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [debt] Herdr `launch` exits before writing the receipt or printing the address when `hc get` fails right after a successful `hc run`; a Claude child may already hold its first message, so a retry can duplicate it (source: codex) (pre_existing) — dev/skills/dispatch/scripts/dispatch.py:397
 
+### PR #468 — Add github queue writes, the queue-write grant and issue filing in task-tickets (2026-11-27)
+
+- [ ] [debt] `key_index` and `github_rejected` walk every issue / closed `task-queue` issue (cap 100 pages of 100); past that every github `create` goes pending — look up only the batch's keys, or filter rejected by `reason:not-planned` search (source: code-review, agy) (introduced here) — dev/skills/task-next/scripts/queue_backend.py:key_index
+- [ ] [debt] On a truncated github `list`, a parent's sub-issue on an unread page is excluded as "not a trusted task-queue issue" instead of "incomplete read", and the parent is still offered (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:why_not
+- [ ] [debt] `handle()` resolves the backend for `show`/`rejected` from the working tree, ignoring the request's `rev`, so a github.com repo whose `backlog.md` has open items only at `rev` queries GitHub instead (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:handle
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

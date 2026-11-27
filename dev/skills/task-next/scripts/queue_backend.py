@@ -55,6 +55,12 @@ class QueueError(Exception):
     """An error the CLI reports on stderr with exit 1."""
 
 
+class GhUnavailable(QueueError):
+    """`gh` failed to start, authenticate or answer; a write stops and its drafts go pending."""
+
+    partial: dict | None = None
+
+
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
@@ -442,7 +448,7 @@ def gh_runner(args: list[str]) -> tuple[int, str, str]:
         out = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8",
                              errors="replace", check=False)
     except OSError as e:
-        raise QueueError("the github queue backend needs the GitHub CLI: install `gh`, then run "
+        raise GhUnavailable("the github queue backend needs the GitHub CLI: install `gh`, then run "
                          f"`gh auth login` ({e}); it never falls back to backlog.md") from e
     return out.returncode, out.stdout, out.stderr
 
@@ -750,29 +756,34 @@ def github_show(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
 # `github` write path: create, rejected, reject, defer, publish (+ pending store)
 # ---------------------------------------------------------------------------
 
-class GhUnavailable(QueueError):
-    """`gh` failed to run, authenticate or answer; a write stops and its drafts go pending."""
+class GhRejected(QueueError):
+    """GitHub refused a write as invalid (HTTP 400/422): retrying the same draft cannot succeed."""
 
 
 NO_QUEUE_WRITE = "no-queue-write"
 QUEUE_LIMITS = ("none", NO_QUEUE_WRITE)
+WRITE_MAX_PAGES = 100  # key index / rejected walk; 100 issues per page
 _KEY_MARKER = "<!-- queue-key: {} -->"
-_KEY_RE = re.compile(r"<!-- queue-key: (.+?) -->")
+# the marker create appends on its own last line; a body quoting the syntax earlier never wins
+_KEY_RE = re.compile(r"^<!-- queue-key: (.+?) -->\r?$", re.MULTILINE)
 _REJECT_MARKER = "<!-- queue-rejected -->"
 _ISSUE_REF_RE = re.compile(r"^(?:([\w.-]+/[\w.-]+))?#(\d+)$")
 
+# No label filter: an issue whose relations were still being filed carries no `task-queue` label
+# yet (so selection never sees it half-linked), and a retry must still find it by its key.
 KEYS_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
-    f"issues(first: 100, after: $after, labels: [\"{QUEUE_LABEL}\"], "
-    "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
-    "nodes { id number url body authorAssociation parent { number repository { nameWithOwner } } "
+    "issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) "
+    "{ pageInfo { hasNextPage endCursor } "
+    "nodes { id number url body authorAssociation labels(first: 100) { nodes { name } } "
+    "parent { number repository { nameWithOwner } } "
     "blockedBy(first: 100) { nodes { number repository { nameWithOwner } } } } } } }"
 )
 NODE_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
               "issue(number: $number) { id number body authorAssociation labels(first: 100) { nodes { name } } } } }")
 REJECTED_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
-    f"issues(first: {PAGE_SIZE}, after: $after, states: CLOSED, labels: [\"{QUEUE_LABEL}\"], "
+    f"issues(first: 100, after: $after, states: CLOSED, labels: [\"{QUEUE_LABEL}\"], "
     "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
     "nodes { number title url stateReason authorAssociation "
     "comments(last: 50) { nodes { body authorAssociation } } } } } }"
@@ -783,11 +794,13 @@ ADD_BLOCKED_BY = ("mutation($issue: ID!, $blocker: ID!) { addBlockedBy(input: {i
                   "blockingIssueId: $blocker}) { issue { number } } }")
 
 
-def _gh_failed(code: int, err: str, what: str) -> GhUnavailable:
+def _gh_failed(code: int, err: str, what: str) -> QueueError:
     low = err.lower()
     if code == 4 or "gh auth login" in low or "not logged in" in low or "authentication" in low:
         return GhUnavailable("gh is not authenticated for github.com: run `gh auth login`; "
                              "the github queue backend never falls back to backlog.md")
+    if re.search(r"HTTP (400|422)\b", err):
+        return GhRejected(f"{what} was refused: {err.strip()}")
     return GhUnavailable(f"{what} failed (exit {code}): {err.strip()}")
 
 
@@ -842,8 +855,8 @@ def _node_key(repo_name: str, number: int) -> tuple[str, int]:
     return repo_name.lower(), number
 
 
-def key_index(runner, owner: str, name: str, max_pages: int = MAX_PAGES) -> dict[str, dict]:
-    """{queue-key: issue} over every trusted `task-queue` issue, open or closed."""
+def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -> dict[str, dict]:
+    """{queue-key: issue} over every issue (open or closed) a trusted author filed with a key."""
     index: dict[str, dict] = {}
     after = None
     for _ in range(max_pages):
@@ -852,23 +865,24 @@ def key_index(runner, owner: str, name: str, max_pages: int = MAX_PAGES) -> dict
             raise GhUnavailable("GitHub GraphQL error: " + "; ".join(errors))
         conn = _repository(data, owner, name)["issues"]
         for issue in conn["nodes"]:
-            m = _KEY_RE.search(issue.get("body") or "")
-            if m and issue.get("authorAssociation") in TRUSTED_AUTHORS:
-                index.setdefault(m.group(1), issue)
+            keys = _KEY_RE.findall(issue.get("body") or "")
+            if keys and issue.get("authorAssociation") in TRUSTED_AUTHORS:
+                index.setdefault(keys[-1], issue)
         if not conn["pageInfo"]["hasNextPage"]:
             return index
         after = conn["pageInfo"]["endCursor"]
-    raise GhUnavailable(f"more than {max_pages} pages of {QUEUE_LABEL} issues; cannot prove a queue-key is unused")
+    raise GhUnavailable(f"more than {max_pages} pages of issues; cannot prove a queue-key is unused")
 
 
 def _validate_items(items: object) -> list[dict]:
+    """Shape checks that need no gh, so a draft that can never be filed is refused, not stored."""
     if not isinstance(items, list) or not items:
         raise QueueError("create needs a non-empty items[]")
     out, keys = [], set()
     for item in items:
         if not isinstance(item, dict):
             raise QueueError("each create item must be an object")
-        key, title = item.get("key"), item.get("title")
+        key, title, body = item.get("key"), item.get("title"), item.get("body")
         if not (isinstance(key, str) and key.strip() and "-->" not in key and "\n" not in key):
             raise QueueError(f"item key must be a one-line string without '-->', got {key!r}")
         if key in keys:
@@ -876,6 +890,8 @@ def _validate_items(items: object) -> list[dict]:
         keys.add(key)
         if not (isinstance(title, str) and title.strip()):
             raise QueueError(f"item {key!r} needs a title")
+        if body is not None and not isinstance(body, str):
+            raise QueueError(f"item {key!r}: body must be a string")
         labels = item.get("labels") or []
         blocked = item.get("blocked_by") or []
         parent = item.get("parent_key")
@@ -885,7 +901,9 @@ def _validate_items(items: object) -> list[dict]:
             raise QueueError(f"item {key!r}: blocked_by must be a list of keys or refs")
         if parent is not None and not (isinstance(parent, str) and parent):
             raise QueueError(f"item {key!r}: parent_key must be a key or ref")
-        out.append({"key": key, "title": title, "body": item.get("body") or "", "labels": labels,
+        if key == parent or key in blocked:
+            raise QueueError(f"item {key!r} names itself as its parent or blocker")
+        out.append({"key": key, "title": title, "body": body or "", "labels": labels,
                     "parent_key": parent, "blocked_by": blocked})
     return out
 
@@ -895,6 +913,34 @@ def pending_path(repo: str) -> str:
     if not common:
         raise QueueError(f"{repo} is not a git repository; the pending store lives in its git common dir")
     return os.path.join(os.path.normpath(os.path.join(repo, common)), "agent-queue", "pending.json")
+
+
+class _StoreLock:
+    """Exclusive lock on the pending store: every worktree and dispatched child shares it."""
+
+    def __init__(self, repo: str, timeout: float = 30.0):
+        self.path = pending_path(repo) + ".lock"
+        self.timeout = timeout
+
+    def __enter__(self):
+        import time
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                os.close(os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return self
+            except FileExistsError:
+                if time.monotonic() > deadline:
+                    raise QueueError(f"pending store is locked ({self.path}); remove the lock if no "
+                                     "queue_backend.py run is active") from None
+                time.sleep(0.05)
+
+    def __exit__(self, *exc):
+        try:
+            os.remove(self.path)
+        except FileNotFoundError:
+            pass
 
 
 def read_pending(repo: str) -> list[dict]:
@@ -910,55 +956,78 @@ def read_pending(repo: str) -> list[dict]:
 
 
 def write_pending(repo: str, items: list[dict]) -> str:
-    """Replace the pending store with `items`; an empty list removes the file."""
+    """Replace the pending store with `items` (caller holds the lock); empty removes the file."""
+    import tempfile
     path = pending_path(repo)
     if not items:
         if os.path.exists(path):
             os.remove(path)
         return path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix="pending.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
         json.dump({"version": 1, "items": items}, fh, indent=2)
         fh.write("\n")
     os.replace(tmp, path)
     return path
 
 
-def store_pending(repo: str, items: list[dict], reason: str) -> str:
-    """Merge drafts into the pending store by key (newest draft wins)."""
-    stored = {i["key"]: i for i in read_pending(repo)}
-    for item in items:
-        stored[item["key"]] = dict(item, pending_reason=reason)
-    return write_pending(repo, list(stored.values()))
+def _draft(item: dict) -> dict:
+    return {k: item[k] for k in ("key", "title", "body", "labels", "parent_key", "blocked_by")}
 
 
-def _post_items(req: dict, items: list[dict], runner) -> dict:
-    """Retry-safe create of validated `items`. Returns created/incomplete/done; a transport
+def store_pending(repo: str, items: list[dict], target: str, reason: str) -> str:
+    """Merge drafts into the pending store by key (newest draft wins), bound to `target`."""
+    with _StoreLock(repo):
+        stored = {i["key"]: i for i in read_pending(repo)}
+        for item in items:
+            stored[item["key"]] = dict(_draft(item), target=target, pending_reason=reason)
+        return write_pending(repo, list(stored.values()))
+
+
+def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bool) -> dict:
+    """Retry-safe create of validated `items`. Returns created/incomplete/done/refused; a transport
     failure re-raises with the partial result attached as `partial`."""
-    owner, name = github_slug(req["repo"])
     slug = f"{owner}/{name}".lower()
-    result: dict = {"created": [], "incomplete": [], "done": set()}
+    result: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
     try:
         index = key_index(runner, owner, name)
         batch = {i["key"] for i in items}
+        ready = []
         for item in items:
-            for target in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]:
-                if not (_ISSUE_REF_RE.match(target) or target in batch or target in index):
-                    raise QueueError(f"item {item['key']!r} names {target!r}: not a batch key, a known "
-                                     "queue-key or an issue ref (#N / owner/name#N)")
-        ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in items for x in i["labels"]])
+            unknown = [t for t in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]
+                       if not (_ISSUE_REF_RE.match(t) or t in batch or t in index)]
+            if unknown and not from_store:
+                raise QueueError(f"item {item['key']!r} names {unknown[0]!r}: not a batch key, a known "
+                                 "queue-key or an issue ref (#N / owner/name#N)")
+            if unknown:  # one bad stored draft never blocks the rest of the store
+                result["incomplete"].append({"key": item["key"], "relation": "target", "ref": unknown[0],
+                                             "error": "not a batch key, a known queue-key or an issue ref"})
+                continue
+            ready.append(item)
+        ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in ready for x in i["labels"]])
         issues: dict[str, dict] = {}
-        for item in items:
+        for item in ready:
             found = index.get(item["key"])
             reused = found is not None
             if found is None:
+                # An item with relations is filed without `task-queue` and labelled only once every
+                # relation landed, so selection never offers it before its blockers are recorded.
+                linked = bool(item["parent_key"] or item["blocked_by"])
+                labels = sorted(set(item["labels"]) | (set() if linked else {QUEUE_LABEL}))
                 body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + _KEY_MARKER.format(item["key"])
-                made = _rest(runner, "POST", f"repos/{owner}/{name}/issues", {"title": item["title"], "body": body},
-                             {"labels": sorted({QUEUE_LABEL, *item["labels"]})}) or {}
+                try:
+                    made = _rest(runner, "POST", f"repos/{owner}/{name}/issues", {"title": item["title"], "body": body},
+                                 {"labels": labels} if labels else None) or {}
+                except GhRejected as e:
+                    result["incomplete"].append({"key": item["key"], "relation": "create", "ref": None,
+                                                 "error": str(e)})
+                    result["refused"].add(item["key"])
+                    continue
                 if not all(k in made for k in ("node_id", "number", "html_url")):
                     raise GhUnavailable(f"creating {item['key']!r} returned no issue: {made!r}")
                 found = {"id": made["node_id"], "number": made["number"], "url": made["html_url"],
+                         "labels": {"nodes": [{"name": x} for x in labels]},
                          "parent": None, "blockedBy": {"nodes": []}}
                 index[item["key"]] = found
             issues[item["key"]] = found
@@ -983,7 +1052,9 @@ def _post_items(req: dict, items: list[dict], runner) -> dict:
                 node_ids[nk] = node["id"] if node else ""
             return nk, ref, node_ids[nk] or None
 
-        for item in items:
+        for item in ready:
+            if item["key"] not in issues:
+                continue
             issue = issues[item["key"]]
             missing = []
             relations = ([("parent", item["parent_key"])] if item["parent_key"] else []) + \
@@ -992,6 +1063,10 @@ def _post_items(req: dict, items: list[dict], runner) -> dict:
             have_blockers = {_node_key(b["repository"]["nameWithOwner"], b["number"])
                              for b in issue["blockedBy"]["nodes"]}
             for kind, target in relations:
+                if target in batch and target not in issues:
+                    missing.append({"key": item["key"], "relation": kind, "ref": None,
+                                    "error": f"{target!r} was not filed"})
+                    continue
                 nk, ref, node_id = target_node(target)
                 if kind == "parent" and have_parent and \
                         _node_key(have_parent["repository"]["nameWithOwner"], have_parent["number"]) == nk:
@@ -1011,11 +1086,14 @@ def _post_items(req: dict, items: list[dict], runner) -> dict:
                     have_blockers.add(nk)
                 else:
                     have_parent = {"number": nk[1], "repository": {"nameWithOwner": nk[0]}}
+            if not missing and QUEUE_LABEL not in [n["name"] for n in issue["labels"]["nodes"]]:
+                _rest(runner, "POST", f"repos/{owner}/{name}/issues/{issue['number']}/labels",
+                      arrays={"labels": [QUEUE_LABEL]})
             result["incomplete"].extend(missing)
             if not missing:
                 result["done"].add(item["key"])
     except GhUnavailable as e:
-        e.partial = result  # type: ignore[attr-defined]
+        e.partial = result
         raise
     return result
 
@@ -1023,34 +1101,46 @@ def _post_items(req: dict, items: list[dict], runner) -> dict:
 def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) -> dict:
     """`create`, and `publish` when `items` come from the pending store. Drafts that are not
     fully filed (gh unavailable mid-write, an incomplete relation, `no-queue-write`) are kept in
-    the pending store — the failure path only; a clean run writes no file at all."""
+    the pending store — the failure path only; a clean run writes no file at all. A draft GitHub
+    refused as invalid (HTTP 400/422) is reported in `incomplete[]` and not stored: a retry of the
+    same draft cannot succeed."""
     from_store = items is not None
     items = _validate_items(req.get("items") if items is None else items)
     repo = req["repo"]
     limits = req.get("queue_limits") or "none"
     if limits not in QUEUE_LIMITS:
         raise QueueError(f"queue_limits must be one of {', '.join(QUEUE_LIMITS)}, got {limits!r}")
+    owner, name = github_slug(repo)
+    target = f"{owner}/{name}".lower()
     out: dict = {"created": [], "incomplete": [], "pending": []}
+    res: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
     if limits == NO_QUEUE_WRITE:
-        reason, done = f"Queue limits: {NO_QUEUE_WRITE}", set()
+        reason = f"Queue limits: {NO_QUEUE_WRITE}"
     else:
         try:
-            res = _post_items(req, items, runner)
+            res = _post_items(owner, name, items, runner, from_store)
             reason = "incomplete relation"
         except GhUnavailable as e:
-            res = getattr(e, "partial", {"created": [], "incomplete": [], "done": set()})
+            res = e.partial or res
             reason = str(e)
             out["error"] = reason
-        out["created"], out["incomplete"], done = res["created"], res["incomplete"], res["done"]
-    left = [i for i in items if i["key"] not in done]
+        out["created"], out["incomplete"] = res["created"], res["incomplete"]
+    left = [i for i in items if i["key"] not in res["done"] | res["refused"]]
     if from_store:
-        kept = {i["key"]: i for i in read_pending(repo)}
-        for i in items:
-            if i["key"] in done:
-                kept.pop(i["key"], None)
-        path = write_pending(repo, list(kept.values()))
-    elif left:
-        path = store_pending(repo, left, reason)
+        with _StoreLock(repo):
+            stored = read_pending(repo)
+            # drop a draft only when the store still holds the very draft that was filed or refused
+            sent = {i["key"]: i for i in items}
+            kept = [s for s in stored if not (s["key"] in res["done"] | res["refused"]
+                                              and _draft(s) == sent.get(s["key"]))]
+            path = write_pending(repo, kept)
+    elif left or (res["done"] | res["refused"] and os.path.exists(pending_path(repo))):
+        # a direct create that filed a key also retires that key's stale stored draft
+        with _StoreLock(repo):
+            stored = {i["key"]: i for i in read_pending(repo) if i["key"] not in res["done"] | res["refused"]}
+            for item in left:
+                stored[item["key"]] = dict(_draft(item), target=target, pending_reason=reason)
+            path = write_pending(repo, list(stored.values()))
     else:
         path = None
     out["pending"] = [i["key"] for i in left]
@@ -1060,11 +1150,26 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
 
 
 def github_publish(req: dict, runner=gh_runner) -> dict:
+    """Post the pending store's drafts bound to this repo's current `origin`; a draft stored for
+    another target stays pending and is reported, never posted elsewhere."""
     stored = read_pending(req["repo"])
     if not stored:
         return {"created": [], "incomplete": [], "pending": []}
-    clean = [{k: v for k, v in i.items() if k != "pending_reason"} for i in stored]
-    return github_create(req, runner, clean)
+    owner, name = github_slug(req["repo"])
+    target = f"{owner}/{name}".lower()
+    mine = [_draft(i) for i in stored if i.get("target") == target]
+    other = [i for i in stored if i.get("target") != target]
+    foreign = [{"key": i["key"], "relation": "target", "ref": i.get("target"),
+                "error": f"stored for {i.get('target')}, origin is now {target}; not posted"} for i in other]
+    if not mine:
+        return {"created": [], "incomplete": foreign, "pending": [i["key"] for i in other],
+                "pending_path": pending_path(req["repo"])}
+    out = github_create(req, runner, mine)
+    out["incomplete"] = out["incomplete"] + foreign
+    out["pending"] = out["pending"] + [i["key"] for i in other]
+    if out["pending"]:
+        out["pending_path"] = pending_path(req["repo"])
+    return out
 
 
 def _parse_rejection(comments: list[dict]) -> tuple[str, str]:
@@ -1077,7 +1182,7 @@ def _parse_rejection(comments: list[dict]) -> tuple[str, str]:
     return "", ""
 
 
-def github_rejected(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict:
+def github_rejected(req: dict, runner=gh_runner, max_pages: int = WRITE_MAX_PAGES) -> dict:
     """Closed-not-planned trusted `task-queue` issues, with the reason from the reject comment."""
     owner, name = github_slug(req["repo"])
     entries, after = [], None
@@ -1850,9 +1955,10 @@ class _FakeGitHub:
         if query == KEYS_QUERY:
             nodes = [{"id": i["id"], "number": n, "url": f"https://github.com/owner/repo/issues/{n}",
                       "body": i["body"], "authorAssociation": i["assoc"],
+                      "labels": _fx_conn([{"name": x} for x in sorted(i["labels"])]),
                       "parent": self._node(i["parent"]) if i["parent"] else None,
                       "blockedBy": {"nodes": [self._node(b) for b in i["blockedBy"]]}}
-                     for n, i in sorted(self.issues.items()) if QUEUE_LABEL in i["labels"]]
+                     for n, i in sorted(self.issues.items())]
             return self._ok({"data": {"repository": {"issues": _fx_conn(nodes)}}})
         if query == NODE_QUERY:
             i = self.issues.get(v["number"]) if v["owner"] == "owner" else None
@@ -1889,7 +1995,7 @@ class _FakeGitHub:
             return self._ok({"name": f["name"]})
         if parts == ["issues"] and method == "POST":
             missing = set(f.get("labels", [])) - self.labels
-            if missing:
+            if missing or len(f["title"]) > 256:
                 return 1, "", f"gh: Validation Failed (HTTP 422) labels {missing}"
             n = self.add(f["title"], f["body"], f.get("labels", []))
             if self.lose_create:
@@ -1977,10 +2083,60 @@ def run_github_write_tests(tmp: str, git) -> None:
                        {ENV_VAR: "github"}, gh)
     _assert(out["incomplete"] == [{"key": "b", "relation": "blocked_by", "ref": "#1", "error": "dependency limit reached"}]
             and out["pending"] == ["b"], "a failed relation → incomplete[] and that item stays pending")
+    _assert(QUEUE_LABEL in gh.issues[1]["labels"] and QUEUE_LABEL not in gh.issues[2]["labels"],
+            "an issue whose relation failed carries no task-queue label, so selection never offers it half-linked")
     gh.reject_relation.clear()
     code, out = handle("publish", dict(req), {ENV_VAR: "github"}, gh)
     _assert(gh.issues[2]["blockedBy"] == [1] and out["created"][0]["reused"] and out["pending"] == []
             and len(gh.issues) == 2, "publish completes the missing relation on the reused issue")
+    _assert(QUEUE_LABEL in gh.issues[2]["labels"], "the task-queue label lands once every relation is filed")
+
+    gh = _FakeGitHub()
+    code, out = handle("create", dict(req, items=[{"key": "long", "title": "x" * 300},
+                                                  {"key": "ok", "title": "fine"}]), {ENV_VAR: "github"}, gh)
+    _assert(out["incomplete"][0]["key"] == "long" and out["incomplete"][0]["relation"] == "create"
+            and out["pending"] == [] and not os.path.exists(store) and [c["key"] for c in out["created"]] == ["ok"],
+            "an HTTP 422 refusal is reported, never stored for an endless retry, and the rest still files")
+
+    def no_gh(args):
+        raise GhUnavailable("the github queue backend needs the GitHub CLI: install `gh`")
+    code, out = handle("create", dict(req, items=pair), {ENV_VAR: "github"}, no_gh)
+    _assert(out["pending"] == ["p", "c"] and "GitHub CLI" in out["error"] and os.path.exists(store),
+            "gh not installed → drafts stored, not dropped")
+    git(repo, "remote", "set-url", "origin", "git@github.com:someone/fork.git")
+    gh = _FakeGitHub()
+    code, out = handle("publish", dict(req), {ENV_VAR: "github"}, gh)
+    _assert(gh.calls == [] and out["pending"] == ["p", "c"] and out["incomplete"][0]["relation"] == "target",
+            "a draft stored for another origin is never posted to the current one")
+    git(repo, "remote", "set-url", "origin", "git@github.com:owner/repo.git")
+    store_pending(repo, [{"key": "bad", "title": "B", "body": "", "labels": [], "parent_key": None,
+                          "blocked_by": ["typo"]}], "owner/repo", "test")
+    code, out = handle("publish", dict(req), {ENV_VAR: "github"}, gh)
+    _assert(code == 0 and {c["key"] for c in out["created"]} == {"p", "c"} and out["pending"] == ["bad"]
+            and out["incomplete"] == [{"key": "bad", "relation": "target", "ref": "typo",
+                                       "error": "not a batch key, a known queue-key or an issue ref"}],
+            "one stored draft with an unknown target does not block the rest of the store")
+    write_pending(repo, [])
+    gh = _FakeGitHub()
+    gh.add("[DOCS] marker docs", "Write `<!-- queue-key: quoted -->` like this:\n<!-- queue-key: quoted -->\n"
+           "trailing prose\r\n<!-- queue-key: real -->")
+    _assert(set(key_index(gh, "owner", "repo")) == {"real"},
+            "key_index takes the last own-line marker, never a quoted one earlier in the body")
+    code, out = handle("create", dict(req, items=pair, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
+    code, out = handle("create", dict(req, items=pair), {ENV_VAR: "github"}, gh)
+    _assert(out["pending"] == [] and not os.path.exists(store),
+            "a direct create that files a stored key retires its stale pending draft")
+    import threading
+    drafts = [{"key": f"k{n}", "title": "T", "body": "", "labels": [], "parent_key": None, "blocked_by": []}
+              for n in range(8)]
+    threads = [threading.Thread(target=store_pending, args=(repo, [d], "owner/repo", "test")) for d in drafts]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    _assert(sorted(i["key"] for i in read_pending(repo)) == [d["key"] for d in drafts]
+            and not os.path.exists(store + ".lock"), "concurrent pending writes keep every draft (store lock)")
+    write_pending(repo, [])
 
     gh = _FakeGitHub()
     code, out = handle("create", dict(req, items=pair, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
@@ -1998,7 +2154,9 @@ def run_github_write_tests(tmp: str, git) -> None:
     write_pending(repo, [])
     for bad, label in (([{"key": "x", "title": "X", "blocked_by": ["nope"]}], "unknown key"),
                        ([{"key": "x", "title": "X"}, {"key": "x", "title": "Y"}], "duplicate key"),
-                       ([{"key": "x -->", "title": "X"}], "marker-breaking key")):
+                       ([{"key": "x -->", "title": "X"}], "marker-breaking key"),
+                       ([{"key": "x", "title": "X", "blocked_by": ["x"]}], "self-blocking item"),
+                       ([{"key": "x", "title": "X", "body": ["b"]}], "non-string body")):
         try:
             handle("create", dict(req, items=bad), {ENV_VAR: "github"}, _FakeGitHub())
             _assert(False, f"create with {label} → QueueError")

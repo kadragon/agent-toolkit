@@ -60,7 +60,6 @@ class RecoveryTest(unittest.TestCase):
                     self.state("authorize", "--action", action, ok=action in actions)
 
     def test_queue_limits_field_leaves_git_authority_unchanged(self):
-        # `**Queue limits:**` is a separate field: it never enters the Git vocabularies.
         for queue in ("none", "no-queue-write"):
             for limit, ok in (("none", True), ("pr-only", False)):
                 with self.subTest(queue=queue, limit=limit):
