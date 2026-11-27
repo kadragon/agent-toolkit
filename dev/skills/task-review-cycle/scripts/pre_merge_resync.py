@@ -272,6 +272,16 @@ def load_insert():
     return module.insert_changelog_entry
 
 
+def changelog_entries(merge_base, changed_paths):
+    if CHANGELOG not in changed_paths:
+        return []
+    # The last file item can be pruned on the branch, or the first can be added there.
+    repo = str(Path.cwd())
+    if all(resolve(repo, rev=rev)["backend"] == "github" for rev in ("HEAD", merge_base)):
+        return []
+    return branch_entries(merge_base)
+
+
 def resync(base, remote):
     branch = git("symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
     if not branch or branch == base:
@@ -295,9 +305,7 @@ def resync(base, remote):
     merge_base = out("merge-base", "HEAD", target)
     names = out("diff", "--name-only", merge_base, "HEAD").splitlines()
     bumps = branch_bumps(merge_base, names)
-    entries = []
-    if CHANGELOG in names and resolve(str(Path.cwd()), rev=merge_base)["backend"] != "github":
-        entries = branch_entries(merge_base)
+    entries = changelog_entries(merge_base, names)
     if entries and git("cat-file", "-e", f"{target}:{CHANGELOG}", check=False).returncode:
         raise Stop("error", f"base no longer has {CHANGELOG}; resync by hand")
     insert = load_insert() if entries else None

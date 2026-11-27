@@ -133,8 +133,9 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — skip `prune-tasks` and `prune-backlog`; this cycle claims no queue items.
-  With the selected file queue, write an entry if the repo maintains a `CHANGELOG.md`. In a
-  queue documentation cycle, title the entry for the act of recording the tickets. Follow the
+  With the selected file queue, use the shared `AGENT_QUEUE_BACKEND=backlog` changelog command
+  if the repo maintains a `CHANGELOG.md`. For queue documentation, title the entry for the act
+  of recording the tickets. Follow the
   shared PR metadata procedure for GitHub issue queues. Do not scaffold a harness to finish
   standalone work.
 

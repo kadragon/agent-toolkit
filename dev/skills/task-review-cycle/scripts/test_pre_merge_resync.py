@@ -117,6 +117,18 @@ def test_classify():
     check(module.bump("1.0.1", "minor") == "1.1.0", "bump minor")
 
 
+def test_file_queue_transition_keeps_branch_entries():
+    spec = importlib.util.spec_from_file_location("resync", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for head, base in (("backlog", "github"), ("github", "backlog")):
+        selected = {"HEAD": head, "base": base}
+        with patch.object(module, "resolve", side_effect=lambda repo, rev: {"backend": selected[rev]}), \
+             patch.object(module, "branch_entries", return_value=["entry"]):
+            check(module.changelog_entries("base", ["CHANGELOG.md"]) == ["entry"],
+                  "resync dropped file-queue entries when the backend changed on the branch")
+
+
 def test_two_branches_both_merge(tmp):
     repo = setup(tmp)
     branch(repo, "feat/a", {**release("1.0.1", entries=entry("A thing", "1.0.1")), "x.txt": "a\n"},
@@ -408,6 +420,7 @@ def test_issue_queue_archive_merges_without_changelog_replay(tmp):
 
 def main():
     test_classify()
+    test_file_queue_transition_keeps_branch_entries()
     for test in (test_two_branches_both_merge, test_version_line_conflict_takes_base,
                  test_non_version_conflict_stops, test_mixed_hunk_in_version_file_stops,
                  test_denied_writes_nothing, test_multi_step_bump_stops,

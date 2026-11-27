@@ -34,7 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -274,11 +274,11 @@ def verify_terminal(run, terminal):
             raise SystemExit(f"terminal identity changed: {run['address']}")
 
 
-def confirm_launch_identity(path, run, locked):
+def confirm_launch_identity(path, run, locked, *, timeout=None):
     """Write the identity adopted after a failed launch lookup, so later checks are exact."""
     if run.get("created_ms") is not None:
         return
-    verify_terminal(run, hc_json("get", run["address"]))
+    verify_terminal(run, hc_json("get", run["address"], **({"timeout": timeout} if timeout else {})))
     if locked:
         write_json(path, run)
         return
@@ -319,6 +319,16 @@ def hc_json(*args, timeout=None):
     out = subprocess.run(["hc", args[0], "--json", *args[1:]], capture_output=True, text=True,
                          encoding="utf-8", check=True, timeout=timeout).stdout
     return json.loads(out)
+
+
+def hc_rpc(method, params, timeout):
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}) + "\n"
+    out = subprocess.run(["hc", "connect"], input=request, capture_output=True, text=True,
+                         encoding="utf-8", timeout=timeout, check=True).stdout
+    for line in out.splitlines():
+        if line.strip() and (reply := json.loads(line)).get("id") == 1:
+            return reply
+    raise ValueError(f"Herdr returned no reply to {method}")
 
 
 def free_name(base, explicit, taken):
@@ -516,7 +526,6 @@ def release(args):
                 if child.get("wave") != str(path) or not child.get("closed_reason"):
                     raise pinned_wave.PinError(f"wave child must be closed first: {receipt}")
             write_json(path, {**wave, "released": True})
-        # Release only the dispatch-created directory, which wave_path validated under temp.
         pinned_wave.remove(path.parent)
     except PIN_ERRORS as error:
         raise SystemExit(f"cannot release Codex wave: {error}") from None
@@ -532,18 +541,24 @@ def launch(args):
         raise SystemExit("--wave requires an idle Codex launch and forbids --trust-hooks")
     try:
         path = pinned_wave.wave_path(wave_arg)
-        with lock_run(path):
+        if not path.is_file():
+            raise pinned_wave.PinError("wave receipt is missing")
+    except PIN_ERRORS as error:
+        raise SystemExit(f"pinned launch withheld: {error}; see shared-cache readiness") from None
+    with lock_run(path):
+        try:
             wave = pinned_wave.read_wave(path)
             if wave.get("released"):
                 raise pinned_wave.PinError("wave has been released")
             pinned_wave.ensure_shared_guards_are_preserved(codex_home())
             pinned_wave.verify_herdr()
-            launch_child(args, path, wave)
-    except PIN_ERRORS as error:
-        raise SystemExit(f"pinned launch withheld: {error}; see shared-cache readiness") from None
+            trusted = pinned_wave.verify(path, wave, Path(args.cwd).expanduser().resolve(strict=True))
+        except PIN_ERRORS as error:
+            raise SystemExit(f"pinned launch withheld: {error}; see shared-cache readiness") from None
+        launch_child(args, path, wave, trusted)
 
 
-def launch_child(args, wave_path=None, wave=None):
+def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
     name = terminal_name(args.name) if args.name else child_name(cwd.name, title)
@@ -565,11 +580,9 @@ def launch_child(args, wave_path=None, wave=None):
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
     result_path = None
     child = None
-    pinned_startup = None
     if wave:
         codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
         child = [wave["binary"], *codex_args[1:]]
-        pinned_startup = pinned_wave.verify(wave_path, wave, cwd.resolve(strict=True))
     if not args.dry_run:
         terminals = hc_json("ls")["terminals"]
         if home:
@@ -615,25 +628,36 @@ def launch_child(args, wave_path=None, wave=None):
         return
     receipt = result_path.with_name("run.json")
     if wave:
-        # Pending launches also hold a reference. An uncertain spawn must not lead to removal.
         wave["children"].append(str(receipt))
-        write_json(wave_path, wave)
+        try:
+            write_json(wave_path, wave)
+        except OSError as error:
+            raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
     try:
-        kwargs = {}
         if wave:
-            kwargs["input"] = json.dumps({"jsonrpc": "2.0", "id": 1,
-                                          "method": "terminal.run", "params": params}) + "\n"
-        stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
-                                timeout=LAUNCH_LOOKUP_SECONDS, **kwargs).stdout
-    except subprocess.SubprocessError as error:
+            reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
+        else:
+            stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
+                                    timeout=LAUNCH_LOOKUP_SECONDS).stdout
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"hc run failed ({error}); a child may be running, so do not retry the launch. "
                          f"Find terminal {name!r} with hc ls"
                          + (f"; wave reference retained for {receipt}" if wave else "")) from None
     try:
         if wave:
-            replies = [json.loads(line) for line in stdout.splitlines() if line.strip()]
-            reply = next((message for message in replies if message.get("id") == 1), {})
+            error = reply.get("error") or {}
+            kind = (error.get("data") or {}).get("kind")
+            if kind in {"name_taken", "spawn_failed", "invalid_params"} or error.get("code") in {-32601, -32602}:
+                wave["children"].remove(str(receipt))
+                try:
+                    write_json(wave_path, wave)
+                    receipt.parent.rmdir()
+                except OSError as cleanup_error:
+                    raise SystemExit(f"Herdr rejected the launch and started no child. "
+                                     f"Could not clear reservation {receipt}: {cleanup_error}") from None
+                raise SystemExit(f"Herdr rejected the pinned launch: {kind or error.get('code')}: "
+                                 f"{error.get('message', '')}")
             address = reply["result"]["address"]
         else:
             address = json.loads(stdout)["address"]
@@ -641,7 +665,8 @@ def launch_child(args, wave_path=None, wave=None):
             raise ValueError("invalid terminal address")
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         raise SystemExit(f"hc run printed no terminal address ({error}); a child may be running, so do not "
-                         f"retry the launch. Find terminal {name!r} with hc ls. Output: {stdout[:200]!r}") from None
+                         f"retry the launch. Find terminal {name!r} with hc ls."
+                         + (f" Wave reference retained for {receipt}" if wave else f" Output: {stdout[:200]!r}")) from None
     try:
         terminal, lookup_error = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS), None
         if not isinstance(terminal, dict) or not isinstance(terminal.get("created_ms"), int):
@@ -661,7 +686,11 @@ def launch_child(args, wave_path=None, wave=None):
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
-    write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+    try:
+        write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+    except OSError as error:
+        raise SystemExit(f"{address}: the child may be running, but the launch receipt could not be "
+                         f"written to {receipt}: {error}. Inspect the terminal before retrying.") from None
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
     if lookup_error is not None:
         detail = ("do not retry the launch: Claude may already hold its launch prompt"
@@ -851,6 +880,16 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
+def verify_delivery_turn(run, terminal):
+    verify_pinned_delivery(run, terminal)
+    if run and run.get("wave"):
+        current = hc_json("get", run["address"])
+        verify_terminal(run, current)
+        if current["state"] != "live" or any(current.get(key) != terminal.get(key)
+                                             for key in ("turn", "status", "foreground")):
+            raise SystemExit(f"{run['address']}: pinned task withheld; the terminal changed during verification")
+
+
 def send_task(args, run_path):
     address = args.address
     if not args.message.strip():
@@ -1001,12 +1040,7 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
-        verify_pinned_delivery(run, terminal)
-        if run and run.get("wave"):
-            current = hc_json("get", address)
-            verify_terminal(run, current)
-            if current["turn"] != terminal["turn"] or current.get("status") != terminal.get("status") or current["state"] != "live":
-                raise SystemExit(f"{address}: pinned task withheld; the terminal changed during verification")
+        verify_delivery_turn(run, terminal)
         message = args.message
         if run:
             if not continuation:
@@ -1089,7 +1123,7 @@ def send_task(args, run_path):
                 idle_paste = (status == "idle" or (continuation and status == "done")) and matches_paste
                 if idle_paste and previous_idle_paste and not retried_enter:
                     if run and run.get("wave"):
-                        verify_pinned_delivery(run, terminal)
+                        verify_delivery_turn(run, terminal)
                     hc_json("keys", address, "enter")
                     retried_enter = saw_trace = True
                 if time.monotonic() >= deadline:
@@ -1125,9 +1159,13 @@ def send_task(args, run_path):
                 time.sleep(SCREEN_POLL_SECONDS)
 
         for attempt in range(2):
-            if attempt and run and run["send_acknowledged"]:
-                run["send_acknowledged"] = False
-                write_json(run_path, run)
+            if attempt:
+                if run and run.get("wave"):
+                    verify_delivery_turn(run, terminal)
+                if run and run["send_acknowledged"]:
+                    run["send_acknowledged"] = False
+                    write_json(run_path, run)
+                print("warning: the submission left no trace; sending it once more", file=sys.stderr)
             send_error = None
             try:
                 hc_json("send", *guard, "--", address, message)
@@ -1149,7 +1187,6 @@ def send_task(args, run_path):
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
-            print("warning: the submission left no trace; sending it once more", file=sys.stderr)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as err:
         reason = ("Herdr could not confirm delivery; inspect the screen before retrying" if attempted_send
                   else "task withheld; Herdr could not read Codex readiness")
@@ -1167,17 +1204,22 @@ def collect(args):
     print(brief_report(report) if getattr(args, "brief", False) else json.dumps(report, ensure_ascii=False))
 
 
+def watch_stop_reason(report):
+    return report["stop_reason"] or ("plugin_drift" if report.get("plugin_drift") else None)
+
+
 def brief_report(report):
     result = report["result"] or {}
 
     def field(value):
-        return str(value).split("\n", 1)[0].split("\r", 1)[0].strip() if value is not None else ""
+        lines = str(value).splitlines() if value is not None else []
+        return lines[0].strip() if lines else ""
 
     status = result.get("status")
     if not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
     return " · ".join((report["address"], *(field(value) or "-" for value in (
-        status, result.get("phase"), result.get("summary"), result.get("pr"), report["stop_reason"],
+        status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report),
     ))))
 
 
@@ -1187,38 +1229,61 @@ def reached_outcome(report, outcomes):
     stopped = report["state"] == "finished" or report["status"] in {"idle", "done"}
     return ((reported in outcomes and (reported != "done" or stopped))
             or ("idle" in outcomes and report["status"] == "idle")
-            or ("stop" in outcomes and (report["stop_reason"] or report["state"] == "finished")))
+            or ("stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished")))
+
+
+def remaining_wait(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired("dispatch wait", 0)
+    return remaining
+
+
+def herdr_error_kind(error):
+    try:
+        return json.loads(error.stderr)["error"]["kind"]
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def wait(args):
-    paths = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
+    pending = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
     deadline = time.monotonic() + args.timeout
     previous = {}
-    while True:
-        pending = []
-        for path in paths:
-            report = collect_result(path, False, False, args.stall_minutes, warn_drift=False)
-            line = brief_report(report)
-            if previous.get(path) != line:
-                print(line, flush=True)
-                previous[path] = line
-            if not reached_outcome(report, args.until):
-                pending.append(report)
-        if not pending:
-            return
-        interval = min(WAIT_POLL_SECONDS, deadline - time.monotonic())
-        if interval <= 0:
-            raise SystemExit("dispatch wait timed out")
-        next_poll = time.monotonic() + interval
-        working = next((r for r in pending if r["state"] == "live" and r["status"] == "working"), None)
-        if working and interval > 1:
-            try:
-                hc_json("wait", working["address"], "--timeout", "1", timeout=interval)
-            except subprocess.TimeoutExpired:
-                pass  # Result updates can arrive independently of terminal events.
-        if (delay := next_poll - time.monotonic()) > 0:
-            time.sleep(delay)
-
+    try:
+        while pending:
+            next_pending = []
+            working = None
+            for path in pending:
+                report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
+                line = brief_report(report)
+                if previous.get(path) != line:
+                    print(line, flush=True)
+                    previous[path] = line
+                if not reached_outcome(report, args.until):
+                    next_pending.append(path)
+                    if working is None and report["state"] == "live" and report["status"] == "working":
+                        working = report["address"]
+            pending = next_pending
+            if not pending:
+                return
+            interval = min(WAIT_POLL_SECONDS, remaining_wait(deadline))
+            next_poll = time.monotonic() + interval
+            if working and interval > 1:
+                with suppress(subprocess.TimeoutExpired):
+                    reply = hc_rpc("terminal.wait", {"terminal": working, "timeout": 1, "caller": None}, interval)
+                    error = reply.get("error")
+                    if error and (error.get("data") or {}).get("kind") != "not_found":
+                        raise SystemExit(f"Herdr wait failed: {error.get('message', 'unknown error')}")
+                    result = reply.get("result") or {}
+                    if result.get("reason") == "message":
+                        raise SystemExit(f"Herdr wait interrupted by message from {result.get('from', 'unknown sender')}")
+            if (delay := next_poll - time.monotonic()) > 0:
+                time.sleep(delay)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("dispatch wait timed out") from None
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"dispatch wait could not read Herdr: {error}") from None
 
 
 def wait_for_terminal_exit(run):
@@ -1289,7 +1354,7 @@ def last_commit_ms(cwd):
         return 0
 
 
-def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), ())):
+def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), ()), *, deadline=None):
     """Return a one-line diagnosis and the number of extra screen reads."""
     changed, removed = drift
     facts = terminal.get("status") or {}
@@ -1323,7 +1388,8 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
-        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=2)
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
+        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=timeout)
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
         snapshot, notice = {}, None
@@ -1359,7 +1425,7 @@ def repeated_review_categories(result):
     return sorted(set(earlier["categories"]).intersection(later["categories"]))
 
 
-def collect_result(path, close, force, stall_minutes, *, warn_drift=True):
+def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
         result, written = read_result(path)
@@ -1370,8 +1436,18 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True):
         result, written = None, None
     if written == run.get("previous_result"):
         result, written = None, None
-    confirm_launch_identity(path, run, locked=close)
-    terminal = hc_json("get", run["address"])
+    timeout = remaining_wait(deadline) if deadline is not None else None
+    if deadline is not None and run.get("closed_reason"):
+        return {"address": run["address"], "status": None, "state": "finished", "result": result,
+                "stop_reason": None}
+    try:
+        confirm_launch_identity(path, run, locked=close, timeout=timeout)
+        terminal = hc_json("get", run["address"], **({"timeout": remaining_wait(deadline)} if timeout else {}))
+    except subprocess.CalledProcessError as error:
+        if deadline is not None and herdr_error_kind(error) == "not_found":
+            return {"address": run["address"], "status": None, "state": "finished", "result": result,
+                    "stop_reason": "Herdr terminal no longer exists"}
+        raise
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
@@ -1403,7 +1479,8 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True):
         closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
     else:
-        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed))
+        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed),
+                                          deadline=deadline)
     return {"address": run["address"], "status": status, "state": terminal["state"],
                       "result": result, "stop_reason": reason,
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,

@@ -80,7 +80,7 @@ and saves the snapshot and any override in `run.json`. See `references/quota-sna
 
 - When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
   where the task warrants it. Only `production DB` and `deploy` qualify as exceptions.
-- Launch or prompt: use `--user-pinned` for an explicit user choice. For a `critical` CLI
+- Launch: use `--user-pinned` for an explicit user choice. For a `critical` CLI
   (check `raw_state` when present), pass `--approve-critical` only with the user's approval.
   An exception category may be followed by `: detail`. Report any quota warnings.
 - Escalation uses the wave's effective bias and `references/escalation.md`.
@@ -183,7 +183,8 @@ Tell the user each terminal's name, address and repo. Watch in the background an
 
 - After confirming task delivery to every new child, run `dispatch.py wait <receipt>...` in the
   background. It prints the initial status and changes until every receipt reaches a selected
-  outcome or 1800 seconds elapse. For task completion, use `--until ready,blocked,done,merged,stop`
+  outcome or 1800 seconds elapse. A receipt that reaches its outcome leaves the watch set.
+  For task completion, use `--until ready,blocked,done,merged,stop`
   to keep waiting through ordinary idle states. Keep the timeout under the prompt-cache lifetime.
 - `dispatch.py collect <receipt> --brief` prints the same one-line status on demand. Use full
   `collect` for details and review evidence. `--stall-minutes N` overrides the 30-minute

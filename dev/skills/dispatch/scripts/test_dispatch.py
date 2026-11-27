@@ -8,7 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +37,7 @@ from dispatch import (
     verify_pinned_delivery,
     verify_terminal,
     wait,
+    write_json,
 )
 from quota import WEEK, assess, claude_snapshot
 from quota import main as quota_main
@@ -1218,8 +1219,6 @@ class CodexModelTests(DispatchTestCase):
 
 
 class PinnedWaveTests(unittest.TestCase):
-    """Exercise wave bytes and dispatch gates without authorizing any real hooks."""
-
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
 
@@ -1338,24 +1337,32 @@ class PinnedWaveTests(unittest.TestCase):
         with self.assertRaisesRegex(pinned_wave.PinError, "omit shared guards.*hooks.json"):
             pinned_wave.ensure_shared_guards_are_preserved(home)
 
-    def test_launch_starts_native_codex_through_herdr_with_only_private_home(self):
-        path, wave = self.make_wave("a", "1.0.0")
+    @contextmanager
+    def mocked_launch(self, path, child_dir, reply):
         args = SimpleNamespace(wave=str(path), cli="codex", model="gpt-6.2-sol", effort="medium", cwd=self.tmp,
                                name=None, title=None, task=None, message=None, keep_connectors=False,
-                               parent=None, task_dir=None, work_kind="standalone", request="work",
+                               parent=None, work_kind="standalone", request="work",
                                unit="unit", git_limits="none", dry_run=False)
         terminal = {"address": "t7", "parent": None, "created_ms": 42}
-        reply = {"jsonrpc": "2.0", "id": 1, "result": {"address": "t7"}}
-        child_dir = self.tmp / "child"
         child_dir.mkdir()
-        with patch.dict(os.environ, {"HC_TERMINAL_ID": "", "CODEX_HOME": str(self.tmp / "shared")}), \
-             patch("pinned_wave.tempfile.gettempdir", return_value=str(self.tmp)), \
-             patch("pinned_wave.verify_herdr"), patch("pinned_wave.verify", return_value=False), \
-             patch("dispatch.read_quota_snapshot", return_value=QUOTA_OK), patch("dispatch.warn_linked_worktree"), \
-             patch("dispatch.tempfile.mkdtemp", return_value=str(child_dir)), \
-             patch("dispatch.hc_json", side_effect=[{"terminals": []}, terminal]), \
-             patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(reply))) as process, \
-             redirect_stdout(StringIO()) as output:
+        with (
+            patch.dict(os.environ, {"HC_TERMINAL_ID": "", "CODEX_HOME": str(self.tmp / "shared")}),
+            patch("pinned_wave.tempfile.gettempdir", return_value=str(self.tmp)),
+            patch("pinned_wave.verify_herdr"),
+            patch("pinned_wave.verify", return_value=False),
+            patch("dispatch.read_quota_snapshot", return_value=QUOTA_OK),
+            patch("dispatch.warn_linked_worktree"),
+            patch("dispatch.tempfile.mkdtemp", return_value=str(child_dir)),
+            patch("dispatch.hc_json", side_effect=[{"terminals": []}, terminal]),
+            patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(
+                {"jsonrpc": "2.0", "id": 1, **reply}))) as process,
+            redirect_stdout(StringIO()) as output,
+        ):
+            yield args, process, output
+
+    def test_launch_starts_native_codex_through_herdr_with_only_private_home(self):
+        path, wave = self.make_wave("a", "1.0.0")
+        with self.mocked_launch(path, self.tmp / "child", {"result": {"address": "t7"}}) as (args, process, output):
             launch(args)
         cmd = process.call_args
         self.assertEqual(cmd.args[0], ["hc", "connect"])
@@ -1369,6 +1376,42 @@ class PinnedWaveTests(unittest.TestCase):
         receipt = json.loads(output.getvalue())
         self.assertFalse(receipt["wave_trusted_at_start"])
         self.assertEqual(pinned_wave.read_json(path)["children"], [receipt["run"]])
+
+    def test_known_rejection_clears_pending_wave_reservation(self):
+        path, _ = self.make_wave("a", "1.0.0")
+        child_dir = self.tmp / "child"
+        reply = {"error": {"code": -32000, "data": {"kind": "name_taken"}, "message": "name already taken"}}
+        with self.mocked_launch(path, child_dir, reply) as (args, _, _):
+            with self.assertRaisesRegex(SystemExit, "rejected.*name_taken"):
+                launch(args)
+        self.assertEqual(pinned_wave.read_json(path)["children"], [])
+        self.assertFalse(child_dir.exists())
+
+    def test_uncertain_spawn_keeps_the_wave_registered(self):
+        path, _ = self.make_wave("a", "1.0.0")
+        child_dir = self.tmp / "child"
+        with self.mocked_launch(path, child_dir, {}) as (args, process, _):
+            process.side_effect = subprocess.TimeoutExpired("hc connect", 30)
+            with self.assertRaisesRegex(SystemExit, "child may be running"):
+                launch(args)
+            with self.assertRaisesRegex(SystemExit, "cannot read dispatch receipt"):
+                release(SimpleNamespace(wave=str(path)))
+        self.assertEqual(pinned_wave.read_json(path)["children"], [str(child_dir / "run.json")])
+
+    def test_receipt_write_error_after_spawn_tells_operator_to_inspect_live_child(self):
+        path, _ = self.make_wave("a", "1.0.0")
+        child_dir = self.tmp / "child"
+
+        def reject_receipt(target, data):
+            if target.name == "run.json":
+                raise OSError("disk full")
+            write_json(target, data)
+
+        with self.mocked_launch(path, child_dir, {"result": {"address": "t7"}}) as (args, _, _):
+            with patch("dispatch.write_json", side_effect=reject_receipt), \
+                 self.assertRaisesRegex(SystemExit, "t7: the child may be running"):
+                launch(args)
+        self.assertEqual(pinned_wave.read_json(path)["children"], [str(child_dir / "run.json")])
 
     def test_pinned_launch_cannot_opt_in_to_hook_bypass(self):
         args = SimpleNamespace(wave="unused", cli="codex", trust_hooks=True, task=None)
@@ -1394,8 +1437,6 @@ class PinnedWaveTests(unittest.TestCase):
         self.assertTrue(other.is_file())
 
 
-
-
 class DispatchWatchTests(unittest.TestCase):
     def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
@@ -1407,10 +1448,12 @@ class DispatchWatchTests(unittest.TestCase):
         args = SimpleNamespace(runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
                                timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[report, same, ready]) as probe, \
-             patch("dispatch.hc_json") as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
+             patch("dispatch.hc_rpc", return_value={"result": {}}) as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
             wait(args)
         self.assertEqual(probe.call_count, 3)
         self.assertEqual(hc.call_count, 2)
+        for invocation in hc.call_args_list:
+            self.assertEqual(invocation.args[:2], ("terminal.wait", {"terminal": "t7", "timeout": 1, "caller": None}))
         self.assertEqual(output.getvalue().splitlines(), [
             "t7 · working · implement · 작업 중 · #10 · -",
             "t7 · ready · review · 검증 완료 · #10 · -",
@@ -1422,11 +1465,52 @@ class DispatchWatchTests(unittest.TestCase):
         stopped = {**working, "status": "done"}
         second = {**working, "address": "t8", "result": None, "stop_reason": "hooks_broken"}
         args = SimpleNamespace(runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
-        with patch("dispatch.collect_result", side_effect=[working, second, stopped, second]) as probe, \
-             patch("dispatch.hc_json"), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
+        with patch("dispatch.collect_result", side_effect=[working, second, stopped]) as probe, \
+             patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
             wait(args)
-        self.assertEqual(probe.call_count, 4)
+        self.assertEqual(probe.call_count, 3)
         self.assertEqual(len(output.getvalue().splitlines()), 3)
+
+    def test_wait_can_collect_a_closed_child_without_herdr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"address": "t7", "closed_reason": "finished"}), encoding="utf-8")
+            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            with patch("dispatch.hc_json") as hc, redirect_stdout(StringIO()) as output:
+                wait(args)
+        hc.assert_not_called()
+        self.assertIn("t7 · finished", output.getvalue())
+
+    def test_wait_stops_and_surfaces_drift_even_while_old_hook_directory_exists(self):
+        report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
+                  "result": None, "plugin_drift": ["dev old -> new"]}
+        args = SimpleNamespace(runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
+        with patch("dispatch.collect_result", return_value=report), patch("dispatch.hc_rpc") as hc, \
+             redirect_stdout(StringIO()) as output:
+            wait(args)
+        hc.assert_not_called()
+        self.assertIn("plugin_drift", output.getvalue())
+
+    def test_wait_treats_the_documented_missing_terminal_error_as_stopped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
+            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            gone = subprocess.CalledProcessError(3, "hc", stderr='{"error":{"kind":"not_found"}}')
+            with patch("dispatch.hc_json", side_effect=gone), redirect_stdout(StringIO()) as output:
+                wait(args)
+        self.assertIn("Herdr terminal no longer exists", output.getvalue())
+
+    def test_hung_herdr_read_obeys_wait_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
+            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
+            with patch("dispatch.hc_json", side_effect=subprocess.TimeoutExpired("hc", 1)) as hc, \
+                 self.assertRaisesRegex(SystemExit, "timed out"):
+                wait(args)
+        self.assertGreater(hc.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(hc.call_args.kwargs["timeout"], 1)
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
@@ -2420,6 +2504,29 @@ class CodexSendTests(DispatchTestCase):
                 self.assertEqual(len(sends), 2)
                 output.assert_any_call("warning: the submission left no trace; sending it once more", file=sys.stderr)
                 self.assertTrue(json.loads(output.call_args.args[0])["submitted"])
+
+    def test_pinned_lost_submission_checks_hooks_again_before_retry(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            run = {**DispatchReceiptTests.RECEIPT, "wave": "fixture", "handoff": DispatchReceiptTests.HANDOFF}
+            receipt.write_text(json.dumps(run), encoding="utf-8")
+
+            def respond(command, *_args):
+                if command == "read":
+                    return self.screen(self.READY)
+                return terminal if command == "get" else {}
+
+            with (
+                patch("dispatch.hc_json", side_effect=respond) as hc,
+                patch("dispatch.time.sleep"),
+                patch("dispatch.time.monotonic", side_effect=range(1000)),
+                patch("dispatch.verify_pinned_delivery", side_effect=[None, SystemExit("pinned hooks changed")]),
+                redirect_stderr(StringIO()),
+                self.assertRaisesRegex(SystemExit, "pinned hooks changed"),
+            ):
+                send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
+        self.assertEqual(sum(c.args[0] == "send" for c in hc.call_args_list), 1)
 
     def test_submission_with_a_trace_after_the_send_is_not_resent(self):
         sends = []

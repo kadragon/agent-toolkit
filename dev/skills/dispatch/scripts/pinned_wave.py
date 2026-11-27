@@ -65,7 +65,6 @@ def file_hash(path):
 
 
 def tree_hash(root):
-    """Cover all files, including scripts referenced by hooks and skills."""
     digest = hashlib.sha256()
 
     def visit(directory):
@@ -122,7 +121,6 @@ def effective_settings(home):
     file_hash(config_file)
     with config_file.open("rb") as stream:
         config = tomllib.load(stream)
-    # Repo and hook approvals belong to native Codex and stay inside this home.
     config.pop("projects", None)
     tui = config.get("tui")
     if isinstance(tui, dict) and tui.get("screen_reader_detection_done") is True:
@@ -177,7 +175,6 @@ def protect_tree(path):
 
 
 def remove(root):
-    # Validate the exact dispatch directory before making it writable and removing it.
     root = wave_path(root / WAVE_FILE).parent
     if os.name != "nt":
         for tree in (root / "source", root / "home/plugins/cache"):
@@ -215,31 +212,31 @@ def prepare(repo, commit, binary):
         if (catalog["name"] != "kadragon" or len(catalog["plugins"]) != len(PLUGINS) or sources != {
                 name: {"source": "local", "path": f"./{name}"} for name in PLUGINS}):
             raise PinError("unsupported agent-toolkit marketplace layout")
-        # A unique ID prevents collision with repo and shared marketplace IDs.
-        catalog["name"] = root.name
+        market_id = root.name
+        catalog["name"] = market_id
         catalog_path.write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
-        wave = {"schema": 1, "commit": commit, "market": root.name, "binary": str(binary),
+        wave = {"schema": 1, "commit": commit, "market": market_id, "binary": str(binary),
                 "binary_hash": file_hash(binary), "source_hash": tree_hash(source),
                 "versions": {}, "cache_hash": {}, "children": []}
         added = json.loads(codex_command(root, str(binary), "plugin", "marketplace", "add", str(source), "--json"))
-        if added["marketplaceName"] != root.name or Path(added["installedRoot"]).resolve() != source:
+        if added["marketplaceName"] != market_id or Path(added["installedRoot"]).resolve() != source:
             raise PinError("Codex did not register the isolated local marketplace")
         for name in PLUGINS:
             version = read_json(source / name / MANIFEST)["version"]
             if not re.fullmatch(r"\d+\.\d+\.\d+", version):
                 raise PinError(f"unsupported {name} version: {version!r}")
             wave["versions"][name] = version
-            plugin_id = f"{name}@{root.name}"
+            plugin_id = f"{name}@{market_id}"
             installed = json.loads(codex_command(root, str(binary), "plugin", "add", plugin_id, "--json"))
             if installed["pluginId"] != plugin_id or Path(installed["installedPath"]).resolve() != cache_path(root, wave, name):
                 raise PinError(f"Codex installed {name} outside its pinned version directory")
             wave["cache_hash"][name] = tree_hash(source / name)
         wave["settings"] = effective_settings(home)
-        local = wave["settings"]["marketplaces"][root.name]
+        local = wave["settings"]["marketplaces"][market_id]
         if (set(wave["settings"]) != {"marketplaces", "plugins", "cli_auth_credentials_store"}
                 or wave["settings"]["cli_auth_credentials_store"] != "file"
-                or wave["settings"]["plugins"] != {f"{p}@{root.name}": {"enabled": True} for p in PLUGINS}
-                or set(wave["settings"]["marketplaces"]) != {root.name}
+                or wave["settings"]["plugins"] != {f"{p}@{market_id}": {"enabled": True} for p in PLUGINS}
+                or set(wave["settings"]["marketplaces"]) != {market_id}
                 or local["source_type"] != "local" or not Path(local["source"]).samefile(source)):
             raise PinError("Codex created unexpected isolated settings")
         path = root / WAVE_FILE
@@ -360,7 +357,6 @@ def verify(path, wave, cwd):
 
 
 def ensure_shared_guards_are_preserved(home):
-    """A minimal private home cannot reproduce extra user-level guards."""
     try:
         config = effective_settings(home)
     except FileNotFoundError:

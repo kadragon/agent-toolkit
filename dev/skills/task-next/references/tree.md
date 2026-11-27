@@ -87,8 +87,8 @@ the user explicitly authorizes abandoning the run, remove the worktree and branc
 `tasks.md` goes with the worktree — and clear the Herdr label (`cycle.md` → *Worktree cycle*).
 
 **After QA passes:** in the worktree, `cycle.md` → *Version bump*, *Cleanup* (`prune-tasks` on
-the worktree `tasks.md`, plus `prune-backlog` on the worktree `backlog.md` and `changelog` for
-the file queue), then
+the worktree `tasks.md`, plus `prune-backlog` and the `AGENT_QUEUE_BACKEND=backlog` changelog
+command for the selected file queue), then
 *Validation evidence* on the complete candidate. Hand off per Step 4 from the worktree (covered refs included on the issues backend), stating
 the absolute worktree path so the review cycle runs there, takes the hub path, and passes the
 path to `merge-and-cleanup.sh` (*Worktree cycle* → *Route*, *Merge*).

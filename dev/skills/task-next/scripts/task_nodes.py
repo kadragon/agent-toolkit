@@ -2222,12 +2222,22 @@ status: open
         _assert(find_entry_checker(Path(td)) is None,
                 "a tree with no scripts/ci/ checker reports None, and the write above proceeded")
 
-        # An explicitly selected issues queue leaves even a legacy log untouched.
         before = c.read_bytes()
         from unittest.mock import patch
         with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "github"}):
             rc_issues = main(["changelog", "--file", str(c), "--title", "issue work"])
         _assert(rc_issues == 0 and c.read_bytes() == before, "issues backend does not write a changelog")
+
+        migrated = Path(td) / "last-file-item"
+        subprocess.run(["git", "init", "-q", str(migrated)], check=True)
+        subprocess.run(["git", "-C", str(migrated), "config", "remote.origin.url",
+                        "https://github.com/fixture/repo.git"], check=True)
+        (migrated / "backlog.md").write_text("# Backlog\n", encoding="utf-8")
+        log = migrated / "CHANGELOG.md"
+        with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}):
+            rc_last = main(["changelog", "--file", str(log), "--title", "last file item"])
+        _assert(rc_last == 0 and "last file item" in log.read_text(encoding="utf-8"),
+                "the intake's file-queue selection survives pruning its last backlog item")
 
         # ---- changelog: write-time contract validation ----
         print("\nTest 6: changelog — the entry is validated before the file is written")

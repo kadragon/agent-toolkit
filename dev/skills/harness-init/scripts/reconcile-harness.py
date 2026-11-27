@@ -349,7 +349,7 @@ def main() -> None:
         if status == "done":
             backend = queue_state()
             if backend is None:
-                return  # Preserve the sprint so recovery can be retried.
+                return
             if backend["backend"] != "github":
                 append_changelog(title)
             remainder = strip_sprint_block(tasks_content)
