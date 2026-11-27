@@ -25,7 +25,7 @@ Mapping (docs/design/github-issues-queue.md → Migration):
     outside the Rejected section stay in place and are listed.
 
 Each issue's initial `create` key is `backlog-migrated:<sha1 of heading path + item>`. Before filing,
-`--apply` records each open checkbox's key in a Markdown comment under that checkbox. Keep the
+`--apply` records each open checkbox's key in a Markdown comment on its source line. Keep the
 comment with the item when editing it between attempts so a retry can find the issue and
 report any content discrepancy. `--apply` files under the standing `queue-write` grant, then deletes a backlog.md line only
 once its issue exists and every parent/blocker relation it needs is confirmed; unconfirmed lines
@@ -63,7 +63,7 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(\[*])")
 _ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig)\.)$", re.IGNORECASE)
 _MARKER_SPAN_RE = re.compile(bc._BLOCK_MARKER_RE.pattern, re.IGNORECASE | re.DOTALL)
 _PLAIN_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
-_ITEM_KEY_RE = re.compile(r"^\s*<!-- migration-key: (" + qb.MIGRATION_KEY_PREFIX + r"[0-9a-f]{40}) -->\s*$")
+_ITEM_KEY_RE = re.compile(r" <!-- migration-key: (" + qb.MIGRATION_KEY_PREFIX + r"[0-9a-f]{40}) -->[ \t]*$")
 
 
 class MigrateError(Exception):
@@ -194,7 +194,7 @@ def _rejected_entries(lines: list[str], masked: list[str], headings: list[dict])
 
 
 def _unprunable_reason(text: str, line: str) -> str | None:
-    _, problems = tn.prune_lines(text, [line])
+    _, problems = tn.prune_lines(text, [line], item_metadata=_ITEM_KEY_RE)
     return "; ".join(problems) if problems else None
 
 
@@ -333,9 +333,9 @@ def build_plan(text: str, visibility: str) -> dict:
             inflight.append(path)
             continue
         span = _item_span(lines, masked, owners, i)
-        pinned = [match[1] for j in span[1:] if (match := _ITEM_KEY_RE.fullmatch(lines[j]))]
-        raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent(
-            "\n".join(lines[j] for j in span[1:] if not _ITEM_KEY_RE.fullmatch(lines[j])))
+        pin = _ITEM_KEY_RE.search(lines[i])
+        checkbox = lines[i][:pin.start()] if pin else lines[i]
+        raw_body = checkbox.split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
         markers = list(_MARKER_SPAN_RE.finditer(raw_body))
         deferred = [" ".join(m.group(2).split()) for m in markers if m.group(1).lower() == "deferred"]
         blockers = [m.group(2) for m in markers if m.group(1).lower() == "blocked by"
@@ -345,8 +345,8 @@ def build_plan(text: str, visibility: str) -> dict:
         role = _role(path)
         items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
                           blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
-                          key=pinned[0] if pinned else migration_key(*(x["title"] for x in path), t["text"]),
-                          pinned=len(pinned)))
+                          key=pin[1] if pin else migration_key(*(x["title"] for x in path), t["text"]),
+                          pinned=pin is not None))
 
     for t in tokens:  # plain bullets outside the Rejected section are not queue items
         if t["type"] == "bullet":
@@ -361,8 +361,6 @@ def build_plan(text: str, visibility: str) -> dict:
         why = _unprunable_reason(text, it["source"])
         if why:
             bad[it["line"]] = f"cannot be deleted mechanically ({why})"
-        elif it["pinned"] > 1:
-            bad[it["line"]] = "multiple migration keys on one item; reconcile them before retrying"
         elif not it["title"].strip():
             bad[it["line"]] = "no title left once its markers are stripped"
         elif it["role"] == "security" and visibility != "private":
@@ -397,7 +395,7 @@ def build_plan(text: str, visibility: str) -> dict:
         issues.append({"kind": "item", "key": it["key"], "title": it["title"], "body": body, "labels": labels,
                        "parent_key": parent_of.get(it["line"]), "blocked_by": it["blocked_by"],
                        "line": it["line"], "lines": [j + 1 for j in it["span"]], "source": it["source"],
-                       "notes": it["notes"], "pinned": bool(it["pinned"])})
+                       "notes": it["notes"], "pinned": it["pinned"]})
     for r in _rejected_entries(lines, masked, headings):
         if not r["safe"]:
             refused.append({"line": r["span"][0] + 1, "source": lines[r["span"][0]],
@@ -444,16 +442,9 @@ def _draft(issue: dict) -> dict:
 
 def _pin_item_keys(text: str, plan: dict) -> str:
     lines, eols = tn._split(text)
-    default_eol = tn._dominant_eol(eols)
-    for item in reversed(plan["issues"]):
-        if item["kind"] != "item" or item["pinned"]:
-            continue
-        line = item["line"] - 1
-        eol = eols[line] or default_eol
-        indent = " " * (tn._indent(lines[line]) + 2)
-        lines.insert(line + 1, f"{indent}<!-- migration-key: {item['key']} -->")
-        eols.insert(line + 1, eols[line])
-        eols[line] = eol
+    for item in plan["issues"]:
+        if item["kind"] == "item" and not item["pinned"]:
+            lines[item["line"] - 1] += f" <!-- migration-key: {item['key']} -->"
     return "".join(line + eol for line, eol in zip(lines, eols))
 
 
@@ -506,7 +497,7 @@ def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) 
         end = bc._region_end(heading, headings)
         if _is_role_heading(heading) or any(heading["line"] < i < end for i in fenced_lines):
             keep_prose.add(heading["line"] - 1)
-    return tn.prune_lines(text, targets, keep_prose_under=frozenset(keep_prose))
+    return tn.prune_lines(text, targets, keep_prose_under=frozenset(keep_prose), item_metadata=_ITEM_KEY_RE)
 
 
 def _only_headings(text: str) -> bool:
@@ -1080,8 +1071,8 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     _assert(quiet(main, ["--repo", repo, "--apply", "--json"], runner=gh) == EXIT_PARTIAL, "the CLI exits 3 on a partial run")
     gh.refuse_blockers = False
     n_before = len(gh.issues)
-    edited = text.replace("*(blocked by: 1-alpha-feature)*\n",
-                          "*(blocked by: 1-alpha-feature)*\n  - edited nested note\n")
+    checkbox = next(line for line in text.splitlines() if "*(blocked by: 1-alpha-feature)*" in line)
+    edited = text.replace(checkbox + "\n", checkbox + "\n  - edited nested note\n")
     write(path, edited)
     edited_plan = build_plan(edited, "public")
     beta = _by_title(edited_plan, "[FIX] Beta")
@@ -1169,6 +1160,15 @@ def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
         _assert(not report["kept"] and report["file_deleted"] and len(gh.issues) == 2
                 and bool(gh.issues[dependent]["blockedBy"]),
                 f"retry completes the original dependency and prunes the source ({name})")
+
+    text = "# Backlog\n\n## Work\n\n- [ ] First\n- [ ] Second\n"
+    plan = build_plan(text, "public")
+    first_key = _by_title(plan, "First")["key"]
+    pinned_text = _pin_item_keys(text, plan)
+    edited = "".join(line for line in pinned_text.splitlines(keepends=True) if not line.startswith("- [ ] Second"))
+    retry = build_plan(edited, "public")
+    _assert(not retry["refused"] and [i["key"] for i in retry["issues"]] == [first_key],
+            "deleting one checkbox removes its migration key with it")
 
     role_text = "# Backlog\n\n## Someday\n\nShared conditions for later.\n\n- [ ] [FIX] Idea\n"
     repo = make_repo(tmp, "role-notes", "https://github.com/owner/repo.git", role_text)
