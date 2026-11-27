@@ -1,11 +1,24 @@
-# backlog.md Template and Rules
+# Security Alert Filing and Templates
 
-Rules and template for appending a security-fix section to the scanned repo's `backlog.md`.
+Use the route selected by `security-overview.md` § 2-1.
 
-Findings outlive the cycle that produced them, so they belong in `backlog.md` — the repo's only
-persistent queue. Never write them to `tasks.md`: that file is the current Sprint Contract and is
-deleted whole at sprint close, and `task_nodes.py prune-tasks` refuses to run against a `tasks.md`
-holding a `## Security Fixes` section.
+- **Report only:** on public or internal GitHub repositories, report the alert kind, source number,
+  and suggested fix. Point to `/dev:task-new` with the kind and number. Skip all queue writes,
+  including cleanup when no alerts are open.
+- **Private GitHub issues:** use the remediation text below for the title and describe the action
+  in the body. Include the alert kind and source number. File one `security` issue per alert with
+  `queue_backend.py create`. For example, a Dependabot alert numbered 42 uses this item:
+
+  ```json
+  {"key":"gh-alert/dependabot/42","title":"Upgrade the affected dependency","body":"Dependabot alert #42. Upgrade to the patched version.","labels":["security"]}
+  ```
+
+  The backend appends `<!-- gh-alert: dependabot/42 -->` on its own final line and reuses a matching
+  open or closed issue filed by a trusted author without updating it. Use the same key on every scan. See the
+  [queue contract](../../skills/task-next/references/queue-backend-contract.md) for the request
+  envelope and the response fields.
+- **Legacy backlog:** use the target path, template, rejected-item rules, and replacement rules
+  below. Keep `tasks.md` for the current Sprint Contract.
 
 ## Target Path
 
@@ -59,7 +72,7 @@ If the repo has no `backlog.md`, create one with a
 ### Code Scanning Items
 
 - Include the file path and line number.
-- Read the flagged file at the reported line range (+-5 lines) from the default branch (fetched per `security-overview.md` § 2-1) to understand context.
+- Read the flagged file at the reported line range (+-5 lines) from the default branch (fetched per `security-overview.md` § 2-2) to understand context.
 - If the file no longer exists on the default branch, use the **"Dismiss stale alert"** template — a file missing only from the working tree is still live.
 
 ### Secret Scanning Items
@@ -70,9 +83,10 @@ If the repo has no `backlog.md`, create one with a
 
 ### Rejected Items
 
-Before writing an item, read the target `backlog.md` → `## Rejected — do not re-file`. An alert
-the user already discarded (e.g. as accepted risk) is withheld unless this scan's evidence meets
-that entry's re-file bar. Match only what the user rejected, never a whole package or rule:
+Before writing, read the queue's rejected entries. On GitHub, call `queue_backend.py rejected`;
+if the lookup fails, report the failure and leave the queue alone. In the legacy backlog, read
+`## Rejected — do not re-file`. Withhold a rejected alert unless the scan meets the entry's
+re-file bar. Require an exact match:
 
 | Alert | Matches an entry only on |
 |-------|--------------------------|
@@ -81,8 +95,8 @@ that entry's re-file bar. Match only what the user rejected, never a whole packa
 | Secret scanning | the same secret type **and** location |
 
 A severity higher than the one the entry records also meets the bar. List each withheld alert
-in the summary with the entry it matched. If every alert is withheld, write no
-`## Security Fixes` section — remove an existing one — and report only the Withheld line.
+with the matching entry. If every alert is withheld, file no GitHub issue. On the legacy route,
+remove an existing `## Security Fixes` section under the replacement rules and report the Withheld line.
 
 ### Idempotency
 

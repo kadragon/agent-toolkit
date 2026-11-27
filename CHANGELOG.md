@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Route security-overview findings by queue backend and repository visibility (dev v4.12.42) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Add migrate_backlog.py to move a backlog.md queue onto GitHub issues (dev v4.12.41) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Route findings writers through the queue backend (dev v4.12.40) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Keep the Herdr launch receipt and address when the terminal lookup fails after hc run (dev v4.12.39) (2026-11-27)
