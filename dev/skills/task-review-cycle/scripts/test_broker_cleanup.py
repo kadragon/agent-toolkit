@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
+BASH = os.environ.get("TEST_GIT_BASH") or shutil.which("bash") or "bash"
 BROKER = r"""
 import fs from 'node:fs';
 import net from 'node:net';
@@ -83,10 +84,10 @@ class BrokerCleanupTests(unittest.TestCase):
                 env = {**os.environ, "TEST_BROKER": str(broker), "TEST_MARKER": str(marker),
                        "TEST_EXIT": str(exited), "TEST_FAIL": fails, "CODEX_REVIEW_RESULT_DIR": str(root / "results")}
                 result = subprocess.run(
-                    ["bash", str(SCRIPTS / "codex-review.sh"), "plugin", "main", str(companion)],
+                    [BASH, str(SCRIPTS / "codex-review.sh"), "plugin", "main", str(companion)],
                     cwd=root, env=env, capture_output=True, text=True, timeout=60, check=False,
                 )
-                self.assertEqual(result.returncode, 9 if fails == "yes" else 0, result.stderr)
+                self.assertEqual(result.returncode, 9 if fails == "yes" else 0, result.stdout + result.stderr)
                 self.assertTrue(marker.is_file(), result.stderr)
                 info = json.loads(marker.read_text(encoding="utf-8"))
                 self.assertEqual(exited.read_text(encoding="utf-8"), str(info["pid"]))

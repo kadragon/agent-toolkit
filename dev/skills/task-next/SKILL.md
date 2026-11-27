@@ -38,16 +38,6 @@ an edge case applies.
 
 ## Prerequisites
 
-**Sweep merged worktrees.** Resolve `SKILL_DIR` to this skill's absolute directory. Before queue
-selection, relay the sweep output and keep the main checkout on its current branch.
-
-```bash
-SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
-REPO=$(git rev-parse --show-toplevel) || exit 1
-PY=$(command -v python3 || command -v python || true)
-[[ -z "$PY" ]] || "$PY" -I -X utf8 "$SKILL_DIR/scripts/worktree_sweep.py" "$REPO"
-```
-
 **Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
 applying the working-tree gate:
 
@@ -140,15 +130,18 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 QB="$SKILL_DIR/scripts/queue_backend.py"
 [[ -r "$QB" ]] || { echo "Bundled script missing or unreadable: $QB" >&2; exit 1; }
 REPO=$(git rev-parse --show-toplevel) || exit 1
+PY=$(command -v python3 || command -v python) || exit 1
+"$PY" -I -X utf8 "$SKILL_DIR/scripts/worktree_sweep.py" "$REPO"
 REF="<BASE_SHA under --tree, else empty>"
 REQ=$(jq -nc --arg r "$REPO" --arg ref "$REF" \
   '{contract: 1, repo: $r} + (if $ref == "" then {} else {ref: $ref} end)') || exit 1
-jq -c '. + {full_scan: false}' <<<"$REQ" | python3 "$QB" list   # fast path, cap 3
-jq -c '. + {full_scan: true}' <<<"$REQ" | python3 "$QB" list    # full list, type priority
-jq -c '. + {parked: true}' <<<"$REQ" | python3 "$QB" list       # .parked[]: blocked/deferred items, Step 2 stop
+jq -c '. + {full_scan: false}' <<<"$REQ" | "$PY" "$QB" list   # fast path, cap 3
+jq -c '. + {full_scan: true}' <<<"$REQ" | "$PY" "$QB" list    # full list, type priority
+jq -c '. + {parked: true}' <<<"$REQ" | "$PY" "$QB" list       # .parked[]: blocked/deferred items, Step 2 stop
 ```
 
-Exit 1 → relay stderr and stop. Each candidate is `ref`, `title`, `tag`, `items[]` and `counts`;
+Relay sweep diagnostics and keep the main checkout on its current branch. A list exit 1 → relay
+stderr and stop. Each candidate is `ref`, `title`, `tag`, `items[]` and `counts`;
 on the issues backend also `item_refs[]` (parallel to `items[]`) and `excluded[]` (sub-issues left
 out, with the reason — name them in the plan).
 
@@ -160,7 +153,7 @@ backend `ref` pins only the branch base and adds this checkout's own `## Covers`
 "$BASE_SHA:backlog.md"`). Hand the printed SHA to `references/tree.md` → *Branch* — a later fetch
 must not move the worktree off the queue it was selected from.
 
-The backend owns selection. On `backlog`: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
+On `backlog`: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items, items another
 `.worktrees/` run has claimed, and anything inside comments or code fences. On the issues backend:
 trusted open queue issues, oldest first, skipping blocked, deferred and claimed ones (a
@@ -173,12 +166,9 @@ unbalanced-fence warning makes that file untrustworthy; a persistent-section war
 (the full scan qualifies groups by the same test, so it finds none either); a truncation note
 means the fast path hid groups — say how many when offering more.
 
-| Fast-path count | Action |
-|-----------------|--------|
-| 1 | announce the group → Step 3 |
-| 2–3 | one `AskUserQuestion` (Codex: a numbered list) listing the candidates plus **"더 많은 항목 보기"** as the last option; that option → the full scan → Step 2 |
-
-Unattended run: no question — run the full scan, take `[1]`, announce.
+Fast path: one candidate → announce and go to Step 3. Two or three → list them plus
+**"더 많은 항목 보기"** via `AskUserQuestion` (Codex: numbered list), then full scan → Step 2 if
+requested. Unattended run: full scan, take `[1]`, announce.
 
 **Dispatched `--tree` with `Dispatch mode: parallel-worktree`** → this overrides the selection defaults.
 The forwarded request and Git limits are handoff metadata.

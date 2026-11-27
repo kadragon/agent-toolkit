@@ -424,5 +424,6 @@ jobs:
       - name: Test broker shutdown and locked worktrees
         shell: bash
         run: |
-          python dev/skills/task-review-cycle/scripts/test_broker_cleanup.py
+          git_bash=$(cygpath -m "$BASH")
+          TEST_GIT_BASH="$git_bash" python dev/skills/task-review-cycle/scripts/test_broker_cleanup.py
           python dev/skills/task-next/scripts/test_worktree_sweep.py
