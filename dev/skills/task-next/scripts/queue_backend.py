@@ -57,7 +57,8 @@ class QueueError(Exception):
 
 def _git(repo: str, *args: str) -> str | None:
     try:
-        out = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, check=False)
+        out = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", check=False)
     except OSError:
         return None
     return out.stdout.strip() if out.returncode == 0 else None
@@ -98,28 +99,36 @@ def _registry_command(host: str, env: dict[str, str]) -> list[str] | None:
     return cmd
 
 
-def backlog_open_items(repo: str) -> int:
-    """Unchecked `- [ ]` items in `<repo>/backlog.md`, parked ones included; 0 when absent."""
+def backlog_open_items(repo: str, rev: str | None = None) -> int:
+    """Unchecked `- [ ]` items in `<repo>/backlog.md` (as committed at `rev` when given), parked
+    ones included; 0 when absent."""
+    if rev:
+        sha = _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+        if not sha:
+            raise QueueError(f"ref {rev!r} does not resolve to a commit in {repo}")
+        text = _git(repo, "show", f"{sha}:backlog.md") or ""
+        return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
     try:
         with open(os.path.join(repo, "backlog.md"), encoding="utf-8") as fh:
             text = fh.read()
-    except OSError:
+    except FileNotFoundError:
         return 0
+    except (OSError, ValueError) as e:  # unreadable is not "empty": never flip to github on it
+        raise QueueError(f"cannot read {os.path.join(repo, 'backlog.md')}: {e}") from e
     return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
 
 
-def resolve(repo: str, env: dict[str, str] | None = None) -> dict:
+def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None) -> dict:
     """{"backend": "backlog"|"github"|"adapter", "source": <rule>, "command": [...] (adapter)}."""
     env = dict(os.environ) if env is None else env
     explicit = (env.get(ENV_VAR) or "").strip()
     if explicit:
         if explicit in ("backlog", "github"):
             return {"backend": explicit, "source": "env"}
-        cmd = shlex.split(explicit)
-        return {"backend": "adapter", "source": "env", "command": cmd}
+        return {"backend": "adapter", "source": "env", "command": split_command(explicit)}
     host = origin_host(_git(repo, "remote", "get-url", "origin"))
     if host == "github.com":
-        if backlog_open_items(repo):
+        if backlog_open_items(repo, rev):  # the queue `list` will read, not this checkout's
             return {"backend": "backlog", "source": "github-open-backlog"}
         return {"backend": "github", "source": "github-host"}
     if host:
@@ -127,6 +136,18 @@ def resolve(repo: str, env: dict[str, str] | None = None) -> dict:
         if cmd:
             return {"backend": "adapter", "source": "registry", "command": cmd}
     return {"backend": "backlog", "source": "fallback"}
+
+
+def split_command(line: str, posix: bool | None = None) -> list[str]:
+    """Shell-split an adapter command line; Windows mode keeps backslashes in paths."""
+    posix = os.name != "nt" if posix is None else posix
+    try:
+        parts = shlex.split(line, posix=posix)
+    except ValueError as e:
+        raise QueueError(f"{ENV_VAR} is not a valid command line ({e}): {line!r}") from e
+    if not posix:  # non-POSIX mode keeps the quotes around a quoted argument
+        parts = [p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in "\"'" else p for p in parts]
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +165,9 @@ def _tag(texts: list[str]) -> str:
 
 def _run_candidates(args: list[str]) -> tuple[Any, list[str]]:
     script = os.path.join(HERE, "backlog_candidates.py")
-    out = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, check=False)
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    out = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", env=env, check=False)
     warnings = [line for line in out.stderr.splitlines() if line.strip()]
     if out.returncode != 0:
         raise QueueError("backlog_candidates.py failed: " + ("; ".join(warnings) or f"exit {out.returncode}"))
@@ -162,19 +185,48 @@ def _paths(req: dict) -> tuple[str, str]:
     return os.path.join(repo, "backlog.md"), tasks
 
 
+def _resolve_rev(req: dict, key: str) -> str | None:
+    """The commit SHA `req[key]` names, or None when absent; an unresolvable rev is an error."""
+    rev = req.get(key)
+    if not rev:
+        return None
+    sha = _git(req["repo"], "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+    if not sha:
+        raise QueueError(f"{key} {rev!r} does not resolve to a commit in {req['repo']}")
+    return sha
+
+
+def _read_queue(path: str, rev: str | None, optional: bool = False) -> str:
+    if rev:
+        return bc._read_at_ref(path, rev, required=not optional)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except FileNotFoundError as e:
+        if optional:
+            return ""
+        raise QueueError(f"cannot read {path}: {e}") from e
+    except OSError as e:
+        raise QueueError(f"cannot read {path}: {e}") from e
+
+
 def backlog_list(req: dict) -> dict:
     """`backlog_candidates.py --json --counts` mapped onto contract v1 `list`."""
     backlog, tasks = _paths(req)
-    rev = req.get("ref")
+    rev = _resolve_rev(req, "ref")  # pinned to one SHA, so both reads below see the same commit
     base = ["--tasks", tasks, "--backlog", backlog] + (["--ref", rev] if rev else [])
     raw, warnings = _run_candidates(base + ["--json", "--counts"] + (["--full-scan"] if req.get("full_scan") else []))
 
     # items[] and claimed[] come from the same tokenizer and claim scan main() runs, so they match
     # the candidate counts; the subprocess stays the selection authority.
-    backlog_raw = bc._read_at_ref(backlog, rev, required=True) if rev else bc._read_file(backlog, required=True)
+    backlog_raw = _read_queue(backlog, rev)
     tokens = bc.tokenize(backlog_raw)
     claims = bc.collect_claims(backlog, tasks, rev or "HEAD", include_self=rev is not None)
     claimed_lines = bc.mark_claimed(backlog_raw, tokens, claims)
+    block_lines = bc.mark_claimed_blocks(
+        bc.tokenize(_read_queue(tasks, rev, optional=True)),
+        bc.collect_block_claims(backlog, tasks, include_self=rev is not None, ref=rev or "HEAD"),
+    )
     headings = bc._headings(tokens)
     by_line = {h["line"]: h for h in headings}
 
@@ -184,9 +236,12 @@ def backlog_list(req: dict) -> dict:
         if c["kind"] == "h1":
             items: list[str] = []
         else:
-            items = [t["text"] for t in bc._direct_open_items(tokens, by_line[c["line"]], headings)]
-            if len(items) != c["items"]:
-                warnings.append(f"queue_backend: {label}:{c['line']} item count drifted ({len(items)} vs {c['items']})")
+            heading = by_line.get(c["line"])
+            items = [t["text"] for t in bc._direct_open_items(tokens, heading, headings)] if heading else []
+            if heading is None or heading["title"] != c["title"] or len(items) != c["items"]:
+                # The working-tree queue changed between the two reads: never pair one group's
+                # title with another group's items.
+                raise QueueError(f"{label} changed while listing ({label}:{c['line']}); retry")
         ref = _ref(label, c["line"])
         candidates.append({
             "id": ref, "ref": ref, "title": c["title"], "tag": _tag(items), "labels": [],
@@ -204,10 +259,11 @@ def backlog_list(req: dict) -> dict:
                 parked.append({"ref": _ref("backlog.md", row["line"]), "kind": kind, "payload": marker["payload"]})
 
     claimed = [
-        {"ref": _ref("backlog.md", line), "by": wt}
-        for wt, lines in claimed_lines.items() for line in lines
+        {"ref": _ref(label, line), "by": wt}
+        for label, found in (("tasks.md", block_lines), ("backlog.md", claimed_lines))
+        for wt, lines in found.items() for line in lines
     ]
-    return {"candidates": candidates, "parked": parked, "claimed": claimed, "warnings": warnings}
+    return {"candidates": candidates, "parked": parked, "claimed": claimed, "warnings": warnings, "rev": rev}
 
 
 def _parse_ref(ref: object) -> tuple[str, int]:
@@ -217,15 +273,16 @@ def _parse_ref(ref: object) -> tuple[str, int]:
     return m.group(1), int(m.group(2))
 
 
+def _strip_marker(m: re.Match) -> str:
+    """Drop a real marker from a title; keep a placeholder (`<n>-<slug>`) as literal prose."""
+    return m.group(0) if m.group(1).lower() == "blocked by" and bc._is_placeholder_payload(m.group(2)) else " "
+
+
 def backlog_show(req: dict) -> dict:
     label, line = _parse_ref(req.get("ref"))
     backlog, tasks = _paths(req)
     path = backlog if label == "backlog.md" else tasks
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
-    except OSError as e:
-        raise QueueError(f"cannot read {path}: {e}") from e
+    raw = _read_queue(path, _resolve_rev(req, "rev"))
     tokens = bc.tokenize(raw)
     lines = raw.splitlines()
     headings = bc._headings(tokens)
@@ -233,7 +290,9 @@ def backlog_show(req: dict) -> dict:
     if token is None:
         raise QueueError(f"{label}:{line} is not a heading or checkbox item")
     if token["type"] == "heading":
-        end = bc._region_end(token, headings)
+        # a tasks.md h1 sprint block owns its `##` sections up to the next h1
+        bounds = [h for h in headings if h["level"] == 1] if label == "tasks.md" and token["level"] == 1 else headings
+        end = bc._region_end(token, bounds)
         body_lines = lines[line:] if end == float("inf") else lines[line:int(end) - 1]
         outer = [h for h in headings if h["line"] < line and h["level"] < token["level"]]
         return {
@@ -252,7 +311,7 @@ def backlog_show(req: dict) -> dict:
     ]
     above = [h for h in headings if h["line"] < line]
     return {
-        "ref": _ref(label, line), "title": bc._BLOCK_MARKER_RE.sub("", token["text"]).strip(),
+        "ref": _ref(label, line), "title": " ".join(bc._BLOCK_MARKER_RE.sub(_strip_marker, token["text"]).split()),
         "body": "\n".join(body_lines), "labels": [], "blocked_by": blocked_by,
         "parent": _ref(label, above[-1]["line"]) if above else None, "url": "",
     }
@@ -263,8 +322,8 @@ def _split_rejected(text: str) -> tuple[str, str, str]:
     m = re.match(r"^\*\*(.+?)\*\*\s*(.*)$", text)
     if m:
         title, rest = m.group(1).strip(), m.group(2)
-        _, sep, after = f" {rest}".partition(" — ")  # the dash may follow the bold directly
-        rest = after if sep else rest
+        parts = re.split(r"\s*— ", rest, maxsplit=1)
+        rest = parts[1] if len(parts) > 1 else rest
     else:
         title, sep, rest = text.partition(" — ")
         title = title.strip()
@@ -277,11 +336,7 @@ def _split_rejected(text: str) -> tuple[str, str, str]:
 
 def backlog_rejected(req: dict) -> dict:
     backlog, _ = _paths(req)
-    try:
-        with open(backlog, encoding="utf-8") as fh:
-            raw = fh.read()
-    except OSError as e:
-        raise QueueError(f"cannot read {backlog}: {e}") from e
+    raw = _read_queue(backlog, _resolve_rev(req, "rev"))
     masked = bc._strip_fenced_blocks(bc._strip_html_comments(raw)).splitlines()
     entries: list[dict] = []
     inside = False
@@ -332,7 +387,8 @@ def backlog_op(op: str, req: dict) -> tuple[int, dict | None]:
 
 def _run_adapter(cmd: list[str], op: str, req: dict) -> tuple[int, dict | None]:
     try:
-        out = subprocess.run([*cmd, op], input=json.dumps(req), capture_output=True, text=True, check=False)
+        out = subprocess.run([*cmd, op], input=json.dumps(req), capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", check=False)
     except OSError as e:
         raise QueueError(f"queue adapter {cmd[0]!r} could not start: {e}") from e
     if out.stderr:
@@ -358,7 +414,7 @@ def handle(op: str, req: object, env: dict[str, str] | None = None) -> tuple[int
     repo = req.get("repo")
     if not (isinstance(repo, str) and os.path.isabs(repo) and os.path.isdir(repo)):
         raise QueueError(f"request repo must be an existing absolute path, got {repo!r}")
-    backend = resolve(repo, env)
+    backend = resolve(repo, env, req.get("ref") if op == "list" else None)
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
         if code == EXIT_UNSUPPORTED:
@@ -377,7 +433,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("usage: queue_backend.py <op> < request.json | --test\n")
         return EXIT_ERROR
     try:
-        req = json.loads(sys.stdin.read() or "null")
+        req = json.loads(sys.stdin.buffer.read().decode("utf-8") or "null")
     except ValueError as e:
         sys.stderr.write(f"queue_backend: request is not JSON: {e}\n")
         return EXIT_ERROR
@@ -386,8 +442,6 @@ def main(argv: list[str]) -> int:
     except QueueError as e:
         sys.stderr.write(f"queue_backend: {e}\n")
         return EXIT_ERROR
-    if code == EXIT_UNSUPPORTED and data is None and not os.environ.get("_QUEUE_BACKEND_QUIET"):
-        sys.stderr.write(f"queue_backend: op {argv[0]!r} is unsupported by this backend\n")
     if data is not None:
         print(json.dumps(data))
     return code
@@ -474,7 +528,7 @@ def run_tests() -> int:
     def cli(op: str, req: object, extra_env: dict[str, str] | None = None) -> tuple[int, Any, str]:
         run_env = dict(os.environ, **(extra_env or {}))
         out = subprocess.run([sys.executable, os.path.abspath(__file__), op], input=json.dumps(req),
-                             capture_output=True, text=True, env=run_env, check=False)
+                             capture_output=True, text=True, encoding="utf-8", env=run_env, check=False)
         try:
             data = json.loads(out.stdout) if out.stdout.strip() else None
         except ValueError:
@@ -500,9 +554,23 @@ def run_tests() -> int:
             r = resolve(repo, dict(base_env, **{ENV_VAR: "python3 /x/adapter.py --flag"}))
             _assert(r == {"backend": "adapter", "source": "env", "command": ["python3", "/x/adapter.py", "--flag"]},
                     "env adapter command is shell-split")
+            _assert(split_command('py "C:\\my tools\\a.py" -x', posix=False) == ["py", "C:\\my tools\\a.py", "-x"],
+                    "Windows split keeps backslashes and drops quotes")
+            try:
+                split_command('py "C:/x', posix=True)
+                _assert(False, "unbalanced quote → QueueError")
+            except QueueError:
+                _assert(True, "unbalanced quote → QueueError")
             git(repo, "remote", "add", "origin", "git@github.com:owner/repo.git")
             _assert(resolve(repo, dict(base_env))["source"] == "github-open-backlog",
                     "github.com origin with open backlog.md items keeps backlog")
+            git(repo, "rm", "-q", "--cached", "backlog.md")
+            git(repo, "commit", "-q", "--no-verify", "-m", "migrated")
+            _assert(resolve(repo, dict(base_env), "HEAD")["backend"] == "github",
+                    "with a list ref, the open-items guard reads backlog.md at that ref")
+            _assert(resolve(repo, dict(base_env), "HEAD~1")["backend"] == "backlog",
+                    "a ref still holding open items keeps backlog")
+            git(repo, "reset", "-q", "HEAD~1")
             _assert(resolve(repo, dict(base_env, **{ENV_VAR: "backlog"}))["source"] == "env",
                     "env beats the host rule")
             empty = os.path.realpath(os.path.join(tmp, "empty"))
@@ -532,6 +600,16 @@ def run_tests() -> int:
                               ("https://user@GitHub.com/a/b", "github.com"),
                               ("C:\\repos\\x", None), ("/srv/x.git", None)):
                 _assert(origin_host(url) == host, f"origin_host({url!r}) == {host!r}")
+
+            locked = os.path.realpath(os.path.join(tmp, "locked"))
+            os.makedirs(os.path.join(locked, "backlog.md"))  # a directory: unreadable, not absent
+            git(locked, "init", "-q", "-b", "main")
+            git(locked, "remote", "add", "origin", "https://github.com/owner/locked.git")
+            try:
+                resolve(locked, dict(base_env))
+                _assert(False, "unreadable backlog.md on github.com → QueueError, not github")
+            except QueueError:
+                _assert(True, "unreadable backlog.md on github.com → QueueError, not github")
 
             print("\nTest 2: contract framing and exit codes")
             req = {"contract": 1, "repo": repo}
@@ -593,6 +671,15 @@ def run_tests() -> int:
             write(os.path.join(repo, "backlog.md"), FIXTURE_BACKLOG.replace("## Delta", "## Delta edited"))
             code, data, _ = cli("list", dict(req, full_scan=True, ref="HEAD"), base_env)
             _assert("Delta" in [c["title"] for c in data["candidates"]], "ref reads the committed queue")
+            head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            _assert(data["rev"] == head, "list echoes the resolved rev")
+            write(os.path.join(repo, "backlog.md"), "# Moved\n\n\n\n" + FIXTURE_BACKLOG)
+            code, shown, _ = cli("show", dict(req, ref="backlog.md:10", rev=data["rev"]), base_env)
+            _assert(code == 0 and shown["title"] == "[FEAT] first alpha item wrapped tail",
+                    "show with rev reads the listed commit, not the shifted working tree")
+            code, rej, _ = cli("rejected", dict(req, rev=data["rev"]), base_env)
+            _assert(code == 0 and rej["entries"][0]["ref"] == "backlog.md:30", "rejected with rev reads the commit")
+            write(os.path.join(repo, "backlog.md"), FIXTURE_BACKLOG.replace("## Delta", "## Delta edited"))
             code, data, _ = cli("list", dict(req, full_scan=True), base_env)
             _assert("Delta edited" in [c["title"] for c in data["candidates"]], "no ref reads the working tree")
             git(repo, "checkout", "-q", "--", "backlog.md")
@@ -613,6 +700,19 @@ def run_tests() -> int:
             _assert(any("claimed" in w for w in data["warnings"]), "claim note lands in warnings[]")
             git(repo, "worktree", "remove", "--force", wt)
 
+            global _run_candidates
+            real_run = _run_candidates
+            stale = [{"source": "backlog.md", "kind": "h2", "title": "Renamed since", "line": 8, "items": 2,
+                      "open": 3, "deferred": 1, "blocked": 0}]
+            _run_candidates = lambda args: (stale, [])  # noqa: E731 — the queue moved between reads
+            try:
+                backlog_list(dict(req))
+                _assert(False, "a queue changed between the two reads → QueueError")
+            except QueueError:
+                _assert(True, "a queue changed between the two reads → QueueError")
+            finally:
+                _run_candidates = real_run
+
             print("\nTest 6: show and rejected")
             code, data, _ = cli("show", dict(req, ref="backlog.md:10"), base_env)
             _assert(code == 0 and data["title"] == "[FEAT] first alpha item wrapped tail"
@@ -623,6 +723,13 @@ def run_tests() -> int:
                     "show item: blocked_by payload, marker dropped from title")
             code, data, _ = cli("show", dict(req, ref="backlog.md:13"), base_env)
             _assert(data["blocked_by"] == [], "show item: a deferred marker is not a blocker")
+            write(tasks, "# Sprint A\nstatus: open\n\n## Scope\n\n- x\n\n## Covers\n\n- [ ] item\n\n# Sprint B\n")
+            code, data, _ = cli("show", dict(req, ref="tasks.md:1"), base_env)
+            _assert(code == 0 and "## Covers" in data["body"] and "Sprint B" not in data["body"],
+                    "show on a tasks.md h1 spans its ## sections up to the next h1")
+            write(tasks, FIXTURE_TASKS)
+            _assert(" ".join(bc._BLOCK_MARKER_RE.sub(_strip_marker, "Doc *(blocked by: <n>-<slug>)* and *(deferred: x)* tail").split())
+                    == "Doc *(blocked by: <n>-<slug>)* and tail", "title keeps placeholder markers, collapses gaps")
             code, data, _ = cli("show", dict(req, ref="backlog.md:15"), base_env)
             _assert(data["title"] == "Beta child" and data["parent"] == "backlog.md:8"
                     and data["body"] == "- [ ] [FIX] beta only item", "show heading: region body, outer parent")

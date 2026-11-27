@@ -25,9 +25,12 @@ stderr. Every request carries `"contract": 1` and `"repo"` (the absolute repo to
 
 First match wins:
 
-1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command line (shell-split).
+1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command line (shell-split; on
+   Windows backslashes stay literal).
 2. `origin` host `github.com` → `github`, **unless `backlog.md` has an open `- [ ]` item**
-   (parked ones included); such a repo stays on `backlog` until its file queue is empty.
+   (parked ones included); such a repo stays on `backlog` until its file queue is empty. For a
+   `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
+   absent) `backlog.md` is an error, never a switch to `github`.
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.
@@ -41,15 +44,16 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 |----|----------|-------|--------|
 | `describe` | yes | — | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
-| `show` | yes | `ref` | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
+| `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]` |
-| `rejected` | yes | — | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
+| `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
 
 `candidates[]` entries: `id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`, and `counts`
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
-(`blocked`/`deferred`), `payload`. `claimed[]`: `ref`, `by` (the worktree holding it).
+(`blocked`/`deferred`), `payload`. `claimed[]`: `ref`, `by` (the worktree holding it). A
+`backlog` `list` also returns `rev`: the commit SHA its `ref` resolved to, or `null`.
 
 Forge constraints the contract keeps: a claim needs no remote write, closing happens through the
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
@@ -65,10 +69,14 @@ existing item.
   (tokenizer-folded: wrapped lines joined, checkbox prefix dropped), `tag` = the `[TYPE]` every
   listed item shares (else `""`), `labels` = `[]`, `url` = `""`, `counts` from `--counts`. A
   `tasks.md` h1 sprint block carries `items: []`. `parked[]` comes from `--parked --json`, one
-  entry per marker; `claimed[]` from the same `.worktrees/` claim scan; `warnings[]` is the
-  script's stderr (claim skips, truncation, zero-candidate diagnosis, fence warnings).
+  entry per marker; `claimed[]` from the same `.worktrees/` claim scans (items and sprint
+  blocks); `warnings[]` is the script's stderr (claim skips, truncation, zero-candidate
+  diagnosis, fence warnings).
+- `list` pins `ref` to one SHA for every read; on the working tree, a queue that changes between
+  its reads fails with exit 1 (retry) rather than pairing one group's title with another's items.
 - `show` takes `backlog.md:<line>` or `tasks.md:<line>` naming a heading or a checkbox item.
-  A heading gives its region as `body` and the nearest enclosing heading as `parent`; an item
+  Line numbers are those of the queue `list` read: pass `list`'s `rev` back as `rev` when it
+  listed with `ref`. A heading gives its region as `body` (a `tasks.md` h1 runs to the next h1) and the nearest enclosing heading as `parent`; an item
   gives its raw lines as `body`, its text without markers as `title`, its
   `*(blocked by: …)*` payloads as `blocked_by`, and its heading as `parent`.
 - `create` answers `{"edit_file": "backlog.md"}`: the caller writes the item by hand with the
