@@ -633,6 +633,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             write_json(wave_path, wave)
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
+    versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
     launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
     try:
         if wave:
@@ -682,7 +683,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["launched_ms"] = launched_ms
     if wave:
         run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup, cwd=str(cwd.resolve()))
-    elif args.cli == "codex" and (versions := installed_plugin_versions()):
+    elif versions:
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
@@ -880,10 +881,11 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
-def require_shared_guard():
+def require_shared_guard(run):
     versions = installed_plugin_versions()
+    started = (run or {}).get("plugin_versions") or {}
     dev = versions.get("dev")
-    if not dev or "guard" in versions:
+    if not dev or ("guard" in versions and (not started or "guard" in started)):
         return
     manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
     try:
@@ -899,7 +901,7 @@ def require_shared_guard():
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
     if not run or not run.get("wave"):
-        require_shared_guard()
+        require_shared_guard(run)
     else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)

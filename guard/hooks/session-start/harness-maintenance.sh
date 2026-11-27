@@ -51,7 +51,7 @@ size_out=$(bash "$SCRIPT_DIR/check-context-size.sh" 2>&1) || true
 CURATE_DUE="$SCRIPT_DIR/curate_due.py"
 PY=$(command -v python3 || command -v python || true)
 if [[ -n "$PY" ]] && [[ -f "$CURATE_DUE" ]]; then
-  due_out=$("$PY" "$CURATE_DUE" 2>/dev/null) || true
+  due_out=$("$PY" -B "$CURATE_DUE" 2>/dev/null) || true
   [[ -n "$due_out" ]] && WARNINGS+="[harness:G] $due_out\n"
 fi
 

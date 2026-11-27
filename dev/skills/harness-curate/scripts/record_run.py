@@ -32,8 +32,9 @@ import sys
 import tempfile
 import time
 
-from curate_due import STATE_FILE, due_message, read_state, state_path
-from session_paths import codex_home, codex_state_dir
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from curate_due import STATE_FILE, due_message, read_state, state_path  # noqa: E402
+from session_paths import codex_home, codex_state_dir  # noqa: E402
 
 
 def write_state(path, state):

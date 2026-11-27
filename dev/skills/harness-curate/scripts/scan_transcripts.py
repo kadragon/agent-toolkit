@@ -83,7 +83,8 @@ import os
 import re
 import sys
 
-from session_paths import (
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from session_paths import (  # noqa: E402
     codex_home,
     codex_state_dir,
     find_codex_session_files,

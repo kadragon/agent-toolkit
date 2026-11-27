@@ -2,9 +2,11 @@
 
 import json
 import os
+import sys
 import time
 
-from session_paths import (
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from session_paths import (  # noqa: E402
     codex_home,
     codex_state_dir,
     find_codex_session_files,
@@ -47,7 +49,6 @@ def count_newer(paths, since_ms):
 
 
 def new_sessions(state_dir, since_ms):
-    """Transcripts in the resolved project dir modified after `since_ms`."""
     try:
         names = [n for n in os.listdir(state_dir) if n.endswith(".jsonl")]
     except OSError:
@@ -56,7 +57,6 @@ def new_sessions(state_dir, since_ms):
 
 
 def new_codex_sessions(project, since_ms):
-    """The project's Codex rollouts (matched by session_meta cwd) modified after `since_ms`."""
     return len(find_codex_session_files(codex_home(), project, since_ms))
 
 
@@ -66,7 +66,6 @@ def last_run_ms(path):
 
 
 def due_message(project, now_ms=None):
-    """Return the nudge line, or None when a curate run is not due."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     path = state_path(project)
     last = max(last_run_ms(path),
@@ -74,7 +73,7 @@ def due_message(project, now_ms=None):
     if last and now_ms - last <= DUE_DAYS * DAY_MS:
         return None
     sessions = new_sessions(os.path.dirname(path), last)
-    if sessions < DUE_SESSIONS:  # the Codex scan reads every rollout's head; skip it when unneeded
+    if sessions < DUE_SESSIONS:
         sessions += new_codex_sessions(project, last)
     if sessions < DUE_SESSIONS:
         return None

@@ -1231,7 +1231,9 @@ class SharedGuardMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "install guard@kadragon"):
                 verify_delivery_turn(None, {})
             (cache / "guard/1.0.0").mkdir(parents=True)
-            verify_delivery_turn(None, {})
+            with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
+                verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
+            verify_delivery_turn({"plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}, {})
 
 
 class PinnedWaveTests(unittest.TestCase):

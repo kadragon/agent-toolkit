@@ -51,11 +51,13 @@ class GuardPluginTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             env = {**os.environ, "CLAUDE_MD_SYNC_URL": "", "CLAUDE_CONFIG_DIR": str(root / "claude"),
-                   "CLAUDE_PLUGIN_ROOT": str(bundle), "PLUGIN_ROOT": str(bundle), "CODEX_HOME": str(codex)}
+                   "CLAUDE_PLUGIN_ROOT": str(bundle), "PLUGIN_ROOT": str(bundle), "CODEX_HOME": str(codex),
+                   "PYTHONDONTWRITEBYTECODE": "", "PYTHONSAFEPATH": "1"}
             result = subprocess.run(["bash", str(bundle / "hooks/session-start/run.sh")], cwd=project,
                                     env=env, capture_output=True, text=True, encoding="utf-8", check=True)
             self.assertEqual((project / "CLAUDE.md").read_text(encoding="utf-8").strip(), "@AGENTS.md")
             self.assertIn("HARNESS-CURATE DUE:", result.stdout)
+            self.assertFalse(list(bundle.rglob("__pycache__")))
             self.assertTrue((project / ".agents/.maintenance-stamp").is_file())
             second = subprocess.run(result.args, cwd=project, env=env, capture_output=True,
                                     text=True, encoding="utf-8", check=True)
