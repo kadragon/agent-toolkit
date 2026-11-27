@@ -43,17 +43,32 @@ points or the straight-line projection at reset exceeds 120%. The reader still r
 
 ## Reset passes
 
-Maintain one `reset-passes.json` per CLI by hand. Codex uses `$CODEX_HOME` or `~/.codex`.
-Claude full reset passes use `$CLAUDE_CONFIG_DIR` or `~/.claude`. Store one ISO-8601 expiry
-timestamp per pass in a JSON array, with `T` and an explicit offset such as `Z` or `+09:00`.
-The reader interprets timestamps without an offset as UTC.
+Each CLI uses a `reset-passes.json` array with one ISO-8601 expiry per pass. Use `T` and an
+explicit offset such as `Z` or `+09:00`. The reader interprets timestamps without an offset
+as UTC.
 
 ```json
 ["2026-12-01T09:00:00+09:00", "2026-12-14T00:00:00Z"]
 ```
 
-Missing, unreadable, or malformed files count as zero passes. An invalid entry makes the
-whole file malformed. Remove a pass from the file after redeeming it.
+Missing, unreadable, or malformed files count as zero passes. An invalid entry makes the whole
+file malformed.
+
+Maintain Claude's file in `$CLAUDE_CONFIG_DIR` or `~/.claude` by hand. Remove a pass from it after
+redemption.
+
+Codex stores its file in `$CODEX_HOME` or `~/.codex`. Wave planning calls
+`quota.py --refresh-if-stale` before calculating routing. It checks the recorded success time and
+refreshes when it is missing or at least 24 hours old, or when the cache file is missing. Launch
+and ordinary quota reads use the local cache. After redeeming a Codex pass, force a refresh with
+`python3 -I "<dispatch>/scripts/quota.py" --refresh-codex-reset-passes`.
+
+Refreshes are serialized and use the Codex app server's read-only `account/rateLimits/read`
+with a 15-second request deadline. Valid details replace the array atomically. An explicit zero
+writes an empty array. If Codex is unavailable or the response is unsupported or incomplete,
+the existing file is retained. The warning reports the last successful refresh age, or the file
+age for a manually maintained cache when available. Planning still prints the routing snapshot.
+The manual refresh command exits with status 1 on failure.
 
 Each CLI reports `reset_passes`, the number of expiries strictly after the current time.
 Any positive count lowers the assessed state one step for routing (`critical` to `hot`,

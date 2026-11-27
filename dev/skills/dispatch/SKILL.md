@@ -69,9 +69,10 @@ Tiers are equal across CLIs: `haiku` = `luna` < `sonnet` < `opus` = `sol`; `terr
 Pick the tier by capability, then the CLI by quota bias.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
-For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"`. Use its `effective_bias`
+For wave planning, run `python3 -I "<dispatch>/scripts/quota.py" --refresh-if-stale`. Use its `effective_bias`
 in the table and cap the wave at two live children under `both-hot`. The launcher reruns the check
-and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md` for pass files.
+from cache and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md`
+for refresh warnings, pass files, and a manual refresh after redemption.
 
 | bias | Change |
 |------|--------|

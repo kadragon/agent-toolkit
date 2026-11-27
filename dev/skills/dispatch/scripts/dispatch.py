@@ -449,6 +449,16 @@ def first_prompt(cli, message, handoff):
               "<dispatch-handoff>\n"
               f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
               "</dispatch-handoff>")
+    invocation, *body = message.lstrip().splitlines()
+    if (handoff["work_kind"] == "queue" and invocation.split()[:2] == [commands[0], "--tree"]
+            and any(line.startswith("Dispatch mode: parallel-worktree") for line in body)):
+        prompt += (
+            "\n\nRead the installed task-next SKILL.md sections listed in Phase index as each phase starts. "
+            "Locate Markdown headings outside code fences with rg -n '^#{2,3} ' and read the current ranges. "
+            "For the worktree, see references/tree.md → --tree mode and references/cycle.md → Branch "
+            "(including Worktree cycle). After implementation, follow cycle.md → Version bump, Cleanup, "
+            "and Validation evidence, then Step 4 and cycle.md → Hand off into task-review-cycle → Caller gate."
+        )
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
         if cli == "codex":

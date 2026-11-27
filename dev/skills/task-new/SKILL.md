@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 2.9.0
+version: 2.10.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
@@ -19,10 +19,31 @@ route to `task-next`.
 
 Resolve the queue with `queue_backend.py describe` using `../task-next/SKILL.md` →
 *Prerequisites*. Set `SKILL_DIR` to the task-next skill directory. Under `--tree` with an
-`origin`, pin `BASE_SHA` there first and set `REF` to it for `describe` and `list`. Otherwise
-leave `REF` empty. Check known refs and look for matching queue items, including parked
-entries. Route confirmed matches to `task-next`. A candidate scan can omit claimed tickets,
-so a missing candidate leaves the match unconfirmed.
+`origin`, pin `BASE_SHA` there first and use it as `ref` for `describe`, `inventory`, or `list`.
+Otherwise omit `ref`. For text matching, use `inventory` on GitHub or an adapter that
+advertises it in `ops`. Compare the request with the returned titles and bodies. This read
+includes claimed and parked issues, parents, and sub-issues. Resolve explicit queue refs with
+`show` on the selected backend when the inventory does not contain them. Use
+`AGENT_QUEUE_BACKEND=github` for GitHub `show` so it also works when the selected backend
+came from a pinned base. A failed read or an `incomplete: true` result leaves tracking
+unconfirmed even if some items were readable. Apply *Queue unavailable* in that case.
+A `show` trust-gate refusal for an issue absent from a complete inventory only means that
+the issue is outside the queue. Text matching covers open issues. Use an explicit ref to
+check a closed queue issue.
+
+On `backlog`, a missing `backlog.md` in the selected checkout or pinned snapshot means
+the file queue has no tickets yet. Skip `list` in that case and check any explicit
+`tasks.md` ref with `show` (pass the pinned SHA as `rev` for a snapshot). Report other
+read errors. On backends without `inventory`, use `list` with `full_scan: true` and
+`parked: true` when the queue exists, then use `show` on explicit, parked, and claimed refs
+to check their text. For a file snapshot pass the `rev` returned by `list` to `show`.
+Treat an unbalanced fence or other warning that hides queue items as an incomplete read.
+
+When a match is confirmed, report its ref. For an inventory match, check selection with
+`list` (`full_scan: true`, `parked: true`) only after finding the match. A candidate ref
+or an `item_refs[]` entry identifies selectable work. If the match is claimed, parked,
+closed, or its eligibility is unconfirmed, report its status and end intake. Route
+selectable matches to `task-next`.
 Read `docs/conventions.md` when present. On `backlog`, only create `backlog.md` when writing
 tickets or findings. A standalone task needs neither a backlog file nor harness initialization.
 
@@ -49,12 +70,15 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 
 ## Step 2 — Route
 
-For every `task-tickets` call here or in *Queue documentation cycle*, pass the selected
-backend and writing checkout. If a pinned base selected `backlog`, first describe the
-writing checkout with no ref or new backend override. Report a different backend and stop
-before ticketing. For a built-in backend, set `AGENT_QUEUE_BACKEND` to that backend on the
-callee's queue commands. Proceed with a file edit only on the `backlog` route, in the stated
-checkout, and after `create` returns `edit_file`. Report any mismatch before writing.
+**Ticket-writing preflight.** Identify the checkout where `task-tickets` will write. Run
+`describe` on that checkout with no `ref` or new backend override (`verify_visibility: false`
+is enough). If the check fails or its backend differs from the selected backend, report the
+error or mismatch and stop before writing. Run this before calling `task-spec` on the
+multi-session route and immediately before every `task-tickets` call, including in
+*Queue documentation cycle*. Pass the verified checkout and selected backend to `task-tickets`.
+For a built-in backend, set `AGENT_QUEUE_BACKEND` to that backend on the callee's queue
+commands. Proceed with a file edit only on the `backlog` route, in the stated checkout, and
+after `create` returns `edit_file`.
 
 For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only the assigned
 unit. If the assignment is missing, already queued, unclear, larger than one contract, or
@@ -78,9 +102,9 @@ can still be too large for one contract.
     route below.
   - Ticket-only route on `backlog` → write through the Skill tool with "dev:task-tickets"
     in the checkout examined by the working-tree gate, then stop.
-- **Multi-session or architecturally significant** → call the Skill tool twice, for
-  "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
-  "dev:task-tickets"; then **stop** — no cycle runs this invocation.
+- **Multi-session or architecturally significant** → resolve any remaining scope ambiguity
+  with "dev:task-grill". Run the ticket-writing preflight, then call "dev:task-spec". Re-run
+  the preflight before calling "dev:task-tickets"; then **stop** — no cycle runs this invocation.
   Implementation starts in a fresh session that holds the written spec, not the interview that
   produced it: tell the user to `/clear` and run `/dev:task-next`, which picks the first ready
   ticket (in Codex, the `task-next` skill-picker entry in a new session). The working-tree gate

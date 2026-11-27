@@ -243,9 +243,16 @@ class RecoveryTest(unittest.TestCase):
         text = contract() + self.authority("pr-only")
         wt = self.repo / "isolated"
         self.git("worktree", "add", "-qb", "fix/isolated", str(wt))
-        self.state("save", text=text, cwd=wt)
+        saved = self.state("save", text=text, cwd=wt)
+        archive = Path(saved["contract_path"])
+        git_dir = wt / self.git("-C", str(wt), "rev-parse", "--git-dir")
+        registration = git_dir / "task-cycle-contract"
+        self.assertEqual(registration.read_text(encoding="utf-8").splitlines(),
+                         ["fix/isolated", archive.parent.name])
         self.state("authorize", "--action", "pr-write", cwd=wt)
         self.git("worktree", "remove", str(wt))
+        self.assertFalse(registration.exists())
+        self.assertTrue(archive.exists())
         self.assertEqual(self.state("inspect")["contract"], None)
         self.state("authorize", "--branch", "fix/isolated", "--action", "pr-write")
         self.state("authorize", "--branch", "fix/isolated", "--action", "base-push", ok=False)
