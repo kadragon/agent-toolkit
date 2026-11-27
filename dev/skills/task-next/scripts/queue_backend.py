@@ -1371,7 +1371,7 @@ def _github_create(req: dict, runner, slug: tuple[str, str], items: list[dict] |
     fully filed (gh unavailable mid-write, an incomplete relation, `no-queue-write`) are kept in
     the pending store — the failure path only. A draft GitHub
     refused as invalid (HTTP 400/422) is reported in `incomplete[]` and not stored: a retry of the
-    same draft cannot succeed. Migration content conflicts also retire drafts until reconciled."""
+    same draft cannot succeed."""
     from_store = items is not None
     items = _validate_items(req.get("items") if items is None else items)
     repo = req["repo"]
