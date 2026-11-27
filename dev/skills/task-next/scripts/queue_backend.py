@@ -31,12 +31,14 @@ the request on stdin; its stdout and exit code pass through.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from typing import Any
 
@@ -593,7 +595,11 @@ def _trusted(issue: dict) -> bool:
 
 
 def _deferred_reason(issue: dict) -> str:
-    m = _DEFERRED_LINE_RE.search(issue.get("body") or "")
+    body = issue.get("body") or ""
+    _, reason = _migration_body_and_deferral(body)
+    if reason:
+        return reason
+    m = _DEFERRED_LINE_RE.search(body)
     return m.group(1) if m else ""
 
 
@@ -1116,6 +1122,9 @@ def pending_path(repo: str) -> str:
     return os.path.join(os.path.normpath(os.path.join(repo, common)), "agent-queue", "pending.json")
 
 
+QUEUE_LOCK_TIMEOUT = 10
+
+
 @contextmanager
 def _queue_write_lock(repo: str):
     """Hold the Git common dir's lock across lookup, filing and pending-store updates."""
@@ -1126,16 +1135,24 @@ def _queue_write_lock(repo: str):
     except OSError as e:
         raise QueueError(f"cannot open queue writer lock {path}: {e}") from e
     with lock:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        except OSError as e:
-            raise QueueError(f"cannot acquire queue writer lock {path}: {e}") from e
+        deadline = time.monotonic() + QUEUE_LOCK_TIMEOUT
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as e:
+                if e.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise QueueError(f"cannot acquire queue writer lock {path}: {e}") from e
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise QueueError(f"timed out waiting for queue writer lock {path}; retry the operation") from e
+                time.sleep(min(0.05, remaining))
         yield
 
 
@@ -1179,6 +1196,22 @@ def _issue_body(body: str, marker: str) -> str:
     return (body.rstrip() + "\n\n" if body.strip() else "") + marker
 
 
+def _migration_body_and_deferral(body: str) -> tuple[str, str]:
+    body = body.replace("\r\n", "\n").rstrip()
+    prefix, separator, reason = body.rpartition("\n\nDeferred: ")
+    if separator and reason and "\n" not in reason:
+        keys = _KEY_RE.findall(prefix)
+        if keys and keys[-1].startswith(MIGRATION_KEY_PREFIX):
+            return prefix, reason
+    return body, ""
+
+
+def _matches_migrated_content(item: dict, marker_key: str, found: dict) -> bool:
+    expected = _issue_body(item["body"], _KEY_MARKER.format(marker_key)).replace("\r\n", "\n")
+    actual, _ = _migration_body_and_deferral(found["body"] or "")
+    return found["title"] == item["title"] and actual == expected
+
+
 def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bool,
                 withheld: frozenset[str] = frozenset()) -> dict:
     """Retry-safe create of validated `items`. Returns created/incomplete/done/refused; a transport
@@ -1199,14 +1232,14 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                                           "reused": True})
                 result["done"].add(key)
                 continue
-            if key.startswith(MIGRATION_KEY_PREFIX) and (found := index.get(key)):
-                expected_body = _issue_body(item["body"], _KEY_MARKER.format(key)).replace("\r\n", "\n")
-                remote_body = (found["body"] or "").replace("\r\n", "\n").rstrip()
-                if found["title"] != item["title"] or remote_body != expected_body:
+            if key.startswith(MIGRATION_KEY_PREFIX):
+                marker_key, found = _item_match(index, item)
+                if found and not _matches_migrated_content(item, marker_key, found):
                     result["incomplete"].append({
                         "key": key, "relation": "content", "ref": f"#{found['number']}",
                         "error": "migration issue title or body differs; reconcile it with backlog.md and retry",
                     })
+                    result["refused"].add(key)
                     continue
             unknown = [t for t in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]
                        if not (_ISSUE_REF_RE.match(t) or t in batch or t in index)]
@@ -1500,7 +1533,12 @@ def github_reject(req: dict, runner=gh_runner) -> dict:
 def github_defer(req: dict, runner=gh_runner) -> dict:
     reason = _one_line(req, "reason")
     owner, name, issue = _queue_issue(req, runner)
-    body = _DEFERRED_LINE_RE.sub("", issue.get("body") or "").rstrip()
+    body = issue.get("body") or ""
+    keys = _KEY_RE.findall(body)
+    if keys and keys[-1].startswith(MIGRATION_KEY_PREFIX):
+        body, _ = _migration_body_and_deferral(body)
+    else:
+        body = _DEFERRED_LINE_RE.sub("", body).rstrip()
     body = (body + "\n\n" if body else "") + f"Deferred: {reason}\n"
     ensure_labels(runner, owner, name, ["deferred"])
     _rest(runner, "PATCH", f"repos/{owner}/{name}/issues/{issue['number']}", {"body": body})
@@ -2748,6 +2786,18 @@ def run_github_write_tests(tmp: str, git) -> None:
             "a recurring finding closed without completion stays closed")
 
     gh = _FakeGitHub()
+    migrated = dict(sweep, key=MIGRATION_KEY_PREFIX + "completed", title="Revised title", body="New details")
+    gh.add("Original title", _issue_body("Old details", _KEY_MARKER.format(migrated["key"])),
+           state="CLOSED", reason="COMPLETED")
+    _, out = handle("create", dict(req, items=[migrated]), {ENV_VAR: "github"}, gh)
+    _assert(not out["incomplete"] and [c["ref"] for c in out["created"]] == ["#2"],
+            "refiling an edited draft compares against the selected migrated recurrence")
+    _, out = handle("create", dict(req, items=[migrated]), {ENV_VAR: "github"}, gh)
+    _assert(not out["incomplete"] and len(out["created"]) == 1 and out["created"][0]["reused"],
+            "a retry checks the existing recurrence body against its own marker")
+    write_pending(repo, [])
+
+    gh = _FakeGitHub()
     gh.add(sweep["title"], _KEY_MARKER.format(sweep["key"]), state="CLOSED", reason="COMPLETED")
     recurrence = {"key": f"{sweep['key']}:after:1", "title": "Explicit recurrence"}
     _, out = handle("create", dict(req, items=[sweep, recurrence]), {ENV_VAR: "github"}, gh)
@@ -2853,6 +2903,32 @@ def run_github_write_tests(tmp: str, git) -> None:
     _assert(sorted(i["key"] for i in read_pending(repo)) == [d["key"] for d in drafts],
             "concurrent pending writes keep every draft (queue writer lock)")
     write_pending(repo, [])
+
+    from threading import Event
+    from unittest.mock import patch
+
+    held = Event()
+    release = Event()
+
+    def hold_writer():
+        with _queue_write_lock(repo):
+            held.set()
+            release.wait(2)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holder = pool.submit(hold_writer)
+        _assert(held.wait(2), "the other writer holds the lock before publish")
+        with patch(f"{__name__}.QUEUE_LOCK_TIMEOUT", 0.05, create=True):
+            try:
+                github_publish(req, gh)
+            except QueueError as exc:
+                _assert("timed out" in str(exc) and "retry" in str(exc), "writer lock timeout is retryable")
+            else:
+                _assert(False, "publish times out before the other writer releases its lock")
+            finally:
+                release.set()
+        holder.result()
+    _assert(not github_publish(req, gh)["pending"], "publish can retry after the writer releases the lock")
 
     gh = _FakeGitHub()
     code, out = handle("create", dict(req, items=pair, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)

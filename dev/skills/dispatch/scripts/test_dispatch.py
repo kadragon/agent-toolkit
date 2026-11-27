@@ -748,6 +748,37 @@ class DispatchReceiptTests(DispatchTestCase):
                                      {**result, "status": status, "phase": phase, "summary": summary})
                     self.assertEqual(list(path.parent.iterdir()), [path])
 
+    def test_report_review_respects_the_resumed_dispatch_receipts_review_policy(self):
+        head = "a" * 40
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        cases = (
+            ({"cli": "claude"}, head, "ready", "review"),
+            ({"cli": "claude"}, "b" * 40, "blocked", "review-state"),
+            ({"cli": "codex", "require_review_sources": True}, head, "blocked", "review-sources"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            path = receipt.with_name("result.json")
+            for receipt_fields, review_head, status, phase in cases:
+                with self.subTest(receipt=receipt_fields, review_head=review_head):
+                    write_json(receipt, {**self.RECEIPT, **receipt_fields})
+                    result = {
+                        "status": "ready", "phase": "review", "summary": "CI passed",
+                        "pr": "example-pr", "head": head, "ci": "success",
+                        "review": {"head": review_head, "sources": ["codex"], "status": "passed"},
+                    }
+                    completed = subprocess.run(
+                        [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        input=json.dumps(result), text=True, check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual((saved["status"], saved["phase"]), (status, phase))
+                    self.assertEqual(saved["review"], result["review"])
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
+                        collect(SimpleNamespace(run=receipt, close=False))
+                    self.assertEqual(json.loads(output.getvalue())["result"], saved)
+
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"

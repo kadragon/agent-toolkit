@@ -241,10 +241,12 @@ def report_instruction(result, *, require_review_sources=False):
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
             "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
-            f'Pass the candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
-            "when available. "
             "Keep the review outcomes in any later PR completion report."
         )
+    instruction += (
+        f' Pass the pre-merge candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
+        "when available."
+    )
     return instruction
 
 
@@ -368,7 +370,9 @@ def review_problem(result, *, require_review_sources=False):
     return None
 
 
-def gate_review_head(result, *, require_review_sources):
+def gate_review_result(result, *, require_review_sources):
+    if require_review_sources:
+        result = gate_required_reviews(result)
     status = result["status"]
     if status == "ready" or (result.get("pr") and status in {"done", "merged"}):
         if reason := review_problem(result, require_review_sources=require_review_sources):
@@ -388,8 +392,10 @@ def report_review(args):
         validate_result(result)
         if result["status"] not in {"ready", "blocked"}:
             raise ValueError("report-review expects a ready or blocked report")
-        result = gate_required_reviews(result)
-        result = gate_review_head(result, require_review_sources=True)
+        receipt = path.with_name("run.json")
+        # Preserve the three-source gate for callers that do not have a dispatch receipt.
+        required = load_run(receipt).get("require_review_sources", False) if receipt.exists() else True
+        result = gate_review_result(result, require_review_sources=required)
         if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > RESULT_LIMIT:
             raise ValueError("result exceeds 8 KiB")
         write_json(path, result)
@@ -1615,10 +1621,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     if written == run.get("previous_result"):
         result, written = None, None
     if result:
-        required = run.get("require_review_sources", False)
-        if required:
-            result = gate_required_reviews(result)
-        result = gate_review_head(result, require_review_sources=required)
+        result = gate_review_result(result, require_review_sources=run.get("require_review_sources", False))
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
