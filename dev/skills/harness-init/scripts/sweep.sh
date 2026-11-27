@@ -136,12 +136,12 @@ for f in "${FINDINGS[@]}"; do
     fi
 done
 
-QUEUE_BACKEND_SCRIPT="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/../../task-next/scripts/queue_backend.py}"
+QUEUE_BACKEND_SCRIPT="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/queue/queue_backend.py}"
 if [[ ! -r "$QUEUE_BACKEND_SCRIPT" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; then
     QUEUE_BACKEND_SCRIPT="$PROJ_DIR/dev/skills/task-next/scripts/queue_backend.py"
 fi
 if [[ ! -r "$QUEUE_BACKEND_SCRIPT" ]] || ! command -v python3 >/dev/null; then
-    echo "Findings were not persisted — configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
+    echo "Findings were not persisted — install the queue modules with sweep or configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
     if [[ -t 2 ]]; then
         for f in "${FINDINGS[@]}"; do
             if is_security_finding "$f"; then printf '  %s\n' "$f" >&2; fi

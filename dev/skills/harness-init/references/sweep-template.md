@@ -4,12 +4,24 @@ The sweep script is the automated garbage collector for the harness. It catches 
 
 ## Base Script
 
-A ready-to-use sweep script is available at `../scripts/sweep.sh`. Copy it into the target project's `tools/` directory and adapt the marked `# ADAPT:` sections to the project's tech stack.
+A ready-to-use sweep script is available at `../scripts/sweep.sh`. Install it with its queue
+modules so `bash tools/sweep.sh` also works from cron or harness sync. From the target
+project's root:
 
-Configure `AGENT_QUEUE_BACKEND_SCRIPT` in the installed script or its launcher to the absolute
-path of the bundled `task-next/scripts/queue_backend.py` and keep it current with the plugin
-installation. Manual runs and unattended launchers need the same configuration and `python3` on
-PATH. Sweep calls `queue_backend.py create` under the standing grant, reports issue refs and
+```bash
+SKILL_DIR="<absolute harness-init skill directory>"
+QUEUE_SCRIPTS="$SKILL_DIR/../task-next/scripts"
+mkdir -p tools/queue
+cp "$SKILL_DIR/scripts/sweep.sh" tools/sweep.sh
+cp "$QUEUE_SCRIPTS/queue_backend.py" "$QUEUE_SCRIPTS/backlog_candidates.py" tools/queue/
+```
+
+Adapt the marked `# ADAPT:` sections to the project's tech stack. Keep the two installed queue
+modules together when upgrading. A launcher can instead set `AGENT_QUEUE_BACKEND_SCRIPT` to the
+absolute bundled script path. Both routes need `python3` on PATH. On GitHub, use an authenticated
+owner, member or collaborator account so the queue can select the issues it files.
+
+Sweep calls `queue_backend.py create` under the standing grant, reports issue refs and
 failure-path pending drafts, and uses its existing `## Sweep` section format on `edit_file`.
 Set `AGENT_QUEUE_LIMITS=no-queue-write` for a run whose contract expressly forbids issue writes.
 Mark security findings from adapted checks with `[security]` at the start so sweep can check
