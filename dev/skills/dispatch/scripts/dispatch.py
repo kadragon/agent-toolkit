@@ -237,6 +237,7 @@ def report_instruction(result, *, require_review_sources=False):
     if require_review_sources:
         instruction += (
             " Also include review_sources with claude, agy and codex outcomes. "
+            "Use the same lowercase names in review.sources. "
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
             "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
@@ -345,30 +346,34 @@ def review_record(result):
     return review if isinstance(review, dict) else {}
 
 
-def gate_review_head(result, *, require_review_sources):
-    if result["status"] != "ready":
-        return result
+def review_problem(result, *, require_review_sources=False):
     review = review_record(result)
     status = review.get("status")
     head = result.get("head")
     sources = review.get("sources")
     if status == "pending":
-        reason = "Independent review is pending"
-    elif status != "passed":
-        reason = "Independent review is missing"
-    elif not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
-        reason = "Result head must be a full commit SHA"
-    elif review.get("head") != head:
-        reason = "Independent review head differs from result head"
-    elif not isinstance(sources, list) or not sources or any(
+        return "Independent review is pending"
+    if status != "passed":
+        return "Independent review is missing"
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
+        return "Result head must be a full commit SHA"
+    if review.get("head") != head:
+        return "Independent review head differs from result head"
+    if not isinstance(sources, list) or not sources or any(
         not isinstance(source, str) or not source.strip() for source in sources
     ):
-        reason = "Independent review sources are missing"
-    elif require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
-        reason = "Independent review record must list Claude, agy and Codex"
-    else:
-        return result
-    return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
+        return "Independent review sources are missing"
+    if require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
+        return "Independent review record must list claude, agy and codex"
+    return None
+
+
+def gate_review_head(result, *, require_review_sources):
+    status = result["status"]
+    if status == "ready" or (result.get("pr") and status in {"done", "merged"}):
+        if reason := review_problem(result, require_review_sources=require_review_sources):
+            return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
+    return result
 
 
 def report_review(args):
@@ -1387,7 +1392,9 @@ def brief_report(report):
         status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report),
     ))))
     review_status = review_record(result).get("status")
-    if result.get("phase") in {"review-state", "review-sources"} and review_status != "pending":
+    if review_status == "passed" and review_problem(result):
+        review_status = "missing"
+    elif result.get("phase") in {"review-state", "review-sources"} and review_status != "pending":
         review_status = "missing"
     if review_status in ("passed", "missing", "pending"):
         line += f" · review={review_status}"

@@ -66,7 +66,8 @@ fallback policy. Keep the original launch history and the accepted blockers acro
   the re-review on a lite repair. Reuse the primary reviewer, with the current diff and targeted
   evidence. Record its launch in `cycle_state.py note` before calling it. A timeout or
   unavailable result consumes the launch. A new HEAD, CI repair, or route
-  change does not reset the budget or restart the panel.
+  change does not reset the budget or restart the general panel. For dispatched pre-merge
+  verification on a new head, follow *Dispatch pre-merge report*.
 - Apply the normal gate until the one general re-review has been consolidated. If unused,
   keep the normal gate through late reclaim. Record closure in `cycle_state.py note` after
   consolidating the re-review, or when ready without it. Route valid new ordinary findings
@@ -135,8 +136,15 @@ dispatch script. Use the assigned path from the handoff. Include the full PR hea
 cover in `review.head` (use `null` when unavailable) and list the consolidated reviewers in
 `review.sources`. Set `review.status` to `passed` when the required reviews pass for that
 head, `pending` while awaiting a result, or `missing` when a required result is unavailable.
-Carry the reviewed SHA forward from the evidence. A changed PR head requires fresh review
-evidence before it can be reported ready.
+Carry the reviewed SHA forward from the evidence.
+
+After a repair or a home-side resync changes the head, the child resumes at final verification.
+Confirm that the local checkout matches the current PR head and recover the prior source results.
+Obtain one read-only confirmation for the current SHA from each required source whose result
+covers a different head. Give each source the previous SHA, its findings and the delta to check.
+Use the regular source launch when no prior result exists. The disposition and re-review budgets still
+apply to code findings. Record the outcomes on the current SHA before reporting ready. Resume a
+legacy report the same way, using archived evidence that identifies the reviewed head.
 
 Set `review_sources` to an object with the keys `claude`, `agy` and `codex`.
 Use `"complete"` only for a completed, consolidated independent result. Otherwise give the

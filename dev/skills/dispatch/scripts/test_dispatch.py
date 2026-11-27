@@ -662,10 +662,9 @@ class DispatchReceiptTests(DispatchTestCase):
                         result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
                         if sources is not None:
                             result["review_sources"] = sources
-                        if status == "ready":
-                            result["head"] = "a" * 40
-                            result["review"] = {"head": result["head"], "sources": ["claude", "agy", "codex"],
-                                                "status": "passed"}
+                        result["head"] = "a" * 40
+                        result["review"] = {"head": result["head"], "sources": ["claude", "agy", "codex"],
+                                            "status": "passed"}
                         write_json(receipt.with_name("result.json"), result)
                         output = StringIO()
                         with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
@@ -676,24 +675,28 @@ class DispatchReceiptTests(DispatchTestCase):
                         for blocker in blockers:
                             self.assertIn(blocker, reported["summary"])
 
-    def test_collect_requires_passed_review_on_the_ready_head(self):
+    def test_collect_requires_passed_review_on_the_reported_pr_head(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         head = "a" * 40
         review = {"head": head, "sources": ["codex"], "status": "passed"}
+        stale_review = {**review, "head": "b" * 40}
         cases = (
-            (None, "Independent review is missing", "missing"),
-            ({**review, "status": "missing"}, "Independent review is missing", "missing"),
-            ({**review, "status": "pending"}, "Independent review is pending", "pending"),
-            ({**review, "head": "b" * 40}, "Independent review head differs", "missing"),
-            ({**review, "sources": []}, "Independent review sources are missing", "missing"),
-            (review, None, "passed"),
+            ("ready", None, "Independent review is missing", "missing"),
+            ("ready", {**review, "status": "missing"}, "Independent review is missing", "missing"),
+            ("ready", {**review, "status": "pending"}, "Independent review is pending", "pending"),
+            ("ready", stale_review, "Independent review head differs", "missing"),
+            ("ready", {**review, "sources": []}, "Independent review sources are missing", "missing"),
+            ("ready", review, None, "passed"),
+            ("done", None, "Independent review is missing", "missing"),
+            ("merged", stale_review, "Independent review head differs", "missing"),
+            ("blocked", stale_review, None, "missing"),
         )
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             write_json(receipt, self.RECEIPT)
-            for record, blocker, brief_status in cases:
-                with self.subTest(review=record):
-                    result = {"status": "ready", "phase": "review", "summary": "CI passed",
+            for status, record, blocker, brief_status in cases:
+                with self.subTest(status=status, review=record):
+                    result = {"status": status, "phase": "review", "summary": "Reported PR state",
                               "pr": "example-pr", "head": head}
                     if record is not None:
                         result["review"] = record
@@ -1016,9 +1019,13 @@ class DispatchReceiptTests(DispatchTestCase):
                     report, calls = self.collect_report(directory, {"state": "done"}, result=result)
                     self.assertEqual(report["scope_decision_categories"], expected)
                     self.assertEqual(calls, [call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY)])
+            head = "a" * 40
             report, _ = self.collect_report(directory, {"state": "done"}, result={
-                "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
+                "status": "ready", "phase": "review", "summary": "Review passed", "head": head,
+                "review": {"head": head, "sources": ["codex"], "status": "passed"},
+                "review_sendbacks": [earlier, later],
             })
+            self.assertEqual(report["result"]["status"], "ready")
             self.assertEqual(report["scope_decision_categories"], [])
 
     def test_collect_keeps_review_history_without_escalating_missing_sources_as_sendbacks(self):

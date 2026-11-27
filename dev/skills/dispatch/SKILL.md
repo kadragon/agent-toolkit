@@ -208,15 +208,15 @@ The user delegates the session's decisions to this session:
   recommendation unless it conflicts with the request or the repo; add a correction when it is
   missing something. Answer with `hc send <address> '<answer>'`, then tell the user in one line what
   was chosen and why. Honor Git limits and step 2's batch authorization rule.
-- **Push and merge** — follow the user's original authorization and limits, and wait until
-  full `dispatch.py collect` reports `result.status == "ready"` and
-  `result.review.status == "passed"`. Compare `result.review.head` and `result.head` with the
-  current PR head immediately before merge. All three SHAs must match, and required CI must
-  pass on that head. On GitHub, pass the verified SHA to `gh pr merge --match-head-commit`
-  or the review merge helper's `--expected-head`. Prepare independent PRs in parallel and
-  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
-  (for example, `origin/main`) into it. Preserve both sides of shared file-queue entries. If the
-  head changes, obtain and collect a new review report and rerun required checks on the new head before merging.
+- **Push and merge** — merge one PR at a time. Once a parallel PR branch has been pushed,
+  fetch and merge its PR base, preserving both sides of shared file-queue entries.
+  If the head changes or a legacy report lacks review evidence, resume the child with
+  `dispatch.py send --continue` for the review cycle's *Dispatch pre-merge report* on the current head.
+  Require full `collect` to show `result.status == "ready"` and `result.review.status == "passed"`.
+  Match `result.review.head` and `result.head` to the current PR head and verify required CI there.
+  Require the merge owner's archived `base-merge` authority per
+  [Git authorization](../task-next/references/git-authorization.md). On GitHub, pin the verified SHA
+  using `--expected-head` or `gh pr merge --match-head-commit`.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
   in collect), and any decision the user kept. Tell the user what is waiting and stop watching.
