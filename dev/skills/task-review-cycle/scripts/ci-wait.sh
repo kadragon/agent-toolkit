@@ -2,7 +2,7 @@
 # Wait for all CI checks on a PR to complete.
 # Backend-agnostic: polls via hub.sh ci-status (gh for GitHub, REST for Forgejo).
 #
-# Usage: ci-wait.sh <pr_number>
+# Usage: ci-wait.sh <pr_number> [--expected-head <sha>]
 # Output: JSON to stdout — {passed: bool}
 #
 # The orchestrator runs this in the foreground under the Bash tool's 600s ceiling, so the
@@ -19,7 +19,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
+USAGE="Usage: ci-wait.sh <pr_number> [--expected-head <sha>]"
+PR_NUMBER="${1:?$USAGE}"
+EXPECTED_HEAD=""
+if [[ $# -eq 3 && "$2" == --expected-head && "$3" =~ ^[0-9a-f]{40}$ ]]; then
+  EXPECTED_HEAD="$3"
+elif [[ $# -ne 1 ]]; then
+  printf '%s\n' "$USAGE" >&2
+  exit 1
+fi
 MAX_STRIKES="${CI_WAIT_MAX_STRIKES:-3}"
 # A non-numeric override would make the -ge test and --argjson both fail, and under
 # `set -euo pipefail` the script would die with no JSON at all — worse than any cap.
@@ -131,12 +139,12 @@ ci_configured() {
   [ "$CI_CONFIGURED" = yes ]
 }
 
-# The pushed head. Right after a push the hub can still describe the previous commit, and its
-# `failure` would be struck a second time (PR #362). A status whose head_sha is a strict
-# ancestor of HEAD is that lag: `pending`. Any other SHA (a bot or collaborator commit this
-# checkout lacks) or a missing SHA is taken as-is, so a diverged checkout never waits out the
-# whole deadline on a CI that already finished.
-HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+# A strict ancestor can be the hub's stale result right after a push (PR #362). Watch it as
+# pending against the reviewed SHA in exact mode, or the checkout's HEAD in legacy mode.
+HEAD_SHA="$EXPECTED_HEAD"
+if [ -z "$HEAD_SHA" ]; then
+  HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+fi
 
 START=$(date +%s)
 DEADLINE=$(( START + TIMEOUT_SECS ))
@@ -145,9 +153,17 @@ while true; do
   STATUS_JSON=$(bash "$SCRIPT_DIR/hub.sh" ci-status "$PR_NUMBER" 2>/dev/null || echo '{}')
   STATUS=$(jq -r '.status // "error"' <<<"$STATUS_JSON")
   STATUS_SHA=$(jq -r '.head_sha // empty' <<<"$STATUS_JSON" 2>/dev/null || true)
-  if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$HEAD_SHA" ] \
-    && git merge-base --is-ancestor "$STATUS_SHA" "$HEAD_SHA" 2>/dev/null; then
-    STATUS=pending
+  if [ "$STATUS_SHA" != "$HEAD_SHA" ]; then
+    if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] \
+      && git merge-base --is-ancestor "$STATUS_SHA" "$HEAD_SHA" 2>/dev/null; then
+      STATUS=pending
+    elif [ -n "$EXPECTED_HEAD" ]; then
+      REASON=head-mismatch
+      [ -n "$STATUS_SHA" ] || REASON=head-missing
+      jq -n --arg reason "$REASON" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
+        '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
+      exit 0
+    fi
   fi
   NOW=$(date +%s)
 

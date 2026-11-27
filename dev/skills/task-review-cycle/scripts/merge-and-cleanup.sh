@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Merge a PR using the best available strategy, then clean up local branch.
 #
-# Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json> [worktree_path]
+# Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json>
+#                            [worktree_path] [--expected-head <sha>]
 #   merge_strategy_json: e.g. '{"squash":true,"merge":true,"rebase":true}'
 #   worktree_path: optional, removes the worktree before the local branch is deleted
+#   --expected-head: atomically match the reviewed full SHA when merging on GitHub
 #
 # Output: JSON with merge result and cleanup status. merge_ok=false skips local cleanup; then
 # queued=true means the PR entered a merge queue, unconfirmed=true that gh could not report its state.
@@ -12,7 +14,8 @@ set -euo pipefail
 
 # --- Argument validation ---
 usage() {
-  echo "Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json> [worktree_path]"
+  echo "Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json>"
+  echo "                            [worktree_path] [--expected-head <sha>]"
   echo ""
   echo "  pr_number           PR number (integer)"
   echo "  base_branch         Target branch (e.g. main)"
@@ -42,7 +45,18 @@ PR_NUMBER="$1"
 BASE_BRANCH="$2"
 FEATURE_BRANCH="$3"
 MERGE_STRATEGY_JSON="$4"
-WORKTREE_PATH="${5:-}"
+shift 4
+WORKTREE_PATH=""
+if [[ $# -gt 0 && "$1" != --* ]]; then
+  WORKTREE_PATH="$1"
+  shift
+fi
+EXPECTED_HEAD=""
+if [[ $# -eq 2 && "$1" == --expected-head && "$2" =~ ^[0-9a-f]{40}$ ]]; then
+  EXPECTED_HEAD="$2"
+elif [[ $# -ne 0 ]]; then
+  usage
+fi
 
 # Validate PR number is numeric
 if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
@@ -73,7 +87,11 @@ fi
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/git-authority.sh"
 require_git_authority --branch "$FEATURE_BRANCH" --action base-merge
-MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" merge "$PR_NUMBER" "$MERGE_METHOD" "$FEATURE_BRANCH" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
+HUB_MERGE_ARGS=(merge "$PR_NUMBER" "$MERGE_METHOD" "$FEATURE_BRANCH")
+if [ -n "$EXPECTED_HEAD" ]; then
+  HUB_MERGE_ARGS+=("$EXPECTED_HEAD")
+fi
+MERGE_RESULT=$(bash "$SCRIPT_DIR/hub.sh" "${HUB_MERGE_ARGS[@]}" 2>&1 || echo '{"merge_ok": false, "merge_output": "hub.sh merge invocation failed"}')
 MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
 QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)

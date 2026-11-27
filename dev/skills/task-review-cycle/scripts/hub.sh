@@ -10,7 +10,8 @@
 #   pr-get                                  → {pr_number, pr_url}   (open PR for current branch)
 #   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n, head_sha?}
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
-#   merge <pr_number> <squash|merge|rebase> → {merge_ok, queued, unconfirmed, merge_output}
+#   merge <pr_number> <squash|merge|rebase> [authority_branch] [expected_head]
+#                                            → {merge_ok, queued, unconfirmed, merge_output}
 #
 # Auth:
 #   github  — gh CLI must be authenticated (gh auth login)
@@ -336,10 +337,15 @@ case "$SUBCOMMAND" in
     PR_NUMBER="${1:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     if [ "$HUB_TYPE" = "github" ]; then
+      EXPECTED_HEAD="${4:-}"
+      MERGE_ARGS=(pr merge "$PR_NUMBER" "--${STRATEGY}")
+      if [ -n "$EXPECTED_HEAD" ]; then
+        MERGE_ARGS+=(--match-head-commit "$EXPECTED_HEAD")
+      fi
       MERGE_OK=true
       QUEUED=false
       UNCONFIRMED=false
-      MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" "--${STRATEGY}" 2>&1) || MERGE_OK=false
+      MERGE_OUTPUT=$(gh "${MERGE_ARGS[@]}" 2>&1) || MERGE_OK=false
       # Under a merge queue gh exits 0 on enqueue, so exit 0 alone is not a merge: only a MERGED
       # state is. Anything else is merge_ok=false, so merge-and-cleanup.sh keeps the local branch:
       # OPEN is reported as queued, a state gh could not report (after retries) as unconfirmed.

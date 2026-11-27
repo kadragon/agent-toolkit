@@ -91,6 +91,11 @@ fallback policy. Keep the original launch history and the accepted blockers acro
 
 ## Final verification
 
+On GitHub, record the full SHA of the committed candidate covered by the review in the existing
+review checkpoint as `Reviewed head <sha>`. Use that SHA as `REVIEWED_HEAD` for every CI wait
+and the merge command. After a repair or resync, record a new SHA when review and targeted
+evidence cover the new candidate under the existing review budget.
+
 On hub, follow `ci-failure-handling.md` for CI on the current PR head, then reclaim late results
 per `late-source-reclaim.md`. On the local-only route, reclaim at its stop point. If reclaim leads
 to an in-scope repair, run targeted checks, commit it, and return through CI on hub. Apply the
@@ -104,8 +109,10 @@ in-scope cause under the existing review budget and approval rules. Use targeted
 Step 5 for each repair or withdrawal. On hub, push it and confirm CI on the new head before
 returning to the full local checks. An unresolved failure or missing result blocks merge and
 a ready report. A later change invalidates affected evidence. Reclaim any newly completed panel
-result before ready or merge without waiting for work still running. On hub, confirm that the
-remote head and its applicable CI match the local candidate.
+result before ready or merge without waiting for work still running. On GitHub, confirm local
+`HEAD` still equals `REVIEWED_HEAD` after the final checks. Use the same SHA in the merge command,
+or in a final CI wait before reporting ready. On Forgejo, confirm that the remote head and its
+applicable CI match the local candidate.
 
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve

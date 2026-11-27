@@ -92,8 +92,8 @@ starting checkout is never read, edited or switched. Nothing collapses back into
 - **Route.** The review cycle takes the hub (PR) path: its lite merge runs `git checkout <base>`,
   which a linked worktree cannot do while the base is checked out elsewhere. The risk-routing
   floor forces this (`WORKTREE_HIT`).
-- **Merge.** When the review cycle issues `merge-and-cleanup.sh`, append the absolute worktree
-  path as its optional fifth argument, `worktree_path`, so the merge removes the worktree. Run it
+- **Merge.** When the review cycle issues `merge-and-cleanup.sh`, pass the absolute worktree
+  path as its fifth argument, before GitHub's `--expected-head` flag. Run it
   from inside the worktree — from the starting checkout, the script runs `git checkout <base>`
   there — but keep the merge command itself unprefixed, the only shape an auto-mode allow rule
   matches: issue `cd "<printed worktree path>"` as its own Bash call first (the cwd carries to
