@@ -7,6 +7,7 @@
 #   1. Required files exist (AGENTS.md, CLAUDE.md, docs/runbook.md); the other
 #      docs are conditional — absence reported as INFO
 #   1b. Executable text file line endings (*.sh/*.bash/*.py)
+#   1c. Guard registration in the agent-toolkit marketplaces
 #   2. AGENTS.md size policy (target ≤100, warn >100, strong warn >200; no size-only failure)
 #   3. All files referenced in AGENTS.md docs index exist
 #   4. Golden principles conditional on real invariants; no item-count mandate
@@ -184,6 +185,26 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
 else
     warn "Skipping line-ending check outside a git worktree"
+fi
+
+# ── 1c. agent-toolkit plugin layout ───────────────────────
+if [[ -f dev/.claude-plugin/plugin.json ]] &&
+   jq -e '.name == "kadragon"' .claude-plugin/marketplace.json >/dev/null 2>&1; then
+    if jq -e 'any(.plugins[]; .name == "guard" and .source == "./guard")' \
+           .claude-plugin/marketplace.json >/dev/null &&
+       jq -e 'any(.plugins[]; .name == "guard" and .source == {source: "local", path: "./guard"})' \
+           .agents/plugins/marketplace.json >/dev/null &&
+       jq -es 'length == 2 and all(.[]; .name == "guard" and .hooks == "./hooks.json") and
+               .[0].version != null and .[0].version == .[1].version' \
+           guard/.claude-plugin/plugin.json guard/.codex-plugin/plugin.json >/dev/null &&
+       jq -es 'length == 2 and all(.[]; .name == "dev" and (has("hooks") | not))' \
+           dev/.claude-plugin/plugin.json dev/.codex-plugin/plugin.json >/dev/null &&
+       jq -e '.hooks.PreToolUse and .hooks.SessionStart' guard/hooks.json >/dev/null &&
+       [[ ! -e dev/hooks.json && ! -e dev/hooks/hooks.json ]]; then
+        pass "Both marketplaces register the standalone guard plugin"
+    else
+        fail "agent-toolkit guard plugin registration or hook configuration is incomplete"
+    fi
 fi
 
 # ── 2. AGENTS.md line count ────────────────────────────────

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# E) Skills Symlink Guard
+#
+# Ensures .agents/skills resolves to ../.claude/skills.
+# Two valid materializations:
+#   - Real symlink (POSIX, or Windows with core.symlinks=true + Developer Mode)
+#   - Regular text file containing "../../.claude/skills" (git core.symlinks=false checkout)
+# Silent on success; prints one line if a change is made; exits non-zero on ambiguous state.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+TARGET="../.claude/skills"
+LINK=".agents/skills"
+
+# Case 1: valid symlink
+if [ -L "$LINK" ] && [ "$(readlink "$LINK")" = "$TARGET" ]; then
+  exit 0
+fi
+
+# Case 2: git-text-symlink (Windows, core.symlinks=false) — correct representation, leave alone
+if [ -f "$LINK" ] && [ ! -L "$LINK" ]; then
+  content=$(cat "$LINK")
+  if [ "$content" = "$TARGET" ]; then
+    exit 0
+  fi
+fi
+
+# Case 3: wrong-target symlink — safe to replace (just a pointer, no data)
+if [ -L "$LINK" ]; then
+  rm "$LINK"
+fi
+
+# Case 4: missing — create and verify
+if [ ! -e "$LINK" ]; then
+  mkdir -p .claude/skills .agents
+  ln -sfn "$TARGET" "$LINK"
+  if [ -L "$LINK" ]; then
+    echo "Symlink updated: $LINK → $TARGET"
+    exit 0
+  fi
+  # ln -s fell back to a directory copy (Windows without symlink support).
+  # Auto-recover by writing the git mode-120000 text form — works on POSIX peers.
+  rm -rf "$LINK"
+  printf '%s' "$TARGET" > "$LINK"
+  echo "symlink-guard: wrote text-form pointer at $LINK (Windows without symlink support)"
+  _git_mode=$(git ls-files -s "$LINK" 2>/dev/null | awk '{print $1}')
+  if [ "$_git_mode" != "120000" ]; then
+    echo "  WARNING: $LINK is not tracked as git mode 120000 — POSIX peers will see a plain text file, not a symlink."
+    echo "  To fix after staging: sha=\$(git hash-object '$LINK') && git update-index --cacheinfo 120000,\$sha,'$LINK'"
+  fi
+  exit 0
+fi
+
+# Case 5: unexpected state (wrong-content file, directory, etc.) — do not destroy, report
+echo "symlink-guard: .agents/skills is in an unexpected state (not a symlink or git text-symlink)."
+echo "  Current: $(ls -ld "$LINK" 2>&1 || true)"
+echo "  Manual fix: rm -rf .agents/skills && bash '$SCRIPT_PATH'"
+exit 1

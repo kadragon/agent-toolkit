@@ -16,7 +16,6 @@
 dev/
   .claude-plugin/plugin.json   # semver manifest — bump before merge
   agents/                      # plugin-shipped agent roles
-  hooks/                       # hook scripts (references/)
   skills/                      # one dir per skill, each has SKILL.md
     harness-init/
       SKILL.md
@@ -31,6 +30,12 @@ prod/
   skills/
     hwpx/
     persona-debate/
+
+guard/
+  .claude-plugin/plugin.json   # same release version as the Codex manifest
+  .codex-plugin/plugin.json
+  hooks.json                   # commit, memory, and SessionStart registrations
+  hooks/                       # self-contained runtime scripts
 
 mods/                          # Claude Code only — no .codex-plugin, not in the Codex marketplace
   .claude-plugin/plugin.json   # own semver line; userConfig holds each mod's options
@@ -61,11 +66,13 @@ mods/                          # Claude Code only — no .codex-plugin, not in t
 plugin.json
   -> skills/ (SKILL.md + scripts/)
   -> agents/ (agent roles)
-  -> hooks/ (hook scripts)
+  -> guard/hooks/ (standalone hook scripts)
 ```
 
 - Skills within a plugin may reference that plugin's `agents/` and `references/`
-- No cross-plugin imports — `dev/` skill must not reference `prod/` paths
+- Each plugin runs from its own installed root. `guard` executes only its bundled code.
+  The standalone `dev` workflows bundle copies of the checks they also run explicitly.
+  `scripts/ci/test_guard_plugin.py` checks that the copies agree with the hook implementations.
 - Agent artifacts go to the session scratchpad directory (path given in the system prompt) — never committed, never repo-root
 
 ### Boundaries

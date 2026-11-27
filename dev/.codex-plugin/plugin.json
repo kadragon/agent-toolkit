@@ -1,7 +1,7 @@
 {
   "name": "dev",
-  "version": "5.0.0",
-  "description": "Personal development skills and workflows for agent-assisted engineering.",
+  "version": "5.0.1",
+  "description": "Development skills and workflows. Install guard@kadragon for commit, memory, and session-start hooks.",
   "author": {
     "name": "kadragon"
   },
@@ -16,7 +16,6 @@
     "automation"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks.json",
   "interface": {
     "displayName": "Dev Tools",
     "shortDescription": "Development workflows for agent-assisted engineering",

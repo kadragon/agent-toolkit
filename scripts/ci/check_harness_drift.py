@@ -145,7 +145,7 @@ SHELL_PROVIDED_VARS = {
     "LINES",
 }
 FORBIDDEN_SKILL_ROOT_VARS = ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
-HOOKS_FILE = REPO_ROOT / "dev/hooks.json"
+HOOKS_FILE = REPO_ROOT / "guard/hooks.json"
 
 FENCE_RE = re.compile(r"```(bash|sh|shell)\n(.*?)```", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
@@ -1022,7 +1022,7 @@ def check_section_refs(
 
 
 def check_windows_hook_commands() -> list[str]:
-    """Require an explicit PowerShell-safe override for every dev command hook."""
+    """Require an explicit PowerShell-safe override for every guard command hook."""
     try:
         data = json.loads(HOOKS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

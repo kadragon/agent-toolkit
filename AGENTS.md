@@ -1,6 +1,6 @@
 # agent-toolkit
 
-Plugin marketplace (dev + prod + mods) by kadragon. This repo IS the harness — skills, agents, hooks shipped to other repos.
+Plugin marketplace by kadragon. This repo IS the harness — skills, agents, hooks shipped to other repos.
 
 ## Docs Index (read on demand)
 
@@ -20,7 +20,7 @@ Plugin marketplace (dev + prod + mods) by kadragon. This repo IS the harness —
 
 Invariants. Each states its enforcement mechanism where one exists. Violations block merges.
 
-1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/`. `mods/` is Claude Code only: its single `mods/.claude-plugin/plugin.json` must increment. Enforced by CI (`harness-check.yml`) for both platforms. Semver: major is reserved for removing or renaming something invoked **by name** (skill, agent, command); a hook has no invocable name, so hook removal is a patch. Full table: `docs/conventions.md` → Plugin Version Bump Rules.
+1. **Version bump mandatory** — If files under `dev/` changed, both `dev/.claude-plugin/plugin.json` AND `dev/.codex-plugin/plugin.json` versions must increment (keep in sync). Same for `prod/` and `guard/`. `mods/` is Claude Code only: its single `mods/.claude-plugin/plugin.json` must increment. Enforced by CI (`harness-check.yml`) for both platforms. Semver: major is reserved for removing or renaming something invoked **by name** (skill, agent, command); a hook has no invocable name, so hook removal is a patch. Full table: `docs/conventions.md` → Plugin Version Bump Rules.
 2. **Shell capture-before-use** — Shell patterns must show `var=$(cmd)` before `$var` use. Never reference a variable before the capture step. Enforced by code review.
 3. **Agent integrity** — Never state a value as fact without directly reading it from a file/command output this session. Write `[unknown — read {source}]` instead of guessing. Applies to: version numbers, file paths, skill names, API shapes.
 
@@ -50,7 +50,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 - Skills are in `{plugin}/skills/{name}/SKILL.md` — `description:` field drives auto-invocation
 - Repository-local Claude Code roles live in `.claude/agents/*.md`. For delegated exploration, use the platform's built-in role: `Explore` in Claude Code or `explorer` in Codex.
 - Mods (function hooks) live only in `mods/hooks/{name}/`, plus `mods/hooks/band.tsx`, the one hook that draws every mod's rows above the prompt; run `python3 scripts/check_mods.py` locally (validate + test, failing on any TS error) — CI does not
-- Tests: every `test_*.py` and `--test`/`--selftest` script under `dev/`/`prod/`/`scripts/` has a `python3 <path> [flag]` step in `harness-check.yml` — run the matching one
+- Tests: every `test_*.py` and `--test`/`--selftest` script under `dev/`/`prod/`/`guard/`/`scripts/` has a `python3 <path> [flag]` step in `harness-check.yml` — run the matching one
 - Validate harness from the working tree, not the plugin cache: `bash dev/skills/harness-init/scripts/validate-harness.sh`
 
 ## Platform Pointers

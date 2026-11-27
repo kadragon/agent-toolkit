@@ -47,7 +47,7 @@ Size warnings above 100 (strong above 200) do not fail a level; session checks w
 - [ ] All doc cross-references resolve (no broken `docs/` links)
 - [ ] Lint/test infrastructure exists and passes
 - [ ] *(only if the repo has agent roles)* delegation routing triggers are objective and measurable, and `docs/workflows.md` embeds the gates as named steps
-- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or the `dev` plugin's SessionStart hook)
+- [ ] AGENTS.md size check active (via `scripts/check-context-size.sh` or the `guard` plugin's SessionStart hook)
 - [ ] Area-specific rules live outside AGENTS.md — in `docs/` (multi-tool repos) or `.claude/rules/*.md` with `paths:` (Claude-only repos) — see `path-scoped-rules.md` *(manual check — not enforced by `validate-harness.sh`)*
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.

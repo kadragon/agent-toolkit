@@ -46,7 +46,7 @@ mod = _load("check_asset_hygiene", SCRIPT)
 # The shipped hook that carries a copy of the same table. Loading it here rather than in
 # the hook is the only direction that works: this file runs in the repo, where both paths
 # exist, while the hook runs on a machine that has no `scripts/` at all.
-GUARD = Path(__file__).resolve().parents[2] / "dev" / "hooks" / "memory-guard" / "guard.py"
+GUARD = Path(__file__).resolve().parents[2] / "guard" / "hooks" / "memory-guard" / "guard.py"
 guard_mod = _load("memory_guard", GUARD)
 
 PASS = "\033[92mPASS\033[0m"
@@ -317,7 +317,7 @@ def main() -> int:
         len(mod.empty_corpus_errors([])) == len(mod.CORPUS_ROOTS),
     )
 
-    print("\ndev/hooks/memory-guard/guard.py — the duplicated character table stays in sync")
+    print("\nguard/hooks/memory-guard/guard.py — the duplicated character table stays in sync")
 
     ours = mod._forbidden_chars()
     theirs = guard_mod._forbidden_chars()

@@ -247,7 +247,7 @@ def case_guard_missing(tmp):
     """A missing guard.py fails OPEN but never silently: guard_skipped=true + a warning.
 
     Staged into a bare directory tree so the script's
-    `$SCRIPT_DIR/../../../hooks/commit-guard/guard.py` resolves to nothing.
+    `$SCRIPT_DIR/../guard.py` resolves to nothing.
     """
     stand_in = Path(tmp) / "standin" / "skills" / "task-review-cycle" / "skills" / "task-review-cycle" / "scripts"
     stand_in.mkdir(parents=True)
@@ -294,7 +294,7 @@ def case_guard_reject_leaves_index_clean(tmp):
 def case_guard_python_fallback(tmp):
     """Windows installs often ship only `python`, not `python3`.
 
-    dev/hooks.json's own commit-guard entry uses `commandWindows: python ...`,
+    guard/hooks.json's own commit-guard entry uses `commandWindows: python ...`,
     so hardcoding python3 here would silently disable BOTH guards on those
     installs while still reporting a clean commit. Simulate it with a PATH that
     exposes `python` but no `python3`.

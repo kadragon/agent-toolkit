@@ -16,6 +16,11 @@
       "description": "Personal Claude Code productivity skills by kadragon"
     },
     {
+      "name": "guard",
+      "source": "./guard",
+      "description": "Commit and memory guards, plus session-start maintenance for agent-toolkit"
+    },
+    {
       "name": "mods",
       "source": "./mods",
       "description": "Claude Code interface mods by kadragon (function hooks, early access)"

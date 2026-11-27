@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for commit-guard hook. Run: python3 test_guard.py --test"""
+"""Tests for commit-guard hook. Run: python3 scripts/ci/test_commit_guard.py"""
 
 import importlib.util
 import io
@@ -9,14 +9,15 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("guard", os.path.join(HERE, "guard.py"))
+GUARD = Path(__file__).resolve().parents[2] / "guard/hooks/commit-guard/guard.py"
+spec = importlib.util.spec_from_file_location("guard", GUARD)
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
 
@@ -159,12 +160,12 @@ os.unlink(_fpath)
 check("-F nonexistent: fail-open", run_hook("git commit -F /nonexistent/msg.txt", branch="feature/x") == 0)
 
 # --- end-to-end subprocess: malformed stdin → exit 0 -------------------------
-_r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+_r = subprocess.run([sys.executable, GUARD],
                     input="not json", text=True, capture_output=True)
 check("e2e malformed stdin exit 0", _r.returncode == 0)
 
 # --- end-to-end subprocess: non-commit → exit 0 ------------------------------
-_r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+_r = subprocess.run([sys.executable, GUARD],
                     input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "cwd": "/tmp"}),
                     text=True, capture_output=True)
 check("e2e non-commit exit 0", _r.returncode == 0)
@@ -186,14 +187,14 @@ with tempfile.TemporaryDirectory() as _d:
     })
     if _branch in ("main", "master"):
         # no marker → BLOCK
-        _r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+        _r = subprocess.run([sys.executable, GUARD],
                             input=payload_main, text=True, capture_output=True)
         check("e2e main branch no marker blocked (exit 2)", _r.returncode == 2)
 
         # write marker to AGENTS.md → ALLOW
         with open(os.path.join(_d, "AGENTS.md"), "w") as _fh:
             _fh.write("# Agents\n<!-- commit-guard: allow-main -->\n")
-        _r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+        _r = subprocess.run([sys.executable, GUARD],
                             input=payload_main, text=True, capture_output=True)
         check("e2e main branch AGENTS.md marker passes (exit 0)", _r.returncode == 0)
     else:
@@ -211,7 +212,7 @@ with tempfile.TemporaryDirectory() as _d:
         "tool_input": {"command": "git commit -m 'wip'"},
         "cwd": _d,
     })
-    _r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+    _r = subprocess.run([sys.executable, GUARD],
                         input=payload_bad, text=True, capture_output=True)
     check("e2e bad type message blocked (exit 2)", _r.returncode == 2)
 
@@ -220,7 +221,7 @@ with tempfile.TemporaryDirectory() as _d:
         "tool_input": {"command": "git commit -m '[FEAT] x'"},
         "cwd": _d,
     })
-    _r = subprocess.run([sys.executable, os.path.join(HERE, "guard.py")],
+    _r = subprocess.run([sys.executable, GUARD],
                         input=payload_good, text=True, capture_output=True)
     check("e2e valid type message passes (exit 0)", _r.returncode == 0)
 
@@ -382,7 +383,7 @@ check(
 def _section_map_names():
     import ast
 
-    src = open(os.path.join(HERE, "guard.py"), encoding="utf-8").read()
+    src = open(GUARD, encoding="utf-8").read()
     defs = {n.name for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
     lines = src.splitlines()
     if "# ---- SECTION MAP ----" not in lines:
