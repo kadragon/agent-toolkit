@@ -1,17 +1,17 @@
 ---
-description: "Scan GitHub security alerts (Dependabot, Code Scanning, Secret Scanning) for the repo in the current directory and append prioritized fix tasks to its backlog.md"
+description: "Scan the current repository's Dependabot, Code Scanning, and Secret Scanning alerts and report or queue prioritized fixes according to repository visibility and queue backend"
 allowed-tools: ["Bash", "Read", "Write"]
 ---
 
 # Security Overview
 
-Scan GitHub security alerts for the repository checked out in the current working directory, then append a prioritized `## Security Fixes` section to that repo's `backlog.md`. Other repos the user owns are out of scope.
+Scan GitHub security alerts for the current checkout's `origin` and use the matching route below. Other repositories are out of scope.
 
 Respond in user's language; technical artifacts (commits, branches, file paths) in English.
 
 ## Execution Model
 
-Single continuous flow: **Discover → Generate Tasks**.
+Single continuous flow: **Discover → Report or file fixes**.
 
 ## Phase 1: Discovery
 
@@ -28,7 +28,7 @@ SCAN_OUT=$(bash "${CLAUDE_PLUGIN_ROOT}/commands/security-overview/fetch-alerts.s
 SCAN_DIR=$(tail -1 <<<"$SCAN_OUT")
 ```
 
-Results go to a temp directory outside the repo (last output line), so alert data never lands in the working tree.
+Results go to a temp directory outside the repo (last output line), so raw alert data stays outside the working tree.
 
 For query structure, field reference, error handling → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`**.
 
@@ -44,13 +44,28 @@ Show one row for the repo:
 |------|-----------|--------------|----------------|-------|
 | repo-name | 3 (1 HIGH, 2 LOW) | 1 (1 ERROR) | 0 | 4 |
 
-Mark a feature that is not enabled as "not enabled". If `${SCAN_DIR}/.fetch-errors` exists, show it and treat zero counts as unknown, never as clean. Total zero with no fetch errors → if `backlog.md` has a `## Security Fixes` section, remove it (manual-edit check in backlog-template.md § Idempotency still applies); either way report and stop.
+Mark a feature that is not enabled as "not enabled". If `${SCAN_DIR}/.fetch-errors` exists, show it and treat zero counts as unknown. Flag truncated results per api-patterns.md. Resolve the route before making any queue change, including a zero-alert cleanup.
 
-## Phase 2: Update backlog.md
+## Phase 2: Report or file fixes
 
-Write a `## Security Fixes` section into the current repo's root `backlog.md`. Do NOT write to `tasks.md` — that file is the current Sprint Contract and is deleted at sprint close, so findings placed there are lost.
+### 2-1. Resolve the route
 
-### 2-1. Read code context
+Call `describe` with the repository root. Use the scan's resolved origin URL from `repo.txt` (or the same URL resolved during manual discovery).
+
+```bash
+QUEUE="${CLAUDE_PLUGIN_ROOT}/skills/task-next/scripts/queue_backend.py"
+REPO_ROOT=$(git rev-parse --show-toplevel) || exit 1
+REQUEST=$(jq -n --arg repo "$REPO_ROOT" '{contract: 1, repo: $repo}') || exit 1
+DESCRIBE=$(python3 "$QUEUE" describe <<<"$REQUEST") || exit 1
+```
+
+- **Public:** if `describe.visibility` is `public`, stay report-only. A github.com origin can resolve to a legacy queue. For a github.com origin with any other backend, check the origin itself with `AGENT_QUEUE_BACKEND=github python3 "$QUEUE" describe <<<"$REQUEST"` unless the route is already report-only. Require a confirmed private result from that extra check before using a legacy write path on github.com.
+- **Private GitHub issues:** if `describe.backend` is `github` and `describe.visibility` is `private`, file through `create`.
+- **Legacy backlog:** for the remaining non-public routes, use the existing `backlog.md` workflow. If `describe` fails or GitHub visibility is missing or unknown, report the alerts and the lookup failure without writing to any queue.
+
+For public results, list each alert by kind and number and give a suggested fix. Point the user to `/dev:task-new` with the kind and alert number to start a fix. Do not call `create`, save drafts, or edit `backlog.md` or `tasks.md`, even when there are zero alerts.
+
+### 2-2. Read code context
 
 Before writing fix tasks, read the relevant files:
 
@@ -67,12 +82,16 @@ Before writing fix tasks, read the relevant files:
     && DEFAULT_OK=yes
   ```
 
-  `DEFAULT_OK` not `yes` → existence is unknown: write each alert as a normal item with `(file not verified — default branch unreachable)`, never `[STALE - file deleted]`, and say so in the summary. Otherwise, per alert, `git cat-file -e "origin/HEAD:<path>"` decides existence; when it exists, read lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive from `git show "origin/HEAD:<path>"`. When it does not: do NOT dismiss via API autonomously — mark in backlog.md as `[STALE - file deleted]` and add action item `- [ ] Manually dismiss via GitHub Security tab`.
+  `DEFAULT_OK` not `yes` → existence is unknown: include `(file not verified — default branch unreachable)` in the result. Otherwise, per alert, `git cat-file -e "origin/HEAD:<path>"` decides existence; when it exists, read lines `max(1, flagged_line - 5)` through `flagged_line + 5` inclusive from `git show "origin/HEAD:<path>"`. When it does not, mark it `[STALE - file deleted]` and suggest manual dismissal in the GitHub Security tab. Never dismiss via API autonomously.
 - **Secret Scanning**: Note alert type and location. Do NOT read or display secret values.
 
-### 2-2. Write the backlog.md section
+### 2-3. File fixes and present the result
 
-Template, formatting rules, severity ordering, idempotency → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/backlog-template.md`**.
+Follow **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/backlog-template.md`** for remediation wording and the route-specific rules. Keep `tasks.md` for Sprint Contracts.
+
+**Private GitHub issues:** build one item per collected alert with its positive source `number`, using `gh-alert/<kind>/<number>` as the key and `["security"]` as labels. Use the kind names `dependabot`, `code-scanning`, and `secret-scanning`. Submit the items in a single `create` request to the same queue backend. The backend derives the hidden `<!-- gh-alert: <kind>/<number> -->` marker from the key and reuses an existing issue with that marker. Report new, reused, and failed or pending items from the response. With zero alerts, skip `create`. Report malformed alerts without a number and skip those items.
+
+**Legacy backlog:** write or replace `## Security Fixes` in the current repo's `backlog.md`, following the reference's manual-edit and rejected-item rules. With zero alerts and no fetch errors, remove an existing section subject to the manual-edit check. With fetch errors and zero collected alerts, leave the section in place.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.
@@ -81,9 +100,7 @@ Key rules:
 - If an alert's package matches an open Dependabot PR, write the PR-pointer item instead of the manual upgrade item — format → backlog-template.md.
 - An alert matching the repo's `## Rejected — do not re-file` entry is withheld unless its re-file bar is met; list it in the summary — backlog-template.md § Rejected Items.
 
-### 2-3. Present result
-
-After writing, show the repo, `backlog.md` path, and item count. Include the Withheld line for alerts held back by `## Rejected — do not re-file` (it explains any gap from the Phase 1 totals), and suggest next step.
+After a legacy write, show the repo, `backlog.md` path, and item count. Include the Withheld line for alerts held back by `## Rejected — do not re-file`.
 
 ## Error Handling
 

@@ -19,13 +19,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   Done when: each writer's prose names the backend call and keeps the `edit_file` path verbatim for `backlog`; on `github` every writer files without per-run approval, including `--auto`, dispatched and unattended runs (`harness-capture` deltas and deferred memory prunes included), and uses the pending store only on the failure path; a security finding on a `public` backend is never written to an issue or file; the advisory call is exercised once on a private test repo or recorded as unverified; `task-review-cycle/references/comment-rules.md` (the two "file under `## Review Backlog`" rules) and `late-source-reclaim.md` (the `## Review Backlog` note) are backend-neutral too
   Approach: `consolidation-guide.md` → *Recording out-of-scope and non-blocking findings* becomes backend-neutral; the rejected check reads `rejected`
 
-## 7 — security-overview on issues backend
-
-- [ ] [FEAT] Make `dev/commands/security-overview.md` backend-aware: report-only (alert numbers, no queue write) on a public GitHub repo; one `security`-labelled issue per alert with a hidden `gh-alert` marker on a private one; `backlog.md` path unchanged elsewhere
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Security findings
-  Done when: the command and `references/security-overview/backlog-template.md` state the three routes; a rescan on a private fixture creates nothing already marked; a run on a public repo writes nothing; the command's `description:`, the `README.md` command row and `references/security-overview/api-patterns.md`'s "backlog.md severity" mapping no longer say alerts always go to `backlog.md`
-  Approach: visibility from `describe`; idempotency by body marker search instead of the backlog section replace
-
 ## 8 — task-new routing on issues backend
 
 - [ ] [FEAT] Update `task-new` routing: on the issues backend, *Queue without implementing* calls `task-tickets`, which files issues directly under the standing `queue-write` grant, with no *Queue documentation cycle* and no commit-authority check, and the working-tree gate's `backlog.md` carve-out and `queue_delta` apply only on the `backlog` backend
@@ -49,7 +42,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 11 — adopt issues queue in agent-toolkit
 
-- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 6-findings-writers-on-queue-backend)* *(blocked by: 7-security-overview-on-issues-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
+- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 6-findings-writers-on-queue-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
   Source: docs/design/github-issues-queue.md → Further Notes (Bootstrap)
   Done when: `queue_backend.py list` on this repo shows no legacy-backlog warning; the rejected entries are listed by `rejected`; `validate-harness.sh` green
   Approach: dry-run first, then `--apply`

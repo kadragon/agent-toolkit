@@ -769,6 +769,10 @@ NO_QUEUE_WRITE = "no-queue-write"
 QUEUE_LIMITS = ("none", NO_QUEUE_WRITE)
 WRITE_MAX_PAGES = 100  # key index / rejected walk; 100 issues per page
 _KEY_MARKER = "<!-- queue-key: {} -->"
+_ALERT_MARKER = "<!-- gh-alert: {} -->"
+_ALERT_ID = r"(?:dependabot|code-scanning|secret-scanning)/[1-9][0-9]*"
+_ALERT_KEY_PREFIX = "gh-alert/"
+_ALERT_MARKER_RE = re.compile(r"^<!-- gh-alert: (" + _ALERT_ID + r") -->\r?$", re.MULTILINE)
 # the marker create appends on its own last line; a body quoting the syntax earlier never wins
 _KEY_RE = re.compile(r"^<!-- queue-key: (.+?) -->\r?$", re.MULTILINE)
 _REJECT_MARKER = "<!-- queue-rejected -->"
@@ -861,7 +865,7 @@ def _node_key(repo_name: str, number: int) -> tuple[str, int]:
 
 
 def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -> dict[str, dict]:
-    """{queue-key: issue} over every issue (open or closed) a trusted author filed with a key."""
+    """Index ordinary queue keys and security alert markers on open or closed issues."""
     index: dict[str, dict] = {}
     after = None
     for _ in range(max_pages):
@@ -870,9 +874,14 @@ def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -
             raise GhUnavailable("GitHub GraphQL error: " + "; ".join(errors))
         conn = _repository(data, owner, name)["issues"]
         for issue in conn["nodes"]:
-            keys = _KEY_RE.findall(issue.get("body") or "")
-            if keys and issue.get("authorAssociation") in TRUSTED_AUTHORS:
+            if issue.get("authorAssociation") not in TRUSTED_AUTHORS:
+                continue
+            body = issue.get("body") or ""
+            keys = _KEY_RE.findall(body)
+            if keys and not keys[-1].startswith(_ALERT_KEY_PREFIX):
                 index.setdefault(keys[-1], issue)
+            for alert in _ALERT_MARKER_RE.findall(body):
+                index.setdefault(_ALERT_KEY_PREFIX + alert, issue)
         if not conn["pageInfo"]["hasNextPage"]:
             return index
         after = conn["pageInfo"]["endCursor"]
@@ -908,6 +917,11 @@ def _validate_items(items: object) -> list[dict]:
             raise QueueError(f"item {key!r}: parent_key must be a key or ref")
         if key == parent or key in blocked:
             raise QueueError(f"item {key!r} names itself as its parent or blocker")
+        if key.startswith(_ALERT_KEY_PREFIX):
+            if not re.fullmatch(_ALERT_ID, key.removeprefix(_ALERT_KEY_PREFIX)):
+                raise QueueError(f"invalid GitHub alert key {key!r}")
+            if parent or blocked or "security" not in labels:
+                raise QueueError(f"alert {key!r} needs the security label and no queue relations")
         out.append({"key": key, "title": title, "body": body or "", "labels": labels,
                     "parent_key": parent, "blocked_by": blocked})
     return out
@@ -1000,6 +1014,13 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
         batch = {i["key"] for i in items}
         ready = []
         for item in items:
+            key = item["key"]
+            if key.startswith(_ALERT_KEY_PREFIX) and key in index:
+                found = index[key]
+                result["created"].append({"key": key, "ref": f"#{found['number']}", "url": found["url"],
+                                          "reused": True})
+                result["done"].add(key)
+                continue
             unknown = [t for t in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]
                        if not (_ISSUE_REF_RE.match(t) or t in batch or t in index)]
             if unknown and not from_store:
@@ -1010,6 +1031,8 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                                              "error": "not a batch key, a known queue-key or an issue ref"})
                 continue
             ready.append(item)
+        if not ready:
+            return result
         ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in ready for x in i["labels"]])
         issues: dict[str, dict] = {}
         for item in ready:
@@ -1020,7 +1043,10 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                 # relation landed, so selection never offers it before its blockers are recorded.
                 linked = bool(item["parent_key"] or item["blocked_by"])
                 labels = sorted(set(item["labels"]) | (set() if linked else {QUEUE_LABEL}))
-                body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + _KEY_MARKER.format(item["key"])
+                key = item["key"]
+                marker = (_ALERT_MARKER.format(key.removeprefix(_ALERT_KEY_PREFIX))
+                          if key.startswith(_ALERT_KEY_PREFIX) else _KEY_MARKER.format(key))
+                body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + marker
                 try:
                     made = _rest(runner, "POST", f"repos/{owner}/{name}/issues", {"title": item["title"], "body": body},
                                  {"labels": labels} if labels else None) or {}
@@ -1116,6 +1142,9 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
     if limits not in QUEUE_LIMITS:
         raise QueueError(f"queue_limits must be one of {', '.join(QUEUE_LIMITS)}, got {limits!r}")
     owner, name = github_slug(repo)
+    if any(item["key"].startswith(_ALERT_KEY_PREFIX) for item in items):
+        if github_visibility(runner, owner, name) != "private":
+            raise QueueError("GitHub security alerts can only be filed on a confirmed private repository")
     target = f"{owner}/{name}".lower()
     out: dict = {"created": [], "incomplete": [], "pending": []}
     res: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
@@ -1249,13 +1278,19 @@ def github_defer(req: dict, runner=gh_runner) -> dict:
     return {"ref": f"#{issue['number']}"}
 
 
+def github_visibility(runner, owner: str, name: str) -> str:
+    data = _graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name})
+    private = _repository(data, owner, name).get("isPrivate")
+    if not isinstance(private, bool):
+        return "unknown"
+    return "private" if private else "public"
+
+
 def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
     if op == "describe":
         owner, name = github_slug(req["repo"])
-        private = _repository(_graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name}),
-                              owner, name).get("isPrivate")
         return EXIT_OK, {
-            "backend": "github", "contract": CONTRACT, "visibility": "private" if private else "public",
+            "backend": "github", "contract": CONTRACT, "visibility": github_visibility(runner, owner, name),
             "ops": list(GITHUB_OPS), "close_ref_template": "Closes {ref}",
         }
     if op == "list":
@@ -1962,6 +1997,8 @@ class _FakeGitHub:
         return {"number": n, "repository": {"nameWithOwner": "owner/repo"}}
 
     def _graphql(self, query: str, v: dict) -> tuple[int, str, str]:
+        if query == DESCRIBE_QUERY:
+            return self._ok({"data": {"repository": {"isPrivate": self.private}}})
         if query == KEYS_QUERY:
             nodes = [{"id": i["id"], "number": n, "url": f"https://github.com/owner/repo/issues/{n}",
                       "body": i["body"], "authorAssociation": i["assoc"],
@@ -2040,6 +2077,38 @@ def run_github_write_tests(tmp: str, git) -> None:
     def status() -> str:
         return subprocess.run(["git", "-C", repo, "status", "--porcelain", "--ignored"], capture_output=True,
                               text=True).stdout
+
+    alerts = [
+        {"key": f"gh-alert/{kind}/7", "title": f"Review {kind} alert #7", "labels": ["security"]}
+        for kind in ("dependabot", "code-scanning", "secret-scanning")
+    ]
+    alert_req = dict(req, items=alerts)
+    gh = _FakeGitHub()
+    _, desc = handle("describe", req, {ENV_VAR: "github"}, gh)
+    _assert(desc["visibility"] == "public", "a public scan is report-only")
+    try:
+        handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    except QueueError as e:
+        _assert("confirmed private" in str(e) and not gh.writes() and not os.path.exists(store) and status() == "",
+                "even a direct create cannot write security alerts to a public repository")
+    else:
+        raise AssertionError("a public GitHub security alert create was accepted")
+
+    gh = _FakeGitHub(private=True)
+    gh.add("An already filed alert", "<!-- gh-alert: dependabot/7 -->", labels=["security"], state="CLOSED")
+    _, out = handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    _assert([i["reused"] for i in out["created"]] == [True, False, False]
+            and gh.issues[1]["labels"] == {"security"} and len(gh.issues) == 3,
+            "private filing reuses a closed marker-only issue and distinguishes kinds with the same source number")
+    _assert(all(gh.issues[n]["labels"] == {QUEUE_LABEL, "security"}
+                and gh.issues[n]["body"].endswith(f"<!-- gh-alert: {kind}/7 -->")
+                for n, kind in ((2, "code-scanning"), (3, "secret-scanning"))),
+            "new issues carry the security label and the kind/number marker")
+    gh.calls.clear()
+    _, out = handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    _assert(all(i["reused"] for i in out["created"]) and len(out["created"]) == 3
+            and not gh.writes() and not os.path.exists(store),
+            "a private rescan reuses every marker without updating issues or creating labels")
 
     gh = _FakeGitHub()
     existing = gh.add("[FEAT] earlier ticket", "<!-- queue-key: old -->")

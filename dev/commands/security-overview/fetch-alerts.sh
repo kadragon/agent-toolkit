@@ -58,6 +58,7 @@ query($owner: String!, $name: String!) {
     vulnerabilityAlerts(first: 100, states: OPEN) {
       totalCount
       nodes {
+        number
         securityVulnerability {
           package { name ecosystem }
           severity

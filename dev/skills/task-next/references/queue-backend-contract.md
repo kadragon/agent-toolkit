@@ -146,6 +146,11 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   (outside the working tree and history; every read-merge-write holds `pending.json.lock`), and
   named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
   path. A clean run writes no file.
+  - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
+    require the `security` label, no relations, and confirmed private visibility. The backend
+    writes `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
+    marker from a trusted author without updating it. `publish` also checks private visibility
+    before sending security alert drafts.
 - `publish` re-sends the stored drafts bound to the current `origin` through `create`
   (retry-safe, so an issue whose response was lost is reused and its missing relations
   completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes

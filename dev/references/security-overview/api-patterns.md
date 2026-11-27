@@ -18,6 +18,7 @@ query($owner: String!, $name: String!) {
     vulnerabilityAlerts(first: 100, states: OPEN) {
       totalCount
       nodes {
+        number
         securityVulnerability {
           package { name ecosystem }
           severity
@@ -34,6 +35,7 @@ query($owner: String!, $name: String!) {
 
 | Field | Purpose |
 |-------|---------|
+| `number` | Source alert number for reporting or filing |
 | `severity` | CRITICAL, HIGH, MODERATE, LOW |
 | `package.name` / `ecosystem` | Affected dependency and ecosystem (npm, pip, etc.) |
 | `advisory.ghsaId` | Unique advisory identifier for linking |
@@ -89,6 +91,7 @@ gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 
 | Field | Purpose |
 |-------|---------|
+| `number` | Source alert number for reporting or filing |
 | `rule.id` | Rule identifier (e.g., `js/sql-injection`) |
 | `rule.description` | Human-readable rule description |
 | `rule.severity` | error, warning, note |
@@ -98,9 +101,9 @@ gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 
 ### Severity Mapping
 
-CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Map to backlog.md severity labels as follows:
+CodeQL returns `rule.severity` as `error`, `warning`, or `note`. Use the same severity mapping for reports and queued fixes.
 
-| `rule.severity` | backlog.md severity | Notes |
+| `rule.severity` | Severity | Notes |
 |-----------------|-----------------|-------|
 | `error` | CRITICAL | Code injection, auth bypass, or similar high-impact issues |
 | `error` | HIGH | All other `error`-level rules not matching CRITICAL criteria |
@@ -122,6 +125,9 @@ Use CRITICAL for `error`-severity rules whose `rule.id` or `rule.description` re
 
 An empty array `[]` means code scanning is enabled but found no alerts. A 403/404 means it is not configured.
 
+The bundled script reads one page of up to 100 alerts per REST endpoint. If a page is full, report
+that more alerts may exist.
+
 ## Secret Scanning — REST
 
 ```bash
@@ -135,6 +141,7 @@ gh api "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
 
 | Field | Purpose |
 |-------|---------|
+| `number` | Source alert number for reporting or filing |
 | `secret_type` | Type of secret (e.g., `github_personal_access_token`) |
 | `secret_type_display_name` | Human-readable type name |
 | `locations_url` | API URL to fetch where the secret was found |
