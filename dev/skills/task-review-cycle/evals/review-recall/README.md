@@ -84,8 +84,8 @@ findings separately, and record the date, reviewer versions/mode, effort and res
 Raw outputs from earlier runs are kept in `runs/`; replace throwaway paths with `<worktree>/`
 when checking in output.
 
-Changes to a launcher, shared review guidance, `comment-rules.md`, `fixtures.tsv` or `run.sh`
-invalidate the scorecard. CI's `check-results.sh` checks the latest fingerprint and requires a
-scorecard update when the inputs differ from the PR base. CI does not
-run the authenticated engines or grade findings. On routing, model or tool changes outside
-those files, run the full set and update the scorecard even if the fingerprint stays the same.
+Rerun the evaluation when a change affects reviewer behavior, the scoring rules, or the
+fixtures. This includes routing, model, or tool changes outside the fingerprinted files.
+Run `bash check-results.sh` locally from this directory to compare the recorded fingerprint
+with the current inputs. Scorecard freshness is part of this evaluation workflow and does
+not gate PR CI.

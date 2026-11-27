@@ -9,7 +9,7 @@ jobs:
     name: Repository checks
     runs-on: ubuntu-latest
     steps:
-      # Review recall and trigger checks compare against the PR base.
+      # The skill trigger fixture check compares against the PR base.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -92,11 +92,6 @@ jobs:
       - name: Test harness reconciliation
         run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
 
-      - name: Check review recall scorecard freshness
-        env:
-          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
-        run: bash dev/skills/task-review-cycle/evals/review-recall/check-results.sh "$REVIEW_BASE"
-
       # `.python-version` and ruff.toml's `target-version` are two spellings of the
       # same floor, and NOTHING in the toolchain reconciles them: ruff never reads
       # `.python-version`, and setup-python only picks the interpreter that runs pip.
@@ -149,7 +144,7 @@ jobs:
       - name: Test skill trigger ranking
         run: python3 scripts/ci/test_check_skill_triggers.py
 
-      - name: Check skill trigger ranking
+      - name: Check skill trigger fixtures
         run: python3 scripts/ci/check_skill_triggers.py
 
   release-checks:

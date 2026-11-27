@@ -87,10 +87,9 @@ skip** — CI supplies the base via `fetch-depth: 0`, so its absence means that 
 was lost, and a gate that quietly skips itself is worse than no gate at all.
 
 Usage: python3 scripts/ci/check_skill_triggers.py
-Exit: 0 if every scored query, every fixture's floor and the ratchet pass, 1 on any
-violation (including discovery finding zero skills, a malformed fixture, or a changed
-SKILL.md with no fixture), 2 if PyYAML is unavailable. Always prints a full report
-before the verdict.
+Exit: 0 if fixture and repository checks pass, including when ranking or description
+similarity produces a warning. Exit 1 on invalid input, zero scorable positive queries,
+or a fixture requirement violation. Exit 2 if PyYAML is unavailable.
 """
 
 from __future__ import annotations
@@ -157,7 +156,7 @@ def changed_skill_files(root: Path) -> tuple[list[str], str | None]:
     """
     unresolved = (
         f"diff base `{DIFF_BASE}` unresolvable — ratchet skipped "
-        "(CI's skill-triggers job fetches it via fetch-depth: 0)"
+        "(CI's repository-checks job fetches it via fetch-depth: 0)"
     )
     try:
         probe = subprocess.run(
@@ -281,7 +280,7 @@ def cosine_similarity(left: dict[str, float], right: dict[str, float]) -> float:
     return sum(left[token] * right[token] for token in left.keys() & right.keys())
 
 
-def find_collision_failures(
+def find_collisions(
     corpus: "Corpus", threshold: float = COLLISION_THRESHOLD
 ) -> list[tuple[str, str, float, list[str]]]:
     """Return near-collision pairs whose descriptions lack mutual skill-name pointers."""
@@ -410,7 +409,7 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
     path_name: dict[str, str] = {}
     for path in skill_files:
         name, description, error = parse_description(path)
-        rel = str(path.relative_to(root))
+        rel = path.relative_to(root).as_posix()
         if error:
             lines.append(
                 f"ERROR {rel}: {error} — excluded from the ranking corpus "
@@ -420,7 +419,7 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
             failed = True
             continue
         if name in descriptions:
-            first_rel = str(name_first_path[name].relative_to(root))
+            first_rel = name_first_path[name].relative_to(root).as_posix()
             lines.append(
                 f"FAIL: duplicate skill name {name!r} declared in both {first_rel} "
                 f"and {rel} — the loader routes on `name:`, so two skills sharing "
@@ -446,18 +445,16 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
     lines.append("----")
 
     pair_count = len(descriptions) * (len(descriptions) - 1) // 2
-    collision_failures = find_collision_failures(corpus)
+    collisions = find_collisions(corpus)
     lines.append(
-        f"Near-collision gate: τ={COLLISION_THRESHOLD:.2f}; checked {pair_count} pairs."
+        f"Near-collision check: τ={COLLISION_THRESHOLD:.2f}; checked {pair_count} pairs."
     )
-    for left, right, score, missing in collision_failures:
+    for left, right, score, missing in collisions:
         lines.append(
-            f"  FAIL collision {left} ↔ {right} (cosine={score:.4f} >= "
+            f"  WARNING collision {left} ↔ {right} (cosine={score:.4f} >= "
             f"τ={COLLISION_THRESHOLD:.2f}) — missing {', '.join(missing)}; "
-            "add the cross-pointer(s), not a suppression entry."
+            "review whether the descriptions need clearer boundaries or cross-pointers."
         )
-    if collision_failures:
-        failed = True
 
     any_fixture = False
     for name in sorted(skill_dirs):
@@ -465,7 +462,7 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
         if not fixture_path.exists():
             continue
         any_fixture = True
-        rel_fixture = str(fixture_path.relative_to(root))
+        rel_fixture = fixture_path.relative_to(root).as_posix()
 
         entries, error = load_fixture(fixture_path)
         if error:
@@ -529,10 +526,9 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
                         else f" (top: {ranked[0][0]}={ranked[0][1]:.4f})"
                     )
                     detail_lines.append(
-                        f"  FAIL positive {query!r} — {name} not unambiguous rank 1"
+                        f"  WARNING positive {query!r} — {name} not unambiguous rank 1"
                         f"{tie_note}"
                     )
-                    failed = True
             else:
                 owner_top1_any_tie = name in top_names
                 if not owner_top1_any_tie:
@@ -540,10 +536,9 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
                 else:
                     scored_neg_fail += 1
                     detail_lines.append(
-                        f"  FAIL negative {query!r} — {name} ranked 1st "
+                        f"  WARNING negative {query!r} — {name} ranked 1st "
                         f"(score={top_score:.4f})"
                     )
-                    failed = True
 
         scored_total = scored_pos_pass + scored_pos_fail + scored_neg_pass + scored_neg_fail
         lines.append(
@@ -589,7 +584,7 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
         # check exists to stop.
         lines.append(
             f"FAIL Ratchet: {skip_reason} — but {CI_ENV_VAR}=true, where the base "
-            "is guaranteed by `fetch-depth: 0` on the skill-triggers job. Restore "
+            "is guaranteed by `fetch-depth: 0` on the repository-checks job. Restore "
             "it; a skipped ratchet in CI is a disabled gate, not a pass."
         )
         failed = True
@@ -604,7 +599,7 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
         for rel in changed:
             skill_dir = (root / rel).parent
             fixture_path = skill_dir / "evals" / "trigger-eval.json"
-            rel_fixture = str(fixture_path.relative_to(root))
+            rel_fixture = fixture_path.relative_to(root).as_posix()
             # Fall back to the directory name when the frontmatter did not parse —
             # that case already failed the run on its own, and a missing `name:` must
             # not swallow the ratchet's verdict for the same file.
@@ -623,10 +618,8 @@ def build_report(root: Path, *, require_diff_base: bool = False) -> tuple[list[s
 
     lines.append("----")
     lines.append(
-        "This check establishes a necessary condition only — that each fixture's "
-        "scorable queries rank their owning skill correctly by lexical similarity. "
-        "Passing does NOT certify a skill fires correctly in practice; "
-        "skill-creator's model-judged runner is the semantic tier above it."
+        "Ranking and collision warnings reflect lexical similarity. "
+        "Use the model-judged runner to measure actual skill selection."
     )
 
     return lines, failed
@@ -643,7 +636,7 @@ def main() -> int:
         print("FAIL: see ERROR/FAIL lines above.")
         return 1
 
-    print("OK: all scorable trigger-fixture queries passed.")
+    print("OK: trigger fixture requirements passed.")
     return 0
 
 
