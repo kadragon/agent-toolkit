@@ -217,6 +217,77 @@ def case_hub_merge_queue_is_not_merged(tmp):
     print("ok hub_merge_queue_is_not_merged")
 
 
+def case_merge_matches_reviewed_head(tmp):
+    case = "merge_matches_reviewed_head"
+    for remote_moved in (True, False):
+        repo, scripts = make_repo(tmp), make_script_dir(tmp)
+        shutil.copy(HUB, scripts / "hub.sh")
+        git(repo, "remote", "add", "origin", "git@github.com:o/r.git")
+        reviewed = git(repo, "rev-parse", "HEAD").stdout.strip()
+        git(repo, "checkout", "-qb", "feat/other")
+        worktree = Path(tmp) / f"pinned-worktree-{remote_moved}"
+        git(repo, "worktree", "add", "-q", str(worktree), FEATURE)
+
+        bindir = Path(tempfile.mkdtemp(dir=tmp))
+        gh = bindir / "gh"
+        gh.write_text("""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "pr merge")
+    if [[ "$5" == --match-head-commit && "$6" != "$GH_REMOTE_HEAD" ]]; then
+      echo "Head SHA changed" >&2
+      exit 1
+    fi
+    ;;
+  "pr view") echo '{"state":"MERGED","headRefName":"feat/x","isCrossRepository":false}' ;;
+esac
+""", encoding="utf-8", newline="\n")
+        gh.chmod(0o755)
+        log = bindir / "gh.log"
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
+                   GH_LOG=str(log), GH_REMOTE_HEAD="1" * 40 if remote_moved else reviewed)
+        proc = subprocess.run(
+            ["bash", str(scripts / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}',
+             str(worktree), "--expected-head", reviewed],
+            cwd=worktree, env=env, capture_output=True, text=True, check=True,
+        )
+        out = json.loads(proc.stdout)
+        calls = log.read_text(encoding="utf-8").splitlines()
+        if remote_moved:
+            if (out["merge_ok"] or "Head SHA changed" not in out["merge_output"]
+                    or not worktree.exists() or not branch_exists(repo) or len(calls) != 1):
+                fail(case, f"the remote changed after CI but merge or cleanup proceeded: {out!r}, {calls!r}")
+        elif not out["merge_ok"] or worktree.exists() or branch_exists(repo):
+            fail(case, f"matching head should merge and clean up: {out!r}, {calls!r}")
+        if calls[0] != f"pr merge 1 --squash --match-head-commit {reviewed}":
+            fail(case, f"the reviewed SHA did not reach the merge command: {calls!r}")
+    print("ok merge matches the reviewed head and preserves recovery when it moves")
+
+
+def case_forgejo_expected_head_is_rejected(tmp):
+    case = "forgejo_expected_head_is_rejected"
+    repo = make_repo(tmp)
+    git(repo, "remote", "add", "origin", "https://forgejo.example/o/r.git")
+    bindir = Path(tempfile.mkdtemp(dir=tmp))
+    log = bindir / "curl.log"
+    curl = bindir / "curl"
+    curl.write_text("#!/usr/bin/env bash\necho called >> \"$CURL_LOG\"\nprintf '{}\\n200'\n",
+                    encoding="utf-8", newline="\n")
+    curl.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
+               FORGEJO_TOKEN="stub", CURL_LOG=str(log))
+    args = ["bash", str(HUB), "merge", "1", "squash", FEATURE]
+    reviewed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    proc = subprocess.run(args + [reviewed], cwd=repo, env=env, capture_output=True, text=True, check=True)
+    out = json.loads(proc.stdout)
+    if out["merge_ok"] or log.exists():
+        fail(case, f"the hub allowed an explicitly pinned Forgejo merge: {out!r}")
+    proc = subprocess.run(args, cwd=repo, env=env, capture_output=True, text=True, check=True)
+    if not json.loads(proc.stdout)["merge_ok"] or not log.exists():
+        fail(case, f"the existing Forgejo merge no longer reaches the API: {proc.stdout!r}")
+    print("ok Forgejo keeps its existing merge and rejects an explicit GitHub-only SHA pin")
+
+
 def case_hub_ref_is_encoded_and_failure_reported(tmp):
     # A raw `#` or `%` in the ref would target a different path; `/` separates segments.
     view = {"state": "MERGED", "headRefName": "feat/a#b%c", "isCrossRepository": False}
@@ -420,6 +491,8 @@ def main():
         case_base_checkout_fails(tmp)
         case_hub_remote_delete_when(tmp)
         case_hub_merge_queue_is_not_merged(tmp)
+        case_merge_matches_reviewed_head(tmp)
+        case_forgejo_expected_head_is_rejected(tmp)
         case_hub_ref_is_encoded_and_failure_reported(tmp)
         case_cleanup_reports_queued(tmp)
         case_run_from_inside_worktree(tmp)

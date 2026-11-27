@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.16.0
+version: 1.17.0
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -48,9 +48,10 @@ BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
 CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
+jq -r '.hub_type' <<<"$PREFLIGHT" >&2
 ```
 
-Stop on missing scripts or `has_errors: true`. Substitute the Setup values in later blocks.
+Stop on missing scripts or `has_errors: true`. Carry the printed hub type into the CI wait.
 
 ## Step 1: Commit, route, PR
 
@@ -221,16 +222,15 @@ never reset hard; recover within established authority. Lite is done only once t
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
 pushed a merge of base, reapplied the bump and file-queue CHANGELOG entries, and restarted CI. `conflict`/`denied`/`error` →
 stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
-Apply *Final verification* to the resulting hub candidate, then resolve the merge helper.
-Issue the merge as a second, separate command
-starting with the printed path — no `bash` prefix, no variable: the only shape an auto-mode allow
-rule matches. Exit 126/127 → stop and report; never retry as `bash <path>`:
+Apply *Final verification* to the resulting candidate, then resolve the merge helper.
+On GitHub, append `--expected-head <REVIEWED_HEAD>` after the optional worktree path.
+Issue the merge separately, starting with the literal printed path to match the auto-mode rule.
+Exit 126/127 → stop and report; never retry as `bash <path>`:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] && echo "$SKILL_DIR/scripts/merge-and-cleanup.sh" || { echo "Bundled merge helper not executable" >&2; exit 1; }
-# second command:
-<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>'
+<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [<WORKTREE_PATH>] [--expected-head <REVIEWED_HEAD>]
 ```
 
 ## Error handling
