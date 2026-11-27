@@ -3,7 +3,7 @@
 
 Usage:
   python3 migrate_backlog.py [--repo PATH] [--json]            # dry run (default): print the plan
-  python3 migrate_backlog.py [--repo PATH] --apply [--json]    # file the issues, delete confirmed lines
+  python3 migrate_backlog.py [--repo PATH] --apply [--keep-file] [--json]
   python3 migrate_backlog.py --test
 
 Mapping (docs/design/github-issues-queue.md → Migration):
@@ -30,7 +30,7 @@ comment with the item when editing it between attempts so a retry can find the i
 report any content discrepancy. `--apply` files under the standing `queue-write` grant, then deletes a backlog.md line only
 once its issue exists and every parent/blocker relation it needs is confirmed; unconfirmed lines
 stay. The deletion is a working-tree change for the user to commit; the file is deleted when only
-headings remain.
+headings remain unless `--keep-file` was passed.
 
 Exit: 0 = dry run printed, or every planned line migrated (refused lines are listed, not an error);
 1 = error; 3 = --apply left unconfirmed lines in backlog.md (re-run to finish).
@@ -537,7 +537,7 @@ def _deletable(plan: dict, confirmed: set[str]) -> set[str]:
     return {k for k in confirmed if k not in keep}
 
 
-def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
+def apply_plan(repo: str, plan: dict, runner=qb.gh_runner, *, keep_file: bool = False) -> dict:
     path = os.path.join(repo, "backlog.md")
     held = [r for r in plan["refused"] if bc._CHECKBOX_RE.match(r["source"].strip())]
     if held:
@@ -626,7 +626,7 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
                        "reason": "issue or relation not confirmed" if i["key"] not in confirmed
                        else "filed; kept until the items it groups or blocks are confirmed"}
                       for i in plan["issues"] if i["kind"] != "parent" and i["key"] not in deletable]
-    if _only_headings(new_text):
+    if not keep_file and _only_headings(new_text):
         _check_source(path, text)
         os.remove(path)
         report["file_deleted"] = True
@@ -685,11 +685,11 @@ def _opt(argv: list[str], name: str) -> str | None:
 def main(argv: list[str], runner=qb.gh_runner) -> int:
     if argv[:1] == ["--test"]:
         return run_tests()
-    known = {"--apply", "--json", "--repo"}
+    known = {"--apply", "--keep-file", "--json", "--repo"}
     unknown = [a for i, a in enumerate(argv) if a.startswith("--") and a not in known]
     if unknown:
         sys.stderr.write(f"migrate_backlog: unknown option {unknown[0]}\nusage: migrate_backlog.py "
-                         "[--repo PATH] [--apply] [--json] | --test\n")
+                         "[--repo PATH] [--apply [--keep-file]] [--json] | --test\n")
         return EXIT_ERROR
     try:
         repo = _opt(argv, "--repo") or qb._git(os.getcwd(), "rev-parse", "--show-toplevel")
@@ -715,7 +715,7 @@ def main(argv: list[str], runner=qb.gh_runner) -> int:
                 print(render_plan(plan, f"{owner}/{name}", path))
                 print("\nDry run: nothing was filed. Check the plan against backlog.md, then re-run with --apply.")
             return EXIT_OK
-        report = apply_plan(repo, plan, runner)
+        report = apply_plan(repo, plan, runner, keep_file="--keep-file" in argv)
     except (MigrateError, qb.QueueError) as e:
         sys.stderr.write(f"migrate_backlog: {e}\n")
         return EXIT_ERROR
@@ -1126,6 +1126,14 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     gh = _FakeGh()
     report = apply_plan(repo, build_plan(read(path), "public"), gh)
     _assert(report["file_deleted"] and not os.path.exists(path), "nothing left → backlog.md is deleted, [x] lines too")
+
+    repo = make_repo(tmp, "keep-file", "git@github.com:owner/repo.git", "# Backlog\n\n## Now\n\n- [ ] Move this task\n")
+    path = os.path.join(repo, "backlog.md")
+    gh = _FakeGh()
+    code = quiet(main, ["--repo", repo, "--apply", "--keep-file"], runner=gh)
+    _assert(code == EXIT_OK and _only_headings(read(path)) and len(gh.issues) == 1
+            and all(qb.QUEUE_LABEL in issue["labels"] for issue in gh.issues.values()),
+            "--keep-file migrates and prunes the queue while retaining the file for separate approval")
     write(path, "# Backlog\n\n- [ ] [FEAT] Moving target\n")
     plan = build_plan(read(path), "public")
     write(path, "# Backlog\n\n- [ ] [FEAT] Moving target\n- [ ] [FEAT] added meanwhile\n")
