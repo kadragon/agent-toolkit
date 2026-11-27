@@ -5,7 +5,7 @@
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT
-                     [--git-limits LIMITS] [--no-git-writes]
+                     [--git-limits LIMITS] [--git-grant-recorded | --no-git-writes]
                      [--review-transfer-approval APPROVAL]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
@@ -457,6 +457,12 @@ def first_prompt(cli, message, handoff):
               "<dispatch-handoff>\n"
               f"{json.dumps(fields, ensure_ascii=False, indent=2)}\n"
               "</dispatch-handoff>")
+    if "additional_git_limits" in handoff and handoff["work_kind"] != "standalone":
+        prompt += (
+            "\n\nHonor Additional Git limits (verbatim) from intake, including worktree preparation. "
+            "Quote them in a separate section of the Sprint Contract for handoff and resume. "
+            "Keep the Git limits field set to implementation-only."
+        )
     invocation, *body = message.lstrip().splitlines()
     if (handoff["work_kind"] == "queue" and invocation.split()[:2] == [commands[0], "--tree"]
             and any(line.startswith("Dispatch mode: parallel-worktree") for line in body)):
@@ -507,15 +513,20 @@ def launch_handoff(args, cwd):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
     limits = " ".join((args.git_limits or "").casefold().split())
-    no_authority = limits in {"", "not specified", "unknown", "implementation-only"}
+    standard_limits = limits in {"none", "no-push", "pr-only"}
+    grant_recorded = getattr(args, "git_grant_recorded", False)
+    no_authority = limits.rstrip(" .!?") in {
+        "", "-", "n/a", "not specified", "tbd", "unknown", "unknown limits", "implementation-only",
+    }
     if getattr(args, "no_git_writes", False):
-        if limits in {"none", "no-push", "pr-only"}:
+        if standard_limits:
             raise SystemExit("--no-git-writes conflicts with --git-limits that describe a Git grant")
         handoff["git_limits"] = "implementation-only"
         if not no_authority:
             handoff["additional_git_limits"] = args.git_limits
-    elif handoff["work_kind"] in {"queue", "new"} and no_authority:
+    elif handoff["work_kind"] in {"queue", "new"} and (no_authority or not (standard_limits or grant_recorded)):
         raise SystemExit("--git-limits must carry a verified user grant; "
+                         "use --git-grant-recorded with a verbatim free-form grant, or "
                          "use --no-git-writes for implementation-only work")
     elif not limits:
         raise SystemExit("--git-limits must not be blank")
@@ -1726,7 +1737,10 @@ def main(argv):
     launch_parser.add_argument("--request", required=True, help="verbatim original user request")
     launch_parser.add_argument("--unit", required=True, help="assigned unit")
     launch_parser.add_argument("--git-limits", help="verbatim Git grant and limits (required unless --no-git-writes)")
-    launch_parser.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
+    git_mode = launch_parser.add_mutually_exclusive_group()
+    git_mode.add_argument("--git-grant-recorded", action="store_true",
+                          help="confirm that free-form --git-limits records the verified user grant")
+    git_mode.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
