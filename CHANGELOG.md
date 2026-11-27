@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Add the queue backend resolver and its built-in backlog backend (dev v4.12.31) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Record the GitHub Issues queue backend spec and 11 tickets (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Keep a status band countdown from regressing on out-of-order steps or a late /clear (mods v1.1.9) (2026-11-26)
 - [done] Keep the status band's cache and install picks tied to the right model and project (mods v1.1.8) (2026-11-26)
