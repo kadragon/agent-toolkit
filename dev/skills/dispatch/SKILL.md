@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.9.0
+version: 2.9.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`) or T3 Code orchestration. Use when the user asks to
@@ -60,7 +60,7 @@ Forward only workflows the human requested. In separate-worktree prompts, add
 Children verify authority before Git writes or nested delegation and stop separate PRs at ready
 before base merge. Hold if the CLI cannot carry the handoff fields.
 
-`/dev:task-next` needs `backlog.md`. If missing, tell the user and offer `/dev:task-new`.
+`/dev:task-next` needs a queue. When `pick` reports none, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
 
 ## 3. Pick CLI, model and effort
@@ -117,9 +117,9 @@ that edits no file may start one lower (`haiku/low`, `luna/medium`); `max`/`ultr
 
 - For `task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`. Add
   `--full-scan` for batches, known unattended runs, or an unclear selection. Add `--tree` for
-  worktrees; it reads local `origin/HEAD` without fetching. Read stderr and the relevant criteria.
-  Size for the hardest eligible candidate in scope, or estimate an unattended single run from the
-  first full-scan result. The child owns final selection and unattended limits.
+  worktrees; it reads local `origin/HEAD` without fetching. Read stderr (warnings, claims) and the
+  relevant criteria. Size for the hardest eligible candidate in scope, or estimate an unattended
+  single run from the first full-scan result. The child owns final selection and unattended limits.
 - Effort is fixed per session (the model scales thinking per turn within it); each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
   an escalated task launches, read `references/escalation.md` for the ladder and the relaunch.
