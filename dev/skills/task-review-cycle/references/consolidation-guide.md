@@ -118,6 +118,33 @@ Finalize dispositions and update the PR's `Verification:` section from final evi
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
 the final evidence in the merge commit message before retiring the archive.
 
+## Dispatch pre-merge report
+
+Dispatched Codex task cycles require the hub's Claude primary and the agy and Codex panel
+sources. Use their consolidated outcomes from Step 3 and late reclaim. Self-grading and the
+advisory comments pass do not satisfy the primary slot. A missing source blocks ready even if
+the diff and CI are clean. Keep a pending process running and preserve its result path for
+resume. Follow the existing review budget when reclaiming the result.
+
+After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
+dispatch script. Use the assigned path from the handoff. Include the usual head, PR, CI and
+evidence fields. Set `review_sources` to an object with the keys `claude`, `agy` and `codex`.
+Use `"complete"` only for a completed, consolidated independent result. Otherwise give the
+reason, such as `"approval denied"`, `"policy excluded"` or `"still running"`.
+
+```bash
+DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
+RESULT="<assigned result.json path>"
+python3 -I "$DISPATCH" report-review "$RESULT" <<'REPORT_JSON'
+{"status":"ready","phase":"review","summary":"Final checks passed","review_sources":{"claude":"complete","agy":"still running","codex":"complete"}}
+REPORT_JSON
+```
+
+Provide `status: ready` as the candidate outcome when the remaining gates pass. The helper
+writes `blocked` with the missing reviewers and reasons in this example. If another gate failed,
+pass `status: blocked` and state that blocker as well. Home collection checks a Codex task
+receipt's ready report again before handing it to the merge owner.
+
 ## Record finding dispositions
 
 Use `cycle_state.py note`, the same channel as `Review send-back`. The disposition categories

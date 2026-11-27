@@ -49,6 +49,55 @@ Sources: [Codex local marketplaces](https://developers.openai.com/plugins/build/
 [native hook trust](https://learn.chatgpt.com/docs/hooks), and
 [Herdr JSON-RPC](https://github.com/herdrdev/herdr-core/blob/master/schema/README.md#connecting).
 
+## Approval checks before a wave
+
+Codex dispatch starts the CLI with `--approve-for-me`. The auto-reviewer decides eligible
+approval requests. A Git grant, a public repo and hook trust do not grant transfer to a
+review provider. Before dispatch, capture the user's approval for the target repository,
+the review data (diff, relevant source, Sprint Contract and `REVIEW.md` where applicable)
+and each authorized engine or account. Forward the approval verbatim in the request or
+in the [configured handoff](launch-handoff.md), with its source. The child checks that approval
+against the repo's data-sharing policy before each reviewer call. Mention the authorized data
+and destination in any escalation. A rejected transfer remains blocked and must not be retried
+through another interface.
+
+For approvals that need human review, an operator may use `approvals_reviewer = "user"` with
+`approval_policy = "on-request"`, when managed policy permits. This changes who handles an
+approval, while rules determine which command prefixes can run without one. With dispatch's
+`--approve-for-me` still active, do not assume a user-level setting takes precedence. Verify the
+effective launch configuration. An operator-approved rule for an immutable, reviewed launcher
+can match its literal path and fixed arguments. Limit review-script rules to the approved repo
+and data scope the launcher enforces. Leave the generic interpreters and reviewer CLIs under
+the normal approval policy. End-to-end reviewer approval through the dispatched child is
+unverified.
+
+For routine commands, use the sandbox for local `git status`, `git log`, `git show`,
+`git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
+For approved network reads, the operator can add a `.rules` file under an active Codex
+config layer's `rules/` directory and restart the child. Use a trusted project layer for
+repository-specific rules. For example, if `origin` is the approved remote:
+
+```python
+prefix_rule(pattern=["git", "fetch", "origin"], decision="allow")
+prefix_rule(pattern=["gh", "pr", ["view", "checks"], "--repo", "kadragon/agent-toolkit"], decision="allow")
+```
+
+`git fetch` writes local remote-tracking state. Prefix matches also allow trailing arguments.
+Review these rules against the commands and repository settings used by the child. Use the
+shown token order and the tool's working directory argument for direct tool calls. Codex
+evaluates the outer invocation for scripts, so a rule for `gh pr checks` does not pre-approve
+a CI script that calls it. Keep `git push`, PR writes and generic shell or filesystem commands
+outside these rules.
+
+`codex execpolicy check --rules <file> -- git fetch origin` shows the matched rule and
+decision. Check the intended invocations and nearby writes such as `git push origin` and
+`gh pr create` before enabling a rule. Rule matching was verified with Codex CLI 0.172.0.
+A dispatched run using these rules through PR creation without routine approval requests is
+unverified. Check that in the child's transcript when enabling the rules for a wave.
+
+Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
+[configuration reference](https://developers.openai.com/codex/config-reference).
+
 ## Hook trust at launch
 
 On the shared cache, Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex

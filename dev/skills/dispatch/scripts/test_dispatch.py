@@ -391,6 +391,7 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertNotIn("handoff", payload)
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
+            self.assertTrue(receipt["require_review_sources"])
             self.assertFalse(receipt["sent"])
             self.assertEqual(receipt["quota_snapshot"], snapshot)
             self.assertEqual(receipt["bias"], "claude")
@@ -541,6 +542,54 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_blocks_ready_until_every_required_review_completes(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        cases = (
+            (None, ("claude", "agy", "codex", "no completed result")),
+            ({"claude": "approval denied", "agy": "still running", "codex": "complete"},
+             ("claude", "approval denied", "agy", "still running")),
+            ({"claude": "complete", "agy": "complete", "codex": "complete"}, ()),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**self.RECEIPT, "require_review_sources": True}), encoding="utf-8")
+            for sources, blockers in cases:
+                with self.subTest(sources=sources):
+                    result = {"status": "ready", "phase": "review", "summary": "CI passed", "pr": "example-pr"}
+                    if sources is not None:
+                        result["review_sources"] = sources
+                    write_json(receipt.with_name("result.json"), result)
+                    output = StringIO()
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
+                        collect(SimpleNamespace(run=receipt, close=False))
+                    reported = json.loads(output.getvalue())["result"]
+                    self.assertEqual(reported["status"], "blocked" if blockers else "ready")
+                    self.assertEqual(reported["pr"], "example-pr")
+                    for blocker in blockers:
+                        self.assertIn(blocker, reported["summary"])
+
+    def test_report_review_writes_missing_source_reason_to_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            result = {
+                "status": "ready", "phase": "review", "summary": "CI passed",
+                "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"},
+                "ci": "success",
+            }
+            for outcome, status, summary in (
+                ("still running", "blocked", "agy: still running"),
+                ("complete", "ready", "CI passed"),
+            ):
+                with self.subTest(outcome=outcome):
+                    result["review_sources"]["agy"] = outcome
+                    subprocess.run(
+                        [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        input=json.dumps(result), text=True, check=True, capture_output=True,
+                    )
+                    self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                                     {**result, "status": status, "summary": summary})
+                    self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2289,12 +2338,12 @@ class CodexSendTests(DispatchTestCase):
                            "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
                            "Hook approval required for the local workflow."]
             handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
-            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff, "require_review_sources": True}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
             expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
                         + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
-                        + report_instruction(receipt.resolve().with_name("result.json")))
+                        + report_instruction(receipt.resolve().with_name("result.json"), require_review_sources=True))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
@@ -2308,6 +2357,7 @@ class CodexSendTests(DispatchTestCase):
             self.assertTrue(transcript_echoed(echoed, prompt))
             self.assertEqual(codex_screen(echoed), "ready")
             self.assertEqual(prompt, expected)
+            self.assertIn("dispatch.py report-review", prompt)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):
