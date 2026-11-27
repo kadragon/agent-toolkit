@@ -22,9 +22,20 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Prerequisites
 
+**Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
+applying the working-tree gate:
+
+```bash
+git fetch origin || exit 1
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
+BASE_SHA=$(git rev-parse --verify "$BASE^{commit}") || exit 1
+echo "base: $BASE  selecting from: $BASE_SHA"
+```
+
 **Queue backend.** Every queue read goes through `scripts/queue_backend.py`
-(`references/queue-backend-contract.md`); resolve the backend once, first — under `--tree`, right
-after Step 1 pins `BASE_SHA`, with `REF="$BASE_SHA"`, so it resolves against the same base
+(`references/queue-backend-contract.md`). Resolve it once before applying the working-tree gate.
+Under `--tree`, set `REF` to the pinned `BASE_SHA`, so it resolves against the same base
 `backlog.md` the `list` calls read (this checkout's copy may differ):
 
 ```bash
@@ -46,8 +57,8 @@ never falls back to `backlog.md`). Every rule below that names `backlog.md` line
 non-empty: `github`, or an adapter that closes through a keyword) takes the branch stated beside it.
 
 **Required:** on `backlog`, `backlog.md`. Missing → stop and point to `dev:harness-init`. Under `--tree`, this
-checkout's copy does not count: defer the check to right after Step 1 pins `BASE_SHA`, and test the
-base commit's copy (`git cat-file -e "$BASE_SHA:backlog.md"`); missing there → stop with the same
+checkout's copy does not count: test the pinned base commit's copy
+(`git cat-file -e "$BASE_SHA:backlog.md"`); missing there → stop with the same
 pointer. The issues backend needs no queue file. Read `docs/conventions.md` when present; when absent the linter is the authority.
 
 **Working tree gate.** Capture the state before judging dirty files:
@@ -115,21 +126,13 @@ Exit 1 → relay stderr and stop. Each candidate is `ref`, `title`, `tag`, `item
 on the issues backend also `item_refs[]` (parallel to `items[]`) and `excluded[]` (sub-issues left
 out, with the reason — name them in the plan).
 
-`--tree` selects from the base commit it will branch from, not this checkout: pin it first, then
-set `REF="$BASE_SHA"`, so on `backlog` both files are read as committed there and claims are
+`--tree` selects from the pinned base commit it will branch from. Use `REF="$BASE_SHA"` from
+*Prerequisites*, so on `backlog` both files are read as committed there and claims are
 measured against it (this checkout's own `## Covers` and pruned lines included); on the issues
 backend `ref` pins only the branch base and adds this checkout's own `## Covers` to the claims. On
 `backlog`, read the selected lines in Steps 2–3 from the same commit (`git show
 "$BASE_SHA:backlog.md"`). Hand the printed SHA to `references/tree.md` → *Branch* — a later fetch
 must not move the worktree off the queue it was selected from.
-
-```bash
-git fetch origin || exit 1
-BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
-  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-BASE_SHA=$(git rev-parse --verify "$BASE^{commit}") || exit 1
-echo "base: $BASE  selecting from: $BASE_SHA"
-```
 
 The backend owns selection. On `backlog`: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items, items another

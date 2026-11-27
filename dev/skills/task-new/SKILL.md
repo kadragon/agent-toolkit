@@ -17,12 +17,12 @@ route to `task-next`.
 
 ## Prerequisites
 
-Resolve the checkout's queue backend with `queue_backend.py describe` using
-`../task-next/SKILL.md` → *Prerequisites* (set `SKILL_DIR` to the task-next skill directory and
-leave `REF` empty for intake, including `--tree`). Use the resolved queue to check whether the
-request is already tracked. Read `docs/conventions.md` when present. On `backlog`, read
-`backlog.md` when present and create it only if writing tickets or findings. A standalone
-task needs neither a backlog file nor harness initialization.
+Resolve the queue with `queue_backend.py describe` using `../task-next/SKILL.md` →
+*Prerequisites*. Set `SKILL_DIR` to the task-next skill directory. Under `--tree` with an
+`origin`, pin `BASE_SHA` there first and set `REF` to it for `describe` and `list`. Otherwise
+leave `REF` empty. Use the resolved queue to check whether the request is already tracked.
+Read `docs/conventions.md` when present. On `backlog`, only create `backlog.md` when writing
+tickets or findings. A standalone task needs neither a backlog file nor harness initialization.
 
 **Working tree gate** — apply `../task-next/SKILL.md` → *Working tree gate* with the
 resolved `BACKEND`: its capture block, then its table rows in order.
@@ -59,11 +59,12 @@ can still be too large for one contract.
     change the destination. If an issues backend returns `edit_file`, stop and report the
     mismatch before editing. Report the ticketing result and stop. This route skips the
     commit-authority check and *Queue documentation cycle*, including on a parallel dispatch.
-  - Dispatched `--tree` on `backlog` → verify commit authority for the queue edit from the
+  - Dispatched on `backlog` → verify commit authority for the queue edit from the
     forwarded human request and Git limits per `../task-next/references/git-authorization.md`.
-    If established, take *Queue documentation cycle* below. Otherwise report the blocker and
-    stop before writing.
-  - Other runs on `backlog` → call the Skill tool with "dev:task-tickets" on the request,
+    If established, take *Queue documentation cycle* below. If missing under `--tree`, report
+    the blocker and stop before writing. If missing without `--tree`, use the ticket-only
+    route below.
+  - Ticket-only route on `backlog` → call the Skill tool with "dev:task-tickets" on the request,
     then stop after writing the tickets.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
@@ -83,8 +84,13 @@ user to re-invoke (or queue them for `task-next --all`).
 
 ### Queue documentation cycle
 
-On `backlog`, use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording the assigned
-tickets, with the verified Git authority and limits. Apply `--tree` for checkout isolation
+With an `origin`, use the base pinned at intake or pin it now per
+`../task-next/SKILL.md` → *Prerequisites*. If intake used the working tree, run `describe`
+against this base before opening the cycle. If it resolves an issues backend, use the issues
+route under **Queue without implementing**. Use the pinned SHA for any worktree this cycle creates.
+
+On `backlog`, use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording
+the assigned tickets, with the verified Git authority and limits. Apply `--tree` for checkout isolation
 only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's checkout.
 Keep the selected backend for that call by setting `AGENT_QUEUE_BACKEND=backlog` on its queue
 commands if the cycle uses a separate checkout.
@@ -111,7 +117,7 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 
 - **Branch** — no stdin; pass `--tag <TYPE>` from Step 1. `--tree` → replace the block with
   `../task-next/references/tree.md` → *Branch*, swapping its piped item lines for `--tag <TYPE>`
-  and an empty `BASE_SHA` (it pins `origin/HEAD`'s commit, levels the local base only when this checkout is clean
+  and the `BASE_SHA` from intake when available (it levels the local base only when this checkout is clean
   on it, and leaves this checkout's branch and uncommitted edits untouched), then run the whole
   cycle as a `cycle.md` → *Worktree cycle* from any branch or dirty state (the gate's `--tree` row). Nothing is claimed: no `tasks.md`, and a free-text request is not on the queue.
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no

@@ -24,7 +24,7 @@ rc=$?
 [[ -n "$BRANCH" ]] || { echo "branch derivation failed — see stderr above" >&2; exit 1; }
 # exit 3 (this checkout is off the base) is fine here: --tree never touches this checkout
 [[ $rc -eq 0 || $rc -eq 3 ]] || { echo "branch exited $rc — see stderr above" >&2; exit 1; }
-# the commit Step 1 selected from (task-next), or empty (task-new: no selection) → pin it here
+# the commit pinned for task-next selection or task-new intake, or empty when unpinned
 BASE_SHA="<the SHA Step 1 printed, or empty>"
 BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
   || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
