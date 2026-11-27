@@ -33,7 +33,7 @@ Once you have decided to delegate, `docs/delegation.md` covers *how* — role ro
 | Role | Fits | Model |
 |------|------|-------|
 | Claude Code `Explore` / Codex `explorer` (built-ins) | Read-only map of an unfamiliar plugin area | Platform default |
-| implementer | A `backlog.md` item with a Sprint Contract | sonnet |
+| implementer | A queue issue with a Sprint Contract | sonnet |
 | qa-verifier | Verifying work a *different* agent implemented | sonnet |
 | skill-evaluator | Skill quality assessment | opus |
 

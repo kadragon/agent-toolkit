@@ -193,8 +193,7 @@ scope for every rule on this page — do not rewrite their notation.
 
 ## Classification — `dev/`
 
-The single source the `backlog.md` migration items apply. **Both halves are in force**: each
-skill marked `user` below carries `disable-model-invocation: true` in its `SKILL.md` and
+Each skill marked `user` below carries `disable-model-invocation: true` in its `SKILL.md` and
 `policy.allow_implicit_invocation: false` in its `agents/openai.yaml`. `prod/` skills (`hwpx`, `persona-debate`, `repo-quiz`)
 are all model-invoked, which is the default, so they carry no fields and need no change.
 
