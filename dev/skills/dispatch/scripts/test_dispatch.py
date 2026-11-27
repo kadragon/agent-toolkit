@@ -374,11 +374,25 @@ class DispatchReceiptTests(unittest.TestCase):
                 self.assertIsNone(receipt["created_ms"])
                 with self.assertRaisesRegex(SystemExit, "identity unconfirmed"):
                     verify_terminal(dict(receipt), self.TERMINAL)  # created before the launch
-                with self.assertRaisesRegex(SystemExit, "identity unconfirmed"):
-                    verify_terminal(dict(receipt), {**self.TERMINAL, "parent": "t9", "created_ms": 2**62})
-                fresh = {**self.TERMINAL, "created_ms": receipt["launched_ms"] + 5}
+                fresh = {**self.TERMINAL, "name": receipt["name"], "created_ms": receipt["launched_ms"] + 5}
+                for other in ({"parent": "t9"}, {"name": "sibling"}):
+                    with self.assertRaisesRegex(SystemExit, "identity unconfirmed"):
+                        verify_terminal(dict(receipt), {**fresh, **other})
                 verify_terminal(receipt, fresh)
                 self.assertEqual(receipt["created_ms"], fresh["created_ms"])
+
+    def test_collect_saves_the_identity_adopted_after_a_failed_launch_lookup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.json"
+            path.write_text(json.dumps({
+                "name": "repo", "address": "t7", "parent": "t6", "created_ms": None, "launched_ms": 100,
+                "cli": "claude", "model": "opus", "effort": "high", "sent": True, "screen_reads": 0,
+            }), encoding="utf-8")
+            terminal = {**self.TERMINAL, "name": "repo", "created_ms": 150,
+                        "status": {"state": "working"}}
+            with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()):
+                collect(SimpleNamespace(run=str(path), close=False, force=False, stall_minutes=30))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["created_ms"], 150)
 
     def test_launch_without_an_address_from_hc_run_says_not_to_retry(self):
         args = self.launch_args(Path.cwd())
@@ -392,6 +406,14 @@ class DispatchReceiptTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "no terminal address.*do not retry"):
                 launch(args)
             submit.assert_not_called()
+        failed = subprocess.TimeoutExpired(["hc", "run"], 30)
+        with tempfile.TemporaryDirectory() as directory, (
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+        ), patch("dispatch.subprocess.run", side_effect=[SimpleNamespace(stdout=""), failed]), (
+            patch("dispatch.tempfile.mkdtemp", return_value=directory)
+        ):
+            with self.assertRaisesRegex(SystemExit, "hc run failed.*do not retry.*'repo'"):
+                launch(args)
 
     def test_launch_records_the_title_in_the_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
