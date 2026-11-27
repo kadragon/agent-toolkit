@@ -14,10 +14,6 @@
 # re-run on every invocation and overlaid onto a cache hit; a cached probe could report a reviewer
 # that the current runtime does not have.
 #
-# Validity is keyed on the *current branch*, not on time alone: an entry written on the base
-# branch names the wrong `feature_branch` once a branch is cut, and must not be reused. A cache
-# hit therefore requires all of:
-# same feature_branch, same --no-hub mode, has_errors false, and younger than the TTL.
 # An errored result is never written, so a failure always re-surfaces on the next run.
 #
 # A cache hit still fast-forwards the local base branch. That sync is what keeps a downstream
@@ -59,6 +55,18 @@ sync_base_branch() {
   fi
 }
 
+resolve_local_base() {
+  local configured branch
+  configured=$(git config init.defaultBranch 2>/dev/null || true)
+  for branch in "$configured" main master; do
+    if [ -n "$branch" ] && git show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
+  return 1
+}
+
 NO_HUB=false
 REFRESH=false
 for arg in "$@"; do
@@ -80,6 +88,12 @@ if [ "$CACHE_ENABLED" != "0" ]; then
 fi
 
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+LOCAL_BASE=""
+if [ "$NO_HUB" = "true" ]; then
+  LOCAL_BASE=$(resolve_local_base) || errors+=(
+    "No local review base branch exists. Set init.defaultBranch to an existing local branch or create main or master."
+  )
+fi
 
 # --- Antigravity (agy) CLI ---
 AGY_AVAILABLE=false
@@ -147,8 +161,10 @@ if [ -n "$CACHE_FILE" ] && [ "$REFRESH" = "false" ] && [ -f "$CACHE_FILE" ]; the
     CACHE_VALID=$(jq -r \
       --arg branch "$CURRENT_BRANCH" \
       --argjson no_hub "$NO_HUB" \
+      --arg local_base "$LOCAL_BASE" \
       'if (.feature_branch == $branch
            and .no_hub == $no_hub
+           and (if $no_hub then $local_base != "" and .base_branch == $local_base else true end)
            and (.has_errors // false | not))
        then "yes" else "no" end' "$CACHE_FILE" 2>/dev/null || echo "no")
     if [ "$CACHE_VALID" = "yes" ]; then
@@ -206,17 +222,7 @@ if [ "$NO_HUB" = "false" ]; then
 
   sync_base_branch "$BASE_BRANCH" "$FEATURE_BRANCH"
 else
-  # Detect base branch purely locally — no remote references
-  BASE_BRANCH=$(git config init.defaultBranch 2>/dev/null || true)
-  if [ -z "$BASE_BRANCH" ]; then
-    for b in main master; do
-      if git show-ref --verify --quiet "refs/heads/$b" 2>/dev/null; then
-        BASE_BRANCH="$b"
-        break
-      fi
-    done
-  fi
-  [ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
+  BASE_BRANCH="$LOCAL_BASE"
 fi
 
 # --- Build JSON safely with jq ---

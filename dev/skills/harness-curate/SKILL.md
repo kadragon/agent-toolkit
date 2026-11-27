@@ -5,7 +5,7 @@ description: >-
   skills/agents/hooks, and disable plugins that never fire in a repo; after a model upgrade,
   re-examine steering files and guardrails for no-ops. Retrospecting the conversation you are
   in → harness-capture. Repo structure validation → harness-init.
-version: 2.6.2
+version: 2.7.0
 disable-model-invocation: true
 ---
 
@@ -79,11 +79,13 @@ Three lenses on the inventory:
   ```bash
   SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
   [[ -d "$SKILL_DIR/scripts" ]] || { echo "Bundled scripts unavailable: $SKILL_DIR/scripts" >&2; exit 1; }
-  python3 "$SKILL_DIR/scripts/check_plugin_contracts.py" [--project /abs/path]   # exit 1 = conflict
+  python3 "$SKILL_DIR/scripts/check_plugin_contracts.py"   # exit 1 = conflict
   ```
 
-  Each `CONFLICT` goes in the Step 6 table as its own row, route "repo rule fix". The plugin
-  contract wins; the repo rule changes (Step 7).
+  Match the scope with `--project /abs/path` or `--all` (the current repo and live Git roots from
+  local session metadata). Run even when the transcript scan has no signals. Report check errors
+  and give each `CONFLICT` a Step 6 row. For `legacy-backlog`, prepare the per-repo plan in
+  `references/legacy-backlog.md` → *Preview* before reporting.
 
 Done when: every globbed path is either cross-referenced against usage or listed under a lens.
 
@@ -215,6 +217,7 @@ land on confirmation, disclosed as unverified.
   the diff and confirm before deleting existing lines (for example `[x]` history on the file queue).
   The accepting check: `check_plugin_contracts.py` exits 0 on the repo, and the repo's own
   validation still passes. Retire a repo gate only when it exists solely for the conflicting rule.
+- **Legacy GitHub queue** — follow `references/legacy-backlog.md` → *Apply on approval*.
 - **A global `~/.claude/CLAUDE.md` line** is never edited here — surface it, the user decides.
 
 Done when: the user picked an action, and its accepting check passed or the edit is disclosed as

@@ -78,7 +78,8 @@ def make_repo(tmp: Path, name: str, stub: str = STUB_HUB) -> Path:
     subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
     (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "seed"], cwd=repo, check=True)
     shutil.copy(SCRIPT, scripts / "preflight.sh")
     hub = scripts / "hub.sh"
     hub.write_text(stub, encoding="utf-8")
@@ -232,6 +233,27 @@ def main() -> int:
               hub_again.get("no_hub") is False and hub_again.get("hub_type") == "github"
               and call_count(modes) == 2,
               f"got {hub_again}, calls={call_count(modes)}")
+
+        print("\n-- local review requires an existing base, even with a cached result --")
+        local = make_repo(tmp, "local-base")
+        checkout(local, "feat/local")
+        stale_config = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "init.defaultBranch",
+                        "GIT_CONFIG_VALUE_0": "missing-base"}
+        fallback = run(local, "--no-hub", **stale_config)
+        check("stale configuration falls back to main",
+              fallback.get("base_branch") == "main" and fallback.get("has_errors") is False,
+              f"got {fallback}")
+        subprocess.run(["git", "branch", "-m", "main", "custom"], cwd=local, check=True)
+        configured = run(local, "--no-hub", **{**stale_config, "GIT_CONFIG_VALUE_0": "custom"})
+        check("an existing configured base replaces a cached base",
+              configured.get("base_branch") == "custom" and configured.get("has_errors") is False,
+              f"got {configured}")
+        missing = run(local, "--no-hub", **stale_config)
+        check("no usable local base returns an actionable error",
+              missing.get("has_errors") is True and missing.get("base_branch") == ""
+              and "init.defaultBranch" in " ".join(missing.get("errors", [])),
+              f"got {missing}")
+        check("local base resolution never consults the hub", call_count(local) == 0)
 
         print("\n-- --refresh forces a live run --")
         refresh = make_repo(tmp, "refresh")
