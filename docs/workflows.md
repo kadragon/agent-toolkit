@@ -40,7 +40,7 @@ Write or update `docs/`. Ground every claim in current code. Never modify produc
 
 1. Write CI check or lint rule first.
 2. Run it.
-3. File a queue issue for violations in current code.
+3. File a queue issue for violations in current code and defer the code fixes to that issue.
 4. Update `docs/architecture.md`.
 
 ## `sweep` — Garbage Collection
