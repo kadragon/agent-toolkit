@@ -332,8 +332,8 @@ def build_plan(text: str, visibility: str) -> dict:
             inflight.append(path)
             continue
         span = _item_span(lines, masked, owners, i)
-        pin = bc._MIGRATION_ITEM_KEY_RE.search(lines[i])
-        checkbox = lines[i][:pin.start()] if pin else lines[i]
+        pins = bc._MIGRATION_ITEM_KEY_RE.findall(lines[i])
+        checkbox = bc._MIGRATION_ITEM_KEY_RE.sub("", lines[i])
         raw_body = checkbox.split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
         markers = list(_MARKER_SPAN_RE.finditer(raw_body))
         deferred = [" ".join(m.group(2).split()) for m in markers if m.group(1).lower() == "deferred"]
@@ -344,8 +344,8 @@ def build_plan(text: str, visibility: str) -> dict:
         role = _role(path)
         items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
                           blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
-                          key=pin[1] if pin else migration_key(*(x["title"] for x in path), t["text"]),
-                          pinned=pin is not None))
+                          key=pins[0] if pins else migration_key(*(x["title"] for x in path), t["text"]),
+                          pins=len(pins)))
 
     for t in tokens:  # plain bullets outside the Rejected section are not queue items
         if t["type"] == "bullet":
@@ -360,6 +360,8 @@ def build_plan(text: str, visibility: str) -> dict:
         why = _unprunable_reason(text, it["source"])
         if why:
             bad[it["line"]] = f"cannot be deleted mechanically ({why})"
+        elif it["pins"] > 1:
+            bad[it["line"]] = "multiple migration keys on one item; reconcile them before retrying"
         elif not it["title"].strip():
             bad[it["line"]] = "no title left once its markers are stripped"
         elif it["role"] == "security" and visibility != "private":
@@ -394,7 +396,7 @@ def build_plan(text: str, visibility: str) -> dict:
         issues.append({"kind": "item", "key": it["key"], "title": it["title"], "body": body, "labels": labels,
                        "parent_key": parent_of.get(it["line"]), "blocked_by": it["blocked_by"],
                        "line": it["line"], "lines": [j + 1 for j in it["span"]], "source": it["source"],
-                       "notes": it["notes"], "pinned": it["pinned"]})
+                       "notes": it["notes"], "pinned": bool(it["pins"])})
     for r in _rejected_entries(lines, masked, headings):
         if not r["safe"]:
             refused.append({"line": r["span"][0] + 1, "source": lines[r["span"][0]],
@@ -1187,6 +1189,15 @@ def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
     pruned, problems = tn.prune_lines(pinned_text, [first])
     _assert(not problems and "- [ ] First" not in pruned and "- [ ] Second" in pruned,
             "the file-queue pruner accepts a retained checkbox with migration metadata")
+    edited_first = first + " *(deferred: wait for vendor)*"
+    edited = pinned_text.replace(first, edited_first)
+    retry = build_plan(edited, "public")
+    _assert(not retry["refused"] and any(i["key"] == first_key and "Deferred: wait for vendor" in i["body"]
+                                         for i in retry["issues"]),
+            "text appended after a migration key preserves the item's identity")
+    pruned, problems = tn.prune_lines(edited, [edited_first])
+    _assert(not problems and "- [ ] First" not in pruned and "- [ ] Second" in pruned,
+            "the file-queue pruner accepts a checkbox with a deferred marker after its key")
 
     text = "# Backlog\n\n- [ ] Explain the `<!--` syntax\n- [ ] Another item\n"
     repo = make_repo(tmp, "literal-comment", "https://github.com/owner/repo.git", text)
@@ -1225,8 +1236,14 @@ def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
     gh.refuse_blockers = True
     apply_plan(repo, build_plan(read(path), "public"), gh)
     blocker = next(n for n, i in gh.issues.items() if i["title"] == "[FIX] Blocker")
+    gh.issues[blocker]["body"] += "\n\nUser note."
     qb.github_defer({"repo": repo, "ref": f"#{blocker}", "reason": "first queue reason"}, gh)
     qb.github_defer({"repo": repo, "ref": f"#{blocker}", "reason": "current queue reason"}, gh)
+    body = gh.issues[blocker]["body"]
+    _assert("User note." in body and "first queue reason" not in body
+            and qb._deferred_reason(gh.issues[blocker]) == "current queue reason",
+            "a user note after the migration key survives replacement of queue-owned deferral")
+    gh.issues[blocker]["body"] = body.replace("\n\nUser note.", "")
     gh.refuse_blockers = False
     original = read(path)
     write(path, original.replace("source reason", "new source reason"))

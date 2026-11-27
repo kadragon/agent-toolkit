@@ -155,7 +155,7 @@ import sys
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
 _STATUS_RE = re.compile(r"^status:\s*(\S+)")
 _CHECKBOX_RE = re.compile(r"^-\s*\[([ xX>])\]\s*(.*)$")
-_MIGRATION_ITEM_KEY_RE = re.compile(r" <!-- migration-key: (backlog-migrated:[0-9a-f]{40}) -->[ \t]*$")
+_MIGRATION_ITEM_KEY_RE = re.compile(r" <!-- migration-key: (backlog-migrated:[0-9a-f]{40}) -->")
 # Generalized skip marker: `*(deferred: ...)*` or `*(blocked by: <n>-<slug>)*` — both mean
 # "otherwise-open item is not actually actionable yet", same treatment as a `[>]` checkbox.
 # Group 1 is the keyword and group 2 the payload (the reason, or the blocker's `<n>-<slug>`).
@@ -254,9 +254,8 @@ def _strip_html_comments(text: str) -> str:
     if "<!-- migration-key: " in text:
         lines = text.splitlines(keepends=True)
         for i, line in enumerate(lines):
-            checkbox = line.rstrip(_LINE_BREAKS)
-            if _CHECKBOX_RE.match(checkbox) and (marker := _MIGRATION_ITEM_KEY_RE.search(checkbox)):
-                lines[i] = line[:marker.start()] + line[marker.end():]
+            if _CHECKBOX_RE.match(line.rstrip(_LINE_BREAKS)):
+                lines[i] = _MIGRATION_ITEM_KEY_RE.sub("", line)
         text = "".join(lines)
     if text and text[-1] not in _LINE_BREAKS:
         text += "\n"

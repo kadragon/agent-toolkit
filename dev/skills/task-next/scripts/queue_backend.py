@@ -1200,8 +1200,8 @@ def _migration_body_and_deferral(body: str) -> tuple[str, str]:
     body = body.replace("\r\n", "\n").rstrip()
     prefix, separator, reason = body.rpartition("\n\nDeferred: ")
     if separator and reason and "\n" not in reason:
-        marker = _KEY_RE.fullmatch(prefix.rsplit("\n", 1)[-1])
-        if marker and marker[1].startswith(MIGRATION_KEY_PREFIX):
+        keys = _KEY_RE.findall(prefix)
+        if keys and keys[-1].startswith(MIGRATION_KEY_PREFIX):
             return prefix, reason
     return body, ""
 
