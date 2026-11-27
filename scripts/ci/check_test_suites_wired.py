@@ -5,7 +5,7 @@ A suite nothing runs proves nothing: harness-curate found fifteen self-tests (ho
 task-next, every prod script) passing locally while `harness-check.yml` never invoked them, so
 a regression in any of them would have merged green.
 
-A tracked `*.py` under dev/, prod/ or scripts/ is a suite when its basename starts with `test_`
+A tracked `*.py` under dev/, prod/, guard/ or scripts/ is a suite when its basename starts with `test_`
 or it dispatches a quoted `--test` / `--selftest` / `--self-test` flag. It is wired when an
 enabled step's `run:` command is `python3 <path>`, carrying that flag for a self-test — a plain
 invocation of a dual-mode script runs the check, not its tests. Only `run:` values count, so a
@@ -76,7 +76,7 @@ def check(suites: dict[str, str | None], workflow: str) -> list[str]:
 def tracked_sources(root: str) -> dict[str, str]:
     out = subprocess.check_output(
         ["git", "-C", root, "-c", "core.quotePath=false", "ls-files", "--",
-         "dev/*.py", "prod/*.py", "scripts/*.py"],
+         "dev/*.py", "prod/*.py", "guard/*.py", "scripts/*.py"],
         text=True,
     )
     sources = {}

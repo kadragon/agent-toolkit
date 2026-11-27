@@ -1296,6 +1296,39 @@ class PinnedWaveTests(unittest.TestCase):
         self.assertNotEqual(old_wave["cache_hash"]["dev"], new_wave["cache_hash"]["dev"])
         self.assertEqual(old_wave["cache_hash"]["guard"], new_wave["cache_hash"]["guard"])
 
+    def test_export_uses_the_catalog_at_the_selected_commit(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+        git("init", "-q")
+        catalog_path = repo / pinned_wave.CATALOG
+        catalog_path.parent.mkdir(parents=True)
+        for names in (pinned_wave.LEGACY_PLUGINS, pinned_wave.PLUGINS):
+            entries = [{"name": name, "source": {"source": "local", "path": f"./{name}"}} for name in names]
+            catalog_path.write_text(json.dumps({"name": "kadragon", "plugins": entries}), encoding="utf-8")
+            for name in names:
+                manifest = repo / name / pinned_wave.MANIFEST
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_text('{"version": "1.0.0"}', encoding="utf-8")
+            git("add", ".")
+            git("-c", "core.hooksPath=NUL" if os.name == "nt" else "core.hooksPath=/dev/null",
+                "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                "commit", "-qm", "marketplace fixture")
+            if names == pinned_wave.LEGACY_PLUGINS:
+                legacy_commit = git("rev-parse", "HEAD")
+
+        for names, commit in ((pinned_wave.LEGACY_PLUGINS, legacy_commit),
+                              (pinned_wave.PLUGINS, git("rev-parse", "HEAD"))):
+            with self.subTest(names=names):
+                target = self.tmp / str(len(names))
+                _, exported = pinned_wave.export_snapshot(repo, commit, target)
+                self.assertEqual(exported, names)
+                self.assertEqual({path.name for path in target.iterdir() if not path.name.startswith(".")},
+                                 set(names))
+
     def test_existing_wave_receipt_keeps_its_dev_hooks(self):
         path, wave = self.make_wave("legacy", "1.0.0", legacy=True)
         self.assertEqual(pinned_wave.read_wave(path), wave)

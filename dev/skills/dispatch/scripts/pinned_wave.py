@@ -84,13 +84,24 @@ def tree_hash(root):
     return digest.hexdigest()
 
 
+def catalog_plugins(catalog):
+    sources = {entry["name"]: entry["source"] for entry in catalog["plugins"]}
+    for names in (PLUGINS, LEGACY_PLUGINS):
+        expected = {name: {"source": "local", "path": f"./{name}"} for name in names}
+        if catalog["name"] == "kadragon" and len(catalog["plugins"]) == len(names) and sources == expected:
+            return names
+    raise PinError("unsupported agent-toolkit marketplace layout")
+
+
 def export_snapshot(repo, commit, source):
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
         raise PinError("use the full verified agent-toolkit commit ID")
     git = ["git", "-C", str(repo)]
     if command([*git, "rev-parse", "--verify", f"{commit}^{{commit}}"]).strip() != commit:
         raise PinError("the supplied ID is not the commit being exported")
-    data = subprocess.run([*git, "archive", "--format=tar", commit, "--", CATALOG, *PLUGINS],
+    catalog = json.loads(command([*git, "show", f"{commit}:{CATALOG}"]))
+    names = catalog_plugins(catalog)
+    data = subprocess.run([*git, "archive", "--format=tar", commit, "--", CATALOG, *names],
                           check=True, capture_output=True, timeout=TIMEOUT).stdout
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
         for member in archive:
@@ -107,6 +118,7 @@ def export_snapshot(repo, commit, source):
                 with archive.extractfile(member) as stream, path.open("xb") as output:
                     shutil.copyfileobj(stream, output)
                 path.chmod(0o755 if member.mode & 0o111 else 0o644)
+    return catalog, names
 
 
 def home_env(root):
@@ -206,23 +218,17 @@ def prepare(repo, commit, binary):
             raise PinError(f"the isolation adapter was verified with {CODEX_VERSION}")
         (home / "config.toml").write_text('cli_auth_credentials_store = "file"\n', encoding="utf-8")
         source = root / "source"
-        export_snapshot(repo, commit, source)
-        catalog_path = source / CATALOG
-        catalog = read_json(catalog_path)
-        sources = {entry["name"]: entry["source"] for entry in catalog["plugins"]}
-        if (catalog["name"] != "kadragon" or len(catalog["plugins"]) != len(PLUGINS) or sources != {
-                name: {"source": "local", "path": f"./{name}"} for name in PLUGINS}):
-            raise PinError("unsupported agent-toolkit marketplace layout")
+        catalog, names = export_snapshot(repo, commit, source)
         market_id = root.name
         catalog["name"] = market_id
-        catalog_path.write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
+        (source / CATALOG).write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
         wave = {"schema": 1, "commit": commit, "market": market_id, "binary": str(binary),
                 "binary_hash": file_hash(binary), "source_hash": tree_hash(source),
                 "versions": {}, "cache_hash": {}, "children": []}
         added = json.loads(codex_command(root, str(binary), "plugin", "marketplace", "add", str(source), "--json"))
         if added["marketplaceName"] != market_id or Path(added["installedRoot"]).resolve() != source:
             raise PinError("Codex did not register the isolated local marketplace")
-        for name in PLUGINS:
+        for name in names:
             version = read_json(source / name / MANIFEST)["version"]
             if not re.fullmatch(r"\d+\.\d+\.\d+", version):
                 raise PinError(f"unsupported {name} version: {version!r}")
@@ -236,7 +242,7 @@ def prepare(repo, commit, binary):
         local = wave["settings"]["marketplaces"][market_id]
         if (set(wave["settings"]) != {"marketplaces", "plugins", "cli_auth_credentials_store"}
                 or wave["settings"]["cli_auth_credentials_store"] != "file"
-                or wave["settings"]["plugins"] != {f"{p}@{market_id}": {"enabled": True} for p in PLUGINS}
+                or wave["settings"]["plugins"] != {f"{p}@{market_id}": {"enabled": True} for p in names}
                 or set(wave["settings"]["marketplaces"]) != {market_id}
                 or local["source_type"] != "local" or not Path(local["source"]).samefile(source)):
             raise PinError("Codex created unexpected isolated settings")
@@ -246,7 +252,7 @@ def prepare(repo, commit, binary):
             raise PinError("expected an isolated inventory of hooks pending review")
         verify(path, wave, root)
         protect_tree(source)
-        for name in PLUGINS:
+        for name in names:
             protect_tree(cache_path(root, wave, name))
         path.write_text(json.dumps(wave, ensure_ascii=False), encoding="utf-8")
         return path, wave

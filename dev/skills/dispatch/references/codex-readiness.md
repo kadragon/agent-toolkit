@@ -4,8 +4,9 @@
 
 Use `dispatch.py pin --repo "<agent-toolkit checkout>" --commit "<full verified commit SHA>"
 --codex "<absolute native Codex executable>"`. Review the chosen commit, including the
-hook manifests and the files their commands run. Each new wave exports the dev, prod, and guard plugins
-into its own local marketplace with a unique name and installs them in a private `CODEX_HOME`.
+hook manifests and the files their commands run. Each wave exports the plugins in that commit's marketplace into a uniquely named local
+marketplace and installs them in a private `CODEX_HOME`. Current commits ship dev, prod, and
+guard. Earlier supported commits ship dev and prod with the hooks inside dev.
 A shared marketplace refresh cannot replace those files. Prepare a new wave for a later commit.
 Dispatch protects the snapshot files against ordinary edits and verifies the plugin trees,
 including executable scripts and skills, before each launch

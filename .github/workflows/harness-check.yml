@@ -366,6 +366,11 @@ jobs:
       - name: Test the standalone hook bundle
         run: python3 scripts/ci/test_guard_plugin.py
 
+      - name: Test the bundled dev checks
+        run: |
+          python3 dev/skills/task-review-cycle/guard.py --test
+          python3 dev/skills/harness-capture/guard.py --test
+
       - name: Test commit and push
         run: python3 dev/skills/task-review-cycle/scripts/test_commit_and_push.py
 

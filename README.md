@@ -57,6 +57,11 @@ line above it.
 
 ## Installation
 
+> **Upgrading from a dev release with bundled hooks?** Refresh the marketplace and
+> install `guard@kadragon` alongside the dev update before starting a working session.
+> In Codex, review and trust its three hooks in `/hooks`. A dev update by itself removes
+> the previous hook registrations.
+
 > **Migrating from `toolkit@kadragon`?** The former single plugin is now split into
 > `dev@kadragon` and `prod@kadragon`. Remove the old plugin
 > (`claude plugin uninstall toolkit@kadragon`) and install the plugins below.
