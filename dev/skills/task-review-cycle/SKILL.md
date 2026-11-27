@@ -48,7 +48,7 @@ BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
 CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
-jq -r '.hub_type' <<<"$PREFLIGHT"
+jq -r '.hub_type' <<<"$PREFLIGHT" >&2
 ```
 
 Stop on missing scripts or `has_errors: true`. Carry the printed hub type into the CI wait.
