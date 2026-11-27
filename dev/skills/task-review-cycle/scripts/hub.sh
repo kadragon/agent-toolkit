@@ -12,6 +12,7 @@
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
 #   merge <pr_number> <squash|merge|rebase> [authority_branch] [expected_head]
 #                                            → {merge_ok, queued, unconfirmed, merge_output}
+#   expected_head requires GitHub.
 #
 # Auth:
 #   github  — gh CLI must be authenticated (gh auth login)
@@ -336,8 +337,8 @@ case "$SUBCOMMAND" in
     require_git_authority --branch "$AUTHORITY_BRANCH" --action base-merge
     PR_NUMBER="${1:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
+    EXPECTED_HEAD="${4:-}"
     if [ "$HUB_TYPE" = "github" ]; then
-      EXPECTED_HEAD="${4:-}"
       MERGE_ARGS=(pr merge "$PR_NUMBER" "--${STRATEGY}")
       if [ -n "$EXPECTED_HEAD" ]; then
         MERGE_ARGS+=(--match-head-commit "$EXPECTED_HEAD")
@@ -383,6 +384,8 @@ case "$SUBCOMMAND" in
       fi
       jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --argjson unconfirmed "$UNCONFIRMED" \
         --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: $queued, unconfirmed: $unconfirmed, merge_output: $out}'
+    elif [ -n "$EXPECTED_HEAD" ]; then
+      jq -n '{merge_ok: false, queued: false, unconfirmed: false, merge_output: "Head matching requires GitHub"}'
     else
       require_forgejo_token
       PAYLOAD=$(jq -n --arg do "$STRATEGY" '{Do: $do, delete_branch_after_merge: true}')

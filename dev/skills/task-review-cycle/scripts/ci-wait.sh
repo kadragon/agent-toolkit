@@ -139,12 +139,16 @@ ci_configured() {
   [ "$CI_CONFIGURED" = yes ]
 }
 
-# A strict ancestor can be the hub's stale result right after a push (PR #362). Watch it as
-# pending against the reviewed SHA in exact mode, or the checkout's HEAD in legacy mode.
-HEAD_SHA="$EXPECTED_HEAD"
-if [ -z "$HEAD_SHA" ]; then
-  HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+WATCH_SHA="$EXPECTED_HEAD"
+if [ -z "$WATCH_SHA" ]; then
+  WATCH_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
 fi
+
+fail_verification() {
+  jq -n --arg reason "$1" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
+    '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
+  exit 0
+}
 
 START=$(date +%s)
 DEADLINE=$(( START + TIMEOUT_SECS ))
@@ -153,16 +157,16 @@ while true; do
   STATUS_JSON=$(bash "$SCRIPT_DIR/hub.sh" ci-status "$PR_NUMBER" 2>/dev/null || echo '{}')
   STATUS=$(jq -r '.status // "error"' <<<"$STATUS_JSON")
   STATUS_SHA=$(jq -r '.head_sha // empty' <<<"$STATUS_JSON" 2>/dev/null || true)
-  if [ "$STATUS_SHA" != "$HEAD_SHA" ]; then
-    if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] \
-      && git merge-base --is-ancestor "$STATUS_SHA" "$HEAD_SHA" 2>/dev/null; then
+  if [ -n "$EXPECTED_HEAD" ] && [ -z "$STATUS_SHA" ]; then
+    case "$STATUS" in
+      success|failure) fail_verification head-missing ;;
+      *) STATUS=pending ;;
+    esac
+  elif [ -n "$WATCH_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$WATCH_SHA" ]; then
+    if git merge-base --is-ancestor "$STATUS_SHA" "$WATCH_SHA" 2>/dev/null; then
       STATUS=pending
     elif [ -n "$EXPECTED_HEAD" ]; then
-      REASON=head-mismatch
-      [ -n "$STATUS_SHA" ] || REASON=head-missing
-      jq -n --arg reason "$REASON" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
-        '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
-      exit 0
+      fail_verification head-mismatch
     fi
   fi
   NOW=$(date +%s)
@@ -194,6 +198,9 @@ while true; do
           exit 0
         fi
       elif [ $(( NOW - START )) -ge "$NO_CHECKS_GRACE_SECS" ]; then
+        if [ -n "$EXPECTED_HEAD" ] && ! git diff --quiet "$EXPECTED_HEAD" -- 2>/dev/null; then
+          fail_verification ci-config-unverified
+        fi
         clear_strikes  # a pass is a pass: no-CI must reset the counter like `success` does
         jq -n '{passed: true, reason: "no CI checks found"}'
         exit 0
@@ -209,6 +216,9 @@ while true; do
   esac
 
   if [ "$NOW" -ge "$DEADLINE" ]; then
+    if [ -n "$EXPECTED_HEAD" ] && [ -z "$STATUS_SHA" ]; then
+      fail_verification head-missing
+    fi
     jq -n --arg pr "$PR_NUMBER" '{"passed": false, "reason": "timeout", "pr_number": $pr}'
     exit 0
   fi

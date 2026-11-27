@@ -335,14 +335,21 @@ def main() -> int:
         print("\n-- a stale head's status is pending, not an answer --")
         # Right after a push the hub can still describe the previous commit: PR #362 struck one
         # real failure twice that way. Each stub answers for `first` once, then for HEAD.
-        def sha_repo(name, first_status, first_sha, then_status):
+        def sha_repo(name, first_status, first_sha, then_status, previous_workflow=False):
             repo = make_repo(tmp, "pending", name=name)
             commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t",
                       "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
                       "commit", "-q", "--allow-empty", "-m"]
+            if previous_workflow:
+                workflow = repo / ".github/workflows/test.yml"
+                workflow.parent.mkdir(parents=True)
+                workflow.write_text("on: pull_request\n", encoding="utf-8")
+                subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
             subprocess.run(commit + ["previous"], cwd=repo, check=True)
             previous = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
                                       capture_output=True, text=True).stdout.strip()
+            if previous_workflow:
+                subprocess.run(["git", "rm", "-q", str(workflow)], cwd=repo, check=True)
             subprocess.run(commit + ["head"], cwd=repo, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
                                   capture_output=True, text=True).stdout.strip()
@@ -406,10 +413,33 @@ def main() -> int:
         check("exact mode uses the supplied SHA even when local HEAD has advanced",
               result.get("passed") is True and call_count(repo) == 1, f"got {result}")
 
+        for status in ("pending", "none"):
+            repo = sha_repo(f"exact_transient_{status}", status, None, "success")
+            reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            result = run(repo, expected_head=reviewed, CI_WAIT_POLL_INTERVAL=1)
+            check(f"exact mode waits for a SHA after an inconclusive {status} response",
+                  result.get("passed") is True and call_count(repo) == 2, f"got {result}")
+
         repo = make_repo(tmp, "none", name="exact_unidentified_empty_rollup")
-        result = run(repo, expected_head="1" * 40, CI_WAIT_NO_CHECKS_GRACE_SECS=0)
+        result = run(repo, expected_head="1" * 40, CI_WAIT_NO_CHECKS_GRACE_SECS=0,
+                     CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
         check("an unidentified empty rollup cannot pass as no CI configured",
-              result.get("passed") is False and result.get("reason") == "head-missing",
+              result.get("passed") is False and result.get("reason") == "head-missing"
+              and sleep_intervals(repo) == [1, 1],
+              f"got {result}")
+
+        repo = sha_repo("exact_other_ci_config", "none", "previous", "success", previous_workflow=True)
+        reviewed = subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=repo, text=True).strip()
+        result = run(repo, expected_head=reviewed, CI_WAIT_NO_CHECKS_GRACE_SECS=0)
+        check("an unrelated checkout cannot prove that the reviewed commit has no CI",
+              result.get("passed") is False and result.get("reason") == "ci-config-unverified",
+              f"got {result}")
+
+        repo = sha_repo("exact_no_ci", "none", "head", "success")
+        reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        result = run(repo, expected_head=reviewed, CI_WAIT_NO_CHECKS_GRACE_SECS=0)
+        check("the reviewed commit can pass when its checkout has no CI",
+              result.get("passed") is True and result.get("reason") == "no CI checks found",
               f"got {result}")
 
         print("\n-- the real hub.sh reports the head SHA its GitHub checks describe --")

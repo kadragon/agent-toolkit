@@ -48,9 +48,10 @@ BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 FEATURE_BRANCH=$(jq -r '.feature_branch' <<<"$PREFLIGHT")
 CLAUDE_CLI_AVAILABLE=$(jq -r '.claude_cli_available' <<<"$PREFLIGHT")
 MERGE_STRATEGY=$(jq -c '.merge_strategy' <<<"$PREFLIGHT")
+jq -r '.hub_type' <<<"$PREFLIGHT"
 ```
 
-Stop on missing scripts or `has_errors: true`. Substitute the Setup values in later blocks.
+Stop on missing scripts or `has_errors: true`. Carry the printed hub type into the CI wait.
 
 ## Step 1: Commit, route, PR
 
@@ -223,9 +224,8 @@ pushed a merge of base, reapplied the bump and file-queue CHANGELOG entries, and
 stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
 Apply *Final verification* to the resulting candidate, then resolve the merge helper.
 On GitHub, append `--expected-head <REVIEWED_HEAD>` after the optional worktree path.
-Issue the merge as a second, separate command
-starting with the printed path — no `bash` prefix, no variable: the only shape an auto-mode allow
-rule matches. Exit 126/127 → stop and report; never retry as `bash <path>`:
+Issue the merge separately, starting with the literal printed path to match the auto-mode rule.
+Exit 126/127 → stop and report; never retry as `bash <path>`:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"

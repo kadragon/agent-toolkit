@@ -110,9 +110,9 @@ Step 5 for each repair or withdrawal. On hub, push it and confirm CI on the new 
 returning to the full local checks. An unresolved failure or missing result blocks merge and
 a ready report. A later change invalidates affected evidence. Reclaim any newly completed panel
 result before ready or merge without waiting for work still running. On GitHub, confirm local
-`HEAD` still equals `REVIEWED_HEAD` after the final checks. Use the same SHA in the merge command,
-or in a final CI wait before reporting ready. On Forgejo, confirm that the remote head and its
-applicable CI match the local candidate.
+`HEAD` still equals `REVIEWED_HEAD` after the final checks, then run a final CI wait with that SHA.
+Use the same SHA in the merge command or ready report. On Forgejo, confirm that the remote head
+and its applicable CI match the local candidate.
 
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
