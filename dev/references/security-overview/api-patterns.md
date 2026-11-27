@@ -3,6 +3,9 @@
 Detailed API usage patterns for the three GitHub security alert types. Consult this when
 customizing queries, debugging API responses, or handling edge cases.
 
+Set `REPO_HOST`, `OWNER`, and `REPO` from the canonical repository URL resolved from `origin`.
+Pass the host explicitly on every alert API call, including manual discovery.
+
 ## Dependabot — GraphQL
 
 One GraphQL call fetches the current repo's open alerts (`OWNER`/`REPO` resolved from the `origin` remote). Pass both with `-f`, never `-F`: `-F` turns a repo named `2048` or `true` into a number or boolean and the `String!` check fails.
@@ -10,7 +13,7 @@ One GraphQL call fetches the current repo's open alerts (`OWNER`/`REPO` resolved
 ### Query Structure
 
 ```bash
-gh api graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
+gh api --hostname "${REPO_HOST}" graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     name
@@ -84,7 +87,7 @@ Dependabot PR titles follow `bump <package> from X to Y` (Go/JS ecosystems) or `
 ## Code Scanning — REST
 
 ```bash
-gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
+gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100"
 ```
 
 ### Response Fields
@@ -131,7 +134,7 @@ that more alerts may exist.
 ## Secret Scanning — REST
 
 ```bash
-gh api "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
+gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
   --jq '[.[] | del(.secret)]'
 ```
 

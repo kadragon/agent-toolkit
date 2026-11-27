@@ -32,6 +32,9 @@ Results go to a temp directory outside the repo (last output line), so raw alert
 
 For query structure, field reference, error handling → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`**.
 
+Bind all three alert requests to the canonical origin host. Before filing, verify that the current
+`origin` still resolves to the repository scanned in Phase 1. If it changed, report only.
+
 Expected errors: Code Scanning 403/404 and Secret Scanning 404 mean the feature is not enabled; the script writes `<type>.disabled` beside the `[]` result — report that type as "not enabled", not as 0. Any other failure lands in `.fetch-errors`.
 
 **Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context. `fetch-alerts.sh` strips secret fields automatically. If using manual queries, pipe through `jq 'del(.[] | .secret)'` before processing.
@@ -89,7 +92,7 @@ Before writing fix tasks, read the relevant files:
 
 Follow **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/backlog-template.md`** for remediation wording and the route-specific rules. Keep `tasks.md` for Sprint Contracts.
 
-**Private GitHub issues:** build one item per collected alert with its positive source `number`, using `gh-alert/<kind>/<number>` as the key and `["security"]` as labels. Use the kind names `dependabot`, `code-scanning`, and `secret-scanning`. Submit the items in a single `create` request to the same queue backend. The backend derives the hidden `<!-- gh-alert: <kind>/<number> -->` marker from the key and reuses an existing issue with that marker. Report new, reused, and failed or pending items from the response. With zero alerts, skip `create`. Report malformed alerts without a number and skip those items.
+**Private GitHub issues:** check `rejected` for explicit rejections using the reference's matching rules. Build one item per remaining alert with its positive source `number`, using `gh-alert/<kind>/<number>` as the key and `["security"]` as labels. Use the kind names `dependabot`, `code-scanning`, and `secret-scanning`. Submit the items in a single `create` request to the same queue backend. The backend derives the hidden `<!-- gh-alert: <kind>/<number> -->` marker from the key and reuses an existing issue with that marker. Report new, reused, withheld, and failed or pending items. With zero eligible alerts, skip `create`. Report malformed alerts without a number and skip those items.
 
 **Legacy backlog:** write or replace `## Security Fixes` in the current repo's `backlog.md`, following the reference's manual-edit and rejected-item rules. With zero alerts and no fetch errors, remove an existing section subject to the manual-edit check. With fetch errors and zero collected alerts, leave the section in place.
 

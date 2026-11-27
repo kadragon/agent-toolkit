@@ -17,7 +17,7 @@ Three plugins:
 
 | Command | Description | Claude Code | Codex |
 |---|---|---|---|
-| `/security-overview` | Scans the current repo's GitHub security alerts, reports public alerts, and queues fixes through private issues or the legacy backlog | ✅ | ❌ |
+| `/security-overview` | Reports GitHub security alerts for public repos and queues fixes through private issues or the legacy backlog | ✅ | ❌ |
 
 ### `prod` — document authoring
 

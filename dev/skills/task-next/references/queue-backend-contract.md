@@ -148,9 +148,10 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   path. A clean run writes no file.
   - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
     require the `security` label, no relations, and confirmed private visibility. The backend
-    writes `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
-    marker from a trusted author without updating it. `publish` also checks private visibility
-    before sending security alert drafts.
+    appends `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
+    final-line marker from a trusted author without updating it. If `publish` cannot confirm
+    private visibility, it holds the alert drafts pending with an `incomplete[]` visibility entry
+    and continues with ordinary drafts.
 - `publish` re-sends the stored drafts bound to the current `origin` through `create`
   (retry-safe, so an issue whose response was lost is reused and its missing relations
   completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes

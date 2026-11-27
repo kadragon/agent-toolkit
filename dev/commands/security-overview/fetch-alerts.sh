@@ -42,6 +42,8 @@ if ! REPO_INFO=$(env -u GH_REPO gh repo view "${ORIGIN_URL}" --json owner,name,u
   exit 3
 fi
 read -r OWNER REPO REPO_URL <<< "${REPO_INFO}"
+REPO_HOST=${REPO_URL#*://}
+REPO_HOST=${REPO_HOST%%/*}
 echo "Scanning: ${OWNER}/${REPO}"
 
 mkdir -p "${OUTPUT_DIR}"
@@ -50,7 +52,7 @@ echo "${OWNER}/${REPO} ${REPO_URL}" > "${OUTPUT_DIR}/repo.txt"
 
 # --- Step 2: Dependabot alerts via GraphQL ---
 echo "Fetching Dependabot alerts..."
-if ! DB_ERR=$(gh api graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
+if ! DB_ERR=$(gh api --hostname "${REPO_HOST}" graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     name
@@ -77,7 +79,7 @@ echo "Fetching Code Scanning and Secret Scanning alerts..."
 
 # Code Scanning (403/404 = not enabled, skip gracefully)
 # NOTE: other API errors (e.g. 503) fall through to "[]" — check ${OUTPUT_DIR}/.fetch-errors.
-if CS_RESP=$(gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
+if CS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
   echo "${CS_RESP}" > "${OUTPUT_DIR}/code-scanning.json"
 else
   HTTP_STATUS=$(echo "${CS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1 || true)
@@ -91,7 +93,7 @@ else
 fi
 
 # Secret Scanning (404 = disabled, skip gracefully; strip secret values)
-if SS_RESP=$(gh api "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
+if SS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
     --jq '[.[] | del(.secret)]' 2>&1); then
   echo "${SS_RESP}" > "${OUTPUT_DIR}/secret-scanning.json"
 else

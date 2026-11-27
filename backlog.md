@@ -59,6 +59,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] On a truncated github `list`, a parent's sub-issue on an unread page is excluded as "not a trusted task-queue issue" instead of "incomplete read", and the parent is still offered (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:why_not
 - [ ] [debt] `handle()` resolves the backend for `show`/`rejected` from the working tree, ignoring the request's `rev`, so a github.com repo whose `backlog.md` has open items only at `rev` queries GitHub instead (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:handle
 
+### PR #472 — Route security overview by repository visibility (2026-11-27)
+
+- [ ] [debt] Serialize GitHub issue lookup and creation for concurrent queue writers sharing a Git common directory so two scans cannot file the same alert concurrently (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_post_items
+- [ ] [debt] Include the target repository when indexing pending queue drafts so an origin change cannot replace a draft in another repository with the same key (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:github_create
+- [ ] [debt] Distinguish Code Scanning permission errors from a disabled feature before allowing zero-alert backlog cleanup (source: codex) (pre_existing) — dev/commands/security-overview/fetch-alerts.sh
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

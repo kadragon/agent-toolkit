@@ -12,8 +12,8 @@ Use the route selected by `security-overview.md` § 2-1.
   {"key":"gh-alert/dependabot/42","title":"Upgrade the affected dependency","body":"Dependabot alert #42. Upgrade to the patched version.","labels":["security"]}
   ```
 
-  The backend adds `<!-- gh-alert: dependabot/42 -->` and reuses a matching open or closed issue
-  filed by a trusted author without updating it. Use the same key on every scan. See the
+  The backend appends `<!-- gh-alert: dependabot/42 -->` on its own final line and reuses a matching
+  open or closed issue filed by a trusted author without updating it. Use the same key on every scan. See the
   [queue contract](../../skills/task-next/references/queue-backend-contract.md) for the request
   envelope and the response fields.
 - **Legacy backlog:** use the target path, template, rejected-item rules, and replacement rules
@@ -71,7 +71,7 @@ If the repo has no `backlog.md`, create one with a
 ### Code Scanning Items
 
 - Include the file path and line number.
-- Read the flagged file at the reported line range (+-5 lines) from the default branch (fetched per `security-overview.md` § 2-1) to understand context.
+- Read the flagged file at the reported line range (+-5 lines) from the default branch (fetched per `security-overview.md` § 2-2) to understand context.
 - If the file no longer exists on the default branch, use the **"Dismiss stale alert"** template — a file missing only from the working tree is still live.
 
 ### Secret Scanning Items
@@ -82,9 +82,10 @@ If the repo has no `backlog.md`, create one with a
 
 ### Rejected Items
 
-Before writing an item, read the target `backlog.md` → `## Rejected — do not re-file`. An alert
-the user already discarded (e.g. as accepted risk) is withheld unless this scan's evidence meets
-that entry's re-file bar. Match only what the user rejected, never a whole package or rule:
+Before writing, read the queue's rejected entries. On GitHub, call `queue_backend.py rejected`;
+if the lookup fails, report the failure and leave the queue alone. In the legacy backlog, read
+`## Rejected — do not re-file`. Withhold a rejected alert unless the scan meets the entry's
+re-file bar. Require an exact match:
 
 | Alert | Matches an entry only on |
 |-------|--------------------------|
@@ -93,8 +94,8 @@ that entry's re-file bar. Match only what the user rejected, never a whole packa
 | Secret scanning | the same secret type **and** location |
 
 A severity higher than the one the entry records also meets the bar. List each withheld alert
-in the summary with the entry it matched. If every alert is withheld, write no
-`## Security Fixes` section — remove an existing one — and report only the Withheld line.
+with the matching entry. If every alert is withheld, file no GitHub issue. On the legacy route,
+remove an existing `## Security Fixes` section under the replacement rules and report the Withheld line.
 
 ### Idempotency
 
