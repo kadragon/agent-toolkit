@@ -761,8 +761,6 @@ class _FakeGh(qb._FakeGitHub):
         self.refuse_blockers = False
 
     def _graphql(self, query, v):
-        if query == qb.DESCRIBE_QUERY:
-            return self._ok({"data": {"repository": {"isPrivate": self.private}}})
         if query == qb.ADD_BLOCKED_BY and self.refuse_blockers:
             return self._ok({"data": None, "errors": [{"message": "dependency limit reached"}]})
         return super()._graphql(query, v)

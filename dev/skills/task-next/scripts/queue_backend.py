@@ -436,7 +436,7 @@ SHOW_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
     f"issue(number: $number) {{ {_ISSUE_FIELDS} }} }} }}"
 )
-DESCRIBE_QUERY = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isPrivate } }"
+DESCRIBE_QUERY = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { visibility } }"
 
 
 def _conn_query(name: str) -> str:
@@ -446,7 +446,8 @@ def _conn_query(name: str) -> str:
 
 
 def gh_runner(args: list[str]) -> tuple[int, str, str]:
-    """Run `gh <args>`; the default runner. Missing `gh` is a hard error, never a fallback."""
+    if args[:1] == ["api"]:
+        args = ["api", "--hostname", "github.com", *args[1:]]
     try:
         out = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8",
                              errors="replace", check=False)
@@ -772,6 +773,10 @@ NO_QUEUE_WRITE = "no-queue-write"
 QUEUE_LIMITS = ("none", NO_QUEUE_WRITE)
 WRITE_MAX_PAGES = 100  # key index / rejected walk; 100 issues per page
 _KEY_MARKER = "<!-- queue-key: {} -->"
+_ALERT_MARKER = "<!-- gh-alert: {} -->"
+_ALERT_ID = r"(?:dependabot|code-scanning|secret-scanning)/[1-9][0-9]*"
+_ALERT_KEY_PREFIX = "gh-alert/"
+_ALERT_MARKER_RE = re.compile(r"<!-- gh-alert: (" + _ALERT_ID + r") -->")
 # the marker create appends on its own last line; a body quoting the syntax earlier never wins
 _KEY_RE = re.compile(r"^<!-- queue-key: (.+?) -->\r?$", re.MULTILINE)
 _REJECT_MARKER = "<!-- queue-rejected -->"
@@ -864,7 +869,6 @@ def _node_key(repo_name: str, number: int) -> tuple[str, int]:
 
 
 def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -> dict[str, dict]:
-    """{queue-key: issue} over every issue (open or closed) a trusted author filed with a key."""
     index: dict[str, dict] = {}
     after = None
     for _ in range(max_pages):
@@ -873,9 +877,15 @@ def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -
             raise GhUnavailable("GitHub GraphQL error: " + "; ".join(errors))
         conn = _repository(data, owner, name)["issues"]
         for issue in conn["nodes"]:
-            keys = _KEY_RE.findall(issue.get("body") or "")
-            if keys and issue.get("authorAssociation") in TRUSTED_AUTHORS:
+            if issue.get("authorAssociation") not in TRUSTED_AUTHORS:
+                continue
+            body = issue.get("body") or ""
+            keys = _KEY_RE.findall(body)
+            if keys and not keys[-1].startswith(_ALERT_KEY_PREFIX):
                 index.setdefault(keys[-1], issue)
+            if lines := body.rstrip().splitlines():
+                if marker := _ALERT_MARKER_RE.fullmatch(lines[-1]):
+                    index.setdefault(_ALERT_KEY_PREFIX + marker[1], issue)
         if not conn["pageInfo"]["hasNextPage"]:
             return index
         after = conn["pageInfo"]["endCursor"]
@@ -911,12 +921,19 @@ def _validate_items(items: object) -> list[dict]:
             raise QueueError(f"item {key!r}: parent_key must be a key or ref")
         if key == parent or key in blocked:
             raise QueueError(f"item {key!r} names itself as its parent or blocker")
+        if key.startswith(_ALERT_KEY_PREFIX):
+            if not re.fullmatch(_ALERT_ID, key.removeprefix(_ALERT_KEY_PREFIX)):
+                raise QueueError(f"invalid GitHub alert key {key!r}")
+            if parent or blocked or "security" not in labels:
+                raise QueueError(f"alert {key!r} needs the security label and no queue relations")
         refile = item.get("refile_completed", False)
         if not isinstance(refile, bool):
             raise QueueError(f"item {key!r}: refile_completed must be a boolean")
         draft = {"key": key, "title": title, "body": body or "", "labels": labels,
                  "parent_key": parent, "blocked_by": blocked}
         if refile:
+            if key.startswith(_ALERT_KEY_PREFIX):
+                raise QueueError(f"alert {key!r} cannot use refile_completed")
             draft["refile_completed"] = True
         out.append(draft)
     return out
@@ -1002,7 +1019,8 @@ def store_pending(repo: str, items: list[dict], target: str, reason: str) -> str
         return write_pending(repo, list(stored.values()))
 
 
-def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bool) -> dict:
+def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bool,
+                withheld: frozenset[str] = frozenset()) -> dict:
     """Retry-safe create of validated `items`. Returns created/incomplete/done/refused; a transport
     failure re-raises with the partial result attached as `partial`."""
     slug = f"{owner}/{name}".lower()
@@ -1010,20 +1028,31 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
     try:
         index = key_index(runner, owner, name)
         batch = {i["key"] for i in items}
+        issues: dict[str, dict] = {}
         ready = []
         for item in items:
+            key = item["key"]
+            if key.startswith(_ALERT_KEY_PREFIX) and key in index:
+                found = index[key]
+                issues[key] = found
+                result["created"].append({"key": key, "ref": f"#{found['number']}", "url": found["url"],
+                                          "reused": True})
+                result["done"].add(key)
+                continue
             unknown = [t for t in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]
                        if not (_ISSUE_REF_RE.match(t) or t in batch or t in index)]
-            if unknown and not from_store:
-                raise QueueError(f"item {item['key']!r} names {unknown[0]!r}: not a batch key, a known "
+            invalid = [target for target in unknown if target not in withheld]
+            if invalid and not from_store:
+                raise QueueError(f"item {item['key']!r} names {invalid[0]!r}: not a batch key, a known "
                                  "queue-key or an issue ref (#N / owner/name#N)")
             if unknown:  # one bad stored draft never blocks the rest of the store
                 result["incomplete"].append({"key": item["key"], "relation": "target", "ref": unknown[0],
                                              "error": "not a batch key, a known queue-key or an issue ref"})
                 continue
             ready.append(item)
+        if not ready:
+            return result
         ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in ready for x in i["labels"]])
-        issues: dict[str, dict] = {}
         for item in ready:
             key = marker_key = item["key"]
             found = index.get(key)
@@ -1042,7 +1071,9 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                 # relation landed, so selection never offers it before its blockers are recorded.
                 linked = bool(item["parent_key"] or item["blocked_by"])
                 labels = sorted(set(item["labels"]) | (set() if linked else {QUEUE_LABEL}))
-                body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + _KEY_MARKER.format(marker_key)
+                marker = (_ALERT_MARKER.format(key.removeprefix(_ALERT_KEY_PREFIX))
+                          if key.startswith(_ALERT_KEY_PREFIX) else _KEY_MARKER.format(marker_key))
+                body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + marker
                 try:
                     made = _rest(runner, "POST", f"repos/{owner}/{name}/issues", {"title": item["title"], "body": body},
                                  {"labels": labels} if labels else None) or {}
@@ -1140,38 +1171,58 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
     owner, name = github_slug(repo)
     target = f"{owner}/{name}".lower()
     out: dict = {"created": [], "incomplete": [], "pending": []}
-    res: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
     submitted = items
-    security = {i["key"] for i in items if any(label.casefold() == "security" for label in i["labels"])}
+    alert_keys = {item["key"] for item in items if item["key"].startswith(_ALERT_KEY_PREFIX)}
+    finding_keys = {item["key"] for item in items if any(label.casefold() == "security" for label in item["labels"])}
+    finding_keys -= alert_keys
+    if from_store and limits == NO_QUEUE_WRITE and not finding_keys:
+        return out | {"pending": [item["key"] for item in items], "pending_path": pending_path(repo)}
+    withheld: set[str] = set()
     visibility = None
-    if security:
+    visibility_error = "GitHub security alerts can only be filed on a confirmed private repository"
+    if finding_keys or (alert_keys and limits != NO_QUEUE_WRITE):
         try:
             visibility = github_visibility(repo, runner)
-        except QueueError:
-            pass
+        except QueueError as e:
+            visibility_error = str(e)
+            if alert_keys and not from_store and limits != NO_QUEUE_WRITE:
+                limits = NO_QUEUE_WRITE
+                out["error"] = visibility_error
         if visibility != "private":
-            items = [i for i in items if i["key"] not in security]
-            out["withheld_security"] = len(security)
-    reason = f"Queue limits: {NO_QUEUE_WRITE}"
+            withheld.update(finding_keys)
+            if finding_keys:
+                out["withheld_security"] = len(finding_keys)
+        if alert_keys and visibility != "private" and (limits != NO_QUEUE_WRITE or visibility is not None):
+            withheld.update(alert_keys)
+            out["incomplete"] = [{"key": item["key"], "relation": "visibility", "ref": None,
+                                  "error": visibility_error} for item in items if item["key"] in alert_keys]
+            if from_store and visibility != "public":
+                out["pending"] = [entry["key"] for entry in out["incomplete"]]
+            if not from_store and len(alert_keys) == len(items):
+                raise QueueError(visibility_error)
+        items = [item for item in items if item["key"] not in withheld]
+    res: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
+    reason = out.get("error", f"Queue limits: {NO_QUEUE_WRITE}")
     if items and limits != NO_QUEUE_WRITE:
         try:
-            res = _post_items(owner, name, items, runner, from_store)
+            res = _post_items(owner, name, items, runner, from_store, frozenset(withheld))
             reason = "incomplete relation"
         except GhUnavailable as e:
             res = e.partial or res
             reason = str(e)
             out["error"] = reason
-        out["created"], out["incomplete"] = res["created"], res["incomplete"]
+        out["created"] = res["created"]
+        out["incomplete"].extend(res["incomplete"])
     left = [i for i in items if i["key"] not in res["done"] | res["refused"]]
     if from_store:
         with _StoreLock(repo):
             stored = read_pending(repo)
             retired = res["done"] | res["refused"]
             if visibility == "public":
-                retired |= security
+                retired |= withheld
             # Preserve a newer draft and keep private drafts when the visibility check was unavailable.
             sent = {i["key"]: i for i in submitted}
-            kept = [s for s in stored if not (s["key"] in retired
+            kept = [s for s in stored if not (s.get("target") == target and s["key"] in retired
                                               and _draft(s) == sent.get(s["key"]))]
             path = write_pending(repo, kept) if kept != stored else pending_path(repo)
     elif left or (res["done"] | res["refused"] and os.path.exists(pending_path(repo))):
@@ -1183,7 +1234,7 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
             path = write_pending(repo, list(stored.values()))
     else:
         path = None
-    out["pending"] = [i["key"] for i in left]
+    out["pending"].extend(i["key"] for i in left)
     if path and out["pending"]:
         out["pending_path"] = path
     return out
@@ -1286,17 +1337,20 @@ def github_defer(req: dict, runner=gh_runner) -> dict:
 
 def github_visibility(repo: str, runner) -> str:
     owner, name = github_slug(repo)
-    private = _repository(_graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name}),
-                          owner, name).get("isPrivate")
-    if not isinstance(private, bool):
-        raise QueueError("GitHub returned no repository visibility")
-    return "private" if private else "public"
+    data = _graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name})
+    visibility = _repository(data, owner, name).get("visibility")
+    if visibility not in ("PRIVATE", "PUBLIC"):
+        return "unknown"
+    return visibility.lower()
 
 
 def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
     if op == "describe":
+        visibility = github_visibility(req["repo"], runner)
+        if req.get("verify_visibility") is True and visibility == "unknown":
+            raise QueueError("GitHub did not confirm public or private repository visibility")
         return EXIT_OK, {
-            "backend": "github", "contract": CONTRACT, "visibility": github_visibility(req["repo"], runner),
+            "backend": "github", "contract": CONTRACT, "visibility": visibility,
             "ops": list(GITHUB_OPS), "close_ref_template": "Closes {ref}",
         }
     if op == "list":
@@ -1358,6 +1412,8 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
             and origin_host(_git(repo, "remote", "get-url", "origin")) == "github.com"
         ):
             data["visibility"] = github_visibility(repo, runner)
+            if data["visibility"] == "unknown":
+                raise QueueError("GitHub did not confirm public or private repository visibility")
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
         elif op == "list" and backend["source"] == "github-open-backlog" and data is not None:
@@ -1449,8 +1505,13 @@ FIXTURE_TASKS = "# Running sprint\n\nstatus: open\n\n- [ ] sprint item\n"
 
 def run_tests() -> int:
     import tempfile
+    from unittest.mock import patch
 
     print("=== queue_backend.py --test ===\n")
+    with patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+        gh_runner(["api", "graphql"])
+        _assert(run.call_args.args[0] == ["gh", "api", "--hostname", "github.com", "graphql"],
+                "GitHub queue requests explicitly target github.com")
     selectors = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", ENV_VAR, "XDG_CONFIG_HOME"}
     env = {k: v for k, v in os.environ.items() if k not in selectors}
     env.update({
@@ -1789,7 +1850,7 @@ def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = 
         if query == LIST_QUERY:
             repo = {"isPrivate": private, "issues": copy.deepcopy(pages[variables.get("after")])}
         elif query == DESCRIBE_QUERY:
-            repo = {"isPrivate": private}
+            repo = {"visibility": "PRIVATE" if private else "PUBLIC"}
         elif query == SHOW_QUERY:
             repo = {"issue": copy.deepcopy((issues or {}).get(variables["number"]))}
         else:
@@ -1981,7 +2042,7 @@ class _FakeGitHub:
         self.fail_after: int | None = None
         self.lose_create = 0
         self.reject_relation: set[tuple[str, int]] = set()  # (kind, child number) answered with a GraphQL error
-        self.private = private
+        self.visibility = "PRIVATE" if private else "PUBLIC"
 
     def add(self, title: str, body: str = "", labels=(QUEUE_LABEL,), assoc: str = "OWNER", state: str = "OPEN",
             reason: str | None = None, comments=()) -> int:
@@ -2020,7 +2081,7 @@ class _FakeGitHub:
 
     def _graphql(self, query: str, v: dict) -> tuple[int, str, str]:
         if query == DESCRIBE_QUERY:
-            return self._ok({"data": {"repository": {"isPrivate": self.private}}})
+            return self._ok({"data": {"repository": {"visibility": self.visibility}}})
         if query == KEYS_QUERY:
             nodes = [{"id": i["id"], "number": n, "url": f"https://github.com/owner/repo/issues/{n}",
                       "body": i["body"], "authorAssociation": i["assoc"],
@@ -2100,6 +2161,98 @@ def run_github_write_tests(tmp: str, git) -> None:
     def status() -> str:
         return subprocess.run(["git", "-C", repo, "status", "--porcelain", "--ignored"], capture_output=True,
                               text=True).stdout
+
+    alerts = [
+        {"key": f"gh-alert/{kind}/7", "title": f"Review {kind} alert #7", "labels": ["security"]}
+        for kind in ("dependabot", "code-scanning", "secret-scanning")
+    ]
+    alert_req = dict(req, items=alerts)
+    gh = _FakeGitHub()
+    _, desc = handle("describe", req, {ENV_VAR: "github"}, gh)
+    _assert(desc["visibility"] == "public", "a public scan is report-only")
+    try:
+        handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    except QueueError as e:
+        _assert("confirmed private" in str(e) and not gh.writes() and not os.path.exists(store) and status() == "",
+                "even a direct create cannot write security alerts to a public repository")
+    else:
+        raise AssertionError("a public GitHub security alert create was accepted")
+
+    gh.visibility = "INTERNAL"
+    _, desc = handle("describe", req, {ENV_VAR: "github"}, gh)
+    _assert(desc["visibility"] == "unknown", "internal is not confirmed private under the queue contract")
+    try:
+        handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    except QueueError as e:
+        _assert("confirmed private" in str(e) and not gh.writes() and not os.path.exists(store),
+                "an internal repository cannot receive security alert issues")
+    else:
+        raise AssertionError("an internal GitHub security alert create was accepted")
+
+    gh.visibility = "PUBLIC"
+    ordinary = {"key": "ordinary", "title": "Publish this ordinary draft"}
+    _, out = handle("create", dict(req, items=[alerts[0], ordinary]), {ENV_VAR: "github"}, gh)
+    _assert([i["key"] for i in out["created"]] == ["ordinary"]
+            and out["incomplete"][0]["relation"] == "visibility" and not os.path.exists(store),
+            "a mixed create files ordinary items without posting or storing the public alert")
+    dependent = {"key": "dependent", "title": "Follow up", "blocked_by": [alerts[0]["key"]]}
+    independent = {"key": "independent", "title": "Independent follow-up"}
+    _, out = handle("create", dict(req, items=[alerts[0], dependent, independent]), {ENV_VAR: "github"}, gh)
+    _assert([i["key"] for i in out["created"]] == ["independent"] and out["pending"] == ["dependent"]
+            and {entry["relation"] for entry in out["incomplete"]} == {"visibility", "target"},
+            "a withheld alert only defers its dependent item, not independent queue items")
+    write_pending(repo, [])
+
+    gh = _FakeGitHub(private=True)
+
+    def visibility_unavailable(args):
+        if f"query={DESCRIBE_QUERY}" in args:
+            return 1, "", "temporarily unable to read repository visibility"
+        return gh(args)
+
+    _, out = handle("create", dict(req, items=[alerts[0], ordinary]), {ENV_VAR: "github"}, visibility_unavailable)
+    _assert(not gh.calls and set(out["pending"]) == {alerts[0]["key"], ordinary["key"]}
+            and "temporarily unable" in out["error"],
+            "a failed visibility request leaves both alert and ordinary drafts recoverable")
+    _, out = handle("publish", req, {ENV_VAR: "github"}, gh)
+    _assert({i["key"] for i in out["created"]} == {alerts[0]["key"], ordinary["key"]} and not os.path.exists(store),
+            "publish can send drafts stored after a visibility lookup failed")
+
+    gh = _FakeGitHub(private=True)
+    gh.add("An already filed alert", "<!-- gh-alert: code-scanning/7 -->\nReference above.\n"
+           "<!-- gh-alert: dependabot/7 -->", labels=["security"], state="CLOSED")
+    _, out = handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    _assert([i["reused"] for i in out["created"]] == [True, False, False]
+            and gh.issues[1]["labels"] == {"security"} and len(gh.issues) == 3,
+            "private filing reuses a closed issue by its final marker and ignores an earlier quoted marker")
+    _assert(all(gh.issues[n]["labels"] == {QUEUE_LABEL, "security"}
+                and gh.issues[n]["body"].endswith(f"<!-- gh-alert: {kind}/7 -->")
+                for n, kind in ((2, "code-scanning"), (3, "secret-scanning"))),
+            "new issues carry the security label and the kind/number marker")
+    gh.calls.clear()
+    _, out = handle("create", alert_req, {ENV_VAR: "github"}, gh)
+    _assert(all(i["reused"] for i in out["created"]) and len(out["created"]) == 3
+            and not gh.writes() and not os.path.exists(store),
+            "a private rescan reuses every marker without updating issues or creating labels")
+    _, out = handle("create", dict(req, items=[alerts[0], dependent]), {ENV_VAR: "github"}, gh)
+    _assert(not out["incomplete"] and gh.issues[4]["blockedBy"] == [1],
+            "an ordinary issue can reference a reused alert in the same batch")
+
+    gh = _FakeGitHub(private=True)
+    handle("create", dict(req, queue_limits=NO_QUEUE_WRITE, items=[alerts[0], ordinary]),
+           {ENV_VAR: "github"}, gh)
+    _assert(not gh.calls and set(i["key"] for i in read_pending(repo)) == {alerts[0]["key"], ordinary["key"]},
+            "create under no-queue-write stores drafts without any GitHub calls")
+    gh.calls.clear()
+    _, out = handle("publish", dict(req, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
+    _assert(not gh.calls and set(out["pending"]) == {alerts[0]["key"], ordinary["key"]},
+            "publish under no-queue-write performs no visibility lookup or writes")
+    gh.visibility = "PUBLIC"
+    _, out = handle("publish", req, {ENV_VAR: "github"}, gh)
+    _assert([i["key"] for i in out["created"]] == ["ordinary"]
+            and not out["pending"] and out["incomplete"][0]["relation"] == "visibility"
+            and not os.path.exists(store),
+            "publish files ordinary drafts and clears alert drafts when the repository becomes public")
 
     gh = _FakeGitHub()
     existing = gh.add("[FEAT] earlier ticket", "<!-- queue-key: old -->")
@@ -2253,7 +2406,7 @@ def run_github_write_tests(tmp: str, git) -> None:
         _, out = handle("create", dict(req, items=[secret], queue_limits=limits), {ENV_VAR: "github"}, gh)
         _assert(out["withheld_security"] == 1 and not gh.writes() and not os.path.exists(store),
                 f"a public security draft never posts or goes pending ({limits})")
-    gh.private = True
+    gh.visibility = "PRIVATE"
     _, out = handle("create", dict(req, items=[secret], queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
     _assert(out["pending"] == [secret["key"]] and not gh.writes() and os.path.exists(store),
             "a verified private security draft can wait without making a remote write")
@@ -2262,7 +2415,7 @@ def run_github_write_tests(tmp: str, git) -> None:
     _assert(out["withheld_security"] == 1 and not out["pending"] and os.path.exists(store),
             "publish with unavailable visibility keeps a previously private draft without reporting its key")
     gh.fail_after = None
-    gh.private = False
+    gh.visibility = "PUBLIC"
     _, out = handle("publish", req, {ENV_VAR: "github"}, gh)
     _assert(out["withheld_security"] == 1 and not gh.writes() and not os.path.exists(store),
             "publish suppresses and clears a private draft if the repository has become public")

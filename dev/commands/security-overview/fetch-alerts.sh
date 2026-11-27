@@ -9,6 +9,7 @@
 #
 # Output:
 #   ${OUTPUT_DIR}/repo.txt             — "owner/name url" of the scanned repo
+#   ${OUTPUT_DIR}/visibility.txt       — visibility of the scanned repo from gh repo view
 #   ${OUTPUT_DIR}/dependabot.json      — Dependabot vulnerability alerts (GraphQL)
 #   ${OUTPUT_DIR}/code-scanning.json   — Code scanning alerts (REST)
 #   ${OUTPUT_DIR}/secret-scanning.json — Secret scanning alerts (REST, secrets redacted)
@@ -36,21 +37,24 @@ if ! ORIGIN_URL=$(git remote get-url origin 2>/dev/null); then
   echo "ERROR: not inside a git checkout with an origin remote" >&2
   exit 2
 fi
-if ! REPO_INFO=$(env -u GH_REPO gh repo view "${ORIGIN_URL}" --json owner,name,url \
-    -q '"\(.owner.login) \(.name) \(.url)"' 2>&1); then
+if ! REPO_INFO=$(env -u GH_REPO gh repo view "${ORIGIN_URL}" --json owner,name,url,visibility \
+    -q '"\(.owner.login) \(.name) \(.url) \(.visibility)"' 2>&1); then
   echo "ERROR: gh could not resolve origin (${ORIGIN_URL}) as a GitHub repo: ${REPO_INFO}" >&2
   exit 3
 fi
-read -r OWNER REPO REPO_URL <<< "${REPO_INFO}"
+read -r OWNER REPO REPO_URL REPO_VISIBILITY <<< "${REPO_INFO}"
+REPO_HOST=${REPO_URL#*://}
+REPO_HOST=${REPO_HOST%%/*}
 echo "Scanning: ${OWNER}/${REPO}"
 
 mkdir -p "${OUTPUT_DIR}"
 rm -f "${OUTPUT_DIR}/.fetch-errors" "${OUTPUT_DIR}"/*.disabled
 echo "${OWNER}/${REPO} ${REPO_URL}" > "${OUTPUT_DIR}/repo.txt"
+printf '%s\n' "${REPO_VISIBILITY}" > "${OUTPUT_DIR}/visibility.txt"
 
 # --- Step 2: Dependabot alerts via GraphQL ---
 echo "Fetching Dependabot alerts..."
-if ! DB_ERR=$(gh api graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
+if ! DB_ERR=$(gh api --hostname "${REPO_HOST}" graphql -f owner="${OWNER}" -f name="${REPO}" -f query='
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     name
@@ -58,6 +62,7 @@ query($owner: String!, $name: String!) {
     vulnerabilityAlerts(first: 100, states: OPEN) {
       totalCount
       nodes {
+        number
         securityVulnerability {
           package { name ecosystem }
           severity
@@ -76,7 +81,7 @@ echo "Fetching Code Scanning and Secret Scanning alerts..."
 
 # Code Scanning (403/404 = not enabled, skip gracefully)
 # NOTE: other API errors (e.g. 503) fall through to "[]" — check ${OUTPUT_DIR}/.fetch-errors.
-if CS_RESP=$(gh api "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
+if CS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
   echo "${CS_RESP}" > "${OUTPUT_DIR}/code-scanning.json"
 else
   HTTP_STATUS=$(echo "${CS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1 || true)
@@ -90,7 +95,7 @@ else
 fi
 
 # Secret Scanning (404 = disabled, skip gracefully; strip secret values)
-if SS_RESP=$(gh api "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
+if SS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
     --jq '[.[] | del(.secret)]' 2>&1); then
   echo "${SS_RESP}" > "${OUTPUT_DIR}/secret-scanning.json"
 else

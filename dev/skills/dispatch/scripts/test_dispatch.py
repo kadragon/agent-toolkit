@@ -1023,7 +1023,7 @@ class PickTests(unittest.TestCase):
             if "issues(first" in query:
                 return 0, json.dumps({"data": {"repository": {
                     "isPrivate": True, "issues": {**connection(issues)}}}}), ""
-            return 0, json.dumps({"data": {"repository": {"isPrivate": True}}}), ""
+            return 0, json.dumps({"data": {"repository": {"visibility": "PRIVATE"}}}), ""
 
         def queue_op(op, request):
             code, data = queue_backend.handle(op, json.loads(json.dumps(request)), {}, runner)
@@ -1040,7 +1040,7 @@ class PickTests(unittest.TestCase):
             with patch("dispatch.queue_op", side_effect=queue_op), redirect_stdout(out), redirect_stderr(err):
                 pick(SimpleNamespace(repo=str(repo), tree=False, full_scan=True))
 
-        self.assertTrue(any("isPrivate } }" in q for q in calls), "the missing backlog.md asks for the backend")
+        self.assertTrue(any("visibility } }" in q for q in calls), "the missing backlog.md asks for the backend")
         candidates = json.loads(out.getvalue())
         self.assertEqual([(c["ref"], c["title"], c["items"], c["open"]) for c in candidates],
                          [("#1", "[FEAT] Single issue", 1, 1), ("#3", "Parent", 2, 2)])
