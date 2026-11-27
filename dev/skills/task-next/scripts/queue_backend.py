@@ -1396,15 +1396,16 @@ def _parse_rejection(comments: list[dict]) -> tuple[str, str]:
 def github_rejected(req: dict, runner=gh_runner) -> dict:
     """Closed-not-planned trusted `task-queue` issues, with the reason from the reject comment."""
     owner, name = github_slug(req["repo"])
+    rejected = [
+        issue for page in _issue_pages(runner, REJECTED_QUERY, owner, name) for issue in page
+        if issue.get("stateReason") == "NOT_PLANNED" and issue.get("authorAssociation") in TRUSTED_AUTHORS
+    ]
+    details = _issue_details(runner, REJECTION_COMMENTS_QUERY, [issue["id"] for issue in rejected])
     entries = []
-    for page in _issue_pages(runner, REJECTED_QUERY, owner, name):
-        rejected = [issue for issue in page if issue.get("stateReason") == "NOT_PLANNED"
-                    and issue.get("authorAssociation") in TRUSTED_AUTHORS]
-        details = _issue_details(runner, REJECTION_COMMENTS_QUERY, [issue["id"] for issue in rejected])
-        for issue in rejected:
-            reason, bar = _parse_rejection(details[issue["id"]]["comments"]["nodes"])
-            entries.append({"ref": f"#{issue['number']}", "title": issue["title"], "reason": reason,
-                            "refile_bar": bar, "url": issue["url"]})
+    for issue in rejected:
+        reason, bar = _parse_rejection(details[issue["id"]]["comments"]["nodes"])
+        entries.append({"ref": f"#{issue['number']}", "title": issue["title"], "reason": reason,
+                        "refile_bar": bar, "url": issue["url"]})
     return {"entries": entries}
 
 
@@ -1527,7 +1528,6 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     revision = req.get("ref") if op in ("list", "describe") else req.get("rev") if historical_file_read else None
     backend = resolve(repo, env, revision)
     if historical_file_read and backend["source"] == "github-host":
-        # A historical file request can refer to a snapshot containing only rejected or finished items.
         backend = {"backend": "backlog", "source": "historical-file"}
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
@@ -2711,10 +2711,10 @@ def run_github_write_tests(tmp: str, git) -> None:
         {"ref": f"#{last}", "title": "Late rejection", "reason": "", "refile_bar": "",
          "url": f"https://github.com/owner/repo/issues/{last}"},
     ]}, "rejected reads past 100 pages and returns only trusted closed-not-planned issues")
-    comment_ids = [arg for call in gh.calls if f"query={REJECTION_COMMENTS_QUERY}" in call
-                   for arg in call if arg.startswith("ids[]=")]
-    _assert(comment_ids == ["ids[]=I_1", f"ids[]=I_{last}"],
-            "rejected fetches comments only for issues with a trusted author and matching state reason")
+    comment_requests = [[arg for arg in call if arg.startswith("ids[]=")]
+                        for call in gh.calls if f"query={REJECTION_COMMENTS_QUERY}" in call]
+    _assert(comment_requests == [["ids[]=I_1", f"ids[]=I_{last}"]],
+            "rejected batches comments across pages only for trusted issues with matching state reason")
     target = gh.add("[FIX] later", "Context.\nDeferred: old reason\n")
     code, out = handle("defer", dict(req, ref=f"#{target}", reason="waits on vendor"), {ENV_VAR: "github"}, gh)
     _assert(code == 0 and "deferred" in gh.issues[target]["labels"] and "deferred" in gh.labels
