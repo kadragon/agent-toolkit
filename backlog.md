@@ -11,13 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 8 — task-new routing on issues backend
-
-- [ ] [FEAT] Update `task-new` routing: on the issues backend, *Queue without implementing* calls `task-tickets`, which files issues directly under the standing `queue-write` grant, with no *Queue documentation cycle* and no commit-authority check, and the working-tree gate's `backlog.md` carve-out and `queue_delta` apply only on the `backlog` backend
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Writers and authority
-  Done when: `task-new/SKILL.md` and `task-next/SKILL.md` → *Working tree gate* read correctly for both backends; `docs/design/` stays carried; the `task-new`/`task-next` workflow eval cases updated for the issues route, and the `backlog.md` queries in `task-next`/`task-new` `evals/trigger-eval.json` gain an issues-queue counterpart
-  Approach: backend from `queue_backend.py describe`; parallel-worktree queue-edit blocker applies only to `backlog`
-
 ## 9 — harness-init and validators backend split
 
 - [ ] [HARNESS] Split the harness tooling by backend: `reconcile-harness.py` skips its `backlog.md` writes, `validate-harness.sh` §9 expects no `backlog.md` on a GitHub origin and warns with the migration pointer on open items, `check_plugin_contracts.py` backlog-history skips the issues backend, and the harness-init templates and `harness-invariants.md` *Reconciliation Contract* state the split
@@ -27,7 +20,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 11 — adopt issues queue in agent-toolkit
 
-- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)*
+- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)*
   Source: docs/design/github-issues-queue.md → Further Notes (Bootstrap)
   Done when: `queue_backend.py list` on this repo shows no legacy-backlog warning; the rejected entries are listed by `rejected`; `validate-harness.sh` green
   Approach: dry-run first, then `--apply`

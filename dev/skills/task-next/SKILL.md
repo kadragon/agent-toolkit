@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.18.0
+version: 2.19.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -53,13 +53,22 @@ pointer. The issues backend needs no queue file. Read `docs/conventions.md` when
 **Working tree gate.** Capture the state before judging dirty files:
 
 ```bash
+BACKEND="<backend printed by describe>"
 dirty=$(git status --porcelain)
 current_branch=$(git branch --show-current)   # every row below reads it, dirty or clean
 task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)   # dirty or clean
 if [[ -n "$dirty" ]]; then
   task_contract_dirty=$(git status --porcelain -- tasks.md)
-  non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md' ':(exclude,top)docs/design')   # top: anchor at repo root
-  queue_delta=$(git diff --stat HEAD -- backlog.md)                          # HEAD: a staged backlog.md still shows
+  design_dirty=$(git status --porcelain -- ':(top)docs/design')
+  backlog_dirty=''
+  queue_delta=''
+  if [[ "$BACKEND" == backlog ]]; then
+    backlog_dirty=$(git status --porcelain -- ':(top)backlog.md')
+    queue_delta=$(git diff --stat HEAD -- ':(top)backlog.md')   # HEAD includes staged changes
+    non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md' ':(exclude,top)docs/design')
+  else
+    non_queue_dirty=$(git status --porcelain -- ':(exclude,top)docs/design')
+  fi
 fi
 ```
 
@@ -68,12 +77,12 @@ Base branch means `main` or `master`.
 | State | Action |
 |-------|--------|
 | `--resume <slug>`, or the user names a worktree | *Work already in flight* on `.worktrees/<slug>` only (`references/edge-cases.md`) |
-| `--tree`, any branch, clean or dirty — except on base with `task_contract_dirty` non-empty, which takes the legacy row below | proceed: this checkout is never read for selection, edited, or switched, so its branch and dirty files are someone else's (at most one non-`--tree` session, or the user). Announce them in one line — `main checkout: <current_branch>, <N> dirty file(s), left as is` — and, when `queue_delta` or a `docs/design/` file is dirty, add that these uncommitted queue edits are invisible to `--tree` until committed to base. Step 1 selects from the base |
+| `--tree`, any branch, clean or dirty — except on base with `task_contract_dirty` non-empty, which takes the legacy row below | proceed: this checkout is never read for selection, edited, or switched, so its branch and dirty files are someone else's (at most one non-`--tree` session, or the user). Announce them in one line — `main checkout: <current_branch>, <N> dirty file(s), left as is` — and, when `backlog_dirty` or `design_dirty` is non-empty, add that those edits are invisible to `--tree` until committed to base. Step 1 selects from the base |
 | clean on base branch | proceed |
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
 | on base branch, `task_contract_dirty` non-empty | same edge case — legacy only: a pre-collapse-free `--tree` run stopped after removing its worktree |
-| on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
+| on base branch, `non_queue_dirty` empty | Carry dirty `docs/design/` files on either backend and dirty `backlog.md` only on `backlog`. Announce the carried design docs and, when `backlog_dirty` is non-empty, quote `queue_delta` (or the file's line count when untracked). Proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
 On the `--tree` row or a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' runs, not this
