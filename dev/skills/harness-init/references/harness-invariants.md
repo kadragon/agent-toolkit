@@ -91,7 +91,7 @@ needs these gates is the one running without them. The floor, one line per gate:
 
 Each carve-out belongs to its own gate; do not merge them. Gate 1: repo-root paths outside every
 plugin tree are **N/A, not fail** — nothing to bump. Gate 5: the paths the cycle itself writes
-(`tasks.md`, `backlog.md`, `CHANGELOG.md`, the plugin manifests) are **N/A, not fail** — no
+(`tasks.md`, `backlog.md`, file-queue `CHANGELOG.md`, the plugin manifests) are **N/A, not fail** — no
 contract's Scope has to list them. A repo-root path is *not* exempt from gate 5: an edit there
 outside the contract's Scope still fails.
 
@@ -214,7 +214,7 @@ task cycle hands issue closure to the PR; file item deletion belongs to
 | `tasks.md` `status:` | Local sprint action | File queue only |
 |----------------------|---------------------|-----------------|
 | `open` / `active` | Keep the block and report the sprint title | An open block is selectable work |
-| `done` | Close the block; append a CHANGELOG entry if the file exists | Covered item deletion happens separately through `prune-backlog` |
+| `done` | Close the block; append a CHANGELOG entry only on the file queue if the file exists | Covered item deletion happens separately through `prune-backlog` |
 | `failed` | Close the block | Revert `[>]` to `[ ]` and prune empty headings |
 | No `tasks.md` | Sprint is idle | Revert orphan `[>]` to `[ ]` and prune empty headings |
 
@@ -235,7 +235,10 @@ the same shape on the file backend. Transfer those entries to the active queue b
 
 ## CHANGELOG Entry Contract
 
-`CHANGELOG.md` is an **index, not a record**. Every cycle tail — `task-new`, `task-next`
+GitHub issue queues use PR metadata. Follow `task-next/references/cycle.md` → *Cleanup* for
+the PR title, owning design pointer and issue closure.
+
+On the file queue, `CHANGELOG.md` indexes completed work. Every cycle tail — `task-new`, `task-next`
 (single, batch, or worktree), `reconcile-harness.py` — writes exactly one line, inserted as
 the **first entry under `## Unreleased`** (newest first; all tails write from the same end):
 

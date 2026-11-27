@@ -10,7 +10,7 @@ to the active queue before closing the sprint.
 
 ## Required Schema
 
-1. A top-level heading `# <Sprint Title>` — reconcile's display name and CHANGELOG title.
+1. A top-level heading `# <Sprint Title>` — reconcile's display name and the file queue's CHANGELOG title.
 2. A `status:` line, lowercase: `open` (queued; `task-next` flips it to `active` at the plan
    gate) · `active` · `done` · `failed`. What reconcile does with each:
    `harness-invariants.md` → *Reconciliation Contract*.

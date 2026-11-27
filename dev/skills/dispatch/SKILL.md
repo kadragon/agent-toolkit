@@ -1,9 +1,9 @@
 ---
 name: dispatch
-version: 2.11.0
+version: 3.0.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
-  the home's repos/*.md, using Herdr (`hc run`) or T3 Code orchestration. Use when the user asks to
+  the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
   run a listed repo's queue, start a task there, or have that repo handle a request, e.g. "다른 레포에서
   다음 작업 진행해" or "대상 레포 큐 돌려줘". Also use to watch, relaunch, or escalate a child session started by
   dispatch. Work on the home repo stays in that session.
@@ -21,14 +21,6 @@ slash commands and Codex uses `$task-next` and `$task-new`. Step 3 picks the CLI
 Replace `<dispatch>` with the directory containing the installed `SKILL.md`. If a live plugin
 update removes that directory, resolve the current installed path before the next command.
 Keep the receipt and address of the existing child.
-
-## Backend
-
-Pick once per run, before launch; name it in step 3's pre-launch line. The user's choice wins; else T3
-Code if this session has T3 tools **and** an `orchestrator_capabilities` call succeeds (env vars are
-not evidence); else Herdr. A launched child never switches backend. T3: `references/t3-backend.md`.
-Use Herdr when the user requests the Codex hook-trust bypass. If they select T3, report that this
-backend cannot pass the startup flag.
 
 ## 1. Resolve the repo
 
@@ -159,8 +151,9 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-Before launching or replacing a Codex child, follow `references/codex-readiness.md` → *Before a Codex wave*.
-For a single Codex child, launch and send in one invocation:
+For independent Codex waves, use `references/codex-readiness.md` → *Verified wave* to pin
+the reviewed plugin version and send through receipts. For shared-cache launches, follow
+*Before a shared-cache Codex wave*, then launch and send a single child in one invocation:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
@@ -170,7 +163,7 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex fa
 
 - `send` checks the idle composer before sending and checks the screen again before confirming
   submission. For blockers and retries, follow `references/codex-readiness.md`.
-- For Herdr Codex, `launch --trust-hooks` passes `--dangerously-bypass-hook-trust` for that process.
+- For shared-cache Herdr Codex, `launch --trust-hooks` passes `--dangerously-bypass-hook-trust` for that process.
   Verify the hook sources and commands and get explicit authorization before using it. It works
   with `--task` and with idle wave launches. Otherwise follow the manual hook review in the readiness guide.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
@@ -188,14 +181,14 @@ More than one session:
 
 Tell the user each terminal's name, address and repo. Watch in the background and keep context small:
 
-- Start `hc wait --children any --timeout 1800` in the background after confirming task
-  delivery to every new child. A child still idle at startup can wake the wait immediately.
-  Keep the timeout under the prompt-cache lifetime (1 hour on a subscription).
-- On a status change or timeout, run `dispatch.py collect <receipt>` before waiting again. Report
-  its `stop_reason` when present. `--stall-minutes N` overrides the 30-minute inactivity threshold.
-  Check the screen yourself if a decision remains unclear. Report model, effort and measured
-  token totals or review retries. `screen_reads` counts delivery reads; `collect_screen_reads`
-  counts extra reads for this call. On `hooks_broken` or `plugin_drift`, see `references/codex-readiness.md`.
+- After confirming task delivery to every new child, run `dispatch.py wait <receipt>...` in the
+  background. It prints the initial status and changes until every receipt reaches a selected
+  outcome or 1800 seconds elapse. For task completion, use `--until ready,blocked,done,merged,stop`
+  to keep waiting through ordinary idle states. Keep the timeout under the prompt-cache lifetime.
+- `dispatch.py collect <receipt> --brief` prints the same one-line status on demand. Use full
+  `collect` for details and review evidence. `--stall-minutes N` overrides the 30-minute
+  inactivity threshold. Report the stop reason, model, effort and any measured token totals or
+  review retries. On `hooks_broken` or `plugin_drift`, see `references/codex-readiness.md`.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.
@@ -212,7 +205,7 @@ The user delegates the session's decisions to this session:
 - **Push and merge** — follow the user's original authorization and limits, and wait until
   the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
   merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
-  (for example, `origin/main`) into it. Preserve both sides of shared queue and changelog entries and rerun
+  (for example, `origin/main`) into it. Preserve both sides of shared file-queue entries and rerun
   required checks on the final head. This keeps pushes fast-forward and the merge commit
   stays off main when the PR is squash-merged.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
@@ -233,10 +226,11 @@ A finished terminal closes without a final result. If the result file is unreada
 reconfirm `state: finished` and use `collect --close --force`. For a live child, use
 `--force` only when authorized to close it irrespective of its reported status.
 
-After close returns `"closed": true`, save any result or receipt details you still need. Use the exact
-`run.json` path printed by `launch`. Remove that file, `run.lock`, `result.json`, and any identified temporary
-writes such as `run.tmp` or the child's temporary result file. Remove the directory if empty, or report its
-path if files remain. If close fails, keep the receipt files for diagnosis.
+After close returns `"closed": true`, save any result or receipt details you still need.
+For a pinned wave, close every child and release the wave before removing its receipts.
+Use the exact `run.json` path printed by `launch`. Remove that file, `run.lock`, `result.json`,
+and any identified temporary writes. Remove the directory if empty, or report its path if files
+remain. If close fails, keep the receipt files for diagnosis.
 
 ### Continue with another phase
 

@@ -1,6 +1,6 @@
 ---
 name: task-new
-version: 2.8.0
+version: 2.9.0
 description: >-
   Intake for new work you just described — classify, size, then run the full code cycle:
   branch, Sprint Contract, implement, version bump, review, commit, push, PR and merge
@@ -133,9 +133,10 @@ Git limits per `../task-next/references/git-authorization.md` before writes:
 - **Sprint Contract** — archive per the shared cycle. No `tasks.md`: a free-text request has no
   queue line to delete.
 - **Cleanup** — skip `prune-tasks` and `prune-backlog`; this cycle claims no queue items.
-  When the repo maintains a `CHANGELOG.md`, record the completed scoped change. In a queue
-  documentation cycle, title the entry for the act of recording the tickets. Do not scaffold
-  a harness to finish standalone work.
+  With the selected file queue, write an entry if the repo maintains a `CHANGELOG.md`. In a
+  queue documentation cycle, title the entry for the act of recording the tickets. Follow the
+  shared PR metadata procedure for GitHub issue queues. Do not scaffold a harness to finish
+  standalone work.
 
 ## Step 4 — Hand off
 

@@ -27,9 +27,15 @@ Commit types (mandatory prefix):
 
 Never commit directly to `main` — branch first (`git checkout -b <type>/<slug>`).
 
+### Release Records
+
+For GitHub issue queues, put resulting plugin versions in the PR title and the owning design
+pointer in the PR body when applicable. The PR closes the issues it completes. See the
+[historical changelog](archive/CHANGELOG.md) for agent-toolkit's entries before this switch.
+
 ### CHANGELOG Entries
 
-`CHANGELOG.md` is an index, not a record. One line per completed cycle, inserted as the first
+File queues use `CHANGELOG.md` as an index. One line per completed cycle, inserted as the first
 entry under `## Unreleased` (newest first):
 
 ```
@@ -201,8 +207,7 @@ uv python install 3.11 && "$(uv python find 3.11)" -c "import ast; ast.parse(ope
 `mods/.claude-plugin/plugin.json` is a third independent line. `mods` is Claude Code only, so it
 has no `.codex-plugin` manifest to keep in sync. It follows the table below with a mod read as a
 hook: a mod added is a minor, because it fires on its own; a mod or a `userConfig` key removed or
-renamed is a patch, because neither is invoked by name. Say a renamed key in the CHANGELOG entry's
-owning doc — the stored setting silently falls back to its default.
+renamed is a patch, because neither is invoked by name. Document a renamed key in the owning doc — the stored setting silently falls back to its default.
 
 | Change type | Bump |
 |-------------|------|

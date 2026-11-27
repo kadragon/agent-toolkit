@@ -7,7 +7,7 @@
 # G) record_run.py --check-due — nudge when a harness-curate run is due
 #
 # Run C (reconcile-harness.py) during explicit harness sync. It can close tasks.md,
-# update CHANGELOG.md, or repair file-queue markers.
+# update a file queue's CHANGELOG.md, or repair file-queue markers.
 #
 # Guard: only runs in repos with AGENTS.md (harness repos)
 # Debounce: daily stamp at .agents/.maintenance-stamp

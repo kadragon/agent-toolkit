@@ -2,6 +2,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
+import pinned_wave
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
@@ -26,14 +28,15 @@ from dispatch import (
     launch,
     lock_run,
     pick,
-    record,
-    render_t3_thread_launch,
+    release,
     report_instruction,
     resolve_codex_model,
     send,
     terminal_name,
     transcript_echoed,
+    verify_pinned_delivery,
     verify_terminal,
+    wait,
 )
 from quota import WEEK, assess, claude_snapshot
 from quota import main as quota_main
@@ -1214,257 +1217,237 @@ class CodexModelTests(DispatchTestCase):
                 cache.assert_not_called()
 
 
-class T3PromptTests(DispatchTestCase):
-    FIELDS = DispatchReceiptTests.FIELDS
-    HANDOFF = DispatchReceiptTests.HANDOFF
-    BLOCK = DispatchReceiptTests.BLOCK
+class PinnedWaveTests(unittest.TestCase):
+    """Exercise wave bytes and dispatch gates without authorizing any real hooks."""
 
-    def prompt_args(self, cwd, **overrides):
-        args = dict(cwd=str(cwd), cli="claude", model="claude-sonnet-5-5", effort="medium",
-                    title=None, message="/dev:task-next", **self.HANDOFF)
-        return SimpleNamespace(**(args | overrides))
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
 
-    def render(self, args, home):
-        receipt_dir = Path(home) / "receipt"
-        receipt_dir.mkdir(exist_ok=True)
-        with (
-            patch("dispatch.tempfile.mkdtemp", return_value=str(receipt_dir)),
-            patch("dispatch.Path.cwd", return_value=home),
-            patch("dispatch.hc_json") as hc,
-            patch("dispatch.subprocess.run") as run,
-            patch("sys.stdout", new_callable=StringIO) as stdout,
-        ):
-            render_t3_thread_launch(args)
-        hc.assert_not_called()
-        run.assert_not_called()
-        return json.loads(stdout.getvalue())
+    def make_wave(self, suffix, version):
+        root = self.tmp / ("dispatch-wave-" + suffix)
+        root.mkdir()
+        path = root / "wave.json"
+        binary = self.tmp / "codex"
+        binary.write_text("fixture executable", encoding="utf-8")
+        home = root / "home"
+        home.mkdir()
+        (home / "config.toml").write_text("", encoding="utf-8")
+        source = root / "source"
+        source.mkdir()
+        wave = {"schema": 1, "market": root.name, "versions": {"dev": version, "prod": "1.0.0"},
+                "binary": str(binary), "binary_hash": pinned_wave.file_hash(binary),
+                "settings": {}, "cache_hash": {}, "hooks": {}, "children": []}
+        for name in pinned_wave.PLUGINS:
+            plugin = source / name
+            (plugin / ".codex-plugin").mkdir(parents=True)
+            (plugin / pinned_wave.MANIFEST).write_text('{"hooks":"hooks.json"}', encoding="utf-8")
+            (plugin / "hooks.json").write_text('{"hooks":{}}', encoding="utf-8")
+            (plugin / "hooks").mkdir()
+            (plugin / "hooks/guard.py").write_text(f"# {version}", encoding="utf-8")
+            (plugin / "SKILL.md").write_text(f"Skill {version}", encoding="utf-8")
+            cache = pinned_wave.cache_path(root, wave, name)
+            shutil.copytree(plugin, cache)
+            wave["cache_hash"][name] = pinned_wave.tree_hash(plugin)
+        wave["source_hash"] = pinned_wave.tree_hash(source)
+        wave["hooks"] = {"first": [pinned_wave.cache_path(root, wave, "dev").relative_to(root).as_posix()
+                                   + "/hooks.json", "sha256:first", 'python "$env:PLUGIN_ROOT/hooks/guard.py"']}
+        path.write_text(json.dumps(wave), encoding="utf-8")
+        return path, wave
 
-    def test_blank_handoff_fields_stop_before_any_receipt(self):
-        for field in ("request", "unit", "git_limits"):
-            with self.subTest(field=field), patch("dispatch.tempfile.mkdtemp") as mkdtemp:
-                with self.assertRaisesRegex(SystemExit, "--" + field.replace("_", "-")):
-                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **{field: " \n "}))
-                mkdtemp.assert_not_called()
-        with patch("dispatch.tempfile.mkdtemp") as mkdtemp, self.assertRaisesRegex(SystemExit, "fable"):
-            render_t3_thread_launch(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
-        mkdtemp.assert_not_called()
+    def verification_stubs(self, path, wave, *, trusted=True):
+        root = path.parent
+        plugins = {"installed": [
+            {"pluginId": f"{name}@{wave['market']}", "enabled": True, "version": wave["versions"][name],
+             "source": {"source": "local", "path": str(root / "source" / name)}}
+            for name in pinned_wave.PLUGINS
+        ]}
+        hook_path, hook_hash, command = wave["hooks"]["first"]
+        hook = {"pluginId": f"dev@{wave['market']}", "source": "plugin", "key": "first",
+                "sourcePath": str(root / hook_path), "currentHash": hook_hash, "command": command,
+                "enabled": True, "isManaged": False, "trustStatus": "trusted" if trusted else "untrusted"}
+        groups = {"data": [{"cwd": str(self.tmp), "warnings": [], "errors": [], "hooks": [hook]}]}
+        return plugins, groups
 
-    def test_prompt_enforces_quota_and_records_the_exception(self):
-        snapshot = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex"}
-        self.quota.return_value = snapshot
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            with patch("dispatch.tempfile.mkdtemp") as mkdtemp:
-                with self.assertRaisesRegex(SystemExit, "quota bias codex refuses"):
-                    render_t3_thread_launch(self.prompt_args(home))
-                mkdtemp.assert_not_called()
-            reason = "production DB: execution plan"
-            payload = self.render(self.prompt_args(home, model="claude-opus-5-5", bias_exception=reason), home)
-            receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
-            self.assertEqual(receipt["bias_exception"], reason)
-            self.assertEqual(receipt["quota_snapshot"], snapshot)
-            self.quota.return_value = {**QUOTA_OK, "bias": "claude", "effective_bias": "claude"}
-            with patch("dispatch.tempfile.mkdtemp") as mkdtemp:
-                with self.assertRaisesRegex(SystemExit, "quota bias claude refuses"):
-                    render_t3_thread_launch(self.prompt_args(home, cli="codex", model="gpt-6.2-sol",
-                                                             effort="high", message="$task-next"))
-                mkdtemp.assert_not_called()
+    def test_overlapping_versions_are_independent_of_a_shared_marketplace_refresh(self):
+        shared_cache = self.tmp / "shared/plugins/cache/kadragon/dev"
+        old, old_wave = self.make_wave("a", "1.0.0")
+        (shared_cache / "1.0.0").mkdir(parents=True)
+        (shared_cache / "1.0.0" / "SKILL.md").write_text("original", encoding="utf-8")
+        new, new_wave = self.make_wave("b", "1.1.0")
+        shutil.rmtree(shared_cache / "1.0.0")
+        (shared_cache / "1.1.0").mkdir()
+        with patch.dict(os.environ, {"CODEX_HOME": str(self.tmp / "shared")}):
+            for path, wave in ((old, old_wave), (new, new_wave)):
+                plugins, groups = self.verification_stubs(path, wave)
+                with patch("pinned_wave.codex_command", return_value=json.dumps(plugins)), \
+                     patch("pinned_wave.inspect_hooks", return_value=groups):
+                    self.assertTrue(pinned_wave.verify(path, wave, self.tmp))
+                cached = pinned_wave.cache_path(path.parent, wave, "dev")
+                self.assertEqual((cached / "SKILL.md").read_text(encoding="utf-8"),
+                                 f"Skill {wave['versions']['dev']}")
+                self.assertEqual((cached / "hooks/guard.py").read_text(encoding="utf-8"), f"# {wave['versions']['dev']}")
 
-    def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
-        for cli, model, option in (("claude", "claude-sonnet-5-5", "effort"),
-                                   ("codex", "gpt-6.2-sol", "reasoningEffort")):
-            with self.subTest(cli=cli), tempfile.TemporaryDirectory() as directory:
-                home = Path(directory)
-                (home / "repos").mkdir()
-                extra_lines = ["Use the launch-time checklist."]
-                (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
-                message = "/dev:task-next" if cli == "claude" else "$task-next"
-                payload = self.render(self.prompt_args(home, cli=cli, model=model, effort="high",
-                                                       message=message, title=" T3  run "), home)
-                result = Path(payload["result"])
-                guard = (f"You start in {home.resolve()}. If you started anywhere else, stop before any change "
-                         "and report that in the result file; a worktree the task skill creates from there is fine.")
-                single = "Write summary as one JSON string (join its lines with \\n), never an array."
-                selection = {"instanceId": "claudeAgent" if cli == "claude" else "codex", "model": model,
-                             "options": [{"id": option, "value": "high"}]}
-                self.assertEqual(payload["t3_thread_launch"], {
-                    "title": "T3 run", "modelSelection": selection, "workspaceStrategy": {"type": "root"},
-                    "message": message + self.BLOCK + "\n\n" + extra_lines[0] + "\n\n" + guard + " "
-                    + report_instruction(result) + " " + single})
-                self.assertEqual(payload["project_lookup"],
-                                 {"tool": "t3_project_list", "workspaceRoot": str(home.resolve())})
-                self.assertNotIn("handoff", payload)
-                receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
-                self.assertEqual(Path(payload["run"]), result.with_name("run.json"))
-                self.assertEqual(receipt["backend"], "t3")
-                self.assertEqual(receipt["title"], "T3 run")
-                self.assertEqual(receipt["cwd"], str(home.resolve()))
-                self.assertEqual(receipt["model_selection"], selection)
-                self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
-                self.assertNotIn("address", receipt)
+    def test_modified_missing_or_untrusted_hooks_fail_the_delivery_gate(self):
+        path, wave = self.make_wave("a", "1.0.0")
+        run = {"address": "t7", "wave": str(path), "wave_trusted_at_start": True, "cwd": str(self.tmp)}
+        terminal = {"labels": {pinned_wave.WAVE_LABEL: wave["market"]},
+                    "foreground": {"argv": [wave["binary"], "--no-daemon"]}, "status": {"app": "codex"}}
+        plugins, groups = self.verification_stubs(path, wave, trusted=False)
+        with patch("pinned_wave.tempfile.gettempdir", return_value=str(self.tmp)), \
+             patch("pinned_wave.codex_command", return_value=json.dumps(plugins)), \
+             patch("pinned_wave.inspect_hooks", return_value=groups):
+            with self.assertRaisesRegex(SystemExit, "lack native trust"):
+                verify_pinned_delivery(run, terminal)
+            with self.assertRaisesRegex(SystemExit, "close and relaunch"):
+                verify_pinned_delivery({**run, "wave_trusted_at_start": False}, terminal)
+            with self.assertRaisesRegex(SystemExit, "supply its launch receipt"):
+                verify_pinned_delivery(None, terminal)
+            groups["data"][0]["hooks"][0]["command"] = "python C:/external/guard.py"
+            with self.assertRaisesRegex(SystemExit, "no verifiable plugin entrypoint"):
+                verify_pinned_delivery(run, terminal)
+            groups["data"][0]["hooks"] = []
+            with self.assertRaisesRegex(SystemExit, "definitions differ"):
+                verify_pinned_delivery(run, terminal)
+            (pinned_wave.cache_path(path.parent, wave, "dev") / "hooks/guard.py").write_text("changed", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "cache changed"):
+                verify_pinned_delivery(run, terminal)
 
-    def test_models_and_efforts_must_be_ones_t3_lists(self):
-        for overrides, error in (
-            ({"model": "sonnet"}, "full Claude model id"),
-            ({"cli": "codex", "model": "Sol", "message": "$task-next"}, "Codex slug"),
-            ({"effort": "ultra"}, "claudeAgent effort must be one of .*ultrathink"),
-            ({"cli": "codex", "model": "gpt-6.2-sol", "effort": "ultrathink", "message": "$task-next"},
-             "codex effort must be one of .*ultra"),
-            ({"cli": "codex", "model": "gpt-6-luna", "effort": "ultra", "message": "$task-next"}, "no 'ultra' effort"),
-            ({"cli": "codex", "model": " sol ", "message": "$task-next"}, "Codex slug"),
-            ({"model": " \n "}, "--model must not be blank"),
-        ):
-            with self.subTest(**overrides), patch("dispatch.tempfile.mkdtemp") as mkdtemp, \
-                    patch("dispatch.resolve_codex_model") as resolve:
-                with self.assertRaisesRegex(SystemExit, error):
-                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **overrides))
-                mkdtemp.assert_not_called()
-                resolve.assert_not_called()
+    def test_missing_herdr_environment_support_refuses_isolation(self):
+        schema = {"methods": [{"name": "terminal.run", "params": [{"name": "argv"}]}]}
+        with patch("pinned_wave.command", return_value=json.dumps(schema)), \
+             self.assertRaisesRegex(pinned_wave.PinError, "per-terminal environment support"):
+            pinned_wave.verify_herdr()
 
-    def test_cli_prompt_prints_json_and_needs_a_message(self):
-        base = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "prompt", "--cli", "claude",
-                "--model", "claude-opus-5-5", "--effort", "xhigh", "--cwd", str(SCRIPTS), "--work-kind", "new",
-                "--request", "요청", "--unit", "단위", "--git-limits", "none"]
-        missing = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(missing.returncode, 2)
-        self.assertIn("message", missing.stderr)
-        done = subprocess.run([*base, "/dev:task-new 단위"], capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        payload = json.loads(done.stdout)
-        try:
-            launch_args = payload["t3_thread_launch"]
-            self.assertTrue(launch_args["message"].startswith("/dev:task-new 단위\n\nHandoff metadata (JSON):"))
-            self.assertEqual(launch_args["modelSelection"]["options"], [{"id": "effort", "value": "xhigh"}])
-            self.assertEqual(launch_args["title"], SCRIPTS.name)
-        finally:
-            for name in ("run.json", "run.lock"):
-                Path(payload["run"]).with_name(name).unlink(missing_ok=True)
-            Path(payload["run"]).parent.rmdir()
+    def test_native_ui_setup_marker_does_not_change_verified_settings(self):
+        path, wave = self.make_wave("a", "1.0.0")
+        config = path.parent / "home" / "config.toml"
+        config.write_text("[tui]\nscreen_reader_detection_done = true\n", encoding="utf-8")
+        pinned_wave.verify_files(path, wave)
+        config.write_text("sandbox_mode = 'danger-full-access'\n"
+                          "[tui]\nscreen_reader_detection_done = true\n", encoding="utf-8")
+        with self.assertRaisesRegex(pinned_wave.PinError, "isolated Codex settings changed"):
+            pinned_wave.verify_files(path, wave)
 
-    def test_cli_prompt_rejects_hook_trust_bypass_on_t3(self):
-        result = subprocess.run(
-            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "prompt", "--cli", "codex",
-             "--model", "gpt-6.2-sol", "--effort", "medium", "--cwd", str(SCRIPTS), "--work-kind", "queue",
-             "--request", "request", "--unit", "unit", "--git-limits", "none", "--trust-hooks", "$task-next"],
-            capture_output=True, text=True, encoding="utf-8",
+    def test_detected_user_hook_settings_require_shared_cache(self):
+        home = self.tmp / "shared"
+        home.mkdir()
+        (home / "config.toml").write_text('[hooks.state."fixture"]\ntrusted_hash = "fixture"\n',
+                                           encoding="utf-8")
+        pinned_wave.ensure_shared_guards_are_preserved(home)
+        (home / "hooks.json").write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(pinned_wave.PinError, "omit shared guards.*hooks.json"):
+            pinned_wave.ensure_shared_guards_are_preserved(home)
+
+    def test_launch_starts_native_codex_through_herdr_with_only_private_home(self):
+        path, wave = self.make_wave("a", "1.0.0")
+        args = SimpleNamespace(wave=str(path), cli="codex", model="gpt-6.2-sol", effort="medium", cwd=self.tmp,
+                               name=None, title=None, task=None, message=None, keep_connectors=False,
+                               parent=None, task_dir=None, work_kind="standalone", request="work",
+                               unit="unit", git_limits="none", dry_run=False)
+        terminal = {"address": "t7", "parent": None, "created_ms": 42}
+        reply = {"jsonrpc": "2.0", "id": 1, "result": {"address": "t7"}}
+        child_dir = self.tmp / "child"
+        child_dir.mkdir()
+        with patch.dict(os.environ, {"HC_TERMINAL_ID": "", "CODEX_HOME": str(self.tmp / "shared")}), \
+             patch("pinned_wave.tempfile.gettempdir", return_value=str(self.tmp)), \
+             patch("pinned_wave.verify_herdr"), patch("pinned_wave.verify", return_value=False), \
+             patch("dispatch.read_quota_snapshot", return_value=QUOTA_OK), patch("dispatch.warn_linked_worktree"), \
+             patch("dispatch.tempfile.mkdtemp", return_value=str(child_dir)), \
+             patch("dispatch.hc_json", side_effect=[{"terminals": []}, terminal]), \
+             patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(reply))) as process, \
+             redirect_stdout(StringIO()) as output:
+            launch(args)
+        cmd = process.call_args
+        self.assertEqual(cmd.args[0], ["hc", "connect"])
+        frame = cmd.kwargs["input"]
+        self.assertTrue(frame.endswith("\n"))
+        data = json.loads(frame)
+        self.assertEqual(data["method"], "terminal.run")
+        self.assertEqual(data["params"]["env"]["CODEX_HOME"], str(path.parent / "home"))
+        self.assertEqual(data["params"]["argv"][:2], [wave["binary"], "--no-daemon"])
+        self.assertNotIn("--dangerously-bypass-hook-trust", data["params"]["argv"])
+        receipt = json.loads(output.getvalue())
+        self.assertFalse(receipt["wave_trusted_at_start"])
+        self.assertEqual(pinned_wave.read_json(path)["children"], [receipt["run"]])
+
+    def test_pinned_launch_cannot_opt_in_to_hook_bypass(self):
+        args = SimpleNamespace(wave="unused", cli="codex", trust_hooks=True, task=None)
+        with self.assertRaisesRegex(SystemExit, "forbids --trust-hooks"):
+            launch(args)
+
+    def test_release_waits_for_every_child_and_leaves_other_wave_intact(self):
+        path, wave = self.make_wave("a", "1.0.0")
+        other, _ = self.make_wave("b", "2.0.0")
+        child = self.tmp / "run.json"
+        wave["children"] = [str(child)]
+        path.write_text(json.dumps(wave), encoding="utf-8")
+        child.write_text(json.dumps({"address": "t7", "wave": str(path)}), encoding="utf-8")
+        args = SimpleNamespace(wave=str(path))
+        with patch("pinned_wave.tempfile.gettempdir", return_value=str(self.tmp)), redirect_stdout(StringIO()):
+            with self.assertRaisesRegex(SystemExit, "must be closed first"):
+                release(args)
+            self.assertTrue(path.is_file())
+            child.write_text(json.dumps({"address": "t7", "wave": str(path), "closed_reason": "finished"}),
+                             encoding="utf-8")
+            release(args)
+        self.assertFalse(path.parent.exists())
+        self.assertTrue(other.is_file())
+
+
+
+
+class DispatchWatchTests(unittest.TestCase):
+    def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
+        report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
+                  "result": {"status": "done", "phase": "implement", "summary": "작업 중\nsecond line",
+                             "pr": "#10"}}
+        same = {**report, "result": {**report["result"], "review_retries": 2}}
+        ready = {**report, "status": "done", "result": {"status": "ready", "phase": "review",
+                                                       "summary": "검증 완료", "pr": "#10"}}
+        args = SimpleNamespace(runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
+                               timeout=30, stall_minutes=30)
+        with patch("dispatch.collect_result", side_effect=[report, same, ready]) as probe, \
+             patch("dispatch.hc_json") as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
+            wait(args)
+        self.assertEqual(probe.call_count, 3)
+        self.assertEqual(hc.call_count, 2)
+        self.assertEqual(output.getvalue().splitlines(), [
+            "t7 · working · implement · 작업 중 · #10 · -",
+            "t7 · ready · review · 검증 완료 · #10 · -",
+        ])
+
+    def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
+        working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
+                   "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
+        stopped = {**working, "status": "done"}
+        second = {**working, "address": "t8", "result": None, "stop_reason": "hooks_broken"}
+        args = SimpleNamespace(runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
+        with patch("dispatch.collect_result", side_effect=[working, second, stopped, second]) as probe, \
+             patch("dispatch.hc_json"), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
+            wait(args)
+        self.assertEqual(probe.call_count, 4)
+        self.assertEqual(len(output.getvalue().splitlines()), 3)
+
+    def test_wait_times_out_when_no_selected_outcome_occurs(self):
+        report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
+        args = SimpleNamespace(runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
+        with patch("dispatch.collect_result", return_value=report), \
+             patch("dispatch.time.monotonic", side_effect=[0, 2]), redirect_stdout(StringIO()) as output:
+            with self.assertRaisesRegex(SystemExit, "timed out"):
+                wait(args)
+        self.assertEqual(output.getvalue(), "t7 · idle · - · - · - · -\n")
+
+    def test_piped_brief_is_utf8_even_under_a_legacy_console_encoding(self):
+        code = (
+            "import sys; sys.path.insert(0, sys.argv[1]); import dispatch; "
+            "dispatch.collect_result = lambda *a, **kw: "
+            "{'address':'t7','status':'working','state':'live','stop_reason':None,"
+            "'result':{'status':'working','phase':'test','summary':'\\uac80\\uc99d \\U0001f9ea'}}; "
+            "dispatch.main(['collect','run.json','--brief'])"
         )
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("--trust-hooks is unavailable on T3: t3_thread_launch has no Codex startup argv field",
-                      result.stderr)
-
-    def test_record_stores_one_thread_and_project_on_a_t3_receipt_only(self):
-        def ids(thread="th-1", project="pr-1"):
-            return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project, resume=False)
-
-        with tempfile.TemporaryDirectory() as directory:
-            receipt = Path(directory) / "run.json"
-            receipt.write_text(json.dumps({"backend": "t3", "cli": "claude"}), encoding="utf-8")
-            with patch("sys.stdout", new_callable=StringIO):
-                record(ids(thread=" th-1 "))
-                record(ids())
-            stored = json.loads(receipt.read_text(encoding="utf-8"))
-            self.assertEqual((stored["thread_id"], stored["project_id"]), ("th-1", "pr-1"))
-            self.assertNotIn("task_id", stored)
-            with self.assertRaisesRegex(SystemExit, "already records thread_id th-1"):
-                record(ids(thread="th-2"))
-            with self.assertRaisesRegex(SystemExit, "already records project_id pr-1"):
-                record(ids(project="pr-2"))
-            for blank, flag in (({"thread": " "}, "--thread-id"), ({"project": ""}, "--project-id")):
-                with self.assertRaisesRegex(SystemExit, f"{flag} must not be blank"):
-                    record(ids(**blank))
-            herdr = Path(directory) / "herdr.json"
-            herdr.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, "not a T3 receipt"):
-                record(SimpleNamespace(run=str(herdr), thread_id="th-1", project_id="pr-1", resume=False))
-            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "is a T3 receipt"):
-                send(SimpleNamespace(address="t7", message="$task-next", run=str(receipt)))
-            hc.assert_not_called()
-
-    def test_collect_reads_the_result_file_without_herdr(self):
-        with tempfile.TemporaryDirectory() as directory:
-            receipt = Path(directory) / "run.json"
-            receipt.write_text(json.dumps({"backend": "t3", "thread_id": "th-1", "project_id": "pr-1"}),
-                               encoding="utf-8")
-            final = {"status": "ready", "phase": "review", "summary": "PR open"}
-            receipt.with_name("result.json").write_text(json.dumps(final), encoding="utf-8")
-            with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
-                collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
-            hc.assert_not_called()
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual((payload["backend"], payload["thread_id"], payload["project_id"], payload["result"]),
-                             ("t3", "th-1", "pr-1", final))
-            self.assertIsNone(payload["stop_reason"])
-            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "t3_thread_interrupt"):
-                collect(SimpleNamespace(run=str(receipt), close=True, stall_minutes=30))
-            hc.assert_not_called()
-
-
-class T3StallTests(unittest.TestCase):
-    def collect_t3(self, directory, created_ms, result=None, result_age_minutes=0):
-        receipt = Path(directory) / "run.json"
-        receipt.write_text(json.dumps({"backend": "t3", "created_ms": created_ms}), encoding="utf-8")
-        if result is not None:
-            written = receipt.with_name("result.json")
-            written.write_text(json.dumps(result), encoding="utf-8")
-            stamp = time.time() - result_age_minutes * 60
-            os.utime(written, (stamp, stamp))
-        with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
-            collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
-        hc.assert_not_called()
-        return json.loads(stdout.getvalue())["stop_reason"]
-
-    def test_a_silent_result_file_past_the_threshold_is_a_stall(self):
-        now_ms = time.time_ns() // 1_000_000
-        old_ms = now_ms - 31 * 60_000
-        working = {"status": "working", "phase": "implement", "summary": "going"}
-        for created_ms, result, age, expected in (
-            (now_ms, None, 0, None),
-            (old_ms, None, 0, "No result file for 30 minutes"),
-            (old_ms, working, 5, None),
-            (old_ms, working, 31, "No result update for 30 minutes"),
-            (old_ms, {**working, "status": "ready"}, 31, None),
-            (old_ms, {**working, "status": "blocked"}, 31, None),
-        ):
-            with self.subTest(result=result and result["status"], age=age), \
-                    tempfile.TemporaryDirectory() as directory:
-                self.assertEqual(self.collect_t3(directory, created_ms, result, age), expected)
-
-
-class T3ResumeTests(unittest.TestCase):
-    def test_resume_hides_the_paused_result_and_restarts_the_stall_clock(self):
-        with tempfile.TemporaryDirectory() as directory:
-            receipt = Path(directory) / "run.json"
-            old_ms = time.time_ns() // 1_000_000 - 40 * 60_000
-            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms}), encoding="utf-8")
-            resume = SimpleNamespace(run=str(receipt), thread_id=None, project_id=None, resume=True)
-            with self.assertRaisesRegex(SystemExit, "records no thread yet"):
-                record(resume)
-            with self.assertRaisesRegex(SystemExit, "--resume takes no"):
-                record(SimpleNamespace(run=str(receipt), thread_id="th-1", project_id=None, resume=True))
-            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms, "thread_id": "th-1"}),
-                               encoding="utf-8")
-            paused = receipt.with_name("result.json")
-            paused.write_text(json.dumps({"status": "blocked", "phase": "grill", "summary": "question"}),
-                              encoding="utf-8")
-            stamp = time.time() - 35 * 60
-            os.utime(paused, (stamp, stamp))
-
-            def collected():
-                with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
-                    collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
-                hc.assert_not_called()
-                return json.loads(stdout.getvalue())
-
-            self.assertEqual(collected()["result"]["status"], "blocked")
-            with patch("sys.stdout", new_callable=StringIO):
-                record(resume)
-            stored = json.loads(receipt.read_text(encoding="utf-8"))
-            self.assertEqual(stored["previous_result"], paused.stat().st_mtime_ns)
-            payload = collected()
-            self.assertEqual((payload["result"], payload["stop_reason"]), (None, None))
-            receipt.write_text(json.dumps({**stored, "resumed_ms": old_ms}), encoding="utf-8")
-            self.assertEqual(collected()["stop_reason"], "No result file for 30 minutes")
+        proc = subprocess.run([sys.executable, "-c", code, str(SCRIPTS)], check=True, capture_output=True,
+                              env={**os.environ, "PYTHONIOENCODING": "cp949:strict"})
+        self.assertEqual(proc.stdout.decode("utf-8").strip(), "t7 · working · test · 검증 🧪 · - · -")
 
 
 class WorkflowDocsTests(unittest.TestCase):
@@ -1483,22 +1466,8 @@ class WorkflowDocsTests(unittest.TestCase):
                       "limits, pass `--git-limits='none'`.", launch_step)
         self.assertIn("For work that needs no Git writes and has no user-provided limits, "
                       "pass `--git-limits='not specified'`.", launch_step)
-        self.assertIn("after confirming task delivery to every new child", watch_step)
+        self.assertIn("After confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
-
-    def test_backend_branch_keys_on_a_successful_capability_call(self):
-        skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        backend = skill.split("## Backend", 1)[1].split("## 1. Resolve the repo", 1)[0]
-        self.assertIn("The user's choice wins", backend)
-        self.assertIn("an `orchestrator_capabilities` call succeeds", backend)
-        self.assertIn("A launched child never switches backend.", backend)
-        reference = (SCRIPTS.parent / "references" / "t3-backend.md").read_text(encoding="utf-8")
-        findings, open_items = reference.split("## Findings", 1)[1].split("## Open", 1)
-        for item in ("1.", "2.", "4.", "5."):
-            self.assertIn(f"\n{item} ", findings)
-        for item in ("3.", "6."):
-            self.assertIn(f"\n{item} ", open_items)
-        self.assertIn("A dispatch request counts as the user asking for a new thread", reference)
 
     def test_docs_name_codex_models_by_family_only(self):
         docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]

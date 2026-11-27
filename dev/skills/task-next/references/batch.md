@@ -95,8 +95,7 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
    plugin, cleanup only for integrated units, and full required checks on the integrated candidate.
    On the issues backend the hand-off carries only the integrated units' refs, so an excluded
    unit's issues stay open.
-   Pass `--units <N>` to the `changelog` command with the count of integrated units, so the entry
-   reads as a batch. Worktree checks do not certify integration. Keep archives before pruning
+   On the file queue, pass `--units <N>` to `changelog` with the count of integrated units. Worktree checks do not certify integration. Keep archives before pruning
    `tasks.md`.
 4. Hand off once: call the Skill tool with "dev:task-review-cycle" and
    `args: --from task-next --auto`, carrying the aggregate contract, archive, evidence, and unit

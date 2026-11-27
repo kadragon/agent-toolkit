@@ -1021,6 +1021,15 @@ def cmd_branch(argv: list[str]) -> int:
 
 def cmd_changelog(argv: list[str]) -> int:
     path = Path(_opt(argv, "--file") or "CHANGELOG.md")
+    from queue_backend import QueueError, resolve
+
+    try:
+        if resolve(str(path.resolve().parent))["backend"] == "github":
+            print("Changelog skipped for the selected queue backend.")
+            return 0
+    except QueueError as error:
+        print(f"Error: cannot resolve the queue backend: {error}", file=sys.stderr)
+        return 1
     units = _opt(argv, "--units")
     entry = compose_entry(
         _require(_opt(argv, "--title"), "--title"),
@@ -2212,6 +2221,13 @@ status: open
                 "the changelog subcommand creates the file end-to-end")
         _assert(find_entry_checker(Path(td)) is None,
                 "a tree with no scripts/ci/ checker reports None, and the write above proceeded")
+
+        # An explicitly selected issues queue leaves even a legacy log untouched.
+        before = c.read_bytes()
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "github"}):
+            rc_issues = main(["changelog", "--file", str(c), "--title", "issue work"])
+        _assert(rc_issues == 0 and c.read_bytes() == before, "issues backend does not write a changelog")
 
         # ---- changelog: write-time contract validation ----
         print("\nTest 6: changelog — the entry is validated before the file is written")

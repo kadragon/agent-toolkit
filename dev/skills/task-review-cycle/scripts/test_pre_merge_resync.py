@@ -13,10 +13,12 @@ Exits 0 on success, 1 on the first failure.
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parent / "pre_merge_resync.py"
 CONTRACT = ("**Approval source:** user-invoked: fixture workflow\n"
@@ -386,6 +388,24 @@ def test_multi_step_bump_stops(tmp):
     check(git(repo, "rev-parse", "HEAD") == head, "HEAD moved on a multi-step bump")
 
 
+def test_issue_queue_archive_merges_without_changelog_replay(tmp):
+    repo = setup(tmp)
+    branch(repo, "feat/issues", {**release("1.0.1"), "issue.txt": "done\\n"}, "[TEST] issue work")
+    archive = repo / "docs" / "archive"
+    archive.mkdir(parents=True)
+    git(repo, "mv", "CHANGELOG.md", "docs/archive/CHANGELOG.md")
+    git(repo, "commit", "-qm", "[TEST] archive changelog")
+    git(repo, "push", "-q", "origin", "feat/issues")
+    branch(repo, "feat/base-change", {"base.txt": "advance\\n"}, "[TEST] advance base")
+    squash_merge(repo, "feat/base-change")
+    git(repo, "checkout", "-q", "feat/issues")
+    with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "github"}):
+        rc, result = resync(repo)
+    check(rc == 0 and result["status"] == "resynced", f"issue-queue resync failed: {result}")
+    check(not (repo / "CHANGELOG.md").exists() and (archive / "CHANGELOG.md").is_file(),
+          "issue-queue resync resurrected the root changelog or lost its archive")
+
+
 def main():
     test_classify()
     for test in (test_two_branches_both_merge, test_version_line_conflict_takes_base,
@@ -394,7 +414,7 @@ def main():
                  test_commit_authority_required, test_body_version_line_is_not_a_version_conflict,
                  test_base_deleted_changelog_stops, test_failed_commit_aborts_merge,
                  test_unpushed_merge_is_pushed_on_rerun, test_multi_plugin_suffix_rewritten,
-                 test_line_endings_kept, test_runs_from_subdirectory):
+                 test_line_endings_kept, test_runs_from_subdirectory, test_issue_queue_archive_merges_without_changelog_replay):
         with tempfile.TemporaryDirectory() as tmp:
             test(Path(tmp))
     print("pre_merge_resync: all tests passed")
