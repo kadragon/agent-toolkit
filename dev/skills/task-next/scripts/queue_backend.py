@@ -443,7 +443,6 @@ def _conn_query(name: str) -> str:
 
 
 def gh_runner(args: list[str]) -> tuple[int, str, str]:
-    """Run the GitHub.com backend's CLI calls, independent of the local default host."""
     if args[:1] == ["api"]:
         args = ["api", "--hostname", "github.com", *args[1:]]
     try:
@@ -867,7 +866,6 @@ def _node_key(repo_name: str, number: int) -> tuple[str, int]:
 
 
 def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -> dict[str, dict]:
-    """Index ordinary queue keys and security alert markers on open or closed issues."""
     index: dict[str, dict] = {}
     after = None
     for _ in range(max_pages):
