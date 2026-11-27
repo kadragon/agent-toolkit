@@ -25,7 +25,7 @@ from dispatch import (
     launch,
     lock_run,
     record,
-    render_t3_delegate_request,
+    render_t3_thread_launch,
     report_instruction,
     resolve_codex_model,
     send,
@@ -942,7 +942,7 @@ class T3PromptTests(unittest.TestCase):
             patch("dispatch.subprocess.run") as run,
             patch("sys.stdout", new_callable=StringIO) as stdout,
         ):
-            render_t3_delegate_request(args)
+            render_t3_thread_launch(args)
         hc.assert_not_called()
         run.assert_not_called()
         return json.loads(stdout.getvalue())
@@ -951,10 +951,10 @@ class T3PromptTests(unittest.TestCase):
         for field in ("request", "unit", "git_limits"):
             with self.subTest(field=field), patch("dispatch.tempfile.mkdtemp") as mkdtemp:
                 with self.assertRaisesRegex(SystemExit, "--" + field.replace("_", "-")):
-                    render_t3_delegate_request(self.prompt_args(Path.cwd(), **{field: " \n "}))
+                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **{field: " \n "}))
                 mkdtemp.assert_not_called()
         with patch("dispatch.tempfile.mkdtemp") as mkdtemp, self.assertRaisesRegex(SystemExit, "fable"):
-            render_t3_delegate_request(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
+            render_t3_thread_launch(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
         mkdtemp.assert_not_called()
 
     def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
@@ -971,17 +971,22 @@ class T3PromptTests(unittest.TestCase):
                 result = Path(payload["result"])
                 guard = (f"Work in {home.resolve()}. If your working directory is anywhere else, stop before "
                          "any change and report that in the result file.")
-                self.assertEqual(payload["prompt"], message + self.BLOCK + "\n\n" + extra_lines[0]
-                                 + "\n\n" + guard + " " + report_instruction(result))
-                self.assertEqual(payload["target"], {"provider": "claudeAgent" if cli == "claude" else "codex",
-                                                     "model": model, "options": {option: "high"}})
+                single = "Write summary as one JSON string (join its lines with \\n), never an array."
+                selection = {"instanceId": "claudeAgent" if cli == "claude" else "codex", "model": model,
+                             "options": [{"id": option, "value": "high"}]}
+                self.assertEqual(payload["t3_thread_launch"], {
+                    "title": "T3 run", "modelSelection": selection, "workspaceStrategy": {"type": "root"},
+                    "message": message + self.BLOCK + "\n\n" + extra_lines[0] + "\n\n" + guard + " "
+                    + report_instruction(result) + " " + single})
+                self.assertEqual(payload["project_lookup"],
+                                 {"tool": "t3_project_list", "workspaceRoot": str(home.resolve())})
                 self.assertNotIn("handoff", payload)
                 receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
                 self.assertEqual(Path(payload["run"]), result.with_name("run.json"))
                 self.assertEqual(receipt["backend"], "t3")
                 self.assertEqual(receipt["title"], "T3 run")
                 self.assertEqual(receipt["cwd"], str(home.resolve()))
-                self.assertEqual(receipt["target"], payload["target"])
+                self.assertEqual(receipt["model_selection"], selection)
                 self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
                 self.assertNotIn("address", receipt)
 
@@ -996,7 +1001,7 @@ class T3PromptTests(unittest.TestCase):
             with self.subTest(**overrides), patch("dispatch.tempfile.mkdtemp") as mkdtemp, \
                     patch("dispatch.resolve_codex_model") as resolve:
                 with self.assertRaisesRegex(SystemExit, error):
-                    render_t3_delegate_request(self.prompt_args(Path.cwd(), **overrides))
+                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **overrides))
                 mkdtemp.assert_not_called()
                 resolve.assert_not_called()
 
@@ -1011,29 +1016,39 @@ class T3PromptTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         payload = json.loads(done.stdout)
         try:
-            self.assertTrue(payload["prompt"].startswith("/dev:task-new 단위\n\nHandoff metadata (JSON):"))
-            self.assertEqual(payload["target"]["options"], {"effort": "xhigh"})
+            launch_args = payload["t3_thread_launch"]
+            self.assertTrue(launch_args["message"].startswith("/dev:task-new 단위\n\nHandoff metadata (JSON):"))
+            self.assertEqual(launch_args["modelSelection"]["options"], [{"id": "effort", "value": "xhigh"}])
+            self.assertEqual(launch_args["title"], SCRIPTS.name)
         finally:
             for name in ("run.json", "run.lock"):
                 Path(payload["run"]).with_name(name).unlink(missing_ok=True)
             Path(payload["run"]).parent.rmdir()
 
-    def test_record_stores_one_task_id_on_a_t3_receipt_only(self):
+    def test_record_stores_one_thread_and_project_on_a_t3_receipt_only(self):
+        def ids(thread="th-1", project="pr-1"):
+            return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project)
+
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"backend": "t3", "cli": "claude"}), encoding="utf-8")
             with patch("sys.stdout", new_callable=StringIO):
-                record(SimpleNamespace(run=str(receipt), task_id=" task-1 "))
-                record(SimpleNamespace(run=str(receipt), task_id="task-1"))
-            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["task_id"], "task-1")
-            with self.assertRaisesRegex(SystemExit, "already records task task-1"):
-                record(SimpleNamespace(run=str(receipt), task_id="task-2"))
-            with self.assertRaisesRegex(SystemExit, "--task-id must not be blank"):
-                record(SimpleNamespace(run=str(receipt), task_id=" "))
+                record(ids(thread=" th-1 "))
+                record(ids())
+            stored = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual((stored["thread_id"], stored["project_id"]), ("th-1", "pr-1"))
+            self.assertNotIn("task_id", stored)
+            with self.assertRaisesRegex(SystemExit, "already records thread_id th-1"):
+                record(ids(thread="th-2"))
+            with self.assertRaisesRegex(SystemExit, "already records project_id pr-1"):
+                record(ids(project="pr-2"))
+            for blank, flag in (({"thread": " "}, "--thread-id"), ({"project": ""}, "--project-id")):
+                with self.assertRaisesRegex(SystemExit, f"{flag} must not be blank"):
+                    record(ids(**blank))
             herdr = Path(directory) / "herdr.json"
             herdr.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "not a T3 receipt"):
-                record(SimpleNamespace(run=str(herdr), task_id="task-1"))
+                record(SimpleNamespace(run=str(herdr), thread_id="th-1", project_id="pr-1"))
             with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "is a T3 receipt"):
                 send(SimpleNamespace(address="t7", message="$task-next", run=str(receipt)))
             hc.assert_not_called()
@@ -1041,16 +1056,18 @@ class T3PromptTests(unittest.TestCase):
     def test_collect_reads_the_result_file_without_herdr(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            receipt.write_text(json.dumps({"backend": "t3", "task_id": "task-1"}), encoding="utf-8")
+            receipt.write_text(json.dumps({"backend": "t3", "thread_id": "th-1", "project_id": "pr-1"}),
+                               encoding="utf-8")
             final = {"status": "ready", "phase": "review", "summary": "PR open"}
             receipt.with_name("result.json").write_text(json.dumps(final), encoding="utf-8")
             with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
                 collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
             hc.assert_not_called()
             payload = json.loads(stdout.getvalue())
-            self.assertEqual((payload["backend"], payload["task_id"], payload["result"]), ("t3", "task-1", final))
+            self.assertEqual((payload["backend"], payload["thread_id"], payload["project_id"], payload["result"]),
+                             ("t3", "th-1", "pr-1", final))
             self.assertIsNone(payload["stop_reason"])
-            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "task_cancel"):
+            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "t3_thread_interrupt"):
                 collect(SimpleNamespace(run=str(receipt), close=True, stall_minutes=30))
             hc.assert_not_called()
 
@@ -1112,9 +1129,12 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("an `orchestrator_capabilities` call succeeds", backend)
         self.assertIn("A launched child never switches backend.", backend)
         reference = (SCRIPTS.parent / "references" / "t3-backend.md").read_text(encoding="utf-8")
-        open_items = reference.split("## Open", 1)[1]
-        for item in ("3.", "4.", "5.", "6."):
+        findings, open_items = reference.split("## Findings", 1)[1].split("## Open", 1)
+        for item in ("1.", "2.", "4.", "5."):
+            self.assertIn(f"\n{item} ", findings)
+        for item in ("3.", "6."):
             self.assertIn(f"\n{item} ", open_items)
+        self.assertIn("A dispatch request counts as the user asking for a new thread", reference)
 
     def test_docs_name_codex_models_by_family_only(self):
         docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]

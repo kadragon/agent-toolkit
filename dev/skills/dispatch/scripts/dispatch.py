@@ -20,10 +20,11 @@
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
                      [--title TEXT] MESSAGE
       T3 Code backend: launch nothing. Validate the same handoff fields, write a receipt with
-      backend "t3", and print the delegate_task prompt (first message, handoff block, configured
-      lines, result-report instruction) with the target provider, model and effort option.
-  dispatch.py record RECEIPT --task-id ID
-      Store the task id delegate_task returned in a T3 receipt.
+      backend "t3", and print the t3_thread_launch arguments (title, modelSelection,
+      workspaceStrategy root, message: first message, handoff block, configured lines, cwd
+      guard, result-report instruction) and the project lookup for the target repo.
+  dispatch.py record RECEIPT --thread-id ID --project-id ID
+      Store the thread and project t3_thread_launch returned in a T3 receipt.
 """
 import argparse
 import json
@@ -418,7 +419,7 @@ def launch(args):
         send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
 
 
-def render_t3_delegate_request(args):
+def render_t3_thread_launch(args):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
     refuse_banned_model(args.model)
@@ -437,34 +438,40 @@ def render_t3_delegate_request(args):
         raise SystemExit(f"no such directory: {cwd}")
     cwd = cwd.resolve()
     result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
-    run = {"backend": "t3", "cli": args.cli, "model": model, "effort": args.effort,
-           "cwd": str(cwd),
-           "target": {"provider": target["provider"], "model": model,
-                      "options": {target["effort_option"]: args.effort}},
-           "created_ms": time.time_ns() // 1_000_000}
+    model_selection = {"instanceId": target["provider"], "model": model,
+                       "options": [{"id": target["effort_option"], "value": args.effort}]}
+    run = {"backend": "t3", "cli": args.cli, "model": model, "effort": args.effort, "cwd": str(cwd),
+           "model_selection": model_selection, "created_ms": time.time_ns() // 1_000_000}
     if title:
         run["title"] = title
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff})
     guard = (f"Work in {cwd}. If your working directory is anywhere else, stop before any change "
              "and report that in the result file.")
+    single = "Write summary as one JSON string (join its lines with \\n), never an array."
+    message = f"{text}\n\n{guard} {report_instruction(result_path)} {single}"
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path),
-                      "prompt": f"{text}\n\n{guard} {report_instruction(result_path)}"}, ensure_ascii=False))
+                      "project_lookup": {"tool": "t3_project_list", "workspaceRoot": str(cwd)},
+                      "t3_thread_launch": {"title": title or cwd.name, "modelSelection": model_selection,
+                                           "workspaceStrategy": {"type": "root"}, "message": message}},
+                     ensure_ascii=False))
 
 
 def record(args):
     path = Path(args.run).resolve()
-    task_id = args.task_id.strip()
-    if not task_id:
-        raise SystemExit("--task-id must not be blank")
+    ids = {"thread_id": args.thread_id.strip(), "project_id": args.project_id.strip()}
+    for key, value in ids.items():
+        if not value:
+            raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
     with lock_run(path):
         run = load_run(path)
         if run.get("backend") != "t3":
             raise SystemExit(f"{path} is not a T3 receipt; a Herdr receipt records its terminal address at launch")
-        if run.get("task_id") not in (None, task_id):
-            raise SystemExit(f"{path} already records task {run['task_id']}")
-        write_json(path, {**run, "task_id": task_id})
-    print(json.dumps({"run": str(path), "task_id": task_id}, ensure_ascii=False))
+        for key, value in ids.items():
+            if run.get(key) not in (None, value):
+                raise SystemExit(f"{path} already records {key} {run[key]}")
+        write_json(path, {**run, **ids})
+    print(json.dumps({"run": str(path), **ids}, ensure_ascii=False))
 
 
 def matches_sent_message(rows, message):
@@ -1062,8 +1069,9 @@ def collect_result(path, close, force, stall_minutes):
         result, written = None, None
     if run.get("backend") == "t3":
         if close:
-            raise SystemExit("a T3 child stops through task_cancel, not collect --close")
-        print(json.dumps({"backend": "t3", "task_id": run.get("task_id"), "result": result,
+            raise SystemExit("a T3 child stops through t3_thread_interrupt, not collect --close")
+        print(json.dumps({"backend": "t3", "thread_id": run.get("thread_id"), "project_id": run.get("project_id"),
+                          "result": result,
                           "stop_reason": t3_stop_reason(run, result, written, stall_minutes),
                           "scope_decision_categories": repeated_review_categories(result), "closed": False},
                          ensure_ascii=False))
@@ -1201,10 +1209,11 @@ def main(argv):
     prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
     prompt_parser.add_argument("message")
-    prompt_parser.set_defaults(func=render_t3_delegate_request)
+    prompt_parser.set_defaults(func=render_t3_thread_launch)
     record_parser = sub.add_parser("record")
     record_parser.add_argument("run")
-    record_parser.add_argument("--task-id", required=True)
+    record_parser.add_argument("--thread-id", required=True)
+    record_parser.add_argument("--project-id", required=True)
     record_parser.set_defaults(func=record)
     args = parser.parse_args(argv)
     if args.command == "collect" and args.stall_minutes < 1:
