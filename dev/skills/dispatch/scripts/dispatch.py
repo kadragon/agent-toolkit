@@ -232,9 +232,10 @@ def report_instruction(result, *, require_review_sources=False):
             " For a pre-merge report, include review_sources with claude, agy and codex outcomes. "
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
-            "An incomplete required review must report blocked with the reviewer and reason. "
+            "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
             f'Pass the candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
-            "when available. Report ready only after the required independent reviews and CI pass."
+            "when available. Report ready only after the required independent reviews and CI pass. "
+            "Keep the review outcomes in any later PR completion report."
         )
     return instruction
 
@@ -313,8 +314,9 @@ def validate_result(result):
         raise ValueError("invalid status, phase, or summary")
 
 
-def gate_ready_review(result):
-    if result["status"] != "ready":
+def gate_required_reviews(result):
+    status = result["status"]
+    if status not in {"ready", "merged"} and not (status == "done" and result.get("pr")):
         return result
     sources = result.get("review_sources")
     if not isinstance(sources, dict):
@@ -327,7 +329,7 @@ def gate_ready_review(result):
         reason = " ".join(outcome.split())[:160] if isinstance(outcome, str) else ""
         missing.append(f"{reviewer}: {reason or 'no completed result'}")
     if missing:
-        return {**result, "status": "blocked", "phase": "review", "summary": "\n".join(missing)}
+        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(missing)}
     return result
 
 
@@ -343,7 +345,7 @@ def report_review(args):
         validate_result(result)
         if result["status"] not in {"ready", "blocked"}:
             raise ValueError("report-review expects a ready or blocked report")
-        result = gate_ready_review(result)
+        result = gate_required_reviews(result)
         if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > RESULT_LIMIT:
             raise ValueError("result exceeds 8 KiB")
         write_json(path, result)
@@ -1505,7 +1507,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
 
 
 def repeated_review_categories(result):
-    if not result or result["status"] != "blocked":
+    if not result or result["status"] != "blocked" or result["phase"] == "review-sources":
         return []
     history = result.get("review_sendbacks")
     if not isinstance(history, list) or len(history) < 2:
@@ -1534,7 +1536,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     if written == run.get("previous_result"):
         result, written = None, None
     if result and run.get("require_review_sources"):
-        result = gate_ready_review(result)
+        result = gate_required_reviews(result)
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,

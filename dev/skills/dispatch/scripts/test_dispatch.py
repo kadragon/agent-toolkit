@@ -589,7 +589,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
 
-    def test_collect_blocks_ready_until_every_required_review_completes(self):
+    def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         cases = (
             (None, ("claude", "agy", "codex", "no completed result")),
@@ -600,20 +600,21 @@ class DispatchReceiptTests(DispatchTestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({**self.RECEIPT, "require_review_sources": True}), encoding="utf-8")
-            for sources, blockers in cases:
-                with self.subTest(sources=sources):
-                    result = {"status": "ready", "phase": "review", "summary": "CI passed", "pr": "example-pr"}
-                    if sources is not None:
-                        result["review_sources"] = sources
-                    write_json(receipt.with_name("result.json"), result)
-                    output = StringIO()
-                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
-                        collect(SimpleNamespace(run=receipt, close=False))
-                    reported = json.loads(output.getvalue())["result"]
-                    self.assertEqual(reported["status"], "blocked" if blockers else "ready")
-                    self.assertEqual(reported["pr"], "example-pr")
-                    for blocker in blockers:
-                        self.assertIn(blocker, reported["summary"])
+            for status in ("ready", "done", "merged"):
+                for sources, blockers in cases:
+                    with self.subTest(status=status, sources=sources):
+                        result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
+                        if sources is not None:
+                            result["review_sources"] = sources
+                        write_json(receipt.with_name("result.json"), result)
+                        output = StringIO()
+                        with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
+                            collect(SimpleNamespace(run=receipt, close=False))
+                        reported = json.loads(output.getvalue())["result"]
+                        self.assertEqual(reported["status"], "blocked" if blockers else status)
+                        self.assertEqual(reported["pr"], "example-pr")
+                        for blocker in blockers:
+                            self.assertIn(blocker, reported["summary"])
 
     def test_report_review_writes_missing_source_reason_to_result(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -623,9 +624,9 @@ class DispatchReceiptTests(DispatchTestCase):
                 "review_sources": {"claude": "complete", "agy": "리뷰 진행 중", "codex": "complete"},
                 "ci": "success",
             }
-            for outcome, status, summary in (
-                ("리뷰 진행 중", "blocked", "agy: 리뷰 진행 중"),
-                ("complete", "ready", "CI passed"),
+            for outcome, status, phase, summary in (
+                ("리뷰 진행 중", "blocked", "review-sources", "agy: 리뷰 진행 중"),
+                ("complete", "ready", "review", "CI passed"),
             ):
                 with self.subTest(outcome=outcome):
                     result["review_sources"]["agy"] = outcome
@@ -637,7 +638,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     )
                     self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
                     self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
-                                     {**result, "status": status, "summary": summary})
+                                     {**result, "status": status, "phase": phase, "summary": summary})
                     self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
@@ -915,6 +916,19 @@ class DispatchReceiptTests(DispatchTestCase):
                 "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
             })
             self.assertEqual(report["scope_decision_categories"], [])
+
+    def test_collect_keeps_review_history_without_escalating_missing_sources_as_sendbacks(self):
+        first = {"change": "/archive/contract.md", "round": 1, "categories": ["atomicity"]}
+        history = [first, {**first, "round": 2}]
+        with tempfile.TemporaryDirectory() as directory:
+            report, _ = self.collect_report(directory, {"state": "done"},
+                                            receipt_fields={"require_review_sources": True}, result={
+                "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": history,
+                "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"},
+            })
+        self.assertEqual(report["result"]["status"], "blocked")
+        self.assertEqual(report["result"]["review_sendbacks"], history)
+        self.assertEqual(report["scope_decision_categories"], [])
 
     def test_collect_force_closes_an_owned_child_and_records_the_reason(self):
         working = {**self.TERMINAL, "status": {"state": "working"}}

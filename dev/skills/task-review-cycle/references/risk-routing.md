@@ -48,7 +48,8 @@ it chooses neither a route nor a reviewer count alone.
 | Large but mechanical/documentary diff | Judge review surface; size alone picks no route |
 
 `--no-hub` remains local-only and stops before merge; report required remote checks as pending.
-Unknown risk defaults to hub.
+Unknown risk defaults to hub. Dispatched Codex task cycles use the hub panel unless `--no-hub`
+keeps the cycle local.
 
 **Panel** — the agy + Codex sources run by default on every hub route and on `--no-hub` (PR #277);
 announce panel on/off with the route. A route judged lite runs one reviewer only (*Lite

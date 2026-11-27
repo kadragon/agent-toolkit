@@ -114,6 +114,9 @@ result before ready or merge without waiting for work still running. On GitHub, 
 Use the same SHA in the merge command or ready report. On Forgejo, confirm that the remote head
 and its applicable CI match the local candidate.
 
+Apply the [Dispatch pre-merge report](#dispatch-pre-merge-report) gate to every dispatched
+Codex task cycle before a ready report or any authorized base merge.
+
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
 the final evidence in the merge commit message before retiring the archive.
@@ -121,10 +124,10 @@ the final evidence in the merge commit message before retiring the archive.
 ## Dispatch pre-merge report
 
 Dispatched Codex task cycles require the hub's Claude primary and the agy and Codex panel
-sources. Use their consolidated outcomes from Step 3 and late reclaim. Self-grading and the
-advisory comments pass do not satisfy the primary slot. A missing source blocks ready even if
-the diff and CI are clean. Keep a pending process running and preserve its result path for
-resume. Follow the existing review budget when reclaiming the result.
+sources. Use their consolidated outcomes from Step 3 and late reclaim. The primary slot
+requires the independent Claude result. A missing source blocks both readiness and an
+authorized base merge. Keep a pending process running and preserve its result path for resume.
+Follow the existing review budget when reclaiming the result.
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
 dispatch script. Use the assigned path from the handoff. Include the usual head, PR, CI and
@@ -140,10 +143,13 @@ python3 -I "$DISPATCH" report-review "$RESULT" <<'REPORT_JSON'
 REPORT_JSON
 ```
 
-Provide `status: ready` as the candidate outcome when the remaining gates pass. The helper
-writes `blocked` with the missing reviewers and reasons in this example. If another gate failed,
-pass `status: blocked` and state that blocker as well. Home collection checks a Codex task
-receipt's ready report again before handing it to the merge owner.
+For a pre-merge stop, pass `status: ready` when the other final gates pass. The helper writes
+`blocked` with the missing reviewers and reasons in this example. If another gate failed, pass
+`status: blocked` and state that blocker. A child authorized to merge proceeds to the merge
+helper only when all three sources and the other final gates pass. If a reviewer is missing,
+use the same candidate report to publish the block. Carry the outcomes into the confirmed
+merge report. Home collection checks PR completion reports from Codex task receipts before
+handing them to the merge owner.
 
 ## Record finding dispositions
 

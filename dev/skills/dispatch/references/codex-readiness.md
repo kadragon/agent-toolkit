@@ -82,22 +82,21 @@ For routine commands, use the sandbox for local `git status`, `git log`, `git sh
 `git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
 For approved network reads, the operator can add a `.rules` file under an active Codex
 config layer's `rules/` directory and restart the child. Use a trusted project layer for
-repository-specific rules. For example, if `origin` is the approved remote:
+repository-specific rules. For example:
 
 ```python
-prefix_rule(pattern=["git", "fetch", "origin"], decision="allow")
 prefix_rule(pattern=["gh", "pr", ["view", "checks"], "--repo", "kadragon/agent-toolkit"], decision="allow")
 ```
 
-`git fetch` writes local remote-tracking state. Prefix matches also allow trailing arguments.
-Review these rules against the commands and repository settings used by the child. Use the
-shown token order and the tool's working directory argument for direct tool calls. Codex
-evaluates the outer invocation for scripts, so a rule for `gh pr checks` does not pre-approve
-a CI script that calls it. Keep `git push`, PR writes and generic shell or filesystem commands
-outside these rules.
+Prefix matches allow trailing arguments, including another `--repo` flag. Enable the example
+only if the permitted read commands fit that scope. Use the shown token order and set the tool's
+working directory for direct calls. A rule for `gh pr checks` applies to that outer invocation.
+Run `git fetch origin` through normal approval. A fetch prefix would allow trailing refspecs
+that update local branches. Keep `git push`, PR writes and generic shell or filesystem commands
+under normal approval as well.
 
-`codex execpolicy check --rules <file> -- git fetch origin` shows the matched rule and
-decision. Check the intended invocations and nearby writes such as `git push origin` and
+`codex execpolicy check --rules <file> -- gh pr view --repo kadragon/agent-toolkit 541` shows the
+matched rule and decision. Check the intended invocations and nearby writes such as `git push origin` and
 `gh pr create` before enabling a rule. Rule matching was verified with Codex CLI 0.172.0.
 A dispatched run using these rules through PR creation without routine approval requests is
 unverified. Check that in the child's transcript when enabling the rules for a wave.
