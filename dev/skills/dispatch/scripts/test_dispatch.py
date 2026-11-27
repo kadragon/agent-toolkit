@@ -24,9 +24,11 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    record,
     report_instruction,
     resolve_codex_model,
     send,
+    t3_prompt,
     terminal_name,
     transcript_echoed,
 )
@@ -920,6 +922,124 @@ class CodexModelTests(unittest.TestCase):
                 cache.assert_not_called()
 
 
+class T3PromptTests(unittest.TestCase):
+    FIELDS = DispatchReceiptTests.FIELDS
+    HANDOFF = DispatchReceiptTests.HANDOFF
+    BLOCK = DispatchReceiptTests.BLOCK
+
+    def prompt_args(self, cwd, **overrides):
+        args = dict(cwd=str(cwd), cli="claude", model="claude-sonnet-5-5", effort="medium",
+                    title=None, message="/dev:task-next", **self.HANDOFF)
+        return SimpleNamespace(**(args | overrides))
+
+    def render(self, args, home):
+        with (
+            patch("dispatch.Path.cwd", return_value=home),
+            patch("dispatch.hc_json") as hc,
+            patch("dispatch.subprocess.run") as run,
+            patch("sys.stdout", new_callable=StringIO) as stdout,
+        ):
+            t3_prompt(args)
+        hc.assert_not_called()
+        run.assert_not_called()
+        return json.loads(stdout.getvalue())
+
+    def test_blank_handoff_fields_stop_before_any_receipt(self):
+        for field in ("request", "unit", "git_limits"):
+            with self.subTest(field=field), patch("dispatch.tempfile.mkdtemp") as mkdtemp:
+                with self.assertRaisesRegex(SystemExit, "--" + field.replace("_", "-")):
+                    t3_prompt(self.prompt_args(Path.cwd(), **{field: " \n "}))
+                mkdtemp.assert_not_called()
+        with patch("dispatch.tempfile.mkdtemp") as mkdtemp, self.assertRaisesRegex(SystemExit, "fable"):
+            t3_prompt(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
+        mkdtemp.assert_not_called()
+
+    def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
+        for cli, model, option in (("claude", "claude-sonnet-5-5", "effort"),
+                                   ("codex", "gpt-6.2-sol", "reasoningEffort")):
+            with self.subTest(cli=cli), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                (home / "repos").mkdir()
+                extra_lines = ["Use the launch-time checklist."]
+                (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
+                message = "/dev:task-next" if cli == "claude" else "$task-next"
+                payload = self.render(self.prompt_args(home, cli=cli, model=model, effort="high",
+                                                       message=message, title=" T3  run "), home)
+                result = Path(payload["result"])
+                self.assertEqual(payload["prompt"], message + self.BLOCK + "\n\n" + extra_lines[0]
+                                 + "\n\n" + report_instruction(result))
+                self.assertEqual(payload["target"], {"provider": "claudeAgent" if cli == "claude" else "codex",
+                                                     "model": model, "options": {option: "high"}})
+                self.assertNotIn("handoff", payload)
+                receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+                self.assertEqual(Path(payload["run"]), result.with_name("run.json"))
+                self.assertEqual(receipt["backend"], "t3")
+                self.assertEqual(receipt["title"], "T3 run")
+                self.assertEqual(receipt["cwd"], str(home.resolve()))
+                self.assertEqual(receipt["target"], payload["target"])
+                self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
+                self.assertNotIn("address", receipt)
+
+    def test_codex_family_resolves_like_launch(self):
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.resolve_codex_model",
+                                                               return_value="gpt-6.2-sol") as resolve:
+            payload = self.render(self.prompt_args(directory, cli="codex", model="sol", message="$task-new X"),
+                                  Path(directory))
+        resolve.assert_called_once_with("sol")
+        self.assertEqual((payload["model"], payload["model_family"]), ("gpt-6.2-sol", "sol"))
+        self.assertEqual(payload["target"]["model"], "gpt-6.2-sol")
+
+    def test_cli_prompt_prints_json_and_needs_a_message(self):
+        base = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "prompt", "--cli", "claude",
+                "--model", "claude-opus-5-5", "--effort", "xhigh", "--cwd", str(SCRIPTS), "--work-kind", "new",
+                "--request", "요청", "--unit", "단위", "--git-limits", "none"]
+        missing = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("message", missing.stderr)
+        done = subprocess.run([*base, "/dev:task-new 단위"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        payload = json.loads(done.stdout)
+        try:
+            self.assertTrue(payload["prompt"].startswith("/dev:task-new 단위\n\nHandoff metadata (JSON):"))
+            self.assertEqual(payload["target"]["options"], {"effort": "xhigh"})
+        finally:
+            for name in ("run.json", "run.lock"):
+                Path(payload["run"]).with_name(name).unlink(missing_ok=True)
+            Path(payload["run"]).parent.rmdir()
+
+    def test_record_stores_one_task_id_on_a_t3_receipt_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"backend": "t3", "cli": "claude"}), encoding="utf-8")
+            with patch("sys.stdout", new_callable=StringIO):
+                record(SimpleNamespace(run=str(receipt), task_id=" task-1 "))
+                record(SimpleNamespace(run=str(receipt), task_id="task-1"))
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["task_id"], "task-1")
+            with self.assertRaisesRegex(SystemExit, "already records task task-1"):
+                record(SimpleNamespace(run=str(receipt), task_id="task-2"))
+            with self.assertRaisesRegex(SystemExit, "--task-id must not be blank"):
+                record(SimpleNamespace(run=str(receipt), task_id=" "))
+            herdr = Path(directory) / "herdr.json"
+            herdr.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "not a T3 receipt"):
+                record(SimpleNamespace(run=str(herdr), task_id="task-1"))
+
+    def test_collect_reads_the_result_file_without_herdr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"backend": "t3", "task_id": "task-1"}), encoding="utf-8")
+            final = {"status": "ready", "phase": "review", "summary": "PR open"}
+            receipt.with_name("result.json").write_text(json.dumps(final), encoding="utf-8")
+            with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
+                collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
+            hc.assert_not_called()
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual((payload["backend"], payload["task_id"], payload["result"]), ("t3", "task-1", final))
+            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "task_cancel"):
+                collect(SimpleNamespace(run=str(receipt), close=True, stall_minutes=30))
+            hc.assert_not_called()
+
+
 class WorkflowDocsTests(unittest.TestCase):
     def test_launch_and_watch_document_operational_order(self):
         skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
@@ -938,6 +1058,17 @@ class WorkflowDocsTests(unittest.TestCase):
                       "pass `--git-limits='not specified'`.", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
+
+    def test_backend_branch_keys_on_a_successful_capability_call(self):
+        skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        backend = skill.split("## Backend", 1)[1].split("## 1. Resolve the repo", 1)[0]
+        self.assertIn("The user's choice wins", backend)
+        self.assertIn("an `orchestrator_capabilities` call succeeds", backend)
+        self.assertIn("A launched child never switches backend.", backend)
+        reference = (SCRIPTS.parent / "references" / "t3-backend.md").read_text(encoding="utf-8")
+        open_items = reference.split("## Open", 1)[1]
+        for item in ("3.", "4.", "5.", "6."):
+            self.assertIn(f"\n{item} ", open_items)
 
     def test_docs_name_codex_models_by_family_only(self):
         docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]

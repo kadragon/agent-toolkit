@@ -16,6 +16,14 @@
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
+  dispatch.py prompt --cli claude|codex --model M --effort E --cwd PATH
+                     --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
+                     [--title TEXT] MESSAGE
+      T3 Code backend: launch nothing. Validate the same handoff fields, write a receipt with
+      backend "t3", and print the delegate_task prompt (first message, handoff block, configured
+      lines, result-report instruction) with the target provider, model and effort option.
+  dispatch.py record RECEIPT --task-id ID
+      Store the task id delegate_task returned in a T3 receipt.
 """
 import argparse
 import json
@@ -78,6 +86,8 @@ TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
+# T3 provider instance and the option that carries the routed effort (orchestrator_capabilities).
+T3_TARGETS = {"claude": ("claudeAgent", "effort"), "codex": ("codex", "reasoningEffort")}
 
 
 def terminal_name(raw):
@@ -315,13 +325,28 @@ def warn_linked_worktree(cwd):
               "Launch from the main checkout and add --tree to the task invocation.", file=sys.stderr)
 
 
-def launch(args):
-    cwd = Path(args.cwd).expanduser()
-    title = getattr(args, "title", None)
+def normalized_title(title):
     if title is not None:
         title = " ".join(title.split())
         if not title:
             raise SystemExit("--title must not be blank")
+    return title
+
+
+def launch_handoff(args, cwd):
+    handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
+    for key in ("request", "unit", "git_limits"):
+        if not handoff[key].strip():
+            raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    extra_lines = configured_handoff_lines(Path.cwd(), cwd)
+    if extra_lines:
+        handoff["extra_lines"] = extra_lines
+    return handoff
+
+
+def launch(args):
+    cwd = Path(args.cwd).expanduser()
+    title = normalized_title(getattr(args, "title", None))
     name = terminal_name(args.name) if args.name else child_name(cwd.name, title)
     if args.task is not None and (args.cli != "codex" or args.message is not None):
         raise SystemExit("--task is for Codex only; Claude takes its task as MESSAGE")
@@ -331,13 +356,7 @@ def launch(args):
     refuse_banned_model(args.model)
     model = resolve_codex_model(args.model) if args.cli == "codex" else args.model
     resolved = {"model": model, **({"model_family": args.model} if model != args.model else {})}
-    handoff = {key: getattr(args, key) for key in ("request", "unit", "git_limits", "work_kind")}
-    for key in ("request", "unit", "git_limits"):
-        if not handoff[key].strip():
-            raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
-    extra_lines = configured_handoff_lines(Path.cwd(), cwd)
-    if extra_lines:
-        handoff["extra_lines"] = extra_lines
+    handoff = launch_handoff(args, cwd)
     message = args.message
     if args.cli == "claude" and message is not None:
         message = first_prompt(args.cli, message, handoff)
@@ -393,6 +412,46 @@ def launch(args):
         raise SystemExit(f"{address}: parent changed at launch; {detail}")
     if args.task:
         send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
+
+
+def t3_prompt(args):
+    """Render a T3 delegate_task launch; the model makes the MCP call itself."""
+    cwd = Path(args.cwd).expanduser()
+    title = normalized_title(getattr(args, "title", None))
+    refuse_banned_model(args.model)
+    model = resolve_codex_model(args.model) if args.cli == "codex" else args.model
+    resolved = {"model": model, **({"model_family": args.model} if model != args.model else {})}
+    handoff = launch_handoff(args, cwd)
+    text = first_prompt(args.cli, args.message, handoff)
+    if not cwd.is_dir():
+        raise SystemExit(f"no such directory: {cwd}")
+    result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
+    provider, effort_option = T3_TARGETS[args.cli]
+    run = {"backend": "t3", "cli": args.cli, **resolved, "effort": args.effort,
+           "cwd": str(cwd.resolve()),
+           "target": {"provider": provider, "model": model, "options": {effort_option: args.effort}},
+           "created_ms": time.time_ns() // 1_000_000}
+    if title:
+        run["title"] = title
+    receipt = result_path.with_name("run.json")
+    write_json(receipt, {**run, "handoff": handoff})
+    print(json.dumps({**run, "run": str(receipt), "result": str(result_path),
+                      "prompt": f"{text}\n\n{report_instruction(result_path)}"}, ensure_ascii=False))
+
+
+def record(args):
+    path = Path(args.run).resolve()
+    task_id = args.task_id.strip()
+    if not task_id:
+        raise SystemExit("--task-id must not be blank")
+    with lock_run(path):
+        run = load_run(path)
+        if run.get("backend") != "t3":
+            raise SystemExit(f"{path} is not a T3 receipt; a Herdr receipt records its terminal address at launch")
+        if run.get("task_id") not in (None, task_id):
+            raise SystemExit(f"{path} already records task {run['task_id']}")
+        write_json(path, {**run, "task_id": task_id})
+    print(json.dumps({"run": str(path), "task_id": task_id}, ensure_ascii=False))
 
 
 def matches_sent_message(rows, message):
@@ -977,6 +1036,13 @@ def collect_result(path, close, force, stall_minutes):
         result, written = None, None
     if written == run.get("previous_result"):
         result, written = None, None
+    if run.get("backend") == "t3":
+        if close:
+            raise SystemExit("a T3 child stops through task_cancel, not collect --close")
+        print(json.dumps({"backend": "t3", "task_id": run.get("task_id"), "result": result, "stop_reason": None,
+                          "scope_decision_categories": repeated_review_categories(result), "closed": False},
+                         ensure_ascii=False))
+        return
     terminal = hc_json("get", run["address"])
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
@@ -1099,6 +1165,22 @@ def main(argv):
     collect_parser.add_argument("--close", action="store_true")
     collect_parser.add_argument("--force", action="store_true", help="close even when the owned child has no final result")
     collect_parser.set_defaults(func=collect)
+    prompt_parser = sub.add_parser("prompt")
+    prompt_parser.add_argument("--cli", choices=["claude", "codex"], required=True)
+    prompt_parser.add_argument("--model", required=True)
+    prompt_parser.add_argument("--effort", required=True)
+    prompt_parser.add_argument("--cwd", required=True)
+    prompt_parser.add_argument("--work-kind", choices=["queue", "new", "standalone"], required=True)
+    prompt_parser.add_argument("--request", required=True, help="verbatim original user request")
+    prompt_parser.add_argument("--unit", required=True, help="assigned unit")
+    prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
+    prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
+    prompt_parser.add_argument("message")
+    prompt_parser.set_defaults(func=t3_prompt)
+    record_parser = sub.add_parser("record")
+    record_parser.add_argument("run")
+    record_parser.add_argument("--task-id", required=True)
+    record_parser.set_defaults(func=record)
     args = parser.parse_args(argv)
     if args.command == "collect" and args.stall_minutes < 1:
         collect_parser.error("--stall-minutes must be positive")
