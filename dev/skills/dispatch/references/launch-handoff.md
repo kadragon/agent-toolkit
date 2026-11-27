@@ -19,3 +19,17 @@ appear as message text. Use `--dry-run` to preview the first message with Claude
 
 Codex receipts retain the launch-time lines for delayed delivery and first-message retries.
 Verify approvals using the original user request and Git limits carried in the handoff.
+
+## Git authority in the handoff
+
+Pass the verbatim originating request in `--request`. For queue and new work, verify that the
+request or a separate grant authorizes the Git actions the task needs. Record the exact grant,
+grantor and date in `--git-limits` and confirm the record with `--git-grant-recorded`.
+The values `none`, `no-push` and `pr-only` can follow a verified workflow invocation without
+that flag. The child checks the originating request and recorded grant when establishing authority.
+
+Queue and new launches reject missing, blank, and recognized placeholder values. A free-form
+restriction by itself cannot establish a grant. For implementation-only work, use
+`--no-git-writes`. The child receives `implementation-only` and stops before commits, pushes
+or PR writes. Any additional restrictions from `--git-limits` apply from worktree preparation
+onward. The child quotes them separately in the Sprint Contract for handoff and resume.

@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.2.0
+version: 3.3.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -123,22 +123,22 @@ Run `hc ls` first. A live task session in the repo — yours or another home ses
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
 Verify user authorization for the Git writes the task needs, including any grant from an explicit
 full-workflow invocation. If a required action is still unauthorized, ask once before launch
-which Git actions the user authorizes. Carry the answer in the handoff.
+which Git actions the user authorizes. See [Git authority in the handoff](references/launch-handoff.md#git-authority-in-the-handoff).
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
   --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
-  --unit='<assigned unit>' --git-limits='<verbatim Git limits>' '<first message>'
+  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' '<first message>'
 ```
 
 Always pass `--title`, a short unit summary in the user's language (Herdr label `title`, receipt, name `<repo>-<slug>`).
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
-in step 2. The launcher rejects missing or blank handoff fields and appends their verbatim values
-as JSON strings. Forward explicit Git limits verbatim. If an explicit full-workflow invocation
+in step 2. Forward explicit Git grants and limits verbatim. If an explicit full-workflow invocation
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
-For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
-Shell-quote each value, as in `--git-limits='don'\''t merge'`.
-Preview with `--dry-run`.
+Add `--git-grant-recorded` for queue or new work only after verifying the free-form grant in `--git-limits`.
+For work authorized to proceed without Git writes, pass `--no-git-writes`. Add `--git-limits` to forward additional restrictions.
+For standalone work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
+Shell-quote each value, as in `--git-limits='don'\''t merge'`. Preview with `--dry-run`.
 
 For Codex review cycles, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
 Pass the user's separate review transfer grant with `--review-transfer-approval='<verbatim approval>'`.
@@ -163,7 +163,7 @@ the reviewed plugin version and send through receipts. For shared-cache launches
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
   --effort <effort> --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
-  --unit='<assigned unit>' --git-limits='<verbatim Git limits>' --task '<first message>'
+  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' --task '<first message>'
 ```
 
 - `send` checks the idle composer before sending and checks the screen again before confirming
