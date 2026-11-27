@@ -10,7 +10,6 @@ from pathlib import Path
 SWEEP = Path(__file__).with_name("sweep.sh")
 LINT_MARKER = "# Parse lint output and add to FINDINGS if issues found"
 LINT_FINDING = "[lint] Fixture lint finding"
-SECURITY_FINDING = "[security] Fixture security finding"
 
 
 class SweepTests(unittest.TestCase):
@@ -25,7 +24,10 @@ class SweepTests(unittest.TestCase):
         self.backlog.write_text("# Queue\n", encoding="utf-8")
         self.backend = self.root / "queue_backend.py"
         self.backend.write_text('print(\'{"edit_file":"backlog.md"}\')\n', encoding="utf-8")
-        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        git_local_vars = subprocess.check_output(["git", "rev-parse", "--local-env-vars"], text=True).splitlines()
+        self.env = {key: value for key, value in os.environ.items() if key not in git_local_vars}
+        self.env["AGENT_QUEUE_BACKEND_SCRIPT"] = str(self.backend)
+        subprocess.run(["git", "init", "-q", str(self.root)], env=self.env, check=True)
 
     def sweep(self, *args, finding=None):
         template = SWEEP.read_text(encoding="utf-8")
@@ -37,7 +39,7 @@ class SweepTests(unittest.TestCase):
         return subprocess.run(
             ["bash", str(script), *args],
             cwd=self.root,
-            env={**os.environ, "AGENT_QUEUE_BACKEND_SCRIPT": str(self.backend)},
+            env=self.env,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -58,11 +60,13 @@ class SweepTests(unittest.TestCase):
         self.assertNotIn("Doc drift", result.stdout)
 
     def test_quick_keeps_security_details_out_of_unattended_output(self):
-        result = self.sweep("--quick", finding=SECURITY_FINDING)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("1 finding(s)", result.stdout)
-        self.assertNotIn(SECURITY_FINDING, result.stdout + result.stderr)
-        self.assertEqual(self.backlog.read_text(encoding="utf-8"), "# Queue\n")
+        for finding in ("[security] Fixture security finding", "[SECURITY]: Fixture security finding"):
+            with self.subTest(finding=finding):
+                result = self.sweep("--quick", finding=finding)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("1 finding(s)", result.stdout)
+                self.assertNotIn(finding, result.stdout + result.stderr)
+                self.assertEqual(self.backlog.read_text(encoding="utf-8"), "# Queue\n")
 
     def test_full_scan_still_persists_findings(self):
         result = self.sweep(finding=LINT_FINDING)

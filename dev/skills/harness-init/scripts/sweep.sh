@@ -23,7 +23,7 @@ QUICK_MODE=false
 [[ "${1:-}" == "--quick" ]] && QUICK_MODE=true
 
 is_security_finding() {
-    [[ "$1" == \[[sS][eE][cC][uU][rR][iI][tT][yY]\]\ * ]]
+    [[ "$1" == \[[sS][eE][cC][uU][rR][iI][tT][yY]\]* ]]
 }
 
 report_findings() {
@@ -201,7 +201,7 @@ request["items"] = [
         "key": "sweep:" + hashlib.sha256(finding.encode("utf-8")).hexdigest(),
         "title": finding[:256],
         "body": finding,
-        "labels": ["security"] if finding.lower().startswith("[security] ") else [],
+        "labels": ["security"] if finding.lower().startswith("[security]") else [],
         "refile_completed": True,
     }
     for finding in dict.fromkeys(sys.argv[3:])
