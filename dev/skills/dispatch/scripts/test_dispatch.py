@@ -35,7 +35,7 @@ from dispatch import (
     transcript_echoed,
     verify_terminal,
 )
-from quota import WEEK, assess
+from quota import WEEK, assess, claude_snapshot
 from quota import main as quota_main
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -2453,11 +2453,12 @@ class LaunchQuotaTests(unittest.TestCase):
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.claude), "CODEX_HOME": str(self.codex),
                     "QUOTA_CLAUDE_CACHE": str(self.claude / "quota.json")}
 
-    def write_usage(self, claude, codex):
+    def write_usage(self, claude, codex, *, claude_five_hour=None):
         reset = (self.now + dt.timedelta(days=1)).timestamp()
-        (self.claude / "quota.json").write_text(json.dumps({
-            "used": claude, "reset": reset, "observed": self.now.timestamp(),
-        }), encoding="utf-8")
+        snapshot = {"used": claude, "reset": reset, "observed": self.now.timestamp()}
+        if claude_five_hour is not None:
+            snapshot["five_hour"] = {"used": claude_five_hour, "reset": self.now.timestamp() + 3600}
+        (self.claude / "quota.json").write_text(json.dumps(snapshot), encoding="utf-8")
         session = self.codex / "sessions" / self.now.strftime("%Y/%m/%d") / "session.jsonl"
         session.parent.mkdir(parents=True, exist_ok=True)
         session.write_text(json.dumps({
@@ -2555,6 +2556,37 @@ class LaunchQuotaTests(unittest.TestCase):
         audit = json.loads(accepted.stdout)
         self.assertEqual(audit["bias"], "both-hot")
         self.assertEqual(audit["quota_snapshot"]["effective_bias"], "none")
+
+    def test_both_hot_prefers_the_cli_that_can_launch_without_critical_approval(self):
+        self.write_usage(10, 80, claude_five_hour=90)
+        accepted = self.preview("codex", "gpt-6-luna")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        audit = json.loads(accepted.stdout)
+        self.assertEqual(audit["bias"], "both-hot")
+        self.assertEqual(audit["quota_snapshot"]["effective_bias"], "codex")
+
+    def test_unreadable_codex_log_does_not_disable_claude_critical_gate(self):
+        self.write_usage(90, 10)
+        original_stat = Path.stat
+
+        def stat(path, *args, **kwargs):
+            if path.name == "session.jsonl":
+                raise FileNotFoundError(path)
+            return original_stat(path, *args, **kwargs)
+
+        snapshot_path = self.claude / "quota.json"
+        with (patch.dict(os.environ, self.env), patch("quota.claude_snapshot", return_value=claude_snapshot(snapshot_path)),
+              patch("quota.Path.stat", stat), redirect_stdout(StringIO()) as output):
+            quota_main()
+        snapshot = json.loads(output.getvalue())
+        self.assertEqual(snapshot["codex"]["state"], "unknown")
+        self.assertEqual(snapshot["claude"]["state"], "critical")
+        args = SimpleNamespace(cwd=str(self.root), name=None, parent=None, cli="claude", model="sonnet",
+                               effort="medium", task=None, message="Example", keep_connectors=False,
+                               dry_run=True, **(DispatchReceiptTests.HANDOFF | {"work_kind": "standalone"}))
+        with patch("dispatch.read_quota_snapshot", return_value=snapshot):
+            with self.assertRaisesRegex(SystemExit, "requires explicit user approval"):
+                launch(args)
 
     def test_unknown_snapshots_warn_and_leave_the_base_route_available(self):
         accepted = self.preview("claude", "sonnet")

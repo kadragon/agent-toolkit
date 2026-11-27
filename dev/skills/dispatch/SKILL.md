@@ -81,7 +81,7 @@ and saves the snapshot and any override in `run.json`. See `references/quota-sna
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` | Top-tier work goes to `sol`. For `opus`, give `--bias-exception` with a category: `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
+| `codex` | Top-tier work goes to `sol`. For `opus`, pass `--bias-exception` with `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
 | `claude` (Codex running ahead) | Codex rows go to the equal Claude tier: `luna` → `haiku` and mid-tier `sol/medium` → `sonnet/medium`, each at its Claude tier's starting effort below; `terra` writing or visual work → `sonnet` at the same effort. |
 
 - When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
@@ -117,6 +117,8 @@ that edits no file may start one lower (`haiku/low`, `luna/medium`); `max`/`ultr
 - Effort is fixed per session (the model scales thinking per turn within it); each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
   an escalated task launches, read `references/escalation.md` for the ladder and the relaunch.
+  Before stopping a child, check the new pair with `launch --dry-run` (Herdr) or `prompt` (T3).
+  If the quota gate refuses the pair, keep the child and choose a permitted rung or ask the user.
 - Before launch, give the CLI, pair and reason in one line. If either state is other than `ok`,
   include both CLIs' weekly used, elapsed and runway in that line. Mark missing values as
   unavailable and include 5-hour usage when it raised the state.

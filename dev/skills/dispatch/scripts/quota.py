@@ -84,9 +84,13 @@ def codex_snapshot(home=None):
     files = []
     for days in range(9):
         day = today - dt.timedelta(days=days)
-        files.extend((home / "sessions" / day.strftime("%Y/%m/%d")).glob("*.jsonl"))
+        for path in (home / "sessions" / day.strftime("%Y/%m/%d")).glob("*.jsonl"):
+            try:
+                files.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
     latest = None
-    for path in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:40]:
+    for _, path in sorted(files, key=lambda entry: entry[0], reverse=True)[:40]:
         try:
             with path.open("rb") as stream:
                 stream.seek(max(0, path.stat().st_size - 512 * 1024))
@@ -225,9 +229,12 @@ def main():
     routing = bias(**clis)
     effective = routing
     if routing == "both-hot":
-        claude_runway, codex_runway = (clis[cli]["runway_h"] for cli in ("claude", "codex"))
         effective = "none"
-        if claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
+        eligible = [cli for cli, quota in clis.items() if quota.get("raw_state", quota["state"]) != "critical"]
+        claude_runway, codex_runway = (clis[cli]["runway_h"] for cli in ("claude", "codex"))
+        if len(eligible) == 1:
+            effective = eligible[0]
+        elif claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
             effective = "claude" if claude_runway > codex_runway else "codex"
     preferred = clis.get(effective, {})
     print(json.dumps({**clis, "bias": routing, "effective_bias": effective,
