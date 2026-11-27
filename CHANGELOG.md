@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Settle collected T3 dispatch threads (dev v4.12.36) (2026-11-27) → dev/skills/dispatch/references/t3-backend.md
 - [done] Route dispatch pick through the queue backend (dev v4.12.35) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Add the github queue backend read path: describe, list and show (dev v4.12.34) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Flag Codex children whose hooks broke after a mid-wave plugin update (dev v4.12.33) (2026-11-27) → dev/skills/dispatch/references/codex-readiness.md
