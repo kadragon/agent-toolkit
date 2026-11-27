@@ -2898,6 +2898,134 @@ class LaunchQuotaTests(unittest.TestCase):
                 self.assertIn("warning: quota check unavailable", errors.getvalue())
 
 
+@unittest.skipIf(os.name == "nt", "fixture uses a POSIX executable script")
+class ResetPassRefreshTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.cache = self.home / "reset-passes.json"
+        self.marker = self.home / "reset-passes.refreshed"
+        self.requests = self.home / "requests"
+        self.response = self.home / "response.json"
+        self.expiry = dt.datetime.now(dt.timezone.utc).replace(microsecond=0) + dt.timedelta(days=30)
+        self.old_cache = json.dumps([(self.expiry + dt.timedelta(days=days)).isoformat() for days in (1, 2)]) + "\n"
+        self.cache.write_text(self.old_cache, encoding="utf-8")
+        codex = self.home / "codex"
+        codex.write_text(f"#!{sys.executable}\n" + """\
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+assert sys.argv[1:] == ["app-server"], sys.argv
+home = Path(os.environ["CODEX_HOME"])
+initialize = json.loads(input())
+assert initialize["method"] == "initialize", initialize
+print(json.dumps({"id": initialize["id"], "result": {"codexHome": str(home)}}), flush=True)
+assert json.loads(input()) == {"method": "initialized"}
+request = json.loads(input())
+with (home / "requests").open("a", encoding="utf-8") as log:
+    log.write(request["method"] + "\\n")
+assert request["method"] == "account/rateLimits/read", request
+assert request["params"] == {"excludeResetCreditDetails": False}, request
+response = json.loads((home / "response.json").read_text(encoding="utf-8"))
+time.sleep(response.pop("delay", 0))
+print(json.dumps({"id": request["id"], **response}), flush=True)
+assert not sys.stdin.readline(), "unexpected extra request"
+""", encoding="utf-8")
+        codex.chmod(0o700)
+        self.env = {**os.environ, "CODEX_HOME": str(self.home), "PATH": f"{self.home}{os.pathsep}{os.environ['PATH']}"}
+        self.env["CLAUDE_CONFIG_DIR"] = str(self.home / "claude")
+        self.env["QUOTA_CLAUDE_CACHE"] = str(self.home / "claude-quota.json")
+        self.credit = {"id": "credit-1", "status": "available", "resetType": "codexRateLimits",
+                       "expiresAt": int(self.expiry.timestamp())}
+        self.set_response({"availableCount": 1, "credits": [self.credit]})
+
+    def set_response(self, summary):
+        self.response.write_text(json.dumps({"result": {"rateLimitResetCredits": summary}}), encoding="utf-8")
+
+    def command(self, *args):
+        return [sys.executable, "-I", str(SCRIPTS / "quota.py"), *args]
+
+    def quota_command(self, *args):
+        return subprocess.run(self.command(*args), env=self.env, text=True, capture_output=True, timeout=35)
+
+    def test_wave_planning_refreshes_legacy_cache_before_assessing_and_reuses_success(self):
+        skill = (SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8")
+        planning_args = re.search(r'For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"([^\n`]*)`', skill)
+        self.assertIsNotNone(planning_args)
+        args = planning_args[1].split()
+        result = self.quota_command(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [self.expiry.isoformat().replace("+00:00", "Z")])
+        self.assertEqual(json.loads(result.stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        self.set_response({"availableCount": 0})
+        self.assertEqual(json.loads(self.quota_command(*args).stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        prior_day = time.time() - 24 * 3600
+        os.utime(self.marker, (prior_day, prior_day))
+        self.assertEqual(json.loads(self.quota_command(*args).stdout)["codex"]["reset_passes"], 0)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [])
+
+    def test_manual_forces_explicit_zero_and_ordinary_reads_use_only_cache(self):
+        self.assertEqual(self.quota_command("--refresh-if-stale").returncode, 0)
+        self.set_response({"availableCount": 0, "credits": None})
+        self.assertEqual(json.loads(self.quota_command().stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        result = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [])
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"] * 2)
+
+    def test_bad_responses_keep_last_successful_cache_and_report_age(self):
+        result = self.quota_command("--refresh-if-stale")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cached = self.cache.read_bytes()
+        prior = time.time() - 25 * 3600
+        os.utime(self.marker, (prior, prior))
+        for response in (
+            {"result": {}},
+            {"result": {"rateLimitResetCredits": {"availableCount": 2, "credits": [self.credit]}}},
+            {"result": {"rateLimitResetCredits": {"availableCount": 1, "credits": [{**self.credit, "expiresAt": None}]}}},
+            {"result": {"rateLimitResetCredits": {"availableCount": False}}},
+            {"error": {"code": -32601, "message": "unsupported"}},
+        ):
+            with self.subTest(response=response):
+                self.response.write_text(json.dumps(response), encoding="utf-8")
+                result = self.quota_command("--refresh-if-stale")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["codex"]["reset_passes"], 1)
+                self.assertIn("last successful refresh 25.0h ago", result.stderr)
+                self.assertEqual(self.cache.read_bytes(), cached)
+        failure = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(failure.returncode, 1, failure.stderr)
+
+    def test_parallel_planners_share_one_refresh(self):
+        self.response.write_text(json.dumps({
+            "result": {"rateLimitResetCredits": {"availableCount": 0}}, "delay": 0.25,
+        }), encoding="utf-8")
+        with subprocess.Popen(self.command("--refresh-if-stale"), env=self.env, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as first:
+            second = self.quota_command("--refresh-if-stale")
+            stdout, stderr = first.communicate(timeout=5)
+        self.assertEqual(first.returncode, 0, stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual([json.loads(output)["codex"]["reset_passes"] for output in (stdout, second.stdout)], [0, 0])
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+
+    def test_lookup_timeout_keeps_legacy_cache_and_reports_file_age(self):
+        self.response.write_text(json.dumps({"delay": 60}), encoding="utf-8")
+        with (patch.dict(os.environ, self.env), patch("quota.RESET_PASS_LOOKUP_TIMEOUT", 0.5),
+              redirect_stdout(StringIO()) as out, redirect_stderr(StringIO()) as err):
+            quota_main(["--refresh-if-stale"])
+        self.assertIn("timed out", err.getvalue())
+        self.assertIn("cache file age", err.getvalue())
+        self.assertEqual(self.cache.read_text(encoding="utf-8"), self.old_cache)
+        self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 2)
+        self.assertFalse(self.marker.exists())
+
+
 class QuotaTests(unittest.TestCase):
     def test_claude_pass_defaults_to_claude_home_and_filters_by_weekly_reset(self):
         now = dt.datetime(2026, 12, 10, tzinfo=dt.timezone.utc).timestamp()

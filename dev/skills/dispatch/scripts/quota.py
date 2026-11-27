@@ -15,10 +15,14 @@ null when there is no estimate), age_h (snapshot age), five_hour_used when
 reported, and state ok|hot|critical|unknown.
 Each CLI also gets reset_passes and reset_passes_before_weekly_reset.
 """
+import argparse
 import datetime as dt
+import errno
 import json
 import math
 import os
+import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -33,6 +37,8 @@ MIN_PACE_HOURS = 24
 HOT_AHEAD = 15
 HOT_PROJECTED = 120
 RANK = {"ok": 0, "hot": 1, "critical": 2}
+RESET_PASS_REFRESH_AGE = 24 * 3600
+RESET_PASS_LOOKUP_TIMEOUT = 15
 
 
 def finite(value):
@@ -146,6 +152,109 @@ def reset_passes(home, now):
         return []
 
 
+def read_codex_reset_passes(home):
+    # The launcher runs this script in isolated mode, which omits the script directory.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from codex_app_server import request
+
+    result = request("codex", home, "account/rateLimits/read", {"excludeResetCreditDetails": False},
+                     timeout=RESET_PASS_LOOKUP_TIMEOUT)
+    summary = result.get("rateLimitResetCredits") if isinstance(result, dict) else None
+    count = summary.get("availableCount") if isinstance(summary, dict) else None
+    if type(count) is not int or count < 0:
+        raise ValueError("Codex response has no valid available reset-credit count")
+    if count == 0:
+        return []
+    rows = summary.get("credits")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError("Codex response has no reset-credit details")
+    expiries = {}
+    for row in rows:
+        if row.get("status") != "available" or row.get("resetType") != "codexRateLimits":
+            continue
+        credit_id, expiry = row.get("id"), row.get("expiresAt")
+        if not isinstance(credit_id, str) or not credit_id or credit_id in expiries:
+            raise ValueError("Codex response has an invalid or duplicate reset-credit ID")
+        if type(expiry) is not int or expiry <= 0:
+            raise ValueError("Codex response has a reset credit without a valid expiry")
+        expiries[credit_id] = expiry
+    if len(expiries) != count:
+        raise ValueError("Codex reset-credit details do not match the available count")
+    return [dt.datetime.fromtimestamp(expiry, dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            for expiry in sorted(expiries.values())]
+
+
+def lock_reset_pass_cache(lock):
+    if os.name == "nt":
+        import msvcrt
+
+        # LK_LOCK retries for up to ten seconds and the handle releases it on close.
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    deadline = time.monotonic() + RESET_PASS_LOOKUP_TIMEOUT
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError as error:
+            if error.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError("timed out waiting for the Codex reset-pass cache lock") from None
+            time.sleep(0.05)
+
+
+def file_mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def refresh_codex_reset_passes(home, *, force=False):
+    cache = home / "reset-passes.json"
+    refreshed = home / "reset-passes.refreshed"
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        with (home / "reset-passes.lock").open("a+b") as lock:
+            lock_reset_pass_cache(lock)
+            last_success = file_mtime(refreshed)
+            if (not force and last_success is not None and cache.is_file()
+                    and 0 <= time.time() - last_success < RESET_PASS_REFRESH_AGE):
+                return True
+            expiries = read_codex_reset_passes(home)
+            temporary = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=home, delete=False)
+            temporary_path = Path(temporary.name)
+            try:
+                with temporary:
+                    json.dump(expiries, temporary)
+                    temporary.write("\n")
+                temporary_path.replace(cache)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            try:
+                refreshed.touch()
+            except OSError as error:
+                print(f"warning: Codex reset-pass cache updated but could not record refresh time ({error})",
+                      file=sys.stderr)
+    except (OSError, ValueError, OverflowError, RuntimeError) as error:
+        last_success = file_mtime(refreshed)
+        cache_time = file_mtime(cache)
+        now = time.time()
+        if last_success is not None:
+            age = f"last successful refresh {max(0, now - last_success) / 3600:.1f}h ago"
+        elif cache_time is not None:
+            age = f"cache file age {max(0, now - cache_time) / 3600:.1f}h"
+        else:
+            age = "cache age unknown"
+        print(f"warning: Codex reset-pass refresh failed ({error}); using cached passes ({age})", file=sys.stderr)
+        return False
+    return True
+
+
 def assess(snapshot, now):
     if not snapshot:
         return {"state": "unknown"}
@@ -221,9 +330,18 @@ def assess_with_passes(snapshot, home, now):
     return result
 
 
-def main():
-    now = time.time()
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--refresh-if-stale", action="store_true", help="refresh stale Codex passes before wave planning")
+    mode.add_argument("--refresh-codex-reset-passes", action="store_true", help="force an immediate Codex pass refresh")
+    args = parser.parse_args(argv)
     home = codex_home()
+    if args.refresh_codex_reset_passes:
+        return 0 if refresh_codex_reset_passes(home, force=True) else 1
+    if args.refresh_if_stale:
+        refresh_codex_reset_passes(home)
+    now = time.time()
     clis = {"claude": assess_with_passes(claude_snapshot(), claude_home(), now),
             "codex": assess_with_passes(codex_snapshot(home), home, now)}
     routing = bias(**clis)
@@ -245,4 +363,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main(sys.argv[1:]))
