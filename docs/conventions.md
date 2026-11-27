@@ -43,7 +43,7 @@ there and nowhere else, so they cannot drift.
 
 Its decidable subset — the character cap, one line per entry, at most one `→` link, and that
 link resolving under `## Unreleased` — is enforced by `scripts/ci/check_changelog_entries.py`,
-run by the `changelog-entries` job in `harness-check.yml` (exit 1 blocks the PR). The cap's
+run by the `release-checks` job in `harness-check.yml` (exit 1 blocks the PR). The cap's
 value lives in that script's `MAX_LEN`, which is the enforcement point; everything the contract
 bans but a script cannot decide (explanatory clauses, file lists, narration) is on review.
 
@@ -177,8 +177,8 @@ wrong here:
 
 - `ruff.toml` at the repo root pins the ruleset the local `.git/hooks/pre-commit` gate enforces on staged `*/scripts/*.py`. Without a config, ruff activates its full rule set and the gate reports ~149 pre-existing violations, which forces `--no-verify`. Keep the repo at 0 violations so the gate stays usable.
 - `target-version` is load-bearing, not cosmetic: ruff's parser is version-aware, so it also gates `E9` invalid-syntax. Setting it below the repo's real floor makes every commit fail.
-- The pre-commit hook is untracked and per-machine, so CI carries the real gate: the `ruff` job in `.github/workflows/harness-check.yml` runs `ruff check --no-cache .` **repo-wide** with ruff pinned to `0.16.0`. Repo-wide is deliberate — it is what fails a `target-version` downgrade, which the hook's staged-files-only scope can miss. Bump the pin and the hook together.
-- The Python floor is recorded twice and nothing in the toolchain reconciles the two: `ruff.toml`'s `target-version` drives ruff's parser, while `.python-version` (`3.12`) only selects the interpreter `setup-python` hands the new CI jobs — **ruff never reads `.python-version`**. So the `ruff` job carries an explicit step asserting the two agree. Bump them together; the E9 failure on a `target-version` downgrade and that assert are what actually defend the floor.
+- The pre-commit hook is untracked and per-machine, so CI carries the real gate: the `static-checks` job in `.github/workflows/harness-check.yml` runs `ruff check --no-cache .` **repo-wide** with ruff pinned to `0.16.0`. Repo-wide is deliberate — it is what fails a `target-version` downgrade, which the hook's staged-files-only scope can miss. Bump the pin and the hook together.
+- The Python floor is recorded twice and nothing in the toolchain reconciles the two: `ruff.toml`'s `target-version` drives ruff's parser, while `.python-version` (`3.12`) only selects the interpreter `setup-python` hands the new CI jobs — **ruff never reads `.python-version`**. So the `static-checks` job carries an explicit step asserting the two agree. Bump them together; the E9 failure on a `target-version` downgrade and that assert are what actually defend the floor.
 - **Never infer the Python floor by grepping for version-gated constructs.** Tokenizer-level changes do not look like keywords and will be missed — `prod/skills/hwpx/scripts/table.py` needs 3.12 only because of PEP 701 f-strings (backslash and reused outer quote inside the braces), which a grep for `match`/`tomllib`/`except*` does not see. Derive it mechanically instead:
 
 ```sh
