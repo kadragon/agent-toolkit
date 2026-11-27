@@ -64,6 +64,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] Serialize GitHub issue lookup and creation for concurrent queue writers sharing a Git common directory so two scans cannot file the same alert concurrently (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_post_items
 - [ ] [debt] Include the target repository when indexing pending queue drafts so an origin change cannot replace a draft in another repository with the same key (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:github_create
 - [ ] [debt] Distinguish Code Scanning permission errors from a disabled feature before allowing zero-alert backlog cleanup (source: codex) (pre_existing) — dev/commands/security-overview/fetch-alerts.sh
+- [ ] [debt] Keep existing legacy security backlog items for any alert type whose scan failed or was truncated before replacing the section (source: code-review) (pre_existing) — dev/commands/security-overview.md
 
 ## Rejected — do not re-file
 

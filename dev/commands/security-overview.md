@@ -33,7 +33,8 @@ Results go to a temp directory outside the repo (last output line), so raw alert
 For query structure, field reference, error handling → **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/api-patterns.md`**.
 
 Bind all three alert requests to the canonical origin host. Before filing, verify that the current
-`origin` still resolves to the repository scanned in Phase 1. If it changed, report only.
+`origin` still resolves to the same repository and confirm that its visibility is still private.
+If the check fails, report only.
 
 Expected errors: Code Scanning 403/404 and Secret Scanning 404 mean the feature is not enabled; the script writes `<type>.disabled` beside the `[]` result — report that type as "not enabled", not as 0. Any other failure lands in `.fetch-errors`.
 
@@ -53,7 +54,9 @@ Mark a feature that is not enabled as "not enabled". If `${SCAN_DIR}/.fetch-erro
 
 ### 2-1. Resolve the route
 
-Call `describe` with the repository root. Use the scan's resolved origin URL from `repo.txt` (or the same URL resolved during manual discovery).
+Call `describe` with the repository root. Read the scanned origin URL and visibility from
+`repo.txt` and `visibility.txt`. For manual discovery, resolve both from the explicit `origin` URL
+with `gh repo view`, including its `visibility` field. Normalize repository visibility to lowercase.
 
 ```bash
 QUEUE="${CLAUDE_PLUGIN_ROOT}/skills/task-next/scripts/queue_backend.py"
@@ -62,9 +65,14 @@ REQUEST=$(jq -n --arg repo "$REPO_ROOT" '{contract: 1, repo: $repo}') || exit 1
 DESCRIBE=$(python3 "$QUEUE" describe <<<"$REQUEST") || exit 1
 ```
 
-- **Public:** if `describe.visibility` is `public`, stay report-only. A github.com origin can resolve to a legacy queue. For a github.com origin with any other backend, check the origin itself with `AGENT_QUEUE_BACKEND=github python3 "$QUEUE" describe <<<"$REQUEST"` unless the route is already report-only. Require a confirmed private result from that extra check before using a legacy write path on github.com.
-- **Private GitHub issues:** if `describe.backend` is `github` and `describe.visibility` is `private`, file through `create`.
-- **Legacy backlog:** for the remaining non-public routes, use the existing `backlog.md` workflow. If `describe` fails or GitHub visibility is missing or unknown, report the alerts and the lookup failure without writing to any queue.
+- **Report only:** if the scanned GitHub repository is `public` or `internal`, or `describe.visibility`
+  is `public`, report the alerts. If either lookup fails or the scanned GitHub visibility is unknown,
+  also report the lookup failure. This gate applies to every GitHub host before any queue write.
+- **Private GitHub issues:** if the scanned repository and `describe.visibility` are both `private`
+  and `describe.backend` is `github`, file through `create`. If the issues backend cannot confirm
+  private visibility, report the alerts without filing.
+- **Legacy backlog:** if the scanned repository is confirmed private and the queue uses a legacy
+  route, use the existing `backlog.md` workflow.
 
 For public results, list each alert by kind and number and give a suggested fix. Point the user to `/dev:task-new` with the kind and alert number to start a fix. Do not call `create`, save drafts, or edit `backlog.md` or `tasks.md`, even when there are zero alerts.
 

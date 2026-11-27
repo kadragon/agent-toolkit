@@ -1149,24 +1149,23 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
     if from_store and limits == NO_QUEUE_WRITE:
         return out | {"pending": [item["key"] for item in items], "pending_path": pending_path(repo)}
     alert_keys = {item["key"] for item in items if item["key"].startswith(_ALERT_KEY_PREFIX)}
-    if alert_keys:
+    if alert_keys and limits != NO_QUEUE_WRITE:
         visibility_error = "GitHub security alerts can only be filed on a confirmed private repository"
         try:
             private = github_visibility(runner, owner, name) == "private"
         except QueueError as e:
-            if not from_store:
-                raise
             private = False
             visibility_error = str(e)
         if not private:
-            if not from_store:
-                raise QueueError(visibility_error)
             out["incomplete"] = [{"key": item["key"], "relation": "visibility", "ref": None,
                                   "error": visibility_error} for item in items if item["key"] in alert_keys]
-            out["pending"] = [entry["key"] for entry in out["incomplete"]]
+            if from_store:
+                out["pending"] = [entry["key"] for entry in out["incomplete"]]
             items = [item for item in items if item["key"] not in alert_keys]
             if not items:
-                return out | {"pending_path": pending_path(repo)}
+                if from_store:
+                    return out | {"pending_path": pending_path(repo)}
+                raise QueueError(visibility_error)
     res: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
     if limits == NO_QUEUE_WRITE:
         reason = f"Queue limits: {NO_QUEUE_WRITE}"
@@ -2120,6 +2119,12 @@ def run_github_write_tests(tmp: str, git) -> None:
     else:
         raise AssertionError("a public GitHub security alert create was accepted")
 
+    ordinary = {"key": "ordinary", "title": "Publish this ordinary draft"}
+    _, out = handle("create", dict(req, items=[alerts[0], ordinary]), {ENV_VAR: "github"}, gh)
+    _assert([i["key"] for i in out["created"]] == ["ordinary"]
+            and out["incomplete"][0]["relation"] == "visibility" and not os.path.exists(store),
+            "a mixed create files ordinary items without posting or storing the public alert")
+
     gh = _FakeGitHub(private=True)
     gh.add("An already filed alert", "<!-- gh-alert: code-scanning/7 -->\nReference above.\n"
            "<!-- gh-alert: dependabot/7 -->", labels=["security"], state="CLOSED")
@@ -2142,9 +2147,10 @@ def run_github_write_tests(tmp: str, git) -> None:
             "an ordinary issue can reference a reused alert in the same batch")
 
     gh = _FakeGitHub(private=True)
-    ordinary = {"key": "ordinary", "title": "Publish this ordinary draft"}
     handle("create", dict(req, queue_limits=NO_QUEUE_WRITE, items=[alerts[0], ordinary]),
            {ENV_VAR: "github"}, gh)
+    _assert(not gh.calls and set(i["key"] for i in read_pending(repo)) == {alerts[0]["key"], ordinary["key"]},
+            "create under no-queue-write stores drafts without any GitHub calls")
     gh.calls.clear()
     _, out = handle("publish", dict(req, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
     _assert(not gh.calls and set(out["pending"]) == {alerts[0]["key"], ordinary["key"]},

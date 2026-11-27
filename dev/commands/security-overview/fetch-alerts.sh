@@ -9,6 +9,7 @@
 #
 # Output:
 #   ${OUTPUT_DIR}/repo.txt             — "owner/name url" of the scanned repo
+#   ${OUTPUT_DIR}/visibility.txt       — visibility of the scanned repo from gh repo view
 #   ${OUTPUT_DIR}/dependabot.json      — Dependabot vulnerability alerts (GraphQL)
 #   ${OUTPUT_DIR}/code-scanning.json   — Code scanning alerts (REST)
 #   ${OUTPUT_DIR}/secret-scanning.json — Secret scanning alerts (REST, secrets redacted)
@@ -36,12 +37,12 @@ if ! ORIGIN_URL=$(git remote get-url origin 2>/dev/null); then
   echo "ERROR: not inside a git checkout with an origin remote" >&2
   exit 2
 fi
-if ! REPO_INFO=$(env -u GH_REPO gh repo view "${ORIGIN_URL}" --json owner,name,url \
-    -q '"\(.owner.login) \(.name) \(.url)"' 2>&1); then
+if ! REPO_INFO=$(env -u GH_REPO gh repo view "${ORIGIN_URL}" --json owner,name,url,visibility \
+    -q '"\(.owner.login) \(.name) \(.url) \(.visibility)"' 2>&1); then
   echo "ERROR: gh could not resolve origin (${ORIGIN_URL}) as a GitHub repo: ${REPO_INFO}" >&2
   exit 3
 fi
-read -r OWNER REPO REPO_URL <<< "${REPO_INFO}"
+read -r OWNER REPO REPO_URL REPO_VISIBILITY <<< "${REPO_INFO}"
 REPO_HOST=${REPO_URL#*://}
 REPO_HOST=${REPO_HOST%%/*}
 echo "Scanning: ${OWNER}/${REPO}"
@@ -49,6 +50,7 @@ echo "Scanning: ${OWNER}/${REPO}"
 mkdir -p "${OUTPUT_DIR}"
 rm -f "${OUTPUT_DIR}/.fetch-errors" "${OUTPUT_DIR}"/*.disabled
 echo "${OWNER}/${REPO} ${REPO_URL}" > "${OUTPUT_DIR}/repo.txt"
+printf '%s\n' "${REPO_VISIBILITY}" > "${OUTPUT_DIR}/visibility.txt"
 
 # --- Step 2: Dependabot alerts via GraphQL ---
 echo "Fetching Dependabot alerts..."

@@ -2,8 +2,9 @@
 
 Use the route selected by `security-overview.md` § 2-1.
 
-- **Public:** report the alert kind, source number, and suggested fix. Point to `/dev:task-new` with
-  the kind and number. Skip all queue writes, including cleanup when no alerts are open.
+- **Report only:** on public or internal GitHub repositories, report the alert kind, source number,
+  and suggested fix. Point to `/dev:task-new` with the kind and number. Skip all queue writes,
+  including cleanup when no alerts are open.
 - **Private GitHub issues:** use the remediation text below for the title and describe the action
   in the body. Include the alert kind and source number. File one `security` issue per alert with
   `queue_backend.py create`. For example, a Dependabot alert numbered 42 uses this item:
