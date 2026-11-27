@@ -85,16 +85,16 @@ needs these gates is the one running without them. The floor, one line per gate:
    checks and mark criteria that need the final suite pending until review-cycle verification
 4. No new `$var` reference without a visible `var=$(cmd)` capture
 5. No out-of-scope edits — every changed path traces to a line in the contract's **Scope**. A path
-   outside it fails unless the contract was amended to cover it
+   outside it fails unless the contract was amended to cover it. Cycle-owned changes to `tasks.md`
+   and the plugin manifests are exempt from the scope check. When the cycle selected the
+   `backlog` backend, this exemption also covers its bookkeeping in `backlog.md` and
+   `CHANGELOG.md`. On the issues backend, changes to those two files must be in scope.
 6. Owning doc synced — a change that alters a rule stated in `docs/` or `AGENTS.md` updates that
    doc and its sibling references in the same change set (a new or renamed `docs/` file also
    updates the `AGENTS.md` Docs Index)
 
-Each carve-out belongs to its own gate; do not merge them. Gate 1: repo-root paths outside every
-plugin tree are **N/A, not fail** — nothing to bump. Gate 5: the paths the cycle itself writes
-(`tasks.md`, `backlog.md`, file-queue `CHANGELOG.md`, the plugin manifests) are **N/A, not fail** — no
-contract's Scope has to list them. A repo-root path is *not* exempt from gate 5: an edit there
-outside the contract's Scope still fails.
+For gate 1, record **N/A** for paths outside every plugin tree. Gate 5 applies its own scope
+rules to those paths.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
 same commit. Cited by *Absent-Role Fallbacks* below, which `dev:task-next`'s `--tree` and `--all`
