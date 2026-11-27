@@ -57,7 +57,8 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ### PR #475 — Route task-new queue-only requests through the selected backend (2026-11-27)
 
-- [ ] [debt] Give task-new an exhaustive duplicate check covering claimed GitHub issues and sub-issues that candidate scans omit (source: codex) — dev/skills/task-new/SKILL.md:23 (introduced here)
+- [ ] [debt] Give task-new an exhaustive duplicate check covering claims, sub-issues, and incomplete GitHub candidate scans (source: codex) — dev/skills/task-new/SKILL.md:23 (introduced here)
+- [ ] [debt] Check the ticket-writing checkout before authoring a multi-session spec so a known backend mismatch does not leave an unqueued design (source: codex) — dev/skills/task-new/SKILL.md:81 (introduced here)
 - [ ] [debt] Make label bootstrap tolerate another queue writer creating a missing GitHub label between lookup and creation (source: codex) — dev/skills/task-next/scripts/queue_backend.py:856 (pre_existing)
 - [ ] [debt] Clear the stale item 3 blocker from repository migration after verifying PR #466 merged (source: agy) — backlog.md:23 (pre_existing)
 
