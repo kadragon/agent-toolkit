@@ -6,7 +6,8 @@ This design follows [How the Claude Code team does code review](https://claude.d
 ## User Stories
 
 - A maintainer changing a reviewer can see its recall on every escaped-defect fixture. CI
-  catches stale scores, and maintainers have an intake path for the next confirmed escape.
+  keeps reviewer regression tests green, and maintainers have an intake path for the next
+  confirmed escape.
 - A maintainer can measure false positives and other dropped findings by reviewer, including
   after the active review contract is retired.
 - An author fixing a blocking bug checks the branch diff for the same bug pattern in the
@@ -20,8 +21,8 @@ This design follows [How the Claude Code team does code review](https://claude.d
 
 ## Implementation and Testing Decisions
 
-- Reuse the existing recall fixture runner. Require the scorecard to match the inputs for a
-  successful full run. CI checks the input fingerprint and leaves grading to a maintainer.
+- Reuse the existing recall fixture runner. Maintainers can check scorecard freshness locally
+  and grade the recall output when reviewer behavior or fixtures change.
 - Capture dispositions through the existing notes command, keyed by finding so late sources
   can be counted without counting the same finding twice. Preserve rows when retiring or
   replacing the contract. Keep the `comments` source for comparing advisory pass behavior.

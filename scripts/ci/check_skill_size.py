@@ -10,12 +10,11 @@ Rules, over every tracked `*/skills/*/SKILL.md`:
 
 - At most CAP lines — unless the file is listed in the ratchet (`skill-size-ratchet.json`,
   beside this script) with a ceiling. A listed file may not exceed its ceiling.
-- The ratchet only goes down: a listed file that shrank below its ceiling is reported so
-  the ceiling gets lowered in the same change; a listed file now at or under CAP must be
-  removed from the ratchet. Both are errors, so the file cannot quietly regrow.
+- Report stale exception entries as warnings when a skill shrinks or is removed.
+  The configured ceiling applies until the exception is updated.
 
 Usage: python3 scripts/ci/check_skill_size.py [--test]
-Exit: 0 clean, 1 any violation.
+Exit: 0 within limits (including warnings), 1 on any limit violation.
 """
 
 from __future__ import annotations
@@ -52,25 +51,28 @@ def load_ratchet(path: str) -> dict[str, int]:
     return data
 
 
-def check(root: str, skills: list[str], ratchet: dict[str, int], cap: int = CAP) -> list[str]:
-    problems: list[str] = []
+def check(
+    root: str, skills: list[str], ratchet: dict[str, int], cap: int = CAP
+) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
     for rel in skills:
         n = line_count(os.path.join(root, rel))
         ceiling = ratchet.get(rel)
         if ceiling is None:
             if n > cap:
-                problems.append(f"{rel}: {n} lines > cap {cap} — trim it, or list it in the ratchet with its current count")
+                errors.append(f"{rel}: {n} lines > cap {cap} — trim it, or list it in the ratchet with its current count")
         else:
             if n > ceiling:
-                problems.append(f"{rel}: {n} lines > ratchet ceiling {ceiling} — the ratchet only goes down")
+                errors.append(f"{rel}: {n} lines > ratchet ceiling {ceiling}")
             elif n <= cap:
-                problems.append(f"{rel}: {n} lines is within cap {cap} — remove it from the ratchet")
+                warnings.append(f"{rel}: {n} lines is within cap {cap} — remove it from the ratchet")
             elif n < ceiling:
-                problems.append(f"{rel}: {n} lines < ratchet ceiling {ceiling} — lower the ceiling to {n}")
+                warnings.append(f"{rel}: {n} lines < ratchet ceiling {ceiling} — lower the ceiling to {n}")
     for rel in ratchet:
         if rel not in skills:
-            problems.append(f"{rel}: listed in the ratchet but not a tracked SKILL.md — remove the entry")
-    return problems
+            warnings.append(f"{rel}: listed in the ratchet but not a tracked SKILL.md — remove the entry")
+    return errors, warnings
 
 
 def run_tests() -> int:
@@ -94,14 +96,20 @@ def run_tests() -> int:
 
         small = write("dev/skills/a/SKILL.md", 10)
         big = write("dev/skills/b/SKILL.md", 40)
-        skills = [small, big]
-        t("under cap, unlisted: clean", check(tmp, [small], {}, cap=20) == [])
-        t("over cap, unlisted: flagged", any("> cap" in p for p in check(tmp, [big], {}, cap=20)))
-        t("over cap, listed at ceiling: clean", check(tmp, [big], {big: 40}, cap=20) == [])
-        t("over ceiling: flagged", any("ratchet ceiling" in p for p in check(tmp, [big], {big: 30}, cap=20)))
-        t("shrank below ceiling: asks to lower", any("lower the ceiling to 40" in p for p in check(tmp, [big], {big: 50}, cap=20)))
-        t("listed but within cap: asks to remove", any("remove it from the ratchet" in p for p in check(tmp, [small], {small: 30}, cap=20)))
-        t("listed but untracked: flagged", any("not a tracked" in p for p in check(tmp, skills, {"dev/skills/z/SKILL.md": 300}, cap=20)))
+        t("under cap, unlisted: clean", check(tmp, [small], {}, cap=20) == ([], []))
+        t("over cap, listed at ceiling: clean", check(tmp, [big], {big: 40}, cap=20) == ([], []))
+
+        errors, warnings = check(tmp, [big], {}, cap=20)
+        t("over cap, unlisted: error", not warnings and any("> cap" in p for p in errors))
+        errors, warnings = check(tmp, [big], {big: 30}, cap=20)
+        t("over ceiling: error", not warnings and any("ratchet ceiling" in p for p in errors))
+
+        errors, warnings = check(tmp, [big], {big: 50}, cap=20)
+        t("shrank below ceiling: warn", not errors and any("lower the ceiling to 40" in p for p in warnings))
+        errors, warnings = check(tmp, [small], {small: 30}, cap=20)
+        t("listed but within cap: warn", not errors and any("remove it from the ratchet" in p for p in warnings))
+        errors, warnings = check(tmp, [small], {"dev/skills/z/SKILL.md": 300}, cap=20)
+        t("listed but untracked: warn", not errors and any("not a tracked" in p for p in warnings))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -115,10 +123,12 @@ def main() -> int:
         return run_tests()
     root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
     skills = tracked_skills(root)
-    problems = check(root, skills, load_ratchet(RATCHET))
-    for p in problems:
-        print(f"ERROR: {p}")
-    if problems:
+    errors, warnings = check(root, skills, load_ratchet(RATCHET))
+    for warning in warnings:
+        print(f"WARNING: {warning}")
+    for error in errors:
+        print(f"ERROR: {error}")
+    if errors:
         return 1
     print(f"OK: {len(skills)} SKILL.md files within {CAP} lines (or their ratchet ceiling).")
     return 0

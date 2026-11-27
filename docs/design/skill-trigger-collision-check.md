@@ -8,6 +8,10 @@
 > (`skills/skill-creator/scripts/run_eval.py`, `improve_description.py`), already used by
 > `prod/skills/persona-debate/evals/trigger-eval.json`.
 
+PR #477 made lexical ranking misses and description collisions advisory. The
+fixture format, scorable-positive floor, discovery checks, and changed-skill
+fixture requirement still gate CI. The original decisions follow.
+
 ## Problem Statement
 
 `docs/eval-criteria.md` weights **Trigger Accuracy at 30%** — the single largest criterion

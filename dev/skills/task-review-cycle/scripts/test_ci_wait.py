@@ -11,15 +11,9 @@ on either kind of pass (`success` and no-CI-configured), and is NOT incremented 
 or a ci-status error. The timing constants are env-overridable purely so the timeout and
 no-checks-grace branches are reachable here without editing the script.
 
-Also covered: the opening fast-poll window. `harness-check` finishes in 13-22s, so a single
-20s cadence discovers a pass up to a full interval late; the script polls at
-CI_WAIT_FAST_POLL_INTERVAL for the first CI_WAIT_FAST_POLL_SECS and then falls back.
-
-These cases count stub invocations rather than asserting on wall-clock gaps, which removes
-flake from the *gap* between polls but not from the deadline itself: the status call precedes
-the deadline check, so per-iteration overhead (a forked hub.sh, two jq calls, two `date`
-calls) can trip the deadline one poll early. Each budget below is therefore set well above the
-minimum that satisfies its assertion, so several slow iterations cannot red the gate.
+The opening window polls quickly before falling back to the regular interval. A Bash fixture
+advances a test clock on each sleep, so the suite checks the requested intervals and deadlines
+independently of runner speed.
 
 ci-wait.sh resolves hub.sh relative to its own directory, so each case runs against a
 stub hub.sh in a throwaway git repo — no network, no gh.
@@ -66,11 +60,7 @@ def make_repo(tmp: Path, status: str, name: str = "") -> Path:
 
 
 def make_counting_repo(tmp: Path, name: str) -> Path:
-    """Like make_repo("pending"), but the stub records one line per invocation.
-
-    Counting calls is what makes the cadence observable without timing assertions: over a
-    fixed window, a tighter interval is simply more calls.
-    """
+    """Like make_repo("pending"), but also records each status request."""
     repo = tmp / name
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
@@ -92,8 +82,32 @@ def call_count(repo: Path) -> int:
     return len(log.read_text(encoding="utf-8").splitlines()) if log.exists() else 0
 
 
+VIRTUAL_CLOCK = r'''date() {
+    local tick
+    read -r tick < .ci-wait-clock
+    printf '%s\n' "$tick"
+}
+sleep() {
+    local tick
+    printf '%s\n' "$1" >> .ci-wait-sleeps
+    # Fail immediately on a zero interval instead of spinning forever.
+    [[ $1 =~ ^[1-9][0-9]*$ ]] || return 97
+    read -r tick < .ci-wait-clock
+    printf '%s\n' "$((tick + $1))" > .ci-wait-clock
+}
+'''
+
+
+def sleep_intervals(repo: Path) -> list[int]:
+    return [int(line) for line in (repo / ".ci-wait-sleeps").read_text(encoding="utf-8").splitlines()]
+
+
 def run(repo: Path, pr: str = "7", timeout: int = 30, **env_overrides) -> dict:
-    env = dict(os.environ)
+    startup = repo / ".ci-wait-clock.sh"
+    startup.write_text(VIRTUAL_CLOCK, encoding="utf-8", newline="\n")
+    (repo / ".ci-wait-clock").write_text("1000\n", encoding="utf-8", newline="\n")
+    (repo / ".ci-wait-sleeps").write_text("", encoding="utf-8")
+    env = dict(os.environ, BASH_ENV=startup.as_posix())
     env.update({k: str(v) for k, v in env_overrides.items()})
     proc = subprocess.run(
         ["bash", str(repo / "scripts" / "ci-wait.sh"), pr],
@@ -141,49 +155,28 @@ def main() -> int:
               f"got {fourth}")
 
         print("\n-- the opening window polls fast, then falls back --")
-        fast = make_counting_repo(tmp, "fast_window")
-        run(fast, CI_WAIT_TIMEOUT_SECS=6, CI_WAIT_POLL_INTERVAL=30,
-            CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=10)
-        check("a 1s opening cadence polls every second inside a 6s budget",
-              call_count(fast) >= 4, f"got {call_count(fast)} calls, expected >= 4")
-
-        slow = make_counting_repo(tmp, "slow_fallback")
-        run(slow, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=3,
-            CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=0)
-        # The status call precedes the deadline check, so a 3s sleep over a 2s budget still
-        # costs one more poll: t=0 and t=3. The fast cadence would have polled at t=0,1,2, so
-        # an upper bound alone discriminates — and it stays true if a slow first iteration
-        # burns the whole budget and the run ends at one call.
-        check("a zero-length opening window falls straight back to POLL_INTERVAL",
-              call_count(slow) <= 2, f"got {call_count(slow)} calls, expected <= 2")
-
-        clamped = make_counting_repo(tmp, "explicit_override")
-        run(clamped, CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=1)
-        check("an explicit POLL_INTERVAL below the 5s fast default is not slowed by it",
-              call_count(clamped) >= 3, f"got {call_count(clamped)} calls, expected >= 3")
-
-        floored = make_counting_repo(tmp, "zero_interval")
-        run(floored, CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=0,
-            CI_WAIT_FAST_POLL_INTERVAL=0)
-        check("a zero fast interval is floored instead of busy-looping",
-              call_count(floored) <= 2, f"got {call_count(floored)} calls, expected <= 2")
-
-        # The slow path had the same hole for longer: the numeric guard accepts 0, so
-        # CI_WAIT_POLL_INTERVAL=0 turned the long tail into `sleep 0`. A zero-length opening
-        # window forces the fallback branch on the very first iteration, so this exercises
-        # POLL_INTERVAL alone — the fast interval never runs.
-        # Killed rather than waited out. The floor is hardcoded at 20s, so once it works the
-        # very first sleep outlasts any budget worth setting — letting the run finish would
-        # add 20s to every suite invocation to observe a single call. Pre-fix the same window
-        # is a `sleep 0` busy loop, and the call count over a fixed 4s discriminates the two
-        # without either side having to terminate.
-        slow_floored = make_counting_repo(tmp, "zero_slow_interval")
-        try:
-            run(slow_floored, timeout=4, CI_WAIT_POLL_INTERVAL=0, CI_WAIT_FAST_POLL_SECS=0)
-        except subprocess.TimeoutExpired:
-            pass
-        check("a zero POLL_INTERVAL is floored instead of busy-looping the long tail",
-              call_count(slow_floored) <= 3, f"got {call_count(slow_floored)} calls, expected <= 3")
+        cadence_cases = [
+            ("fast_window", dict(CI_WAIT_TIMEOUT_SECS=6, CI_WAIT_POLL_INTERVAL=30,
+                                 CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=10), [1] * 6),
+            ("switch_cadence", dict(CI_WAIT_TIMEOUT_SECS=5, CI_WAIT_POLL_INTERVAL=3,
+                                    CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=2), [1, 1, 3]),
+            ("slow_fallback", dict(CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=3,
+                                   CI_WAIT_FAST_POLL_INTERVAL=1, CI_WAIT_FAST_POLL_SECS=0), [3]),
+            ("explicit_override", dict(CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=1), [1] * 4),
+            ("zero_fast_interval", dict(CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=20,
+                                        CI_WAIT_FAST_POLL_INTERVAL=0), [5]),
+            ("zero_slow_interval", dict(CI_WAIT_TIMEOUT_SECS=4, CI_WAIT_POLL_INTERVAL=0,
+                                        CI_WAIT_FAST_POLL_SECS=0), [20]),
+        ]
+        for name, options, expected in cadence_cases:
+            repo = make_counting_repo(tmp, name)
+            result = run(repo, **options)
+            intervals = sleep_intervals(repo)
+            calls = call_count(repo)
+            # The status check precedes the deadline check, including the last iteration.
+            check(f"{name}: expected polling intervals up to the timeout",
+                  intervals == expected and calls == len(expected) + 1 and result.get("reason") == "timeout",
+                  f"intervals={intervals}, calls={calls}, result={result}")
 
         print("\n-- a pass clears the counter --")
         passing = make_repo(tmp, "success")
