@@ -96,6 +96,12 @@ DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
+REVIEW_SOURCES = ("claude", "agy", "codex")
+PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
+NO_WORK_PREFIX = re.compile(
+    r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
+    re.IGNORECASE,
+)
 WAIT_DEFAULT = ("ready", "blocked", "merged", "idle", "stop")
 WAIT_OUTCOMES = (*WAIT_DEFAULT, "done")
 WAIT_POLL_SECONDS = 2
@@ -242,8 +248,12 @@ def report_instruction(result, *, require_review_sources=False):
 
 
 def write_json(path, data):
+    write_atomic(path, json.dumps(data, ensure_ascii=False))
+
+
+def write_atomic(path, content):
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    temporary.write_text(content, encoding="utf-8")
     temporary.replace(path)
 
 
@@ -315,23 +325,41 @@ def validate_result(result):
         raise ValueError("invalid status, phase, or summary")
 
 
-def gate_required_reviews(result):
-    status = result["status"]
-    if status not in {"ready", "merged"} and not (status == "done" and result.get("pr")):
-        return result
+def missing_reviews(result):
     sources = result.get("review_sources")
     if not isinstance(sources, dict):
         sources = {}
-    missing = []
-    for reviewer in ("claude", "agy", "codex"):
+    missing = {}
+    for reviewer in REVIEW_SOURCES:
         outcome = sources.get(reviewer)
         if outcome == "complete":
             continue
         reason = " ".join(outcome.split())[:160] if isinstance(outcome, str) else ""
-        missing.append(f"{reviewer}: {reason or 'no completed result'}")
-    if missing:
-        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(missing)}
-    return result
+        missing[reviewer] = reason or "no completed result"
+    return missing
+
+
+def gate_required_reviews(result):
+    status = result["status"]
+    if status not in {"ready", "merged", "done"}:
+        return result
+    if status == "done" and not result.get("pr"):
+        if NO_WORK_PREFIX.match(result["summary"]):
+            return result
+        if not (result.get("head") or PR_REFERENCE.search(result["summary"])
+                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False))):
+            return result
+    missing = missing_reviews(result)
+    if not missing:
+        return result
+    reasons = [f"{reviewer}: {reason}" for reviewer, reason in missing.items()]
+    if status == "ready":
+        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(reasons)}
+    return {**result, "review_warning": " | ".join(reasons)}
+
+
+def serialize_result(result):
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
 def report_review(args):
@@ -346,10 +374,26 @@ def report_review(args):
         validate_result(result)
         if result["status"] not in {"ready", "blocked"}:
             raise ValueError("report-review expects a ready or blocked report")
-        result = gate_required_reviews(result)
-        if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > RESULT_LIMIT:
+        gated = gate_required_reviews(result)
+        serialized = serialize_result(gated)
+        if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
+            names = ", ".join(missing_reviews(result))
+            gated["summary"] = f"{names}: see review_sources"
+            serialized = serialize_result(gated)
+            if len(serialized.encode("utf-8")) > RESULT_LIMIT:
+                with tempfile.NamedTemporaryFile(
+                    dir=path.parent, prefix="review-details-", suffix=".json", mode="w", encoding="utf-8", delete=False,
+                ) as details:
+                    details.write(serialized)
+                details_path = Path(details.name)
+                serialized = serialize_result({
+                    "status": "blocked", "phase": "review-sources",
+                    "summary": f"{names}: see {details_path.name} for review details",
+                    "evidence": str(details_path.resolve()),
+                })
+        if len(serialized.encode("utf-8")) > RESULT_LIMIT:
             raise ValueError("result exceeds 8 KiB")
-        write_json(path, result)
+        write_atomic(path, serialized)
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot write dispatch result {path}: {error}") from None
 
@@ -1345,9 +1389,10 @@ def brief_report(report):
     status = result.get("status")
     if not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
-    return " · ".join((report["address"], *(field(value) or "-" for value in (
-        status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report),
-    ))))
+    fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
+    if warning := result.get("review_warning"):
+        fields += (warning,)
+    return " · ".join((report["address"], *(field(value) or "-" for value in fields)))
 
 
 def reached_outcome(report, outcomes):
