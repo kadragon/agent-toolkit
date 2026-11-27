@@ -28,9 +28,9 @@ tickets or findings. A standalone task needs neither a backlog file nor harness 
 
 **Queue unavailable.** For intake, catch a failed `describe` or queue lookup and report the
 error and unconfirmed tracking status. If `describe` failed, pass `BACKEND=unavailable` to
-the working-tree gate, so only its design-file exception applies. After sizing and any
-dispatch assignment checks, continue to Step 3 only for a clear, bounded implementation that
-can proceed without queue access. Requests that require the queue stop with the error.
+the working-tree gate, so only its design-file exception applies. After sizing, continue to
+Step 3 only for a clear, bounded local implementation with no dispatch, queued-item reference,
+or queue action. Stop all other requests with the queue error before writing.
 
 **Working tree gate** — apply `../task-next/SKILL.md` → *Working tree gate* with the
 resolved `BACKEND`: its capture block, then its table rows in order.
@@ -50,10 +50,11 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 ## Step 2 — Route
 
 For every `task-tickets` call here or in *Queue documentation cycle*, pass the selected
-backend and writing checkout. For a built-in backend, set `AGENT_QUEUE_BACKEND` to that
-backend on the callee's queue commands. Proceed with a file edit only on the `backlog`
-route, in the stated checkout, and after `create` returns `edit_file`. Report any backend or
-checkout mismatch before writing.
+backend and writing checkout. If a pinned base selected `backlog`, first describe the
+writing checkout with no ref or new backend override. Report a different backend and stop
+before ticketing. For a built-in backend, set `AGENT_QUEUE_BACKEND` to that backend on the
+callee's queue commands. Proceed with a file edit only on the `backlog` route, in the stated
+checkout, and after `create` returns `edit_file`. Report any mismatch before writing.
 
 For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only the assigned
 unit. If the assignment is missing, already queued, unclear, larger than one contract, or
@@ -76,9 +77,7 @@ can still be too large for one contract.
     the blocker and stop before writing. If missing without `--tree`, use the ticket-only
     route below.
   - Ticket-only route on `backlog` → write through the Skill tool with "dev:task-tickets"
-    in the checkout examined by the working-tree gate, then stop. If `--tree` resolved
-    `backlog` from the pinned base, first confirm the writing checkout also resolves to
-    `backlog`; report a mismatch and stop before writing.
+    in the checkout examined by the working-tree gate, then stop.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
   "dev:task-tickets"; then **stop** — no cycle runs this invocation.
