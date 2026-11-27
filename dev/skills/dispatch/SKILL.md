@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.9.1
+version: 2.10.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`) or T3 Code orchestration. Use when the user asks to
@@ -68,33 +68,27 @@ The task skills own the working-tree gate.
 Route by rules, not by a guess at the outcome: give each session the cheapest pair that can
 finish it, and escalate on evidence. Pick the two independently — the model by the capability
 the work needs, the effort by how ambiguous or risky it is. The user naming a CLI, model or
-effort overrides both tables and every rule below, except the ban on `fable` and `astra`, which the launcher refuses.
+effort overrides the routing tables. The bans on `fable` and `astra` and the critical gate still apply.
 Name Codex models by family — `luna`, `terra`, `sol`; the launcher resolves each to a slug (`references/model-effort.md`).
 Tiers are equal across CLIs: `haiku` = `luna` < `sonnet` < `opus` = `sol`; `terra` takes only writing and visual work.
 Pick the tier by capability, then the CLI by quota bias; Claude keeps opus judgment, and the equal Claude tier stands in when Codex is unavailable.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
-Balance by quota. Before picking each wave's pairs, run `python3 -I "<dispatch>/scripts/quota.py"`
-once, not per child. It reads the weekly and 5-hour limits each CLI's server last reported
-and prints `used`, `elapsed` and `runway_h` (hours to 100% at the weekly pace) per CLI,
-plus each CLI's `state` and one `bias`. Unexpired Codex passes lower its state one step before bias.
-When redeeming a pass, use the first entry in `reset_passes_before_weekly_reset` if present.
-See `references/quota-snapshot.md` for thresholds, the Claude snapshot, and the manually maintained Codex pass file.
-Apply the bias on top of the tables below:
+For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"`. Use its `effective_bias`
+in the table and cap the wave at two live children under `both-hot`. The launcher reruns the check
+and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md` for pass files.
 
 | bias | Change |
 |------|--------|
 | `none` | the tables as written |
-| `codex` (Claude running ahead) | Top-tier work also goes to Codex `sol`, except unknown-cause debugging, open grill/spec work and costly-mistake work (security, auth, data migration, production DB or deploy), which stay on `opus`. |
+| `codex` | Top-tier work goes to `sol`. For `opus`, give `--bias-exception` with a category: `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
 | `claude` (Codex running ahead) | Codex rows go to the equal Claude tier: `luna` → `haiku` and mid-tier `sol/medium` → `sonnet/medium`, each at its Claude tier's starting effort below; `terra` writing or visual work → `sonnet` at the same effort. |
-| `both-hot` | At most two live children. Prefer the longer `runway_h` by applying that CLI's bias row, subject to task fit and the critical gate. Use the base tables when runways tie or either estimate is unavailable. |
 
-- `critical` on a CLI: launch nothing on it without the user's yes. Move a row to the other
-  CLI when the bias table allows it; otherwise ask.
-- `unknown` (no snapshot yet) counts as `ok`; say which one is missing.
-  The Claude snapshot refreshes whenever a Claude status line draws, the Codex one only when a
-  Codex session runs, so a large `age_h` on Codex usually means it sat idle. The Codex plan
-  may report no 5-hour window; then only the weekly one counts.
+- When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
+  where the task warrants it. Only `production DB` and `deploy` qualify as exceptions.
+- Launch or prompt: use `--user-pinned` for an explicit user choice. For a `critical` CLI
+  (check `raw_state` when present), pass `--approve-critical` only with the user's approval.
+  An exception category may be followed by `: detail`. Report any quota warnings.
 - Escalation uses the wave's effective bias and `references/escalation.md`.
 
 Model tier — capability; a pair gives the starting effort (Default CLI applies under bias `none`):

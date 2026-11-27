@@ -1,18 +1,19 @@
 """Weekly and 5-hour quota pace for dispatch: which CLI has room for the next wave.
 
-Uses server-reported limits and locally tracked Codex reset passes.
+Uses server-reported limits and locally tracked reset passes.
 - Claude: read the snapshot written by the home repo's status line. See
   references/quota-snapshot.md for the file contract.
 - Codex: the latest token_count.rate_limits event in recent session JSONL files
   under $CODEX_HOME (default ~/.codex), plus reset-passes.json in that directory.
 
 Without arguments it prints one JSON object:
-  {"claude": {...}, "codex": {...}, "bias": "none|codex|claude|both-hot"}
+  {"claude": {...}, "codex": {...}, "bias": "none|codex|claude|both-hot",
+   "effective_bias": "none|codex|claude", "prefer_expiring_passes": true|false}
 Each CLI gets used (weekly percent), elapsed (percent of its 7-day window),
 ahead (used - elapsed), reset_in_h, runway_h (hours to 100% at the weekly pace,
 null when there is no estimate), age_h (snapshot age), five_hour_used when
 reported, and state ok|hot|critical|unknown.
-Codex also gets reset_passes and reset_passes_before_weekly_reset.
+Each CLI also gets reset_passes and reset_passes_before_weekly_reset.
 """
 import datetime as dt
 import json
@@ -73,6 +74,10 @@ def codex_home():
     return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
+def claude_home():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
 def codex_snapshot(home=None):
     home = Path(home) if home else codex_home()
     today = dt.datetime.now(dt.timezone.utc).date()
@@ -117,7 +122,7 @@ def codex_snapshot(home=None):
     return latest
 
 
-def codex_reset_passes(home, now):
+def reset_passes(home, now):
     try:
         values = json.loads((home / "reset-passes.json").read_text(encoding="utf-8-sig"))
         if not isinstance(values, list):
@@ -191,22 +196,43 @@ def bias(claude, codex):
         return "codex"
     if x:
         return "claude"
+    c = bool(claude["reset_passes_before_weekly_reset"])
+    x = bool(codex["reset_passes_before_weekly_reset"])
+    if c != x:
+        return "claude" if c else "codex"
     return "none"
+
+
+def assess_with_passes(snapshot, home, now):
+    result = assess(snapshot, now)
+    passes = reset_passes(home, now)
+    result["reset_passes"] = len(passes)
+    result["reset_passes_before_weekly_reset"] = [
+        value for expiry, value in passes if snapshot and expiry < snapshot["reset"]
+    ]
+    lowered = {"critical": "hot", "hot": "ok"}
+    if passes and result["state"] in lowered:
+        result["raw_state"] = result["state"]
+        result["state"] = lowered[result["state"]]
+    return result
 
 
 def main():
     now = time.time()
     home = codex_home()
-    snapshot = codex_snapshot(home)
-    claude, codex = assess(claude_snapshot(), now), assess(snapshot, now)
-    passes = codex_reset_passes(home, now)
-    codex["reset_passes"] = len(passes)
-    codex["reset_passes_before_weekly_reset"] = [
-        value for expiry, value in passes if snapshot and expiry < snapshot["reset"]
-    ]
-    if passes:
-        codex["state"] = {"critical": "hot", "hot": "ok"}.get(codex["state"], codex["state"])
-    print(json.dumps({"claude": claude, "codex": codex, "bias": bias(claude, codex)}))
+    clis = {"claude": assess_with_passes(claude_snapshot(), claude_home(), now),
+            "codex": assess_with_passes(codex_snapshot(home), home, now)}
+    routing = bias(**clis)
+    effective = routing
+    if routing == "both-hot":
+        claude_runway, codex_runway = (clis[cli]["runway_h"] for cli in ("claude", "codex"))
+        effective = "none"
+        if claude_runway is not None and codex_runway is not None and claude_runway != codex_runway:
+            effective = "claude" if claude_runway > codex_runway else "codex"
+    preferred = clis.get(effective, {})
+    print(json.dumps({**clis, "bias": routing, "effective_bias": effective,
+                      "prefer_expiring_passes": bool(preferred.get("state") == "ok"
+                                                     and preferred["reset_passes_before_weekly_reset"])}))
 
 
 if __name__ == "__main__":

@@ -95,6 +95,11 @@ TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
+QUOTA_SCRIPT = Path(__file__).resolve().with_name("quota.py")
+QUOTA_TIMEOUT_SECONDS = 10
+EXPIRING_PASS_EXCEPTIONS = ("production DB", "deploy")
+BIAS_EXCEPTIONS = ("unknown-cause debugging", "open grill/spec", "security", "auth", "data migration",
+                   *EXPIRING_PASS_EXCEPTIONS)
 T3_TARGETS = {
     "claude": {"provider": "claudeAgent", "effort_option": "effort",
                "efforts": ("low", "medium", "high", "xhigh", "max", "ultrathink")},
@@ -420,6 +425,70 @@ def launch_handoff(args, cwd):
     return handoff
 
 
+def read_quota_snapshot():
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", str(QUOTA_SCRIPT)], capture_output=True, text=True,
+            encoding="utf-8", check=True, timeout=QUOTA_TIMEOUT_SECONDS,
+        )
+        snapshot = json.loads(result.stdout)
+        if (snapshot["bias"] not in ("none", "claude", "codex", "both-hot")
+                or snapshot["effective_bias"] not in ("none", "claude", "codex")
+                or not isinstance(snapshot["prefer_expiring_passes"], bool)
+                or any(snapshot[cli]["state"] not in ("unknown", "ok", "hot", "critical")
+                       for cli in ("claude", "codex"))):
+            raise ValueError("unexpected quota output")
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, RecursionError) as error:
+        print(f"warning: quota check unavailable; proceeding without quota gates ({error})", file=sys.stderr)
+        return None
+    for cli in ("claude", "codex"):
+        if snapshot[cli]["state"] == "unknown":
+            print(f"warning: {cli} quota snapshot is unavailable", file=sys.stderr)
+    return snapshot
+
+
+def launch_quota(args, model):
+    snapshot = read_quota_snapshot()
+    pinned = getattr(args, "user_pinned", False)
+    approved = getattr(args, "approve_critical", False)
+    reason = getattr(args, "bias_exception", None)
+    audit = {"bias": snapshot["bias"] if snapshot else None, "quota_snapshot": snapshot}
+    if pinned:
+        audit["user_pin_reason"] = "CLI, model or effort explicitly selected by the user"
+    if approved:
+        audit["critical_approved"] = True
+    if reason is not None:
+        audit["bias_exception"] = reason
+    if snapshot is None:
+        return audit
+
+    quota = snapshot[args.cli]
+    if quota.get("raw_state", quota["state"]) == "critical" and not approved:
+        raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
+    preferred = snapshot["effective_bias"]
+    if pinned or preferred in ("none", args.cli):
+        return audit
+
+    words = set(re.split(r"[^a-z0-9]+", model.lower()))
+    strong = snapshot["prefer_expiring_passes"]
+    if args.cli == "claude":
+        top = "opus" in words and not words.intersection(("haiku", "sonnet"))
+    else:
+        top = ("sol" in words and not words.intersection(("luna", "terra"))
+               and args.effort.lower() in ("high", "xhigh", "max", "ultra"))
+        if top and not strong:
+            return audit
+    if not top:
+        raise SystemExit(f"quota bias {preferred} refuses {args.cli} {model}/{args.effort}; "
+                         "use the preferred CLI or --user-pinned for an explicit user choice")
+
+    allowed = EXPIRING_PASS_EXCEPTIONS if strong else BIAS_EXCEPTIONS
+    category = (reason or "").partition(":")[0].strip().casefold()
+    if category not in {item.casefold() for item in allowed}:
+        raise SystemExit(f"quota bias {preferred} requires --bias-exception with one of: {', '.join(allowed)}")
+    return audit
+
+
 def launch(args):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
@@ -438,6 +507,7 @@ def launch(args):
         message = first_prompt(args.cli, message, handoff)
     if args.task is not None and not args.task.strip():
         raise SystemExit("first message is empty")
+    quota = launch_quota(args, model)
     home = args.parent or os.environ.get("HC_TERMINAL_ID")
     result_path = None
     if not args.dry_run:
@@ -463,7 +533,7 @@ def launch(args):
             *(["--parent", home] if home else ["--no-parent"]),
             *child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path)]
     if args.dry_run:
-        preview = {"name": name, **resolved, "argv": argv}
+        preview = {"name": name, **resolved, **quota, "argv": argv}
         if title:
             preview["title"] = title
         if args.task is not None:
@@ -490,7 +560,7 @@ def launch(args):
         terminal, lookup_error = {}, error
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
-           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
+           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0, **quota}
     if lookup_error is not None:
         run["launched_ms"] = launched_ms
     if args.cli == "codex" and (versions := installed_plugin_versions()):
@@ -536,11 +606,12 @@ def render_t3_thread_launch(args):
     if not cwd.is_dir():
         raise SystemExit(f"no such directory: {cwd}")
     cwd = cwd.resolve()
+    quota = launch_quota(args, model)
     result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
     model_selection = {"instanceId": target["provider"], "model": model,
                        "options": [{"id": target["effort_option"], "value": args.effort}]}
     run = {"backend": "t3", "cli": args.cli, "model": model, "effort": args.effort, "cwd": str(cwd),
-           "model_selection": model_selection, "created_ms": time.time_ns() // 1_000_000}
+           "model_selection": model_selection, "created_ms": time.time_ns() // 1_000_000, **quota}
     if title:
         run["title"] = title
     receipt = result_path.with_name("run.json")
@@ -1381,6 +1452,12 @@ def main(argv):
     prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
     prompt_parser.add_argument("message")
+    for launch_command in (launch_parser, prompt_parser):
+        launch_command.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")
+        launch_command.add_argument("--user-pinned", action="store_true",
+                                    help="the user explicitly selected this CLI, model or effort")
+        launch_command.add_argument("--approve-critical", action="store_true",
+                                    help="the user explicitly approved use of a critical CLI")
     prompt_parser.set_defaults(func=render_t3_thread_launch)
     record_parser = sub.add_parser("record")
     record_parser.add_argument("run")
