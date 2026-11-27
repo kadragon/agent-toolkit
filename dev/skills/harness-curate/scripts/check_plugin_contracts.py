@@ -67,7 +67,8 @@ _PRUNE_RE = re.compile(r"prune-backlog")
 _RECORD_DOC_RE = re.compile(r"(?:^|[-_.])(?:log|changelog|history)\.md$", re.IGNORECASE)
 _ARCHIVE_DOC_RE = re.compile(r"(?:^|[-_.])archives?\.md$|^archives?[-_.]", re.IGNORECASE)
 _BACKLOG_FILE = r"(?<![\w./-])(?:`backlog\.md`|backlog\.md(?![\w/-]|\.[\w./-]))"
-_CLAUSE_BREAK_RE = re.compile(r";\s*|[.!?]\s+")
+_CLAUSE_BREAK_RE = re.compile(r";\s*|[.!?]\s+|,\s*(?:but\s+|(?=not\b))", re.IGNORECASE)
+_QUEUE_CONTRAST_RE = re.compile(r"\b(?:instead of|rather than|not\s+(?:in|to|under))\b", re.IGNORECASE)
 _QUEUE_RULE_RE = re.compile(
     rf"(?:\b(?:queue(?: truth| source)?|source of truth|system of record|canonical queue)"
     rf"\s*(?:is\s+|(?:lives )?in\s+|[:=—-]\s*)?{_BACKLOG_FILE}"
@@ -161,8 +162,11 @@ def check_backlog_history(root: Path, env: dict[str, str] | None = None) -> list
 
 
 def is_legacy_queue_rule(line: str) -> bool:
-    return any(_QUEUE_RULE_RE.search(clause) and not _NEGATION_RE.search(clause)
-               for clause in _CLAUSE_BREAK_RE.split(line))
+    for clause in _CLAUSE_BREAK_RE.split(line):
+        positive = _QUEUE_CONTRAST_RE.split(clause, maxsplit=1)[0]
+        if _QUEUE_RULE_RE.search(positive) and not _NEGATION_RE.search(positive):
+            return True
+    return False
 
 
 def backlog_migration_proposal(backlog: Path) -> str:
@@ -181,6 +185,8 @@ def backlog_migration_proposal(backlog: Path) -> str:
     plan = build_plan(text, "unknown")
     if plan["issues"] or plan["refused"]:
         return "backlog.md: rejected entries remain; run the migration dry run."
+    if any(not _DONE_RE.match(item["source"]) for item in plan["left"]):
+        return "backlog.md: review remaining non-queue entries before proposing deletion."
     return "backlog.md: no open or in-flight items; propose deleting the file after showing its diff."
 
 
@@ -231,8 +237,8 @@ def main(argv: list[str]) -> int:
 
 
 def git_root(path: Path) -> Path | None:
-    if path.is_dir() and (root := _git(str(path), "rev-parse", "--show-toplevel")):
-        return Path(root).resolve()
+    if os.path.isdir(path) and (root := _git(str(path), "rev-parse", "--show-toplevel")):
+        return Path(root)
     return None
 
 
@@ -403,7 +409,9 @@ def _legacy_tests(github: Path) -> None:
                       "- Track tasks in backlog.md; never commit credentials.\n"
                       "- Put the file in backlog.md format.\n"
                       "- Do not file tasks in backlog.md.\n"
-                      "- Track tasks in backlog.md.bak.\n",
+                      "- Track tasks in backlog.md.bak.\n"
+                      "- Track work in GitHub issues, not in backlog.md.\n"
+                      "- File new tasks in GitHub issues instead of in backlog.md.\n",
                       encoding="utf-8")
     (github / "CLAUDE.md").write_text("<!-- Use backlog.md as the queue. -->\n"
                                      "```md\nQueue: backlog.md\n```\n"
@@ -427,6 +435,7 @@ def _legacy_tests(github: Path) -> None:
         ("## Now\n- [>] in flight\n", "resolve in-flight"),
         ("```\n- [ ] ambiguous\n", "unclosed code fence"),
         ("## Rejected — do not re-file\n- Build a dashboard — defer until needed.\n", "rejected entries remain"),
+        ("## Notes\n- Preserve this process detail.\n", "review remaining non-queue entries"),
     ]:
         backlog.write_text(content, encoding="utf-8")
         _assert(expected in "\n".join(check_legacy_backlog(github, env={})), f"backlog reports {expected}")
@@ -458,9 +467,10 @@ def _legacy_tests(github: Path) -> None:
         rollout.parent.mkdir(parents=True)
         rollout.write_text(json.dumps({"type": "session_meta", "payload": {"cwd": str(other)}}) + "\n",
                            encoding="utf-8")
-        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(claude), "CODEX_HOME": str(codex), ENV_VAR: ""}):
-            with contextlib.redirect_stdout(io.StringIO()) as out:
-                code = main(["--all"])
+        env = {"CLAUDE_CONFIG_DIR": str(claude), "CODEX_HOME": str(codex), ENV_VAR: ""}
+        with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=Path(tmp)), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = main(["--all"])
         report_text = out.getvalue()
         _assert(code == 1 and f"Project: {github.resolve()}" in report_text
                 and f"Project: {other.resolve()}" in report_text and "CONFLICT legacy-backlog" in report_text,
