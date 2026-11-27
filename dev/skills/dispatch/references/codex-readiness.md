@@ -21,6 +21,25 @@ active Codex cycles to finish, then prepare the wave:
 Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
 it is the idle child started for this preparation.
 
+Before a long wave, run `codex plugin marketplace upgrade` and then the warm-up above, so no
+startup during the wave finds a newer plugin to install.
+
+## Plugin update during a wave
+
+Any Codex startup outside the wave can update a kadragon plugin and delete the old version
+directory. Live children keep pointing at it: every tool call prints `• Hook failed … os error 2`
+and the session continues without its guards.
+
+`launch` records the installed `~/.codex/plugins/cache/kadragon/<plugin>/<version>` for each
+plugin in the receipt, and each `collect` compares it with the installed one. A change prints a
+warning on stderr and adds `plugin_drift`. A removed launch-time directory, or a `• Hook failed`
+event on the screen, reports `stop_reason: hooks_broken`.
+
+On either signal, stop the child before its next Git write — a commit, push, or merge made
+without hooks skips their guards. Keep the receipt and any work already produced, warm up the
+new plugin as above once no other Codex cycle is mid-task, then relaunch per
+[escalation.md → Relaunch](escalation.md#relaunch) after checking what the child already did.
+
 ## Readiness blockers
 
 Read the live screen with `hc read --lines 0 <address>` before resolving a blocked send.
