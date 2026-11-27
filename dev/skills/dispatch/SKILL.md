@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.3.0
+version: 3.4.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -209,11 +209,15 @@ The user delegates the session's decisions to this session:
   missing something. Answer with `hc send <address> '<answer>'`, then tell the user in one line what
   was chosen and why. Honor Git limits and step 2's batch authorization rule.
 - **Push and merge** — follow the user's original authorization and limits, and wait until
-  the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
-  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
-  (for example, `origin/main`) into it. Preserve both sides of shared file-queue entries and rerun
-  required checks on the final head. This keeps pushes fast-forward and the merge commit
-  stays off main when the PR is squash-merged.
+  full `dispatch.py collect` reports `result.status == "ready"` and
+  `result.review.status == "passed"`. Compare `result.review.head` and `result.head` with the
+  current PR head immediately before merge. All three SHAs must match, and required CI must
+  pass on that head. On GitHub, pass the verified SHA to `gh pr merge --match-head-commit`
+  or the review merge helper's `--expected-head`. Prepare independent PRs in parallel and
+  merge one at a time. Once a parallel
+  PR branch has been pushed, fetch and merge its PR base (for example, `origin/main`) into it.
+  Preserve both sides of shared file-queue entries. If the head changes, obtain and collect a new
+  review report and rerun required checks on the new head before merging.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
   in collect), and any decision the user kept. Tell the user what is waiting and stop watching.

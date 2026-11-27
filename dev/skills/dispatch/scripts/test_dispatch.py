@@ -662,6 +662,10 @@ class DispatchReceiptTests(DispatchTestCase):
                         result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
                         if sources is not None:
                             result["review_sources"] = sources
+                        if status == "ready":
+                            result["head"] = "a" * 40
+                            result["review"] = {"head": result["head"], "sources": ["claude", "agy", "codex"],
+                                                "status": "passed"}
                         write_json(receipt.with_name("result.json"), result)
                         output = StringIO()
                         with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
@@ -672,20 +676,64 @@ class DispatchReceiptTests(DispatchTestCase):
                         for blocker in blockers:
                             self.assertIn(blocker, reported["summary"])
 
+    def test_collect_requires_passed_review_on_the_ready_head(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        head = "a" * 40
+        review = {"head": head, "sources": ["codex"], "status": "passed"}
+        cases = (
+            (None, "Independent review is missing", "missing"),
+            ({**review, "status": "missing"}, "Independent review is missing", "missing"),
+            ({**review, "status": "pending"}, "Independent review is pending", "pending"),
+            ({**review, "head": "b" * 40}, "Independent review head differs", "missing"),
+            ({**review, "sources": []}, "Independent review sources are missing", "missing"),
+            (review, None, "passed"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, self.RECEIPT)
+            for record, blocker, brief_status in cases:
+                with self.subTest(review=record):
+                    result = {"status": "ready", "phase": "review", "summary": "CI passed",
+                              "pr": "example-pr", "head": head}
+                    if record is not None:
+                        result["review"] = record
+                    result_path = receipt.with_name("result.json")
+                    write_json(result_path, result)
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as full:
+                        collect(SimpleNamespace(run=receipt, close=False))
+                    reported = json.loads(full.getvalue())["result"]
+                    if blocker:
+                        self.assertEqual(reported["status"], "blocked")
+                        self.assertEqual(reported["phase"], "review-state")
+                        self.assertIn(blocker, reported["summary"])
+                    else:
+                        self.assertEqual(reported, result)
+                    self.assertEqual(reported.get("review"), record)
+                    self.assertEqual(json.loads(result_path.read_text(encoding="utf-8")), result)
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as brief:
+                        collect(SimpleNamespace(run=receipt, close=False, brief=True))
+                    self.assertIn(f"review={brief_status}", brief.getvalue())
+
     def test_report_review_writes_missing_source_reason_to_result(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.json"
             result = {
                 "status": "ready", "phase": "review", "summary": "CI passed",
                 "review_sources": {"claude": "complete", "agy": "리뷰 진행 중", "codex": "complete"},
-                "ci": "success",
+                "ci": "success", "head": "a" * 40,
             }
-            for outcome, status, phase, summary in (
-                ("리뷰 진행 중", "blocked", "review-sources", "agy: 리뷰 진행 중"),
-                ("complete", "ready", "review", "CI passed"),
+            for outcome, review_head, status, phase, summary in (
+                ("리뷰 진행 중", None, "blocked", "review-sources", "agy: 리뷰 진행 중"),
+                ("complete", "b" * 40, "blocked", "review-state", "Independent review head differs from result head"),
+                ("complete", result["head"], "ready", "review", "CI passed"),
             ):
-                with self.subTest(outcome=outcome):
+                with self.subTest(outcome=outcome, review_head=review_head):
                     result["review_sources"]["agy"] = outcome
+                    result["review"] = {
+                        "head": review_head,
+                        "sources": [name for name, value in result["review_sources"].items() if value == "complete"],
+                        "status": "passed" if outcome == "complete" else "pending",
+                    }
                     completed = subprocess.run(
                         [sys.executable, "-I", "-X", "utf8=0", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
                         env={**os.environ, "LC_ALL": "C"},
