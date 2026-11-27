@@ -85,7 +85,7 @@ Write or update `docs/`. Ground every claim in current code. Never modify produc
 
 1. Write structural test or lint rule first.
 2. Run it.
-3. If current code violates the rule, file remediation in the active queue.
+3. If current code violates the rule, file remediation in the active queue. Fix it in a separate code cycle.
 4. Update `docs/architecture.md`.
 
 ## `sweep` — Garbage Collection

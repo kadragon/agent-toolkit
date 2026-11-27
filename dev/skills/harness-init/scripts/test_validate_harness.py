@@ -39,7 +39,8 @@ class HarnessTests(unittest.TestCase):
     def run_script(self, name="validate-harness.sh", **env):
         result = subprocess.run(
             ["bash", str(SCRIPTS / name)], cwd=self.root,
-            env={**os.environ, "AGENT_QUEUE_BACKEND": "", "CONTEXT_SIZE_LIMIT": "200", **env},
+            env={**os.environ, "AGENT_QUEUE_BACKEND": "", "AGENT_QUEUE_BACKEND_SCRIPT": "",
+                 "CONTEXT_SIZE_LIMIT": "200", **env},
             text=True, encoding="utf-8", capture_output=True, check=False,
         )
         self.assertEqual(result.stderr, "", result.stderr)
@@ -188,6 +189,18 @@ class HarnessTests(unittest.TestCase):
         result = self.run_script(PATH=path)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("non-standard checkboxes", result.stdout)
+
+    def test_queue_resolver_unavailable_still_checks_local_schema(self):
+        self.write("backlog.md", "## Queue\n- [ ] Work\n")
+        for settings, detail in (
+            ({"AGENT_QUEUE_BACKEND_SCRIPT": str(self.root / "missing.py")}, "queue resolver unavailable"),
+            ({"AGENT_QUEUE_BACKEND": "'unterminated"}, "AGENT_QUEUE_BACKEND is not a valid command line"),
+        ):
+            with self.subTest(detail=detail):
+                result = self.run_script(**settings)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(detail, result.stdout)
+                self.assertIn("uses standard checkbox items", result.stdout)
 
     def test_workflow_only_delegation(self):
         self.write("docs/workflows.md", "# Code\n## Delegation workflow\nDelegate to the built-in reviewer when authorized.\n")

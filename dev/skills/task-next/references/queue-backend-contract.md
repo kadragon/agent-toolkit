@@ -35,6 +35,7 @@ First match wins:
    warning `backlog.md has N open item(s); this repo stays on the file queue until you run
    migrate_backlog.py` for unchecked items (*Moving a file queue to issues*).
    For legacy in-flight items, they warn to finish the sprint or reconcile it before migration.
+   The dry run lists these items and `migrate_backlog.py --apply` stops until they are resolved.
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.

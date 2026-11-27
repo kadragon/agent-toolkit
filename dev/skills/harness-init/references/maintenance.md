@@ -108,14 +108,14 @@ Verify **schema** (not content) of harness-related docs. Full schemas in `backlo
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
 Point a repo adopting the file backend without `backlog.md` to harness-init Step 4a.
+Use the template when setting up the file queue and leave its work items for actual findings.
 Absent `tasks.md` indicates an idle sprint.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 
 At cleanup, the file cycle deletes the finished item and records its title in
 `CHANGELOG.md`. On the issues backend, the closed issue preserves the queue record.
-Judge whether the
-shipped work established something future work must respect: a constraint, an
+Judge whether the shipped work established something future work must respect: a constraint, an
 invariant, a behavior contract, a design decision. The script cannot make this
 call; you must.
 
@@ -127,7 +127,8 @@ Signal to judge from (tasks.md is already deleted by C):
 
 If doc-worthy → extract it into the relevant `docs/*.md` (the file named in the
 AGENTS.md docs index) **as a durable rule**, before moving on. If it was a
-routine fix, the existing history suffices. Keep durable rules in the owning doc.
+routine fix, the existing history suffices. Keep durable rules in the owning doc and leave the
+finished item closed.
 
 ### D-3) Plan remaining (only when the user asks)
 

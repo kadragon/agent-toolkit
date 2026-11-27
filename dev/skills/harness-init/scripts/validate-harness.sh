@@ -121,7 +121,7 @@ for config in .claude/settings.json .claude/settings.local.json .claude/trigger-
     fi
 done
 # The queue resolver can run on Python installations without tomllib.
-QUEUE_SCRIPT="$SCRIPT_DIR/../../task-next/scripts/queue_backend.py"
+QUEUE_SCRIPT="${AGENT_QUEUE_BACKEND_SCRIPT:-$SCRIPT_DIR/../../task-next/scripts/queue_backend.py}"
 queue_python=""
 toml_python=""
 for interpreter in python3 python; do
@@ -376,18 +376,18 @@ fi
 echo ""
 echo "--- Queue Backend (sync D-1) ---"
 
-queue_backend=""
+queue_backend="backlog"
 if [[ ! -f "$QUEUE_SCRIPT" ]]; then
-    fail "bundled queue resolver unavailable: $QUEUE_SCRIPT"
+    warn "queue resolver unavailable at $QUEUE_SCRIPT; checking the local file schema only"
 elif [[ -z "$queue_python" ]]; then
     warn "queue backend could not be resolved — no compatible Python (python3/python); checking the local file schema only"
-    queue_backend="backlog"
-elif queue_description=$("$queue_python" - "$QUEUE_SCRIPT" <<'QUEUE_DESCRIPTION'
+elif queue_description=$("$queue_python" - "$QUEUE_SCRIPT" 2>&1 <<'QUEUE_DESCRIPTION'
 import json
 import subprocess
 import sys
 from pathlib import Path
 
+sys.stderr.reconfigure(encoding="utf-8")
 request = {"contract": 1, "repo": str(Path.cwd()), "verify_visibility": False}
 result = subprocess.run(
     [sys.executable, sys.argv[1], "describe"], input=json.dumps(request),
@@ -412,12 +412,10 @@ QUEUE_DESCRIPTION
         done
     } <<< "$queue_description"
 else
-    fail "could not resolve the task queue backend"
+    warn "queue backend could not be resolved: $queue_description; checking the local file schema only"
 fi
 
-if [[ -z "$queue_backend" ]]; then
-    :  # The failed backend check above already explains why the schema check cannot run.
-elif [[ "$queue_backend" != "backlog" ]]; then
+if [[ "$queue_backend" != "backlog" ]]; then
     if [[ -f "backlog.md" ]]; then
         info "backlog.md is unused on the $queue_backend queue backend — file schema check not applicable"
     else
