@@ -35,7 +35,7 @@ class SweepTests(unittest.TestCase):
         if finding is not None:
             template = template.replace(LINT_MARKER, f'FINDINGS+=("{finding}")')
         script = self.root / "tools/sweep.sh"
-        script.write_text(template, encoding="utf-8")
+        script.write_text(template, encoding="utf-8", newline="\n")
         return subprocess.run(
             ["bash", str(script), *args],
             cwd=self.root,
