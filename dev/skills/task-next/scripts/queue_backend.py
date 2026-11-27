@@ -19,8 +19,9 @@ Backend resolution, first match wins:
 
 `backlog` is built in: `list` runs `backlog_candidates.py` and maps its JSON onto the contract,
 `show` and `rejected` read `backlog.md` directly, and `create` answers `{"edit_file":
-"backlog.md"}` so the caller keeps its hand-edit path. `github` resolves but answers exit 2 for
-every op until its read path lands. An adapter command receives `<op>` as its last argument and
+"backlog.md"}` so the caller keeps its hand-edit path. `github` answers `describe`, `list` and
+`show` from `gh api graphql` (an injectable runner, so `--test` needs no network) and exit 2 for
+the write ops until they land; `gh` missing or unauthenticated is exit 1. An adapter command receives `<op>` as its last argument and
 the request on stdin; its stdout and exit code pass through.
 """
 
@@ -382,6 +383,369 @@ def backlog_op(op: str, req: dict) -> tuple[int, dict | None]:
 
 
 # ---------------------------------------------------------------------------
+# Built-in `github` backend (read path: describe, list, show)
+# ---------------------------------------------------------------------------
+
+GITHUB_OPS = ("describe", "list", "show")
+QUEUE_LABEL = "task-queue"
+TRUSTED_AUTHORS = ("OWNER", "MEMBER", "COLLABORATOR")
+PAGE_SIZE = 50
+MAX_PAGES = 20  # per connection; reaching it marks the result incomplete, never an empty queue
+_CLOSING_RE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:([\w.-]+/[\w.-]+))?#(\d+)\b", re.IGNORECASE)
+_REF_RE = re.compile(r"(?<![\w/#])#(\d+)\b")
+_DEFERRED_LINE_RE = re.compile(r"^\s*Deferred:\s*(.*?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+_NODE_SEL = {
+    "labels": "name",
+    "blockedBy": "number state repository { nameWithOwner }",
+    "subIssues": "number title state repository { nameWithOwner }",
+    "closedByPullRequestsReferences": "number url",
+}
+_CONN_ARGS = {"closedByPullRequestsReferences": ", includeClosedPrs: false"}
+
+
+def _conn(name: str, first: int, after: bool = False) -> str:
+    cursor = ", after: $after" if after else ""
+    return (f"{name}(first: {first}{cursor}{_CONN_ARGS.get(name, '')}) "
+            f"{{ pageInfo {{ hasNextPage endCursor }} nodes {{ {_NODE_SEL[name]} }} }}")
+
+
+_ISSUE_FIELDS = ("number title body url state authorAssociation repository { nameWithOwner } "
+                 "parent { number repository { nameWithOwner } } "
+                 + " ".join(_conn(name, PAGE_SIZE) for name in _NODE_SEL))
+LIST_QUERY = (
+    "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
+    f"isPrivate issues(first: {PAGE_SIZE}, after: $after, states: OPEN, labels: [\"{QUEUE_LABEL}\"], "
+    "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
+    f"nodes {{ {_ISSUE_FIELDS} }} }} }} }}"
+)
+SHOW_QUERY = (
+    "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+    f"issue(number: $number) {{ {_ISSUE_FIELDS} }} }} }}"
+)
+DESCRIBE_QUERY = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isPrivate } }"
+
+
+def _conn_query(name: str) -> str:
+    return ("query($owner: String!, $name: String!, $number: Int!, $after: String) { "
+            "repository(owner: $owner, name: $name) { issue(number: $number) { "
+            f"{_conn(name, 100, after=True)} }} }} }}")
+
+
+def gh_runner(args: list[str]) -> tuple[int, str, str]:
+    """Run `gh <args>`; the default runner. Missing `gh` is a hard error, never a fallback."""
+    try:
+        out = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", check=False)
+    except OSError as e:
+        raise QueueError("the github queue backend needs the GitHub CLI: install `gh`, then run "
+                         f"`gh auth login` ({e}); it never falls back to backlog.md") from e
+    return out.returncode, out.stdout, out.stderr
+
+
+def _graphql(runner, query: str, variables: dict) -> dict:
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is not None:
+            args += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
+    code, out, err = runner(args)
+    if code != 0:
+        low = err.lower()
+        if code == 4 or "gh auth login" in low or "not logged in" in low or "authentication" in low:
+            raise QueueError("gh is not authenticated for github.com: run `gh auth login`; "
+                             "the github queue backend never falls back to backlog.md")
+        raise QueueError(f"gh api graphql failed (exit {code}): {err.strip()}")
+    try:
+        data = json.loads(out)
+    except ValueError as e:
+        raise QueueError(f"gh api graphql printed no JSON: {e}") from e
+    if data.get("errors"):
+        raise QueueError("GitHub GraphQL error: " + "; ".join(str(e.get("message", e)) for e in data["errors"]))
+    return data.get("data") or {}
+
+
+def github_slug(repo: str) -> tuple[str, str]:
+    """(owner, name) of the repo's `origin` on github.com."""
+    url = _git(repo, "remote", "get-url", "origin")
+    if origin_host(url) != "github.com":
+        raise QueueError(f"the github queue backend needs a github.com origin in {repo}, got {url!r}")
+    m = re.search(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$", url or "", re.IGNORECASE)
+    if not m:
+        raise QueueError(f"cannot read owner/name from origin {url!r}")
+    return m.group(1), m.group(2)
+
+
+def _repository(data: dict, owner: str, name: str) -> dict:
+    repo = data.get("repository")
+    if repo is None:
+        raise QueueError(f"github.com/{owner}/{name} not found or not readable by the gh account")
+    return repo
+
+
+def _complete_connections(runner, owner: str, name: str, issue: dict, max_pages: int) -> bool:
+    """Page every nested connection selection depends on; False when a page limit cut one short."""
+    for conn in _NODE_SEL:
+        c = issue[conn]
+        pages = 1
+        while c["pageInfo"]["hasNextPage"]:
+            if pages >= max_pages:
+                return False
+            nxt = _repository(_graphql(runner, _conn_query(conn), {
+                "owner": owner, "name": name, "number": issue["number"], "after": c["pageInfo"]["endCursor"],
+            }), owner, name)["issue"][conn]
+            c["nodes"].extend(nxt["nodes"])
+            c["pageInfo"] = nxt["pageInfo"]
+            pages += 1
+    return True
+
+
+def _fetch_queue(runner, owner: str, name: str, max_pages: int) -> tuple[bool, list[dict], bool]:
+    """(is_private, open task-queue issues with complete connections where possible, truncated)."""
+    issues: list[dict] = []
+    after = None
+    pages = 0
+    is_private = False
+    while True:
+        if pages >= max_pages:
+            return is_private, issues, True
+        repo = _repository(_graphql(runner, LIST_QUERY, {"owner": owner, "name": name, "after": after}), owner, name)
+        is_private = bool(repo.get("isPrivate"))
+        issues.extend(repo["issues"]["nodes"])
+        pages += 1
+        if not repo["issues"]["pageInfo"]["hasNextPage"]:
+            return is_private, issues, False
+        after = repo["issues"]["pageInfo"]["endCursor"]
+
+
+def _labels(issue: dict) -> list[str]:
+    return [n["name"] for n in issue["labels"]["nodes"]]
+
+
+def _trusted(issue: dict) -> bool:
+    return issue.get("authorAssociation") in TRUSTED_AUTHORS and QUEUE_LABEL in _labels(issue)
+
+
+def _deferred_reason(issue: dict) -> str:
+    m = _DEFERRED_LINE_RE.search(issue.get("body") or "")
+    return m.group(1) if m else ""
+
+
+def default_branch(repo: str) -> str | None:
+    """The default branch as `dispatch.py` resolves it: `origin/HEAD`, else `main`/`master` when
+    that remote branch exists; None when unresolvable."""
+    head = _git(repo, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+    if head and head.startswith("refs/remotes/origin/"):
+        return head[len("refs/remotes/origin/"):]
+    for name in ("main", "master"):
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}"):
+            return name
+    return None
+
+
+def _covers_refs(tasks_text: str) -> set[int]:
+    """Issue numbers named under any `Covers` heading of a tasks.md."""
+    tokens = bc.tokenize(tasks_text)
+    headings = bc._headings(tokens)
+    lines = tasks_text.splitlines()
+    found: set[int] = set()
+    for h in headings:
+        if h["title"] != "Covers":
+            continue
+        end = bc._region_end(h, headings)
+        stop = len(lines) if end == float("inf") else int(end) - 1
+        for line in lines[h["line"]:stop]:
+            found.update(int(n) for n in _REF_RE.findall(line))
+    return found
+
+
+def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
+                  warnings: list[str]) -> dict[int, str]:
+    """{issue number: claimant} from the three claim sources; none needs a remote write.
+
+    (a) a `.worktrees/*/tasks.md` `## Covers` naming `#N`; (b) an open PR that closes it;
+    (c) a commit on the local default branch, not yet on `origin`, carrying its closing keyword.
+    """
+    claims: dict[int, str] = {}
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    listing = _git(repo, "worktree", "list", "--porcelain")
+    if top is not None and listing is not None:
+        for wt in bc._claimants(listing, os.path.realpath(top), include_self):
+            text = bc._read_optional(os.path.join(wt, "tasks.md")) or ""
+            for n in sorted(_covers_refs(text)):
+                claims.setdefault(n, wt)
+    for issue in issues:
+        prs = issue["closedByPullRequestsReferences"]["nodes"]
+        if prs:
+            claims.setdefault(issue["number"], prs[0].get("url") or f"PR #{prs[0]['number']}")
+    default = default_branch(repo)
+    if default is None:
+        warnings.append("cannot resolve origin's default branch (no origin/HEAD, origin/main or origin/master); "
+                        "unpushed closing commits were not checked as claims")
+    elif _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{default}"):
+        log = _git(repo, "log", "--format=%B%x00", f"refs/remotes/origin/{default}..refs/heads/{default}") or ""
+        for m in _CLOSING_RE.finditer(log):
+            if m.group(1) is None or m.group(1).lower() == slug.lower():
+                claims.setdefault(int(m.group(2)), f"{default} (unpushed commit)")
+    return claims
+
+
+def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict:
+    """Open `task-queue` issues mapped onto contract v1 `list` (GitHub mapping in the contract doc)."""
+    repo = req["repo"]
+    owner, name = github_slug(repo)
+    slug = f"{owner}/{name}".lower()
+    _, issues, truncated = _fetch_queue(runner, owner, name, max_pages)
+    warnings: list[str] = []
+    incomplete = truncated
+    if truncated:
+        warnings.append(f"incomplete: stopped after {max_pages} pages of open {QUEUE_LABEL} issues; "
+                        "later issues were not read")
+
+    def ref(node: dict) -> str:
+        own = node["repository"]["nameWithOwner"]
+        return f"#{node['number']}" if own.lower() == slug else f"{own}#{node['number']}"
+
+    queued: dict[int, dict] = {}
+    partial: set[int] = set()
+    for issue in issues:
+        if issue["authorAssociation"] not in TRUSTED_AUTHORS:
+            warnings.append(f"skipped #{issue['number']}: author association {issue['authorAssociation']} "
+                            "is not OWNER/MEMBER/COLLABORATOR")
+            continue
+        if not _complete_connections(runner, owner, name, issue, max_pages):
+            partial.add(issue["number"])
+            incomplete = True
+            warnings.append(f"incomplete: #{issue['number']} has more linked items than {max_pages} pages; "
+                            "left out of selection")
+        if not _trusted(issue):  # labels are re-read in full now: the label filter stays authoritative
+            continue
+        queued[issue["number"]] = issue
+    claims = github_claims(repo, slug, list(queued.values()), bool(req.get("ref")), warnings)
+
+    def is_queued_parent(issue: dict) -> bool:
+        p = issue.get("parent")
+        return bool(p) and p["repository"]["nameWithOwner"].lower() == slug and p["number"] in queued
+
+    blocked = {n: [ref(b) for b in i["blockedBy"]["nodes"] if b["state"] == "OPEN"] for n, i in queued.items()}
+    deferred = {n for n, i in queued.items() if "deferred" in _labels(i)}
+    parked: list[dict] = []
+    for n, issue in sorted(queued.items()):
+        if n in partial:
+            continue
+        if blocked[n]:
+            parked.append({"ref": f"#{n}", "kind": "blocked", "payload": ", ".join(blocked[n])})
+        if n in deferred:
+            parked.append({"ref": f"#{n}", "kind": "deferred", "payload": _deferred_reason(issue)})
+
+    def why_not(sub: dict) -> str | None:
+        if sub["repository"]["nameWithOwner"].lower() != slug:
+            return "in another repository"
+        n = sub["number"]
+        if n not in queued:
+            return f"not a trusted {QUEUE_LABEL} issue"
+        if n in partial:
+            return "incomplete read"
+        if n in claims:
+            return "claimed"
+        if blocked[n]:
+            return "blocked"
+        if n in deferred:
+            return "deferred"
+        return None
+
+    candidates: list[dict] = []
+    for n, issue in sorted(queued.items()):
+        if n in partial or is_queued_parent(issue) or n in claims or blocked[n] or n in deferred:
+            continue
+        subs = [s for s in issue["subIssues"]["nodes"] if s["state"] == "OPEN"]
+        entry = {"id": f"#{n}", "ref": f"#{n}", "title": issue["title"], "labels": _labels(issue),
+                 "url": issue["url"]}
+        if not subs:
+            entry.update(tag=_tag([issue["title"]]), items=[issue["title"]], item_refs=[f"#{n}"],
+                         excluded=[], counts={"open": 1, "deferred": 0, "blocked": 0})
+            candidates.append(entry)
+            continue
+        reasons = [(s, why_not(s)) for s in subs]
+        eligible = [s for s, why in reasons if why is None]
+        excluded = [{"ref": ref(s), "reason": why} for s, why in reasons if why is not None]
+        counts = {"open": len(subs),
+                  "deferred": sum(1 for _, why in reasons if why == "deferred"),
+                  "blocked": sum(1 for _, why in reasons if why == "blocked")}
+        if eligible:
+            titles = [s["title"] for s in eligible]
+            entry.update(tag=_tag(titles), items=titles, item_refs=[ref(s) for s in eligible],
+                         excluded=excluded, counts=counts)
+            candidates.append(entry)
+        elif any(e["reason"] != "claimed" for e in excluded):
+            others = [e for e in excluded if e["reason"] != "claimed"]
+            kind = "deferred" if all(e["reason"] == "deferred" for e in others) else "blocked"
+            parked.append({"ref": f"#{n}", "kind": kind, "payload": "no eligible sub-issue: "
+                           + ", ".join(f"{e['ref']} {e['reason']}" for e in excluded)})
+
+    # Fast path: oldest first, `someday` last, cap 3. Full scan: uncapped, same order — issues have
+    # no h3/h2 heading kinds, so the backlog's type priority reduces to issue number.
+    candidates.sort(key=lambda c: ("someday" in c["labels"], int(c["ref"][1:])))
+    if not req.get("full_scan"):
+        candidates = candidates[:bc.FAST_PATH_CAP]
+    if incomplete and not candidates:
+        raise QueueError("incomplete queue read and no candidate found: " + "; ".join(
+            w for w in warnings if w.startswith("incomplete")))
+    claimed = [{"ref": f"#{n}", "by": by} for n, by in sorted(claims.items()) if n in queued]
+    return {"candidates": candidates, "parked": parked if req.get("parked") else [], "claimed": claimed,
+            "warnings": warnings, "incomplete": incomplete}
+
+
+def _parse_issue_ref(ref: object) -> int:
+    m = re.fullmatch(r"#?(\d+)", ref.strip()) if isinstance(ref, str) else None
+    if not m:
+        raise QueueError(f"ref must be #<issue number>, got {ref!r}")
+    return int(m.group(1))
+
+
+def github_show(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict:
+    owner, name = github_slug(req["repo"])
+    slug = f"{owner}/{name}".lower()
+    number = _parse_issue_ref(req.get("ref"))
+    issue = _repository(_graphql(runner, SHOW_QUERY, {"owner": owner, "name": name, "number": number}),
+                        owner, name).get("issue")
+    if issue is None:
+        raise QueueError(f"#{number} is not an issue in {owner}/{name}")
+    if not _complete_connections(runner, owner, name, issue, max_pages):
+        raise QueueError(f"#{number} has more linked items than {max_pages} pages; not shown incomplete")
+    if not _trusted(issue):  # an untrusted body never reaches an unattended cycle
+        raise QueueError(f"#{number} is not a trusted queue item (needs the {QUEUE_LABEL} label and an "
+                         f"OWNER/MEMBER/COLLABORATOR author, got {issue['authorAssociation']})")
+
+    def ref(node: dict) -> str:
+        own = node["repository"]["nameWithOwner"]
+        return f"#{node['number']}" if own.lower() == slug else f"{own}#{node['number']}"
+
+    parent = issue.get("parent")
+    return {
+        "ref": f"#{number}", "title": issue["title"], "body": issue.get("body") or "",
+        "labels": _labels(issue), "blocked_by": [ref(b) for b in issue["blockedBy"]["nodes"] if b["state"] == "OPEN"],
+        "parent": ref(parent) if parent else None, "url": issue["url"], "state": issue["state"],
+    }
+
+
+def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
+    if op == "describe":
+        owner, name = github_slug(req["repo"])
+        private = _repository(_graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name}),
+                              owner, name).get("isPrivate")
+        return EXIT_OK, {
+            "backend": "github", "contract": CONTRACT, "visibility": "private" if private else "public",
+            "ops": list(GITHUB_OPS), "close_ref_template": "Closes {ref}",
+        }
+    if op == "list":
+        return EXIT_OK, github_list(req, runner)
+    if op == "show":
+        return EXIT_OK, github_show(req, runner)
+    return EXIT_UNSUPPORTED, None
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -404,7 +768,7 @@ def _run_adapter(cmd: list[str], op: str, req: dict) -> tuple[int, dict | None]:
     return EXIT_OK, data
 
 
-def handle(op: str, req: object, env: dict[str, str] | None = None) -> tuple[int, dict | None]:
+def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_runner) -> tuple[int, dict | None]:
     if op not in OPS:
         raise QueueError(f"unknown op {op!r}; expected one of {', '.join(OPS)}")
     if not isinstance(req, dict):
@@ -421,8 +785,10 @@ def handle(op: str, req: object, env: dict[str, str] | None = None) -> tuple[int
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
         return code, data
     if backend["backend"] == "github":
-        sys.stderr.write(f"queue_backend: the github backend does not implement {op!r} yet\n")
-        return EXIT_UNSUPPORTED, None
+        code, data = github_op(op, req, runner)
+        if code == EXIT_UNSUPPORTED:
+            sys.stderr.write(f"queue_backend: the github backend does not implement {op!r} yet\n")
+        return code, data
     return _run_adapter(backend["command"], op, req)
 
 
@@ -626,10 +992,8 @@ def run_tests() -> int:
             _assert(code == 1, "missing repo → exit 1")
             code, _, _ = cli("bogus", req, base_env)
             _assert(code == 1, "unknown op → exit 1")
-            code, _, err = cli("list", req, dict(base_env, **{ENV_VAR: "github"}))
-            _assert(code == 2 and "github" in err, "github backend → exit 2 for list")
-            code, _, _ = cli("describe", req, dict(base_env, **{ENV_VAR: "github"}))
-            _assert(code == 2, "github backend → exit 2 for describe")
+            code, _, err = cli("create", dict(req, items=[]), dict(base_env, **{ENV_VAR: "github"}))
+            _assert(code == 2 and "github" in err, "github backend → exit 2 for an op its read path lacks")
 
             print("\nTest 3: backlog list parity with backlog_candidates.py --json --counts")
             script = os.path.join(HERE, "backlog_candidates.py")
@@ -754,12 +1118,246 @@ def run_tests() -> int:
             _assert(code == 2 and data is None, "adapter exit 2 passes through")
             code, _, err = cli("show", forge_req, base_env)
             _assert(code == 1 and "boom" in err, "adapter error → exit 1, stderr forwarded")
+
+            run_github_tests(tmp, git, write)
     finally:
         os.environ.clear()
         os.environ.update(saved_env)
 
     print(f"\n=== {PASS} passed, {FAIL} failed ===")
     return 0 if FAIL == 0 else 1
+
+
+# Fixtures follow the envelope `gh api graphql` printed for LIST_QUERY against a live repo
+# (`{"data": {"repository": {"isPrivate": ..., "issues": {"pageInfo": ..., "nodes": [...]}}}}`).
+
+def _fx_conn(nodes: list[dict], cursor: str | None = None) -> dict:
+    return {"pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor}, "nodes": nodes}
+
+
+def _fx_issue(n: int, title: str, assoc: str = "OWNER", labels: tuple = (QUEUE_LABEL,), body: str = "",
+              parent: tuple | None = None, blocked: tuple = (), subs: tuple = (), prs: tuple = (),
+              sub_cursor: str | None = None) -> dict:
+    def node(num: int, state: str = "OPEN", repo: str = "owner/repo", title_: str = "") -> dict:
+        return {"number": num, "state": state, "title": title_, "repository": {"nameWithOwner": repo}}
+    return {
+        "number": n, "title": title, "body": body, "url": f"https://github.com/owner/repo/issues/{n}",
+        "state": "OPEN", "authorAssociation": assoc, "repository": {"nameWithOwner": "owner/repo"},
+        "parent": None if parent is None else {"number": parent[1], "repository": {"nameWithOwner": parent[0]}},
+        "labels": _fx_conn([{"name": label} for label in labels]),
+        "blockedBy": _fx_conn([{k: v for k, v in node(*b).items() if k != "title"} for b in blocked]),
+        "subIssues": _fx_conn([node(*s) for s in subs], sub_cursor),
+        "closedByPullRequestsReferences": _fx_conn(
+            [{"number": p, "url": f"https://github.com/owner/repo/pull/{p}"} for p in prs]),
+    }
+
+
+def _fx_queue() -> tuple[list[dict], list[dict]]:
+    """Two pages of open task-queue issues covering every mapping rule."""
+    page1 = [
+        _fx_issue(1, "[FEAT] lone feature"),
+        _fx_issue(2, "[FEAT] stranger's issue", assoc="NONE"),
+        _fx_issue(3, "Group A", assoc="MEMBER",
+                  subs=((4, "OPEN", "owner/repo", "[FIX] a1"), (5, "OPEN", "owner/repo", "[FIX] a2"),
+                        (6, "CLOSED", "owner/repo", "[FIX] done"), (7, "OPEN", "owner/repo", "[FIX] a4")),
+                  sub_cursor="s1"),
+        _fx_issue(4, "[FIX] a1", parent=("owner/repo", 3)),
+        _fx_issue(5, "[FIX] a2", parent=("owner/repo", 3), blocked=((9, "OPEN"),)),
+        _fx_issue(7, "[FIX] a4", assoc="CONTRIBUTOR", parent=("owner/repo", 3)),
+        _fx_issue(8, "[FIX] a5", parent=("owner/repo", 3), labels=(QUEUE_LABEL, "deferred")),
+        _fx_issue(9, "[FIX] blocker"),
+        _fx_issue(10, "[DOCS] blocked one", blocked=((1, "OPEN"), (11, "CLOSED"))),
+    ]
+    page2 = [
+        _fx_issue(12, "[TEST] closed blocker only", blocked=((11, "CLOSED"),)),
+        _fx_issue(13, "[FEAT] someday idea", labels=(QUEUE_LABEL, "someday")),
+        _fx_issue(14, "[FEAT] has open PR", prs=(40,)),
+        _fx_issue(15, "[FEAT] covered in a worktree"),
+        _fx_issue(16, "[FEAT] closed by an unpushed commit"),
+        _fx_issue(17, "Group B", subs=((18, "OPEN", "owner/repo", "[FIX] b1"),)),
+        _fx_issue(18, "[FIX] b1", parent=("owner/repo", 17), labels=(QUEUE_LABEL, "deferred"),
+                  body="Context.\nDeferred: waits on vendor\n"),
+        _fx_issue(19, "[FIX] child of a foreign parent", parent=("other/repo", 5)),
+        _fx_issue(20, "[FEAT] unlabelled in labels connection", labels=("bug",)),
+        _fx_issue(21, "Group C", subs=((22, "OPEN", "owner/repo", "[FIX] c1"),)),
+        _fx_issue(22, "[FIX] c1", parent=("owner/repo", 21), prs=(41,)),
+    ]
+    return page1, page2
+
+
+def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = None, private: bool = False,
+             calls: list | None = None):
+    import copy
+
+    def run(args: list[str]) -> tuple[int, str, str]:
+        query, variables = "", {}
+        for i, a in enumerate(args):
+            if a in ("-f", "-F"):
+                k, v = args[i + 1].split("=", 1)
+                if k == "query":
+                    query = v
+                else:
+                    variables[k] = int(v) if a == "-F" else v
+        if calls is not None:
+            calls.append((query, variables))
+        if query == LIST_QUERY:
+            repo = {"isPrivate": private, "issues": copy.deepcopy(pages[variables.get("after")])}
+        elif query == DESCRIBE_QUERY:
+            repo = {"isPrivate": private}
+        elif query == SHOW_QUERY:
+            repo = {"issue": copy.deepcopy((issues or {}).get(variables["number"]))}
+        else:
+            conn = next(c for c in _NODE_SEL if query == _conn_query(c))
+            repo = {"issue": {conn: copy.deepcopy((conn_pages or {})[(variables["number"], conn, variables["after"])])}}
+        return 0, json.dumps({"data": {"repository": repo}}), ""
+    return run
+
+
+def run_github_tests(tmp: str, git, write) -> None:
+    import copy
+
+    print("\nTest 8: github backend — trust gate, groups, parking, order")
+    repo = os.path.realpath(os.path.join(tmp, "gh"))
+    os.makedirs(repo)
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "base")
+    git(repo, "remote", "add", "origin", "https://github.com/owner/repo.git")
+    base = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "[FEAT] local work\n\nCloses #16\nFixes other/repo#15")
+    wt = os.path.join(repo, ".worktrees", "cov")
+    git(repo, "worktree", "add", "-q", "-b", "cov", wt)
+    write(os.path.join(wt, "tasks.md"), "# Sprint\nstatus: active\n\n## Covers\n\n- #15 [FEAT] covered\n\n## Notes\n\n- #1\n")
+
+    page1, page2 = _fx_queue()
+    pages = {None: _fx_conn(page1, "p1"), "p1": _fx_conn(page2)}
+    conn_pages = {(3, "subIssues", "s1"): _fx_conn([{"number": 8, "state": "OPEN", "title": "[FIX] a5",
+                                                     "repository": {"nameWithOwner": "owner/repo"}}])}
+    calls: list = []
+    runner = _fake_gh(pages, conn_pages, calls=calls)
+    req = {"contract": 1, "repo": repo}
+    data = github_list(dict(req, full_scan=True, parked=True), runner)
+    refs = [c["ref"] for c in data["candidates"]]
+    _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#13"],
+            f"full scan: trusted, unparked, unclaimed issues by number with someday last ({refs})")
+    _assert("#2" not in refs and any("#2" in w and "NONE" in w for w in data["warnings"]),
+            "trust gate: a non-member author is skipped with a warning")
+    _assert("#20" not in refs, "trust gate: an issue without the task-queue label is not a candidate")
+    _assert(not {"#4", "#5", "#7", "#8"} & set(refs), "sub-issues of a listed parent are never standalone")
+    _assert("#19" in refs, "a sub-issue of a parent in another repo stands alone")
+    group = data["candidates"][1]
+    _assert(group["items"] == ["[FIX] a1"] and group["item_refs"] == ["#4"] and group["tag"] == "FIX",
+            "parent takes only its eligible open sub-issues as items")
+    _assert(group["excluded"] == [{"ref": "#5", "reason": "blocked"},
+                                  {"ref": "#7", "reason": "not a trusted task-queue issue"},
+                                  {"ref": "#8", "reason": "deferred"}],
+            "ineligible sub-issues are named with their reason (sub-issue page 2 read)")
+    _assert(group["counts"] == {"open": 4, "deferred": 1, "blocked": 1}, "group counts cover all open sub-issues")
+    _assert(any(q == _conn_query("subIssues") for q, _ in calls), "a nested connection with a next page is paged")
+    lone = data["candidates"][0]
+    _assert(lone["items"] == ["[FEAT] lone feature"] and lone["item_refs"] == ["#1"]
+            and lone["tag"] == "FEAT" and lone["url"].endswith("/issues/1"), "a lone issue is its own single item")
+    _assert({"ref": "#10", "kind": "blocked", "payload": "#1"} in data["parked"],
+            "an open blocker parks the issue; a closed one is ignored")
+    _assert("#12" in refs, "only closed blockers → not blocked")
+    _assert({"ref": "#18", "kind": "deferred", "payload": "waits on vendor"} in data["parked"],
+            "deferred label parks with the `Deferred:` body line as payload")
+    _assert({"ref": "#17", "kind": "deferred", "payload": "no eligible sub-issue: #18 deferred"} in data["parked"],
+            "a parent whose open sub-issues are all ineligible is parked")
+    _assert("#21" not in refs and not any(p["ref"] == "#21" for p in data["parked"]),
+            "a parent whose open sub-issues are all claimed is neither listed nor parked")
+    claimed = {c["ref"]: c["by"] for c in data["claimed"]}
+    _assert(claimed.get("#14", "").endswith("/pull/40"), "claim (b): an open closing PR")
+    _assert(os.path.realpath(claimed.get("#15", "")) == os.path.realpath(wt), "claim (a): a .worktrees `## Covers` ref")
+    _assert("#1" not in claimed, "a ref outside `## Covers` claims nothing")
+    _assert(claimed.get("#16") == "main (unpushed commit)", "claim (c): an unpushed closing commit on the default branch")
+    _assert(data["incomplete"] is False and not github_list(dict(req), runner)["parked"], "parked[] only when asked")
+    fast = github_list(dict(req), runner)["candidates"]
+    _assert([c["ref"] for c in fast] == ["#1", "#3", "#9"], "fast path caps at 3, oldest first")
+
+    print("\nTest 9: github backend — default branch, page limit, errors, show, describe")
+    git(repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    _assert(default_branch(repo) == "main", "unset origin/HEAD falls back to an existing origin/main")
+    data = github_list(dict(req), runner)
+    _assert({"ref": "#16", "by": "main (unpushed commit)"} in data["claimed"], "claim (c) still read without origin/HEAD")
+    git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    _assert(default_branch(repo) is None, "no origin/HEAD, origin/main or origin/master → unresolvable")
+    data = github_list(dict(req), runner)
+    _assert(any("default branch" in w for w in data["warnings"]) and data["candidates"],
+            "unresolvable default branch → warning, list still answers")
+
+    data = github_list(dict(req, full_scan=True), runner, max_pages=1)
+    _assert(data["incomplete"] is True and any(w.startswith("incomplete") for w in data["warnings"]),
+            "page limit → incomplete flag and warning")
+    _assert("#3" not in [c["ref"] for c in data["candidates"]] and data["candidates"],
+            "an issue whose connection hit the limit is left out, not half-read")
+    stranger = {None: _fx_conn([_fx_issue(2, "x", assoc="NONE")], "p1")}
+    try:
+        github_list(dict(req), _fake_gh(stranger), max_pages=1)
+        _assert(False, "incomplete read with zero candidates → QueueError, never an empty queue")
+    except QueueError:
+        _assert(True, "incomplete read with zero candidates → QueueError, never an empty queue")
+
+    def failing(code: int, err: str):
+        return lambda args: (code, "", err)
+    for code, err, label in ((4, "To get started with GitHub CLI, please run:  gh auth login", "unauthenticated"),
+                             (1, "HTTP 502", "server error")):
+        try:
+            github_list(dict(req), failing(code, err))
+            _assert(False, f"gh {label} → QueueError")
+        except QueueError as e:
+            _assert(("gh auth login" in str(e)) == (code == 4), f"gh {label} → QueueError naming the fix")
+    errs = lambda args: (0, json.dumps({"errors": [{"message": "Field 'x' doesn't exist"}]}), "")  # noqa: E731
+    try:
+        github_list(dict(req), errs)
+        _assert(False, "GraphQL errors → QueueError")
+    except QueueError:
+        _assert(True, "GraphQL errors → QueueError")
+    saved_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.path.join(tmp, "no-bin")
+    try:
+        try:
+            gh_runner(["--version"])
+            _assert(False, "gh missing → QueueError, never a backlog.md fallback")
+        except QueueError as e:
+            _assert("gh" in str(e) and "backlog.md" in str(e), "gh missing → QueueError, never a backlog.md fallback")
+    finally:
+        os.environ["PATH"] = saved_path
+    write(os.path.join(repo, "backlog.md"), "# Backlog\n\n## A\n\n- [ ] open\n")
+    code, data = handle("list", dict(req), {}, failing(4, "gh auth login"))
+    _assert(code == 0 and "rev" in data and data["candidates"][0]["title"] == "A",
+            "resolver stays on backlog while backlog.md has open items (gh never called)")
+    try:
+        handle("list", dict(req), {ENV_VAR: "github"}, failing(4, "gh auth login"))
+        _assert(False, "github with gh unauthenticated → QueueError even with backlog.md present")
+    except QueueError:
+        _assert(True, "github with gh unauthenticated → QueueError even with backlog.md present")
+    os.remove(os.path.join(repo, "backlog.md"))
+
+    issues = {n["number"]: n for n in copy.deepcopy(page1 + page2)}
+    show_runner = _fake_gh(pages, conn_pages, issues)
+    shown = github_show(dict(req, ref="#5"), show_runner)
+    _assert(shown == {"ref": "#5", "title": "[FIX] a2", "body": "", "labels": [QUEUE_LABEL], "blocked_by": ["#9"],
+                      "parent": "#3", "url": "https://github.com/owner/repo/issues/5", "state": "OPEN"},
+            "show: title, labels, open blockers, parent ref, url")
+    _assert(github_show(dict(req, ref="#19"), show_runner)["parent"] == "other/repo#5",
+            "show: a foreign parent keeps its owner/name")
+    for bad, label in (("#2", "untrusted author"), ("#20", "no task-queue label"), ("#99", "missing issue"),
+                       ("backlog.md:3", "non-issue ref")):
+        try:
+            github_show(dict(req, ref=bad), show_runner)
+            _assert(False, f"show {label} → QueueError")
+        except QueueError:
+            _assert(True, f"show {label} → QueueError")
+
+    code, data = handle("describe", dict(req), {ENV_VAR: "github"}, _fake_gh(pages, private=True))
+    _assert(code == 0 and data == {"backend": "github", "contract": 1, "visibility": "private",
+                                   "ops": ["describe", "list", "show"], "close_ref_template": "Closes {ref}"},
+            "describe: private repo, read-path ops, closing template")
+    code, data = handle("describe", dict(req), {}, _fake_gh(pages))
+    _assert(code == 0 and data["visibility"] == "public", "resolver picks github for a github.com origin without backlog items")
+    git(repo, "worktree", "remove", "--force", wt)
 
 
 ADAPTER_SOURCE = """import json, sys

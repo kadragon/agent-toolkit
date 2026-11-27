@@ -11,30 +11,23 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 2 — github backend read path
-
-- [ ] [FEAT] Implement `describe`, `list` and `show` for the `github` backend: `task-queue` label + author-association trust gate, parent/sub-issue groups, sub-issue eligibility (sub-issues never standalone), blocked/deferred parking, and the three claim sources with `origin/HEAD` resolved as `dispatch.py` does
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → GitHub mapping
-  Done when: `queue_backend.py --test` covers each mapping rule against recorded `gh api graphql` JSON fixtures through an injectable runner (no network); a live read-only `list` with `AGENT_QUEUE_BACKEND=github` against `kadragon/knue-pic` runs (zero candidates expected before migration)
-  Approach: GraphQL over issues, labels, blockedBy, subIssues, closedByPullRequestsReferences, paging every connection selection depends on and reporting an incomplete result (never an empty queue) at a page limit; hard error when `gh` is missing or unauthenticated, never a `backlog.md` fallback
-
 ## 3 — dispatch pick via queue backend
 
-- [ ] [FEAT] Switch `dispatch.py pick` to `queue_backend.py list` and make its "no backlog.md: no queue" check and `dispatch/SKILL.md` wording backend-aware *(blocked by: 2-github-backend-read-path)*
+- [ ] [FEAT] Switch `dispatch.py pick` to `queue_backend.py list` and make its "no backlog.md: no queue" check and `dispatch/SKILL.md` wording backend-aware
   Source: docs/design/github-issues-queue.md → Script and doc surface per backend
   Done when: `python3 dev/skills/dispatch/scripts/test_dispatch.py` passes with new cases for a GitHub repo without `backlog.md` (issues listed) and a non-GitHub repo (unchanged output); warnings reach stderr
   Approach: keep the JSON shape `pick` prints today, rebuilt from `candidates[]` and its `counts`; `--tree` passes `ref: origin/HEAD` in the `list` request, which `backlog` honors and `github` ignores
 
 ## 4 — task-next selection and closing on issues
 
-- [ ] [FEAT] Run `task-next` selection through `queue_backend.py`, record covered refs in `## Covers`, skip `prune-backlog` and blocked-marker sync on the issues backend, and have the review cycle write one closing line per ref into the PR body and merge commit *(blocked by: 2-github-backend-read-path)*
+- [ ] [FEAT] Run `task-next` selection through `queue_backend.py`, record covered refs in `## Covers`, skip `prune-backlog` and blocked-marker sync on the issues backend, and have the review cycle write one closing line per ref into the PR body and merge commit
   Source: docs/design/github-issues-queue.md → Implementation Decisions → GitHub mapping (Claim, Completion); Script and doc surface per backend
   Done when: `task-next/SKILL.md`, `references/cycle.md`, `tree.md`, `batch.md`, `edge-cases.md` and `task-review-cycle` read backend-neutral with an issues branch; `backlog`-backend prose and `backlog_candidates.py --test` unchanged; a dry-run walkthrough on a GitHub fixture repo shows selection → `## Covers` refs → PR body `Closes #N`; `harness-init/references/tasks-template.md` → `## Covers` documents refs on the issues backend (no verbatim line, no `prune-backlog`) next to today's rule
   Approach: `--ref BASE_SHA` is passed as `list` `ref` (pins the file queue on `backlog`, the branch base on both); a parent covers its eligible sub-issues, and its own ref joins `## Covers` only when every open sub-issue is covered
 
 ## 5 — github backend writes and task-tickets
 
-- [ ] [FEAT] Implement `create`, `rejected`, `reject` and `defer` for the `github` backend, the standing `queue-write` grant and a separate `**Queue limits:** none | no-queue-write` contract field in `git-authorization.md` (never a `**Git limits:**` value, so `cycle_state.py`'s Git vocabularies stay unchanged), the failure-path pending store with `queue_backend.py publish`, and switch `task-tickets` to file one issue per ticket with dependencies *(blocked by: 2-github-backend-read-path)*
+- [ ] [FEAT] Implement `create`, `rejected`, `reject` and `defer` for the `github` backend, the standing `queue-write` grant and a separate `**Queue limits:** none | no-queue-write` contract field in `git-authorization.md` (never a `**Git limits:**` value, so `cycle_state.py`'s Git vocabularies stay unchanged), the failure-path pending store with `queue_backend.py publish`, and switch `task-tickets` to file one issue per ticket with dependencies
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Backend contract, GitHub mapping (Blocked by, Rejected), Writers and authority
   Done when: `queue_backend.py --test` covers batch-key dependencies, retry-safe `create` (`queue-key` body marker reuse on a lost response, missing relations completed, `incomplete[]` kept pending), label bootstrap, closed-not-planned listing, a `**Queue limits:** no-queue-write` contract still passing `cycle_state.py authorize` for its Git actions (`test_cycle_state.py`), and pending store write/publish under the git common dir on the failure path only (`gh` failing mid-write, `no-queue-write`); `task-tickets/SKILL.md` files issues on `github` with no per-run approval, in attended and unattended runs alike, and keeps the `backlog.md` path on `edit_file`; no working-tree change results from a `github` `create`; the `task-tickets` `description:` and `evals/trigger-eval.json` name queue items/issues rather than only `backlog.md` items, and `task-spec/SKILL.md` (lines naming `backlog.md` items, the "markdown-only backlog (no issue tracker)" note) and the same note in `task-grill/SKILL.md` match the backend split
   Approach: `addBlockedBy`/`addSubIssue` mutations; Git limits never restrict `queue-write`; only on failure do drafts go to `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
