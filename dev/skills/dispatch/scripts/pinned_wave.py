@@ -4,17 +4,16 @@ import hashlib
 import io
 import json
 import os
-import queue
 import re
 import shutil
 import stat
 import subprocess
 import tarfile
 import tempfile
-import threading
-import time
 import tomllib
 from pathlib import Path, PurePosixPath
+
+from codex_app_server import AppServerError, request
 
 CATALOG = ".agents/plugins/marketplace.json"
 MANIFEST = ".codex-plugin/plugin.json"
@@ -295,52 +294,11 @@ def hook_inventory(path, wave, cwd):
 
 
 def inspect_hooks(root, binary, cwd):
-    with subprocess.Popen([binary, "app-server"], cwd=cwd, env=home_env(root), stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8") as proc:
-        incoming = queue.Queue()
-
-        def read():
-            try:
-                for line in proc.stdout:
-                    incoming.put(line)
-            finally:
-                incoming.put(None)
-
-        reader = threading.Thread(target=read, daemon=True)
-        reader.start()
-        deadline = time.monotonic() + TIMEOUT
-
-        def send(message):
-            proc.stdin.write(json.dumps(message) + "\n")
-            proc.stdin.flush()
-
-        def receive(id_):
-            while time.monotonic() < deadline:
-                line = incoming.get(timeout=max(0, deadline - time.monotonic()))
-                if line is None:
-                    break
-                data = json.loads(line)
-                if data.get("id") == id_:
-                    if "result" not in data:
-                        raise PinError("Codex could not verify the hook inventory")
-                    return data["result"]
-            raise PinError("Codex app server did not answer")
-
-        try:
-            send({"id": 1, "method": "initialize", "params": {
-                "clientInfo": {"name": "dispatch", "version": "1"},
-                "capabilities": {"experimentalApi": True},
-            }})
-            if Path(receive(1)["codexHome"]).resolve() != root / "home":
-                raise PinError("Codex app server loaded a different home")
-            send({"method": "initialized"})
-            send({"id": 2, "method": "hooks/list", "params": {"cwds": [str(cwd)]}})
-            return receive(2)
-        except queue.Empty:
-            raise PinError("Codex app server did not answer") from None
-        finally:
-            proc.kill()
-            reader.join(timeout=TIMEOUT)
+    try:
+        return request(binary, root / "home", "hooks/list", {"cwds": [str(cwd)]},
+                       timeout=TIMEOUT, cwd=cwd, experimental=True)
+    except AppServerError as error:
+        raise PinError(str(error)) from error
 
 
 def verify(path, wave, cwd):
