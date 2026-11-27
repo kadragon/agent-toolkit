@@ -942,6 +942,7 @@ class PickTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
             subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
                            cwd=repo, check=True)
+            (repo / "tasks.md").write_text("# Sprint\nstatus: active\n", encoding="utf-8")
             out, err = StringIO(), StringIO()
             with patch("dispatch.queue_op", side_effect=queue_op), redirect_stdout(out), redirect_stderr(err):
                 pick(SimpleNamespace(repo=str(repo), tree=False, full_scan=True))
@@ -955,6 +956,7 @@ class PickTests(unittest.TestCase):
         self.assertIn("skipped #2", err.getvalue())
         self.assertIn("#5 claimed by https://github.com/owner/repo/pull/9", err.getvalue())
         self.assertNotIn("no queue", err.getvalue())
+        self.assertIn("tasks.md exists, but this repo's queue backend does not list its sprint blocks", err.getvalue())
 
     def test_launch_warns_for_a_subdirectory_of_a_linked_worktree(self):
         with tempfile.TemporaryDirectory() as directory:

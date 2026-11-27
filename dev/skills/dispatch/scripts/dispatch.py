@@ -1230,13 +1230,19 @@ def heading_kind(repo, source, line, rev):
     if source == "tasks.md":
         return "h1"
     if rev:
-        text = subprocess.run(["git", "-C", str(repo), "show", f"{rev}:backlog.md"], capture_output=True,
-                              text=True, encoding="utf-8", errors="replace").stdout
+        done = subprocess.run(["git", "-C", str(repo), "show", f"{rev}:./backlog.md"], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        if done.returncode:
+            raise SystemExit(f"cannot read backlog.md at {rev}: {done.stderr.strip()}")
+        text = done.stdout
     else:
         text = (repo / "backlog.md").read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
     heading = lines[line - 1] if 0 < line <= len(lines) else ""
-    return f"h{len(heading) - len(heading.lstrip('#'))}"
+    level = len(heading) - len(heading.lstrip("#"))
+    if level not in (2, 3):
+        raise SystemExit(f"backlog.md:{line} is no longer an h2/h3 heading; the queue changed while listing, retry")
+    return f"h{level}"
 
 
 def pick_entry(repo, candidate, rev):
@@ -1264,6 +1270,9 @@ def pick(args):
                                **({"ref": "origin/HEAD"} if args.tree else {})})
     for warning in listed.get("warnings", []):
         print(warning, file=sys.stderr)
+    if "rev" not in listed and (repo / "tasks.md").exists():  # only the file backend reports `rev`
+        print("warning: tasks.md exists, but this repo's queue backend does not list its sprint blocks; "
+              "check tasks.md by hand before picking", file=sys.stderr)
     for claim in listed.get("claimed", []):
         if not FILE_QUEUE_REF.match(claim["ref"]):  # the file queue already reports its claims as warnings
             print(f"{claim['ref']} claimed by {claim['by']}", file=sys.stderr)
