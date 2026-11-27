@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.20.1
+version: 2.21.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -37,6 +37,16 @@ Open *Step 2* for manual selection or parked entries, and open `references/edge-
 an edge case applies.
 
 ## Prerequisites
+
+**Sweep merged worktrees.** Resolve `SKILL_DIR` to this skill's absolute directory. Before queue
+selection, relay the sweep output and keep the main checkout on its current branch.
+
+```bash
+SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
+REPO=$(git rev-parse --show-toplevel) || exit 1
+PY=$(command -v python3 || command -v python || true)
+[[ -z "$PY" ]] || "$PY" -I -X utf8 "$SKILL_DIR/scripts/worktree_sweep.py" "$REPO"
+```
 
 **Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
 applying the working-tree gate:

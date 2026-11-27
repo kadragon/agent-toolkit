@@ -56,7 +56,12 @@ cleanup() {
   wait 2>/dev/null || true
   if [[ -n "$LOCK" ]]; then rm -rf "$LOCK"; fi
   if [[ -n "$WORK" ]]; then
-    # A Windows reviewer broker can keep its clone directory open after finishing.
+    # An interrupted fixture may have lost its per-review trap.
+    local py
+    py=$(command -v python3 || command -v python || true)
+    if [[ -n "$py" ]]; then
+      "$py" "$SCRIPTS/broker-cleanup.py" "$WORK" --fixture-root || true
+    fi
     rm -rf "$WORK" || printf 'WARN: could not remove all temporary fixture clones under %s\n' "$WORK" >&2
   fi
 }

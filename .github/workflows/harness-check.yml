@@ -399,6 +399,11 @@ jobs:
       - name: Test Codex reviewer launcher
         run: python3 dev/skills/task-review-cycle/scripts/test_codex_review.py
 
+      - name: Test broker shutdown and merged worktree sweep
+        run: |
+          python3 dev/skills/task-review-cycle/scripts/test_broker_cleanup.py
+          python3 dev/skills/task-next/scripts/test_worktree_sweep.py
+
       # Guards the Sprint Contract argument against shell injection, and the prompt
       # assembly against the bash 3.2 heredoc trap that CI's bash 5 cannot reproduce.
       - name: Test Claude reviewer launcher
@@ -407,3 +412,17 @@ jobs:
       # Pins the read-only prompt scope and the late-reclaim sidecar (pending → review + meta).
       - name: Test AGY reviewer launcher
         run: python3 dev/skills/task-review-cycle/scripts/test_agy_review.py
+
+  windows-worktree-cleanup:
+    name: Windows worktree cleanup
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - name: Test broker shutdown and locked worktrees
+        shell: bash
+        run: |
+          python dev/skills/task-review-cycle/scripts/test_broker_cleanup.py
+          python dev/skills/task-next/scripts/test_worktree_sweep.py

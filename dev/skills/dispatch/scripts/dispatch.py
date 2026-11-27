@@ -1701,6 +1701,8 @@ def pick_entry(repo, candidate, rev):
 
 def pick(args):
     repo = Path(args.repo).expanduser().resolve()
+    sweep = QUEUE_BACKEND.with_name("worktree_sweep.py")
+    subprocess.run([sys.executable, "-I", "-X", "utf8", str(sweep), str(repo)], check=False)
     request = {"contract": 1, "repo": str(repo)}
     if not (repo / "backlog.md").exists() and not args.tree:
         if queue_op("describe", request)["backend"] == "backlog":

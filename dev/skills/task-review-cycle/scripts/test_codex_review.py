@@ -921,6 +921,7 @@ def case_non_git_dir_is_not_fatal(tmp: Path, _live: int):
     (outside / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, outside / "scripts" / "codex-review.sh")
     shutil.copy(SCRIPT.with_name("review-guidance.sh"), outside / "scripts")
+    shutil.copy(SCRIPT.with_name("broker-cleanup.py"), outside / "scripts")
     companion = ok_companion(tmp, "comp-nogit", "P3 still reviewed\n")
     env = dict(os.environ)
     env.update({

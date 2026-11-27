@@ -61,10 +61,12 @@ def make_script_dir(tmp):
     d = Path(tempfile.mkdtemp(dir=tmp)) / "skills/task-review-cycle/scripts"
     d.mkdir(parents=True)
     shutil.copy(SCRIPT, d / "merge-and-cleanup.sh")
+    shutil.copy(SCRIPT.with_name("broker-cleanup.py"), d)
     shutil.copy(SCRIPT.parent / "git-authority.sh", d / "git-authority.sh")
     state = d / "../../task-next/scripts/cycle_state.py"
     state.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(SCRIPT.parent / "../../task-next/scripts/cycle_state.py", state)
+    shutil.copy(SCRIPT.parent / "../../task-next/scripts/worktree_sweep.py", state.parent)
     (d / "hub.sh").write_text(HUB_STUB, newline="\n")
     return d
 
