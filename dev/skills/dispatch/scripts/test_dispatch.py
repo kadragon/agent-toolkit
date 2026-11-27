@@ -574,19 +574,22 @@ class DispatchReceiptTests(DispatchTestCase):
             path = Path(directory) / "result.json"
             result = {
                 "status": "ready", "phase": "review", "summary": "CI passed",
-                "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"},
+                "review_sources": {"claude": "complete", "agy": "리뷰 진행 중", "codex": "complete"},
                 "ci": "success",
             }
             for outcome, status, summary in (
-                ("still running", "blocked", "agy: still running"),
+                ("리뷰 진행 중", "blocked", "agy: 리뷰 진행 중"),
                 ("complete", "ready", "CI passed"),
             ):
                 with self.subTest(outcome=outcome):
                     result["review_sources"]["agy"] = outcome
-                    subprocess.run(
-                        [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
-                        input=json.dumps(result), text=True, check=True, capture_output=True,
+                    completed = subprocess.run(
+                        [sys.executable, "-I", "-X", "utf8=0", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        env={**os.environ, "LC_ALL": "C"},
+                        input=json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                        check=False, capture_output=True,
                     )
+                    self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
                     self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
                                      {**result, "status": status, "summary": summary})
                     self.assertEqual(list(path.parent.iterdir()), [path])

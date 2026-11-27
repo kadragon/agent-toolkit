@@ -335,7 +335,10 @@ def report_review(args):
     if path.name != "result.json":
         raise SystemExit("report-review expects the assigned result.json path")
     try:
-        result = json.load(sys.stdin)
+        raw = sys.stdin.buffer.read(RESULT_LIMIT + 1)
+        if len(raw) > RESULT_LIMIT:
+            raise ValueError("result exceeds 8 KiB")
+        result = json.loads(raw.decode("utf-8-sig"))
         validate_result(result)
         if result["status"] not in {"ready", "blocked"}:
             raise ValueError("report-review expects a ready or blocked report")
