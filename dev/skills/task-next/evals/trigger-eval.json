@@ -1,6 +1,8 @@
 [
   {"query": "pull the next item from backlog.md and run the full code cycle on it", "should_trigger": true},
+  {"query": "pull the next queued GitHub issue and run the full code cycle on it", "should_trigger": true},
   {"query": "process every queued backlog item with --all in parallel", "should_trigger": true},
+  {"query": "process every queued GitHub issue with --all in parallel", "should_trigger": true},
   {"query": "take the next queue item with --tree worktree isolation", "should_trigger": true},
 
   {"query": "here is a brand new request with no tracking entry — take it from intake", "should_trigger": false},
