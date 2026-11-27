@@ -149,10 +149,11 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
     require the `security` label, no relations, and confirmed private visibility. The backend
     appends `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
-    final-line marker from a trusted author without updating it. If visibility cannot be confirmed,
-    ordinary drafts continue through both `create` and `publish`. `create` refuses the alert drafts
-    and `publish` leaves stored ones pending. With `no-queue-write`, draft storage requires no
-    visibility lookup and `publish` performs no network calls.
+    final-line marker from a trusted author without updating it. If the visibility response does
+    not confirm a private repository, independent ordinary drafts continue. `create` refuses the
+    alert drafts and `publish` leaves stored ones pending. A failed visibility request puts a new
+    batch in the pending store for retry. With `no-queue-write`, draft storage requires no visibility
+    lookup and `publish` performs no network calls.
 - `publish` re-sends the stored drafts bound to the current `origin` through `create`
   (retry-safe, so an issue whose response was lost is reused and its missing relations
   completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes
