@@ -53,7 +53,7 @@ from backlog_candidates import (  # noqa: E402
     tokenize,
     unclosed_fence_line,
 )
-from migrate_backlog import build_plan  # noqa: E402
+from migrate_backlog import MigrateError, build_plan  # noqa: E402
 from queue_backend import ENV_VAR, QueueError, _git, origin_host, resolve  # noqa: E402
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
@@ -66,17 +66,20 @@ _PRUNE_RE = re.compile(r"prune-backlog")
 # A dated change record (`harness-log.md`, `changelog.md`) names a rule to say it was removed.
 _RECORD_DOC_RE = re.compile(r"(?:^|[-_.])(?:log|changelog|history)\.md$", re.IGNORECASE)
 _ARCHIVE_DOC_RE = re.compile(r"(?:^|[-_.])archives?\.md$|^archives?[-_.]", re.IGNORECASE)
-_BACKLOG_FILE = r"(?<![\w./-])(?:`backlog\.md`|backlog\.md(?![\w/-]|\.[\w./-]))"
+_BACKLOG_PATH = r"(?:\./)?backlog\.md"
+_BACKLOG_FILE = rf"(?<![\w./-])(?:`{_BACKLOG_PATH}`|{_BACKLOG_PATH}(?![\w/-]|\.[\w./-]))"
+_BACKLOG_LINK_RE = re.compile(rf"\[[^\]]+\]\({_BACKLOG_PATH}\)", re.IGNORECASE)
 _CLAUSE_BREAK_RE = re.compile(r";\s*|[.!?]\s+|,\s*(?:but\s+|(?=not\b))", re.IGNORECASE)
 _QUEUE_CONTRAST_RE = re.compile(r"\b(?:instead of|rather than|not\s+(?:in|to|under))\b", re.IGNORECASE)
 _QUEUE_RULE_RE = re.compile(
     rf"(?:\b(?:queue(?: truth| source)?|source of truth|system of record|canonical queue)"
-    rf"\s*(?:is\s+|(?:lives )?in\s+|[:=—-]\s*)?{_BACKLOG_FILE}"
+    rf"\s*(?:is\s+|(?:lives )?in\s+|[:=—|\-]\s*)?{_BACKLOG_FILE}"
     rf"|{_BACKLOG_FILE}\s*(?:is|as)\s+(?:the\s+)?(?:canonical\s+|work\s+|task\s+)?queue\b"
     rf"|{_BACKLOG_FILE}\s+is\s+(?:the\s+)?(?:single\s+)?source of truth\b"
     rf"|\b(?:add|file|record|track|queue|log|put|capture)\b[^.]*?"
     rf"\b(?:tasks?|items?|work|follow-ups?|bugs?|findings?|issues?)\b[^.]*?"
     rf"\b(?:in|to|under)\s+{_BACKLOG_FILE}"
+    rf"|\b(?:pick|take|grab)\b[^.]*?\b(?:tasks?|items?|work)\s+from\s+{_BACKLOG_FILE}"
     rf"|\b(?:use|update|check|read|consult)\s+{_BACKLOG_FILE}\s+(?:for|as|before)\b"
     rf"|\b(?:file|add|create|open)\s+(?:an?\s+)?{_BACKLOG_FILE}\s+(?:entry|item)\b)",
     re.IGNORECASE,
@@ -162,9 +165,11 @@ def check_backlog_history(root: Path, env: dict[str, str] | None = None) -> list
 
 
 def is_legacy_queue_rule(line: str) -> bool:
+    line = _BACKLOG_LINK_RE.sub("backlog.md", line.replace("**", ""))
     for clause in _CLAUSE_BREAK_RE.split(line):
         positive = _QUEUE_CONTRAST_RE.split(clause, maxsplit=1)[0]
-        if _QUEUE_RULE_RE.search(positive) and not _NEGATION_RE.search(positive):
+        match = _QUEUE_RULE_RE.search(positive)
+        if match and not _NEGATION_RE.search(positive, 0, match.end()):
             return True
     return False
 
@@ -185,7 +190,9 @@ def backlog_migration_proposal(backlog: Path) -> str:
     plan = build_plan(text, "unknown")
     if plan["issues"] or plan["refused"]:
         return "backlog.md: rejected entries remain; run the migration dry run."
-    if any(not _DONE_RE.match(item["source"]) for item in plan["left"]):
+    done_lines = {item["line"] for item in plan["done"]}
+    if any(line.strip() and not _HEADING_RE.match(line) and n not in done_lines
+           for n, line in enumerate(masked_lines(text), start=1)):
         return "backlog.md: review remaining non-queue entries before proposing deletion."
     return "backlog.md: no open or in-flight items; propose deleting the file after showing its diff."
 
@@ -217,7 +224,7 @@ def run(root: Path, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
     for check in CHECKS:
         try:
             lines.extend(check(root, env))
-        except (QueueError, OSError, ValueError) as exc:
+        except (MigrateError, QueueError, OSError, ValueError) as exc:
             lines.append(f"Error: {exc}")
             failed = True
     return (2 if failed else int(bool(lines))), lines
@@ -244,7 +251,17 @@ def git_root(path: Path) -> Path | None:
 
 def project_roots(paths) -> list[Path]:
     candidates = {Path.cwd(), *(Path(path) for path in paths if Path(path).is_absolute())}
-    return sorted({root for path in candidates if (root := git_root(path)) is not None})
+    roots = {root for path in candidates if (root := git_root(path)) is not None}
+    projects = set()
+    for root in roots:
+        worktrees = _git(str(root), "worktree", "list", "--porcelain", "-z") or ""
+        first, _, attributes = worktrees.partition("\0")
+        if first.startswith("worktree ") and not attributes.startswith("bare\0"):
+            main = Path(first.removeprefix("worktree "))
+            if os.path.isdir(main):
+                root = main
+        projects.add(root)
+    return sorted(projects)
 
 
 def session_project_paths():
@@ -411,7 +428,14 @@ def _legacy_tests(github: Path) -> None:
                       "- Do not file tasks in backlog.md.\n"
                       "- Track tasks in backlog.md.bak.\n"
                       "- Track work in GitHub issues, not in backlog.md.\n"
-                      "- File new tasks in GitHub issues instead of in backlog.md.\n",
+                      "- File new tasks in GitHub issues instead of in backlog.md.\n"
+                      "- Track tasks in backlog.md and never push to main.\n"
+                      "- File follow-ups in backlog.md — never in TODO comments.\n"
+                      "- Record follow-ups in [backlog.md](backlog.md).\n"
+                      "- **Queue**: `backlog.md`\n"
+                      "- Pick the next item from backlog.md.\n"
+                      "- Track tasks in ./backlog.md.\n"
+                      "| Queue | backlog.md |\n",
                       encoding="utf-8")
     (github / "CLAUDE.md").write_text("<!-- Use backlog.md as the queue. -->\n"
                                      "```md\nQueue: backlog.md\n```\n"
@@ -423,8 +447,8 @@ def _legacy_tests(github: Path) -> None:
     (docs / "workflow.md").write_text("Record new work in `backlog.md`.\n", encoding="utf-8")
     original = {p: p.read_bytes() for p in github.rglob("*.md")}
     text = "\n".join(check_legacy_backlog(github, env={}))
-    _assert(all(f"AGENTS.md:{n}:" in text for n in (2, 3, 4, 5)) and "docs/workflow.md:1:" in text
-            and text.count(_ISSUES_RULE) == 5, "steering proposals name each live line and its replacement")
+    _assert(all(f"AGENTS.md:{n}:" in text for n in (2, 3, 4, 5, *range(11, 18))) and "docs/workflow.md:1:" in text
+            and text.count(_ISSUES_RULE) == 12, "steering proposals name each live line and its replacement")
     _assert(all(p.read_bytes() == data for p, data in original.items()), "the check leaves every source intact")
     _assert(not check_legacy_backlog(github, {ENV_VAR: "backlog"}), "explicit file backend opts out")
     _assert(not check_legacy_backlog(github, {ENV_VAR: "python3 /fixture/adapter.py"}), "explicit adapter opts out")
@@ -435,10 +459,14 @@ def _legacy_tests(github: Path) -> None:
         ("## Now\n- [>] in flight\n", "resolve in-flight"),
         ("```\n- [ ] ambiguous\n", "unclosed code fence"),
         ("## Rejected — do not re-file\n- Build a dashboard — defer until needed.\n", "rejected entries remain"),
-        ("## Notes\n- Preserve this process detail.\n", "review remaining non-queue entries"),
     ]:
         backlog.write_text(content, encoding="utf-8")
         _assert(expected in "\n".join(check_legacy_backlog(github, env={})), f"backlog reports {expected}")
+    for entry in ("- Unclassified entry", "1. Numbered task", "  - Indented task", "| Task | State |", "Prose note"):
+        backlog.write_text(f"## Notes\n{entry}\n", encoding="utf-8")
+        text = "\n".join(check_legacy_backlog(github, env={}))
+        _assert("review remaining non-queue entries" in text and "propose deleting" not in text,
+                f"backlog preserves unclassified content ({entry})")
     backlog.write_bytes(b"# Backlog\n\xff\n")
     code, lines = run(github, env={})
     text = "\n".join(lines)
@@ -462,19 +490,26 @@ def _legacy_tests(github: Path) -> None:
         codex = Path(tmp) / "codex"
         transcript = claude / "projects" / "opaque-token" / "session.jsonl"
         transcript.parent.mkdir(parents=True)
-        transcript.write_text(json.dumps({"cwd": str(github / "docs")}) + "\n", encoding="utf-8")
+        worktree = Path(tmp) / "worktree"
+        subprocess.run(["git", "-C", str(github), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={os.devnull}",
+                        "commit", "-q", "--allow-empty", "-m", "Fixture"], check=True)
+        subprocess.run(["git", "-C", str(github), "worktree", "add", "-q", "--detach", str(worktree)], check=True)
+        transcript.write_text(json.dumps({"cwd": str(worktree)}) + "\n", encoding="utf-8")
         rollout = codex / "sessions" / "day" / "rollout.jsonl"
         rollout.parent.mkdir(parents=True)
         rollout.write_text(json.dumps({"type": "session_meta", "payload": {"cwd": str(other)}}) + "\n",
                            encoding="utf-8")
         env = {"CLAUDE_CONFIG_DIR": str(claude), "CODEX_HOME": str(codex), ENV_VAR: ""}
-        with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=Path(tmp)), \
+        with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=github / "docs"), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
             code = main(["--all"])
         report_text = out.getvalue()
         _assert(code == 1 and f"Project: {github.resolve()}" in report_text
                 and f"Project: {other.resolve()}" in report_text and "CONFLICT legacy-backlog" in report_text,
                 "all scope resolves Claude and Codex project roots and reports by repository")
+        _assert(report_text.count(f"Project: {github.resolve()}") == 1 and f"Project: {worktree}" not in report_text,
+                "all scope reports the main checkout once when sessions include a linked worktree")
 
 
 if __name__ == "__main__":
