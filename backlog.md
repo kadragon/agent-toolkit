@@ -11,13 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 3 — dispatch pick via queue backend
-
-- [ ] [FEAT] Switch `dispatch.py pick` to `queue_backend.py list` and make its "no backlog.md: no queue" check and `dispatch/SKILL.md` wording backend-aware
-  Source: docs/design/github-issues-queue.md → Script and doc surface per backend
-  Done when: `python3 dev/skills/dispatch/scripts/test_dispatch.py` passes with new cases for a GitHub repo without `backlog.md` (issues listed) and a non-GitHub repo (unchanged output); warnings reach stderr
-  Approach: keep the JSON shape `pick` prints today, rebuilt from `candidates[]` and its `counts`; `--tree` passes `ref: origin/HEAD` in the `list` request, which `backlog` honors and `github` ignores
-
 ## 4 — task-next selection and closing on issues
 
 - [ ] [FEAT] Run `task-next` selection through `queue_backend.py`, record covered refs in `## Covers`, skip `prune-backlog` and blocked-marker sync on the issues backend, and have the review cycle write one closing line per ref into the PR body and merge commit
