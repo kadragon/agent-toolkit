@@ -34,6 +34,7 @@ from dispatch import (
     send,
     terminal_name,
     transcript_echoed,
+    verify_delivery_turn,
     verify_pinned_delivery,
     verify_terminal,
     wait,
@@ -1216,6 +1217,21 @@ class CodexModelTests(DispatchTestCase):
                 hc.assert_not_called()
                 run.assert_not_called()
                 cache.assert_not_called()
+
+
+class SharedGuardMigrationTests(unittest.TestCase):
+    def test_send_holds_when_dev_has_moved_its_hooks_but_guard_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"CODEX_HOME": directory}):
+            cache = Path(directory) / "plugins/cache/kadragon"
+            manifest = cache / "dev/5.0.1" / pinned_wave.MANIFEST
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"hooks": "./hooks.json"}', encoding="utf-8")
+            verify_delivery_turn(None, {})
+            manifest.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "install guard@kadragon"):
+                verify_delivery_turn(None, {})
+            (cache / "guard/1.0.0").mkdir(parents=True)
+            verify_delivery_turn(None, {})
 
 
 class PinnedWaveTests(unittest.TestCase):

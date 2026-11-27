@@ -67,6 +67,8 @@ Omit `--trust-hooks` to use the manual review below.
 Install and enable `guard@kadragon` when updating from a dev release that bundled its hooks. Approve its hooks
 once in an idle Codex child. Codex fingerprints the full `guard` bundle, so a new guard release
 requires review. A dev-only or prod-only release preserves the guard approval.
+Dispatch holds task delivery when the installed dev has moved its hooks and guard is missing
+from the shared cache.
 
 Before starting a shared-cache child while another is mid-cycle, fetch agent-toolkit and
 compare the plugin versions in `origin/main` with

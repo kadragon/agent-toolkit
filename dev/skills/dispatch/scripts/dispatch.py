@@ -880,9 +880,27 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
+def require_shared_guard():
+    versions = installed_plugin_versions()
+    dev = versions.get("dev")
+    if not dev or "guard" in versions:
+        return
+    manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
+    try:
+        installed = pinned_wave.read_json(manifest)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"task withheld; can't read the installed dev plugin manifest: {error}") from None
+    if "hooks" not in installed:
+        raise SystemExit("task withheld; install guard@kadragon, restart the idle Codex child, and review its hooks")
+
+
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
-    if run and run.get("wave"):
+    if not run or not run.get("wave"):
+        require_shared_guard()
+    else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)
         if current["state"] != "live" or any(current.get(key) != terminal.get(key)
