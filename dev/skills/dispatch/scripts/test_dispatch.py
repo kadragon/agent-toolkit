@@ -24,6 +24,8 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    record,
+    render_t3_thread_launch,
     report_instruction,
     resolve_codex_model,
     send,
@@ -920,6 +922,226 @@ class CodexModelTests(unittest.TestCase):
                 cache.assert_not_called()
 
 
+class T3PromptTests(unittest.TestCase):
+    FIELDS = DispatchReceiptTests.FIELDS
+    HANDOFF = DispatchReceiptTests.HANDOFF
+    BLOCK = DispatchReceiptTests.BLOCK
+
+    def prompt_args(self, cwd, **overrides):
+        args = dict(cwd=str(cwd), cli="claude", model="claude-sonnet-5-5", effort="medium",
+                    title=None, message="/dev:task-next", **self.HANDOFF)
+        return SimpleNamespace(**(args | overrides))
+
+    def render(self, args, home):
+        receipt_dir = Path(home) / "receipt"
+        receipt_dir.mkdir(exist_ok=True)
+        with (
+            patch("dispatch.tempfile.mkdtemp", return_value=str(receipt_dir)),
+            patch("dispatch.Path.cwd", return_value=home),
+            patch("dispatch.hc_json") as hc,
+            patch("dispatch.subprocess.run") as run,
+            patch("sys.stdout", new_callable=StringIO) as stdout,
+        ):
+            render_t3_thread_launch(args)
+        hc.assert_not_called()
+        run.assert_not_called()
+        return json.loads(stdout.getvalue())
+
+    def test_blank_handoff_fields_stop_before_any_receipt(self):
+        for field in ("request", "unit", "git_limits"):
+            with self.subTest(field=field), patch("dispatch.tempfile.mkdtemp") as mkdtemp:
+                with self.assertRaisesRegex(SystemExit, "--" + field.replace("_", "-")):
+                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **{field: " \n "}))
+                mkdtemp.assert_not_called()
+        with patch("dispatch.tempfile.mkdtemp") as mkdtemp, self.assertRaisesRegex(SystemExit, "fable"):
+            render_t3_thread_launch(self.prompt_args(Path.cwd(), model="claude-fable-5-2"))
+        mkdtemp.assert_not_called()
+
+    def test_prompt_carries_handoff_extra_lines_and_report_instruction_in_the_body(self):
+        for cli, model, option in (("claude", "claude-sonnet-5-5", "effort"),
+                                   ("codex", "gpt-6.2-sol", "reasoningEffort")):
+            with self.subTest(cli=cli), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                (home / "repos").mkdir()
+                extra_lines = ["Use the launch-time checklist."]
+                (home / "repos" / "handoff.json").write_text(json.dumps({".": extra_lines}), encoding="utf-8")
+                message = "/dev:task-next" if cli == "claude" else "$task-next"
+                payload = self.render(self.prompt_args(home, cli=cli, model=model, effort="high",
+                                                       message=message, title=" T3  run "), home)
+                result = Path(payload["result"])
+                guard = (f"You start in {home.resolve()}. If you started anywhere else, stop before any change "
+                         "and report that in the result file; a worktree the task skill creates from there is fine.")
+                single = "Write summary as one JSON string (join its lines with \\n), never an array."
+                selection = {"instanceId": "claudeAgent" if cli == "claude" else "codex", "model": model,
+                             "options": [{"id": option, "value": "high"}]}
+                self.assertEqual(payload["t3_thread_launch"], {
+                    "title": "T3 run", "modelSelection": selection, "workspaceStrategy": {"type": "root"},
+                    "message": message + self.BLOCK + "\n\n" + extra_lines[0] + "\n\n" + guard + " "
+                    + report_instruction(result) + " " + single})
+                self.assertEqual(payload["project_lookup"],
+                                 {"tool": "t3_project_list", "workspaceRoot": str(home.resolve())})
+                self.assertNotIn("handoff", payload)
+                receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+                self.assertEqual(Path(payload["run"]), result.with_name("run.json"))
+                self.assertEqual(receipt["backend"], "t3")
+                self.assertEqual(receipt["title"], "T3 run")
+                self.assertEqual(receipt["cwd"], str(home.resolve()))
+                self.assertEqual(receipt["model_selection"], selection)
+                self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
+                self.assertNotIn("address", receipt)
+
+    def test_models_and_efforts_must_be_ones_t3_lists(self):
+        for overrides, error in (
+            ({"model": "sonnet"}, "full Claude model id"),
+            ({"cli": "codex", "model": "Sol", "message": "$task-next"}, "Codex slug"),
+            ({"effort": "ultra"}, "claudeAgent effort must be one of .*ultrathink"),
+            ({"cli": "codex", "model": "gpt-6.2-sol", "effort": "ultrathink", "message": "$task-next"},
+             "codex effort must be one of .*ultra"),
+            ({"cli": "codex", "model": "gpt-6-luna", "effort": "ultra", "message": "$task-next"}, "no 'ultra' effort"),
+            ({"cli": "codex", "model": " sol ", "message": "$task-next"}, "Codex slug"),
+            ({"model": " \n "}, "--model must not be blank"),
+        ):
+            with self.subTest(**overrides), patch("dispatch.tempfile.mkdtemp") as mkdtemp, \
+                    patch("dispatch.resolve_codex_model") as resolve:
+                with self.assertRaisesRegex(SystemExit, error):
+                    render_t3_thread_launch(self.prompt_args(Path.cwd(), **overrides))
+                mkdtemp.assert_not_called()
+                resolve.assert_not_called()
+
+    def test_cli_prompt_prints_json_and_needs_a_message(self):
+        base = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "prompt", "--cli", "claude",
+                "--model", "claude-opus-5-5", "--effort", "xhigh", "--cwd", str(SCRIPTS), "--work-kind", "new",
+                "--request", "요청", "--unit", "단위", "--git-limits", "none"]
+        missing = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("message", missing.stderr)
+        done = subprocess.run([*base, "/dev:task-new 단위"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        payload = json.loads(done.stdout)
+        try:
+            launch_args = payload["t3_thread_launch"]
+            self.assertTrue(launch_args["message"].startswith("/dev:task-new 단위\n\nHandoff metadata (JSON):"))
+            self.assertEqual(launch_args["modelSelection"]["options"], [{"id": "effort", "value": "xhigh"}])
+            self.assertEqual(launch_args["title"], SCRIPTS.name)
+        finally:
+            for name in ("run.json", "run.lock"):
+                Path(payload["run"]).with_name(name).unlink(missing_ok=True)
+            Path(payload["run"]).parent.rmdir()
+
+    def test_record_stores_one_thread_and_project_on_a_t3_receipt_only(self):
+        def ids(thread="th-1", project="pr-1"):
+            return SimpleNamespace(run=str(receipt), thread_id=thread, project_id=project, resume=False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"backend": "t3", "cli": "claude"}), encoding="utf-8")
+            with patch("sys.stdout", new_callable=StringIO):
+                record(ids(thread=" th-1 "))
+                record(ids())
+            stored = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual((stored["thread_id"], stored["project_id"]), ("th-1", "pr-1"))
+            self.assertNotIn("task_id", stored)
+            with self.assertRaisesRegex(SystemExit, "already records thread_id th-1"):
+                record(ids(thread="th-2"))
+            with self.assertRaisesRegex(SystemExit, "already records project_id pr-1"):
+                record(ids(project="pr-2"))
+            for blank, flag in (({"thread": " "}, "--thread-id"), ({"project": ""}, "--project-id")):
+                with self.assertRaisesRegex(SystemExit, f"{flag} must not be blank"):
+                    record(ids(**blank))
+            herdr = Path(directory) / "herdr.json"
+            herdr.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "not a T3 receipt"):
+                record(SimpleNamespace(run=str(herdr), thread_id="th-1", project_id="pr-1", resume=False))
+            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "is a T3 receipt"):
+                send(SimpleNamespace(address="t7", message="$task-next", run=str(receipt)))
+            hc.assert_not_called()
+
+    def test_collect_reads_the_result_file_without_herdr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({"backend": "t3", "thread_id": "th-1", "project_id": "pr-1"}),
+                               encoding="utf-8")
+            final = {"status": "ready", "phase": "review", "summary": "PR open"}
+            receipt.with_name("result.json").write_text(json.dumps(final), encoding="utf-8")
+            with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
+                collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
+            hc.assert_not_called()
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual((payload["backend"], payload["thread_id"], payload["project_id"], payload["result"]),
+                             ("t3", "th-1", "pr-1", final))
+            self.assertIsNone(payload["stop_reason"])
+            with patch("dispatch.hc_json") as hc, self.assertRaisesRegex(SystemExit, "t3_thread_interrupt"):
+                collect(SimpleNamespace(run=str(receipt), close=True, stall_minutes=30))
+            hc.assert_not_called()
+
+
+class T3StallTests(unittest.TestCase):
+    def collect_t3(self, directory, created_ms, result=None, result_age_minutes=0):
+        receipt = Path(directory) / "run.json"
+        receipt.write_text(json.dumps({"backend": "t3", "created_ms": created_ms}), encoding="utf-8")
+        if result is not None:
+            written = receipt.with_name("result.json")
+            written.write_text(json.dumps(result), encoding="utf-8")
+            stamp = time.time() - result_age_minutes * 60
+            os.utime(written, (stamp, stamp))
+        with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
+            collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
+        hc.assert_not_called()
+        return json.loads(stdout.getvalue())["stop_reason"]
+
+    def test_a_silent_result_file_past_the_threshold_is_a_stall(self):
+        now_ms = time.time_ns() // 1_000_000
+        old_ms = now_ms - 31 * 60_000
+        working = {"status": "working", "phase": "implement", "summary": "going"}
+        for created_ms, result, age, expected in (
+            (now_ms, None, 0, None),
+            (old_ms, None, 0, "No result file for 30 minutes"),
+            (old_ms, working, 5, None),
+            (old_ms, working, 31, "No result update for 30 minutes"),
+            (old_ms, {**working, "status": "ready"}, 31, None),
+            (old_ms, {**working, "status": "blocked"}, 31, None),
+        ):
+            with self.subTest(result=result and result["status"], age=age), \
+                    tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(self.collect_t3(directory, created_ms, result, age), expected)
+
+
+class T3ResumeTests(unittest.TestCase):
+    def test_resume_hides_the_paused_result_and_restarts_the_stall_clock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            old_ms = time.time_ns() // 1_000_000 - 40 * 60_000
+            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms}), encoding="utf-8")
+            resume = SimpleNamespace(run=str(receipt), thread_id=None, project_id=None, resume=True)
+            with self.assertRaisesRegex(SystemExit, "records no thread yet"):
+                record(resume)
+            with self.assertRaisesRegex(SystemExit, "--resume takes no"):
+                record(SimpleNamespace(run=str(receipt), thread_id="th-1", project_id=None, resume=True))
+            receipt.write_text(json.dumps({"backend": "t3", "created_ms": old_ms, "thread_id": "th-1"}),
+                               encoding="utf-8")
+            paused = receipt.with_name("result.json")
+            paused.write_text(json.dumps({"status": "blocked", "phase": "grill", "summary": "question"}),
+                              encoding="utf-8")
+            stamp = time.time() - 35 * 60
+            os.utime(paused, (stamp, stamp))
+
+            def collected():
+                with patch("dispatch.hc_json") as hc, patch("sys.stdout", new_callable=StringIO) as stdout:
+                    collect(SimpleNamespace(run=str(receipt), close=False, stall_minutes=30))
+                hc.assert_not_called()
+                return json.loads(stdout.getvalue())
+
+            self.assertEqual(collected()["result"]["status"], "blocked")
+            with patch("sys.stdout", new_callable=StringIO):
+                record(resume)
+            stored = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(stored["previous_result"], paused.stat().st_mtime_ns)
+            payload = collected()
+            self.assertEqual((payload["result"], payload["stop_reason"]), (None, None))
+            receipt.write_text(json.dumps({**stored, "resumed_ms": old_ms}), encoding="utf-8")
+            self.assertEqual(collected()["stop_reason"], "No result file for 30 minutes")
+
+
 class WorkflowDocsTests(unittest.TestCase):
     def test_launch_and_watch_document_operational_order(self):
         skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
@@ -938,6 +1160,20 @@ class WorkflowDocsTests(unittest.TestCase):
                       "pass `--git-limits='not specified'`.", launch_step)
         self.assertIn("after confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
+
+    def test_backend_branch_keys_on_a_successful_capability_call(self):
+        skill = " ".join((SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        backend = skill.split("## Backend", 1)[1].split("## 1. Resolve the repo", 1)[0]
+        self.assertIn("The user's choice wins", backend)
+        self.assertIn("an `orchestrator_capabilities` call succeeds", backend)
+        self.assertIn("A launched child never switches backend.", backend)
+        reference = (SCRIPTS.parent / "references" / "t3-backend.md").read_text(encoding="utf-8")
+        findings, open_items = reference.split("## Findings", 1)[1].split("## Open", 1)
+        for item in ("1.", "2.", "4.", "5."):
+            self.assertIn(f"\n{item} ", findings)
+        for item in ("3.", "6."):
+            self.assertIn(f"\n{item} ", open_items)
+        self.assertIn("A dispatch request counts as the user asking for a new thread", reference)
 
     def test_docs_name_codex_models_by_family_only(self):
         docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]

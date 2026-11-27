@@ -78,6 +78,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [fix] dispatch: a Codex plugin update during a wave breaks every live Codex child's hooks. Any Codex startup outside the wave can update the kadragon plugin and delete the old version directory (e.g. `dev/4.12.23`). Running children keep pointing at it, so each tool call prints `• Hook failed … os error 2` and the session continues without its guards. In one patis wave on 2026-11-26 this happened 4 times (4.12.24 → .26 → .27 → .29). Each time the children had to be force-closed, the plugin warmed up, and the children relaunched with `--resume`. One PR was merged while its hooks were broken. Three things to do: ① `collect` reports a real hook failure as `stop_reason: hooks_broken`. Match the Codex event line `^• Hook failed\n\s*└`, not the bare phrase, because prompts and `rg` commands quoting it gave false positives. ② Check the installed plugin version at launch and on each `collect`; warn when it no longer matches the version the child started with. ③ Document in `codex-readiness.md`: before a long wave, run `codex plugin marketplace upgrade` and a warm-up; when the plugin changes mid-wave, stop the children before their next Git write. Done-when: collect flags a child whose plugin directory was removed, and the false-positive case does not trigger. (source: patis security wave, 2026-11-26) — `dev/skills/dispatch/scripts/dispatch.py`, `dev/skills/dispatch/references/codex-readiness.md`
 
+## Review Backlog
+
+### PR #464 — Add a T3 Code backend to dispatch with Herdr kept as the fallback (2026-11-27)
+
+- [ ] [debt] Herdr `launch` exits before writing the receipt or printing the address when `hc get` fails right after a successful `hc run`; a Claude child may already hold its first message, so a retry can duplicate it (source: codex) (pre_existing) — dev/skills/dispatch/scripts/dispatch.py:397
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
