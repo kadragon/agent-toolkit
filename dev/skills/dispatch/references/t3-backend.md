@@ -74,9 +74,10 @@ run `hc ls` too when Herdr is installed.
   the child again.
 - **Stop, relaunch, escalate** — `t3_thread_interrupt(threadId)`, then a new `prompt` +
   `t3_thread_launch` per `escalation.md`. `collect --close` refuses a T3 receipt.
-- **Clean up** — once the thread completed or was interrupted and you saved what you need, remove
-  the receipt's `run.json`, `run.lock`, `result.json` and any `run.tmp`, then the directory if
-  empty (SKILL.md → *Close the child terminal*, without the close).
+- **Clean up** — once the thread completed or was interrupted and you collected and saved what
+  you need, call `t3_thread_organize` with action `settle` for the child. Then remove the receipt's
+  `run.json`, `run.lock`, `result.json` and any `run.tmp`, then the directory if empty
+  (SKILL.md → *Close the child terminal*, without the close).
 - **Decide** — answer the child through the T3 thread tools instead of `hc send`; the
   decision rules in SKILL.md step 5 apply as written. Run `dispatch.py record <run> --resume`
   just before each answer: it hides the paused result from `collect` until the child writes a
@@ -122,12 +123,20 @@ Not used under T3: `launch`, `send`, Codex readiness (`codex-readiness.md`), tru
 5. **Restart recovery** — `threadId` alone is enough to `t3_thread_read` / `t3_thread_wait`
    again, so the receipt records `thread_id` and `project_id`.
 
+7. **Sidebar placement** — passing `delegatedFrom` to `t3_thread_launch` did not set
+   `parentThreadId` or `relationshipToParent`; the child stayed a top-level thread in the target
+   project, with or without `includeSubagents`, so dispatch does not pass it. Settling is what
+   clears the sidebar: `t3_thread_organize` `settle` on an MCP-launched thread returned a
+   `sequence`, and `t3_thread_list` then showed `settled: true`.
+
 ## Open
 
 3. **Skill invocation — partial.** A Codex child under T3 had the dev plugin 4.12.30 loaded and
    listed its model-invocable dev skills; `task-next` / `task-new` are user-invoked, so they were
    not listed, as expected. Whether `$task-next` / `/dev:task-*` as the first message triggers
-   them under T3 (dev plugin >= 4.12.4 for `--tree`) is unverified.
+   them under T3 (dev plugin >= 4.12.4 for `--tree`) is unverified. 2026-11-27: a Codex child
+   (dev 4.12.34) ran `$task-new --tree` through the contract and edits, then stopped `blocked` at
+   review hand-off: it had no Skill tool to call `task-review-cycle`.
 6. **Concurrency** — not measured; `maxBatchThreads: 20` is the only data point against this
    skill's four live children per wave.
 
