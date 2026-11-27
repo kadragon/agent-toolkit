@@ -595,7 +595,11 @@ def _trusted(issue: dict) -> bool:
 
 
 def _deferred_reason(issue: dict) -> str:
-    m = _DEFERRED_LINE_RE.search(issue.get("body") or "")
+    body = issue.get("body") or ""
+    _, reason = _migration_body_and_deferral(body)
+    if reason:
+        return reason
+    m = _DEFERRED_LINE_RE.search(body)
     return m.group(1) if m else ""
 
 
@@ -1192,15 +1196,19 @@ def _issue_body(body: str, marker: str) -> str:
     return (body.rstrip() + "\n\n" if body.strip() else "") + marker
 
 
+def _migration_body_and_deferral(body: str) -> tuple[str, str]:
+    body = body.replace("\r\n", "\n").rstrip()
+    prefix, separator, reason = body.rpartition("\n\nDeferred: ")
+    if separator and reason and "\n" not in reason:
+        marker = _KEY_RE.fullmatch(prefix.rsplit("\n", 1)[-1])
+        if marker and marker[1].startswith(MIGRATION_KEY_PREFIX):
+            return prefix, reason
+    return body, ""
+
+
 def _matches_migrated_content(item: dict, marker_key: str, found: dict) -> bool:
-    marker = _KEY_MARKER.format(marker_key)
-    expected = _issue_body(item["body"], marker).replace("\r\n", "\n")
-    actual = (found["body"] or "").replace("\r\n", "\n").rstrip()
-    prefix, separator, reason = actual.rpartition("\n\nDeferred: ")
-    # github_defer replaces any prior deferral line and appends its state after the marker.
-    if separator and prefix.endswith(marker) and reason and "\n" not in reason:
-        actual = prefix
-        expected = _DEFERRED_LINE_RE.sub("", expected).rstrip()
+    expected = _issue_body(item["body"], _KEY_MARKER.format(marker_key)).replace("\r\n", "\n")
+    actual, _ = _migration_body_and_deferral(found["body"] or "")
     return found["title"] == item["title"] and actual == expected
 
 
@@ -1525,7 +1533,12 @@ def github_reject(req: dict, runner=gh_runner) -> dict:
 def github_defer(req: dict, runner=gh_runner) -> dict:
     reason = _one_line(req, "reason")
     owner, name, issue = _queue_issue(req, runner)
-    body = _DEFERRED_LINE_RE.sub("", issue.get("body") or "").rstrip()
+    body = issue.get("body") or ""
+    keys = _KEY_RE.findall(body)
+    if keys and keys[-1].startswith(MIGRATION_KEY_PREFIX):
+        body, _ = _migration_body_and_deferral(body)
+    else:
+        body = _DEFERRED_LINE_RE.sub("", body).rstrip()
     body = (body + "\n\n" if body else "") + f"Deferred: {reason}\n"
     ensure_labels(runner, owner, name, ["deferred"])
     _rest(runner, "PATCH", f"repos/{owner}/{name}/issues/{issue['number']}", {"body": body})

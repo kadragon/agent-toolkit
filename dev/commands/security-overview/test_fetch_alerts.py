@@ -65,13 +65,14 @@ class FetchAlertsTest(unittest.TestCase):
         subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
                        cwd=self.root, env=self.env, check=True)
 
-    def scan(self, db=None, code=(), secret=()):
+    def scan(self, db=None, code=(), secret=(), *, trace=False):
         fixture = self.root / "responses.json"
         fixture.write_text(json.dumps({"dependabot": dependabot() if db is None else db,
                                        "code-scanning": code, "secret-scanning": secret}), encoding="utf-8")
         env = dict(self.env, PATH=f"{self.root}{os.pathsep}{self.env['PATH']}", ALERT_FIXTURE=str(fixture))
-        subprocess.run(["bash", str(SCRIPT), str(self.output)], cwd=self.root, env=env,
-                       check=True, capture_output=True, text=True)
+        options = ["-x"] if trace else []
+        return subprocess.run(["bash", *options, str(SCRIPT), str(self.output)], cwd=self.root, env=env,
+                              check=True, capture_output=True, text=True)
 
     def test_permission_and_not_found_are_unreadable(self):
         self.scan(code="gh: Resource not accessible by integration (HTTP 403)",
@@ -113,6 +114,12 @@ class FetchAlertsTest(unittest.TestCase):
         errors = self.output / ".fetch-errors"
         self.assertTrue(errors.exists(), "a successful non-array response must mark the scan failed")
         self.assertIn("ERROR: secret-scanning returned invalid alert JSON", errors.read_text(encoding="utf-8"))
+
+    def test_secret_is_redacted_before_shell_trace(self):
+        result = self.scan(secret=[{"number": 7, "secret": "fixture-trace-secret"}], trace=True)
+        self.assertIn("+ fetch_rest_alerts secret-scanning", result.stderr)
+        self.assertNotIn("fixture-trace-secret", result.stderr)
+        self.assertEqual(json.loads((self.output / "secret-scanning.json").read_text(encoding="utf-8")), [{"number": 7}])
 
     def test_rest_diagnostics_do_not_contaminate_alert_json(self):
         self.scan(code={"payload": [{"number": 1}], "fixture_stderr": "gh: notice"})

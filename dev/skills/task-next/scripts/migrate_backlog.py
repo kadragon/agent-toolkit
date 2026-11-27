@@ -63,7 +63,6 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(\[*])")
 _ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig)\.)$", re.IGNORECASE)
 _MARKER_SPAN_RE = re.compile(bc._BLOCK_MARKER_RE.pattern, re.IGNORECASE | re.DOTALL)
 _PLAIN_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
-_ITEM_KEY_RE = re.compile(r" <!-- migration-key: (" + qb.MIGRATION_KEY_PREFIX + r"[0-9a-f]{40}) -->[ \t]*$")
 
 
 class MigrateError(Exception):
@@ -194,7 +193,7 @@ def _rejected_entries(lines: list[str], masked: list[str], headings: list[dict])
 
 
 def _unprunable_reason(text: str, line: str) -> str | None:
-    _, problems = tn.prune_lines(text, [line], item_metadata=_ITEM_KEY_RE)
+    _, problems = tn.prune_lines(text, [line])
     return "; ".join(problems) if problems else None
 
 
@@ -333,7 +332,7 @@ def build_plan(text: str, visibility: str) -> dict:
             inflight.append(path)
             continue
         span = _item_span(lines, masked, owners, i)
-        pin = _ITEM_KEY_RE.search(lines[i])
+        pin = bc._MIGRATION_ITEM_KEY_RE.search(lines[i])
         checkbox = lines[i][:pin.start()] if pin else lines[i]
         raw_body = checkbox.split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
         markers = list(_MARKER_SPAN_RE.finditer(raw_body))
@@ -448,7 +447,13 @@ def _pin_item_keys(text: str, plan: dict) -> str:
     return "".join(line + eol for line, eol in zip(lines, eols))
 
 
-def _write_backlog(path: str, text: str) -> None:
+def _check_source(path: str, expected: str) -> None:
+    with open(path, encoding="utf-8", newline="") as source:
+        if source.read() != expected:
+            raise MigrateError("backlog.md changed while migrating; rebuild the plan and retry")
+
+
+def _write_backlog(path: str, original: str, text: str) -> None:
     path = os.path.realpath(path)
     mode = stat.S_IMODE(os.stat(path).st_mode)
     fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".backlog-migration-")
@@ -456,6 +461,7 @@ def _write_backlog(path: str, text: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as output:
             output.write(text)
         os.chmod(temporary, mode)
+        _check_source(path, original)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
@@ -497,7 +503,7 @@ def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) 
         end = bc._region_end(heading, headings)
         if _is_role_heading(heading) or any(heading["line"] < i < end for i in fenced_lines):
             keep_prose.add(heading["line"] - 1)
-    return tn.prune_lines(text, targets, keep_prose_under=frozenset(keep_prose), item_metadata=_ITEM_KEY_RE)
+    return tn.prune_lines(text, targets, keep_prose_under=frozenset(keep_prose))
 
 
 def _only_headings(text: str) -> bool:
@@ -551,8 +557,13 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
         raise MigrateError("backlog.md changed while migrating; rebuild the plan and retry")
     pinned_text = _pin_item_keys(original, plan)
     if pinned_text != original:
-        plan = build_plan(pinned_text, plan["visibility"])
-        _write_backlog(path, pinned_text)
+        pinned_plan = build_plan(pinned_text, plan["visibility"])
+        if pinned_plan["refused"] != plan["refused"] or (
+            [_draft(i) for i in pinned_plan["issues"]] != [_draft(i) for i in plan["issues"]]
+        ):
+            raise MigrateError("recording migration keys changed the plan; backlog.md was preserved")
+        _write_backlog(path, original, pinned_text)
+        plan = pinned_plan
     report: dict = {"created": [], "incomplete": [], "pending": [], "rejected_closed": [], "deleted": [],
                     "kept": [], "file_deleted": False}
     drafts = [_draft(i) for i in plan["issues"]]
@@ -614,10 +625,11 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
                        else "filed; kept until the items it groups or blocks are confirmed"}
                       for i in plan["issues"] if i["kind"] != "parent" and i["key"] not in deletable]
     if _only_headings(new_text):
+        _check_source(path, text)
         os.remove(path)
         report["file_deleted"] = True
     elif new_text != text:
-        _write_backlog(path, new_text)
+        _write_backlog(path, text, new_text)
     return report
 
 
@@ -1126,6 +1138,8 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
 
 
 def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
+    from unittest.mock import patch
+
     print("\nTest 7: --apply — edited retries, deferral metadata and retained source content")
     linked_text = ("# Backlog\n\n## Work\n\n- [ ] [FIX] Blocker\n\n## Follow-up\n\n"
                    "- [ ] [FIX] Dependent. Keep this context. *(blocked by: work)*\n")
@@ -1169,6 +1183,62 @@ def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
     retry = build_plan(edited, "public")
     _assert(not retry["refused"] and [i["key"] for i in retry["issues"]] == [first_key],
             "deleting one checkbox removes its migration key with it")
+    first = next(line for line in pinned_text.splitlines() if line.startswith("- [ ] First"))
+    pruned, problems = tn.prune_lines(pinned_text, [first])
+    _assert(not problems and "- [ ] First" not in pruned and "- [ ] Second" in pruned,
+            "the file-queue pruner accepts a retained checkbox with migration metadata")
+
+    text = "# Backlog\n\n- [ ] Explain the `<!--` syntax\n- [ ] Another item\n"
+    repo = make_repo(tmp, "literal-comment", "https://github.com/owner/repo.git", text)
+    path = os.path.join(repo, "backlog.md")
+    gh = _FakeGh()
+    plan = build_plan(text, "public")
+    report = apply_plan(repo, plan, gh)
+    _assert(report["file_deleted"] and [i["title"] for i in gh.issues.values()] ==
+            ["Explain the `<!--` syntax", "Another item"],
+            "writing source keys preserves a literal HTML comment opener in a checkbox")
+
+    repo = make_repo(tmp, "concurrent-edit", "https://github.com/owner/repo.git", text)
+    path = os.path.join(repo, "backlog.md")
+    edited = text + "- [ ] Concurrent edit\n"
+    gh = _FakeGh()
+    original_build_plan = build_plan
+
+    def edit_during_replan(pinned, visibility):
+        write(path, edited)
+        return original_build_plan(pinned, visibility)
+
+    with patch(f"{__name__}.build_plan", side_effect=edit_during_replan):
+        try:
+            apply_plan(repo, plan, gh)
+        except MigrateError as error:
+            detected_edit = "changed while migrating" in str(error)
+        else:
+            detected_edit = False
+    _assert(detected_edit and read(path) == edited and not gh.issues,
+            "an edit during migration key planning is retained before any remote filing")
+
+    text = linked_text.replace("[FIX] Blocker", "[FIX] Blocker *(deferred: source reason)*")
+    repo = make_repo(tmp, "edited-deferral", "https://github.com/owner/repo.git", text)
+    path = os.path.join(repo, "backlog.md")
+    gh = _FakeGh()
+    gh.refuse_blockers = True
+    apply_plan(repo, build_plan(read(path), "public"), gh)
+    blocker = next(n for n, i in gh.issues.items() if i["title"] == "[FIX] Blocker")
+    qb.github_defer({"repo": repo, "ref": f"#{blocker}", "reason": "first queue reason"}, gh)
+    qb.github_defer({"repo": repo, "ref": f"#{blocker}", "reason": "current queue reason"}, gh)
+    gh.refuse_blockers = False
+    original = read(path)
+    write(path, original.replace("source reason", "new source reason"))
+    report = apply_plan(repo, build_plan(read(path), "public"), gh)
+    _assert(any(i["relation"] == "content" and i["ref"] == f"#{blocker}" for i in report["incomplete"])
+            and "new source reason" in read(path),
+            "a queue deferral does not hide a changed source deferral")
+    write(path, original)
+    report = apply_plan(repo, build_plan(read(path), "public"), gh)
+    _assert(report["file_deleted"] and len(gh.issues) == 2
+            and qb._deferred_reason(gh.issues[blocker]) == "current queue reason",
+            "queue deferral preserves source content and reports the latest queue reason")
 
     role_text = "# Backlog\n\n## Someday\n\nShared conditions for later.\n\n- [ ] [FIX] Idea\n"
     repo = make_repo(tmp, "role-notes", "https://github.com/owner/repo.git", role_text)

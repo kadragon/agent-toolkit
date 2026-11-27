@@ -80,6 +80,7 @@ from backlog_candidates import (  # noqa: E402
     _CHECKBOX_RE,
     _HEADING_RE,
     _HTML_COMMENT_RE,
+    _MIGRATION_ITEM_KEY_RE,
     _STATUS_RE,
     _headings,
     _is_placeholder_payload,
@@ -538,8 +539,7 @@ def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int
     return False
 
 
-def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[int] = frozenset(),
-                item_metadata: re.Pattern[str] | None = None) -> tuple[str, list[str]]:
+def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[int] = frozenset()) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets` with its wrapped continuation lines and nested
     sub-bullets, then any heading this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
     multi-line comment in it, text right under an indented checkbox, or a nested checkbox — refuses
@@ -550,7 +550,7 @@ def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[in
     `_region_blank` and `_region_prose_only`. A section this run never touched, or one where a
     child heading or an `[x]`/`[>]` item survives, keeps its heading untouched either way.
     A caller may protect prose under specific headings by their zero-based line indices.
-    A caller may also allow a specific trailing metadata comment on real checkbox lines.
+    A migration key on a checkbox remains part of its verbatim source line.
 
     Returns `(new_text, problems)`. `problems` is non-empty when a target matched nothing — or
     matched more than once, which is the more dangerous case: two sections can hold identically
@@ -566,12 +566,11 @@ def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[in
     masked = _strip_fenced_blocks(_strip_html_comments(text)).splitlines()
     if len(masked) != len(lines):  # line-count contract broken upstream; fail safe, do not guess
         return text, ["internal: masked line count does not match the source file"]
-    match_lines = masked
-    if item_metadata:
-        match_lines = [
-            raw if _CHECKBOX_RE.match(visible) and item_metadata.sub("", raw).rstrip() == visible.rstrip() else visible
-            for raw, visible in zip(lines, masked)
-        ]
+    match_lines = [
+        raw if _CHECKBOX_RE.match(visible)
+        and _MIGRATION_ITEM_KEY_RE.sub("", raw).rstrip() == visible.rstrip() else visible
+        for raw, visible in zip(lines, masked)
+    ]
     wanted = [t.rstrip() for t in targets if t.strip()]
     problems = []
     drop: set[int] = set()
