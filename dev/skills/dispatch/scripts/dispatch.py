@@ -63,6 +63,7 @@ CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTIL
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
+WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
 WARNING_VIEW_FOOTER = re.compile(
     r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
@@ -772,6 +773,9 @@ def read_codex_screen(address, *, sent_message=None, with_text=False):
         state = "waiting"
     else:
         state = codex_screen(text, sent_message=sent_message)
+        if (sent_message is None and state == "waiting"
+                and any(WARNING_VIEW_TITLE.fullmatch(line.strip()) for line in text.splitlines())):
+            state = "warning-view"
     return (state, text) if with_text else state
 
 
@@ -857,6 +861,8 @@ def send_task(args, run_path):
     stray_draft = None
     clears = 0
     last_clear = None
+    warning_turn = None
+    warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
     dismissed_bypass_notice = False
     try:
         deadline = time.monotonic() + 30
@@ -869,35 +875,40 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
-            if screen == "warning":
-                withheld = f"{address}: task withheld; inspect the Codex warning with F2"
-                footer = "\n".join(text.rstrip().splitlines()[-2:])
+            if screen in {"warning", "warning-view"}:
                 if (not run or run.get("trust_hooks") is not True or run["sent"] is not False
-                        or dismissed_bypass_notice or WARNING_FOOTER.findall(footer) != ["1"]):
-                    raise SystemExit(withheld)
-                terminal = hc_json("get", address)
-                verify_terminal(run, terminal)
-                turn = terminal["turn"]
-                if (terminal["state"] != "live" or (terminal.get("status") or {}).get("state") != "idle"
-                        or not (turn == 0 or (turn == 1 and startup_composer(text)))):
-                    raise SystemExit(withheld)
-                hc_json("keys", address, "f2")
-                time.sleep(SCREEN_POLL_SECONDS)
-                screen_reads += 1
-                panel = hc_json("read", "--lines", "0", address)
-                if not panel["complete"] or panel["how"] != "screen":
-                    raise SystemExit(withheld)
-                if codex_screen(panel["text"]) == "hooks":
-                    raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
-                if not is_hook_bypass_notice(panel["text"]):
-                    raise SystemExit(withheld)
-                current = hc_json("get", address)
-                verify_terminal(run, current)
-                # Herdr can report working while the local warning viewer owns the input.
-                if current["state"] != "live" or current["turn"] != turn:
-                    raise SystemExit(withheld)
-                hc_json("keys", address, "esc")
-                dismissed_bypass_notice = True
+                        or dismissed_bypass_notice):
+                    raise SystemExit(warning_withheld)
+                if screen == "warning-view":
+                    if not is_hook_bypass_notice(text):
+                        raise SystemExit(warning_withheld)
+                    terminal = hc_json("get", address)
+                    verify_terminal(run, terminal)
+                    # Herdr can report working while the local warning viewer owns the input.
+                    turn = terminal["turn"]
+                    if (terminal["state"] != "live" or turn not in (0, 1)
+                            or (warning_turn is not None and turn != warning_turn)):
+                        raise SystemExit(warning_withheld)
+                    hc_json("keys", address, "esc")
+                    warning_turn = None
+                    dismissed_bypass_notice = True
+                    time.sleep(SCREEN_POLL_SECONDS)
+                    continue
+                footer = "\n".join(text.rstrip().splitlines()[-2:])
+                if WARNING_FOOTER.findall(footer) != ["1"]:
+                    raise SystemExit(warning_withheld)
+                if warning_turn is None:
+                    terminal = hc_json("get", address)
+                    verify_terminal(run, terminal)
+                    turn = terminal["turn"]
+                    if (terminal["state"] != "live" or (terminal.get("status") or {}).get("state") != "idle"
+                            or not (turn == 0 or (turn == 1 and startup_composer(text)))):
+                        raise SystemExit(warning_withheld)
+                    hc_json("keys", address, "f2")
+                    warning_turn = turn
+            if warning_turn is not None:
+                if time.monotonic() >= deadline:
+                    raise SystemExit(warning_withheld)
                 time.sleep(SCREEN_POLL_SECONDS)
                 continue
             if screen == "draft":

@@ -1608,25 +1608,34 @@ class CodexSendTests(DispatchTestCase):
                     self.launch_codex(directory, respond, trust_hooks=trust)
 
     def test_authorized_launch_sends_after_closing_exact_startup_notice(self):
-        for deferred in (False, True):
-            with self.subTest(deferred=deferred), tempfile.TemporaryDirectory() as directory:
+        for mode in ("immediate", "deferred", "already open"):
+            deferred = mode != "immediate"
+            already_open = mode == "already open"
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 operations = []
                 banner = "  >_ OpenAI Codex (v0.172.0)\n\n"
                 checked_after_escape = False
+                warning_frames = iter([
+                    self.screen(banner + self.SINGLE_WARNING),
+                    {**self.screen(banner + self.BYPASS_NOTICE), "complete": False},
+                    self.screen(banner + self.BYPASS_NOTICE),
+                ])
+                open_frames = iter([self.screen(banner + self.BYPASS_NOTICE)])
 
                 def respond(command, *args):
                     nonlocal checked_after_escape
                     if command == "get":
-                        state = self.WORKING if operations[-1:] in (["f2"], ["send"]) else self.IDLE
+                        viewer_open = operations == ["f2"] or (already_open and not operations)
+                        state = self.WORKING if viewer_open or operations[-1:] == ["send"] else self.IDLE
                         if operations[-1:] == ["esc"] and not checked_after_escape:
                             checked_after_escape = True
                             state = self.WORKING
                         return {**DispatchReceiptTests.TERMINAL, **state, "turn": int(deferred)}
                     if command == "read":
                         if not operations:
-                            return self.screen(banner + self.SINGLE_WARNING)
+                            return next(open_frames) if already_open else self.screen(banner + self.SINGLE_WARNING)
                         if operations == ["f2"]:
-                            return self.screen(banner + self.BYPASS_NOTICE)
+                            return next(warning_frames)
                         return self.screen(banner + self.READY)
                     if command == "keys":
                         operations.append(args[-1])
@@ -1645,7 +1654,7 @@ class CodexSendTests(DispatchTestCase):
                     with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
                             redirect_stdout(StringIO()):
                         send(SimpleNamespace(address="t7", message="$task-next", run=receipt))
-                self.assertEqual(operations, ["f2", "esc", "send"])
+                self.assertEqual(operations, ["esc", "send"] if already_open else ["f2", "esc", "send"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
     def test_startup_notice_requires_opt_in_and_exact_single_page(self):
@@ -1653,6 +1662,9 @@ class CodexSendTests(DispatchTestCase):
         failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
         for label, opt_in, shown, responses, keys, reason in (
             ("no opt-in", False, self.SINGLE_WARNING, [], [], "F2"),
+            ("open without opt-in", False, self.BYPASS_NOTICE, [], [], "F2"),
+            ("open after startup", True, self.BYPASS_NOTICE, [{**terminal, "turn": 2}], [], "F2"),
+            ("unrelated open page", True, self.BYPASS_NOTICE.replace("Startup", "Runtime"), [], [], "F2"),
             ("multiple footer", True, self.SINGLE_WARNING.replace("1 warning", "2 warnings"), [], [], "F2"),
             ("wrong owner", True, self.SINGLE_WARNING,
              [{**terminal, "created_ms": 51}], [], "terminal identity changed"),
@@ -1687,8 +1699,11 @@ class CodexSendTests(DispatchTestCase):
                 if opt_in:
                     data = {**data, "trust_hooks": True}
                 receipt.write_text(json.dumps(data), encoding="utf-8")
+                clock = [0, 0, 31] if label == "incomplete page" else None
                 with patch("dispatch.hc_json", side_effect=[self.screen(shown), *responses]) as hc, \
-                        patch("dispatch.time.sleep"), self.assertRaisesRegex(SystemExit, reason):
+                        patch("dispatch.time.sleep"), patch("dispatch.time.monotonic", side_effect=clock,
+                                                            wraps=time.monotonic), \
+                        self.assertRaisesRegex(SystemExit, reason):
                     send(SimpleNamespace(address="t7", message="a task", run=receipt))
                 mutations = [action for action in hc.call_args_list if action.args[0] not in {"get", "read"}]
                 self.assertEqual(mutations, [call("keys", "t7", key) for key in keys])
