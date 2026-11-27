@@ -8,7 +8,7 @@ description: >-
   "테스트 정리", "의미 없는 테스트 삭제". Reports surviving mutants as gaps
   instead of writing new tests. NOT for a failing test or unknown bug →
   task-debug; NOT for reviewing a diff → code-review.
-version: 3.1.0
+version: 3.2.0
 ---
 
 # Test Prune
@@ -187,8 +187,15 @@ Not measured: <files outside the sample, INVALID count, tool limits>
 
 State which checks ran and which did not. A claim with no run behind it goes under *Not measured*.
 
-Append every *Gaps* and *Production bugs* row to `backlog.md`, when the repo has one, each as
+An audit-only run writes nothing: it lists these items in the report as proposed. Otherwise
+send every *Gaps* and *Production bugs* row to `queue_backend.py create` (bundled with
+`dev:task-next`). Follow `../task-next/references/queue-backend-contract.md` → *Filing findings*.
+On GitHub, file one issue per row under the standing grant, with a stable key based on the
+affected behavior and mutation. Put the evidence in the body and use the type and summary below
+as the issue title. Name the issue refs in the report.
+
+On `edit_file`, append every *Gaps* and *Production bugs* row to `backlog.md`, when the repo has one, each as
 its own `- [ ]` item under its own `## test-prune <date> — <file:line>` heading (a heading is one
 Sprint Contract): a gap as `[TEST] <behavior unprotected> (mutant: <mutation>)`, a production bug
 as `[FIX] <what the mutant revealed>; diagnose with dev:task-debug`. Name the headings in the
-report. An audit-only run writes nothing: it lists these items in the report as proposed.
+report.

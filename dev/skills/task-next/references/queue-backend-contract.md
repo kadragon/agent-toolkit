@@ -45,10 +45,10 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
-| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
+| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
-| `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`) |
+| `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
 | `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
@@ -63,10 +63,33 @@ Forge constraints the contract keeps: a claim needs no remote write, closing hap
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
 existing item.
 
+## Filing findings
+
+Send `create` a stable key within the writer's scope and enough evidence in the body to act on
+the finding. Read prior decisions through `rejected` wherever the writer checks for them. When
+`create` returns `edit_file`, use the writer's existing file template and file-presence rules.
+For GitHub, the standing grant in `git-authorization.md` → *Queue writes* covers interactive,
+`--auto`, dispatched and unattended runs. Pass the archived `queue_limits` (default `none`).
+In a standalone run, pass `no-queue-write` if the user expressly forbade queue writes.
+Report created refs, incomplete relations and pending keys with their `pending_path`. Let
+`create` manage the failure-only store. An error or unsupported op is never an `edit_file` response.
+
+Before persisting a security finding, read `describe` with `"verify_visibility": true`. On
+public repositories, keep the finding out of queue items, file edits and pending drafts. Hold
+the finding in-session if verification fails. A non-GitHub file queue reporting `unknown`
+keeps its existing behavior. Mark private security drafts with the `security` label. GitHub
+`create` and `publish` recheck visibility for these drafts. If visibility is public or
+unverified, they return a `withheld_security` count that callers report without item details.
+`publish` removes a previously private draft when the repository is confirmed public, and
+retains it for retry when the check is unavailable. Consult the review cycle's consolidation
+guide for the draft advisory route.
+
 ## Built-in `backlog` backend
 
-- `describe`: `visibility` `unknown`, `close_ref_template` `null` (closure is the cycle's
-  `prune-backlog` plus the `CHANGELOG.md` entry), `ops` without `reject`/`defer` (exit 2).
+- `describe`: `visibility` `unknown` by default. With `verify_visibility: true` and a
+  `github.com` origin, it checks visibility through GitHub and keeps the same file backend.
+  `close_ref_template` is `null` (closure is the cycle's `prune-backlog` plus the
+  `CHANGELOG.md` entry), and `ops` excludes `reject`/`defer` (exit 2).
 - `list` runs `backlog_candidates.py --json --counts` (plus `--full-scan`, `--ref`, `--tasks`)
   and maps each row: `ref` = `id` = `<source>:<line>` (`backlog.md:14`, `tasks.md:1`), `title` =
   heading, `items[]` = the group's open, unparked, unclaimed item texts in document order
@@ -135,7 +158,11 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   nothing. It then reads every issue a trusted author filed with a `<!-- queue-key: <key> -->`
   body marker (open or closed, any label), creates each missing label (`task-queue` plus the
   items' labels), files each unmatched item with the marker appended to its body, and reuses a
-  match (`reused: true`). Relations follow: `parent_key` → `addSubIssue`, `blocked_by` →
+  match (`reused: true`). A recurring finding can set `refile_completed: true` on its item.
+  When its match was closed as completed, `create` files the recurrence with a marker derived
+  from its key and the completed issue number. Retries find the same recurrence. A match closed
+  without completion is reported in `incomplete[]` as `relation: "rejected"` and is not stored.
+  Relations follow: `parent_key` → `addSubIssue`, `blocked_by` →
   `addBlockedBy`, each skipped when the issue already has it. An item with relations is filed
   **without** `task-queue` and gets the label only once every relation landed, so `list` never
   offers it half-linked. A relation GitHub refuses lands in `incomplete[]` (`key`, `relation`
@@ -143,7 +170,7 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   there as `relation: "create"` and is not stored — the same draft can never succeed.
 - **Pending store — failure path only.** Drafts not fully filed — `gh` missing, unauthenticated or
   failing mid-write (the response carries `error`), an `incomplete[]` relation, or
-  `"queue_limits": "no-queue-write"` (gh is never called) — are kept by key, bound to the
+  `"queue_limits": "no-queue-write"` (no remote writes) — are kept by key, bound to the
   `owner/name` they were meant for, in `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
   (outside the working tree and history; every read-merge-write holds `pending.json.lock`), and
   named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
