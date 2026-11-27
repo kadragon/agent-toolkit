@@ -33,6 +33,7 @@ from dispatch import (
     send,
     terminal_name,
     transcript_echoed,
+    verify_terminal,
 )
 from quota import WEEK, assess
 from quota import main as quota_main
@@ -342,6 +343,38 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
+
+    def test_launch_keeps_the_receipt_when_terminal_lookup_fails_after_run(self):
+        for cli, overrides, detail in (
+            ("codex", {}, "task withheld"),
+            ("claude", {"task": None, "message": "/dev:task-next", "model": "opus"},
+             "Claude may already hold its launch prompt"),
+        ):
+            with self.subTest(cli=cli), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                args = self.launch_args(directory, cli=cli, **overrides)
+                owner = {"address": "t6", "state": "live", "cwd": str(home.parent),
+                         "foreground": {"cwd": str(home)}}
+                failed = subprocess.CalledProcessError(1, ["hc", "get"])
+                with (
+                    patch("dispatch.Path.cwd", return_value=home),
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, failed]),
+                    patch("dispatch.subprocess.run",
+                          return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
+                    patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                    patch("dispatch.send") as submit,
+                    patch("builtins.print") as output,
+                ):
+                    with self.assertRaisesRegex(SystemExit, f"t7: launched.*do not retry.*{detail}"):
+                        launch(args)
+                submit.assert_not_called()
+                payload = json.loads(output.call_args.args[0])
+                self.assertEqual(payload["address"], "t7")
+                receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+                self.assertEqual(receipt["address"], "t7")
+                self.assertIsNone(receipt["created_ms"])
+                with self.assertRaisesRegex(SystemExit, "records no terminal identity"):
+                    verify_terminal(receipt, self.TERMINAL)
 
     def test_launch_records_the_title_in_the_receipt(self):
         with tempfile.TemporaryDirectory() as directory:

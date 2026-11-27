@@ -250,6 +250,9 @@ def lock_run(path):
 
 
 def verify_terminal(run, terminal):
+    if run.get("created_ms") is None:
+        raise SystemExit(f"{run['address']}: receipt records no terminal identity (hc get failed at launch); "
+                         "inspect the terminal by hand")
     for key in ("address", "parent", "created_ms"):
         if terminal.get(key) != run[key]:
             raise SystemExit(f"terminal identity changed: {run['address']}")
@@ -447,9 +450,12 @@ def launch(args):
     result = json.loads(subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
                                        check=True).stdout)
     address = result["address"]
-    terminal = hc_json("get", address)
+    try:
+        terminal, lookup_error = hc_json("get", address), None
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        terminal, lookup_error = {}, error
     run = {"name": name, "address": address, "parent": home,
-           "created_ms": terminal["created_ms"], "cli": args.cli, **resolved,
+           "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
     if args.cli == "codex" and (versions := installed_plugin_versions()):
         run["plugin_versions"] = versions
@@ -458,6 +464,10 @@ def launch(args):
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
+    if lookup_error is not None:
+        detail = ("Claude may already hold its launch prompt" if args.cli == "claude" else "task withheld")
+        raise SystemExit(f"{address}: launched, but hc get failed ({lookup_error}); do not retry the launch: "
+                         f"{detail}. Inspect the terminal by hand; {receipt} records no terminal identity")
     if terminal.get("parent") != home:
         detail = ("Claude may have received its launch prompt; inspect before retrying"
                   if args.cli == "claude" else "task withheld")

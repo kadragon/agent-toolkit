@@ -69,10 +69,6 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## Review Backlog
 
-### PR #464 — Add a T3 Code backend to dispatch with Herdr kept as the fallback (2026-11-27)
-
-- [ ] [debt] Herdr `launch` exits before writing the receipt or printing the address when `hc get` fails right after a successful `hc run`; a Claude child may already hold its first message, so a retry can duplicate it (source: codex) (pre_existing) — dev/skills/dispatch/scripts/dispatch.py:397
-
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
