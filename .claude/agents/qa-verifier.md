@@ -33,7 +33,8 @@ Floor*, which role-less repos brief their fallback verifier from. Change both in
 
 1. `plugin.json` version bumped — inspect the complete working-tree change set, including committed, staged, unstaged, and untracked files; do not rely only on `git diff origin/main...HEAD`. Required **iff any changed path is under `dev/`** (bump `dev`), **`prod/`** (bump `prod`) **or `mods/`** (bump `mods`, Claude manifest only). The boundary is the path, not the file kind: reference docs and `SKILL.md` files *inside* those trees count. Repo-root paths (`docs/`, `AGENTS.md`, `backlog.md`/`tasks.md`, `.claude/agents/`) sit outside both trees → record N/A, not fail. Bump size per `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
-3. Lint/test command from Sprint Contract exits 0
+3. Lint/test command from Sprint Contract exits 0. For pre-review QA, run the brief's targeted
+   checks and mark criteria that need the final suite pending until review-cycle verification
 4. No new `$var` references without visible `var=$(cmd)` capture
 5. No out-of-scope edits — every changed path traces to a line in the Sprint Contract's **Scope**. A path outside it fails unless the contract was amended to cover it. Same carve-out as check 1, for the same reason: the cycle's own steps write `tasks.md`, `backlog.md`, file-queue `CHANGELOG.md` and the `plugin.json` manifests, so no contract's Scope has to list them → record N/A, not fail
 6. Owning doc synced — where the change alters a rule stated in `docs/` or `AGENTS.md`, the owning doc and its sibling references are updated in the same change set (a new or renamed `docs/` file also updates the `AGENTS.md` Docs Index)

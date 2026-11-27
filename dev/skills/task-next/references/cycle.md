@@ -202,7 +202,7 @@ rules below, and tells the agent to put its full result in its final response �
 silently, even when the result is empty or the run failed. Rules either way:
 
 - **Per-item checkpoint** — run relevant tests/type checks after each meaningful change.
-  Reserve full required checks for the completed integration, not every item. Do not commit per item.
+  Reserve full required checks for final verification in the review cycle. Do not commit per item.
 - **Stuck-fix stop** — the same fix attempted twice on one file without the command passing →
   record what was tried, why it failed, and the next hypothesis (block below; `--tree` prefixes
   `cd ".worktrees/$SLUG" &&` as for `save`), then stop and report. Recommend resuming in a fresh
@@ -225,9 +225,9 @@ silently, even when the result is empty or the run failed. Rules either way:
   absolute paths under the worktree; nothing in the main checkout is read or edited.
 - An implementer that fails or returns unusable output → stop and report.
 
-Before leaving implementation, account for every acceptance criterion with a concrete result;
-unmet or unknown criteria keep the cycle here. Independent review grades requirements and code
-quality separately; it does not replace the implementer's feedback loop or required checks.
+Before leaving implementation, account for each criterion with concrete evidence or an explicit
+final-suite check still pending. Known unmet criteria keep the cycle here. Independent review
+grades requirements and code quality separately and leaves the required checks in place.
 After version bump and cleanup, follow *Validation evidence* before hand-off.
 
 ## Version bump
@@ -297,10 +297,16 @@ evidence the blocker landed. Disclose synced markers in the PR body.
 
 ## Validation evidence
 
-Run the full contract commands and inherited mandatory checks once on the completed candidate,
-after version bump and cleanup. Before running, stage only the reviewed in-scope files; require
-no unstaged or relevant untracked inputs. Capture the tree before and after checks; changed inputs
-invalidate the result. A nonzero exit, absent result, or unaccounted input blocks hand-off.
+Before hand-off, stage only reviewed in-scope files after version bump and cleanup. Run targeted
+checks on that index with no unstaged or relevant untracked inputs. Capture its tree before and
+after the checks. A failed or absent targeted check blocks hand-off. An execution-only criterion
+whose check belongs to the final suite is pending until review completes. The review cycle's
+*Final verification* runs the full contract commands and inherited mandatory checks once on
+the final candidate.
+
+For the final run, stage only reviewed in-scope files and require no unstaged or relevant
+untracked inputs. Capture the tree before and after checks. Changed inputs invalidate the result.
+A nonzero exit, absent result, or unaccounted input blocks ready and merge.
 
 Record the run beside the archived contract, so a later session can judge reuse without guessing
 a filename or format. The helper stamps `HEAD` and `git write-tree` itself:
@@ -315,13 +321,14 @@ python3 "$STATE" evidence --command "<exact command>" --exit <code> \
 
 `inspect` returns one record per command as the `evidence` list — a rerun replaces only that
 command's record, so an earlier failure stays visible — and reports `tree_matches_current` true
-only when every record's tree equals the current index; `false` or a null `evidence` means rerun.
+only when every record's tree equals the current index. Check each required result's tree and
+inputs for reuse. Use the evidence command for final checks. Carry interim check commands, exits,
+tree and log paths in the hand-off and save them in cycle notes for resume.
 
 A later commit with the same tree (`git rev-parse HEAD^{tree}`) may reuse passing evidence if the
 command, environment, and external inputs remain equivalent. HEAD-sensitive checks (version/trigger
 ratchets, ancestry checks) must run against the new commit. Unknown equivalence means rerun.
-Review fixes invalidate affected evidence: run focused checks while fixing, then full required
-checks on the final changed candidate. Additional reviewers never substitute for checks or CI.
+Additional reviewers never substitute for final checks or CI.
 
 ## Hand off
 

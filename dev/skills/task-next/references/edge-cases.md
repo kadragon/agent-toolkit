@@ -50,11 +50,11 @@ report blocked.
 | Evidence | Resume at |
 |----------|-----------|
 | Scope/approach requires a new material decision | `cycle.md` → *Plan gate* |
-| Any acceptance criterion unmet or unknown | `cycle.md` → *Implement* |
+| An implementation criterion unmet or unknown, other than a check explicitly pending the final suite | `cycle.md` → *Implement* |
 | All implementation criteria supported; required version change incomplete | `cycle.md` → *Version bump* |
 | Implementation/version complete; cleanup incomplete | `cycle.md` → *Cleanup* |
-| Required check missing, failed, stale, or bound to different inputs | `cycle.md` → *Validation evidence* |
-| All above complete; review/CI/merge pending | `cycle.md` → *Hand off* |
+| Targeted check missing, failed, stale, or bound to different inputs | `cycle.md` → *Validation evidence* |
+| Targeted checks complete; review, final suite, CI, or merge pending | `cycle.md` → *Hand off* and resume review at its recorded checkpoint |
 | Parallel batch, not yet merged: integration branch `notes` record unit outcomes | `batch.md` → *A5* for the recorded merged units only; excluded/conflicted units stay on their `wt/<slug>` branches |
 
 Read the current branch/PR state before resuming a review; a commit ahead is not proof Step 1 ran.
