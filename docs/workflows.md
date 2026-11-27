@@ -8,14 +8,14 @@ Expand a short prompt into a concrete spec.
 
 1. Expand into `docs/design/{feature}.md`: user stories, high-level design. No granular implementation details.
 2. Review with user. Do not proceed until approved.
-3. Generate `backlog.md` items from approved spec.
+3. File GitHub queue issues from the approved spec.
 
 Skip for trivial features (one-line skill fix, comment update).
 
 Steps 1-2 are automated by `dev:task-spec` (synthesizes conversation + `dev:task-grill`
 output into `docs/design/{slug}.md`; does not interview the user). Step 3 is automated by
-`dev:task-tickets` (breaks an approved spec into vertical-slice `backlog.md` items in
-dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev:task-new`
+`dev:task-tickets` (breaks an approved spec into vertical-slice queue issues in
+dependency order and records blockers as GitHub issue dependencies). `dev:task-new`
 routes multi-session or architecturally significant requests through this chain. Clear bounded
 requests go directly to a contract; unresolved material decisions go through `task-grill`.
 
@@ -34,13 +34,13 @@ is `dev:task-next` → `references/cycle.md`. Repo-specific points:
 
 ## `draft` — Documentation
 
-Write or update `docs/`. Ground every claim in current code. Never modify production code during draft. If the doc reveals a missing constraint, add to `backlog.md`.
+Write or update `docs/`. Ground every claim in current code. Never modify production code during draft. If the doc reveals a missing constraint, file a queue issue.
 
 ## `constrain` — Architectural Enforcement
 
 1. Write CI check or lint rule first.
 2. Run it.
-3. If current code violates → add to `backlog.md`, don't fix here.
+3. File a queue issue for violations in current code and defer the code fixes to that issue.
 4. Update `docs/architecture.md`.
 
 ## `sweep` — Garbage Collection
@@ -50,7 +50,7 @@ Run between features or on schedule (`bash tools/sweep.sh`).
 - Run `tools/sweep.sh`
 - List findings tagged `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
 - Fix trivials inline
-- Leave complex items in `backlog.md`
+- File queue issues for complex items
 - Assess whether harness components are still load-bearing (see `references/sweep-template.md`)
 
 ## `explore` — Research
@@ -67,9 +67,9 @@ The code cycle archives its approved Sprint Contract under the common Git direct
 
 | Primary workflow | Permitted |
 |-----------------|-----------|
-| `code` | Add `[doc]` or `[constraint]` item to `backlog.md` |
+| `code` | File a `[doc]` or `[constraint]` queue issue |
 | `code` | Update relevant docs after implementation |
-| `draft` | Add `backlog.md` item when doc reveals missing behavior |
+| `draft` | File a queue issue when a doc reveals missing behavior |
 | `sweep` | Fix trivial `[doc]` items inline |
 
 Not permitted: writing production code during `draft` or `sweep`.

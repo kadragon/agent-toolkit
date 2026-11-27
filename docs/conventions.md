@@ -23,7 +23,7 @@ Commit types (mandatory prefix):
 | `[CONSTRAINT]` | No production code changed; structural guards only (lint rule, CI check, schema) |
 | `[HARNESS]` | Skill/hook/agent instruction changes; no production code |
 | `[TEST]` | Test-only (new coverage, test refactor) |
-| `[PLAN]` | backlog.md / tasks.md changes |
+| `[PLAN]` | Task queue or `tasks.md` changes |
 
 Never commit directly to `main` — branch first (`git checkout -b <type>/<slug>`).
 
@@ -364,7 +364,7 @@ A new check must not ship a warning the repo has *already decided* is correct-by
 warning never goes away, so it teaches the operator to skim past the whole section — costing the
 real drift the check exists to catch. When a legitimate exception exists, give it a mechanical
 opt-out (a frontmatter key, a marker comment) and document the class that may use it; deferring
-the decision to `backlog.md` leaves the noisy state as the shipped default.
+the decision to a queue issue leaves the noisy state as the shipped default.
 
 Reference implementation: `spine-exempt: true` in `validate-harness.sh` §11.
 
