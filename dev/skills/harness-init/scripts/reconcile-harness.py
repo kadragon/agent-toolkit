@@ -328,9 +328,18 @@ def count_items(backlog: str) -> tuple[int, int] | None:
 # Main
 # ---------------------------------------------------------------------------
 
+def file_queue_enabled() -> bool | None:
+    """Return None when backend resolution failed and recovery should be retried."""
+    try:
+        return resolve(str(BACKLOG.parent.resolve()))["backend"] == "backlog"
+    except QueueError as exc:
+        print(f"Queue backend unavailable: {exc}. Leaving file queue state intact.", file=sys.stderr)
+        return None
+
+
 def main() -> None:
     tasks_content = read(TASKS)
-    file_queue = resolve(str(BACKLOG.parent.resolve()))["backend"] == "backlog"
+    file_queue = None
 
     # C-1: Close the sprint block, restoring file-queue markers where applicable.
     if tasks_content is not None:
@@ -349,6 +358,9 @@ def main() -> None:
                 print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
+            file_queue = file_queue_enabled()
+            if file_queue is None:
+                return  # Keep the failed sprint so recovery can be retried.
             suffix = "; backlog items reverted to [ ]" if file_queue else ""
             if file_queue and BACKLOG.exists():
                 backlog_content = read_text_preserving_eol(BACKLOG)
@@ -395,15 +407,21 @@ def main() -> None:
             )
             return
 
-    elif file_queue and BACKLOG.exists():
+    else:
         # C-2: tasks.md absent — clean orphan markers from backlog
-        content = read_text_preserving_eol(BACKLOG)
-        cleaned = revert_orphan_markers(content)
-        cleaned = remove_empty_headings(cleaned)
-        if cleaned != content:
-            BACKLOG.write_bytes(cleaned.encode("utf-8"))
+        file_queue = file_queue_enabled()
+        if file_queue is None:
+            return
+        if file_queue and BACKLOG.exists():
+            content = read_text_preserving_eol(BACKLOG)
+            cleaned = revert_orphan_markers(content)
+            cleaned = remove_empty_headings(cleaned)
+            if cleaned != content:
+                BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
     # C-3: Report
+    if file_queue is None:
+        file_queue = file_queue_enabled()
     if not file_queue:
         return
     if not BACKLOG.exists():
@@ -425,7 +443,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except QueueError as exc:
-        sys.exit(f"reconcile-harness: {exc}")
+    main()

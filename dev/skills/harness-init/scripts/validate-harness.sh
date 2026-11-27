@@ -120,14 +120,21 @@ for config in .claude/settings.json .claude/settings.local.json .claude/trigger-
         fail "$config malformed or not an object (requires jq)"
     fi
 done
-# Probe capability rather than assuming a python3 shim or tomllib is installed.
+# The queue resolver can run on Python installations without tomllib.
+QUEUE_SCRIPT="$SCRIPT_DIR/../../task-next/scripts/queue_backend.py"
+queue_python=""
 toml_python=""
 for interpreter in python3 python; do
     candidate=$(command -v "$interpreter" || true)
-    if [[ -n "$candidate" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
-        toml_python="$candidate"
-        break
+    [[ -n "$candidate" ]] || continue
+    if [[ -z "$queue_python" && -f "$QUEUE_SCRIPT" ]] &&
+        "$candidate" -c 'import runpy, sys; runpy.run_path(sys.argv[1])' "$QUEUE_SCRIPT" >/dev/null 2>&1; then
+        queue_python="$candidate"
     fi
+    if [[ -z "$toml_python" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+        toml_python="$candidate"
+    fi
+    [[ -z "$queue_python" || -z "$toml_python" ]] || break
 done
 while IFS= read -r config; do
     [[ -f "$config" ]] || continue
@@ -369,9 +376,13 @@ fi
 echo ""
 echo "--- Queue Backend (sync D-1) ---"
 
-if [[ -z "$toml_python" ]]; then
-    fail "queue backend cannot be validated — Python 3.11+ unavailable (python3/python)"
-elif queue_description=$("$toml_python" - "$SCRIPT_DIR/../../task-next/scripts/queue_backend.py" <<'QUEUE_DESCRIPTION'
+queue_backend=""
+if [[ ! -f "$QUEUE_SCRIPT" ]]; then
+    fail "bundled queue resolver unavailable: $QUEUE_SCRIPT"
+elif [[ -z "$queue_python" ]]; then
+    warn "queue backend could not be resolved — no compatible Python (python3/python); checking the local file schema only"
+    queue_backend="backlog"
+elif queue_description=$("$queue_python" - "$QUEUE_SCRIPT" <<'QUEUE_DESCRIPTION'
 import json
 import subprocess
 import sys
@@ -386,7 +397,7 @@ if result.returncode:
     sys.exit(result.stderr.strip() or f"queue_backend.py describe exited {result.returncode}")
 description = json.loads(result.stdout)
 backend = description.get("backend")
-if not isinstance(backend, str) or len(backend.splitlines()) != 1 or not backend.strip():
+if not isinstance(backend, str) or backend.splitlines() != [backend] or not backend.strip():
     sys.exit("queue_backend.py describe did not return a backend name")
 sys.stdout.reconfigure(encoding="utf-8", newline="\n")
 print(backend)
@@ -394,16 +405,17 @@ for warning in description.get("warnings", []):
     print(warning)
 QUEUE_DESCRIPTION
 ); then
-    mapfile -t queue_lines <<< "$queue_description"
-    queue_backend="${queue_lines[0]}"
-    for warning in "${queue_lines[@]:1}"; do
-        warn "$warning"
-    done
+    {
+        IFS= read -r queue_backend
+        while IFS= read -r warning; do
+            warn "$warning"
+        done
+    } <<< "$queue_description"
 else
     fail "could not resolve the task queue backend"
 fi
 
-if [[ -z "${queue_backend:-}" ]]; then
+if [[ -z "$queue_backend" ]]; then
     :  # The failed backend check above already explains why the schema check cannot run.
 elif [[ "$queue_backend" != "backlog" ]]; then
     if [[ -f "backlog.md" ]]; then

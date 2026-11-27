@@ -74,6 +74,12 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("migrate_backlog.py", result.stdout)
         self.assertIn("uses standard checkbox items", result.stdout)
 
+        self.write("backlog.md", "## Queue\n- [>] Last legacy sprint item\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("legacy [>] item(s); finish the sprint or run reconcile-harness.py", result.stdout)
+        self.assertIn("uses standard checkbox items", result.stdout)
+
     def test_existing_non_numbered_policy_and_one_invariant(self):
         self.write("AGENTS.md", BASE + "## Golden Principles\n- Validate public input → tests.\n")
         result = self.run_script()
@@ -155,6 +161,33 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("cannot be validated", result.stdout)
         self.assertNotIn("malformed TOML", result.stdout)
+
+    def test_queue_resolution_without_tomllib(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+            check=True,
+        )
+        shim = f'#!/bin/sh\n[ "$2" != "import tomllib" ] || exit 1\nexec "{sys.executable}" "$@"\n'
+        for name in ("python3", "python"):
+            self.write(f"bin/{name}", shim)
+            (self.root / "bin" / name).chmod(0o755)
+        result = self.run_script(PATH=f"{self.root / 'bin'}:{os.environ['PATH']}")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md absent — expected on the github queue backend", result.stdout)
+
+    def test_missing_queue_python_still_checks_local_schema(self):
+        for name in ("python3", "python"):
+            self.write(f"bin/{name}", "#!/bin/sh\nexit 127\n")
+            (self.root / "bin" / name).chmod(0o755)
+        path = f"{self.root / 'bin'}:{os.environ['PATH']}"
+        self.write("backlog.md", "## Queue\n- [ ] Work\n")
+        result = self.run_script(PATH=path)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("checking the local file schema only", result.stdout)
+        self.write("backlog.md", "## Queue\n- [?] Work\n")
+        result = self.run_script(PATH=path)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("non-standard checkboxes", result.stdout)
 
     def test_workflow_only_delegation(self):
         self.write("docs/workflows.md", "# Code\n## Delegation workflow\nDelegate to the built-in reviewer when authorized.\n")

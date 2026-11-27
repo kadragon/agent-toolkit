@@ -11,8 +11,8 @@ Every request carries `"contract": 1` and `"repo": "<abs toplevel>"`.
 
 Backend resolution, first match wins:
   1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command (shell-split).
-  2. `origin` host `github.com` → `github`, unless `backlog.md` still has an open `- [ ]` item
-     (parked ones included), which keeps the repo on `backlog`.
+  2. `origin` host `github.com` → `github`, unless `backlog.md` still has open `- [ ]`
+     items (including parked items) or legacy in-flight `- [>]` items.
   3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`
      (`{"hosts": {"<origin host>": ["cmd", "arg", ...]}}`) → that adapter command.
   4. `backlog`.
@@ -111,23 +111,29 @@ def _registry_command(host: str, env: dict[str, str]) -> list[str] | None:
     return cmd
 
 
-def backlog_open_items(repo: str, rev: str | None = None) -> int:
-    """Unchecked `- [ ]` items in `<repo>/backlog.md` (as committed at `rev` when given), parked
-    ones included; 0 when absent."""
+def _backlog_counts(repo: str, rev: str | None = None) -> tuple[int, int]:
+    """Count open and legacy in-flight file items at the requested revision."""
     if rev:
         sha = _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
         if not sha:
             raise QueueError(f"ref {rev!r} does not resolve to a commit in {repo}")
         text = _git(repo, "show", f"{sha}:backlog.md") or ""
-        return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
-    try:
-        with open(os.path.join(repo, "backlog.md"), encoding="utf-8") as fh:
-            text = fh.read()
-    except FileNotFoundError:
-        return 0
-    except (OSError, ValueError) as e:  # unreadable is not "empty": never flip to github on it
-        raise QueueError(f"cannot read {os.path.join(repo, 'backlog.md')}: {e}") from e
-    return sum(1 for t in bc.tokenize(text) if t["type"] == "checkbox" and t["state"] == " ")
+    else:
+        path = os.path.join(repo, "backlog.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except FileNotFoundError:
+            return 0, 0
+        except (OSError, ValueError) as e:  # unreadable is not "empty": never flip to github on it
+            raise QueueError(f"cannot read {path}: {e}") from e
+    states = [t["state"] for t in bc.tokenize(text) if t["type"] == "checkbox"]
+    return states.count(" "), states.count(">")
+
+
+def backlog_open_items(repo: str, rev: str | None = None) -> int:
+    """Count unchecked file items, including parked items and excluding legacy in-flight items."""
+    return _backlog_counts(repo, rev)[0]
 
 
 def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None) -> dict:
@@ -140,9 +146,10 @@ def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None
         return {"backend": "adapter", "source": "env", "command": split_command(explicit)}
     host = origin_host(_git(repo, "remote", "get-url", "origin"))
     if host == "github.com":
-        open_items = backlog_open_items(repo, rev)  # the queue `list` will read, not this checkout's
-        if open_items:
-            return {"backend": "backlog", "source": "github-open-backlog", "open_items": open_items}
+        open_items, active_items = _backlog_counts(repo, rev)
+        if open_items or active_items:
+            return {"backend": "backlog", "source": "github-open-backlog",
+                    "open_items": open_items, "active_items": active_items}
         return {"backend": "github", "source": "github-host"}
     if host:
         cmd = _registry_command(host, env)
@@ -1418,7 +1425,14 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
         elif op in ("describe", "list") and backend["source"] == "github-open-backlog" and data is not None:
-            data.setdefault("warnings", []).append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
+            warnings = data.setdefault("warnings", [])
+            if backend["open_items"]:
+                warnings.append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
+            if backend["active_items"]:
+                warnings.append(
+                    f"backlog.md has {backend['active_items']} legacy [>] item(s); finish the sprint or run "
+                    "reconcile-harness.py before migrating with migrate_backlog.py"
+                )
         return code, data
     if backend["backend"] == "github":
         code, data = github_op(op, req, runner)
@@ -1587,8 +1601,16 @@ def run_tests() -> int:
             write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Done\n\n- [x] closed\n")
             _assert(resolve(empty, dict(base_env)) == {"backend": "github", "source": "github-host"},
                     "github.com origin without open items → github")
+            write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Sprint\n\n- [>] last active item\n")
+            git(empty, "add", "backlog.md")
+            git(empty, "commit", "-q", "--no-verify", "-m", "in flight")
+            active = resolve(empty, dict(base_env))
+            _assert(active["backend"] == "backlog" and active["open_items"] == 0 and active["active_items"] == 1,
+                    "legacy in-flight item keeps the file queue even without open items")
             os.remove(os.path.join(empty, "backlog.md"))
             _assert(resolve(empty, dict(base_env))["backend"] == "github", "github.com origin, no backlog.md → github")
+            _assert(resolve(empty, dict(base_env), "HEAD") == active,
+                    "pinned ref retains legacy in-flight file items")
             forge = os.path.realpath(os.path.join(tmp, "forge"))
             os.makedirs(forge)
             git(forge, "init", "-q", "-b", "main")

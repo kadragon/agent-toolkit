@@ -257,7 +257,7 @@ def _run_main_in_tmp(
 
 
 def test_main_github_origin_reconciles_only_the_sprint():
-    backlog = "# Backlog\n\n## Old queue\n- [>] historical marker\n\n## Empty heading\n"
+    backlog = "# Backlog\n\n## Old queue\n- [x] historical item\n\n## Empty heading\n"
     for status in (None, "failed", "done"):
         tasks = f"# Example sprint\n\nstatus: {status}\n" if status else None
         result = _run_main_in_tmp(tasks, backlog, "# Changelog\n", github_origin=True)
@@ -267,11 +267,29 @@ def test_main_github_origin_reconciles_only_the_sprint():
         check(f"{status}: no sprint file remains", not result["tasks_exists"], result)
         check(f"{status}: only done is logged", ("Example sprint" in result["changelog_body"]) == (status == "done"))
 
-    legacy = backlog.replace("- [>]", "- [ ]", 1) + "\n- [>] orphan\n"
-    result = _run_main_in_tmp(None, legacy, github_origin=True)
-    check("unmigrated GitHub backlog keeps file reconciliation",
-          result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
-          "Backlog: 2 queued, 0 active" in result["stdout"], result)
+    legacy = "# Backlog\n\n## Last file item\n- [>] Restore me\n"
+    for status in (None, "failed"):
+        tasks = f"# Example sprint\n\nstatus: {status}\n" if status else None
+        result = _run_main_in_tmp(tasks, legacy, github_origin=True)
+        check(f"{status}: final in-flight item returns to the GitHub repo's file queue",
+              result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
+              "Backlog: 1 queued, 0 active" in result["stdout"] and not result["tasks_exists"], result)
+
+
+def test_main_queue_resolution_failure_preserves_failed_sprint():
+    backlog = "# Backlog\n\n## Sprint\n- [>] Restore me\n"
+    with patch.object(mod, "resolve", side_effect=mod.QueueError("invalid registry")) as resolve:
+        active = _run_main_in_tmp("# Example\nstatus: active\n", backlog)
+        check("active sprint skips queue resolution",
+              not resolve.called and active["stdout"] == "Sprint active: Example\n", active)
+        failed_tasks = "# Example\nstatus: failed\n"
+        failed = _run_main_in_tmp(failed_tasks, backlog)
+        check("failed sprint with unknown backend remains recoverable",
+              failed["tasks_body"] == failed_tasks and failed["backlog_body"] == backlog and
+              "invalid registry" in failed["stderr"], failed)
+        idle = _run_main_in_tmp(None, backlog)
+        check("idle cleanup leaves the file intact on resolution failure",
+              idle["backlog_body"] == backlog and not idle["stdout"] and "invalid registry" in idle["stderr"], idle)
 
 
 def test_main_done_preserves_review_backlog():
@@ -605,6 +623,7 @@ SUITES = [
     ("tasks_title: ignores fenced heading-like lines", test_tasks_title_ignores_fenced_heading_like_lines),
     ("strip_sprint_block: status probe is fence-aware", test_strip_status_probe_is_fence_aware),
     ("main: GitHub origins respect the selected backend", test_main_github_origin_reconciles_only_the_sprint),
+    ("main: backend resolution failures preserve recoverable state", test_main_queue_resolution_failure_preserves_failed_sprint),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
     ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),
