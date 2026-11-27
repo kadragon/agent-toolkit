@@ -82,3 +82,22 @@ Check again immediately before each effect using the saved feature-branch key. H
 `base-merge`. Scripts enforce their writes independently; raw Git/hub commands must use the
 same helper, including review-fix commits, PR updates/comments/closure and batch/tree commits.
 Neither `--from` (caller trace) nor `--auto` (in-scope review-fix confirmation) grants authority.
+
+## Queue writes
+
+On the `github` queue backend, `queue-write` (filing tickets, review findings, deferred
+follow-ups and `harness-capture` deltas as issues through `queue_backend.py create`) is a
+**standing user grant** (2026-11-27): every repo, public or private, attended or dispatched,
+with no per-run approval, plan-gate confirmation or forwarded grant. Filing an issue is not a
+Git write, so no Git limit restricts it. A contract may carry a separate field:
+
+```markdown
+**Queue limits:** none
+```
+
+Set it to `no-queue-write` only from an explicit user instruction forbidding queue writes for
+that run; a missing field reads as `none`. It is never a `**Git limits:**` value and
+`queue-write` is never an `**Allowed Git actions:**` entry — `cycle_state.py authorize` fails
+closed on unknown tokens there. Under `no-queue-write`, writers pass `"queue_limits":
+"no-queue-write"` to `create`, which keeps the drafts in the pending store
+(`$(git rev-parse --git-common-dir)/agent-queue/pending.json`) for a later `publish`.
