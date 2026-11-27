@@ -1,6 +1,6 @@
 {
   "name": "dev",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Development skills and workflows. Install guard@kadragon for commit, memory, and session-start hooks.",
   "author": {
     "name": "kadragon"
