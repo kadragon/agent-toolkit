@@ -59,9 +59,11 @@ Derive `COMMIT_MESSAGE` from `git diff --cached --stat` (empty index: `--stat HE
 Capture it — and the Step 2 contract — with a **quoted** heredoc delimiter, never an interpolated
 assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if its diff against
 the base is empty and no review remains, report no work and stop here. End the body with
-`Verification:` + the exact command and exit code of each `cycle_state.py inspect` → `evidence`
-record, only when `tree_matches_current` is true (else `none recorded`): `retire` deletes the
-archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`). Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref (`Closes #12`; refs from the hand-off, else the archived `## Covers`), kept in every later message (`../task-next/references/cycle.md` → *Covered refs*); none for the `backlog` backend or a ref outside `## Covers`. For PR title and body metadata, see `task-next/references/cycle.md` → *Cleanup*.
+`Verification:` and the exact commands and exits from the hand-off's targeted evidence
+or cycle notes, if they match the candidate tree. Use `none recorded` if no evidence matches.
+Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref
+(`Closes #12`; refs from the hand-off or archived `## Covers`), kept in every later message
+(`../task-next/references/cycle.md` → *Covered refs*). For PR metadata, see that guide's *Cleanup*.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -107,6 +109,8 @@ PR_URL=$(jq -r '.pr_url' <<<"$RESULT")
 `pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
+Recover review progress per `references/consolidation-guide.md` → *Resume checkpoints*
+before launching any reviewer.
 Apply `references/review-sources.md` → *Data-sharing policy* to every primary, panel, and fallback reviewer.
 **Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then the advisory pass below.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
@@ -121,9 +125,10 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 BASE_BRANCH="<from Setup>"
 EFFORT="<high when the latest floor run's SECURITY_HIT was non-empty or the risk is material, else empty>"
 CONTRACT=$(cat <<'SPRINT_CONTRACT'
-<Sprint Contract verbatim, archive path, and validation evidence including commit/tree, command,
- environment, exit code, and log location, prefixed "Lint/test evidence:"; empty only in the
- one case the Sprint Contract paragraph above allows>
+<Sprint Contract verbatim and archive path. Label check results "Lint/test evidence:" only for
+ the criteria each result directly grades. Label other results "Targeted evidence:". List any
+ execution-only criteria awaiting the final suite as pending, with no verdict yet.
+ Include commit/tree, command, environment, exit code, and log location for each result.>
 SPRINT_CONTRACT
 )
 bash "$SKILL_DIR/scripts/claude-review.sh" "${BASE_BRANCH}" "${EFFORT}" "${CONTRACT}" \
@@ -182,20 +187,25 @@ with `gh pr edit`, keeping every closing line.
 `--no-hub` reports with remote checks pending and stops. PR-only, unverified base-merge
 authority, or dispatch pre-merge stop: finish CI, report the PR ready, and preserve its archive.
 
-**Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
-re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route
-is hub from here: Step 1's hub block, then run any hub sources still unused in this cycle and
-consolidate under its existing review cap before the hub path below.
-Otherwise apply *Final verification* without panel reclaim, then merge locally and push `main`:
+**Lite path** — fetch the current base and re-run the floor after any repair. A non-empty `FLOOR_HIT` or
+base tip outside the reviewed HEAD's history → Step 1's hub block, then launch unused hub
+sources once and follow Steps 3–5 under the existing cap before the hub path below.
+Otherwise apply *Final verification* without panel reclaim before the local merge and push:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
 BASE_BRANCH="<from Setup>"
 STATE="<absolute task-next skill directory>/scripts/cycle_state.py"
+MERGE_MESSAGE=$(cat <<'MERGE_MSG'
+<merge title and final Verification: commands and exit codes>
+MERGE_MSG
+)
+[[ -n "$MERGE_MESSAGE" ]] || exit 1
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-merge || exit 1
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
 git checkout "$BASE_BRANCH" && git pull --ff-only origin "$BASE_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
-git merge --no-ff "$FEATURE_BRANCH" -m "Merge branch '$FEATURE_BRANCH'" || { git merge --abort; git checkout "$FEATURE_BRANCH"; exit 1; }
+git merge-base --is-ancestor HEAD "$FEATURE_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
+git merge --no-ff "$FEATURE_BRANCH" -m "$MERGE_MESSAGE" || { git merge --abort; git checkout "$FEATURE_BRANCH"; exit 1; }
 python3 "$STATE" authorize --branch "$FEATURE_BRANCH" --action base-push || exit 1
 git push origin "$BASE_BRANCH" && git branch -d "$FEATURE_BRANCH"
 ```

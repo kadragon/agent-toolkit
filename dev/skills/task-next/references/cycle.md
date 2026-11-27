@@ -226,8 +226,8 @@ silently, even when the result is empty or the run failed. Rules either way:
 - An implementer that fails or returns unusable output → stop and report.
 
 Before leaving implementation, account for each criterion with concrete evidence or an explicit
-final-suite check still pending. Known unmet criteria keep the cycle here. Independent review grades requirements and code
-quality separately; it does not replace the implementer's feedback loop or required checks.
+final-suite check still pending. Known unmet criteria keep the cycle here. Independent review
+grades requirements and code quality separately and leaves the required checks in place.
 After version bump and cleanup, follow *Validation evidence* before hand-off.
 
 ## Version bump
@@ -297,10 +297,12 @@ evidence the blocker landed. Disclose synced markers in the PR body.
 
 ## Validation evidence
 
-Before hand-off, run targeted checks on the integrated change after version bump and cleanup.
-A failed or absent targeted check blocks hand-off. An execution-only criterion whose check belongs
-to the final suite is pending until review completes. The review cycle's *Final verification*
-runs the full contract commands and inherited mandatory checks once on the final candidate.
+Before hand-off, stage only reviewed in-scope files after version bump and cleanup. Run targeted
+checks on that index with no unstaged or relevant untracked inputs. Capture its tree before and
+after the checks. A failed or absent targeted check blocks hand-off. An execution-only criterion
+whose check belongs to the final suite is pending until review completes. The review cycle's
+*Final verification* runs the full contract commands and inherited mandatory checks once on
+the final candidate.
 
 For the final run, stage only reviewed in-scope files and require no unstaged or relevant
 untracked inputs. Capture the tree before and after checks. Changed inputs invalidate the result.
@@ -320,7 +322,8 @@ python3 "$STATE" evidence --command "<exact command>" --exit <code> \
 `inspect` returns one record per command as the `evidence` list — a rerun replaces only that
 command's record, so an earlier failure stays visible — and reports `tree_matches_current` true
 only when every record's tree equals the current index. Check each required result's tree and
-inputs for reuse. Keep interim logs in the review evidence without registering them as final checks.
+inputs for reuse. Use the evidence command for final checks. Carry interim check commands, exits,
+tree and log paths in the hand-off and save them in cycle notes for resume.
 
 A later commit with the same tree (`git rev-parse HEAD^{tree}`) may reuse passing evidence if the
 command, environment, and external inputs remain equivalent. HEAD-sensitive checks (version/trigger

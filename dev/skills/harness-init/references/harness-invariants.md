@@ -81,7 +81,8 @@ needs these gates is the one running without them. The floor, one line per gate:
    file kind: reference docs and `SKILL.md` files *inside* those trees count. Bump size per
    `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
-3. The Sprint Contract's lint/test command exits 0
+3. The Sprint Contract's lint/test command exits 0. For pre-review QA, run the brief's targeted
+   checks and mark criteria that need the final suite pending until review-cycle verification
 4. No new `$var` reference without a visible `var=$(cmd)` capture
 5. No out-of-scope edits — every changed path traces to a line in the contract's **Scope**. A path
    outside it fails unless the contract was amended to cover it

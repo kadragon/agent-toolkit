@@ -27,8 +27,8 @@ scope, criteria, and approach for each unit. Git authority for aggregate/unit co
 **Sequential (default):** small tasks, coupled units, shared-file edits, or work whose preparation
 and hand-off cost outweighs parallel savings. Use one branch and an aggregate Sprint Contract,
 with criteria and exact backlog lines per unit (issues backend: the unit's covered refs,
-`cycle.md` → *Covered refs*). Follow the shared cycle; run relevant checks
-per unit and full required checks on the final candidate. Review the combined result once.
+`cycle.md` → *Covered refs*). Follow the shared cycle with targeted checks per unit.
+Review the combined result and run full required checks on the final candidate.
 A failed unit stops dependent work; preserve changes and report the unmet criterion.
 
 **Parallel:** use only when all selected parallel units have approved scope, independently
@@ -75,7 +75,8 @@ that worktree/branch; exclude them from integration and report why.
 ### A4 — Unit QA
 
 Use a separate `qa-verifier` per successful unit, with the same brief rules and ownership limits.
-Grade requirements and code quality against the unit contract; reuse eligible test evidence per
+Brief pre-review QA with each unit's targeted checks. Grade requirements and code quality
+against the unit contract; reuse eligible test evidence per
 `cycle.md` → *Validation evidence*. One fix-and-QA retry for a blocking finding. Still blocked
 or verifier unavailable → preserve the unit and exclude it from integration; report the limit.
 

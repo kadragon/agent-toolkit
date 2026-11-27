@@ -78,5 +78,6 @@ result, so lite has no pre-merge reclaim.
 The Claude reviewer grades the Sprint Contract itself. Codex reviews the diff only and takes no
 contract, so when Codex is the lite reviewer the orchestrator grades each acceptance criterion
 inline against the recorded evidence and reports each unmet one as a `contract` finding.
-Use the same inline re-grade for focused contract confirmation and disclose it as self-grading
+Leave execution-only criteria pending until their own checks run. Use the same inline re-grade
+for focused contract confirmation and disclose it as self-grading
 (SKILL.md Step 2).
