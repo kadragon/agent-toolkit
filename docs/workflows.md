@@ -15,7 +15,7 @@ Skip for trivial features (one-line skill fix, comment update).
 Steps 1-2 are automated by `dev:task-spec` (synthesizes conversation + `dev:task-grill`
 output into `docs/design/{slug}.md`; does not interview the user). Step 3 is automated by
 `dev:task-tickets` (breaks an approved spec into vertical-slice queue issues in
-dependency order, using a `*(blocked by: <n>-<slug>)*` marker for blocking). `dev:task-new`
+dependency order and records blockers as GitHub issue dependencies). `dev:task-new`
 routes multi-session or architecturally significant requests through this chain. Clear bounded
 requests go directly to a contract; unresolved material decisions go through `task-grill`.
 
