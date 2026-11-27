@@ -11,16 +11,9 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-## 1 — queue backend contract and resolver
-
-- [ ] [FEAT] Add `task-next/scripts/queue_backend.py` (resolver + contract v1 framing) and `references/queue-backend-contract.md`; the built-in `backlog` backend maps `backlog_candidates.py` output onto the contract and adds `show` and `rejected` readers, so selection is unchanged everywhere
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Backend resolution, Backend contract (version 1)
-  Done when: `python3 dev/skills/task-next/scripts/queue_backend.py --test` passes — resolver order (env, github.com host, open `backlog.md` items keep `backlog`, user registry, fallback), exit codes 0/1/2, `create` → `edit_file` on `backlog`, `backlog` `list` matching `backlog_candidates.py --json --counts` after the documented mapping (same titles, order, and `counts` open/deferred/blocked) and honoring `ref`/`tasks`, `show` and `rejected` on fixtures, a fixture adapter plugged in through the registry; the test step is wired in `harness-check.yml`
-  Approach: stdlib-only CLI `<op>` + JSON stdin/stdout; `github` resolves but returns exit 2 for every op until ticket 2
-
 ## 2 — github backend read path
 
-- [ ] [FEAT] Implement `describe`, `list` and `show` for the `github` backend: `task-queue` label + author-association trust gate, parent/sub-issue groups, sub-issue eligibility (sub-issues never standalone), blocked/deferred parking, and the three claim sources with `origin/HEAD` resolved as `dispatch.py` does *(blocked by: 1-queue-backend-contract-and-resolver)*
+- [ ] [FEAT] Implement `describe`, `list` and `show` for the `github` backend: `task-queue` label + author-association trust gate, parent/sub-issue groups, sub-issue eligibility (sub-issues never standalone), blocked/deferred parking, and the three claim sources with `origin/HEAD` resolved as `dispatch.py` does
   Source: docs/design/github-issues-queue.md → Implementation Decisions → GitHub mapping
   Done when: `queue_backend.py --test` covers each mapping rule against recorded `gh api graphql` JSON fixtures through an injectable runner (no network); a live read-only `list` with `AGENT_QUEUE_BACKEND=github` against `kadragon/knue-pic` runs (zero candidates expected before migration)
   Approach: GraphQL over issues, labels, blockedBy, subIssues, closedByPullRequestsReferences, paging every connection selection depends on and reporting an incomplete result (never an empty queue) at a page limit; hard error when `gh` is missing or unauthenticated, never a `backlog.md` fallback
