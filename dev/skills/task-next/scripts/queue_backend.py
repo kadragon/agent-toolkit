@@ -554,8 +554,11 @@ def default_branch(repo: str) -> str | None:
     return None
 
 
+_COVERS_REF_RE = re.compile(r"^\s*[-*+]\s+#(\d+)\b")
+
+
 def _covers_refs(tasks_text: str) -> set[int]:
-    """Issue numbers named under any `Covers` heading of a tasks.md."""
+    """Only a Covers item's leading ref counts: a `#N` quoted in the copied title is not a claim."""
     tokens = bc.tokenize(tasks_text)
     headings = bc._headings(tokens)
     lines = tasks_text.splitlines()
@@ -566,7 +569,9 @@ def _covers_refs(tasks_text: str) -> set[int]:
         end = bc._region_end(h, headings)
         stop = len(lines) if end == float("inf") else int(end) - 1
         for line in lines[h["line"]:stop]:
-            found.update(int(n) for n in _REF_RE.findall(line))
+            m = _COVERS_REF_RE.match(line)
+            if m:
+                found.add(int(m.group(1)))
     return found
 
 
@@ -1303,7 +1308,8 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     repo = req.get("repo")
     if not (isinstance(repo, str) and os.path.isabs(repo) and os.path.isdir(repo)):
         raise QueueError(f"request repo must be an existing absolute path, got {repo!r}")
-    backend = resolve(repo, env, req.get("ref") if op == "list" else None)
+    # describe takes the same ref, so a --tree run resolves the backend `list` will use (the base's backlog.md)
+    backend = resolve(repo, env, req.get("ref") if op in ("list", "describe") else None)
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
         if code == EXIT_UNSUPPORTED:
@@ -1760,7 +1766,7 @@ def run_github_tests(tmp: str, git, write) -> None:
     git(repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "[FEAT] local work\n\nCloses #16\nFixes other/repo#15")
     wt = os.path.join(repo, ".worktrees", "cov")
     git(repo, "worktree", "add", "-q", "-b", "cov", wt)
-    write(os.path.join(wt, "tasks.md"), "# Sprint\nstatus: active\n\n## Covers\n\n- #15 [FEAT] covered\n\n## Notes\n\n- #1\n")
+    write(os.path.join(wt, "tasks.md"), "# Sprint\nstatus: active\n\n## Covers\n\n- #15 [FEAT] covered, follow-up to #12\n\n## Notes\n\n- #1\n")
 
     page1, page2 = _fx_queue()
     pages = {None: _fx_conn(page1, "p1"), "p1": _fx_conn(page2)}
@@ -1805,6 +1811,7 @@ def run_github_tests(tmp: str, git, write) -> None:
             "claim (b) ignores a merged PR and an untrusted author's PR (with a warning)")
     _assert(os.path.realpath(claimed.get("#15", "")) == os.path.realpath(wt), "claim (a): a .worktrees `## Covers` ref")
     _assert("#1" not in claimed, "a ref outside `## Covers` claims nothing")
+    _assert("#12" not in claimed, "a `#N` quoted in a Covers title is not a claim")
     _assert(claimed.get("#16") == "main (unpushed commit)", "claim (c): an unpushed closing commit on the default branch")
     _assert(data["incomplete"] is False and not github_list(dict(req), runner)["parked"], "parked[] only when asked")
     fast = github_list(dict(req), runner)["candidates"]
@@ -1864,6 +1871,9 @@ def run_github_tests(tmp: str, git, write) -> None:
     code, data = handle("list", dict(req), {}, failing(4, "gh auth login"))
     _assert(code == 0 and "rev" in data and data["candidates"][0]["title"] == "A",
             "resolver stays on backlog while backlog.md has open items (gh never called)")
+    code, data = handle("describe", dict(req, ref="HEAD"), {}, _fake_gh(pages))
+    _assert(code == 0 and data["backend"] == "github",
+            "describe with ref reads the open-items guard at that ref, not the working tree")
     try:
         handle("list", dict(req), {ENV_VAR: "github"}, failing(4, "gh auth login"))
         _assert(False, "github with gh unauthenticated → QueueError even with backlog.md present")

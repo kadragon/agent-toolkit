@@ -42,13 +42,15 @@ fi
 echo "branch: $BRANCH  base: $BASE_SHA ($BASE)"
 ```
 
-Create the worktree with `BASE` set to the printed SHA, not the moving `origin/<name>`: the
-worktree's `backlog.md` is then exactly the one Step 1 selected from, so it holds every selected
-line and `prune-backlog` finds them. This checkout's branch and uncommitted edits — `backlog.md`
+Create the worktree with `BASE` set to the printed SHA, not the moving `origin/<name>`: on
+`backlog` the worktree's `backlog.md` is then exactly the one Step 1 selected from, so it holds
+every selected line and `prune-backlog` finds them; on the issues backend the SHA pins only the
+branch base. This checkout's branch and uncommitted edits — `backlog.md`
 and `docs/design/` included — stay where they are and never reach the worktree or the PR.
 
-**Claim — right after `git worktree add`, before the plan gate.** For a `backlog.md` group,
-follow `cycle.md` → *Worktree cycle* → *Claim*: append the full claim block if the base tracks
+**Claim — right after `git worktree add`, before the plan gate.** For a `backlog.md` group or
+an issues-backend candidate (`## Covers` holds refs, `cycle.md` → *Covered refs*), follow
+`cycle.md` → *Worktree cycle* → *Claim*: append the full claim block if the base tracks
 `tasks.md`, or create the file with that block. For a `tasks.md` h1 block (`status: open`), flip
 that block to `status: active` in the worktree's copy. The shared claim step covers branch
 collisions and the re-check after writing the claim. A declined plan → revert only this claim
@@ -85,7 +87,8 @@ the user explicitly authorizes abandoning the run, remove the worktree and branc
 `tasks.md` goes with the worktree — and clear the Herdr label (`cycle.md` → *Worktree cycle*).
 
 **After QA passes:** in the worktree, `cycle.md` → *Version bump*, *Cleanup* (`prune-tasks` on
-the worktree `tasks.md`, `prune-backlog` on the worktree `backlog.md`, `changelog`), then
-*Validation evidence* on the complete candidate. Hand off per Step 4 from the worktree, stating
+the worktree `tasks.md`, `prune-backlog` on the worktree `backlog.md` — `backlog` backend only —
+and `changelog`), then
+*Validation evidence* on the complete candidate. Hand off per Step 4 from the worktree (covered refs included on the issues backend), stating
 the absolute worktree path so the review cycle runs there, takes the hub path, and passes the
 path to `merge-and-cleanup.sh` (*Worktree cycle* → *Route*, *Merge*).

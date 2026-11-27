@@ -30,7 +30,8 @@ First match wins:
 2. `origin` host `github.com` → `github`, **unless `backlog.md` has an open `- [ ]` item**
    (parked ones included); such a repo stays on `backlog` until its file queue is empty. For a
    `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
-   absent) `backlog.md` is an error, never a switch to `github`.
+   absent) `backlog.md` is an error, never a switch to `github`. `describe` honors `ref` the same way,
+   so a caller resolves the backend its `list` calls will use.
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.
@@ -42,7 +43,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
-| `describe` | yes | — | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
+| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`) |
