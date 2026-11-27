@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.1.0
+version: 3.2.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -139,6 +139,9 @@ grants the required Git writes and sets no narrower limits, pass `--git-limits='
 For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`.
+
+For Codex review cycles, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
+Pass the user's separate review transfer grant with `--review-transfer-approval='<verbatim approval>'`.
 
 To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
 in the home repo. See `references/launch-handoff.md` for the schema and path matching.

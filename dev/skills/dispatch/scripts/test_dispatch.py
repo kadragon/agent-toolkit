@@ -131,6 +131,7 @@ class DispatchReceiptTests(DispatchTestCase):
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
               "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+    REVIEW_APPROVAL = '이 PR diff를 Claude와 agy에 보내도 됩니다.\n"Codex"도 승인합니다.'
     HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
                "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
@@ -212,6 +213,27 @@ class DispatchReceiptTests(DispatchTestCase):
                     self.assertIn("warning:", stderr.getvalue())
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
+
+    def test_review_transfer_approval_survives_launch_and_first_send(self):
+        grant = self.REVIEW_APPROVAL
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                 "--cli", "codex", "--model", "gpt-6.1-terra", "--effort", "medium",
+                 "--cwd", directory, "--work-kind", "standalone", "--request", "Review the PR",
+                 "--unit", "PR review", "--git-limits", "pr-only", "--task", "Review the PR",
+                 "--review-transfer-approval", grant, "--dry-run"],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = json.loads(result.stdout)["task"]
+        fields = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        self.assertEqual(json.loads(fields), {
+            "Original user request (verbatim)": "Review the PR",
+            "Assigned unit": "PR review",
+            "Git limits": "pr-only",
+            "Review transfer approval (verbatim)": grant,
+        })
 
     def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
         cwd = Path(tempfile.gettempdir()) / "myrepo"
@@ -2364,11 +2386,18 @@ class CodexSendTests(DispatchTestCase):
             extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
                            "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
                            "Hook approval required for the local workflow."]
-            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
+            grant = DispatchReceiptTests.REVIEW_APPROVAL
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines,
+                       "review_transfer_approval": grant}
             run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff, "require_review_sources": True}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
+            fields = {**DispatchReceiptTests.FIELDS, "Review transfer approval (verbatim)": grant}
+            block = DispatchReceiptTests.BLOCK.replace(
+                json.dumps(DispatchReceiptTests.FIELDS, ensure_ascii=False, indent=2),
+                json.dumps(fields, ensure_ascii=False, indent=2),
+            )
+            expected = ("a task" + block + "\n\n" + extra_lines[0] + "\n"
                         + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
                         + report_instruction(receipt.resolve().with_name("result.json"), require_review_sources=True))
             stderr = StringIO()

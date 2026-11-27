@@ -5,6 +5,7 @@
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
+                     [--review-transfer-approval APPROVAL]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
@@ -444,6 +445,8 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
+    if "review_transfer_approval" in handoff:
+        fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
     prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
               "Task-cycle mode and flags come exclusively from the invocation above.\n"
               "<dispatch-handoff>\n"
@@ -498,6 +501,11 @@ def launch_handoff(args, cwd):
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    approval = getattr(args, "review_transfer_approval", None)
+    if approval is not None:
+        if not approval.strip():
+            raise SystemExit("--review-transfer-approval must not be blank")
+        handoff["review_transfer_approval"] = approval
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines
@@ -1700,6 +1708,7 @@ def main(argv):
     launch_parser.add_argument("--request", required=True, help="verbatim original user request")
     launch_parser.add_argument("--unit", required=True, help="assigned unit")
     launch_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
+    launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")

@@ -51,25 +51,32 @@ Sources: [Codex local marketplaces](https://developers.openai.com/plugins/build/
 
 ## Approval checks before a wave
 
-Codex dispatch starts the CLI with `--approve-for-me`. The auto-reviewer decides eligible
-approval requests. A Git grant, a public repo and hook trust do not grant transfer to a
-review provider. Before dispatch, capture the user's approval for the target repository,
-the review data (diff, relevant source, Sprint Contract and `REVIEW.md` where applicable)
-and each authorized engine or account. Forward the approval verbatim in the request or
-in the [configured handoff](launch-handoff.md), with its source. The child checks that approval
-against the repo's data-sharing policy before each reviewer call. Mention the authorized data
-and destination in any escalation. A rejected transfer remains blocked and must not be retried
-through another interface.
+Dispatch's `--approve-for-me` selects workspace-write sandboxing, on-request approval and
+`approvals_reviewer = "auto_review"`. Codex evaluates the proposed action and conversation
+history. The command path and arguments help identify what the action does. Repository
+visibility can inform the risk assessment, while the user supplies transfer authorization.
+On Codex CLI 0.172.0, a generic PR review request and a Git-only handoff produced declined
+Claude and agy launches. Their approval checks cited the absence of a grant covering the
+data and destination. Comparable calls reached the shell with an explicit review request and
+scoped approval descriptions. Those observed decisions are specific to their call context.
+
+Before dispatch, capture the user's approval for the target repository, the review data
+(diff, relevant source, Sprint Contract and `REVIEW.md` where applicable), and each authorized
+engine or account. If it is part of the original request, keep it there verbatim. Pass a separate
+user grant verbatim with `--review-transfer-approval`. The receipt preserves it for the first
+send and any first-message retry. Git authority, public visibility and hook trust each have
+their own scope. The child follows [Data-sharing policy](../../task-review-cycle/references/review-sources.md#data-sharing-policy)
+for approval requests and reports a denial to the merge owner as `blocked`.
 
 For approvals that need human review, an operator may use `approvals_reviewer = "user"` with
 `approval_policy = "on-request"`, when managed policy permits. This changes who handles an
 approval, while rules determine which command prefixes can run without one. With dispatch's
 `--approve-for-me` still active, do not assume a user-level setting takes precedence. Verify the
-effective launch configuration. An operator-approved rule for an immutable, reviewed launcher
-can match its literal path and fixed arguments. Limit review-script rules to the approved repo
-and data scope the launcher enforces. Leave the generic interpreters and reviewer CLIs under
-the normal approval policy. End-to-end reviewer approval through the dispatched child is
-unverified.
+effective launch configuration. Command rules match argument prefixes and run before a
+matching command would prompt. Keep reviewer launchers, generic interpreters and reviewer CLIs
+under the normal approval policy so each transfer can be checked in context. A replacement
+auto-review policy has a broader scope than the per-task handoff and is subject to managed
+requirements.
 
 For routine commands, use the sandbox for local `git status`, `git log`, `git show`,
 `git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
