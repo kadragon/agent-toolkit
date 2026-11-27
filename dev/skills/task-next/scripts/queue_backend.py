@@ -703,10 +703,10 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
         if sub["repository"]["nameWithOwner"].lower() != slug:
             return "in another repository"
         n = sub["number"]
+        if n in partial or (truncated and n not in seen):
+            return "incomplete read"
         if n not in queued:
             return f"not a trusted {QUEUE_LABEL} issue"
-        if n in partial:
-            return "incomplete read"
         if n in claims:
             return "claimed"
         if blocked[n]:
@@ -733,6 +733,10 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
             candidates.append(entry)
             continue
         reasons = [(s, why_not(s)) for s in subs]
+        unread = [ref(s) for s, why in reasons if why == "incomplete read"]
+        if unread:
+            warnings.append(f"incomplete: #{n} left out; incomplete read of sub-issues {', '.join(unread)}")
+            continue
         eligible = [s for s, why in reasons if why is None]
         excluded = [{"ref": ref(s), "reason": why} for s, why in reasons if why is not None]
         counts = {"open": len(subs),
@@ -805,7 +809,6 @@ class GhRejected(QueueError):
 
 NO_QUEUE_WRITE = "no-queue-write"
 QUEUE_LIMITS = ("none", NO_QUEUE_WRITE)
-WRITE_MAX_PAGES = 100  # key index / rejected walk; 100 issues per page
 _KEY_MARKER = "<!-- queue-key: {} -->"
 _ALERT_MARKER = "<!-- gh-alert: {} -->"
 _ALERT_ID = r"(?:dependabot|code-scanning|secret-scanning)/[1-9][0-9]*"
@@ -822,9 +825,12 @@ KEYS_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
     "issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) "
     "{ pageInfo { hasNextPage endCursor } "
-    "nodes { id number url body state stateReason authorAssociation labels(first: 100) { nodes { name } } "
+    "nodes { id number url body state stateReason authorAssociation } } } }"
+)
+KEY_RELATIONS_QUERY = (
+    "query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { id labels(first: 100) { nodes { name } } "
     "parent { number repository { nameWithOwner } } "
-    "blockedBy(first: 100) { nodes { number repository { nameWithOwner } } } } } } }"
+    "blockedBy(first: 100) { nodes { number repository { nameWithOwner } } } } } }"
 )
 NODE_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
               "issue(number: $number) { id number body authorAssociation labels(first: 100) { nodes { name } } } } }")
@@ -832,8 +838,11 @@ REJECTED_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
     f"issues(first: 100, after: $after, states: CLOSED, labels: [\"{QUEUE_LABEL}\"], "
     "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
-    "nodes { number title url stateReason authorAssociation "
-    "comments(last: 50) { nodes { body authorAssociation } } } } } }"
+    "nodes { id number title url stateReason authorAssociation } } } }"
+)
+REJECTION_COMMENTS_QUERY = (
+    "query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { id "
+    "comments(last: 50) { nodes { body authorAssociation } } } } }"
 )
 ADD_SUB_ISSUE = ("mutation($parent: ID!, $child: ID!) { addSubIssue(input: {issueId: $parent, subIssueId: $child}) "
                  "{ issue { number } } }")
@@ -855,7 +864,10 @@ def _gql(runner, query: str, variables: dict) -> tuple[dict, list[str]]:
     """GraphQL call for the write path: (data, error messages). A transport failure raises."""
     args = ["api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
-        if value is not None:
+        if isinstance(value, list):
+            for entry in value:
+                args += ["-f", f"{key}[]={entry}"]
+        elif value is not None:
             args += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
     code, out, err = runner(args)
     if code != 0:
@@ -902,28 +914,73 @@ def _node_key(repo_name: str, number: int) -> tuple[str, int]:
     return repo_name.lower(), number
 
 
-def key_index(runner, owner: str, name: str, max_pages: int = WRITE_MAX_PAGES) -> dict[str, dict]:
-    index: dict[str, dict] = {}
+def _issue_pages(runner, query: str, owner: str, name: str):
     after = None
-    for _ in range(max_pages):
-        data, errors = _gql(runner, KEYS_QUERY, {"owner": owner, "name": name, "after": after})
+    cursors = set()
+    while True:
+        data, errors = _gql(runner, query, {"owner": owner, "name": name, "after": after})
         if errors:
             raise GhUnavailable("GitHub GraphQL error: " + "; ".join(errors))
         conn = _repository(data, owner, name)["issues"]
-        for issue in conn["nodes"]:
+        yield conn["nodes"]
+        if not conn["pageInfo"]["hasNextPage"]:
+            return
+        after = conn["pageInfo"]["endCursor"]
+        if not after or after in cursors:
+            raise GhUnavailable("GitHub issues pagination did not advance")
+        cursors.add(after)
+
+
+def _issue_details(runner, query: str, ids: list[str]) -> dict[str, dict]:
+    details = {}
+    for start in range(0, len(ids), PAGE_SIZE):
+        batch = set(ids[start:start + PAGE_SIZE])
+        data, errors = _gql(runner, query, {"ids": sorted(batch)})
+        if errors:
+            raise GhUnavailable("GitHub GraphQL error: " + "; ".join(errors))
+        nodes = {node["id"]: node for node in data.get("nodes", []) if node and "id" in node}
+        if nodes.keys() != batch:
+            raise GhUnavailable("GitHub returned incomplete issue details")
+        details.update(nodes)
+    return details
+
+
+def _refile_match(index: dict[str, dict], key: str) -> tuple[str, dict | None]:
+    marker_key = key
+    found = index.get(marker_key)
+    while found and found.get("state") == "CLOSED" and found.get("stateReason") == "COMPLETED":
+        marker_key = f"{key}:after:{found['number']}"
+        found = index.get(marker_key)
+    return marker_key, found
+
+
+def key_index(runner, owner: str, name: str, items: list[dict]) -> dict[str, dict]:
+    batch = {item["key"] for item in items}
+    targets = {target for item in items for target in [item["parent_key"], *item["blocked_by"]]
+               if target and not _ISSUE_REF_RE.match(target)}
+    wanted = batch | targets
+    refile = {item["key"] for item in items if item.get("refile_completed")}
+    index: dict[str, dict] = {}
+    # Search results can lag a successful POST whose response was lost. Use the issue connection
+    # as the source of truth, and only read relation details for matches that will be reused.
+    for page in _issue_pages(runner, KEYS_QUERY, owner, name):
+        for issue in page:
             if issue.get("authorAssociation") not in TRUSTED_AUTHORS:
                 continue
             body = issue.get("body") or ""
             keys = _KEY_RE.findall(body)
             if keys and not keys[-1].startswith(_ALERT_KEY_PREFIX):
-                index.setdefault(keys[-1], issue)
+                key = keys[-1]
+                if key in wanted or key.rpartition(":after:")[0] in refile:
+                    index.setdefault(key, issue)
             if lines := body.rstrip().splitlines():
                 if marker := _ALERT_MARKER_RE.fullmatch(lines[-1]):
-                    index.setdefault(_ALERT_KEY_PREFIX + marker[1], issue)
-        if not conn["pageInfo"]["hasNextPage"]:
-            return index
-        after = conn["pageInfo"]["endCursor"]
-    raise GhUnavailable(f"more than {max_pages} pages of issues; cannot prove a queue-key is unused")
+                    key = _ALERT_KEY_PREFIX + marker[1]
+                    if key in wanted:
+                        index.setdefault(key, issue)
+        if wanted <= index.keys() and all(_refile_match(index, key)[1] for key in refile):
+            break
+    return index
 
 
 def _validate_items(items: object) -> list[dict]:
@@ -1060,7 +1117,7 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
     slug = f"{owner}/{name}".lower()
     result: dict = {"created": [], "incomplete": [], "done": set(), "refused": set()}
     try:
-        index = key_index(runner, owner, name)
+        index = key_index(runner, owner, name, items)
         batch = {i["key"] for i in items}
         issues: dict[str, dict] = {}
         ready = []
@@ -1086,21 +1143,25 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
             ready.append(item)
         if not ready:
             return result
+        matches = {item["key"]: (_refile_match(index, item["key"]) if item.get("refile_completed")
+                                 else (item["key"], index.get(item["key"]))) for item in ready}
+        details = _issue_details(runner, KEY_RELATIONS_QUERY, sorted({
+            found["id"] for item in ready if (found := matches[item["key"]][1])
+            and not (item.get("refile_completed") and found.get("state") == "CLOSED")
+        }))
         ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in ready for x in i["labels"]])
         for item in ready:
-            key = marker_key = item["key"]
-            found = index.get(key)
-            if item.get("refile_completed"):
-                while found and found.get("state") == "CLOSED" and found.get("stateReason") == "COMPLETED":
-                    marker_key = f"{key}:after:{found['number']}"
-                    found = index.get(marker_key)
-                if found and found.get("state") == "CLOSED":
-                    result["incomplete"].append({"key": key, "relation": "rejected",
-                                                 "ref": f"#{found['number']}", "error": "issue closed without completion"})
-                    result["refused"].add(key)
-                    continue
+            key = item["key"]
+            marker_key, found = matches[key]
+            if item.get("refile_completed") and found and found.get("state") == "CLOSED":
+                result["incomplete"].append({"key": key, "relation": "rejected",
+                                             "ref": f"#{found['number']}", "error": "issue closed without completion"})
+                result["refused"].add(key)
+                continue
             reused = found is not None
-            if found is None:
+            if found is not None:
+                found = {**found, **details[found["id"]]}
+            else:
                 # An item with relations is filed without `task-queue` and labelled only once every
                 # relation landed, so selection never offers it before its blockers are recorded.
                 linked = bool(item["parent_key"] or item["blocked_by"])
@@ -1307,23 +1368,19 @@ def _parse_rejection(comments: list[dict]) -> tuple[str, str]:
     return "", ""
 
 
-def github_rejected(req: dict, runner=gh_runner, max_pages: int = WRITE_MAX_PAGES) -> dict:
+def github_rejected(req: dict, runner=gh_runner) -> dict:
     """Closed-not-planned trusted `task-queue` issues, with the reason from the reject comment."""
     owner, name = github_slug(req["repo"])
-    entries, after = [], None
-    for _ in range(max_pages):
-        conn = _repository(_graphql(runner, REJECTED_QUERY, {"owner": owner, "name": name, "after": after}),
-                           owner, name)["issues"]
-        for issue in conn["nodes"]:
-            if issue.get("stateReason") != "NOT_PLANNED" or issue.get("authorAssociation") not in TRUSTED_AUTHORS:
-                continue
-            reason, bar = _parse_rejection(issue["comments"]["nodes"])
+    entries = []
+    for page in _issue_pages(runner, REJECTED_QUERY, owner, name):
+        rejected = [issue for issue in page if issue.get("stateReason") == "NOT_PLANNED"
+                    and issue.get("authorAssociation") in TRUSTED_AUTHORS]
+        details = _issue_details(runner, REJECTION_COMMENTS_QUERY, [issue["id"] for issue in rejected])
+        for issue in rejected:
+            reason, bar = _parse_rejection(details[issue["id"]]["comments"]["nodes"])
             entries.append({"ref": f"#{issue['number']}", "title": issue["title"], "reason": reason,
                             "refile_bar": bar, "url": issue["url"]})
-        if not conn["pageInfo"]["hasNextPage"]:
-            return {"entries": entries}
-        after = conn["pageInfo"]["endCursor"]
-    raise QueueError(f"more than {max_pages} pages of closed {QUEUE_LABEL} issues; rejected list incomplete")
+    return {"entries": entries}
 
 
 def _queue_issue(req: dict, runner) -> tuple[str, str, dict]:
@@ -1438,8 +1495,8 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     repo = req.get("repo")
     if not (isinstance(repo, str) and os.path.isabs(repo) and os.path.isdir(repo)):
         raise QueueError(f"request repo must be an existing absolute path, got {repo!r}")
-    # describe takes the same ref, so a --tree run resolves the backend `list` will use (the base's backlog.md)
-    backend = resolve(repo, env, req.get("ref") if op in ("list", "describe") else None)
+    revision_field = {"list": "ref", "describe": "ref", "show": "rev", "rejected": "rev"}.get(op)
+    backend = resolve(repo, env, req.get(revision_field) if revision_field else None)
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
         if (
@@ -2027,6 +2084,15 @@ def run_github_tests(tmp: str, git, write) -> None:
             "an issue whose connection hit the limit is left out, not half-read")
     _assert("#24" not in [c["ref"] for c in data["candidates"]] and any("#24" in w for w in data["warnings"]),
             "a truncated read never offers a sub-issue whose parent was not read")
+    group_pages = {None: _fx_conn([page1[0], next(issue for issue in page1 if issue["number"] == 4),
+                                 dict(next(issue for issue in page1 if issue["number"] == 3),
+                                      subIssues=_fx_conn([{"number": n, "state": "OPEN", "title": "[FIX] item",
+                                                         "repository": {"nameWithOwner": "owner/repo"}}
+                                                         for n in (4, 8)]))], "p1")}
+    truncated_group = github_list(dict(req, full_scan=True), _fake_gh(group_pages), max_pages=1)
+    _assert(truncated_group["incomplete"] and [c["ref"] for c in truncated_group["candidates"]] == ["#1"]
+            and "incomplete: #3 left out; incomplete read of sub-issues #8" in truncated_group["warnings"],
+            "a parent with one eligible and one unread child is withheld while unrelated work remains eligible")
     stranger = {None: _fx_conn([_fx_issue(2, "x", assoc="NONE")], "p1")}
     try:
         github_list(dict(req), _fake_gh(stranger), max_pages=1)
@@ -2073,6 +2139,22 @@ def run_github_tests(tmp: str, git, write) -> None:
         _assert(True, "github with gh unauthenticated → QueueError even with backlog.md present")
     os.remove(os.path.join(repo, "backlog.md"))
 
+    write(os.path.join(repo, "backlog.md"), "# Backlog\n\n## A\n\n- [ ] historic\n\n"
+          "## Rejected — do not re-file\n\n- **Old idea** — no demand.\n")
+    git(repo, "add", "backlog.md")
+    git(repo, "commit", "-q", "--no-verify", "-m", "file queue")
+    git(repo, "rm", "-q", "backlog.md")
+    git(repo, "commit", "-q", "--no-verify", "-m", "archive the file queue")
+    _, historic = handle("list", dict(req, ref="HEAD^"), {}, failing(4, "gh auth login"))
+    historic_req = dict(req, rev=historic["rev"])
+    try:
+        _, shown = handle("show", dict(historic_req, ref="backlog.md:5"), {}, failing(4, "gh auth login"))
+        _, rejected = handle("rejected", historic_req, {}, failing(4, "gh auth login"))
+        _assert(shown["title"] == "historic" and rejected["entries"][0]["title"] == "Old idea",
+                "historical show and rejected both use the file queue from list's revision")
+    except QueueError as e:
+        _assert(False, f"historical show and rejected both use the file queue from list's revision: {e}")
+
     for url in ("ssh://git@github.com:22/owner/repo.git", "git@github.com:owner/repo", "https://github.com/owner/repo/"):
         git(repo, "remote", "set-url", "origin", url)
         _assert(github_slug(repo) == ("owner", "repo"), f"github_slug({url!r})")
@@ -2117,6 +2199,7 @@ class _FakeGitHub:
         self.lose_create = 0
         self.reject_relation: set[tuple[str, int]] = set()  # (kind, child number) answered with a GraphQL error
         self.visibility = "PRIVATE" if private else "PUBLIC"
+        self.page_size = 100
 
     def add(self, title: str, body: str = "", labels=(QUEUE_LABEL,), assoc: str = "OWNER", state: str = "OPEN",
             reason: str | None = None, comments=()) -> int:
@@ -2153,30 +2236,42 @@ class _FakeGitHub:
     def _node(self, n: int) -> dict:
         return {"number": n, "repository": {"nameWithOwner": "owner/repo"}}
 
+    def _issue_page(self, nodes: list[dict], after: str | None) -> tuple[int, str, str]:
+        start = int(after or 0)
+        end = start + self.page_size
+        return self._ok({"data": {"repository": {
+            "issues": _fx_conn(nodes[start:end], str(end) if len(nodes) > end else None),
+        }}})
+
     def _graphql(self, query: str, v: dict) -> tuple[int, str, str]:
         if query == DESCRIBE_QUERY:
             return self._ok({"data": {"repository": {"visibility": self.visibility}}})
         if query == KEYS_QUERY:
             nodes = [{"id": i["id"], "number": n, "url": f"https://github.com/owner/repo/issues/{n}",
                       "body": i["body"], "authorAssociation": i["assoc"],
-                      "state": i["state"], "stateReason": i["stateReason"],
-                      "labels": _fx_conn([{"name": x} for x in sorted(i["labels"])]),
-                      "parent": self._node(i["parent"]) if i["parent"] else None,
-                      "blockedBy": {"nodes": [self._node(b) for b in i["blockedBy"]]}}
+                      "state": i["state"], "stateReason": i["stateReason"]}
                      for n, i in sorted(self.issues.items())]
-            return self._ok({"data": {"repository": {"issues": _fx_conn(nodes)}}})
+            return self._issue_page(nodes, v.get("after"))
         if query == NODE_QUERY:
             i = self.issues.get(v["number"]) if v["owner"] == "owner" else None
             node = i and {"id": i["id"], "number": i["number"], "body": i["body"], "authorAssociation": i["assoc"],
                           "labels": _fx_conn([{"name": x} for x in sorted(i["labels"])])}
             return self._ok({"data": {"repository": {"issue": node}}})
         if query == REJECTED_QUERY:
-            nodes = [{"number": n, "title": i["title"], "url": f"https://github.com/owner/repo/issues/{n}",
-                      "stateReason": i["stateReason"], "authorAssociation": i["assoc"],
-                      "comments": {"nodes": i["comments"]}}
+            nodes = [{"id": i["id"], "number": n, "title": i["title"], "url": f"https://github.com/owner/repo/issues/{n}",
+                      "stateReason": i["stateReason"], "authorAssociation": i["assoc"]}
                      for n, i in sorted(self.issues.items()) if i["state"] == "CLOSED" and QUEUE_LABEL in i["labels"]]
-            return self._ok({"data": {"repository": {"issues": _fx_conn(nodes)}}})
+            return self._issue_page(nodes, v.get("after"))
         by_id = {i["id"]: i for i in self.issues.values()}
+        if query == KEY_RELATIONS_QUERY:
+            nodes = [{"id": i["id"], "labels": _fx_conn([{"name": x} for x in sorted(i["labels"])]),
+                      "parent": self._node(i["parent"]) if i["parent"] else None,
+                      "blockedBy": {"nodes": [self._node(b) for b in i["blockedBy"]]}}
+                     for i in (by_id[issue_id] for issue_id in v["ids"])]
+            return self._ok({"data": {"nodes": nodes}})
+        if query == REJECTION_COMMENTS_QUERY:
+            nodes = [{"id": issue_id, "comments": {"nodes": by_id[issue_id]["comments"]}} for issue_id in v["ids"]]
+            return self._ok({"data": {"nodes": nodes}})
         if query == ADD_SUB_ISSUE:
             child = by_id[v["child"]]
             if ("parent", child["number"]) in self.reject_relation or child["parent"]:
@@ -2447,8 +2542,29 @@ def run_github_write_tests(tmp: str, git) -> None:
     gh = _FakeGitHub()
     gh.add("[DOCS] marker docs", "Write `<!-- queue-key: quoted -->` like this:\n<!-- queue-key: quoted -->\n"
            "trailing prose\r\n<!-- queue-key: real -->")
-    _assert(set(key_index(gh, "owner", "repo")) == {"real"},
+    marker_items = _validate_items([{"key": key, "title": key} for key in ("quoted", "real")])
+    _assert(set(key_index(gh, "owner", "repo", marker_items)) == {"real"},
             "key_index takes the last own-line marker, never a quoted one earlier in the body")
+    gh = _FakeGitHub()
+    gh.page_size = 1
+    for n in range(100):
+        gh.add(f"Unrelated {n}", _KEY_MARKER.format(f"other:{n}"))
+    blocker = gh.add("Existing blocker", _KEY_MARKER.format("late-blocker"))
+    late_draft = {"key": "late-draft", "title": "Late draft", "blocked_by": ["late-blocker"]}
+    gh.lose_create = 1
+    _, out = handle("create", dict(req, items=[late_draft]), {ENV_VAR: "github"}, gh)
+    _assert(out["pending"] == ["late-draft"] and len(gh.issues) == blocker + 1,
+            "an absent key beyond 100 pages can be filed even when the response is lost")
+    gh.add("Unread tail", _KEY_MARKER.format("tail"))
+    gh.calls.clear()
+    _, out = handle("publish", req, {ENV_VAR: "github"}, gh)
+    _assert(not out["pending"] and len(out["created"]) == 1 and out["created"][0]["reused"]
+            and gh.issues[blocker + 1]["blockedBy"] == [blocker],
+            "publish reuses the late issue and completes its relation to a key outside the batch")
+    _assert(not any(f"after={blocker + 1}" in call for call in gh.calls)
+            and [arg for call in gh.calls if f"query={KEY_RELATIONS_QUERY}" in call
+                 for arg in call if arg.startswith("ids[]=")] == [f"ids[]=I_{blocker + 1}"],
+            "lookup stops after the last needed key and reads relations only for the reused issue")
     code, out = handle("create", dict(req, items=pair, queue_limits=NO_QUEUE_WRITE), {ENV_VAR: "github"}, gh)
     code, out = handle("create", dict(req, items=pair), {ENV_VAR: "github"}, gh)
     _assert(out["pending"] == [] and not os.path.exists(store),
@@ -2512,17 +2628,28 @@ def run_github_write_tests(tmp: str, git) -> None:
 
     print("\nTest 12: github rejected, reject, defer")
     gh = _FakeGitHub(labels=(QUEUE_LABEL,))
+    gh.page_size = 1
     keep = gh.add("[FEAT] keep")
     gh.add("[FEAT] done", state="CLOSED", reason="COMPLETED")
     gh.add("[FEAT] stranger's", assoc="NONE", state="CLOSED", reason="NOT_PLANNED")
+    for _ in range(100):
+        gh.add("Completed", state="CLOSED", reason="COMPLETED")
+    last = gh.add("Late rejection", state="CLOSED", reason="NOT_PLANNED")
     code, out = handle("reject", dict(req, ref=f"#{keep}", reason="no failure seen",
                                       refile_bar="a recorded crash"), {ENV_VAR: "github"}, gh)
     _assert(code == 0 and out == {"ref": "#1"} and gh.issues[1]["stateReason"] == "NOT_PLANNED",
             "reject comments and closes as not planned")
     code, out = handle("rejected", dict(req), {ENV_VAR: "github"}, gh)
-    _assert(out == {"entries": [{"ref": "#1", "title": "[FEAT] keep", "reason": "no failure seen",
-                                 "refile_bar": "a recorded crash", "url": "https://github.com/owner/repo/issues/1"}]},
-            "rejected lists only trusted closed-not-planned issues, reason from the reject comment")
+    _assert(out == {"entries": [
+        {"ref": "#1", "title": "[FEAT] keep", "reason": "no failure seen",
+         "refile_bar": "a recorded crash", "url": "https://github.com/owner/repo/issues/1"},
+        {"ref": f"#{last}", "title": "Late rejection", "reason": "", "refile_bar": "",
+         "url": f"https://github.com/owner/repo/issues/{last}"},
+    ]}, "rejected reads past 100 pages and returns only trusted closed-not-planned issues")
+    comment_ids = [arg for call in gh.calls if f"query={REJECTION_COMMENTS_QUERY}" in call
+                   for arg in call if arg.startswith("ids[]=")]
+    _assert(comment_ids == ["ids[]=I_1", f"ids[]=I_{last}"],
+            "rejected fetches comments only for issues with a trusted author and matching state reason")
     target = gh.add("[FIX] later", "Context.\nDeferred: old reason\n")
     code, out = handle("defer", dict(req, ref=f"#{target}", reason="waits on vendor"), {ENV_VAR: "github"}, gh)
     _assert(code == 0 and "deferred" in gh.issues[target]["labels"] and "deferred" in gh.labels
