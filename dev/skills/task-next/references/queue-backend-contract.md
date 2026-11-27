@@ -28,7 +28,8 @@ First match wins:
 1. `AGENT_QUEUE_BACKEND` — `backlog`, `github`, or an adapter command line (shell-split; on
    Windows backslashes stay literal).
 2. `origin` host `github.com` → `github`, **unless `backlog.md` has open `- [ ]` items**
-   (including parked items) **or legacy in-flight `- [>]` items**. For a
+   (including parked items) **or legacy `- [>]` items with a file sprint claim** in
+   `tasks.md` under `## Covers`. For a
    `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
    absent) `backlog.md` is an error, never a switch to `github`. `describe` honors `ref` the same way,
    so a caller resolves the backend its `list` calls will use. `describe` and `list` on such a repo include the
@@ -36,6 +37,8 @@ First match wins:
    migrate_backlog.py` for unchecked items (*Moving a file queue to issues*).
    For legacy in-flight items, they warn to finish the sprint or reconcile it before migration.
    The dry run lists these items and `migrate_backlog.py --apply` stops until they are resolved.
+   A legacy marker without a file claim leaves the issues backend active and emits a recovery
+   warning. Use the explicit `backlog` backend for reconciliation only when the marker is confirmed file work.
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.

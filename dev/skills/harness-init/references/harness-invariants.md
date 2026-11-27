@@ -219,8 +219,10 @@ task cycle hands issue closure to the PR; file item deletion belongs to
 | No `tasks.md` | Sprint is idle | Revert orphan `[>]` to `[ ]` and prune empty headings |
 
 Closing removes `tasks.md` if no content remains. Init only creates `backlog.md` for repos
-adopting the file backend. GitHub origins with open or legacy in-flight file items remain on
-the file backend. Finish or reconcile legacy sprints before running `migrate_backlog.py`.
+adopting the file backend. GitHub origins with open file items or legacy items held by a file
+sprint remain on the file backend. Finish or reconcile legacy sprints before running
+`migrate_backlog.py`. On the issues backend, an unclaimed legacy marker leaves the queue
+on issues. Use `AGENT_QUEUE_BACKEND=backlog` for reconciliation if it is confirmed file work.
 If backend resolution fails, reconcile leaves file queue state and any failed sprint available
 for retry. Active and queued sprint status can be reported without resolving the queue.
 

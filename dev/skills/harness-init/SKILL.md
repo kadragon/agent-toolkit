@@ -141,8 +141,8 @@ Name skipped docs and their triggers in Step 10 (`validate-harness.sh`: `INFO`).
 Resolve the queue with `dev:task-next` → `references/queue-backend-contract.md` → *Ops*
 (`describe` with `verify_visibility: false`). Create `backlog.md` from
 `references/backlog-template.md` only for a repo adopting the `backlog` backend. A GitHub
-origin without open or legacy in-flight file items uses issues by default. If it still uses the file queue,
-relay the migration warning from `describe`. Create `tasks.md` only during a sprint to
+origin uses issues by default after its open and claimed file work is cleared. Relay any
+migration or recovery warning from `describe`. Create `tasks.md` only during a sprint to
 hold its Sprint Contract (`references/tasks-template.md`). The *Reconciliation Contract*
 in `references/harness-invariants.md` covers closing it.
 

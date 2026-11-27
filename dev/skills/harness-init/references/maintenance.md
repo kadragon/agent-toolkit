@@ -100,8 +100,9 @@ Verify **schema** (not content) of harness-related docs. Full schemas in `backlo
 
 - File backend: `backlog.md` items follow the `[ ]` / `[>]` / `[x]` checkbox pattern under
   `##` headings, with plain bullets under `## Rejected — do not re-file`.
-- Issues backend: absence of `backlog.md` is expected. GitHub origins with open or legacy
-  in-flight file items still use the file backend. Relay the validator's migration guidance.
+- Issues backend: absence of `backlog.md` is expected. GitHub origins with open file items
+  or a file sprint holding legacy items still use the file backend. Relay the validator's
+  migration or recovery guidance.
 - `tasks.md` must have a top-level `# Title`, `status:` line and Sprint Contract fields.
   Transfer persistent `## Review Backlog` or `## Security Fixes` entries to the resolved queue.
 

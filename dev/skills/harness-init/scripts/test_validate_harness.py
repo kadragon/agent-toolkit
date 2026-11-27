@@ -78,6 +78,13 @@ class HarnessTests(unittest.TestCase):
         self.write("backlog.md", "## Queue\n- [>] Last legacy sprint item\n")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unclaimed legacy [>] item(s); the issues queue stays active", result.stdout)
+        self.assertIn("AGENT_QUEUE_BACKEND=backlog", result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
+
+        self.write("tasks.md", "# Sprint\nstatus: failed\n\n## Covers\n\n- [ ] Last legacy sprint item\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("legacy [>] item(s); finish the sprint or run reconcile-harness.py", result.stdout)
         self.assertIn("uses standard checkbox items", result.stdout)
 

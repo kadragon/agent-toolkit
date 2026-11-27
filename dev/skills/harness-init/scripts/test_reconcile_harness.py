@@ -215,6 +215,7 @@ def _read_raw(path: Path) -> str:
 
 def _run_main_in_tmp(
     tasks_text: str | None, backlog_text: str, changelog_text: str | None = None, *, github_origin: bool = False,
+    force_file_queue: bool = False,
 ) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
@@ -238,6 +239,8 @@ def _run_main_in_tmp(
             )
         env = dict(os.environ)
         env.pop("AGENT_QUEUE_BACKEND", None)
+        if force_file_queue:
+            env["AGENT_QUEUE_BACKEND"] = "backlog"
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
         mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
@@ -268,12 +271,17 @@ def test_main_github_origin_reconciles_only_the_sprint():
         check(f"{status}: only done is logged", ("Example sprint" in result["changelog_body"]) == (status == "done"))
 
     legacy = "# Backlog\n\n## Last file item\n- [>] Restore me\n"
-    for status in (None, "failed"):
-        tasks = f"# Example sprint\n\nstatus: {status}\n" if status else None
-        result = _run_main_in_tmp(tasks, legacy, github_origin=True)
-        check(f"{status}: final in-flight item returns to the GitHub repo's file queue",
-              result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
-              "Backlog: 1 queued, 0 active" in result["stdout"] and not result["tasks_exists"], result)
+    tasks = "# Example sprint\n\nstatus: failed\n\n## Covers\n\n- [ ] Restore me\n"
+    result = _run_main_in_tmp(tasks, legacy, github_origin=True)
+    check("failed file sprint: final claimed item returns to the queue",
+          result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
+          "Backlog: 1 queued, 0 active" in result["stdout"] and not result["tasks_exists"], result)
+    idle = _run_main_in_tmp(None, legacy, github_origin=True)
+    check("already migrated GitHub repo leaves an unclaimed legacy marker unchanged",
+          idle["backlog_body"] == legacy and not idle["stdout"], idle)
+    explicit = _run_main_in_tmp(None, legacy, github_origin=True, force_file_queue=True)
+    check("explicit file backend can recover confirmed orphaned work",
+          explicit["backlog_body"] == legacy.replace("- [>]", "- [ ]"), explicit)
 
 
 def test_main_queue_resolution_failure_preserves_failed_sprint():
