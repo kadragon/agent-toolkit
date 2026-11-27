@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: |
-  Use this agent for a backlog item that already has a Sprint Contract and a listed set of files to edit — when that list spans 10+ files or 3+ independent units. Runs focused tests; independent grading belongs to qa-verifier.
+  Use this agent for a queue issue that already has a Sprint Contract and a listed set of files to edit — when that list spans 10+ files or 3+ independent units. Runs focused tests; independent grading belongs to qa-verifier.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -17,7 +17,7 @@ Produce a minimal diff that satisfies the Sprint Contract's acceptance criteria.
 Objective and Boundaries are required — missing either → return control to lead. A missing
 Output format or Tools field defaults to the values below.
 
-- **Objective:** which backlog item, which acceptance criteria
+- **Objective:** queue issue reference and acceptance criteria
 - **Output format:** code diff + one-line summary per changed file + required version-bump report
 - **Tools to use:** Read/Edit/Write on listed paths; Grep/Glob for locating existing patterns
 - **Boundaries:** do not touch files outside the listed plugin area; never weaken a valid test to make implementation pass
