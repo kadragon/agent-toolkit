@@ -322,9 +322,9 @@ def case_run_from_inside_worktree(tmp):
     git(repo, "checkout", "-q", "main")
     wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(wt), FEATURE)
-    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
-                           '{"squash":true}', "."], cwd=wt, check=False,
-                          capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-c", 'bash "$@"; result=$?; cd /; exit "$result"', "caller",
+                           str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}', "."],
+                          cwd=wt, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         fail("run_from_inside_worktree", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
     out = json.loads(proc.stdout)
@@ -334,15 +334,24 @@ def case_run_from_inside_worktree(tmp):
     print("ok run_from_inside_worktree")
 
 
+def case_already_removed_worktree_does_not_keep_branch(tmp):
+    repo, scripts = make_repo(tmp), make_script_dir(tmp)
+    gone = Path(tmp) / "already-removed"
+    out = run("already_removed_worktree", repo, scripts, worktree=gone)
+    if branch_exists(repo) or "deleted" not in out["cleanup_message"]:
+        fail("already_removed_worktree", f"got {out!r}")
+    print("ok already_removed_worktree")
+
+
 def case_inside_worktree_keeps_main_branch(tmp):
     # Moving to the main worktree must never switch the branch someone else has checked out there.
     repo, d = make_repo(tmp), make_script_dir(tmp)
     git(repo, "checkout", "-q", "-b", "feat/other", "main")
     wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(wt), FEATURE)
-    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
-                           '{"squash":true}', "."], cwd=wt, check=False,
-                          capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-c", 'bash "$@"; result=$?; cd /; exit "$result"', "caller",
+                           str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}', "."],
+                          cwd=wt, check=False, capture_output=True, text=True)
     out = json.loads(proc.stdout)
     current = git(repo, "branch", "--show-current").stdout.strip()
     if current != "feat/other" or wt.exists() or branch_exists(repo) \
@@ -498,6 +507,7 @@ def main():
         case_hub_ref_is_encoded_and_failure_reported(tmp)
         case_cleanup_reports_queued(tmp)
         case_run_from_inside_worktree(tmp)
+        case_already_removed_worktree_does_not_keep_branch(tmp)
         case_inside_worktree_keeps_main_branch(tmp)
         case_linked_worktree_without_path_stays(tmp)
         case_hub_merge_state_unconfirmed(tmp)

@@ -94,6 +94,33 @@ class WorktreeSweepTests(unittest.TestCase):
             child.kill()
             child.communicate(timeout=10)
 
+    def test_keeps_supplied_worktree_and_compares_before_deleting_branch(self):
+        supplied = self.tree("supplied")
+        candidate = self.tree("racing")
+        head = self.git("rev-parse", "racing")
+        branch = "refs/heads/racing"
+        tree = self.git("rev-parse", "racing^{tree}")
+        advanced = self.git("commit-tree", tree, "-p", head, "-m", "local advance")
+        real_run = sweep.run
+
+        def fake_run(args, repo, timeout=5):
+            if args[:3] == ["git", "update-ref", "--no-deref"]:
+                self.git("update-ref", branch, advanced, head)
+            return real_run(args, repo, timeout)
+
+        def merged_pr(_repo, _slug, picked, _head, _base, _timeout):
+            self.assertEqual(picked, "racing", "the caller still needs its own path")
+            return 42
+
+        diagnostics = io.StringIO()
+        with (patch.object(sweep, "merged_pr", side_effect=merged_pr),
+              patch.object(sweep, "run", side_effect=fake_run), redirect_stderr(diagnostics)):
+            sweep.sweep(supplied)
+        self.assertFalse(candidate.exists())
+        self.assertTrue(supplied.exists())
+        self.assertEqual(self.git("rev-parse", branch), advanced)
+        self.assertIn("kept racing", diagnostics.getvalue())
+
     def test_reports_gone_upstream_without_switching_the_checkout(self):
         self.git("switch", "-qc", "feature")
         self.git("config", "branch.feature.remote", "origin")

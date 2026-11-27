@@ -64,7 +64,7 @@ def output(args):
     return subprocess.check_output(args, text=True, encoding="utf-8-sig", errors="replace", timeout=8)
 
 
-def process_args(pid=None):
+def process_args(pid=None, owned=None):
     if os.name == "nt":
         query = "Name='node.exe'"
         if pid is not None:
@@ -112,13 +112,16 @@ def process_args(pid=None):
             try:
                 if Path(pid_file).read_text(encoding="ascii").strip() != number:
                     continue
+            except FileNotFoundError:
+                if owned is None or canonical(pid_file).parent.parent != owned:
+                    continue
             except (OSError, UnicodeError):
                 continue
             yield int(number), [node, script, "serve", "--endpoint", endpoint, "--cwd", cwd, "--pid-file", pid_file]
 
 
-def brokers(pid=None):
-    for number, args in process_args(pid):
+def brokers(pid=None, owned=None):
+    for number, args in process_args(pid, owned):
         broker = broker_from_args(number, args)
         if broker is not None:
             yield broker
@@ -126,46 +129,77 @@ def brokers(pid=None):
 
 SHUTDOWN = r"""
 const net = require('node:net');
-const endpoint = process.argv[1];
+const [endpoint, mode] = process.argv.slice(1);
 let target;
 if (endpoint.startsWith('unix:')) target = endpoint.slice(5);
 else if (endpoint.startsWith('pipe:')) target = endpoint.slice(5);
 else process.exit(1);
 const socket = net.createConnection(target);
-socket.setTimeout(750, () => socket.destroy());
+let stopped = false;
+let busy = false;
+let buffer = '';
+const send = (id, method, params = {}) => socket.write(JSON.stringify({ id, method, params }) + '\n');
+socket.setEncoding('utf8');
+socket.setTimeout(1000, () => socket.destroy());
 socket.on('error', () => socket.destroy());
-socket.on('connect', () => socket.write('{"id":1,"method":"broker/shutdown","params":{}}\n'));
-socket.on('data', () => socket.destroy());
+socket.on('close', () => { process.exitCode = stopped ? 0 : busy ? 75 : 1; });
+socket.on('connect', () => {
+  if (mode === 'idle') send(1, 'thread/list', { limit: 1 });
+  else send(2, 'broker/shutdown');
+});
+socket.on('data', chunk => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf('\n')) !== -1) {
+    const line = buffer.slice(0, newline);
+    buffer = buffer.slice(newline + 1);
+    let response;
+    try { response = JSON.parse(line); } catch { socket.destroy(); return; }
+    if (response.id === 1) {
+      busy = response.error?.code === -32001;
+      if (!response.result) { socket.destroy(); return; }
+      send(2, 'broker/shutdown');
+    } else if (response.id === 2) {
+      stopped = Boolean(response.result);
+      socket.destroy();
+    }
+  }
+});
 """
 
 
-def running(broker):
-    return broker in brokers(broker.pid)
+def running(broker, owned):
+    return broker in brokers(broker.pid, owned)
 
 
-def stop(broker):
+def stop(broker, owned, idle_only):
     # A PID from a stale record or from an earlier process snapshot is not authority to kill.
-    if not running(broker):
+    if not running(broker, owned):
         return True
+    status = 1
     try:
-        subprocess.run(["node", "-e", SHUTDOWN, broker.endpoint], capture_output=True, timeout=2, check=False)
+        result = subprocess.run(["node", "-e", SHUTDOWN, broker.endpoint, "idle" if idle_only else "owned"],
+                                capture_output=True, timeout=3, check=False)
+        status = result.returncode
     except (OSError, subprocess.TimeoutExpired):
         pass
+    if idle_only and status:
+        return not running(broker, owned)
     if os.name == "nt":
         # The fresh CIM query gives the app-server time to exit after acknowledging shutdown.
-        if running(broker):
+        if running(broker, owned):
             subprocess.run(["taskkill.exe", "/PID", str(broker.pid), "/T", "/F"],
                            capture_output=True, timeout=5, check=False)
-        return not running(broker)
+        return not running(broker, owned)
 
     # SIGTERM also asks the broker to close its app-server child.
-    if running(broker):
+    if running(broker, owned):
         try:
             os.kill(broker.pid, signal.SIGTERM)
         except ProcessLookupError:
             return True
     for _ in range(20):
-        if not running(broker):
+        if not running(broker, owned):
             return True
         time.sleep(0.05)
     return False
@@ -178,26 +212,33 @@ def main():
     roots.add_argument("--owned-temp", type=Path)
     roots.add_argument("--fixture-root", action="store_true", help="Include immediate fixture directories")
     parser.add_argument("--list", action="store_true", help="Report matching brokers without stopping them")
+    parser.add_argument("--idle-only", action="store_true", help="Keep busy or unresponsive brokers")
     args = parser.parse_args()
     cwd = canonical(args.workspace)
     owned = canonical(args.owned_temp) if args.owned_temp is not None else None
     failed = False
     try:
-        for broker in list(brokers()):
-            matches = broker.cwd.parent == cwd if args.fixture_root else broker.cwd == cwd
-            if not matches or (owned is not None and broker.pid_file.parent.parent != owned):
+        for broker in list(brokers(owned=owned)):
+            if owned is not None:
+                matches = broker.pid_file.parent.parent == owned
+            elif args.fixture_root:
+                matches = broker.cwd.parent == cwd
+            else:
+                matches = broker.cwd == cwd
+            if not matches:
                 continue
             label = f"Codex companion broker PID {broker.pid} ({broker.cwd})"
             if args.list:
                 print(label)
             else:
                 try:
-                    stopped = stop(broker)
+                    stopped = stop(broker, owned, args.idle_only)
                 except (OSError, subprocess.SubprocessError, ValueError):
                     stopped = False
                 if not stopped:
                     failed = True
-                    print(f"Could not stop {label}", file=sys.stderr)
+                    suffix = ": busy or idle state unavailable" if args.idle_only else ""
+                    print(f"Could not stop {label}{suffix}", file=sys.stderr)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         print(f"Could not inspect Codex companion brokers: {exc}", file=sys.stderr)
         failed = True

@@ -22,7 +22,19 @@ const shutdown = () => {
   fs.writeFileSync(process.env.TEST_EXIT, String(process.pid));
   process.exit(0);
 };
-net.createServer(socket => socket.on('data', shutdown)).listen(endpoint, () => {
+net.createServer(socket => {
+  socket.setEncoding('utf8');
+  socket.on('data', chunk => {
+    const { id, method } = JSON.parse(chunk);
+    const busy = process.env.TEST_IDLE && !fs.existsSync(process.env.TEST_IDLE);
+    if (method === 'thread/list') {
+      const reply = busy ? { id, error: { code: -32001 } } : { id, result: { data: [] } };
+      socket.write(JSON.stringify(reply) + '\n');
+    } else if (method === 'broker/shutdown') {
+      socket.end(JSON.stringify({ id, result: {} }) + '\n', shutdown);
+    }
+  });
+}).listen(endpoint, () => {
   fs.writeFileSync(pidFile, String(process.pid));
 });
 process.on('SIGTERM', shutdown);
@@ -67,9 +79,10 @@ class BrokerCleanupTests(unittest.TestCase):
         legacy_temp = root / "legacy"
         legacy_temp.mkdir()
         legacy_marker, legacy_exit = root / "legacy.pid.json", root / "legacy.exit"
+        idle = root / "idle"
         legacy_env = {
             **os.environ, "TEST_BROKER": str(broker), "TEST_MARKER": str(legacy_marker),
-            "TEST_EXIT": str(legacy_exit), "TEST_FAIL": "no",
+            "TEST_EXIT": str(legacy_exit), "TEST_FAIL": "no", "TEST_IDLE": str(idle),
             "TMPDIR": str(legacy_temp), "TMP": str(legacy_temp), "TEMP": str(legacy_temp),
         }
         subprocess.run(["node", str(companion)], cwd=root, env=legacy_env,
@@ -95,8 +108,13 @@ class BrokerCleanupTests(unittest.TestCase):
                 self.assertFalse(pid_file.exists(), result.stderr)
                 self.assertFalse(pid_file.parent.parent.exists(), result.stderr)
                 self.assertTrue(Path(legacy["pidFile"]).exists())
-        stopped = subprocess.run([sys.executable, str(SCRIPTS / "broker-cleanup.py"), str(root)],
-                                 capture_output=True, text=True, timeout=30, check=False)
+        cleanup = [sys.executable, str(SCRIPTS / "broker-cleanup.py"), "--idle-only", str(root)]
+        busy = subprocess.run(cleanup, capture_output=True, text=True, timeout=30, check=False)
+        self.assertEqual(busy.returncode, 1, busy.stderr)
+        self.assertIn(f"PID {legacy['pid']}", busy.stderr)
+        self.assertFalse(legacy_exit.exists())
+        idle.touch()
+        stopped = subprocess.run(cleanup, capture_output=True, text=True, timeout=30, check=False)
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
         self.assertEqual(legacy_exit.read_text(encoding="utf-8"), str(legacy["pid"]))
 

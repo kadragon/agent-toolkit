@@ -54,20 +54,20 @@ KEEP_RUN_DIR=""
 LOCK_DIR=""
 LOCK_HELD=""
 BROKER_TEMP=""
-stop_review_brokers() {
-  local py workspace
+clean_review_brokers() {
+  [ -n "$BROKER_TEMP" ] || return 0
+  local py
   py=$(command -v python3 || command -v python || true)
-  workspace=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
-  [ -n "$py" ] && "$py" "$SCRIPT_DIR/broker-cleanup.py" "$workspace" --owned-temp "$BROKER_TEMP"
+  if [ -n "$py" ] && "$py" -I -X utf8 "$SCRIPT_DIR/broker-cleanup.py" "$PWD" --owned-temp "$BROKER_TEMP" &&
+    rm -rf "$BROKER_TEMP"; then
+    BROKER_TEMP=""
+    return 0
+  fi
+  printf 'WARN: could not clean review brokers under %s\n' "$BROKER_TEMP" >&2
+  return 1
 }
 cleanup() {
-  if [ -n "$BROKER_TEMP" ]; then
-    if stop_review_brokers; then
-      rm -rf "$BROKER_TEMP" || printf 'WARN: could not remove broker temporary directory %s\n' "$BROKER_TEMP" >&2
-    else
-      printf 'WARN: could not clean review brokers under %s\n' "$BROKER_TEMP" >&2
-    fi
-  fi
+  clean_review_brokers || true
   # Release only a lock this process still owns: after a reclaim race the directory at that path can
   # belong to someone else, and dropping it would admit a third run.
   if [ -n "$LOCK_HELD" ] && [ -n "$LOCK_DIR" ] &&
@@ -674,13 +674,6 @@ case "$CODEX_MODE" in
     # first would clobber the holder's in-flight `.pending` with a result that is not its own.
     init_result_dir
     prune_stale_codex_state
-    # A private state root keeps the companion from reusing another client's broker.
-    # A private temp root scopes cleanup even if startup fails before writing broker.json.
-    BROKER_TEMP=$(mktemp -d -t cr.XXXXXX) || exit 1
-    broker_native_temp="$BROKER_TEMP"
-    if command -v cygpath >/dev/null 2>&1; then
-      broker_native_temp=$(cygpath -m "$BROKER_TEMP") || exit 1
-    fi
     # --json disables the companion's live reasoning stream (stderr) and the reasoning section
     # appended to the rendered text. stdout becomes a single JSON object whose .codex.stdout
     # holds the pure review (findings + verdict). stderr is still redirected: a companion that
@@ -691,6 +684,13 @@ case "$CODEX_MODE" in
     # loses the diagnostic detail.
     retry_count=0
     while :; do
+      # Use fresh private state on each attempt. Incomplete broker startup may
+      # have written a PID file before the companion updated its state record.
+      BROKER_TEMP=$(mktemp -d -t cr.XXXXXX) || exit 1
+      broker_native_temp="$BROKER_TEMP"
+      if command -v cygpath >/dev/null 2>&1; then
+        broker_native_temp=$(cygpath -m "$BROKER_TEMP") || exit 1
+      fi
       RAW=""
       codex_status=0
       # The companion's native review does not accept focus text. Its branch-scoped
@@ -770,8 +770,7 @@ case "$CODEX_MODE" in
           printf 'WARN: the review names plugin paths missing on disk (likely a Codex startup cache refresh); retrying once:\n%s\n' \
             "$STALE_PATHS" >&2
           emit_blob_tail "$TEXT" "first run review text"
-          stop_review_brokers || true
-          prune_stale_codex_state
+          clean_review_brokers || break
           continue
         fi
         break
@@ -779,9 +778,9 @@ case "$CODEX_MODE" in
       if [ "$retry_count" -eq 0 ]; then
         retry_count=1
         printf 'WARN: companion payload was empty or unparseable; retrying once after pruning broker state\n' >&2
-        stop_review_brokers || true
-        prune_stale_codex_state
-        continue
+        if clean_review_brokers; then
+          continue
+        fi
       fi
       [ -n "$JQ_ERR" ] && printf 'WARN: jq parse error: %s\n' "$JQ_ERR" >&2
       printf 'ERROR: could not extract .codex.stdout from companion JSON (payload status: %s)\n' \

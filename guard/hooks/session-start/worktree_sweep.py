@@ -73,7 +73,7 @@ def holder(root):
             return linux_holder(root)
         if os.name == "nt":
             return windows_holder(root)
-        result = run(["lsof", "-Fpcn", "+D", str(root)], root.parent)
+        result = run(["lsof", "-w", "-Fpcn", "+D", str(root)], root.parent)
         fields = result.stdout.splitlines()
         if fields and fields[0].startswith("p"):
             name = next((line[1:] for line in fields if line.startswith("c")), "process")
@@ -123,6 +123,7 @@ def sweep(repo):
     worktrees = [dict(field.partition(" ")[::2] for field in entry.split("\0"))
                  for entry in inventory.split("\0\0") if entry]
     main = Path(worktrees[0]["worktree"]).resolve()
+    invocation = repo.resolve()
     base = git(main, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") or ""
     if not base.startswith("refs/remotes/origin/"):
         return
@@ -138,7 +139,10 @@ def sweep(repo):
     reserved = main / ".worktrees"
     for tree in worktrees[1:]:
         path = Path(tree["worktree"])
-        if not path.is_dir() or path.resolve().parent != reserved or path.is_symlink() or "locked" in tree:
+        if not path.is_dir() or path.is_symlink() or "locked" in tree:
+            continue
+        resolved = path.resolve()
+        if resolved.parent != reserved or beneath(invocation, resolved):
             continue
         ref = tree.get("branch", "")
         head = tree.get("HEAD", "")
@@ -163,17 +167,20 @@ def sweep(repo):
             continue
         if not clean(path, include_ignored=True):
             continue
-        result = run(["git", "worktree", "remove", "--", str(path)], main)
+        result = run(["git", "worktree", "remove", "--", str(path)], main, timeout=None)
         if result.returncode:
             print(f"Worktree sweep: kept {path}: {result.stderr.strip()}", file=sys.stderr)
             continue
         # Squash merges do not make the original PR head an ancestor of the base.
-        # branch -D still refuses to delete a branch checked out in another worktree.
-        if git(main, "rev-parse", "--verify", ref) == head:
-            result = run(["git", "branch", "-D", "--", branch], main)
-            if result.returncode:
-                print(f"Worktree sweep: removed {path} but kept {branch}: {result.stderr.strip()}", file=sys.stderr)
-                continue
+        # Use a compare-and-delete so a concurrent advance cannot lose new commits.
+        remaining = git(main, "worktree", "list", "--porcelain", "-z")
+        if remaining is None or f"branch {ref}" in remaining.split("\0"):
+            print(f"Worktree sweep: removed {path} but kept {branch}: checkout may be in use", file=sys.stderr)
+            continue
+        result = run(["git", "update-ref", "--no-deref", "-d", ref, head], main)
+        if result.returncode:
+            print(f"Worktree sweep: removed {path} but kept {branch}: {result.stderr.strip()}", file=sys.stderr)
+            continue
         print(f"Worktree sweep: removed {path} (merged PR #{pr}).", file=sys.stderr)
 
 

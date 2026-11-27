@@ -34,7 +34,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:?set CLAUDE_PLUGIN_ROOT or PLUGIN_ROOT}}/hooks/session-start/run.sh\"",
             "commandWindows": "bash \"$env:PLUGIN_ROOT/hooks/session-start/run.sh\"",
-            "timeout": 15,
+            "timeout": 60,
             "statusMessage": "Running session-start maintenance..."
           }
         ]

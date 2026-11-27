@@ -13,7 +13,7 @@ Covered: dead-PID job records are rewritten and mirrored into state.json, live a
 records are left byte-identical, a dead broker record takes its `cxc-*` session dir with it, a live
 one survives, an unreadable liveness probe counts as alive, another workspace's directory is never
 touched, the lock skips with status 75 for a live owner while reclaiming a stale one, and an empty
-or unparseable companion payload gets one retry after the broker record is pruned.
+or unparseable companion payload gets one retry with fresh private state.
 
 Most state and lock cases do not reach the companion: the lock and prune run before it is launched,
 so the stub path is deliberately non-existent and the resulting non-zero exit is expected. The
@@ -167,6 +167,7 @@ def make_repo(tmp: Path, name: str) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     shutil.copy(SCRIPT, repo / "scripts" / "codex-review.sh")
     shutil.copy(SCRIPT.with_name("review-guidance.sh"), repo / "scripts")
+    shutil.copy(SCRIPT.with_name("broker-cleanup.py"), repo / "scripts")
     return repo
 
 
@@ -202,6 +203,9 @@ def make_sequenced_companion(tmp: Path, name: str, outputs: list[str], broker_pa
     calls = tmp / f"{name}.calls"
     script.write_text(
         "import fs from 'node:fs';\n"
+        "import path from 'node:path';\n"
+        "const attempt = path.join(process.env.CLAUDE_PLUGIN_DATA, 'attempt');\n"
+        "fs.writeFileSync(attempt, '', {flag: 'wx'});\n"
         f"const calls = {json.dumps(str(calls))};\n"
         f"const outputs = {json.dumps(outputs)};\n"
         f"const broker = {json.dumps(str(broker_path) if broker_path else '')};\n"
@@ -525,7 +529,7 @@ def case_empty_payload_retries_after_prune(tmp: Path, _live: int):
     )
     check("empty payload → retry succeeds", proc.returncode == 0, proc.stderr)
     check("companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
-    check("broker record pruned before retry", not broker.exists())
+    check("shared broker record survives private retry", read(broker)["pid"] == DEAD_PID)
     check("retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
     check("retry review text emitted", proc.stdout.strip() == "review after retry", proc.stdout)
 
@@ -544,7 +548,7 @@ def case_empty_json_stdout_retries_after_prune(tmp: Path, _live: int):
     proc = run(repo, tmp, companion=bash_path(companion))
     check("missing stdout → retry succeeds", proc.returncode == 0, proc.stderr)
     check("missing stdout companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
-    check("missing stdout broker record pruned before retry", not broker.exists())
+    check("missing stdout shared broker record survives private retry", read(broker)["pid"] == DEAD_PID)
     check("missing stdout retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
     check("missing stdout retry review text emitted", proc.stdout.strip() == "review after retry", proc.stdout)
 
@@ -566,7 +570,7 @@ def case_empty_json_stdout_retries_then_fails(tmp: Path, _live: int):
     proc = run(repo, tmp, companion=bash_path(companion))
     check("second empty stdout payload → exit 1", proc.returncode == 1, proc.stderr)
     check("empty stdout companion called exactly twice", calls.read_text(encoding="utf-8") == "2")
-    check("empty stdout broker record pruned before retry", not broker.exists())
+    check("empty stdout shared broker record survives private retry", read(broker)["pid"] == DEAD_PID)
     check("empty stdout retry warning emitted once", proc.stderr.count("retrying once") == 1, proc.stderr)
     check("empty stdout current payload status diagnostic kept", "payload status: 0" in proc.stderr, proc.stderr)
     check(
