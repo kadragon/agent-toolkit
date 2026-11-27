@@ -15,7 +15,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 - [ ] [FEAT] Add `task-next/scripts/queue_backend.py` (resolver + contract v1 framing) and `references/queue-backend-contract.md`; the built-in `backlog` backend maps `backlog_candidates.py` output onto the contract and adds `show` and `rejected` readers, so selection is unchanged everywhere
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Backend resolution, Backend contract (version 1)
-  Done when: `python3 dev/skills/task-next/scripts/queue_backend.py --test` passes — resolver order (env, github.com host, open `backlog.md` items keep `backlog`, user registry, fallback), exit codes 0/1/2, `create` → `edit_file` on `backlog`, `backlog` `list` matching `backlog_candidates.py --json --counts` after the documented mapping (same titles, order, open-item counts) and honoring `ref`/`tasks`, `show` and `rejected` on fixtures, a fixture adapter plugged in through the registry; the test step is wired in `harness-check.yml`
+  Done when: `python3 dev/skills/task-next/scripts/queue_backend.py --test` passes — resolver order (env, github.com host, open `backlog.md` items keep `backlog`, user registry, fallback), exit codes 0/1/2, `create` → `edit_file` on `backlog`, `backlog` `list` matching `backlog_candidates.py --json --counts` after the documented mapping (same titles, order, and `counts` open/deferred/blocked) and honoring `ref`/`tasks`, `show` and `rejected` on fixtures, a fixture adapter plugged in through the registry; the test step is wired in `harness-check.yml`
   Approach: stdlib-only CLI `<op>` + JSON stdin/stdout; `github` resolves but returns exit 2 for every op until ticket 2
 
 ## 2 — github backend read path
@@ -30,7 +30,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [FEAT] Switch `dispatch.py pick` to `queue_backend.py list` and make its "no backlog.md: no queue" check and `dispatch/SKILL.md` wording backend-aware *(blocked by: 2-github-backend-read-path)*
   Source: docs/design/github-issues-queue.md → Script and doc surface per backend
   Done when: `python3 dev/skills/dispatch/scripts/test_dispatch.py` passes with new cases for a GitHub repo without `backlog.md` (issues listed) and a non-GitHub repo (unchanged output); warnings reach stderr
-  Approach: keep the JSON shape `pick` prints today; `--tree` passes `ref: origin/HEAD` in the `list` request, which `backlog` honors and `github` ignores
+  Approach: keep the JSON shape `pick` prints today, rebuilt from `candidates[]` and its `counts`; `--tree` passes `ref: origin/HEAD` in the `list` request, which `backlog` honors and `github` ignores
 
 ## 4 — task-next selection and closing on issues
 
@@ -41,9 +41,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 5 — github backend writes and task-tickets
 
-- [ ] [FEAT] Implement `create`, `rejected`, `reject` and `defer` for the `github` backend, the standing `queue-write` grant and the `no-queue-write` limit in `git-authorization.md`, the failure-path pending store with `queue_backend.py publish`, and switch `task-tickets` to file one issue per ticket with dependencies *(blocked by: 2-github-backend-read-path)*
+- [ ] [FEAT] Implement `create`, `rejected`, `reject` and `defer` for the `github` backend, the standing `queue-write` grant and a separate `**Queue limits:** none | no-queue-write` contract field in `git-authorization.md` (never a `**Git limits:**` value, so `cycle_state.py`'s Git vocabularies stay unchanged), the failure-path pending store with `queue_backend.py publish`, and switch `task-tickets` to file one issue per ticket with dependencies *(blocked by: 2-github-backend-read-path)*
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Backend contract, GitHub mapping (Blocked by, Rejected), Writers and authority
-  Done when: `queue_backend.py --test` covers batch-key dependencies, retry-safe `create` (`queue-key` body marker reuse on a lost response, missing relations completed, `incomplete[]` kept pending), label bootstrap, closed-not-planned listing, and pending store write/publish under the git common dir on the failure path only (`gh` failing mid-write, `no-queue-write`); `task-tickets/SKILL.md` files issues on `github` with no per-run approval, in attended and unattended runs alike, and keeps the `backlog.md` path on `edit_file`; no working-tree change results from a `github` `create`
+  Done when: `queue_backend.py --test` covers batch-key dependencies, retry-safe `create` (`queue-key` body marker reuse on a lost response, missing relations completed, `incomplete[]` kept pending), label bootstrap, closed-not-planned listing, a `**Queue limits:** no-queue-write` contract still passing `cycle_state.py authorize` for its Git actions (`test_cycle_state.py`), and pending store write/publish under the git common dir on the failure path only (`gh` failing mid-write, `no-queue-write`); `task-tickets/SKILL.md` files issues on `github` with no per-run approval, in attended and unattended runs alike, and keeps the `backlog.md` path on `edit_file`; no working-tree change results from a `github` `create`
   Approach: `addBlockedBy`/`addSubIssue` mutations; Git limits never restrict `queue-write`; only on failure do drafts go to `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
 
 ## 6 — findings writers on queue backend
@@ -83,7 +83,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 11 — adopt issues queue in agent-toolkit
 
-- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue *(blocked by: 6-findings-writers-on-queue-backend)* *(blocked by: 7-security-overview-on-issues-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
+- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 6-findings-writers-on-queue-backend)* *(blocked by: 7-security-overview-on-issues-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
   Source: docs/design/github-issues-queue.md → Further Notes (Bootstrap)
   Done when: `queue_backend.py list` on this repo shows no legacy-backlog warning; the rejected entries are listed by `rejected`; `validate-harness.sh` green
   Approach: dry-run first, then `--apply`

@@ -90,7 +90,7 @@ Every request carries `"contract": 1` and `"repo": "<abs toplevel>"`.
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
 | `describe` | yes | — | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` (e.g. `"Closes {ref}"`) |
-| `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev) and `tasks` (path) — `backlog` uses both as `backlog_candidates.py --ref/--tasks` does; `github` ignores them | `candidates[]` (`id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`), `parked[]` (`ref`, `kind`: `blocked`/`deferred`, `payload`), `claimed[]`, `warnings[]` |
+| `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev) and `tasks` (path) — `backlog` uses both as `backlog_candidates.py --ref/--tasks` does; `github` ignores them | `candidates[]` (`id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`, `counts`: `open`/`deferred`/`blocked`), `parked[]` (`ref`, `kind`: `blocked`/`deferred`, `payload`), `claimed[]`, `warnings[]` |
 | `show` | yes | `ref` | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key` (stable across retries), `title`, `body`, `labels`, `parent_key`, `blocked_by[]` (batch keys or existing refs) | `created[]`: `key`, `ref`, `url`, `reused` (bool); `incomplete[]`: `key` + the relation still missing |
 | `rejected` | yes | — | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
@@ -177,8 +177,12 @@ section. Selection behavior on that backend is unchanged.
   unattended, and a grant-gated default would leave findings local again — the problem this change
   exists to fix. Filing an issue is not a Git write, so Git limits (`implementation-only`,
   `no-push`, `pr-only`, …) never restrict it.
-- `git-authorization.md` records the standing grant and one limit, `no-queue-write`, set only from
-  an explicit user instruction forbidding queue writes for that run.
+- `git-authorization.md` records the standing grant and a separate contract field,
+  `**Queue limits:** none | no-queue-write`, set to `no-queue-write` only from an explicit user
+  instruction forbidding queue writes for that run. It is not a `**Git limits:**` value and
+  `queue-write` is not an `**Allowed Git actions:**` entry: `cycle_state.py authorize` validates
+  those two fields against fixed Git vocabularies (`GIT_ACTIONS`, `LIMIT_ACTIONS`) and fails closed
+  on an unknown token. A missing `**Queue limits:**` field reads as `none`.
 - **Pending store = failure path only.** When `gh` becomes unreachable or unauthenticated mid-write,
   or `no-queue-write` is set, the writer stores the drafts in
   `$(git rev-parse --git-common-dir)/agent-queue/pending.json` — outside the working tree and
