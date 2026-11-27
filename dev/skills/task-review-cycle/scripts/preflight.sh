@@ -14,10 +14,6 @@
 # re-run on every invocation and overlaid onto a cache hit; a cached probe could report a reviewer
 # that the current runtime does not have.
 #
-# Validity is keyed on the *current branch*, not on time alone: an entry written on the base
-# branch names the wrong `feature_branch` once a branch is cut, and must not be reused. A cache
-# hit therefore requires all of:
-# same feature_branch, same --no-hub mode and local base, has_errors false, and younger than the TTL.
 # An errored result is never written, so a failure always re-surfaces on the next run.
 #
 # A cache hit still fast-forwards the local base branch. That sync is what keeps a downstream

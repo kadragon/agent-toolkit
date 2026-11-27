@@ -645,7 +645,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
 
-    def test_collect_gates_pre_merge_reports_and_warns_on_a_confirmed_merge(self):
+    def test_collect_gates_ready_and_warns_on_completed_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         cases = (
             (None, ("claude", "agy", "codex", "no completed result")),
@@ -667,22 +667,23 @@ class DispatchReceiptTests(DispatchTestCase):
                         with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
                             collect(SimpleNamespace(run=receipt, close=False))
                         reported = json.loads(output.getvalue())["result"]
-                        expected = "blocked" if blockers and status != "merged" else status
+                        expected = "blocked" if blockers and status == "ready" else status
                         self.assertEqual(reported["status"], expected)
                         self.assertEqual(reported["pr"], "example-pr")
-                        if status == "merged":
+                        if status != "ready":
                             self.assertEqual(reported["summary"], "CI passed")
                             self.assertEqual(reported["phase"], "review")
-                        warning = reported.get("review_warning", "") if status == "merged" else reported["summary"]
+                        warning = reported["summary"] if status == "ready" else reported.get("review_warning", "")
                         for blocker in blockers:
                             self.assertIn(blocker, warning)
 
-    def test_collect_gates_pr_done_reports_without_pr_field_and_preserves_no_work(self):
+    def test_collect_warns_about_missing_reviews_without_blocking_done(self):
         with tempfile.TemporaryDirectory() as directory:
             for details in (
                 {"head": "a" * 40},
                 {"summary": "Opened PR #123"},
                 {"evidence": {"review": "https://github.com/acme/widget/pull/123"}},
+                {"summary": "No eligible work. PR #123 already merged."},
                 {},
             ):
                 with self.subTest(details=details):
@@ -690,11 +691,12 @@ class DispatchReceiptTests(DispatchTestCase):
                         directory, {"state": "done"}, receipt_fields={"require_review_sources": True},
                         result={"status": "done", "phase": "review", "summary": "No eligible work", **details},
                     )
-                    self.assertEqual(report["result"]["status"], "blocked" if details else "done")
+                    self.assertEqual(report["result"]["status"], "done")
+                    self.assertEqual(report["result"]["summary"], details.get("summary", "No eligible work"))
                     if details:
-                        self.assertIn("codex: no completed result", report["result"]["summary"])
+                        self.assertIn("codex: no completed result", report["result"]["review_warning"])
                     else:
-                        self.assertEqual(report["result"]["summary"], "No eligible work")
+                        self.assertNotIn("review_warning", report["result"])
 
     def test_collect_can_close_a_merged_child_with_missing_review_evidence(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}

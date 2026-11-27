@@ -347,9 +347,9 @@ def gate_required_reviews(result):
     if not missing:
         return result
     reasons = [f"{reviewer}: {reason}" for reviewer, reason in missing.items()]
-    if status == "merged":
-        return {**result, "review_warning": " | ".join(reasons)}
-    return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(reasons)}
+    if status == "ready":
+        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(reasons)}
+    return {**result, "review_warning": " | ".join(reasons)}
 
 
 def serialize_result(result):
@@ -375,7 +375,6 @@ def report_review(args):
             gated["summary"] = f"{names}: see review_sources"
             serialized = serialize_result(gated)
             if len(serialized.encode("utf-8")) > RESULT_LIMIT:
-                # At the byte limit even a short summary may not fit alongside all receipt data.
                 with tempfile.NamedTemporaryFile(
                     dir=path.parent, prefix="review-details-", suffix=".json", mode="w", encoding="utf-8", delete=False,
                 ) as details:
