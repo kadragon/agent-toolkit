@@ -46,10 +46,11 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 | `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
-| `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]` |
+| `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`) |
 | `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
+| `publish` | no | optional `queue_limits` | as `create`, for the pending store's drafts |
 
 `candidates[]` entries: `id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`, and `counts`
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
@@ -88,10 +89,9 @@ existing item.
 ## `github` backend
 
 Reads `origin`'s `owner/name` and queries `gh api graphql`. `gh` missing or unauthenticated is a
-hard error (exit 1, naming `gh auth login`), never a `backlog.md` fallback. `create`, `rejected`,
-`reject` and `defer` answer exit 2 until the write path lands.
+hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fallback.
 
-- `describe`: `visibility` from the repo's `isPrivate`, `ops` `describe`/`list`/`show`,
+- `describe`: `visibility` from the repo's `isPrivate`, `ops` every op above,
   `close_ref_template` `"Closes {ref}"`.
 - **Trust gate.** Only open issues labelled `task-queue` **and** authored by
   `OWNER`/`MEMBER`/`COLLABORATOR` are queue items; another author's labelled issue is skipped
@@ -121,3 +121,40 @@ hard error (exit 1, naming `gh auth login`), never a `backlog.md` fallback. `cre
   queue. `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.
+
+### `github` writes
+
+Writes run under the standing `queue-write` grant (`git-authorization.md` → *Queue writes*): no
+per-run approval, in attended and unattended runs alike, and no working-tree change.
+
+- `create` validates every item first (one-line `key` without `-->`, unique in the batch, never
+  its own parent or blocker; `title`; string `body`; `parent_key` and each `blocked_by` entry a
+  batch key, a known `queue-key`, or `#N` / `owner/name#N`) — a bad request is exit 1 and stores
+  nothing. It then reads every issue a trusted author filed with a `<!-- queue-key: <key> -->`
+  body marker (open or closed, any label), creates each missing label (`task-queue` plus the
+  items' labels), files each unmatched item with the marker appended to its body, and reuses a
+  match (`reused: true`). Relations follow: `parent_key` → `addSubIssue`, `blocked_by` →
+  `addBlockedBy`, each skipped when the issue already has it. An item with relations is filed
+  **without** `task-queue` and gets the label only once every relation landed, so `list` never
+  offers it half-linked. A relation GitHub refuses lands in `incomplete[]` (`key`, `relation`
+  `parent`/`blocked_by`, `ref`, `error`). An issue GitHub refuses as invalid (HTTP 400/422) lands
+  there as `relation: "create"` and is not stored — the same draft can never succeed.
+- **Pending store — failure path only.** Drafts not fully filed — `gh` missing, unauthenticated or
+  failing mid-write (the response carries `error`), an `incomplete[]` relation, or
+  `"queue_limits": "no-queue-write"` (gh is never called) — are kept by key, bound to the
+  `owner/name` they were meant for, in `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
+  (outside the working tree and history; every read-merge-write holds `pending.json.lock`), and
+  named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
+  path. A clean run writes no file.
+- `publish` re-sends the stored drafts bound to the current `origin` through `create`
+  (retry-safe, so an issue whose response was lost is reused and its missing relations
+  completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes
+  the file when it empties. A draft bound to another repository, or naming a target that no longer
+  resolves, stays pending with an `incomplete[]` entry (`relation: "target"`) and never blocks the
+  rest. Under `no-queue-write` it posts nothing.
+- `rejected`: closed `task-queue` issues with state reason `NOT_PLANNED` and a trusted author;
+  `reason` and `refile_bar` come from the latest trusted `<!-- queue-rejected -->` comment
+  (`Reason: …`, `Re-file only with: …`), plus `url`.
+- `reject` (a trusted queue issue): posts that comment, then closes the issue as not planned.
+- `defer` (a trusted queue issue): creates the `deferred` label when missing, replaces any
+  `Deferred:` body line with `Deferred: <reason>`, and adds the label.

@@ -6,12 +6,12 @@ description: >-
   rationale. Callable from other skills via `Skill(dev:task-grill)`. Not for
   facts discoverable from the repo — look those up instead of asking.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 2.0.0
+version: 2.0.1
 ---
 
 # Grill
 
-> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
+> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's queue backends (GitHub issues or `backlog.md`, via `task-next`'s `queue_backend.py`; no CONTEXT.md/ADR pipeline).
 
 A hard stop as a reusable skill: **material ambiguity affecting scope, irreversible effects, external
 communication, or expected output → grill, don't guess.** Its output feeds directly into

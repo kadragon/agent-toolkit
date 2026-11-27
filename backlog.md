@@ -12,30 +12,23 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
 
-## 5 — github backend writes and task-tickets
-
-- [ ] [FEAT] Implement `create`, `rejected`, `reject` and `defer` for the `github` backend, the standing `queue-write` grant and a separate `**Queue limits:** none | no-queue-write` contract field in `git-authorization.md` (never a `**Git limits:**` value, so `cycle_state.py`'s Git vocabularies stay unchanged), the failure-path pending store with `queue_backend.py publish`, and switch `task-tickets` to file one issue per ticket with dependencies
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Backend contract, GitHub mapping (Blocked by, Rejected), Writers and authority
-  Done when: `queue_backend.py --test` covers batch-key dependencies, retry-safe `create` (`queue-key` body marker reuse on a lost response, missing relations completed, `incomplete[]` kept pending), label bootstrap, closed-not-planned listing, a `**Queue limits:** no-queue-write` contract still passing `cycle_state.py authorize` for its Git actions (`test_cycle_state.py`), and pending store write/publish under the git common dir on the failure path only (`gh` failing mid-write, `no-queue-write`); `task-tickets/SKILL.md` files issues on `github` with no per-run approval, in attended and unattended runs alike, and keeps the `backlog.md` path on `edit_file`; no working-tree change results from a `github` `create`; the `task-tickets` `description:` and `evals/trigger-eval.json` name queue items/issues rather than only `backlog.md` items, and `task-spec/SKILL.md` (lines naming `backlog.md` items, the "markdown-only backlog (no issue tracker)" note) and the same note in `task-grill/SKILL.md` match the backend split
-  Approach: `addBlockedBy`/`addSubIssue` mutations; Git limits never restrict `queue-write`; only on failure do drafts go to `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
-
 ## 6 — findings writers on queue backend
 
-- [ ] [FEAT] Route every findings writer through `queue_backend.py create`/`rejected`: `task-review-cycle` (parent + sub-issues for ≥2 findings, draft security advisory for a `security` finding on a public repo), `harness-capture`, `test-prune`, `repo-architecture`, `reference-review`, `harness-init/scripts/sweep.sh` *(blocked by: 5-github-backend-writes-and-task-tickets)*
+- [ ] [FEAT] Route every findings writer through `queue_backend.py create`/`rejected`: `task-review-cycle` (parent + sub-issues for ≥2 findings, draft security advisory for a `security` finding on a public repo), `harness-capture`, `test-prune`, `repo-architecture`, `reference-review`, `harness-init/scripts/sweep.sh`
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Writers and authority, Security findings
   Done when: each writer's prose names the backend call and keeps the `edit_file` path verbatim for `backlog`; on `github` every writer files without per-run approval, including `--auto`, dispatched and unattended runs (`harness-capture` deltas and deferred memory prunes included), and uses the pending store only on the failure path; a security finding on a `public` backend is never written to an issue or file; the advisory call is exercised once on a private test repo or recorded as unverified; `task-review-cycle/references/comment-rules.md` (the two "file under `## Review Backlog`" rules) and `late-source-reclaim.md` (the `## Review Backlog` note) are backend-neutral too
   Approach: `consolidation-guide.md` → *Recording out-of-scope and non-blocking findings* becomes backend-neutral; the rejected check reads `rejected`
 
 ## 7 — security-overview on issues backend
 
-- [ ] [FEAT] Make `dev/commands/security-overview.md` backend-aware: report-only (alert numbers, no queue write) on a public GitHub repo; one `security`-labelled issue per alert with a hidden `gh-alert` marker on a private one; `backlog.md` path unchanged elsewhere *(blocked by: 5-github-backend-writes-and-task-tickets)*
+- [ ] [FEAT] Make `dev/commands/security-overview.md` backend-aware: report-only (alert numbers, no queue write) on a public GitHub repo; one `security`-labelled issue per alert with a hidden `gh-alert` marker on a private one; `backlog.md` path unchanged elsewhere
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Security findings
   Done when: the command and `references/security-overview/backlog-template.md` state the three routes; a rescan on a private fixture creates nothing already marked; a run on a public repo writes nothing; the command's `description:`, the `README.md` command row and `references/security-overview/api-patterns.md`'s "backlog.md severity" mapping no longer say alerts always go to `backlog.md`
   Approach: visibility from `describe`; idempotency by body marker search instead of the backlog section replace
 
 ## 8 — task-new routing on issues backend
 
-- [ ] [FEAT] Update `task-new` routing: on the issues backend, *Queue without implementing* calls `task-tickets`, which files issues directly under the standing `queue-write` grant, with no *Queue documentation cycle* and no commit-authority check, and the working-tree gate's `backlog.md` carve-out and `queue_delta` apply only on the `backlog` backend *(blocked by: 5-github-backend-writes-and-task-tickets)*
+- [ ] [FEAT] Update `task-new` routing: on the issues backend, *Queue without implementing* calls `task-tickets`, which files issues directly under the standing `queue-write` grant, with no *Queue documentation cycle* and no commit-authority check, and the working-tree gate's `backlog.md` carve-out and `queue_delta` apply only on the `backlog` backend
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Writers and authority
   Done when: `task-new/SKILL.md` and `task-next/SKILL.md` → *Working tree gate* read correctly for both backends; `docs/design/` stays carried; the `task-new`/`task-next` workflow eval cases updated for the issues route, and the `backlog.md` queries in `task-next`/`task-new` `evals/trigger-eval.json` gain an issues-queue counterpart
   Approach: backend from `queue_backend.py describe`; parallel-worktree queue-edit blocker applies only to `backlog`
@@ -49,7 +42,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 10 — backlog migration script and knue-pic pilot
 
-- [ ] [FEAT] Add `task-next/scripts/migrate_backlog.py` (dry-run default, `--apply` under the standing `queue-write` grant, `backlog-migrated` create keys, public-repo security refusal, and the "stays on the file queue until you run migrate_backlog.py" warning on github.com repos with open items) and pilot it on `../knue-pic` *(blocked by: 5-github-backend-writes-and-task-tickets)*
+- [ ] [FEAT] Add `task-next/scripts/migrate_backlog.py` (dry-run default, `--apply` under the standing `queue-write` grant, `backlog-migrated` create keys, public-repo security refusal, and the "stays on the file queue until you run migrate_backlog.py" warning on github.com repos with open items) and pilot it on `../knue-pic`
   Source: docs/design/github-issues-queue.md → Implementation Decisions → Migration; Testing Decisions
   Done when: `migrate_backlog.py --test` passes (groups, blockers, deferred, rejected, security refusal, re-run reuse, a partial run keeps every line whose issue or relation is unconfirmed, the warning) and is wired in `harness-check.yml`; the knue-pic dry-run plan is checked against the source `backlog.md` before `--apply` (a mapping check, not an authority gate), and one knue-pic `task-next --tree` cycle closes an issue through its PR
   Approach: reuse `backlog_candidates.py` tokenizer; `--apply` deletes only confirmed lines and leaves the `backlog.md` change for the user to commit
@@ -66,6 +59,12 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #467 — Select task-next work through the queue backend and close covered issues from the PR (2026-11-27)
 
 - [ ] [debt] On the issues backend, cleanup's `prune-tasks` deletes the worktree `## Covers` claim before the PR exists, so between cleanup and PR creation another run's `list` offers the same issue; add a claim source that survives cleanup (e.g. the worktree branch's archived refs) in `github_claims` (source: code-review) (introduced here) — dev/skills/task-next/scripts/queue_backend.py:564
+
+### PR #468 — Add github queue writes, the queue-write grant and issue filing in task-tickets (2026-11-27)
+
+- [ ] [debt] `key_index` and `github_rejected` walk every issue / closed `task-queue` issue (cap 100 pages of 100); past that every github `create` goes pending — look up only the batch's keys, or filter rejected by `reason:not-planned` search (source: code-review, agy) (introduced here) — dev/skills/task-next/scripts/queue_backend.py:key_index
+- [ ] [debt] On a truncated github `list`, a parent's sub-issue on an unread page is excluded as "not a trusted task-queue issue" instead of "incomplete read", and the parent is still offered (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:why_not
+- [ ] [debt] `handle()` resolves the backend for `show`/`rejected` from the working tree, ignoring the request's `rev`, so a github.com repo whose `backlog.md` has open items only at `rev` queries GitHub instead (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:handle
 
 ## Rejected — do not re-file
 

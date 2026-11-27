@@ -7,12 +7,12 @@ description: >-
   an already-approved spec into queue items → task-tickets. Trivial work skips
   straight to a Sprint Contract.
 # notation-exempt: description text, rewritten only under a separate decision
-version: 1.2.3
+version: 1.2.4
 ---
 
 # To Spec
 
-> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's markdown-only backlog (no issue tracker, no CONTEXT.md/ADR pipeline).
+> Inspired by mattpocock/skills (https://github.com/mattpocock/skills) — adapted for this repo's queue backends (GitHub issues or `backlog.md`, via `task-next`'s `queue_backend.py`; no CONTEXT.md/ADR pipeline).
 
 Synthesizes an approved scope into a spec document. This skill does **not** ask the user
 questions — open questions go to `dev:task-grill` (Step 2).
@@ -24,8 +24,8 @@ cross-cutting change, or anything that won't fit in one Sprint Contract. Trivial
 single-session work skips this skill entirely and goes straight to a Sprint Contract.
 
 This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand into
-`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate `backlog.md` items) is
-`task-tickets`'s job, not this skill's.
+`docs/design/{feature}.md`" + "Review with user"). Step 3 (generate queue items — GitHub issues
+or `backlog.md` items, per the repo's backend) is `task-tickets`'s job, not this skill's.
 
 ## Flow
 
@@ -95,7 +95,7 @@ This skill automates `docs/workflows.md` `plan` workflow **steps 1-2** ("Expand 
    explicit approval before any downstream skill (`task-tickets`, or direct implementation)
    proceeds (`plan` workflow step 2).
 5. **Hand off.** Once approved, the caller (typically `task-new`) proceeds by calling the Skill
-   tool with "dev:task-tickets" to break the spec into backlog items.
+   tool with "dev:task-tickets" to break the spec into queue items.
 
 ## Boundaries
 
