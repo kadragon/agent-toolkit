@@ -10,6 +10,7 @@
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
       --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
+      --trust-hooks bypasses persisted hook trust for this Codex launch only.
       A Codex family (luna, terra, sol, any case) resolves to its newest listed slug in
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
@@ -59,11 +60,11 @@ PLUGIN_HOOK_FAILURE = re.compile(
     re.IGNORECASE | re.MULTILINE)
 # A hook failure event, not a prompt or command output that quotes the phrase.
 CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTILINE)
-HOOK_REVIEW_TITLE = re.compile(r"^\s*(?:\d+\s+)?hooks? needs? review\s*$", re.IGNORECASE)
-HOOK_REVIEW_OPTION = re.compile(r"^\s*(?P<selected>›\s*)?[1-9]\.\s+(?P<label>.+?)\s*$")
-HOOK_TRUST_PROGRESS = re.compile(r"^\s*Trusting hooks(?:\.\.\.|…)\s*$", re.MULTILINE)
-HOOK_TRUST_ERROR = re.compile(r"^\s*(Failed to trust hooks:[^\n]*)", re.MULTILINE)
-WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*\d+\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
+WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
+HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
+                      "Enabled hooks may run without review for this invocation.")
+WARNING_VIEW_FOOTER = re.compile(
+    r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
@@ -124,13 +125,16 @@ def child_name(repo, title):
     return f"{base}-{slug}"[:32].rstrip("-")
 
 
-def child_argv(cli, model, effort, message, keep_connectors, result=None):
+def child_argv(cli, model, effort, message, keep_connectors, result=None, *, trust_hooks=False):
     if cli == "codex":
         if message:
             raise SystemExit("codex takes no first message at launch; use dispatch.py send")
         # Herdr requires foreground Codex so commands execute inside its terminal.
-        return ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
+        argv = ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
                 "-c", f"model_reasoning_effort={effort}"]
+        if trust_hooks:
+            argv.append("--dangerously-bypass-hook-trust")
+        return argv
     if not message:
         raise SystemExit("a claude child needs its first message")
     settings = dict(CLAUDE_SETTINGS)
@@ -496,8 +500,8 @@ def launch(args):
     if args.task is not None and (args.cli != "codex" or args.message is not None):
         raise SystemExit("--task is for Codex only; Claude takes its task as MESSAGE")
     trust_hooks = getattr(args, "trust_hooks", False)
-    if trust_hooks and args.task is None:
-        raise SystemExit("--trust-hooks requires a Codex --task")
+    if trust_hooks and args.cli != "codex":
+        raise SystemExit("--trust-hooks is only supported for Herdr Codex launches")
     refuse_banned_model(args.model)
     model = resolve_codex_model(args.model) if args.cli == "codex" else args.model
     resolved = {"model": model, **({"model_family": args.model} if model != args.model else {})}
@@ -531,7 +535,8 @@ def launch(args):
     argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
             "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
             *(["--parent", home] if home else ["--no-parent"]),
-            *child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path)]
+            *child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
+                        trust_hooks=trust_hooks)]
     if args.dry_run:
         preview = {"name": name, **resolved, **quota, "argv": argv}
         if title:
@@ -561,6 +566,8 @@ def launch(args):
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0, **quota}
+    if trust_hooks:
+        run["trust_hooks"] = True
     if lookup_error is not None:
         run["launched_ms"] = launched_ms
     if args.cli == "codex" and (versions := installed_plugin_versions()):
@@ -581,10 +588,13 @@ def launch(args):
                   if args.cli == "claude" else "task withheld")
         raise SystemExit(f"{address}: parent changed at launch; {detail}")
     if args.task:
-        send(SimpleNamespace(address=address, message=args.task, run=receipt, trust_hooks=trust_hooks))
+        send(SimpleNamespace(address=address, message=args.task, run=receipt))
 
 
 def render_t3_thread_launch(args):
+    if getattr(args, "trust_hooks", False):
+        raise SystemExit("--trust-hooks is unavailable on T3: t3_thread_launch has no Codex startup argv field; "
+                         "use Herdr for this option")
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
     model = args.model.strip()
@@ -755,24 +765,6 @@ def composer_draft(text):
                       *(line.strip() for line in lines[index + 1:status_row])]).strip()
 
 
-def hook_trust_keys(text):
-    """Find the visible trust-all option relative to the selected row."""
-    lines = text.splitlines()
-    title = next((i for i, line in enumerate(lines) if HOOK_REVIEW_TITLE.fullmatch(line)), None)
-    if title is None:
-        return None
-    options = [option for line in lines[title + 1:] if (option := HOOK_REVIEW_OPTION.fullmatch(line))]
-    labels = [option["label"] for option in options]
-    if "Review hooks" not in labels or not any(label.startswith("Continue without trusting") for label in labels):
-        return None
-    selected = [i for i, option in enumerate(options) if option["selected"]]
-    trust_all = [i for i, option in enumerate(options) if option["label"] == "Trust all and continue"]
-    if len(selected) != 1 or len(trust_all) != 1:
-        return None
-    offset = trust_all[0] - selected[0]
-    return ("down",) * offset if offset > 0 else ("up",) * -offset
-
-
 def read_codex_screen(address, *, sent_message=None, with_text=False):
     screen = hc_json("read", "--lines", "0", address)
     text = screen.get("text", "") if screen["how"] == "screen" else ""
@@ -802,6 +794,17 @@ def startup_composer(text, *, draft=False):
             and not any(line.lstrip().startswith(("•", "■")) for line in text.splitlines()))
 
 
+def is_hook_bypass_notice(text):
+    rows = [line.strip() for line in text.splitlines() if line.strip()]
+    title = "Warnings · 1 of 1 · Startup"
+    if rows.count(title) != 1:
+        return False
+    body = rows[rows.index(title) + 1:]
+    if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
+        body.pop()
+    return " ".join(body) == HOOK_BYPASS_NOTICE
+
+
 def send(args):
     run_file = getattr(args, "run", None)
     run_path = Path(run_file).resolve() if run_file else None
@@ -816,7 +819,6 @@ def send_task(args, run_path):
     run = None
     continuation = getattr(args, "continuation", False)
     resend = getattr(args, "resend", False)
-    trust_hooks = getattr(args, "trust_hooks", False)
     if resend and not run_path:
         raise SystemExit("--resend requires --run")
     screen_reads = 0
@@ -855,8 +857,7 @@ def send_task(args, run_path):
     stray_draft = None
     clears = 0
     last_clear = None
-    trust_moved = False
-    trust_accepted = False
+    dismissed_bypass_notice = False
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -866,27 +867,39 @@ def send_task(args, run_path):
                 if screen == "waiting":
                     print_screen_tail(address, text, run)
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
-            if screen == "hooks" and trust_accepted and HOOK_TRUST_PROGRESS.search(text):
-                screen = "waiting"
             if screen == "hooks":
-                trust_error = HOOK_TRUST_ERROR.search(text) if trust_accepted else None
-                if trust_error:
-                    raise SystemExit(f"{address}: task withheld. {trust_error[1]}")
-                keys = hook_trust_keys(text) if trust_hooks else None
-                if keys is None:
-                    raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+            if screen == "warning":
+                withheld = f"{address}: task withheld; inspect the Codex warning with F2"
+                footer = "\n".join(text.rstrip().splitlines()[-2:])
+                if (not run or run.get("trust_hooks") is not True or run["sent"] is not False
+                        or dismissed_bypass_notice or WARNING_FOOTER.findall(footer) != ["1"]):
+                    raise SystemExit(withheld)
                 terminal = hc_json("get", address)
                 verify_terminal(run, terminal)
-                if terminal["state"] != "live":
-                    raise SystemExit(f"{address}: task withheld; Codex exited during hook review")
-                if not keys and not trust_accepted:
-                    hc_json("keys", address, "enter")
-                    trust_accepted = True
-                elif keys and not trust_moved and not trust_accepted:
-                    hc_json("keys", address, *keys)
-                    trust_moved = True
-            if screen == "warning":
-                raise SystemExit(f"{address}: task withheld; inspect the Codex warning with F2")
+                turn = terminal["turn"]
+                if (terminal["state"] != "live" or (terminal.get("status") or {}).get("state") != "idle"
+                        or not (turn == 0 or (turn == 1 and startup_composer(text)))):
+                    raise SystemExit(withheld)
+                hc_json("keys", address, "f2")
+                time.sleep(SCREEN_POLL_SECONDS)
+                screen_reads += 1
+                panel = hc_json("read", "--lines", "0", address)
+                if not panel["complete"] or panel["how"] != "screen":
+                    raise SystemExit(withheld)
+                if codex_screen(panel["text"]) == "hooks":
+                    raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                if not is_hook_bypass_notice(panel["text"]):
+                    raise SystemExit(withheld)
+                current = hc_json("get", address)
+                verify_terminal(run, current)
+                # Herdr can report working while the local warning viewer owns the input.
+                if current["state"] != "live" or current["turn"] != turn:
+                    raise SystemExit(withheld)
+                hc_json("keys", address, "esc")
+                dismissed_bypass_notice = True
+                time.sleep(SCREEN_POLL_SECONDS)
+                continue
             if screen == "draft":
                 draft = composer_draft(text)
                 stray_draft = stray_draft or draft
@@ -911,6 +924,8 @@ def send_task(args, run_path):
                 terminal = hc_json("get", address)
                 if run:
                     verify_terminal(run, terminal)
+                if dismissed_bypass_notice and terminal["state"] != "live":
+                    raise SystemExit(f"{address}: task withheld; Codex exited after closing the warning")
                 status = (terminal.get("status") or {}).get("state")
                 if resend:
                     sent_turn = run.get("sent_turn")
@@ -1422,7 +1437,8 @@ def main(argv):
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
-    launch_parser.add_argument("--trust-hooks", action="store_true", help="trust all hooks in the Codex startup dialog")
+    launch_parser.add_argument("--trust-hooks", action="store_true",
+                               help="bypass persisted hook trust for this Herdr Codex launch (explicit authorization)")
     launch_parser.add_argument("--keep-connectors", action="store_true")
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
@@ -1451,6 +1467,7 @@ def main(argv):
     prompt_parser.add_argument("--unit", required=True, help="assigned unit")
     prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
     prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
+    prompt_parser.add_argument("--trust-hooks", action="store_true", help="unavailable on T3; use Herdr")
     prompt_parser.add_argument("message")
     for launch_command in (launch_parser, prompt_parser):
         launch_command.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")

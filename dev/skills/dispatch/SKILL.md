@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 2.10.0
+version: 2.11.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`) or T3 Code orchestration. Use when the user asks to
@@ -27,6 +27,8 @@ Keep the receipt and address of the existing child.
 Pick once per run, before launch; name it in step 3's pre-launch line. The user's choice wins; else T3
 Code if this session has T3 tools **and** an `orchestrator_capabilities` call succeeds (env vars are
 not evidence); else Herdr. A launched child never switches backend. T3: `references/t3-backend.md`.
+Use Herdr when the user requests the Codex hook-trust bypass. If they select T3, report that this
+backend cannot pass the startup flag.
 
 ## 1. Resolve the repo
 
@@ -168,8 +170,9 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex fa
 
 - `send` checks the idle composer before sending and checks the screen again before confirming
   submission. For blockers and retries, follow `references/codex-readiness.md`.
-- For a single-child `launch --task`, add `--trust-hooks` only with explicit authorization to
-  select **Trust all and continue**. In a wave, resolve any startup review while the child is idle.
+- For Herdr Codex, `launch --trust-hooks` passes `--dangerously-bypass-hook-trust` for that process.
+  Verify the hook sources and commands and get explicit authorization before using it. It works
+  with `--task` and with idle wave launches. Otherwise follow the manual hook review in the readiness guide.
 - Claude-only hooks do not run in a Codex child. Apply step 5's "Leave to the user" list.
 
 More than one session:
