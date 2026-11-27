@@ -391,6 +391,8 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
+    if "additional_git_limits" in handoff:
+        fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
     prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
               "Task-cycle mode and flags come exclusively from the invocation above.\n"
               "<dispatch-handoff>\n"
@@ -438,9 +440,11 @@ def launch_handoff(args, cwd):
     limits = " ".join((args.git_limits or "").casefold().split())
     no_authority = limits in {"", "not specified", "unknown", "implementation-only"}
     if getattr(args, "no_git_writes", False):
-        if not no_authority:
+        if limits in {"none", "no-push", "pr-only"}:
             raise SystemExit("--no-git-writes conflicts with --git-limits that describe a Git grant")
         handoff["git_limits"] = "implementation-only"
+        if not no_authority:
+            handoff["additional_git_limits"] = args.git_limits
     elif handoff["work_kind"] in {"queue", "new"} and no_authority:
         raise SystemExit("--git-limits must carry a verified user grant; "
                          "use --no-git-writes for implementation-only work")

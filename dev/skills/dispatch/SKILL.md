@@ -136,8 +136,10 @@ Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` fo
 in step 2. Forward explicit Git grants and limits verbatim. If an explicit full-workflow invocation
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
 Queue and new launches reject missing, blank, or placeholder Git limits. For work authorized
-to proceed without Git writes, pass `--no-git-writes` in place of `--git-limits`. The child
-receives `implementation-only` and stops before any commit, push, or PR write.
+to proceed without Git writes, pass `--no-git-writes`. The child receives `implementation-only`
+and stops before any commit, push, or PR write. Use `--git-limits` alongside the flag to forward
+additional user restrictions verbatim. The child honors those restrictions within
+`implementation-only`.
 For standalone work that needs no Git writes and has no user-provided limits, pass
 `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.

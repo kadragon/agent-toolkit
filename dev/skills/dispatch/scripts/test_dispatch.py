@@ -221,6 +221,18 @@ class DispatchReceiptTests(DispatchTestCase):
                 handoff = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
                 self.assertEqual(json.loads(handoff)["Git limits"], expected)
 
+        restrictions = "구현만 진행해 주세요.\n로컬 main도 갱신하지 마세요. "
+        args = self.launch_args(Path.cwd(), git_limits=restrictions, no_git_writes=True, dry_run=True)
+        with patch("dispatch.warn_linked_worktree"), redirect_stdout(StringIO()) as stdout:
+            launch(args)
+        prompt = json.loads(stdout.getvalue())["task"]
+        handoff = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        self.assertEqual(json.loads(handoff), {
+            **self.FIELDS,
+            "Git limits": "implementation-only",
+            "Additional Git limits (verbatim)": restrictions,
+        })
+
     def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
         cwd = Path(tempfile.gettempdir()) / "myrepo"
         for raw, name, title, expected in (
