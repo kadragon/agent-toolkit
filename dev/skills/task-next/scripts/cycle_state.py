@@ -183,7 +183,7 @@ def main():
     try:
         branch = getattr(args, "branch", None) or git("symbolic-ref", "--quiet", "--short", "HEAD")
         common = Path(git("rev-parse", "--git-common-dir")).resolve()
-        key = hashlib.sha256(branch.encode()).hexdigest()
+        key = hashlib.sha256(branch.encode("utf-8")).hexdigest()
         slot = common / "task-cycle" / key
         path = slot / "contract.md"
         evidence_path = slot / "evidence.json"
@@ -210,6 +210,12 @@ def main():
             temporary = path.with_suffix(".tmp")
             temporary.write_text(text, encoding="utf-8")
             temporary.replace(path)
+            git_dir = Path(git("rev-parse", "--git-dir")).resolve()
+            if git_dir != common:
+                registration = git_dir / "task-cycle-contract"
+                temporary = registration.with_suffix(".tmp")
+                temporary.write_text(f"{branch}\n{key}\n", encoding="utf-8")
+                temporary.replace(registration)
             result = {"branch": branch, "contract_path": str(path)}
         elif args.subcommand == "authorize":
             if not path.exists():
