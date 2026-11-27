@@ -20,9 +20,17 @@ route to `task-next`.
 Resolve the queue with `queue_backend.py describe` using `../task-next/SKILL.md` →
 *Prerequisites*. Set `SKILL_DIR` to the task-next skill directory. Under `--tree` with an
 `origin`, pin `BASE_SHA` there first and set `REF` to it for `describe` and `list`. Otherwise
-leave `REF` empty. Use the resolved queue to check whether the request is already tracked.
+leave `REF` empty. Check known refs and look for matching queue items, including parked
+entries. Route confirmed matches to `task-next`. A candidate scan can omit claimed tickets,
+so a missing candidate leaves the match unconfirmed.
 Read `docs/conventions.md` when present. On `backlog`, only create `backlog.md` when writing
 tickets or findings. A standalone task needs neither a backlog file nor harness initialization.
+
+**Queue unavailable.** For intake, catch a failed `describe` or queue lookup and report the
+error and unconfirmed tracking status. If `describe` failed, pass `BACKEND=unavailable` to
+the working-tree gate, so only its design-file exception applies. After sizing and any
+dispatch assignment checks, continue to Step 3 only for a clear, bounded implementation that
+can proceed without queue access. Requests that require the queue stop with the error.
 
 **Working tree gate** — apply `../task-next/SKILL.md` → *Working tree gate* with the
 resolved `BACKEND`: its capture block, then its table rows in order.
@@ -41,6 +49,12 @@ approval; tags and file counts are context, not gates. Inspect the relevant area
 
 ## Step 2 — Route
 
+For every `task-tickets` call here or in *Queue documentation cycle*, pass the selected
+backend and writing checkout. For a built-in backend, set `AGENT_QUEUE_BACKEND` to that
+backend on the callee's queue commands. Proceed with a file edit only on the `backlog`
+route, in the stated checkout, and after `create` returns `edit_file`. Report any backend or
+checkout mismatch before writing.
+
 For a `--tree` handoff with `Dispatch mode: parallel-worktree`, classify only the assigned
 unit. If the assignment is missing, already queued, unclear, larger than one contract, or
 requires shared planning, report the blocker to the home session and stop before writing.
@@ -54,18 +68,17 @@ For other runs, first match wins. Size comes before clarity: a fully specified r
 can still be too large for one contract.
 - **Queue without implementing** (the user asks only to record it):
   - Issues backend → call the Skill tool with "dev:task-tickets" to file the issues under the
-    standing `queue-write` grant. Pass the selected backend to the callee. On GitHub, set
-    `AGENT_QUEUE_BACKEND=github` for its queue commands so a concurrent backlog edit cannot
-    change the destination. If an issues backend returns `edit_file`, stop and report the
-    mismatch before editing. Report the ticketing result and stop. This route skips the
+    standing `queue-write` grant. Report the ticketing result and stop. This route skips the
     commit-authority check and *Queue documentation cycle*, including on a parallel dispatch.
   - Dispatched on `backlog` → verify commit authority for the queue edit from the
     forwarded human request and Git limits per `../task-next/references/git-authorization.md`.
     If established, take *Queue documentation cycle* below. If missing under `--tree`, report
     the blocker and stop before writing. If missing without `--tree`, use the ticket-only
     route below.
-  - Ticket-only route on `backlog` → call the Skill tool with "dev:task-tickets" on the request,
-    then stop after writing the tickets.
+  - Ticket-only route on `backlog` → write through the Skill tool with "dev:task-tickets"
+    in the checkout examined by the working-tree gate, then stop. If `--tree` resolved
+    `backlog` from the pinned base, first confirm the writing checkout also resolves to
+    `backlog`; report a mismatch and stop before writing.
 - **Multi-session or architecturally significant** → call the Skill tool twice, for
   "dev:task-spec" (after "dev:task-grill" when its scope is still ambiguous) and then
   "dev:task-tickets"; then **stop** — no cycle runs this invocation.
@@ -92,8 +105,6 @@ route under **Queue without implementing**. Use the pinned SHA for any worktree 
 On `backlog`, use Steps 3–4 for the queue edit. Archive a Sprint Contract scoped to recording
 the assigned tickets, with the verified Git authority and limits. Apply `--tree` for checkout isolation
 only. At *Implement*, call the Skill tool with "dev:task-tickets" from the cycle's checkout.
-Keep the selected backend for that call by setting `AGENT_QUEUE_BACKEND=backlog` on its queue
-commands if the cycle uses a separate checkout.
 After writing the approved tickets, return to this cycle with the ticket list in place of the
 ticket skill's standalone handoff. If ticketing is blocked or leaves no queue delta, report
 that outcome and the saved branch and contract, then stop before review. Verify the ticket
