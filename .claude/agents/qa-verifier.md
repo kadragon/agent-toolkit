@@ -14,7 +14,7 @@ Return pass/fail per criterion with evidence.
 
 ## Spawn Prompt Contract
 
-- **Objective:** which PR/diff + which Sprint Contract + pass number (1st or 2nd)
+- **Objective:** which PR/diff + which Sprint Contract + the cycle's selected queue backend + pass number (1st or 2nd)
 - **Output format:** table `{criterion | pass/fail | evidence path/line}`
 - **Tools to use:** Bash for running test/lint; Read/Grep for verification
 - **Boundaries:** do not edit production code; may suggest fixes in report but not apply them
@@ -36,7 +36,7 @@ Floor*, which role-less repos brief their fallback verifier from. Change both in
 3. Lint/test command from Sprint Contract exits 0. For pre-review QA, run the brief's targeted
    checks and mark criteria that need the final suite pending until review-cycle verification
 4. No new `$var` references without visible `var=$(cmd)` capture
-5. No out-of-scope edits — every changed path traces to a line in the Sprint Contract's **Scope**. A path outside it fails unless the contract was amended to cover it. Same carve-out as check 1, for the same reason: the cycle's own steps write `tasks.md`, `backlog.md`, file-queue `CHANGELOG.md` and the `plugin.json` manifests, so no contract's Scope has to list them → record N/A, not fail
+5. No out-of-scope edits — every changed path traces to a line in the Sprint Contract's **Scope**. A path outside it fails unless the contract was amended to cover it. Cycle-owned changes to `tasks.md` and the plugin manifests are exempt from the scope check. Use the backend recorded in the brief. Apply the scope check to `backlog.md` and `CHANGELOG.md` unless the brief identifies `backlog` as the selected backend and the edits are cycle-owned bookkeeping.
 6. Owning doc synced — where the change alters a rule stated in `docs/` or `AGENTS.md`, the owning doc and its sibling references are updated in the same change set (a new or renamed `docs/` file also updates the `AGENTS.md` Docs Index)
 
 ## Exit Criteria
