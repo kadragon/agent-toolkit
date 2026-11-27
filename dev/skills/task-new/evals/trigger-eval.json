@@ -4,6 +4,7 @@
   {"query": "I am describing new work with no tracking entry — classify it and drive the cycle", "should_trigger": true},
 
   {"query": "pull the next item from backlog.md and run the code cycle on it", "should_trigger": false},
+  {"query": "pull the next queued GitHub issue and run the code cycle on it", "should_trigger": false},
   {"query": "run the post-dev review cycle: commit, reviews, CI, merge", "should_trigger": false},
   {"query": "make a bar chart of these quarterly revenue numbers", "should_trigger": false}
 ]

@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.18.0
+version: 2.19.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -22,9 +22,20 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Prerequisites
 
+**Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
+applying the working-tree gate:
+
+```bash
+git fetch origin || exit 1
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
+  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
+BASE_SHA=$(git rev-parse --verify "$BASE^{commit}") || exit 1
+echo "base: $BASE  selecting from: $BASE_SHA"
+```
+
 **Queue backend.** Every queue read goes through `scripts/queue_backend.py`
-(`references/queue-backend-contract.md`); resolve the backend once, first — under `--tree`, right
-after Step 1 pins `BASE_SHA`, with `REF="$BASE_SHA"`, so it resolves against the same base
+(`references/queue-backend-contract.md`). Resolve it once before applying the working-tree gate.
+Under `--tree`, set `REF` to the pinned `BASE_SHA`, so it resolves against the same base
 `backlog.md` the `list` calls read (this checkout's copy may differ):
 
 ```bash
@@ -46,20 +57,29 @@ never falls back to `backlog.md`). Every rule below that names `backlog.md` line
 non-empty: `github`, or an adapter that closes through a keyword) takes the branch stated beside it.
 
 **Required:** on `backlog`, `backlog.md`. Missing → stop and point to `dev:harness-init`. Under `--tree`, this
-checkout's copy does not count: defer the check to right after Step 1 pins `BASE_SHA`, and test the
-base commit's copy (`git cat-file -e "$BASE_SHA:backlog.md"`); missing there → stop with the same
+checkout's copy does not count: test the pinned base commit's copy
+(`git cat-file -e "$BASE_SHA:backlog.md"`); missing there → stop with the same
 pointer. The issues backend needs no queue file. Read `docs/conventions.md` when present; when absent the linter is the authority.
 
 **Working tree gate.** Capture the state before judging dirty files:
 
 ```bash
+BACKEND="<backend printed by describe>"
 dirty=$(git status --porcelain)
 current_branch=$(git branch --show-current)   # every row below reads it, dirty or clean
 task_worktree=$(git worktree list --porcelain | grep -E '^worktree .*/\.worktrees/' || true)   # dirty or clean
 if [[ -n "$dirty" ]]; then
   task_contract_dirty=$(git status --porcelain -- tasks.md)
-  non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md' ':(exclude,top)docs/design')   # top: anchor at repo root
-  queue_delta=$(git diff --stat HEAD -- backlog.md)                          # HEAD: a staged backlog.md still shows
+  design_dirty=$(git status --porcelain -- ':(top)docs/design')
+  backlog_dirty=''
+  queue_delta=''
+  if [[ "$BACKEND" == backlog ]]; then
+    backlog_dirty=$(git status --porcelain -- ':(top)backlog.md')
+    queue_delta=$(git diff --stat HEAD -- ':(top)backlog.md')   # HEAD includes staged changes
+    non_queue_dirty=$(git status --porcelain -- ':(exclude,top)backlog.md' ':(exclude,top)docs/design')
+  else
+    non_queue_dirty=$(git status --porcelain -- ':(exclude,top)docs/design')
+  fi
 fi
 ```
 
@@ -68,12 +88,12 @@ Base branch means `main` or `master`.
 | State | Action |
 |-------|--------|
 | `--resume <slug>`, or the user names a worktree | *Work already in flight* on `.worktrees/<slug>` only (`references/edge-cases.md`) |
-| `--tree`, any branch, clean or dirty — except on base with `task_contract_dirty` non-empty, which takes the legacy row below | proceed: this checkout is never read for selection, edited, or switched, so its branch and dirty files are someone else's (at most one non-`--tree` session, or the user). Announce them in one line — `main checkout: <current_branch>, <N> dirty file(s), left as is` — and, when `queue_delta` or a `docs/design/` file is dirty, add that these uncommitted queue edits are invisible to `--tree` until committed to base. Step 1 selects from the base |
+| `--tree`, any branch, clean or dirty — except on base with `task_contract_dirty` non-empty, which takes the legacy row below | proceed: this checkout is never read for selection, edited, or switched, so its branch and dirty files are someone else's (at most one non-`--tree` session, or the user). Announce them in one line — `main checkout: <current_branch>, <N> dirty file(s), left as is` — and, when `backlog_dirty` or `design_dirty` is non-empty, add that those edits are invisible to `--tree` until committed to base. Step 1 selects from the base |
 | clean on base branch | proceed |
 | feature branch, even clean | inspect *Work already in flight* before selecting new work |
 | dirty, not on base branch | *Work already in flight* (`references/edge-cases.md`) |
 | on base branch, `task_contract_dirty` non-empty | same edge case — legacy only: a pre-collapse-free `--tree` run stopped after removing its worktree |
-| on base branch, `non_queue_dirty` empty | `backlog.md` and `docs/design/` alone are not stray (the `task-spec` → `task-tickets` hand-off leaves them uncommitted): announce that they are being carried, quote `queue_delta` (or the file's line count when untracked) and any design doc, proceed |
+| on base branch, `non_queue_dirty` empty | Carry dirty `docs/design/` files on either backend and dirty `backlog.md` only on `backlog`. Announce the carried design docs and, when `backlog_dirty` is non-empty, quote `queue_delta` (or the file's line count when untracked). Proceed |
 | anything else | list the dirty files, stop, ask the user to commit, stash, or discard |
 
 On the `--tree` row or a base-branch row that proceeds, a non-empty `task_worktree` is other sessions' runs, not this
@@ -106,21 +126,13 @@ Exit 1 → relay stderr and stop. Each candidate is `ref`, `title`, `tag`, `item
 on the issues backend also `item_refs[]` (parallel to `items[]`) and `excluded[]` (sub-issues left
 out, with the reason — name them in the plan).
 
-`--tree` selects from the base commit it will branch from, not this checkout: pin it first, then
-set `REF="$BASE_SHA"`, so on `backlog` both files are read as committed there and claims are
+`--tree` selects from the pinned base commit it will branch from. Use `REF="$BASE_SHA"` from
+*Prerequisites*, so on `backlog` both files are read as committed there and claims are
 measured against it (this checkout's own `## Covers` and pruned lines included); on the issues
 backend `ref` pins only the branch base and adds this checkout's own `## Covers` to the claims. On
 `backlog`, read the selected lines in Steps 2–3 from the same commit (`git show
 "$BASE_SHA:backlog.md"`). Hand the printed SHA to `references/tree.md` → *Branch* — a later fetch
 must not move the worktree off the queue it was selected from.
-
-```bash
-git fetch origin || exit 1
-BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) \
-  || { echo "origin/HEAD unset — run: git remote set-head origin --auto" >&2; exit 1; }
-BASE_SHA=$(git rev-parse --verify "$BASE^{commit}") || exit 1
-echo "base: $BASE  selecting from: $BASE_SHA"
-```
 
 The backend owns selection. On `backlog`: `tasks.md` `status: open` h1 blocks, then `backlog.md` h2/h3 groups
 with open `- [ ]` items, skipping `[x]`/`[>]`/deferred/blocked items, items another
