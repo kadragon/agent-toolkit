@@ -374,6 +374,9 @@ def gate_review_result(result, *, require_review_sources):
     if require_review_sources:
         result = gate_required_reviews(result)
     status = result["status"]
+    if (status in {"done", "merged"} and not require_review_sources
+            and "review_sources" not in result and "review" not in result):
+        return result
     if status == "ready" or (result.get("pr") and status in {"done", "merged"}):
         if reason := review_problem(result, require_review_sources=require_review_sources):
             return {**result, "status": "blocked", "phase": "review-state", "summary": reason}

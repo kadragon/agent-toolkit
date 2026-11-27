@@ -645,6 +645,35 @@ class DispatchReceiptTests(DispatchTestCase):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
 
+    def test_collect_accepts_and_closes_legacy_pr_completion_reports(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        finished = {**terminal, "state": "finished"}
+        for status in ("done", "merged"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, self.RECEIPT)
+                result = {"status": status, "phase": "complete", "summary": "PR work completed", "pr": "example-pr"}
+                result_path = receipt.with_name("result.json")
+                write_json(result_path, result)
+                with (
+                    self.subTest(close=False),
+                    patch("dispatch.hc_json", return_value=terminal),
+                    redirect_stdout(StringIO()) as output,
+                ):
+                    collect(SimpleNamespace(run=receipt, close=False))
+                    self.assertEqual(json.loads(output.getvalue())["result"], result)
+                with (
+                    self.subTest(close=True),
+                    patch("dispatch.hc_json", side_effect=[terminal, {}, finished, {}]) as hc,
+                    redirect_stdout(StringIO()) as output,
+                ):
+                    collect(SimpleNamespace(run=receipt, close=True))
+                    self.assertEqual(json.loads(output.getvalue())["result"], result)
+                    self.assertEqual(hc.call_args_list, [
+                        call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7"),
+                    ])
+                    self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "final_result")
+
     def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         cases = (
@@ -687,7 +716,7 @@ class DispatchReceiptTests(DispatchTestCase):
             ("ready", stale_review, "Independent review head differs", "missing"),
             ("ready", {**review, "sources": []}, "Independent review sources are missing", "missing"),
             ("ready", review, None, "passed"),
-            ("done", None, "Independent review is missing", "missing"),
+            ("done", {**review, "status": "missing"}, "Independent review is missing", "missing"),
             ("merged", stale_review, "Independent review head differs", "missing"),
             ("blocked", stale_review, None, "missing"),
         )
