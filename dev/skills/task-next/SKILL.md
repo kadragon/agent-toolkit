@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.19.0
+version: 2.20.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -218,9 +218,9 @@ carry no `[x]`, `[>]`, or stale sprint markers. The issues backend runs no `prun
 ## Step 4 — Hand off
 
 Per `references/cycle.md` → *Hand off*: `args: --from task-next --auto`, Sprint Contract restated
-verbatim, with saved archive and validation evidence, plus the covered refs and
-`close_ref_template` on the issues backend. `--tree` and parallel batches also verify
-the integrated candidate after worktree checks.
+verbatim, with saved archive and targeted evidence, plus covered refs and `close_ref_template`
+on the issues backend. `--tree` and parallel batches check the integrated candidate before
+hand-off. The review cycle runs full verification on the final candidate.
 
 ## Edge cases
 

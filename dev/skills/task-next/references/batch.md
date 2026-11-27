@@ -92,7 +92,8 @@ or verifier unavailable → preserve the unit and exclude it from integration; r
    Then record the step 1 outcomes with `cycle_state.py note` on the integration branch, so a
    fresh session reads them through `inspect` — after any `save --replace`, which clears notes.
 3. Run the shared cycle from *Version bump* through *Validation evidence*: one bump per touched
-   plugin, cleanup only for integrated units, and full required checks on the integrated candidate.
+   plugin, cleanup only for integrated units, and targeted checks on the integrated candidate.
+   The review cycle runs the full required checks on the final candidate.
    On the issues backend the hand-off carries only the integrated units' refs, so an excluded
    unit's issues stay open.
    On the file queue, use the *Cleanup* command's `AGENT_QUEUE_BACKEND=backlog` override after

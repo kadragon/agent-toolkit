@@ -48,7 +48,7 @@ size); argue about runway from it, not from one cycle's impression.
 
 ## Pre-merge reclaim
 
-Run this **immediately before the merge command**, for each panel source (codex, agy) recorded as
+Run this during *Final verification*, for each panel source (codex, agy) recorded as
 `Reviewers Skipped` this cycle — still running, or failed. On the hub path that means *after*
 `ci-wait.sh` returns green — the CI wait is free runway for a slow source, so reclaiming
 earlier throws it away.
@@ -69,8 +69,8 @@ done
 
 | State | Action |
 |-------|--------|
-| `.meta` with `status=ok` and a non-empty `review_file` | Read the review file. Put its findings through `consolidation-guide.md` and Step 4 apply, exactly as an in-time source. A resulting change commits via `commit-and-push.sh`; on the hub path that re-enters CI — wait for it green again, and say in the report that the reclaim cost an extra CI round. |
-| `.pending` only, `pid` alive under `kill -0` | The source is still running. Merge, and report the `.meta` path the user can read when it lands. |
+| `.meta` with `status=ok` and a non-empty `review_file` | Read the review file and apply the existing review gate and cap in `consolidation-guide.md`. A resulting repair gets targeted checks and a commit via `commit-and-push.sh`. On hub, wait for CI on that head and report the extra CI round. |
+| `.pending` only, `pid` alive under `kill -0` | The source is still running. Continue final verification and report the `.meta` path. |
 | `.pending` only, `pid` dead | The run died without a result. Nothing to reclaim; the `Reviewers Skipped` line stands. |
 | `.meta` with `status=failed` or `empty`, or no files at all | Nothing to reclaim; the `Reviewers Skipped` line stands. |
 | `.review.txt` and `.pending` but no `.meta` | The meta write failed after the review landed. Read the review file directly and treat it as `status=ok`. |

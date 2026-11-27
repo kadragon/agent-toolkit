@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.15.0
+version: 1.16.0
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -110,9 +110,9 @@ PR_URL=$(jq -r '.pr_url' <<<"$RESULT")
 Apply `references/review-sources.md` → *Data-sharing policy* to every primary, panel, and fallback reviewer.
 **Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then the advisory pass below.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty
-(latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Reuse eligible passing
-evidence per the shared cycle; execute missing/stale required checks before review. A failed or
-absent required result blocks merge, even if the reviewer cannot assess it. Bash `timeout: 600000`:
+(latest floor run) or material behavioral risk → `EFFORT="high"`, else empty. Supply passing
+evidence for checks already run. Leave execution-only criteria without results pending full
+verification at Step 6. Bash `timeout: 600000`:
 
 ```bash
 CLAUDE_ALLOWED="<true only when the policy permits Claude>"
@@ -150,24 +150,13 @@ queue filing and dispositions. Record each verdict per *Report review send-backs
 
 ## Step 4: Apply
 
-1. Apply approved findings with focused checks. For each blocking finding, search the branch
-   diff for the same bug pattern under its Blocking category; verify, fix and check every in-scope
-   instance in the same pass. A check fails → fix forward within that finding's scope once.
-   Still failing: a `contract` finding → stop, never merge; any other → undo that
-   finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
-   applied finding touched the file), queue it per the consolidation guide, and continue.
-   A fixed `contract` finding → re-run the reviewer once; still failing → stop, never merge.
-   Handle advisory `comments` per `references/comment-rules.md` → *Applying*;
-   keep their edits separable from blocking fixes so failed cleanup can be withdrawn independently.
-2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
-   *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
+1. Apply the approved findings and run targeted checks on the changed code. Follow
+   `references/consolidation-guide.md` → *Fix rounds and re-review* for the one general
+   re-review cap, focused contract/security confirmation, and routing after the cap.
+2. A fix newly touched another plugin or skill `SKILL.md` → follow the shared cycle's *Version bump*.
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
    cycle → call the Skill tool with "dev:harness-capture" now. Review has already run, so it
    writes auto-memory only and files every docs/`AGENTS.md`/skill delta through the queue backend.
-4. Run full required checks on the final changed candidate and refresh evidence per the shared
-   cycle. If checks fail after advisory comment edits, withdraw those edits and rerun the required
-   checks on the remaining candidate; defer the cleanup and base the merge gate on that candidate.
-   Finalize the dispositions after checks confirm which edits remain.
 
 ## Step 5: Commit
 ```bash
@@ -175,7 +164,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/commit-and-push.sh" ]] || { echo "Bundled commit helper unavailable: $SKILL_DIR/scripts/commit-and-push.sh" >&2; exit 1; }
 FILES_TO_STAGE="<exact files changed in Step 4, verified against git status --short>"
 COMMIT_MESSAGE=$(cat <<'COMMIT_MSG'
-<[TYPE] message from Step 1, closing lines kept, its Verification: line rebuilt from the Step 4.4 evidence>
+<[TYPE] message from Step 1, closing lines kept, its Verification: section rebuilt from current targeted evidence>
 COMMIT_MSG
 )
 # lite or --no-hub:
@@ -185,18 +174,19 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --messa
 ```
 
 Skip the commit if Step 4 made no changes. GitHub: authorize `pr-write`, then update PR metadata
-with `gh pr edit`, keeping every closing line. `--no-hub`: reclaim late panel sources, report and stop.
+with `gh pr edit`, keeping every closing line.
 
 ## Step 6: Merge
 
-PR-only, unverified base-merge authority, or dispatch pre-merge stop: reclaim late panel results,
-finish checks, report the PR ready, and preserve its archive before any merge preparation.
+**Local-only or PR-only** — apply `references/consolidation-guide.md` → *Final verification*.
+`--no-hub` reports with remote checks pending and stops. PR-only, unverified base-merge
+authority, or dispatch pre-merge stop: finish CI, report the PR ready, and preserve its archive.
 
 **Lite path** — the route was chosen on the pre-review diff. When Step 5 committed a Step 4 fix,
 re-run the floor block of `references/risk-routing.md` first; `FLOOR_HIT` non-empty → the route
-is hub from here: Step 1's hub block, Step 2's hub review, Steps 3–5, then the hub path below.
-Otherwise the lite reviewer ran in the foreground in Step 2 (a timeout kills it), so nothing to reclaim;
-merge locally and push `main`:
+is hub from here: Step 1's hub block, then run any hub sources still unused in this cycle and
+consolidate under its existing review cap before the hub path below.
+Otherwise apply *Final verification* without panel reclaim, then merge locally and push `main`:
 
 ```bash
 FEATURE_BRANCH="<from Setup>"
@@ -220,9 +210,8 @@ never reset hard; recover within established authority. Lite is done only once t
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
 pushed a merge of base, reapplied the bump and file-queue CHANGELOG entries, and restarted CI. `conflict`/`denied`/`error` →
 stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
-Then `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
-ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then
-resolve the helper; non-zero → stop, no merge. Then issue the merge as a second, separate command
+Apply *Final verification* to the resulting hub candidate, then resolve the merge helper.
+Issue the merge as a second, separate command
 starting with the printed path — no `bash` prefix, no variable: the only shape an auto-mode allow
 rule matches. Exit 126/127 → stop and report; never retry as `bash <path>`:
 
@@ -241,7 +230,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 | Guard crashed (traceback) or `guard_skipped: true` | Treat as unchecked — report; fix `guard.py`, do not work around it |
 | Reviewer sentinel, non-zero exit, or 600s timeout (Codex: marker/empty output) | Record `Reviewers Skipped`; lite → its fallback (*Lite reviewer*); hub, or both lite reviewers failed → review inline (self-grading, disclosed); report it |
 | Panel source fails, exits 75, or has not reported when the reviewer returns | Record `Reviewers Skipped: <reason>`, proceed without waiting; codex failure or late return → reclaim before merge |
-| Contract finding still open after the one retry | Stop; no Step 5, no merge |
+| Contract or security finding still open after focused confirmation | Stop; no merge |
 | CI `rework-cap`, or a second consecutive `timeout` | Stop, ask the user |
 | CI first `timeout` | Re-run `ci-wait.sh` once |
 | CI `checks-never-registered` | Re-run `ci-wait.sh` once; recurs → stop, ask the user; never merge on it |

@@ -17,7 +17,7 @@ REASON=$(echo "$RESULT" | jq -r '.reason // empty')
 
 Allow 600000ms — the Bash tool's ceiling; the script's own 9-minute deadline fires inside it so a `timeout` result normally arrives. Branch on both `PASSED` and `REASON`:
 
-- `PASSED` is `true` → proceed to merge.
+- `PASSED` is `true` → continue with late reclaim and final local verification.
 - `PASSED` is `false` and `REASON` is empty → a real CI failure (an actual check failed). Go to "Handle CI Failure" below. The script has already counted this strike and reports the running total in `.failures`; you do not track it yourself.
 - `PASSED` is `false` and `REASON == "rework-cap"` → the 3rd consecutive real failure. **Hard stop** — do not fetch logs, do not attempt another fix. Report the PR number and `.failures` to the user and ask for guidance. If the user decides to keep going anyway, clear the counter with `rm -f "$(git rev-parse --git-dir)/task-review-ci-strikes-<pr>"` — resolve the git dir with that command rather than assuming `.git/`, which is wrong inside a `--tree` worktree.
 - `PASSED` is `false` and `REASON == "timeout"` → CI has not finished after 9 minutes. This is NOT a failure — do not fetch logs, do not count toward 3-strikes. Re-run `ci-wait.sh` once; if it times out again, stop and ask the user: "CI hasn't completed after 18 min on PR #<PR_NUMBER>. (a) keep waiting — re-run ci-wait.sh, (b) check the CI dashboard yourself and report back, (c) abandon this PR." One automatic re-run only — a second timeout waits for the user's choice.
@@ -43,8 +43,10 @@ The script identifies failed checks and returns JSON with logs for each failure 
 
 ### 2. Classify the Fix
 
-- **Trivial fix** (lint, type error, formatting, flaky test retry): Apply the fix directly.
-- **Logic change** (behavioral modification, new/changed code paths): Apply the fix, then re-run Step 2-3 (collect reviews and get user approval) before pushing.
+- **Trivial fix** (lint, type error, formatting, flaky test retry): Apply the fix and run the affected checks.
+- **Logic change** (behavioral modification, new/changed code paths): Apply the fix, run targeted
+  checks, and follow `consolidation-guide.md` → *Fix rounds and re-review* before pushing.
+  The existing review budget and contract/security gates still apply.
 
 ### 3. Commit and Push
 

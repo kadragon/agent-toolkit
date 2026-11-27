@@ -29,9 +29,9 @@ orchestrator's inline grading.
    the more conservative option; note the disagreement.
 5. **Scope.** In-scope = introduced or made worse by this branch and fixable without widening its
    purpose. Everything else is out-of-scope; when in doubt, out.
-6. **Gate.** Every in-scope P0/P1 finding is applied before merge, P0 first. Send verified
-   `pre_existing` findings and in-scope P2/P3 to the findings queue with no merge gate,
-   including in late reclaim. Map Codex's structured `critical`/`high`/`medium`/`low` to
+6. **Gate.** Apply in-scope P0/P1 findings eligible under *Fix rounds and re-review*, P0 first.
+   Keep every verified in-scope security defect blocking. Send eligible queue findings to
+   *Recording out-of-scope and non-blocking findings*. Map Codex's structured `critical`/`high`/`medium`/`low` to
    P0/P1/P2/P3 respectively. A `contract` finding is in-scope P0 by construction and
    bypasses the confidence and `failure` filters and `--auto`. A `comments` finding carries no
    harm path or confidence by design: it bypasses the harm check in step 2 and the confidence and
@@ -48,7 +48,54 @@ Give each blocking finding a short lowercase category for the guarantee it break
 fails again. Leave the category blank for other findings.
 
 Without `--auto`: stop and wait for the user on blocking fixes. With `--auto`: apply every
-in-scope P0/P1 that gates. Apply advisory comment decisions per `comment-rules.md`.
+in-scope finding that gates. Apply advisory comment decisions per `comment-rules.md`.
+
+## Fix rounds and re-review
+
+- Run at most **one general independent re-review per cycle** after the initial review. Use it
+  only when the first repair materially changes behavior. Reuse the primary reviewer, with the
+  current diff and targeted evidence. Record its launch in `cycle_state.py note` before calling
+  it. A timeout or unavailable result consumes the launch. A new HEAD, CI repair, or route
+  change does not reset the budget or restart the panel.
+- The initial consolidation and the result of the one general re-review can add ordinary
+  blockers. Close that window after consolidating the re-review, or when proceeding to final
+  verification without using it. Record closure in `cycle_state.py note` and recover both notes
+  on resume. Route valid new ordinary findings from later sources to the queue, even at P0/P1.
+  This includes late reclaim and findings incidental to focused confirmation. Retain blockers
+  accepted before the window closed. A repeat keeps its existing ID and gate.
+- For each blocker, check the branch diff for the same failure pattern and fix every in-scope
+  instance in one pass. During repairs, run the tests or checks covering the changed behavior.
+  If a targeted check fails, fix forward once within the finding's scope. If it still fails,
+  stop on contract/security. For other findings, withdraw only that finding's edits and queue it
+  if the remaining candidate can still satisfy the contract and final checks. Keep advisory
+  edits separable and use `comment-rules.md` for their disposition.
+- Confirm fixed contract and security blockers against their original criteria or failure
+  paths, including those first surfaced after the cap. Batch ready findings and give the
+  permitted reviewer their stable IDs, changed scope, and targeted evidence. Allow one focused
+  confirmation per blocker across the cycle. Count the general re-review when it confirms a
+  blocker. For a separate confirmation, request only those findings and skip the full-diff
+  launchers and panel. On a Codex-only route, re-grade the contract inline and disclose it.
+  A failed or unverified focused confirmation stops the cycle. If a later change invalidates
+  a confirmation, stop unless current evidence directly re-establishes it. Record the result
+  under the same finding ID. Keep unresolved contract and security findings blocking on every route.
+
+## Final verification
+
+On hub, follow `ci-failure-handling.md` for CI on the current PR head, then reclaim late results
+per `late-source-reclaim.md`. On the local-only route, reclaim at its stop point. If reclaim leads
+to an in-scope repair, run targeted checks, commit it, and return through CI on hub. Apply the
+existing review budget and gate to every repair, including CI repairs and fixes after resync.
+
+After repairs and applicable reclaim settle, run the full required local checks once on the
+final candidate per the shared cycle's *Validation evidence*. Reuse equivalent passing evidence
+for the exact candidate. If a check fails after advisory edits, withdraw only those edits, defer
+them, and verify the resulting candidate. A required failure or missing result blocks merge and
+a ready report. A later change invalidates affected evidence, which must be refreshed for its
+final candidate, with CI required on its head on hub. Reclaim any newly completed panel result
+before ready or merge without waiting for work still running.
+
+Finalize dispositions and update the PR's `Verification:` section from final evidence when
+authorized. Keep its closing lines and report local and remote check outcomes.
 
 ## Record finding dispositions
 
@@ -96,8 +143,9 @@ for each verdict. A newly approved scope starts a fresh sequence.
 
 ## Recording out-of-scope and non-blocking findings
 
-Verified `pre_existing`, valid out-of-scope findings, and in-scope P2/P3 go here, including
-advisory comment follow-ups and late findings. Use `queue_backend.py` (bundled with
+Verified `pre_existing`, valid out-of-scope findings, in-scope P2/P3, and new ordinary findings
+past the window in *Fix rounds and re-review* go here. This includes advisory comment follow-ups
+and qualifying late findings. Use `queue_backend.py` (bundled with
 `dev:task-next`) → *Filing findings* in `../task-next/references/queue-backend-contract.md`
 (paths relative to the skill). Classify security findings before recording or reporting them.
 
