@@ -89,6 +89,9 @@ jobs:
       - name: Test harness validation
         run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
 
+      - name: Test harness sweep
+        run: python3 dev/skills/harness-init/scripts/test_sweep.py
+
       - name: Test harness reconciliation
         run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
 
