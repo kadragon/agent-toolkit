@@ -108,14 +108,15 @@ hard error (exit 1, naming `gh auth login`), never a `backlog.md` fallback. `cre
   <reason>` body line).
 - **Claims** (`claimed[]`, no remote write): (a) a `.worktrees/*/tasks.md` `## Covers` line naming
   `#N` (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
-  `closedByPullRequestsReferences`, `by` = its URL; (c) a closing keyword in a commit on the local
+  `closedByPullRequestsReferences` by an `OWNER`/`MEMBER`/`COLLABORATOR` author, `by` = its URL
+  (another author's PR is ignored with a warning); (c) a closing keyword in a commit on the local
   default branch not yet on `origin` (`origin/HEAD`, else `origin/main`/`origin/master`;
   unresolvable → a warning, never a failed `list`).
 - **Order.** Issue number ascending, `someday` last; the fast path caps at 3, `full_scan` is
   uncapped (issues have no h3/h2 kinds, so the backlog's type priority reduces to number order).
 - **Paging.** Every connection selection reads (issues, labels, blockers, sub-issues, closing
   PRs) is paged up to a page limit. Hitting it sets `incomplete: true` with a warning, leaves out
-  any issue read only in part, and fails with exit 1 when no candidate remains — never an empty
+  any issue read only in part or whose same-repo parent was not read, and fails with exit 1 when no candidate remains — never an empty
   queue. `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.

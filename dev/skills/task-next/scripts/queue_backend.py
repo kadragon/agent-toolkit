@@ -400,7 +400,7 @@ _NODE_SEL = {
     "labels": "name",
     "blockedBy": "number state repository { nameWithOwner }",
     "subIssues": "number title state repository { nameWithOwner }",
-    "closedByPullRequestsReferences": "number url",
+    "closedByPullRequestsReferences": "number url state authorAssociation",
 }
 _CONN_ARGS = {"closedByPullRequestsReferences": ", includeClosedPrs: false"}
 
@@ -470,7 +470,9 @@ def github_slug(repo: str) -> tuple[str, str]:
     url = _git(repo, "remote", "get-url", "origin")
     if origin_host(url) != "github.com":
         raise QueueError(f"the github queue backend needs a github.com origin in {repo}, got {url!r}")
-    m = re.search(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$", url or "", re.IGNORECASE)
+    # path after scheme://[user@]host[:port]/ or scp-like [user@]host:
+    m = (re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+/+([^/]+)/([^/]+?)(?:\.git)?/*$", url or "")
+         or re.match(r"^(?:[^@/]+@)?[^/:]+:/*([^/]+)/([^/]+?)(?:\.git)?/*$", url or ""))
     if not m:
         raise QueueError(f"cannot read owner/name from origin {url!r}")
     return m.group(1), m.group(2)
@@ -575,9 +577,15 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
             for n in sorted(_covers_refs(text)):
                 claims.setdefault(n, wt)
     for issue in issues:
-        prs = issue["closedByPullRequestsReferences"]["nodes"]
-        if prs:
-            claims.setdefault(issue["number"], prs[0].get("url") or f"PR #{prs[0]['number']}")
+        for pr in issue["closedByPullRequestsReferences"]["nodes"]:
+            if pr.get("state") != "OPEN":
+                continue
+            if pr.get("authorAssociation") not in TRUSTED_AUTHORS:  # a stranger's PR cannot park an item
+                warnings.append(f"ignored claim on #{issue['number']} by {pr.get('url')}: PR author association "
+                                f"{pr.get('authorAssociation')} is not OWNER/MEMBER/COLLABORATOR")
+                continue
+            claims.setdefault(issue["number"], pr.get("url") or f"PR #{pr['number']}")
+            break
     default = default_branch(repo)
     if default is None:
         warnings.append("cannot resolve origin's default branch (no origin/HEAD, origin/main or origin/master); "
@@ -608,6 +616,7 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
 
     queued: dict[int, dict] = {}
     partial: set[int] = set()
+    seen = {issue["number"] for issue in issues}
     for issue in issues:
         if issue["authorAssociation"] not in TRUSTED_AUTHORS:
             warnings.append(f"skipped #{issue['number']}: author association {issue['authorAssociation']} "
@@ -657,6 +666,11 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
     candidates: list[dict] = []
     for n, issue in sorted(queued.items()):
         if n in partial or is_queued_parent(issue) or n in claims or blocked[n] or n in deferred:
+            continue
+        p = issue.get("parent")
+        if truncated and p and p["repository"]["nameWithOwner"].lower() == slug and p["number"] not in seen:
+            # its parent may be a queue item on a page never read: never let a sub-issue stand alone
+            warnings.append(f"incomplete: #{n} left out; its parent #{p['number']} was not read")
             continue
         subs = [s for s in issue["subIssues"]["nodes"] if s["state"] == "OPEN"]
         entry = {"id": f"#{n}", "ref": f"#{n}", "title": issue["title"], "labels": _labels(issue),
@@ -1148,7 +1162,8 @@ def _fx_issue(n: int, title: str, assoc: str = "OWNER", labels: tuple = (QUEUE_L
         "blockedBy": _fx_conn([{k: v for k, v in node(*b).items() if k != "title"} for b in blocked]),
         "subIssues": _fx_conn([node(*s) for s in subs], sub_cursor),
         "closedByPullRequestsReferences": _fx_conn(
-            [{"number": p, "url": f"https://github.com/owner/repo/pull/{p}"} for p in prs]),
+            [{"number": p, "url": f"https://github.com/owner/repo/pull/{p}", "state": state, "authorAssociation": assoc}
+             for p, state, assoc in ((pr if isinstance(pr, tuple) else (pr, "OPEN", "MEMBER")) for pr in prs)]),
     }
 
 
@@ -1167,6 +1182,7 @@ def _fx_queue() -> tuple[list[dict], list[dict]]:
         _fx_issue(8, "[FIX] a5", parent=("owner/repo", 3), labels=(QUEUE_LABEL, "deferred")),
         _fx_issue(9, "[FIX] blocker"),
         _fx_issue(10, "[DOCS] blocked one", blocked=((1, "OPEN"), (11, "CLOSED"))),
+        _fx_issue(24, "[FIX] child read before its parent", parent=("owner/repo", 25)),
     ]
     page2 = [
         _fx_issue(12, "[TEST] closed blocker only", blocked=((11, "CLOSED"),)),
@@ -1181,6 +1197,8 @@ def _fx_queue() -> tuple[list[dict], list[dict]]:
         _fx_issue(20, "[FEAT] unlabelled in labels connection", labels=("bug",)),
         _fx_issue(21, "Group C", subs=((22, "OPEN", "owner/repo", "[FIX] c1"),)),
         _fx_issue(22, "[FIX] c1", parent=("owner/repo", 21), prs=(41,)),
+        _fx_issue(23, "[FEAT] merged PR and a stranger's PR", prs=((42, "MERGED", "MEMBER"), (43, "OPEN", "NONE"))),
+        _fx_issue(25, "Group D", subs=((24, "OPEN", "owner/repo", "[FIX] child read before its parent"),)),
     ]
     return page1, page2
 
@@ -1239,7 +1257,7 @@ def run_github_tests(tmp: str, git, write) -> None:
     req = {"contract": 1, "repo": repo}
     data = github_list(dict(req, full_scan=True, parked=True), runner)
     refs = [c["ref"] for c in data["candidates"]]
-    _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#13"],
+    _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#23", "#25", "#13"],
             f"full scan: trusted, unparked, unclaimed issues by number with someday last ({refs})")
     _assert("#2" not in refs and any("#2" in w and "NONE" in w for w in data["warnings"]),
             "trust gate: a non-member author is skipped with a warning")
@@ -1269,6 +1287,8 @@ def run_github_tests(tmp: str, git, write) -> None:
             "a parent whose open sub-issues are all claimed is neither listed nor parked")
     claimed = {c["ref"]: c["by"] for c in data["claimed"]}
     _assert(claimed.get("#14", "").endswith("/pull/40"), "claim (b): an open closing PR")
+    _assert("#23" not in claimed and any("pull/43" in w for w in data["warnings"]),
+            "claim (b) ignores a merged PR and an untrusted author's PR (with a warning)")
     _assert(os.path.realpath(claimed.get("#15", "")) == os.path.realpath(wt), "claim (a): a .worktrees `## Covers` ref")
     _assert("#1" not in claimed, "a ref outside `## Covers` claims nothing")
     _assert(claimed.get("#16") == "main (unpushed commit)", "claim (c): an unpushed closing commit on the default branch")
@@ -1292,6 +1312,8 @@ def run_github_tests(tmp: str, git, write) -> None:
             "page limit → incomplete flag and warning")
     _assert("#3" not in [c["ref"] for c in data["candidates"]] and data["candidates"],
             "an issue whose connection hit the limit is left out, not half-read")
+    _assert("#24" not in [c["ref"] for c in data["candidates"]] and any("#24" in w for w in data["warnings"]),
+            "a truncated read never offers a sub-issue whose parent was not read")
     stranger = {None: _fx_conn([_fx_issue(2, "x", assoc="NONE")], "p1")}
     try:
         github_list(dict(req), _fake_gh(stranger), max_pages=1)
@@ -1334,6 +1356,11 @@ def run_github_tests(tmp: str, git, write) -> None:
     except QueueError:
         _assert(True, "github with gh unauthenticated → QueueError even with backlog.md present")
     os.remove(os.path.join(repo, "backlog.md"))
+
+    for url in ("ssh://git@github.com:22/owner/repo.git", "git@github.com:owner/repo", "https://github.com/owner/repo/"):
+        git(repo, "remote", "set-url", "origin", url)
+        _assert(github_slug(repo) == ("owner", "repo"), f"github_slug({url!r})")
+    git(repo, "remote", "set-url", "origin", "https://github.com/owner/repo.git")
 
     issues = {n["number"]: n for n in copy.deepcopy(page1 + page2)}
     show_runner = _fake_gh(pages, conn_pages, issues)
