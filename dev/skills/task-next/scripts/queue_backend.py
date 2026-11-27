@@ -36,6 +36,7 @@ import re
 import shlex
 import subprocess
 import sys
+from contextlib import contextmanager
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -103,7 +104,9 @@ def _registry_command(host: str, env: dict[str, str]) -> list[str] | None:
         return None
     except (OSError, ValueError) as e:
         raise QueueError(f"unreadable queue backend registry {path}: {e}") from e
-    cmd = (data.get("hosts") or {}).get(host) if isinstance(data, dict) else None
+    if not isinstance(data, dict) or not isinstance(hosts := data.get("hosts", {}), dict):
+        raise QueueError(f"{path}: hosts must be an object")
+    cmd = hosts.get(host)
     if cmd is None:
         return None
     if not (isinstance(cmd, list) and cmd and all(isinstance(a, str) for a in cmd)):
@@ -834,6 +837,7 @@ _KEY_MARKER = "<!-- queue-key: {} -->"
 _ALERT_MARKER = "<!-- gh-alert: {} -->"
 _ALERT_ID = r"(?:dependabot|code-scanning|secret-scanning)/[1-9][0-9]*"
 _ALERT_KEY_PREFIX = "gh-alert/"
+MIGRATION_KEY_PREFIX = "backlog-migrated:"
 _ALERT_MARKER_RE = re.compile(r"<!-- gh-alert: (" + _ALERT_ID + r") -->")
 # the marker create appends on its own last line; a body quoting the syntax earlier never wins
 _KEY_RE = re.compile(r"^<!-- queue-key: (.+?) -->\r?$", re.MULTILINE)
@@ -846,7 +850,7 @@ KEYS_QUERY = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
     "issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) "
     "{ pageInfo { hasNextPage endCursor } "
-    "nodes { id number url body state stateReason authorAssociation } } } }"
+    "nodes { id number url title body state stateReason authorAssociation } } } }"
 )
 KEY_RELATIONS_QUERY = (
     "query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { id labels(first: 100) { nodes { name } } "
@@ -1063,32 +1067,27 @@ def pending_path(repo: str) -> str:
     return os.path.join(os.path.normpath(os.path.join(repo, common)), "agent-queue", "pending.json")
 
 
-class _StoreLock:
-    """Exclusive lock on the pending store: every worktree and dispatched child shares it."""
-
-    def __init__(self, repo: str, timeout: float = 30.0):
-        self.path = pending_path(repo) + ".lock"
-        self.timeout = timeout
-
-    def __enter__(self):
-        import time
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        deadline = time.monotonic() + self.timeout
-        while True:
-            try:
-                os.close(os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-                return self
-            except FileExistsError:
-                if time.monotonic() > deadline:
-                    raise QueueError(f"pending store is locked ({self.path}); remove the lock if no "
-                                     "queue_backend.py run is active") from None
-                time.sleep(0.05)
-
-    def __exit__(self, *exc):
+@contextmanager
+def _queue_write_lock(repo: str):
+    """Hold the Git common dir's lock across lookup, filing and pending-store updates."""
+    path = os.path.join(os.path.dirname(pending_path(repo)), "write.lock")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        lock = open(path, "a+b")
+    except OSError as e:
+        raise QueueError(f"cannot open queue writer lock {path}: {e}") from e
+    with lock:
         try:
-            os.remove(self.path)
-        except FileNotFoundError:
-            pass
+            if os.name == "nt":
+                import msvcrt
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        except OSError as e:
+            raise QueueError(f"cannot acquire queue writer lock {path}: {e}") from e
+        yield
 
 
 def read_pending(repo: str) -> list[dict]:
@@ -1127,13 +1126,8 @@ def _draft(item: dict) -> dict:
     return draft
 
 
-def store_pending(repo: str, items: list[dict], target: str, reason: str) -> str:
-    """Merge drafts into the pending store by key (newest draft wins), bound to `target`."""
-    with _StoreLock(repo):
-        stored = {i["key"]: i for i in read_pending(repo)}
-        for item in items:
-            stored[item["key"]] = dict(_draft(item), target=target, pending_reason=reason)
-        return write_pending(repo, list(stored.values()))
+def _issue_body(body: str, marker: str) -> str:
+    return (body.rstrip() + "\n\n" if body.strip() else "") + marker
 
 
 def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bool,
@@ -1156,6 +1150,15 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                                           "reused": True})
                 result["done"].add(key)
                 continue
+            if key.startswith(MIGRATION_KEY_PREFIX) and (found := index.get(key)):
+                expected_body = _issue_body(item["body"], _KEY_MARKER.format(key)).replace("\r\n", "\n")
+                remote_body = (found["body"] or "").replace("\r\n", "\n").rstrip()
+                if found["title"] != item["title"] or remote_body != expected_body:
+                    result["incomplete"].append({
+                        "key": key, "relation": "content", "ref": f"#{found['number']}",
+                        "error": "migration issue title or body differs; reconcile it with backlog.md and retry",
+                    })
+                    continue
             unknown = [t for t in [item["parent_key"]] * bool(item["parent_key"]) + item["blocked_by"]
                        if not (_ISSUE_REF_RE.match(t) or t in batch or t in index)]
             invalid = [target for target in unknown if target not in withheld]
@@ -1193,7 +1196,7 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                 labels = sorted(set(item["labels"]) | (set() if linked else {QUEUE_LABEL}))
                 marker = (_ALERT_MARKER.format(key.removeprefix(_ALERT_KEY_PREFIX))
                           if key.startswith(_ALERT_KEY_PREFIX) else _KEY_MARKER.format(marker_key))
-                body = (item["body"].rstrip() + "\n\n" if item["body"].strip() else "") + marker
+                body = _issue_body(item["body"], marker)
                 try:
                     made = _rest(runner, "POST", f"repos/{owner}/{name}/issues", {"title": item["title"], "body": body},
                                  {"labels": labels} if labels else None) or {}
@@ -1276,10 +1279,15 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
     return result
 
 
-def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) -> dict:
-    """`create`, and `publish` when `items` come from the pending store. Drafts that are not
+def github_create(req: dict, runner=gh_runner) -> dict:
+    with _queue_write_lock(req["repo"]):
+        return _github_create(req, runner, github_slug(req["repo"]))
+
+
+def _github_create(req: dict, runner, slug: tuple[str, str], items: list[dict] | None = None) -> dict:
+    """File drafts with the write lock held. Drafts that are not
     fully filed (gh unavailable mid-write, an incomplete relation, `no-queue-write`) are kept in
-    the pending store — the failure path only; a clean run writes no file at all. A draft GitHub
+    the pending store — the failure path only. A draft GitHub
     refused as invalid (HTTP 400/422) is reported in `incomplete[]` and not stored: a retry of the
     same draft cannot succeed."""
     from_store = items is not None
@@ -1288,10 +1296,9 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
     limits = req.get("queue_limits") or "none"
     if limits not in QUEUE_LIMITS:
         raise QueueError(f"queue_limits must be one of {', '.join(QUEUE_LIMITS)}, got {limits!r}")
-    owner, name = github_slug(repo)
+    owner, name = slug
     target = f"{owner}/{name}".lower()
     out: dict = {"created": [], "incomplete": [], "pending": []}
-    submitted = items
     alert_keys = {item["key"] for item in items if item["key"].startswith(_ALERT_KEY_PREFIX)}
     finding_keys = {item["key"] for item in items if any(label.casefold() == "security" for label in item["labels"])}
     finding_keys -= alert_keys
@@ -1302,7 +1309,7 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
     visibility_error = "GitHub security alerts can only be filed on a confirmed private repository"
     if finding_keys or (alert_keys and limits != NO_QUEUE_WRITE):
         try:
-            visibility = github_visibility(repo, runner)
+            visibility = _github_visibility(owner, name, runner)
         except QueueError as e:
             visibility_error = str(e)
             if alert_keys and not from_store and limits != NO_QUEUE_WRITE:
@@ -1334,26 +1341,21 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
         out["created"] = res["created"]
         out["incomplete"].extend(res["incomplete"])
     left = [i for i in items if i["key"] not in res["done"] | res["refused"]]
+    retired = res["done"] | res["refused"]
     if from_store:
-        with _StoreLock(repo):
-            stored = read_pending(repo)
-            retired = res["done"] | res["refused"]
-            if visibility == "public":
-                retired |= withheld
-            # Preserve a newer draft and keep private drafts when the visibility check was unavailable.
-            sent = {i["key"]: i for i in submitted}
-            kept = [s for s in stored if not (s.get("target") == target and s["key"] in retired
-                                              and _draft(s) == sent.get(s["key"]))]
-            path = write_pending(repo, kept) if kept != stored else pending_path(repo)
-    elif left or (res["done"] | res["refused"] and os.path.exists(pending_path(repo))):
-        # a direct create that filed a key also retires that key's stale stored draft
-        with _StoreLock(repo):
-            stored = {i["key"]: i for i in read_pending(repo) if i["key"] not in res["done"] | res["refused"]}
-            for item in left:
-                stored[item["key"]] = dict(_draft(item), target=target, pending_reason=reason)
-            path = write_pending(repo, list(stored.values()))
+        if visibility == "public":
+            retired |= withheld
+        left_to_store = []
     else:
-        path = None
+        left_to_store = left
+    path = pending_path(repo)
+    if left_to_store or (retired and os.path.exists(path)):
+        stored = {(i.get("target"), i["key"]): i for i in read_pending(repo)}
+        for key in retired:
+            stored.pop((target, key), None)
+        for item in left_to_store:
+            stored[target, item["key"]] = dict(_draft(item), target=target, pending_reason=reason)
+        write_pending(repo, list(stored.values()))
     out["pending"].extend(i["key"] for i in left)
     if path and out["pending"]:
         out["pending_path"] = path
@@ -1363,6 +1365,11 @@ def github_create(req: dict, runner=gh_runner, items: list[dict] | None = None) 
 def github_publish(req: dict, runner=gh_runner) -> dict:
     """Post the pending store's drafts bound to this repo's current `origin`; a draft stored for
     another target stays pending and is reported, never posted elsewhere."""
+    with _queue_write_lock(req["repo"]):
+        return _github_publish(req, runner)
+
+
+def _github_publish(req: dict, runner) -> dict:
     stored = read_pending(req["repo"])
     if not stored:
         return {"created": [], "incomplete": [], "pending": []}
@@ -1375,7 +1382,7 @@ def github_publish(req: dict, runner=gh_runner) -> dict:
     if not mine:
         return {"created": [], "incomplete": foreign, "pending": [i["key"] for i in other],
                 "pending_path": pending_path(req["repo"])}
-    out = github_create(req, runner, mine)
+    out = _github_create(req, runner, (owner, name), mine)
     out["incomplete"] = out["incomplete"] + foreign
     out["pending"] = out["pending"] + [i["key"] for i in other]
     if out["pending"]:
@@ -1454,6 +1461,10 @@ def github_defer(req: dict, runner=gh_runner) -> dict:
 
 def github_visibility(repo: str, runner) -> str:
     owner, name = github_slug(repo)
+    return _github_visibility(owner, name, runner)
+
+
+def _github_visibility(owner: str, name: str, runner) -> str:
     data = _graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name})
     visibility = _repository(data, owner, name).get("visibility")
     if visibility not in ("PRIVATE", "PUBLIC"):
@@ -1920,6 +1931,11 @@ def run_tests() -> int:
             _assert(code == 2 and data is None, "adapter exit 2 passes through")
             code, _, err = cli("show", forge_req, base_env)
             _assert(code == 1 and "boom" in err, "adapter error → exit 1, stderr forwarded")
+            registry = registry_path(base_env)
+            write(registry, json.dumps({"hosts": ["invalid"]}))
+            code, _, err = cli("describe", forge_req, base_env)
+            _assert(code == 1 and registry in err and "hosts must be an object" in err and "Traceback" not in err,
+                    "a malformed hosts registry reports its path without a traceback")
 
             run_github_tests(tmp, git, write)
             run_github_write_tests(tmp, git)
@@ -2306,7 +2322,7 @@ class _FakeGitHub:
             return self._ok({"data": {"repository": {"visibility": self.visibility}}})
         if query == KEYS_QUERY:
             nodes = [{"id": i["id"], "number": n, "url": f"https://github.com/owner/repo/issues/{n}",
-                      "body": i["body"], "authorAssociation": i["assoc"],
+                      "title": i["title"], "body": i["body"], "authorAssociation": i["assoc"],
                       "state": i["state"], "stateReason": i["stateReason"]}
                      for n, i in sorted(self.issues.items())]
             return self._issue_page(nodes, v.get("after"))
@@ -2373,6 +2389,48 @@ class _FakeGitHub:
         return self._ok({"number": issue["number"]})
 
 
+def _test_concurrent_writers(repo: str, linked: str) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    for op, kind in (("create", "code-scanning"), ("publish", "dependabot")):
+        gh = _FakeGitHub(private=True)
+        item = {"key": f"gh-alert/{kind}/17", "title": "Remediate fixture alert", "labels": ["security"]}
+        req = {"contract": 1, "repo": repo, "items": [item]}
+        other_req = dict(req, repo=linked)
+        if op == "publish":
+            github_create(dict(req, queue_limits=NO_QUEUE_WRITE), gh)
+        first_lookup = Event()
+        second_started = Event()
+        second_done = Event()
+
+        def first_runner(args):
+            result = gh(args)
+            if f"query={KEYS_QUERY}" in args:
+                first_lookup.set()
+                if not second_started.wait(5):
+                    raise AssertionError("competing writer did not start")
+                second_done.wait(0.5)
+            return result
+
+        def second_writer():
+            second_started.set()
+            try:
+                return (github_create if op == "create" else github_publish)(other_req, gh)
+            finally:
+                second_done.set()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(github_create, req, first_runner)
+            if not first_lookup.wait(5):
+                raise AssertionError("first writer did not reach the queue lookup")
+            second = pool.submit(second_writer)
+            first_result, second_result = first.result(timeout=5), second.result(timeout=5)
+        _assert(len(gh.issues) == 1 and first_result["created"] and not second_result["pending"]
+                and all(issue["reused"] for issue in second_result["created"]),
+                f"a concurrent create and {op} from different worktrees file the same alert once")
+
+
 def run_github_write_tests(tmp: str, git) -> None:
     print("\nTest 10: github create — batch dependencies, labels, retry safety, pending store")
     repo = os.path.realpath(os.path.join(tmp, "ghw"))
@@ -2384,6 +2442,9 @@ def run_github_write_tests(tmp: str, git) -> None:
                             text=True).stdout.strip()
     store = os.path.join(os.path.normpath(os.path.join(repo, common)), "agent-queue", "pending.json")
     req = {"contract": 1, "repo": repo}
+    linked = os.path.join(tmp, "ghw-linked")
+    git(repo, "worktree", "add", "-q", "--detach", linked, "HEAD")
+    _test_concurrent_writers(repo, linked)
 
     def status() -> str:
         return subprocess.run(["git", "-C", repo, "status", "--porcelain", "--ignored"], capture_output=True,
@@ -2596,14 +2657,33 @@ def run_github_write_tests(tmp: str, git) -> None:
     _assert(gh.calls == [] and out["pending"] == ["p", "c"] and out["incomplete"][0]["relation"] == "target",
             "a draft stored for another origin is never posted to the current one")
     git(repo, "remote", "set-url", "origin", "git@github.com:owner/repo.git")
-    store_pending(repo, [{"key": "bad", "title": "B", "body": "", "labels": [], "parent_key": None,
-                          "blocked_by": ["typo"]}], "owner/repo", "test")
+    handle("create", dict(req, queue_limits=NO_QUEUE_WRITE,
+                          items=[{"key": "bad", "title": "B", "blocked_by": ["typo"]}]), {ENV_VAR: "github"}, gh)
     code, out = handle("publish", dict(req), {ENV_VAR: "github"}, gh)
     _assert(code == 0 and {c["key"] for c in out["created"]} == {"p", "c"} and out["pending"] == ["bad"]
             and out["incomplete"] == [{"key": "bad", "relation": "target", "ref": "typo",
                                        "error": "not a batch key, a known queue-key or an issue ref"}],
             "one stored draft with an unknown target does not block the rest of the store")
     write_pending(repo, [])
+    draft = {"key": "shared", "title": "First origin draft"}
+    handle("create", dict(req, queue_limits=NO_QUEUE_WRITE, items=[draft]), {ENV_VAR: "github"}, gh)
+    git(repo, "remote", "set-url", "origin", "git@github.com:someone/fork.git")
+    fork_draft = dict(draft, title="Second origin draft")
+    handle("create", dict(req, queue_limits=NO_QUEUE_WRITE, items=[fork_draft]), {ENV_VAR: "github"}, gh)
+    _assert({(i["target"], i["title"]) for i in read_pending(repo)}
+            == {("owner/repo", draft["title"]), ("someone/fork", fork_draft["title"])},
+            "pending drafts with the same key coexist across origins")
+    gh = _FakeGitHub()
+    handle("create", dict(req, items=[fork_draft]), {ENV_VAR: "github"}, gh)
+    remaining = read_pending(repo)
+    _assert([(i["target"], i["title"]) for i in remaining] == [("owner/repo", draft["title"])],
+            "a direct create only retires its own origin's draft")
+    git(repo, "remote", "set-url", "origin", "git@github.com:owner/repo.git")
+    gh = _FakeGitHub()
+    _, out = handle("publish", req, {ENV_VAR: "github"}, gh)
+    _assert(gh.issues.get(1, {}).get("title") == draft["title"] and not out["pending"],
+            "switching back restores access to the original draft")
+
     gh = _FakeGitHub()
     gh.add("[DOCS] marker docs", "Write `<!-- queue-key: quoted -->` like this:\n<!-- queue-key: quoted -->\n"
            "trailing prose\r\n<!-- queue-key: real -->")
@@ -2634,16 +2714,14 @@ def run_github_write_tests(tmp: str, git) -> None:
     code, out = handle("create", dict(req, items=pair), {ENV_VAR: "github"}, gh)
     _assert(out["pending"] == [] and not os.path.exists(store),
             "a direct create that files a stored key retires its stale pending draft")
-    import threading
-    drafts = [{"key": f"k{n}", "title": "T", "body": "", "labels": [], "parent_key": None, "blocked_by": []}
-              for n in range(8)]
-    threads = [threading.Thread(target=store_pending, args=(repo, [d], "owner/repo", "test")) for d in drafts]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    _assert(sorted(i["key"] for i in read_pending(repo)) == [d["key"] for d in drafts]
-            and not os.path.exists(store + ".lock"), "concurrent pending writes keep every draft (store lock)")
+    from concurrent.futures import ThreadPoolExecutor
+
+    drafts = [{"key": f"k{n}", "title": "T"} for n in range(8)]
+    requests = [dict(req, items=[d], queue_limits=NO_QUEUE_WRITE) for d in drafts]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda request: github_create(request, gh), requests))
+    _assert(sorted(i["key"] for i in read_pending(repo)) == [d["key"] for d in drafts],
+            "concurrent pending writes keep every draft (queue writer lock)")
     write_pending(repo, [])
 
     gh = _FakeGitHub()

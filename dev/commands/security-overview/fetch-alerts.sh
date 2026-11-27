@@ -13,11 +13,12 @@
 #   ${OUTPUT_DIR}/dependabot.json      — Dependabot vulnerability alerts (GraphQL)
 #   ${OUTPUT_DIR}/code-scanning.json   — Code scanning alerts (REST)
 #   ${OUTPUT_DIR}/secret-scanning.json — Secret scanning alerts (REST, secrets redacted)
-#   ${OUTPUT_DIR}/<type>.disabled      — present when that feature is not enabled (403/404)
-#   ${OUTPUT_DIR}/.fetch-errors        — present when any fetch failed; zero counts are then unreliable
+#   ${OUTPUT_DIR}/<type>.disabled      — present when GitHub explicitly says a feature is disabled
+#   ${OUTPUT_DIR}/<type>.truncated     — present when a result may omit alerts
+#   ${OUTPUT_DIR}/.fetch-errors        — one diagnostic naming each type that failed
 #
-# Requirements: gh CLI authenticated (gh auth status); run inside a GitHub repo checkout.
-# Exit codes: 1 = gh not authenticated, 2 = not inside a git checkout with an origin remote,
+# Requirements: jq and authenticated gh CLI; run inside a GitHub repo checkout.
+# Exit codes: 1 = missing prerequisite, 2 = not inside a git checkout with an origin remote,
 #             3 = gh could not resolve the origin remote as a GitHub repo
 
 set -euo pipefail
@@ -27,6 +28,10 @@ OUTPUT_DIR="${1:-$(mktemp -d "${TMPDIR:-/tmp}/security-scan.XXXXXX")}"
 # --- Pre-flight: auth check ---
 if ! gh auth status &>/dev/null; then
   echo "ERROR: gh CLI not authenticated. Run: gh auth login" >&2
+  exit 1
+fi
+if ! command -v jq >/dev/null; then
+  echo "ERROR: jq is required to validate scan results" >&2
   exit 1
 fi
 
@@ -48,7 +53,10 @@ REPO_HOST=${REPO_HOST%%/*}
 echo "Scanning: ${OWNER}/${REPO}"
 
 mkdir -p "${OUTPUT_DIR}"
-rm -f "${OUTPUT_DIR}/.fetch-errors" "${OUTPUT_DIR}"/*.disabled
+for alert_type in dependabot code-scanning secret-scanning; do
+  rm -f "${OUTPUT_DIR}/${alert_type}.disabled" "${OUTPUT_DIR}/${alert_type}.truncated"
+done
+rm -f "${OUTPUT_DIR}/.fetch-errors"
 echo "${OWNER}/${REPO} ${REPO_URL}" > "${OUTPUT_DIR}/repo.txt"
 printf '%s\n' "${REPO_VISIBILITY}" > "${OUTPUT_DIR}/visibility.txt"
 
@@ -74,40 +82,50 @@ query($owner: String!, $name: String!) {
   }
 }' 2>&1 > "${OUTPUT_DIR}/dependabot.json"); then
   echo "ERROR: dependabot GraphQL query failed: ${DB_ERR}" >> "${OUTPUT_DIR}/.fetch-errors"
+elif ! DB_UNREAD=$(jq -ser '
+  if length != 1 then error("expected one GraphQL result")
+  elif (.[0].errors // [] | length) != 0 then error("GraphQL returned errors")
+  else .[0].data.repository.vulnerabilityAlerts |
+    if (.nodes | type) != "array" or (.totalCount | type) != "number"
+       or .totalCount < (.nodes | length) or .totalCount != (.totalCount | floor)
+    then error("missing or inconsistent alert count")
+    else .totalCount - (.nodes | length)
+    end
+  end' "${OUTPUT_DIR}/dependabot.json" 2>&1); then
+  echo "ERROR: dependabot response incomplete: ${DB_UNREAD}" >> "${OUTPUT_DIR}/.fetch-errors"
+elif (( DB_UNREAD > 0 )); then
+  touch "${OUTPUT_DIR}/dependabot.truncated"
 fi
 
 # --- Step 3: Code Scanning + Secret Scanning via REST ---
 echo "Fetching Code Scanning and Secret Scanning alerts..."
 
-# Code Scanning (403/404 = not enabled, skip gracefully)
-# NOTE: other API errors (e.g. 503) fall through to "[]" — check ${OUTPUT_DIR}/.fetch-errors.
-if CS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>&1); then
-  echo "${CS_RESP}" > "${OUTPUT_DIR}/code-scanning.json"
-else
-  HTTP_STATUS=$(echo "${CS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1 || true)
-  if [[ "${HTTP_STATUS}" == "403" || "${HTTP_STATUS}" == "404" ]]; then
-    touch "${OUTPUT_DIR}/code-scanning.disabled"
+fetch_rest_alerts() {
+  local alert_type="$1" disabled_feature="$2"
+  shift 2
+  local response count
+  if response=$(gh api --hostname "${REPO_HOST}" \
+      "repos/${OWNER}/${REPO}/${alert_type}/alerts?state=open&per_page=100" "$@" 2>&1); then
+    if count=$(jq -ser 'if length == 1 and (.[0] | type) == "array"
+                       then .[0] | length else error("expected one alert array") end' <<<"${response}" 2>/dev/null); then
+      printf '%s\n' "${response}" > "${OUTPUT_DIR}/${alert_type}.json"
+      if (( count >= 100 )); then
+        touch "${OUTPUT_DIR}/${alert_type}.truncated"
+      fi
+      return
+    fi
+    echo "ERROR: ${alert_type} returned invalid alert JSON" >> "${OUTPUT_DIR}/.fetch-errors"
+  elif grep -Eiq "^gh: (${disabled_feature}) is (not enabled|disabled) for this repository[.]? \(HTTP (403|404)\)$" \
+      <<<"${response}"; then
+    touch "${OUTPUT_DIR}/${alert_type}.disabled"
   else
-    echo "ERROR: code-scanning fetch failed (status=${HTTP_STATUS:-unknown}): ${CS_RESP}" \
-      >> "${OUTPUT_DIR}/.fetch-errors"
+    printf 'ERROR: %s fetch failed: %s\n' "${alert_type}" "${response}" >> "${OUTPUT_DIR}/.fetch-errors"
   fi
-  echo "[]" > "${OUTPUT_DIR}/code-scanning.json"
-fi
+  echo "[]" > "${OUTPUT_DIR}/${alert_type}.json"
+}
 
-# Secret Scanning (404 = disabled, skip gracefully; strip secret values)
-if SS_RESP=$(gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
-    --jq '[.[] | del(.secret)]' 2>&1); then
-  echo "${SS_RESP}" > "${OUTPUT_DIR}/secret-scanning.json"
-else
-  HTTP_STATUS=$(echo "${SS_RESP}" | grep -oE 'HTTP [0-9]+' | grep -oE '[0-9]+' | head -1 || true)
-  if [[ "${HTTP_STATUS}" == "404" ]]; then
-    touch "${OUTPUT_DIR}/secret-scanning.disabled"
-  else
-    echo "ERROR: secret-scanning fetch failed (status=${HTTP_STATUS:-unknown}): ${SS_RESP}" \
-      >> "${OUTPUT_DIR}/.fetch-errors"
-  fi
-  echo "[]" > "${OUTPUT_DIR}/secret-scanning.json"
-fi
+fetch_rest_alerts code-scanning 'code scanning|GitHub (Advanced Security|Code Security)'
+fetch_rest_alerts secret-scanning 'secret scanning' --jq '[.[] | del(.secret)]'
 
 if [[ -f "${OUTPUT_DIR}/.fetch-errors" ]]; then
   echo "WARNING: Some fetches failed. See ${OUTPUT_DIR}/.fetch-errors for details." >&2

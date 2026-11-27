@@ -46,11 +46,13 @@ query($owner: String!, $name: String!) {
 
 ### Pagination
 
-The query reads the first 100 open alerts. If `totalCount` exceeds 100, say the list is truncated in the summary.
+The query reads the first 100 open alerts. If `totalCount` exceeds the returned node count,
+report the list as truncated. GraphQL errors or a missing alert connection mean the result is
+unreadable, including when the HTTP request succeeded.
 
 ### Common Issues
 
-- **Empty `vulnerabilityAlerts`**: Repo may have Dependabot disabled or no supported manifest.
+- **Empty `nodes` and zero `totalCount`**: No open alerts in a successful response.
 - **`firstPatchedVersion` is null**: No fix available. Task item should use "Monitor" template.
 
 ## Cross-referencing Open PRs
@@ -120,16 +122,17 @@ Use CRITICAL for `error`-severity rules whose `rule.id` or `rule.description` re
 | HTTP Status | Meaning | Action |
 |-------------|---------|--------|
 | 200 | Success | Process alerts |
-| 403 | Code scanning not enabled | Record as "not enabled", skip |
-| 404 | Repository not found or no analysis | Record as "not enabled", skip |
+| 403/404 with an explicit feature-disabled message | Code scanning is disabled | Record as "not enabled" |
+| Other 403/404 | Access denied or resource not found | Record as unreadable |
 | 503 | Service unavailable | Retry once after 5s |
 
 ### Empty vs Disabled
 
-An empty array `[]` means code scanning is enabled but found no alerts. A 403/404 means it is not configured.
+A successful empty array `[]` means there are no open alerts. A failed request can also leave
+an empty placeholder file. Check the scan status before treating a count of zero as complete.
 
-The bundled script reads one page of up to 100 alerts per REST endpoint. If a page is full, report
-that more alerts may exist.
+The bundled script reads one page of up to 100 alerts per REST endpoint and marks a full page
+as potentially truncated. For manual scans, treat an unpaginated full page as truncated too.
 
 ## Secret Scanning — REST
 
@@ -156,4 +159,5 @@ gh api --hostname "${REPO_HOST}" "repos/${OWNER}/${REPO}/secret-scanning/alerts?
 | HTTP Status | Meaning | Action |
 |-------------|---------|--------|
 | 200 | Success | Process alerts (strip secrets) |
-| 404 | Secret scanning disabled or not available | Record as "not enabled", skip |
+| 403/404 with an explicit feature-disabled message | Secret scanning is disabled | Record as "not enabled" |
+| Other 403/404 | Access denied or resource not found | Record as unreadable |
