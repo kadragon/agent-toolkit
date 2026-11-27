@@ -538,7 +538,7 @@ def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int
     return False
 
 
-def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
+def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[int] = frozenset()) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets` with its wrapped continuation lines and nested
     sub-bullets, then any heading this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
     multi-line comment in it, text right under an indented checkbox, or a nested checkbox — refuses
@@ -548,6 +548,7 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     (no surviving item, no surviving child heading), is deleted along with that region — see
     `_region_blank` and `_region_prose_only`. A section this run never touched, or one where a
     child heading or an `[x]`/`[>]` item survives, keeps its heading untouched either way.
+    A caller may protect prose under specific headings by their zero-based line indices.
 
     Returns `(new_text, problems)`. `problems` is non-empty when a target matched nothing — or
     matched more than once, which is the more dangerous case: two sections can hold identically
@@ -689,6 +690,7 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         prose_only = {
             h for h in owned
             if h not in drop and h not in newly and (not heads or h != heads[0])
+            and h not in keep_prose_under
             and _region_prose_only(masked_surviving, h, alive)
         }
         if not newly and not prose_only:

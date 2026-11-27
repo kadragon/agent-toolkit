@@ -24,9 +24,10 @@ Mapping (docs/design/github-issues-queue.md → Migration):
   - `[x]` items are dropped (the CHANGELOG is the closure record); `[>]` items and plain bullets
     outside the Rejected section stay in place and are listed.
 
-Each issue's `create` key is `backlog-migrated:<sha1 of heading path + item>`, so a re-run reuses
-the issues already filed and completes their missing relations (`queue_backend.py create` is
-retry-safe). `--apply` files under the standing `queue-write` grant, then deletes a backlog.md line only
+Each issue's initial `create` key is `backlog-migrated:<sha1 of heading path + item>`. Before filing,
+`--apply` records each open checkbox's key in a Markdown comment under that checkbox. Keep the
+comment with the item when editing it between attempts so a retry can find the issue and
+report any content discrepancy. `--apply` files under the standing `queue-write` grant, then deletes a backlog.md line only
 once its issue exists and every parent/blocker relation it needs is confirmed; unconfirmed lines
 stay. The deletion is a working-tree change for the user to commit; the file is deleted when only
 headings remain.
@@ -41,8 +42,10 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 import textwrap
 from typing import Literal, NamedTuple
 
@@ -60,6 +63,7 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(\[*])")
 _ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig)\.)$", re.IGNORECASE)
 _MARKER_SPAN_RE = re.compile(bc._BLOCK_MARKER_RE.pattern, re.IGNORECASE | re.DOTALL)
 _PLAIN_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
+_ITEM_KEY_RE = re.compile(r"^\s*<!-- migration-key: (" + qb.MIGRATION_KEY_PREFIX + r"[0-9a-f]{40}) -->\s*$")
 
 
 class MigrateError(Exception):
@@ -329,7 +333,9 @@ def build_plan(text: str, visibility: str) -> dict:
             inflight.append(path)
             continue
         span = _item_span(lines, masked, owners, i)
-        raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent("\n".join(lines[j] for j in span[1:]))
+        pinned = [match[1] for j in span[1:] if (match := _ITEM_KEY_RE.fullmatch(lines[j]))]
+        raw_body = lines[i].split("]", 1)[1].strip() + "\n" + textwrap.dedent(
+            "\n".join(lines[j] for j in span[1:] if not _ITEM_KEY_RE.fullmatch(lines[j])))
         markers = list(_MARKER_SPAN_RE.finditer(raw_body))
         deferred = [" ".join(m.group(2).split()) for m in markers if m.group(1).lower() == "deferred"]
         blockers = [m.group(2) for m in markers if m.group(1).lower() == "blocked by"
@@ -339,7 +345,8 @@ def build_plan(text: str, visibility: str) -> dict:
         role = _role(path)
         items.append(dict(entry, heading=h, path=path, span=span, role=role, deferred=deferred,
                           blockers=blockers, clean=" ".join(clean.split()), title=title, rest=rest,
-                          key=migration_key(*(x["title"] for x in path), t["text"])))
+                          key=pinned[0] if pinned else migration_key(*(x["title"] for x in path), t["text"]),
+                          pinned=len(pinned)))
 
     for t in tokens:  # plain bullets outside the Rejected section are not queue items
         if t["type"] == "bullet":
@@ -354,6 +361,8 @@ def build_plan(text: str, visibility: str) -> dict:
         why = _unprunable_reason(text, it["source"])
         if why:
             bad[it["line"]] = f"cannot be deleted mechanically ({why})"
+        elif it["pinned"] > 1:
+            bad[it["line"]] = "multiple migration keys on one item; reconcile them before retrying"
         elif not it["title"].strip():
             bad[it["line"]] = "no title left once its markers are stripped"
         elif it["role"] == "security" and visibility != "private":
@@ -388,7 +397,7 @@ def build_plan(text: str, visibility: str) -> dict:
         issues.append({"kind": "item", "key": it["key"], "title": it["title"], "body": body, "labels": labels,
                        "parent_key": parent_of.get(it["line"]), "blocked_by": it["blocked_by"],
                        "line": it["line"], "lines": [j + 1 for j in it["span"]], "source": it["source"],
-                       "notes": it["notes"]})
+                       "notes": it["notes"], "pinned": bool(it["pinned"])})
     for r in _rejected_entries(lines, masked, headings):
         if not r["safe"]:
             refused.append({"line": r["span"][0] + 1, "source": lines[r["span"][0]],
@@ -433,6 +442,35 @@ def _draft(issue: dict) -> dict:
     return {k: issue[k] for k in ("key", "title", "body", "labels", "parent_key", "blocked_by")}
 
 
+def _pin_item_keys(text: str, plan: dict) -> str:
+    lines, eols = tn._split(text)
+    default_eol = tn._dominant_eol(eols)
+    for item in reversed(plan["issues"]):
+        if item["kind"] != "item" or item["pinned"]:
+            continue
+        line = item["line"] - 1
+        eol = eols[line] or default_eol
+        indent = " " * (tn._indent(lines[line]) + 2)
+        lines.insert(line + 1, f"{indent}<!-- migration-key: {item['key']} -->")
+        eols.insert(line + 1, eols[line])
+        eols[line] = eol
+    return "".join(line + eol for line, eol in zip(lines, eols))
+
+
+def _write_backlog(path: str, text: str) -> None:
+    path = os.path.realpath(path)
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".backlog-migration-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as output:
+            output.write(text)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) -> tuple[str, list[str]]:
     # [x] lines only on a complete run: a heading holding only [x] items may be what a kept item's blocker names
     lines = text.splitlines(keepends=True)
@@ -444,7 +482,7 @@ def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) 
     if drop:
         kept = [ln for j, ln in enumerate(lines) if j not in drop]
         # a Rejected heading this run emptied goes too, with the blank lines it leaves
-        masked_kept = bc._strip_fenced_blocks(bc._strip_html_comments("".join(kept))).splitlines()
+        masked_kept = bc._strip_html_comments("".join(kept)).splitlines()
         heads = [h for h in bc._headings(bc.tokenize("".join(kept))) if _is_rejected(h)]
         for h in reversed(heads):
             end = bc._region_end(h, [x for x in bc._headings(bc.tokenize("".join(kept))) if x["level"] <= h["level"]])
@@ -452,17 +490,27 @@ def _delete_lines(text: str, plan: dict, confirmed: set[str], prune_done: bool) 
             region = masked_kept[h["line"]:stop]
             if all(not x.strip() or x.strip() == "" for x in region) and all(r["key"] in confirmed for r in rejected):
                 del kept[h["line"] - 1:stop]
-                masked_kept = bc._strip_fenced_blocks(bc._strip_html_comments("".join(kept))).splitlines()
+                masked_kept = bc._strip_html_comments("".join(kept)).splitlines()
         text = "".join(kept)
     targets = [i["source"] for i in plan["issues"] if i["kind"] == "item" and i["key"] in confirmed]
     targets += [d["source"] for d in plan["done"]] if prune_done else []
     if not targets:
         return text, []
-    return tn.prune_lines(text, targets)
+    headings = bc._headings(bc.tokenize(text))
+    uncommented = bc._strip_html_comments(text)
+    unfenced = bc._strip_fenced_blocks(uncommented).splitlines()
+    fenced_lines = [i for i, (raw, masked) in enumerate(zip(uncommented.splitlines(), unfenced), start=1)
+                    if raw.strip() and not masked.strip()]
+    keep_prose = set()
+    for heading in headings:
+        end = bc._region_end(heading, headings)
+        if _is_role_heading(heading) or any(heading["line"] < i < end for i in fenced_lines):
+            keep_prose.add(heading["line"] - 1)
+    return tn.prune_lines(text, targets, keep_prose_under=frozenset(keep_prose))
 
 
 def _only_headings(text: str) -> bool:
-    masked = bc._strip_fenced_blocks(bc._strip_html_comments(text)).splitlines()
+    masked = bc._strip_html_comments(text).splitlines()
     return all(not ln.strip() or bc._HEADING_RE.match(ln) for ln in masked)
 
 
@@ -506,6 +554,14 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
         raise MigrateError(f"resolve legacy [>] items on line(s) {lines} before --apply: finish the sprint, "
                            "or run reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog for confirmed file work. "
                            "Remove obsolete markers before retrying.")
+    with open(path, encoding="utf-8", newline="") as fh:
+        original = fh.read()
+    if hashlib.sha1(original.encode("utf-8")).hexdigest() != plan["source_sha1"]:
+        raise MigrateError("backlog.md changed while migrating; rebuild the plan and retry")
+    pinned_text = _pin_item_keys(original, plan)
+    if pinned_text != original:
+        plan = build_plan(pinned_text, plan["visibility"])
+        _write_backlog(path, pinned_text)
     report: dict = {"created": [], "incomplete": [], "pending": [], "rejected_closed": [], "deleted": [],
                     "kept": [], "file_deleted": False}
     drafts = [_draft(i) for i in plan["issues"]]
@@ -570,8 +626,7 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
         os.remove(path)
         report["file_deleted"] = True
     elif new_text != text:
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(new_text)
+        _write_backlog(path, new_text)
     return report
 
 
@@ -827,6 +882,7 @@ def run_tests() -> int:
             _plan_tests()
             _apply_tests(tmp, make_repo, read, write)
             _review_regression_tests(tmp, make_repo, read, write)
+            _retry_regression_tests(tmp, make_repo, read, write)
             _warning_tests(tmp, make_repo)
     finally:
         os.environ.clear()
@@ -1076,6 +1132,85 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     _assert(changed and "added meanwhile" in read(path), "a backlog.md edited mid-run is never pruned")
     _assert(quiet(main, ["--repo", repo, "--json"], runner=gh) == EXIT_OK and "Moving target" in read(path),
             "the default run is a dry run: nothing deleted")
+
+
+def _retry_regression_tests(tmp: str, make_repo, read, write) -> None:
+    print("\nTest 7: --apply — edited retries, deferral metadata and retained source content")
+    linked_text = ("# Backlog\n\n## Work\n\n- [ ] [FIX] Blocker\n\n## Follow-up\n\n"
+                   "- [ ] [FIX] Dependent. Keep this context. *(blocked by: work)*\n")
+    for name in ("edited-title", "remote-deferral"):
+        repo = make_repo(tmp, name, "https://github.com/owner/repo.git", linked_text)
+        path = os.path.join(repo, "backlog.md")
+        gh = _FakeGh()
+        gh.refuse_blockers = True
+        apply_plan(repo, build_plan(read(path), "public"), gh)
+        dependent = next(n for n, i in gh.issues.items() if i["title"] == "[FIX] Dependent.")
+        gh.refuse_blockers = False
+        if name == "edited-title":
+            write(path, read(path).replace("Dependent.", "Renamed dependent."))
+            report = apply_plan(repo, build_plan(read(path), "public"), gh)
+            retained = os.path.exists(path) and "Renamed dependent." in read(path)
+            conflicted = any(i["relation"] == "content" and i["ref"] == f"#{dependent}" for i in report["incomplete"])
+            _assert(len(gh.issues) == 2 and retained and conflicted,
+                    "editing a retained checkbox identifies the original issue instead of creating a duplicate")
+            if not retained:
+                continue
+            gh.issues[dependent]["title"] = "[FIX] Renamed dependent."
+        else:
+            blocker = next(n for n, i in gh.issues.items() if i["title"] == "[FIX] Blocker")
+            qb.github_defer({"repo": repo, "ref": f"#{blocker}", "reason": "wait for vendor"}, gh)
+            body = gh.issues[blocker]["body"]
+            gh.issues[blocker]["body"] = "User-authored content.\n\n" + body
+            report = apply_plan(repo, build_plan(read(path), "public"), gh)
+            _assert(any(i["relation"] == "content" and i["ref"] == f"#{blocker}" for i in report["incomplete"]),
+                    "a queue deferral does not hide user edits before the key marker")
+            gh.issues[blocker]["body"] = body
+        report = apply_plan(repo, build_plan(read(path), "public"), gh)
+        _assert(not report["kept"] and report["file_deleted"] and len(gh.issues) == 2
+                and bool(gh.issues[dependent]["blockedBy"]),
+                f"retry completes the original dependency and prunes the source ({name})")
+
+    role_text = "# Backlog\n\n## Someday\n\nShared conditions for later.\n\n- [ ] [FIX] Idea\n"
+    repo = make_repo(tmp, "role-notes", "https://github.com/owner/repo.git", role_text)
+    path = os.path.join(repo, "backlog.md")
+    gh = _FakeGh()
+    report = apply_plan(repo, build_plan(read(path), "public"), gh)
+    surviving_source = "" if report["file_deleted"] else read(path)
+    _assert("Shared conditions for later." in surviving_source or
+            any("Shared conditions for later." in i["body"] for i in gh.issues.values()),
+            "pruning the last checkbox preserves shared role-section prose")
+
+    fence_text = "# Backlog\n\n```text\nFollow this procedure.\n```\n"
+    repo = make_repo(tmp, "standalone-fence", "https://github.com/owner/repo.git", fence_text)
+    path = os.path.join(repo, "backlog.md")
+    gh = _FakeGh()
+    report = apply_plan(repo, build_plan(read(path), "public"), gh)
+    _assert(not report["file_deleted"] and read(path) == fence_text and not gh.issues,
+            "a standalone fenced procedure keeps the backlog and is preserved verbatim")
+    text = "# Backlog\n\n## Procedure\n\nShared context.\n\n" + fence_text.split("\n\n", 1)[1]
+    write(path, text + "\n- [ ] [FIX] Item below the fence\n")
+    report = apply_plan(repo, build_plan(read(path), "public"), gh)
+    _assert(not report["file_deleted"] and read(path).rstrip() == text.rstrip() and len(gh.issues) == 1,
+            "pruning a checkbox preserves prose and fences in the same section")
+
+    for stored in (False, True):
+        text = "# Backlog\n\n- [ ] [FIX] Existing item\n"
+        repo = make_repo(tmp, f"content-conflict-{stored}", "https://github.com/owner/repo.git", text)
+        path = os.path.join(repo, "backlog.md")
+        plan = build_plan(read(path), "public")
+        item = plan["issues"][0]
+        gh = _FakeGh()
+        if stored:
+            qb.github_create({"repo": repo, "items": [_draft(item)], "queue_limits": qb.NO_QUEUE_WRITE}, gh)
+        gh.add(item["title"], qb._issue_body("Different body", qb._KEY_MARKER.format(item["key"])))
+        report = apply_plan(repo, plan, gh)
+        _assert(report["kept"] and report["incomplete"][0]["relation"] == "content"
+                and not report["pending"] and not qb.read_pending(repo) and "- [ ] [FIX] Existing item" in read(path),
+                f"content conflict keeps the source and retires its automatic draft (already stored: {stored})")
+        write(path, "# Backlog\n")
+        published = qb.github_publish({"repo": repo}, gh)
+        _assert(not published["pending"] and not published["incomplete"] and len(gh.issues) == 1,
+                "publish never retries an abandoned conflicting draft")
 
 
 def _warning_tests(tmp: str, make_repo) -> None:
