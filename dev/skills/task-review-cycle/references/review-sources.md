@@ -13,6 +13,13 @@ Select an allowed independent reviewer for any gate that requires one. If none c
 the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer
 must not be retried through another tool.
 
+For a dispatched Codex child, check the original request and any verbatim review transfer
+grant from the handoff. Each shell escalation names the repository and PR or compared refs,
+the review data the launcher can access, the reviewer destination (Anthropic Claude, Google
+Antigravity, or OpenAI Codex), and the source of the user's approval. Submit one reviewer per
+approval request. On denial, retain the exact error as that source's reason in the dispatch
+pre-merge report.
+
 ## Advisory comments pass
 
 After the primary review returns, run `claude-review.sh <base> --comments` as a separate read-only

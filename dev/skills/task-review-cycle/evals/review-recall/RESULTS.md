@@ -175,3 +175,26 @@ The full suite completed all four arms on the ten introducing diffs in isolated 
 The three code reviewers together detected 11 of 12 gold defects. Finding counts are unadjudicated. The raw outputs are in the dispatch evidence directory.
 
 Review recall fingerprint: af6b7fa32222ba106ad89c139bbc07f875d15e0e
+
+# 2026-11-27 policy replay for the re-review cap
+
+Codex `gpt-6.2-sol` at medium effort applied the base rules (`b99000b`) and the capped
+rules in separate sessions to the 11 cases in `policy-replay.md`.
+
+| Scenario | Base rules | Capped rules |
+|----------|------------|--------------|
+| p01: Initial contract defect | Block | Block |
+| p02: Repeat of a still-open contract defect | Keep blocking | Keep blocking |
+| p03: New contract defect at late reclaim | Block | Block |
+| p04: New contract defect during focused confirmation | Block | Block |
+| p05: Failed confirmation of a contract fix | Stop | Stop |
+| p06: New ordinary P1 at late reclaim | Block | Queue |
+| p07: New security P1 at late reclaim | Block | Block |
+| p08: Logic repair for CI after resume | General re-review | Targeted checks, cap retained |
+| p09: Intermediate repair with more work pending | Targeted checks | Targeted checks |
+| p10: Green CI with final local checks missing | Run final local checks | Run final local checks |
+| p11: Prior local evidence invalidated by a late fix | Re-run final checks | Refresh affected final checks |
+
+Contract recall was **5/5 in both arms**. This replay measures handling of defects made
+visible in the cases. It does not estimate how often an extra broad pass would discover a
+previously unseen contract defect.

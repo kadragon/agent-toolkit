@@ -102,15 +102,18 @@ def sleep_intervals(repo: Path) -> list[int]:
     return [int(line) for line in (repo / ".ci-wait-sleeps").read_text(encoding="utf-8").splitlines()]
 
 
-def run(repo: Path, pr: str = "7", timeout: int = 30, **env_overrides) -> dict:
+def run(repo: Path, pr: str = "7", timeout: int = 30, expected_head=None, **env_overrides) -> dict:
     startup = repo / ".ci-wait-clock.sh"
     startup.write_text(VIRTUAL_CLOCK, encoding="utf-8", newline="\n")
     (repo / ".ci-wait-clock").write_text("1000\n", encoding="utf-8", newline="\n")
     (repo / ".ci-wait-sleeps").write_text("", encoding="utf-8")
     env = dict(os.environ, BASH_ENV=startup.as_posix())
     env.update({k: str(v) for k, v in env_overrides.items()})
+    args = ["bash", str(repo / "scripts" / "ci-wait.sh"), pr]
+    if expected_head is not None:
+        args.extend(["--expected-head", expected_head])
     proc = subprocess.run(
-        ["bash", str(repo / "scripts" / "ci-wait.sh"), pr],
+        args,
         cwd=repo,
         capture_output=True,
         text=True,
@@ -332,23 +335,34 @@ def main() -> int:
         print("\n-- a stale head's status is pending, not an answer --")
         # Right after a push the hub can still describe the previous commit: PR #362 struck one
         # real failure twice that way. Each stub answers for `first` once, then for HEAD.
-        def sha_repo(name, first_status, first_sha, then_status):
+        def sha_repo(name, first_status, first_sha, then_status, previous_workflow=False):
             repo = make_repo(tmp, "pending", name=name)
-            commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
-                      "--allow-empty", "-m"]
+            commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                      "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                      "commit", "-q", "--allow-empty", "-m"]
+            if previous_workflow:
+                workflow = repo / ".github/workflows/test.yml"
+                workflow.parent.mkdir(parents=True)
+                workflow.write_text("on: pull_request\n", encoding="utf-8")
+                subprocess.run(["git", "add", str(workflow)], cwd=repo, check=True)
             subprocess.run(commit + ["previous"], cwd=repo, check=True)
             previous = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
                                       capture_output=True, text=True).stdout.strip()
+            if previous_workflow:
+                subprocess.run(["git", "rm", "-q", str(workflow)], cwd=repo, check=True)
             subprocess.run(commit + ["head"], cwd=repo, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
                                   capture_output=True, text=True).stdout.strip()
-            first = previous if first_sha == "previous" else first_sha
+            first = {"previous": previous, "head": head}.get(first_sha, first_sha)
+            first_snapshot = {"status": first_status}
+            if first is not None:
+                first_snapshot["head_sha"] = first
             (repo / "scripts" / "hub.sh").write_text(
                 "#!/usr/bin/env bash\n"
                 'log="$(dirname "${BASH_SOURCE[0]}")/../calls.log"\n'
                 'echo x >> "$log"\n'
                 'if [ "$(wc -l < "$log")" -le 1 ]; then\n'
-                f"  echo '{{\"status\": \"{first_status}\", \"head_sha\": \"{first}\"}}'\n"
+                f"  echo '{json.dumps(first_snapshot)}'\n"
                 "else\n"
                 f"  echo '{{\"status\": \"{then_status}\", \"head_sha\": \"{head}\"}}'\n"
                 "fi\n",
@@ -372,6 +386,69 @@ def main() -> int:
         result = run(foreign, CI_WAIT_POLL_INTERVAL=1)
         check("a SHA this checkout lacks (a bot's commit) is answered, not waited out",
               result.get("failures") == 1 and call_count(foreign) == 1, f"got {result}")
+
+        print("\n-- exact-head mode gates CI on the supplied SHA --")
+        exact_cases = [
+            ("matched", "head", True, None, 1),
+            ("stale", "previous", True, None, 2),
+            ("missing", None, False, "head-missing", 1),
+            ("different", "1" * 40, False, "head-mismatch", 1),
+        ]
+        for name, first_sha, passed, reason, polls in exact_cases:
+            repo = sha_repo(f"exact_{name}", "success", first_sha, "success")
+            reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            strike_file(repo).write_text("1\n", encoding="utf-8")
+            result = run(repo, expected_head=reviewed, CI_WAIT_POLL_INTERVAL=1)
+            check(f"exact {name}: pass={passed}, reason={reason}, polls={polls}",
+                  result.get("passed") is passed and result.get("reason") == reason
+                  and call_count(repo) == polls, f"got {result}")
+            strike = strike_file(repo)
+            check(f"exact {name}: only a matching pass clears an existing strike",
+                  not strike.exists() if passed
+                  else strike.exists() and strike.read_text(encoding="utf-8") == "1\n")
+
+        repo = sha_repo("exact_pinned", "success", "previous", "success")
+        reviewed = subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=repo, text=True).strip()
+        result = run(repo, expected_head=reviewed, CI_WAIT_POLL_INTERVAL=1)
+        check("exact mode uses the supplied SHA even when local HEAD has advanced",
+              result.get("passed") is True and call_count(repo) == 1, f"got {result}")
+
+        for status in ("pending", "none"):
+            repo = sha_repo(f"exact_transient_{status}", status, None, "success")
+            reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            result = run(repo, expected_head=reviewed, CI_WAIT_POLL_INTERVAL=1)
+            check(f"exact mode waits for a SHA after an inconclusive {status} response",
+                  result.get("passed") is True and call_count(repo) == 2, f"got {result}")
+
+        repo = make_repo(tmp, "error", name="exact_hub_error")
+        (repo / "scripts" / "hub.sh").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+        result = run(repo, expected_head="1" * 40, CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
+        check("an explicit hub error in exact mode uses the status-error path immediately",
+              result.get("passed") is False and result.get("reason") == "ci-status returned: error"
+              and not sleep_intervals(repo),
+              f"got {result}")
+
+        repo = make_repo(tmp, "none", name="exact_unidentified_empty_rollup")
+        result = run(repo, expected_head="1" * 40, CI_WAIT_NO_CHECKS_GRACE_SECS=0,
+                     CI_WAIT_TIMEOUT_SECS=2, CI_WAIT_POLL_INTERVAL=1)
+        check("an unidentified empty rollup cannot pass as no CI configured",
+              result.get("passed") is False and result.get("reason") == "head-missing"
+              and sleep_intervals(repo) == [1, 1],
+              f"got {result}")
+
+        repo = sha_repo("exact_other_ci_config", "none", "previous", "success", previous_workflow=True)
+        reviewed = subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=repo, text=True).strip()
+        result = run(repo, expected_head=reviewed, CI_WAIT_NO_CHECKS_GRACE_SECS=0)
+        check("an unrelated checkout cannot prove that the reviewed commit has no CI",
+              result.get("passed") is False and result.get("reason") == "ci-config-unverified",
+              f"got {result}")
+
+        repo = sha_repo("exact_no_ci", "none", "head", "success")
+        reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        result = run(repo, expected_head=reviewed, CI_WAIT_NO_CHECKS_GRACE_SECS=0)
+        check("the reviewed commit can pass when its checkout has no CI",
+              result.get("passed") is True and result.get("reason") == "no CI checks found",
+              f"got {result}")
 
         print("\n-- the real hub.sh reports the head SHA its GitHub checks describe --")
         hub_repo = tmp / "hub_github"

@@ -89,3 +89,14 @@ fixtures. This includes routing, model, or tool changes outside the fingerprinte
 Run `bash check-results.sh` locally from this directory to compare the recorded fingerprint
 with the current inputs. Scorecard freshness is part of this evaluation workflow and does
 not gate PR CI.
+
+## Replay changes to the review-cycle policy
+
+Use `policy-replay.md` when a policy changes which findings can block or when checks run.
+Give an independent model the same scenarios and output instructions twice, once with the
+base cycle rules and once with the candidate rules. Use separate sessions with the same model
+and effort. Supply the review-cycle `SKILL.md`, the consolidation, late-source and CI failure
+guides, and the shared `task-next/references/cycle.md` from each revision.
+Score each response against the dispositions in `RESULTS.md`. Contract recall in
+this replay is the number of known contract defects the model identifies and keeps blocking.
+The introducing-diff fixtures above separately measure discovery by the unchanged launchers.

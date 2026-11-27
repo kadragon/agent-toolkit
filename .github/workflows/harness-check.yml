@@ -89,6 +89,9 @@ jobs:
       - name: Test harness validation
         run: python3 dev/skills/harness-init/scripts/test_validate_harness.py
 
+      - name: Test harness sweep
+        run: python3 dev/skills/harness-init/scripts/test_sweep.py
+
       - name: Test harness reconciliation
         run: python3 dev/skills/harness-init/scripts/test_reconcile_harness.py
 
@@ -280,6 +283,9 @@ jobs:
 
       - name: Test backlog migration
         run: python3 dev/skills/task-next/scripts/migrate_backlog.py --test
+
+      - name: Test security alert fetching
+        run: python3 dev/commands/security-overview/test_fetch_alerts.py
 
       - name: Test repository dispatch
         run: python3 dev/skills/dispatch/scripts/test_dispatch.py

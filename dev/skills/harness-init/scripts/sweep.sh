@@ -22,6 +22,29 @@ FINDINGS=()
 QUICK_MODE=false
 [[ "${1:-}" == "--quick" ]] && QUICK_MODE=true
 
+is_security_finding() {
+    [[ "$1" == \[[sS][eE][cC][uU][rR][iI][tT][yY]\]* ]]
+}
+
+report_findings() {
+    echo ""
+    if [[ ${#FINDINGS[@]} -eq 0 ]]; then
+        echo -e "${GREEN}=== Sweep clean ===${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
+    local finding
+    for finding in "${FINDINGS[@]}"; do
+        if ! is_security_finding "$finding"; then
+            printf '  %s\n' "$finding"
+        elif ! $QUICK_MODE && [[ -t 2 ]]; then
+            printf '  %s\n' "$finding" >&2
+        fi
+    done
+    return 1
+}
+
 cd "$PROJ_DIR"
 
 echo -e "${CYAN}=== Sweep ===${NC}"
@@ -38,7 +61,10 @@ echo -e "${CYAN}[1/5] Lint scan...${NC}"
 lint_output=$(echo "No lint configured — adapt this section" 2>&1) || true
 # Parse lint output and add to FINDINGS if issues found
 
-$QUICK_MODE && { echo "Quick mode — done."; exit 0; }
+if $QUICK_MODE; then
+    report_findings && exit 0
+    exit 1
+fi
 
 # ── 2. Doc drift check ──────────────────────────────────────
 echo -e "${CYAN}[2/5] Doc drift...${NC}"
@@ -118,23 +144,7 @@ done
 [[ $harness_issues -eq 0 ]] && echo -e "  ${GREEN}All references valid${NC}"
 
 # ── 5. Summary ──────────────────────────────────────────────
-echo ""
-if [[ ${#FINDINGS[@]} -eq 0 ]]; then
-    echo -e "${GREEN}=== Sweep clean ===${NC}"
-    exit 0
-fi
-
-echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
-
-is_security_finding() {
-    [[ "$1" == \[[sS][eE][cC][uU][rR][iI][tT][yY]\]\ * ]]
-}
-
-for f in "${FINDINGS[@]}"; do
-    if ! is_security_finding "$f"; then
-        printf '  %s\n' "$f"
-    fi
-done
+report_findings && exit 0
 
 QUEUE_BACKEND_SCRIPT="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/queue/queue_backend.py}"
 if [[ ! -r "$QUEUE_BACKEND_SCRIPT" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; then
@@ -142,11 +152,6 @@ if [[ ! -r "$QUEUE_BACKEND_SCRIPT" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; t
 fi
 if [[ ! -r "$QUEUE_BACKEND_SCRIPT" ]] || ! command -v python3 >/dev/null; then
     echo "Findings were not persisted — install the queue modules with sweep or configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
-    if [[ -t 2 ]]; then
-        for f in "${FINDINGS[@]}"; do
-            if is_security_finding "$f"; then printf '  %s\n' "$f" >&2; fi
-        done
-    fi
     exit 1
 fi
 REPO=$(git rev-parse --show-toplevel) || exit 1
@@ -156,7 +161,6 @@ VISIBILITY=""
 WITHHELD=0
 for f in "${FINDINGS[@]}"; do
     if is_security_finding "$f"; then
-        if [[ -t 2 ]]; then printf '  %s\n' "$f" >&2; fi
         if [[ -z "$VISIBILITY" ]]; then
             REQUEST=$(python3 -c 'import json, sys; print(json.dumps({"contract": 1, "repo": sys.argv[1], "verify_visibility": True}))' "$REPO")
             if DESCRIBE=$(printf '%s\n' "$REQUEST" | python3 "$QUEUE_BACKEND_SCRIPT" describe); then
@@ -197,7 +201,7 @@ request["items"] = [
         "key": "sweep:" + hashlib.sha256(finding.encode("utf-8")).hexdigest(),
         "title": finding[:256],
         "body": finding,
-        "labels": ["security"] if finding.lower().startswith("[security] ") else [],
+        "labels": ["security"] if finding.lower().startswith("[security]") else [],
         "refile_completed": True,
     }
     for finding in dict.fromkeys(sys.argv[3:])

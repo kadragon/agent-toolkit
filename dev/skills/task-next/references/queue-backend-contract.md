@@ -54,15 +54,18 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
-| `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
+| `rejected` | yes | optional `rev` (historical file queue) | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
 | `publish` | no | optional `queue_limits` | as `create`, for the pending store's drafts |
+| `inventory` | no | optional `ref` (resolve as a `list` with that `ref` would) | `entries[]`: `ref`, `title`, `body`, `url` for every open queue item, including claimed and parked items |
 
 `candidates[]` entries: `id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`, and `counts`
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
 (`blocked`/`deferred`), `payload`. `claimed[]`: `ref`, `by` (the worktree holding it). A
 `backlog` `list` also returns `rev`: the commit SHA its `ref` resolved to, or `null`.
+With automatic backend selection on GitHub, a historical file `show` or `rejected` request
+reads that snapshot even when it has no open items. An explicit backend override still applies.
 
 Forge constraints the contract keeps: a claim needs no remote write, closing happens through the
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
@@ -138,8 +141,9 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
 - **Parking.** An open `blockedBy` issue parks it (`blocked`, payload: the open blocker refs); a
   closed blocker is ignored. Label `deferred` parks it (`deferred`, payload: its `Deferred:
   <reason>` body line).
-- **Claims** (`claimed[]`, no remote write): (a) a `.worktrees/*/tasks.md` `## Covers` line naming
-  `#N` (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
+- **Claims** (`claimed[]`, no remote write): (a) a live `.worktrees/` worktree's
+  `## Covers` in its `tasks.md` or an archived contract registered to that worktree
+  (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
   `closedByPullRequestsReferences` by an `OWNER`/`MEMBER`/`COLLABORATOR` author, `by` = its URL
   (another author's PR is ignored with a warning); (c) a closing keyword in a commit on the local
   default branch not yet on `origin` (`origin/HEAD`, else `origin/main`/`origin/master`;
@@ -148,10 +152,14 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
   uncapped (issues have no h3/h2 kinds, so the backlog's type priority reduces to number order).
 - **Paging.** Every connection selection reads (issues, labels, blockers, sub-issues, closing
   PRs) is paged up to a page limit. Hitting it sets `incomplete: true` with a warning, leaves out
-  any issue read only in part or whose same-repo parent was not read, and fails with exit 1 when no candidate remains — never an empty
-  queue. `ref` and `tasks` in a `list` request are ignored.
+  any issue read only in part, any child whose same-repo parent was unread, and any parent with
+  a same-repo open queue child that was unread. It fails with exit 1 when no candidate remains.
+  `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.
+- `inventory` reads the trusted open issue connection to the end, including sub-issues and
+  parents. Use it to check for duplicates regardless of whether an issue can be picked. Failed
+  or stalled pagination returns exit 1 without a partial response.
 
 ### `github` writes
 
@@ -161,10 +169,12 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
 - `create` validates every item first (one-line `key` without `-->`, unique in the batch, never
   its own parent or blocker; `title`; string `body`; `parent_key` and each `blocked_by` entry a
   batch key, a known `queue-key`, or `#N` / `owner/name#N`) — a bad request is exit 1 and stores
-  nothing. It then reads every issue a trusted author filed with a `<!-- queue-key: <key> -->`
-  body marker (open or closed, any label), creates each missing label (`task-queue` plus the
-  items' labels), files each unmatched item with the marker appended to its body, and reuses a
-  match (`reused: true`). A recurring finding can set `refile_completed: true` on its item.
+  nothing. It scans issue bodies for the batch's own and referenced
+  `<!-- queue-key: <key> -->` markers on issues filed by trusted authors (open or closed, any
+  label). The scan stops when all needed matches are found or the connection ends. It reads
+  relation details only for reused issues, creates missing labels (`task-queue` plus the items'
+  labels), files unmatched items with their marker, and reports matches with `reused: true`.
+  A recurring finding can set `refile_completed: true` on its item.
   When its match was closed as completed, `create` files the recurrence with a marker derived
   from its key and the completed issue number. Retries find the same recurrence. A match closed
   without completion is reported in `incomplete[]` as `relation: "rejected"` and is not stored.
@@ -178,9 +188,10 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
   failing mid-write (the response carries `error`), an `incomplete[]` relation, or
   `"queue_limits": "no-queue-write"` (no remote writes) — are kept by key, bound to the
   `owner/name` they were meant for, in `$(git rev-parse --git-common-dir)/agent-queue/pending.json`
-  (outside the working tree and history; every read-merge-write holds `pending.json.lock`), and
+  (outside the working tree and history, indexed by target and key). A Git common directory lock
+  serializes issue lookup, filing, and pending-store updates across worktrees. Drafts are
   named in `pending[]` with `pending_path`. Exit is 0: the writer reports the pending keys and the
-  path. A clean run writes no file.
+  path. A clean run creates no pending file.
   - `create` reserves `gh-alert/<kind>/<number>` keys for GitHub security alerts. These items
     require the `security` label, no relations, and confirmed private visibility. The backend
     appends `<!-- gh-alert: <kind>/<number> -->` and reuses an open or closed issue with that
@@ -190,14 +201,14 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
     when visibility is unconfirmed. A failed visibility request puts a new alert batch in the
     pending store for retry. With `no-queue-write`, batches without generic security findings
     require no visibility lookup.
-- `publish` re-sends the stored drafts bound to the current `origin` through `create`
-  (retry-safe, so an issue whose response was lost is reused and its missing relations
-  completed), drops each fully filed draft unless a newer draft replaced it meanwhile, and removes
-  the file when it empties. A draft bound to another repository, or naming a target that no longer
+- `publish` re-sends the stored drafts bound to the current `origin` through the same retry-safe
+  filing path as `create`. It retires fully filed drafts before releasing the write lock and
+  removes the file when it empties. A draft bound to another repository, or naming a target that no longer
   resolves, stays pending with an `incomplete[]` entry (`relation: "target"`) and never blocks the
   rest. Under `no-queue-write` it posts nothing.
 - `rejected`: closed `task-queue` issues with state reason `NOT_PLANNED` and a trusted author;
-  `reason` and `refile_bar` come from the latest trusted `<!-- queue-rejected -->` comment
+  comment details are fetched only for issues that pass both filters. `reason` and `refile_bar`
+  come from the latest trusted `<!-- queue-rejected -->` comment
   (`Reason: …`, `Re-file only with: …`), plus `url`.
 - `reject` (a trusted queue issue): posts that comment, then closes the issue as not planned.
 - `defer` (a trusted queue issue): creates the `deferred` label when missing, replaces any
@@ -209,8 +220,9 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
 `backlog.md` onto the `github` backend; the mapping is in its docstring. The default run is a dry
 run that prints the plan — check it against `backlog.md` line by line before `--apply`, which
 files through `create` under the standing `queue-write` grant. A line is deleted only once its
-issue and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
-together); exit 3 means lines were kept — re-run, and the filed issues are reused by their
+issue content and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
+together). If a reused issue's title or body differs from the plan, reconcile the GitHub issue
+with `backlog.md` before retrying. Exit 3 means lines were kept — re-run, and the filed issues are reused by their
 `backlog-migrated:<sha1>` keys. An item the plan refuses (a `Security Fixes` item on a public repo, an
 unresolvable blocker) stops `--apply` before it files anything: left behind, it would keep the repo on
 the file queue and hide the filed issues. The

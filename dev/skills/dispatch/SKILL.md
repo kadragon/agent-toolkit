@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.1.0
+version: 3.3.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -52,7 +52,8 @@ PRs require permission for each PR. Report any unsupported request layout.
 Forward only workflows the human requested. In separate-worktree prompts, add
 `Dispatch mode: parallel-worktree` and mark an added `--tree` as isolation only.
 Children verify authority before Git writes or nested delegation and stop separate PRs at ready
-before base merge. Hold if the CLI cannot carry the handoff fields.
+before base merge. For Codex task cycles, the review cycle writes the final dispatch report
+through the required-review gate. Hold if the CLI cannot carry the handoff fields.
 
 `/dev:task-next` needs a queue. When `pick` reports none, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -68,9 +69,10 @@ Tiers are equal across CLIs: `haiku` = `luna` < `sonnet` < `opus` = `sol`; `terr
 Pick the tier by capability, then the CLI by quota bias.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
-For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"`. Use its `effective_bias`
+For wave planning, run `python3 -I "<dispatch>/scripts/quota.py" --refresh-if-stale`. Use its `effective_bias`
 in the table and cap the wave at two live children under `both-hot`. The launcher reruns the check
-and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md` for pass files.
+from cache and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md`
+for refresh warnings, pass files, and a manual refresh after redemption.
 
 | bias | Change |
 |------|--------|
@@ -121,9 +123,8 @@ Run `hc ls` first. A live task session in the repo — yours or another home ses
 both share the checkout: say so and stop, unless the new one runs `--tree` (below).
 Verify user authorization for the Git writes the task needs, including any grant from an explicit
 full-workflow invocation. If a required action is still unauthorized, ask once before launch
-which Git actions the user authorizes. Record the user's exact words, who gave the grant, and
-when in `--git-limits`. Keep `--request` as the verbatim originating request so the child can
-cite the grant and its scope in the Sprint Contract.
+which Git actions the user authorizes. Pass the exact grant, grantor and date in `--git-limits`.
+Pass the verbatim originating request in `--request` for the child's Sprint Contract.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
@@ -135,15 +136,14 @@ Always pass `--title`, a short unit summary in the user's language (Herdr label 
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. Forward explicit Git grants and limits verbatim. If an explicit full-workflow invocation
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
-Queue and new launches reject missing, blank, or placeholder Git limits. For work authorized
-to proceed without Git writes, pass `--no-git-writes`. The child receives `implementation-only`
-and stops before any commit, push, or PR write. Use `--git-limits` alongside the flag to forward
-additional user restrictions verbatim. The child honors those restrictions within
-`implementation-only`.
-For standalone work that needs no Git writes and has no user-provided limits, pass
-`--git-limits='not specified'`.
-Shell-quote each value, as in `--git-limits='don'\''t merge'`.
-Preview with `--dry-run`.
+Queue and new launches reject missing, blank, or placeholder Git limits. For work authorized to proceed without
+Git writes, pass `--no-git-writes`. The child receives `implementation-only` and stops before commits, pushes
+or PR writes. Add `--git-limits` to forward any additional user restrictions verbatim for the child to honor.
+For standalone work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
+Shell-quote each value, as in `--git-limits='don'\''t merge'`. Preview with `--dry-run`.
+
+For Codex review cycles, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
+Pass the user's separate review transfer grant with `--review-transfer-approval='<verbatim approval>'`.
 
 To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
 in the home repo. See `references/launch-handoff.md` for the schema and path matching.

@@ -36,7 +36,10 @@ Bind all three alert requests to the canonical origin host. Before filing, verif
 `origin` still resolves to the same repository and confirm that its visibility is still private.
 If the check fails, report only.
 
-Expected errors: Code Scanning 403/404 and Secret Scanning 404 mean the feature is not enabled; the script writes `<type>.disabled` beside the `[]` result — report that type as "not enabled", not as 0. Any other failure lands in `.fetch-errors`.
+Use each type's scan status. `<type>.disabled` confirms GitHub explicitly reported the feature
+disabled. A type named in `.fetch-errors` is unreadable, including ambiguous 403/404 responses.
+`<type>.truncated` marks partial results. For manual scans, use the same status and pagination
+rules from api-patterns.md.
 
 **Critical**: Always strip `.secret` field from secret scanning responses to prevent credential leaks into context. `fetch-alerts.sh` strips secret fields automatically. If using manual queries, pipe through `jq 'del(.[] | .secret)'` before processing.
 
@@ -48,7 +51,8 @@ Show one row for the repo:
 |------|-----------|--------------|----------------|-------|
 | repo-name | 3 (1 HIGH, 2 LOW) | 1 (1 ERROR) | 0 | 4 |
 
-Mark a feature that is not enabled as "not enabled". If `${SCAN_DIR}/.fetch-errors` exists, show it and treat zero counts as unknown. Flag truncated results per api-patterns.md. Resolve the route before making any queue change, including a zero-alert cleanup.
+Report disabled types as "not enabled", failed types as unknown, and observed counts for truncated
+types as partial. Resolve the route before making any queue change, including a zero-alert cleanup.
 
 ## Phase 2: Report or file fixes
 
@@ -102,7 +106,10 @@ Follow **`${CLAUDE_PLUGIN_ROOT}/references/security-overview/backlog-template.md
 
 **Private GitHub issues:** check `rejected` for explicit rejections using the reference's matching rules. Build one item per remaining alert with its positive source `number`, using `gh-alert/<kind>/<number>` as the key and `["security"]` as labels. Use the kind names `dependabot`, `code-scanning`, and `secret-scanning`. Submit the items in a single `create` request to the same queue backend. The backend derives the hidden `<!-- gh-alert: <kind>/<number> -->` marker from the key and reuses an existing issue with that marker. Report new, reused, withheld, and failed or pending items. With zero eligible alerts, skip `create`. Report malformed alerts without a number and skip those items.
 
-**Legacy backlog:** write or replace `## Security Fixes` in the current repo's `backlog.md`, following the reference's manual-edit and rejected-item rules. With zero alerts and no fetch errors, remove an existing section subject to the manual-edit check. With fetch errors and zero collected alerts, leave the section in place.
+**Legacy backlog:** update `## Security Fixes` in the current repo's `backlog.md` using the reference's
+replacement, manual-edit, and rejected-item rules. Keep each failed, truncated, or disabled type's
+existing subsection verbatim. Remove an empty type's subsection only after a complete scan of that
+type. Remove the whole section only after complete scans of all three types leave no items.
 
 Key rules:
 - Each `- [ ]` = one atomic, actionable fix.

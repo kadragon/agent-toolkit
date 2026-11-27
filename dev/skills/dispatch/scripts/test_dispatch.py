@@ -24,6 +24,7 @@ from dispatch import (
     codex_screen,
     collect,
     composer_draft,
+    first_prompt,
     free_name,
     launch,
     lock_run,
@@ -130,11 +131,35 @@ class DispatchReceiptTests(DispatchTestCase):
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
               "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+    REVIEW_APPROVAL = '이 PR diff를 Claude와 agy에 보내도 됩니다.\n"Codex"도 승인합니다.'
     HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
                "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
              "Task-cycle mode and flags come exclusively from the invocation above.\n"
              f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
+
+    def test_parallel_queue_worktree_prompt_adds_phase_reading_guide(self):
+        for cli, command in (("codex", "$task-next"), ("claude", "/dev:task-next")):
+            with self.subTest(cli=cli):
+                message = f"{command} --tree #511\nDispatch mode: parallel-worktree. Work only on #511."
+                prompt = first_prompt(cli, message, self.HANDOFF)
+                self.assertTrue(prompt.startswith(message + self.BLOCK))
+                guide = prompt.removeprefix(message + self.BLOCK)
+                for section in (
+                    "Phase index", "outside code fences", "rg -n '^#{2,3} '", "tree.md → --tree mode",
+                    "cycle.md → Branch", "cycle.md → Version bump, Cleanup, and Validation evidence",
+                    "Step 4 and cycle.md → Hand off", "task-review-cycle → Caller gate",
+                ):
+                    self.assertIn(section, guide)
+
+    def test_other_prompts_keep_existing_handoff(self):
+        for message in (
+            "$task-next",
+            "$task-next --tree #511",
+            "$task-next --all\nDispatch mode: parallel-worktree",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(first_prompt("codex", message, self.HANDOFF), message + self.BLOCK)
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
@@ -231,6 +256,27 @@ class DispatchReceiptTests(DispatchTestCase):
             **self.FIELDS,
             "Git limits": "implementation-only",
             "Additional Git limits (verbatim)": restrictions,
+        })
+
+    def test_review_transfer_approval_survives_launch_and_first_send(self):
+        grant = self.REVIEW_APPROVAL
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                 "--cli", "codex", "--model", "gpt-6.1-terra", "--effort", "medium",
+                 "--cwd", directory, "--work-kind", "standalone", "--request", "Review the PR",
+                 "--unit", "PR review", "--git-limits", "pr-only", "--task", "Review the PR",
+                 "--review-transfer-approval", grant, "--dry-run"],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = json.loads(result.stdout)["task"]
+        fields = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        self.assertEqual(json.loads(fields), {
+            "Original user request (verbatim)": "Review the PR",
+            "Assigned unit": "PR review",
+            "Git limits": "pr-only",
+            "Review transfer approval (verbatim)": grant,
         })
 
     def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
@@ -435,6 +481,7 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertNotIn("handoff", payload)
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
+            self.assertTrue(receipt["require_review_sources"])
             self.assertFalse(receipt["sent"])
             self.assertEqual(receipt["quota_snapshot"], snapshot)
             self.assertEqual(receipt["bias"], "claude")
@@ -585,6 +632,58 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        cases = (
+            (None, ("claude", "agy", "codex", "no completed result")),
+            ({"claude": "approval denied", "agy": "still running", "codex": "complete"},
+             ("claude", "approval denied", "agy", "still running")),
+            ({"claude": "complete", "agy": "complete", "codex": "complete"}, ()),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**self.RECEIPT, "require_review_sources": True}), encoding="utf-8")
+            for status in ("ready", "done", "merged"):
+                for sources, blockers in cases:
+                    with self.subTest(status=status, sources=sources):
+                        result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
+                        if sources is not None:
+                            result["review_sources"] = sources
+                        write_json(receipt.with_name("result.json"), result)
+                        output = StringIO()
+                        with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
+                            collect(SimpleNamespace(run=receipt, close=False))
+                        reported = json.loads(output.getvalue())["result"]
+                        self.assertEqual(reported["status"], "blocked" if blockers else status)
+                        self.assertEqual(reported["pr"], "example-pr")
+                        for blocker in blockers:
+                            self.assertIn(blocker, reported["summary"])
+
+    def test_report_review_writes_missing_source_reason_to_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            result = {
+                "status": "ready", "phase": "review", "summary": "CI passed",
+                "review_sources": {"claude": "complete", "agy": "리뷰 진행 중", "codex": "complete"},
+                "ci": "success",
+            }
+            for outcome, status, phase, summary in (
+                ("리뷰 진행 중", "blocked", "review-sources", "agy: 리뷰 진행 중"),
+                ("complete", "ready", "review", "CI passed"),
+            ):
+                with self.subTest(outcome=outcome):
+                    result["review_sources"]["agy"] = outcome
+                    completed = subprocess.run(
+                        [sys.executable, "-I", "-X", "utf8=0", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        env={**os.environ, "LC_ALL": "C"},
+                        input=json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                        check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
+                    self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                                     {**result, "status": status, "phase": phase, "summary": summary})
+                    self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -861,6 +960,19 @@ class DispatchReceiptTests(DispatchTestCase):
                 "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
             })
             self.assertEqual(report["scope_decision_categories"], [])
+
+    def test_collect_keeps_review_history_without_escalating_missing_sources_as_sendbacks(self):
+        first = {"change": "/archive/contract.md", "round": 1, "categories": ["atomicity"]}
+        history = [first, {**first, "round": 2}]
+        with tempfile.TemporaryDirectory() as directory:
+            report, _ = self.collect_report(directory, {"state": "done"},
+                                            receipt_fields={"require_review_sources": True}, result={
+                "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": history,
+                "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"},
+            })
+        self.assertEqual(report["result"]["status"], "blocked")
+        self.assertEqual(report["result"]["review_sendbacks"], history)
+        self.assertEqual(report["scope_decision_categories"], [])
 
     def test_collect_force_closes_an_owned_child_and_records_the_reason(self):
         working = {**self.TERMINAL, "status": {"state": "working"}}
@@ -2332,13 +2444,20 @@ class CodexSendTests(DispatchTestCase):
             extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
                            "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
                            "Hook approval required for the local workflow."]
-            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
-            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
+            grant = DispatchReceiptTests.REVIEW_APPROVAL
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines,
+                       "review_transfer_approval": grant}
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff, "require_review_sources": True}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
+            fields = {**DispatchReceiptTests.FIELDS, "Review transfer approval (verbatim)": grant}
+            block = DispatchReceiptTests.BLOCK.replace(
+                json.dumps(DispatchReceiptTests.FIELDS, ensure_ascii=False, indent=2),
+                json.dumps(fields, ensure_ascii=False, indent=2),
+            )
+            expected = ("a task" + block + "\n\n" + extra_lines[0] + "\n"
                         + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
-                        + report_instruction(receipt.resolve().with_name("result.json")))
+                        + report_instruction(receipt.resolve().with_name("result.json"), require_review_sources=True))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
@@ -2352,6 +2471,7 @@ class CodexSendTests(DispatchTestCase):
             self.assertTrue(transcript_echoed(echoed, prompt))
             self.assertEqual(codex_screen(echoed), "ready")
             self.assertEqual(prompt, expected)
+            self.assertIn("dispatch.py report-review", prompt)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):
@@ -2940,6 +3060,161 @@ class LaunchQuotaTests(unittest.TestCase):
                 self.assertEqual(run.call_args.args[0], [sys.executable, "-I", "-X", "utf8", str(SCRIPTS / "quota.py")])
                 self.assertIsNone(json.loads(output.getvalue())["quota_snapshot"])
                 self.assertIn("warning: quota check unavailable", errors.getvalue())
+
+
+@unittest.skipIf(os.name == "nt", "fixture uses a POSIX executable script")
+class ResetPassRefreshTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.cache = self.home / "reset-passes.json"
+        self.marker = self.home / "reset-passes.refreshed"
+        self.requests = self.home / "requests"
+        self.response = self.home / "response.json"
+        self.expiry = dt.datetime.now(dt.timezone.utc).replace(microsecond=0) + dt.timedelta(days=30)
+        self.old_cache = json.dumps([(self.expiry + dt.timedelta(days=days)).isoformat() for days in (1, 2)]) + "\n"
+        self.cache.write_text(self.old_cache, encoding="utf-8")
+        codex = self.home / "codex"
+        codex.write_text(f"#!{sys.executable}\n" + """\
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+assert sys.argv[1:] == ["app-server"], sys.argv
+home = Path(os.environ["CODEX_HOME"])
+initialize = json.loads(input())
+assert initialize["method"] == "initialize", initialize
+print(json.dumps({"id": initialize["id"], "result": {"codexHome": str(home)}}), flush=True)
+assert json.loads(input()) == {"method": "initialized"}
+request = json.loads(input())
+with (home / "requests").open("a", encoding="utf-8") as log:
+    log.write(request["method"] + "\\n")
+assert request["method"] == "account/rateLimits/read", request
+assert request["params"] == {"excludeResetCreditDetails": False}, request
+response = json.loads((home / "response.json").read_text(encoding="utf-8"))
+time.sleep(response.pop("delay", 0))
+print(json.dumps({"id": request["id"], **response}), flush=True)
+assert not sys.stdin.readline(), "unexpected extra request"
+""", encoding="utf-8")
+        codex.chmod(0o700)
+        self.env = {**os.environ, "CODEX_HOME": str(self.home), "PATH": f"{self.home}{os.pathsep}{os.environ['PATH']}"}
+        self.env["CLAUDE_CONFIG_DIR"] = str(self.home / "claude")
+        self.env["QUOTA_CLAUDE_CACHE"] = str(self.home / "claude-quota.json")
+        self.credit = {"id": "credit-1", "status": "available", "resetType": "codexRateLimits",
+                       "expiresAt": int(self.expiry.timestamp())}
+        self.set_response({"availableCount": 1, "credits": [self.credit]})
+
+    def set_response(self, summary):
+        self.response.write_text(json.dumps({"result": {"rateLimitResetCredits": summary}}), encoding="utf-8")
+
+    def command(self, *args):
+        return [sys.executable, "-I", str(SCRIPTS / "quota.py"), *args]
+
+    def quota_command(self, *args):
+        return subprocess.run(self.command(*args), env=self.env, text=True, capture_output=True, timeout=35)
+
+    def test_wave_planning_refreshes_legacy_cache_before_assessing_and_reuses_success(self):
+        skill = (SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8")
+        planning_args = re.search(r'For wave planning, run `python3 -I "<dispatch>/scripts/quota.py"([^\n`]*)`', skill)
+        self.assertIsNotNone(planning_args)
+        args = planning_args[1].split()
+        result = self.quota_command(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [self.expiry.isoformat().replace("+00:00", "Z")])
+        self.assertEqual(json.loads(result.stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        self.set_response({"availableCount": 0})
+        self.assertEqual(json.loads(self.quota_command(*args).stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        prior_day = time.time() - 24 * 3600
+        os.utime(self.marker, (prior_day, prior_day))
+        self.assertEqual(json.loads(self.quota_command(*args).stdout)["codex"]["reset_passes"], 0)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [])
+
+    def test_manual_forces_explicit_zero_and_ordinary_reads_use_only_cache(self):
+        self.assertEqual(self.quota_command("--refresh-if-stale").returncode, 0)
+        self.set_response({"availableCount": 0, "credits": None})
+        self.assertEqual(json.loads(self.quota_command().stdout)["codex"]["reset_passes"], 1)
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+        result = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.cache.read_bytes()), [])
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"] * 2)
+
+    def test_bad_responses_keep_last_successful_cache_and_report_age(self):
+        result = self.quota_command("--refresh-if-stale")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cached = self.cache.read_bytes()
+        prior = time.time() - 25 * 3600
+        os.utime(self.marker, (prior, prior))
+        for response in (
+            {"result": {}},
+            {"result": {"rateLimitResetCredits": {"availableCount": 2, "credits": [self.credit]}}},
+            {"result": {"rateLimitResetCredits": {"availableCount": 1, "credits": [{**self.credit, "expiresAt": None}]}}},
+            {"result": {"rateLimitResetCredits": {"availableCount": False}}},
+            {"error": {"code": -32601, "message": "unsupported"}},
+        ):
+            with self.subTest(response=response):
+                self.response.write_text(json.dumps(response), encoding="utf-8")
+                result = self.quota_command("--refresh-if-stale")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["codex"]["reset_passes"], 1)
+                self.assertIn("last successful refresh 25.0h ago", result.stderr)
+                self.assertEqual(self.cache.read_bytes(), cached)
+        failure = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(failure.returncode, 1, failure.stderr)
+
+    def test_parallel_planners_share_one_refresh(self):
+        self.response.write_text(json.dumps({
+            "result": {"rateLimitResetCredits": {"availableCount": 0}}, "delay": 0.25,
+        }), encoding="utf-8")
+        with subprocess.Popen(self.command("--refresh-if-stale"), env=self.env, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as first:
+            second = self.quota_command("--refresh-if-stale")
+            stdout, stderr = first.communicate(timeout=5)
+        self.assertEqual(first.returncode, 0, stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual([json.loads(output)["codex"]["reset_passes"] for output in (stdout, second.stdout)], [0, 0])
+        self.assertEqual(self.requests.read_text(encoding="utf-8").splitlines(), ["account/rateLimits/read"])
+
+    def test_lookup_timeout_keeps_legacy_cache_and_reports_file_age(self):
+        self.response.write_text(json.dumps({"delay": 60}), encoding="utf-8")
+        with (patch.dict(os.environ, self.env), patch("quota.RESET_PASS_LOOKUP_TIMEOUT", 0.5),
+              redirect_stdout(StringIO()) as out, redirect_stderr(StringIO()) as err):
+            quota_main(["--refresh-if-stale"])
+        self.assertIn("timed out", err.getvalue())
+        self.assertIn("cache file age", err.getvalue())
+        self.assertEqual(self.cache.read_text(encoding="utf-8"), self.old_cache)
+        self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 2)
+        self.assertFalse(self.marker.exists())
+
+    def test_run_codex_from_resolved_executable_path(self):
+        executable = (self.home / "codex").rename(self.home / "codex.cmd")
+        with (patch.dict(os.environ, {**self.env, "PATH": str(self.home)}),
+              patch("shutil.which", return_value=str(executable)) as which,
+              redirect_stdout(StringIO()) as out, redirect_stderr(StringIO()) as err):
+            quota_main(["--refresh-if-stale"])
+        self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 1, err.getvalue())
+        which.assert_called_once_with("codex")
+
+    def test_missing_codex_preserves_legacy_cache_and_skips_unconfigured_home(self):
+        (self.home / "codex").unlink()
+        self.env["PATH"] = str(self.home)
+        legacy = self.quota_command("--refresh-if-stale")
+        self.assertEqual(json.loads(legacy.stdout)["codex"]["reset_passes"], 2)
+        self.assertIn("cache file age", legacy.stderr)
+        self.assertFalse((self.home / "reset-passes.lock").exists())
+        new_home = self.home / "unconfigured"
+        self.env["CODEX_HOME"] = str(new_home)
+        result = self.quota_command("--refresh-if-stale")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(new_home.exists())
+        manual = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(manual.returncode, 1)
+        self.assertIn("Codex CLI executable not found", manual.stderr)
+        self.assertFalse(new_home.exists())
 
 
 class QuotaTests(unittest.TestCase):

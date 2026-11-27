@@ -2,7 +2,7 @@
 # Wait for all CI checks on a PR to complete.
 # Backend-agnostic: polls via hub.sh ci-status (gh for GitHub, REST for Forgejo).
 #
-# Usage: ci-wait.sh <pr_number>
+# Usage: ci-wait.sh <pr_number> [--expected-head <sha>]
 # Output: JSON to stdout — {passed: bool}
 #
 # The orchestrator runs this in the foreground under the Bash tool's 600s ceiling, so the
@@ -19,7 +19,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-PR_NUMBER="${1:?Usage: ci-wait.sh <pr_number>}"
+USAGE="Usage: ci-wait.sh <pr_number> [--expected-head <sha>]"
+PR_NUMBER="${1:?$USAGE}"
+EXPECTED_HEAD=""
+if [[ $# -eq 3 && "$2" == --expected-head && "$3" =~ ^[0-9a-f]{40}$ ]]; then
+  EXPECTED_HEAD="$3"
+elif [[ $# -ne 1 ]]; then
+  printf '%s\n' "$USAGE" >&2
+  exit 1
+fi
 MAX_STRIKES="${CI_WAIT_MAX_STRIKES:-3}"
 # A non-numeric override would make the -ge test and --argjson both fail, and under
 # `set -euo pipefail` the script would die with no JSON at all — worse than any cap.
@@ -131,12 +139,16 @@ ci_configured() {
   [ "$CI_CONFIGURED" = yes ]
 }
 
-# The pushed head. Right after a push the hub can still describe the previous commit, and its
-# `failure` would be struck a second time (PR #362). A status whose head_sha is a strict
-# ancestor of HEAD is that lag: `pending`. Any other SHA (a bot or collaborator commit this
-# checkout lacks) or a missing SHA is taken as-is, so a diverged checkout never waits out the
-# whole deadline on a CI that already finished.
-HEAD_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+WATCH_SHA="$EXPECTED_HEAD"
+if [ -z "$WATCH_SHA" ]; then
+  WATCH_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
+fi
+
+fail_verification() {
+  jq -n --arg reason "$1" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
+    '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
+  exit 0
+}
 
 START=$(date +%s)
 DEADLINE=$(( START + TIMEOUT_SECS ))
@@ -145,9 +157,17 @@ while true; do
   STATUS_JSON=$(bash "$SCRIPT_DIR/hub.sh" ci-status "$PR_NUMBER" 2>/dev/null || echo '{}')
   STATUS=$(jq -r '.status // "error"' <<<"$STATUS_JSON")
   STATUS_SHA=$(jq -r '.head_sha // empty' <<<"$STATUS_JSON" 2>/dev/null || true)
-  if [ -n "$HEAD_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$HEAD_SHA" ] \
-    && git merge-base --is-ancestor "$STATUS_SHA" "$HEAD_SHA" 2>/dev/null; then
-    STATUS=pending
+  if [ -n "$EXPECTED_HEAD" ] && [ -z "$STATUS_SHA" ]; then
+    case "$STATUS" in
+      success|failure) fail_verification head-missing ;;
+      pending|none) STATUS=pending ;;
+    esac
+  elif [ -n "$WATCH_SHA" ] && [ -n "$STATUS_SHA" ] && [ "$STATUS_SHA" != "$WATCH_SHA" ]; then
+    if git merge-base --is-ancestor "$STATUS_SHA" "$WATCH_SHA" 2>/dev/null; then
+      STATUS=pending
+    elif [ -n "$EXPECTED_HEAD" ]; then
+      fail_verification head-mismatch
+    fi
   fi
   NOW=$(date +%s)
 
@@ -178,6 +198,9 @@ while true; do
           exit 0
         fi
       elif [ $(( NOW - START )) -ge "$NO_CHECKS_GRACE_SECS" ]; then
+        if [ -n "$EXPECTED_HEAD" ] && ! git diff --quiet "$EXPECTED_HEAD" -- 2>/dev/null; then
+          fail_verification ci-config-unverified
+        fi
         clear_strikes  # a pass is a pass: no-CI must reset the counter like `success` does
         jq -n '{passed: true, reason: "no CI checks found"}'
         exit 0
@@ -193,6 +216,9 @@ while true; do
   esac
 
   if [ "$NOW" -ge "$DEADLINE" ]; then
+    if [ -n "$EXPECTED_HEAD" ] && [ -z "$STATUS_SHA" ]; then
+      fail_verification head-missing
+    fi
     jq -n --arg pr "$PR_NUMBER" '{"passed": false, "reason": "timeout", "pr_number": $pr}'
     exit 0
   fi

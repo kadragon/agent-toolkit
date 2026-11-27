@@ -81,19 +81,20 @@ needs these gates is the one running without them. The floor, one line per gate:
    file kind: reference docs and `SKILL.md` files *inside* those trees count. Bump size per
    `docs/conventions.md` → *Plugin Version Bump Rules*
 2. Shell patterns in modified `SKILL.md` follow capture-before-use
-3. The Sprint Contract's lint/test command exits 0
+3. The Sprint Contract's lint/test command exits 0. For pre-review QA, run the brief's targeted
+   checks and mark criteria that need the final suite pending until review-cycle verification
 4. No new `$var` reference without a visible `var=$(cmd)` capture
 5. No out-of-scope edits — every changed path traces to a line in the contract's **Scope**. A path
-   outside it fails unless the contract was amended to cover it
+   outside it fails unless the contract was amended to cover it. Cycle-owned changes to `tasks.md`
+   and the plugin manifests are exempt from the scope check. Use the backend recorded in the
+   brief. Apply the scope check to `backlog.md` and `CHANGELOG.md` unless the brief identifies
+   `backlog` as the selected backend and the edits are cycle-owned bookkeeping.
 6. Owning doc synced — a change that alters a rule stated in `docs/` or `AGENTS.md` updates that
    doc and its sibling references in the same change set (a new or renamed `docs/` file also
    updates the `AGENTS.md` Docs Index)
 
-Each carve-out belongs to its own gate; do not merge them. Gate 1: repo-root paths outside every
-plugin tree are **N/A, not fail** — nothing to bump. Gate 5: the paths the cycle itself writes
-(`tasks.md`, `backlog.md`, file-queue `CHANGELOG.md`, the plugin manifests) are **N/A, not fail** — no
-contract's Scope has to list them. A repo-root path is *not* exempt from gate 5: an edit there
-outside the contract's Scope still fails.
+For gate 1, record **N/A** for paths outside every plugin tree. A repo-root path outside the
+contract's scope still fails gate 5 unless gate 5's own exception applies.
 
 When this list changes, update `.claude/agents/qa-verifier.md` → `## Checks (always run)` in the
 same commit. Cited by *Absent-Role Fallbacks* below, which `dev:task-next`'s `--tree` and `--all`
@@ -141,8 +142,9 @@ code quality and never replaces required checks. For task cycles,
 brief keeps the same shape a role file would have carried — `docs/delegation.md` four-field format
 (Objective / Output format / Tools to use / Boundaries) plus effort tier and its stop rule (at the
 tool-call cap, return the table with ungraded criteria marked `unverified`) — filled with the Sprint
-Contract's acceptance criteria verbatim, the in-scope paths, and the lint/test command, and telling
-it to verify against those criteria rather than impressions and to change nothing. **Carry the
+Contract's acceptance criteria verbatim, the in-scope paths, the cycle's selected queue backend,
+and the lint/test command, and telling it to verify against those criteria rather than impressions
+and to change nothing. **Carry the
 standing-checks floor in the brief too** — with no role file there is no `## Checks (always run)`
 for the brief to point at, so the gates every contract inherits reach the verifier only if the brief
 states them. Take them from *Verifier Standing-Checks Floor* above; do not reconstruct the list from

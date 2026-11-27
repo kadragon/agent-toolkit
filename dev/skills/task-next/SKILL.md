@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.19.0
+version: 2.20.1
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -19,6 +19,22 @@ layer; the cycle and the review are elsewhere.
 → `references/batch.md`. `--tree` → single-pick through a git worktree, `references/tree.md`.
 `--resume <slug>` → resume the stopped run in `.worktrees/<slug>` instead of selecting.
 A free-text request not yet on the queue is `task-new`'s job.
+
+## Phase index
+
+Use `rg -n '^#{2,3} ' <file>` to find Markdown headings and ignore matches inside code fences.
+Read each section up to the next heading at the same or a higher level. Resolve paths from
+this skill. For a dispatched `--tree` cycle, use this order:
+
+| Phase | Sections to open |
+|---|---|
+| Confirm the exact assignment | *Prerequisites*, then *Step 1 — Gather candidates* through its dispatched rule |
+| Create the worktree and archive the contract | `references/tree.md` → *--tree mode* and `references/cycle.md` → *Branch* (including *Worktree cycle*), *Plan gate*, *Sprint Contract*. For Git effects, open `references/git-authorization.md` → *Establish and carry authority*, *Check before execution* |
+| Implement and prepare the candidate | *Step 3 — Run the cycle* and `references/cycle.md` → *Implement*. After implementation, open *Version bump*, *Cleanup*, *Validation evidence* there |
+| Start review | *Step 4 — Hand off* and `references/cycle.md` → *Hand off*. Follow its direct call to `dev:task-review-cycle` and start at *Caller gate* |
+
+Open *Step 2* for manual selection or parked entries, and open `references/edge-cases.md` when
+an edge case applies.
 
 ## Prerequisites
 
@@ -218,9 +234,9 @@ carry no `[x]`, `[>]`, or stale sprint markers. The issues backend runs no `prun
 ## Step 4 — Hand off
 
 Per `references/cycle.md` → *Hand off*: `args: --from task-next --auto`, Sprint Contract restated
-verbatim, with saved archive and validation evidence, plus the covered refs and
-`close_ref_template` on the issues backend. `--tree` and parallel batches also verify
-the integrated candidate after worktree checks.
+verbatim, with saved archive and targeted evidence, plus covered refs and `close_ref_template`
+on the issues backend. `--tree` and parallel batches check the integrated candidate before
+hand-off. The review cycle runs full verification on the final candidate.
 
 ## Edge cases
 
