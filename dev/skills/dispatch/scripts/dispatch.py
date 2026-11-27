@@ -1211,25 +1211,64 @@ def warn_stale_local_base(repo):
               "The local backlog may be stale. Update the local base or use pick --tree.", file=sys.stderr)
 
 
-def pick(args):
-    skills = Path(__file__).resolve().parents[2]
-    script = skills / "task-next" / "scripts" / "backlog_candidates.py"
-    repo = Path(args.repo).expanduser()
-    if not (repo / "backlog.md").exists() and not args.tree:
-        raise SystemExit(f"{repo} has no backlog.md: no queue")
-    cmd = [sys.executable, "-I", "-X", "utf8", str(script), "--tasks", "tasks.md",
-           "--backlog", "backlog.md", "--json", "--counts"]
-    if args.tree:
-        cmd += ["--ref", "origin/HEAD"]
-    else:
-        warn_stale_local_base(repo)
-    if args.full_scan:
-        cmd.append("--full-scan")
-    done = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, encoding="utf-8")
+QUEUE_BACKEND = Path(__file__).resolve().parents[2] / "task-next" / "scripts" / "queue_backend.py"
+FILE_QUEUE_REF = re.compile(r"^(tasks\.md|backlog\.md):(\d+)$")
+
+
+def queue_op(op, request):
+    """Run one `queue_backend.py` op; its stderr diagnostics pass through, a failure exits."""
+    done = subprocess.run([sys.executable, "-I", "-X", "utf8", str(QUEUE_BACKEND), op],
+                          input=json.dumps(request), capture_output=True, text=True, encoding="utf-8")
     if done.returncode:
-        raise SystemExit(done.stderr.strip() or done.stdout.strip())
+        raise SystemExit(done.stderr.strip() or f"queue_backend.py {op} exited {done.returncode}")
     sys.stderr.write(done.stderr)
-    print(json.dumps(json.loads(done.stdout), ensure_ascii=False))
+    return json.loads(done.stdout)
+
+
+def heading_kind(repo, source, line, rev):
+    """`h1`/`h2`/`h3` of a file-queue candidate, read from the same commit `list` read."""
+    if source == "tasks.md":
+        return "h1"
+    if rev:
+        text = subprocess.run(["git", "-C", str(repo), "show", f"{rev}:backlog.md"], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace").stdout
+    else:
+        text = (repo / "backlog.md").read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    heading = lines[line - 1] if 0 < line <= len(lines) else ""
+    return f"h{len(heading) - len(heading.lstrip('#'))}"
+
+
+def pick_entry(repo, candidate, rev):
+    """One `list` candidate in the shape `backlog_candidates.py --json --counts` prints."""
+    counts = candidate["counts"]
+    tail = {"open": counts["open"], "deferred": counts["deferred"], "blocked": counts["blocked"]}
+    match = FILE_QUEUE_REF.match(candidate["ref"])
+    if match:
+        source, line = match.group(1), int(match.group(2))
+        return {"source": source, "kind": heading_kind(repo, source, line, rev), "title": candidate["title"],
+                "line": line, "items": None if source == "tasks.md" else len(candidate["items"]), **tail}
+    return {"source": "issues", "kind": "issue", "ref": candidate["ref"], "url": candidate.get("url", ""),
+            "title": candidate["title"], "line": None, "items": len(candidate["items"]), **tail}
+
+
+def pick(args):
+    repo = Path(args.repo).expanduser().resolve()
+    request = {"contract": 1, "repo": str(repo)}
+    if not (repo / "backlog.md").exists() and not args.tree:
+        if queue_op("describe", request)["backend"] == "backlog":
+            raise SystemExit(f"{repo} has no backlog.md: no queue")
+    elif not args.tree:
+        warn_stale_local_base(repo)
+    listed = queue_op("list", {**request, "full_scan": args.full_scan, "parked": False,
+                               **({"ref": "origin/HEAD"} if args.tree else {})})
+    for warning in listed.get("warnings", []):
+        print(warning, file=sys.stderr)
+    for claim in listed.get("claimed", []):
+        if not FILE_QUEUE_REF.match(claim["ref"]):  # the file queue already reports its claims as warnings
+            print(f"{claim['ref']} claimed by {claim['by']}", file=sys.stderr)
+    entries = [pick_entry(repo, c, listed.get("rev")) for c in listed["candidates"]]
+    print(json.dumps(entries, ensure_ascii=False))
 
 
 def main(argv):

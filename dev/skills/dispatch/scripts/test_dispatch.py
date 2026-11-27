@@ -15,6 +15,7 @@ from unittest.mock import ANY, call, patch
 
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
+    QUEUE_BACKEND,
     child_argv,
     child_name,
     codex_models_cache,
@@ -24,6 +25,7 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    pick,
     record,
     render_t3_thread_launch,
     report_instruction,
@@ -836,12 +838,20 @@ class PickTests(unittest.TestCase):
                 (["--full-scan"], ["Base nested", live_title, *full_base[1:]]),
                 (["--tree", "--full-scan"], full_base),
             )
+            candidates_script = QUEUE_BACKEND.with_name("backlog_candidates.py")
             for options, expected in cases:
                 with self.subTest(options=options):
                     result = subprocess.run([*dispatch, *options], cwd=root, env=env, check=True,
                                             capture_output=True, text=True, encoding="utf-8")
                     candidates = json.loads(result.stdout)
                     self.assertEqual([item["title"] for item in candidates], expected, result.stderr)
+                    direct = subprocess.run(
+                        [sys.executable, "-I", "-X", "utf8", str(candidates_script), "--tasks", "tasks.md",
+                         "--backlog", "backlog.md", "--json", "--counts",
+                         *(["--ref", "origin/HEAD"] if "--tree" in options else []),
+                         *(["--full-scan"] if "--full-scan" in options else [])],
+                        cwd=repo, env=env, check=True, capture_output=True, text=True, encoding="utf-8")
+                    self.assertEqual(candidates, json.loads(direct.stdout), "pick output is unchanged off GitHub")
                     self.assertNotIn("local backlog may be stale", result.stderr)
                     for item in candidates:
                         counts = tuple(item[key] for key in ("items", "open", "deferred", "blocked"))
@@ -866,6 +876,85 @@ class PickTests(unittest.TestCase):
                     expected = full_base[1:] if claimed else full_base
                     self.assertEqual([item["title"] for item in json.loads(result.stdout)], expected, result.stderr)
                     self.assertEqual("claimed by in-flight worktrees" in result.stderr, claimed, result.stderr)
+
+    def test_pick_without_backlog_md_stops_only_on_the_file_queue(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch no queue ") as directory:
+            root = Path(directory)
+            repo = root / "plain"
+            repo.mkdir()
+            env = {**os.environ, "HOME": str(root), "USERPROFILE": str(root), "XDG_CONFIG_HOME": str(root)}
+            env.pop("AGENT_QUEUE_BACKEND", None)
+            subprocess.run(["git", "init", "-q"], cwd=repo, env=env, check=True)
+            subprocess.run(["git", "remote", "add", "origin", "https://git.example.org/owner/plain.git"],
+                           cwd=repo, env=env, check=True)
+            result = subprocess.run([sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "pick", str(repo)],
+                                    env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("has no backlog.md: no queue", result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_pick_lists_issues_on_a_github_repo_without_backlog_md(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        def connection(nodes=()):
+            return {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": list(nodes)}
+
+        repository = {"nameWithOwner": "owner/repo"}
+
+        def issue(number, title, author="OWNER", parent=None, subs=(), prs=()):
+            return {
+                "number": number, "title": title, "body": "", "url": f"https://github.com/owner/repo/issues/{number}",
+                "state": "OPEN", "authorAssociation": author, "repository": repository,
+                "parent": parent and {"number": parent, "repository": repository},
+                "labels": connection([{"name": "task-queue"}]), "blockedBy": connection(),
+                "subIssues": connection({"number": n, "title": t, "state": "OPEN", "repository": repository}
+                                        for n, t in subs),
+                "closedByPullRequestsReferences": connection(prs),
+            }
+
+        issues = [
+            issue(1, "[FEAT] Single issue"),
+            issue(2, "[FEAT] Stranger's issue", author="NONE"),
+            issue(3, "Parent", subs=[(4, "[DOCS] Child one"), (6, "[DOCS] Child two")]),
+            issue(4, "[DOCS] Child one", parent=3),
+            issue(5, "[FIX] Claimed issue", prs=[{"number": 9, "url": "https://github.com/owner/repo/pull/9",
+                                                  "state": "OPEN", "authorAssociation": "OWNER"}]),
+            issue(6, "[DOCS] Child two", parent=3),
+        ]
+        calls = []
+
+        def runner(args):
+            query = next(a for a in args if a.startswith("query="))
+            calls.append(query)
+            if "issues(first" in query:
+                return 0, json.dumps({"data": {"repository": {
+                    "isPrivate": True, "issues": {**connection(issues)}}}}), ""
+            return 0, json.dumps({"data": {"repository": {"isPrivate": True}}}), ""
+
+        def queue_op(op, request):
+            code, data = queue_backend.handle(op, json.loads(json.dumps(request)), {}, runner)
+            self.assertEqual(code, 0)
+            return data
+
+        with tempfile.TemporaryDirectory(prefix="dispatch github ") as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
+                           cwd=repo, check=True)
+            out, err = StringIO(), StringIO()
+            with patch("dispatch.queue_op", side_effect=queue_op), redirect_stdout(out), redirect_stderr(err):
+                pick(SimpleNamespace(repo=str(repo), tree=False, full_scan=True))
+
+        self.assertTrue(any("isPrivate } }" in q for q in calls), "the missing backlog.md asks for the backend")
+        candidates = json.loads(out.getvalue())
+        self.assertEqual([(c["ref"], c["title"], c["items"], c["open"]) for c in candidates],
+                         [("#1", "[FEAT] Single issue", 1, 1), ("#3", "Parent", 2, 2)])
+        self.assertEqual({c["source"] for c in candidates}, {"issues"})
+        self.assertEqual(candidates[0]["url"], "https://github.com/owner/repo/issues/1")
+        self.assertIn("skipped #2", err.getvalue())
+        self.assertIn("#5 claimed by https://github.com/owner/repo/pull/9", err.getvalue())
+        self.assertNotIn("no queue", err.getvalue())
 
     def test_launch_warns_for_a_subdirectory_of_a_linked_worktree(self):
         with tempfile.TemporaryDirectory() as directory:
