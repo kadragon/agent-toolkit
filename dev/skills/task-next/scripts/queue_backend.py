@@ -19,8 +19,9 @@ Backend resolution, first match wins:
 
 `backlog` is built in: `list` runs `backlog_candidates.py` and maps its JSON onto the contract,
 `show` and `rejected` read `backlog.md` directly, and `create` answers `{"edit_file":
-"backlog.md"}` so the caller keeps its hand-edit path. `github` answers `describe`, `list` and
-`show`/`rejected` from `gh api graphql` and writes `create`/`reject`/`defer`/`publish` through
+"backlog.md"}` so the caller keeps its hand-edit path. `github` reads `describe`, `list`,
+`inventory`, `show` and `rejected` from `gh api graphql` and writes
+`create`/`reject`/`defer`/`publish` through
 `gh api` (an injectable runner, so `--test` needs no network); `gh` missing or unauthenticated is
 exit 1 on a read. A `create` that cannot finish (gh failing mid-write, an incomplete relation, or
 `"queue_limits": "no-queue-write"`) keeps the unfiled drafts in
@@ -37,15 +38,17 @@ import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import backlog_candidates as bc  # noqa: E402
+from cycle_state import contract_path  # noqa: E402
 
 CONTRACT = 1
-OPS = ("describe", "list", "show", "create", "rejected", "reject", "defer", "publish")
 BACKLOG_OPS = ("describe", "list", "show", "create", "rejected")
+OPS = (*BACKLOG_OPS, "reject", "defer", "publish", "inventory")
 EXIT_OK, EXIT_ERROR, EXIT_UNSUPPORTED = 0, 1, 2
 ENV_VAR = "AGENT_QUEUE_BACKEND"
 LEGACY_BACKLOG_WARNING = ("backlog.md has {n} open item(s); this repo stays on the file queue until you run "
@@ -438,7 +441,7 @@ def backlog_op(op: str, req: dict) -> tuple[int, dict | None]:
 # Built-in `github` backend (read path)
 # ---------------------------------------------------------------------------
 
-GITHUB_OPS = ("describe", "list", "show", "create", "rejected", "reject", "defer", "publish")
+GITHUB_OPS = OPS
 QUEUE_LABEL = "task-queue"
 TRUSTED_AUTHORS = ("OWNER", "MEMBER", "COLLABORATOR")
 PAGE_SIZE = 50
@@ -471,6 +474,12 @@ LIST_QUERY = (
     f"isPrivate issues(first: {PAGE_SIZE}, after: $after, states: OPEN, labels: [\"{QUEUE_LABEL}\"], "
     "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
     f"nodes {{ {_ISSUE_FIELDS} }} }} }} }}"
+)
+INVENTORY_QUERY = (
+    "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { "
+    f"issues(first: {PAGE_SIZE}, after: $after, states: OPEN, labels: [\"{QUEUE_LABEL}\"], "
+    "orderBy: {field: CREATED_AT, direction: ASC}) { pageInfo { hasNextPage endCursor } "
+    "nodes { number title body url authorAssociation } } } }"
 )
 SHOW_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
@@ -627,16 +636,23 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
                   warnings: list[str]) -> dict[int, str]:
     """{issue number: claimant} from the three claim sources; none needs a remote write.
 
-    (a) a `.worktrees/*/tasks.md` `## Covers` naming `#N`; (b) an open PR that closes it;
+    (a) a worktree's `## Covers` in tasks.md or its branch's archived contract;
+    (b) an open PR that closes it;
     (c) a commit on the local default branch, not yet on `origin`, carrying its closing keyword.
     """
     claims: dict[int, str] = {}
     top = _git(repo, "rev-parse", "--show-toplevel")
     listing = _git(repo, "worktree", "list", "--porcelain")
     if top is not None and listing is not None:
+        common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
         for wt in bc._claimants(listing, os.path.realpath(top), include_self):
             text = bc._read_optional(os.path.join(wt, "tasks.md")) or ""
-            for n in sorted(_covers_refs(text)):
+            refs = _covers_refs(text)
+            branch = _git(wt, "symbolic-ref", "--quiet", "--short", "HEAD")
+            if common and branch:
+                archive = contract_path(Path(common), branch)
+                refs.update(_covers_refs(bc._read_optional(archive) or ""))
+            for n in sorted(refs):
                 claims.setdefault(n, wt)
     for issue in issues:
         for pr in issue["closedByPullRequestsReferences"]["nodes"]:
@@ -928,9 +944,18 @@ def ensure_labels(runner, owner: str, name: str, labels) -> list[str]:
     """Create each label that is missing (label bootstrap); returns the ones created."""
     from urllib.parse import quote
     made = []
+    labels_path = f"repos/{owner}/{name}/labels"
     for label in sorted(set(labels)):
-        if _rest(runner, "GET", f"repos/{owner}/{name}/labels/{quote(label, safe='')}", missing_ok=True) is None:
-            _rest(runner, "POST", f"repos/{owner}/{name}/labels", {"name": label})
+        label_path = f"{labels_path}/{quote(label, safe='')}"
+        if _rest(runner, "GET", label_path, missing_ok=True) is not None:
+            continue
+        try:
+            _rest(runner, "POST", labels_path, {"name": label})
+        except GhRejected as exc:
+            # A competing writer can create this label after the first GET.
+            if "HTTP 422" not in str(exc) or _rest(runner, "GET", label_path, missing_ok=True) is None:
+                raise
+        else:
             made.append(label)
     return made
 
@@ -954,6 +979,21 @@ def _issue_pages(runner, query: str, owner: str, name: str):
         if not after or after in cursors:
             raise GhUnavailable("GitHub issues pagination did not advance")
         cursors.add(after)
+
+
+def github_inventory(req: dict, runner=gh_runner) -> dict:
+    """All trusted open queue issues, independent of claims or selection eligibility."""
+    owner, name = github_slug(req["repo"])
+    entries = []
+    for page in _issue_pages(runner, INVENTORY_QUERY, owner, name):
+        for issue in page:
+            # The top-level connection filters by task-queue and OPEN before paging.
+            if issue["authorAssociation"] in TRUSTED_AUTHORS:
+                entries.append({
+                    "ref": f"#{issue['number']}", "title": issue["title"],
+                    "body": issue.get("body") or "", "url": issue["url"],
+                })
+    return {"entries": entries}
 
 
 def _issue_details(runner, query: str, ids: list[str]) -> dict[str, dict]:
@@ -1484,6 +1524,8 @@ def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
         }
     if op == "list":
         return EXIT_OK, github_list(req, runner)
+    if op == "inventory":
+        return EXIT_OK, github_inventory(req, runner)
     if op == "show":
         return EXIT_OK, github_show(req, runner)
     if op == "create":
@@ -1536,7 +1578,7 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     historical_file_read = bool(req.get("rev")) and (
         op == "rejected" or (op == "show" and isinstance(item_ref, str) and _FILE_REF_RE.fullmatch(item_ref))
     )
-    revision = req.get("ref") if op in ("list", "describe") else req.get("rev") if historical_file_read else None
+    revision = req.get("ref") if op in ("list", "describe", "inventory") else req.get("rev") if historical_file_read else None
     backend = resolve(repo, env, revision)
     if historical_file_read and backend["source"] == "github-host":
         backend = {"backend": "backlog", "source": "historical-file"}
@@ -2025,8 +2067,10 @@ def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = 
                     variables[k] = int(v) if a == "-F" else v
         if calls is not None:
             calls.append((query, variables))
-        if query == LIST_QUERY:
+        if query in (LIST_QUERY, INVENTORY_QUERY):
             repo = {"isPrivate": private, "issues": copy.deepcopy(pages[variables.get("after")])}
+            if query == INVENTORY_QUERY:
+                repo["issues"]["nodes"] = [n for n in repo["issues"]["nodes"] if QUEUE_LABEL in _labels(n)]
         elif query == DESCRIBE_QUERY:
             repo = {"visibility": "PRIVATE" if private else "PUBLIC"}
         elif query == SHOW_QUERY:
@@ -2115,6 +2159,37 @@ def run_github_tests(tmp: str, git, write) -> None:
     _assert("#1" not in claimed, "a ref outside `## Covers` claims nothing")
     _assert("#12" not in claimed, "a `#N` quoted in a Covers title is not a claim")
     _assert(claimed.get("#16") == "main (unpushed commit)", "claim (c): an unpushed closing commit on the default branch")
+    calls.clear()
+    code, inventory = handle("inventory", dict(req, ref=base), {}, runner)
+    entries = {i["ref"]: i for i in inventory["entries"]}
+    _assert(code == EXIT_OK and {"#4", "#5", "#8", "#14", "#15", "#18", "#22", "#25"} <= entries.keys()
+            and not {"#2", "#20"} & entries.keys() and "Deferred:" in entries["#18"]["body"],
+            "inventory includes eligible, blocked, deferred and claimed children and roots, excluding non-queue issues")
+    _assert(calls == [(INVENTORY_QUERY, {"owner": "owner", "name": "repo"}),
+                      (INVENTORY_QUERY, {"owner": "owner", "name": "repo", "after": "p1"})],
+            "inventory reads later pages without requesting selection-only connections")
+    broken_pages = _fake_gh({None: pages[None], "p1": _fx_conn(page2, "p1")})
+    try:
+        handle("inventory", req, {}, broken_pages)
+    except QueueError as exc:
+        _assert("pagination did not advance" in str(exc), "inventory rejects an incomplete scan")
+    else:
+        _assert(False, "inventory rejects an incomplete scan")
+
+    tasks_path = os.path.join(wt, "tasks.md")
+    subprocess.run(
+        [sys.executable, os.path.join(HERE, "cycle_state.py"), "save"], cwd=wt, check=True,
+        input="**Acceptance criteria:**\n- [ ] Covers are saved → check\n\n"
+        + (bc._read_optional(tasks_path) or ""), text=True, capture_output=True,
+    )
+    os.remove(tasks_path)
+    data = github_list(dict(req, full_scan=True), runner)
+    _assert({"ref": "#15", "by": wt} in data["claimed"] and "#15" not in {
+        c["ref"] for c in data["candidates"]
+    }, "an archived Covers claim survives removal of tasks.md before a PR exists")
+    _assert(not any(c["ref"] == "#15" for c in github_list(dict(req, repo=wt), runner)["claimed"])
+            and {"ref": "#15", "by": wt} in github_list(dict(req, repo=wt, ref=base), runner)["claimed"],
+            "a worktree counts its archived claims only on pinned scans")
     _assert(data["incomplete"] is False and not github_list(dict(req), runner)["parked"], "parked[] only when asked")
     fast = github_list(dict(req), runner)["candidates"]
     _assert([c["ref"] for c in fast] == ["#1", "#3", "#9"], "fast path caps at 3, oldest first")
@@ -2256,7 +2331,9 @@ def run_github_tests(tmp: str, git, write) -> None:
             "describe: private repo, every op, closing template")
     code, data = handle("describe", dict(req), {}, _fake_gh(pages))
     _assert(code == 0 and data["visibility"] == "public", "resolver picks github for a github.com origin without backlog items")
-    git(repo, "worktree", "remove", "--force", wt)
+    git(repo, "worktree", "remove", wt)
+    _assert(any(c["ref"] == "#15" for c in github_list(dict(req, full_scan=True), runner)["candidates"]),
+            "an archive without a registered worktree does not claim an issue")
 
 
 class _FakeGitHub:
@@ -2565,6 +2642,28 @@ def run_github_write_tests(tmp: str, git) -> None:
     _assert(out["incomplete"] == [] and out["pending"] == [] and not os.path.exists(store),
             "a clean create writes no pending store")
     _assert(status() == "", "a github create leaves no working-tree change")
+
+    for concurrent in (True, False):
+        label = "race" if concurrent else "invalid"
+        label_runner = _FakeGitHub()
+        label_runner.labels.add(QUEUE_LABEL)
+        draft = {"key": label, "title": f"Test {label} label", "labels": [label]}
+
+        def label_post(args):
+            if args[:4] == ["api", "--method", "POST", "repos/owner/repo/labels"]:
+                if concurrent:
+                    label_runner.labels.add(label)
+                return 1, "", "gh: Validation Failed (HTTP 422)"
+            return label_runner(args)
+
+        try:
+            result = github_create(dict(req, items=[draft]), label_post)
+        except GhRejected as exc:
+            _assert(not concurrent and "HTTP 422" in str(exc) and not label_runner.issues,
+                    f"label creation rejection is propagated only if the label is absent ({label})")
+        else:
+            _assert(concurrent and len(result["created"]) == 1 and not result["pending"],
+                    f"a label created by another writer between GET and POST lets filing continue ({label})")
 
     n_before = len(gh.issues)
     code, out = handle("create", dict(req, items=items), {ENV_VAR: "github"}, gh)

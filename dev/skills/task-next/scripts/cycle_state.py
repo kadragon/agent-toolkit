@@ -122,6 +122,11 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).rstrip("\n")
 
 
+def contract_path(common: Path, branch: str) -> Path:
+    key = hashlib.sha256(branch.encode("utf-8")).hexdigest()
+    return common / "task-cycle" / key / "contract.md"
+
+
 def index_tree():
     """The tree the checks actually ran against. None when the index cannot be written."""
     try:
@@ -183,9 +188,8 @@ def main():
     try:
         branch = getattr(args, "branch", None) or git("symbolic-ref", "--quiet", "--short", "HEAD")
         common = Path(git("rev-parse", "--git-common-dir")).resolve()
-        key = hashlib.sha256(branch.encode()).hexdigest()
-        slot = common / "task-cycle" / key
-        path = slot / "contract.md"
+        path = contract_path(common, branch)
+        slot = path.parent
         evidence_path = slot / "evidence.json"
         notes_path = slot / "notes.md"
         if args.subcommand == "save":

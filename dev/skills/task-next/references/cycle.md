@@ -172,10 +172,9 @@ The refs are the claim (a `.worktrees/` run) and the closure list: no queue edit
 review cycle writes one `close_ref_template` line per ref (`Closes #12`) into the commit message,
 which `commit-and-push.sh --pr` turns into the PR body: the PR body closes each issue on merge
 whatever the repo's squash-message setting, and the commits a squash or lite `--no-ff` merge
-lands close it on a direct push to the default branch. Known gap: cleanup's `prune-tasks` removes
-the worktree claim before the open PR claims the issue, so between cleanup and PR creation
-another run can list the issue again — keep that stretch short (validation evidence, then hand
-off at once).
+lands close it on a direct push to the default branch. On GitHub, the live worktree's archived
+contract keeps the same claim after `prune-tasks`, including before the PR exists. The archive
+alone does not claim issues once the worktree is removed.
 
 ```bash
 CYCLE_DIR="<absolute directory of this cycle.md>"

@@ -58,6 +58,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
 | `publish` | no | optional `queue_limits` | as `create`, for the pending store's drafts |
+| `inventory` | no | optional `ref` (resolve as a `list` with that `ref` would) | `entries[]`: `ref`, `title`, `body`, `url` for every open queue item, including claimed and parked items |
 
 `candidates[]` entries: `id`, `ref`, `title`, `tag`, `labels`, `items[]`, `url`, and `counts`
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
@@ -140,8 +141,9 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
 - **Parking.** An open `blockedBy` issue parks it (`blocked`, payload: the open blocker refs); a
   closed blocker is ignored. Label `deferred` parks it (`deferred`, payload: its `Deferred:
   <reason>` body line).
-- **Claims** (`claimed[]`, no remote write): (a) a `.worktrees/*/tasks.md` `## Covers` line naming
-  `#N` (this checkout and the main worktree too when the request has `ref`); (b) an open PR in
+- **Claims** (`claimed[]`, no remote write): (a) a live `.worktrees/` worktree's
+  `## Covers` in its `tasks.md` or branch's archived contract (this checkout and the main
+  worktree too when the request has `ref`); (b) an open PR in
   `closedByPullRequestsReferences` by an `OWNER`/`MEMBER`/`COLLABORATOR` author, `by` = its URL
   (another author's PR is ignored with a warning); (c) a closing keyword in a commit on the local
   default branch not yet on `origin` (`origin/HEAD`, else `origin/main`/`origin/master`;
@@ -155,6 +157,9 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
   `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.
+- `inventory` reads the trusted open issue connection to the end, including sub-issues and
+  parents. Use it to check for duplicates regardless of whether an issue can be picked. Failed
+  or stalled pagination returns exit 1 without a partial response.
 
 ### `github` writes
 
