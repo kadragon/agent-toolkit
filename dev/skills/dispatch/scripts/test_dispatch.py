@@ -679,21 +679,24 @@ class DispatchReceiptTests(DispatchTestCase):
 
     def test_collect_warns_about_missing_reviews_without_blocking_done(self):
         with tempfile.TemporaryDirectory() as directory:
-            for details in (
-                {"head": "a" * 40},
-                {"summary": "Opened PR #123"},
-                {"evidence": {"review": "https://github.com/acme/widget/pull/123"}},
-                {"summary": "No eligible work. PR #123 already merged."},
-                {},
+            for details, warning in (
+                ({"head": "a" * 40}, True),
+                ({"summary": "Opened PR #123"}, True),
+                ({"summary": "PR #123을 열었습니다."}, True),
+                ({"evidence": {"review": "https://github.com/acme/widget/pull/123을 열었습니다."}}, True),
+                ({"summary": "No eligible work. PR #123 already merged."}, False),
+                ({"summary": "처리할 이슈가 없습니다. PR #123은 이미 병합되었습니다."}, False),
+                ({}, False),
             ):
                 with self.subTest(details=details):
                     report, _ = self.collect_report(
                         directory, {"state": "done"}, receipt_fields={"require_review_sources": True},
-                        result={"status": "done", "phase": "review", "summary": "No eligible work", **details},
+                        result={"status": "done", "phase": "review", "summary": "Cycle completed", **details},
                     )
                     self.assertEqual(report["result"]["status"], "done")
-                    self.assertEqual(report["result"]["summary"], details.get("summary", "No eligible work"))
-                    if details:
+                    self.assertEqual(report["result"]["summary"], details.get("summary", "Cycle completed"))
+                    if warning:
+                        self.assertIn("review_warning", report["result"])
                         self.assertIn("codex: no completed result", report["result"]["review_warning"])
                     else:
                         self.assertNotIn("review_warning", report["result"])

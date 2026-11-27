@@ -97,7 +97,11 @@ LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 REVIEW_SOURCES = ("claude", "agy", "codex")
-PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE)
+PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
+NO_WORK_PREFIX = re.compile(
+    r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
+    re.IGNORECASE,
+)
 WAIT_DEFAULT = ("ready", "blocked", "merged", "idle", "stop")
 WAIT_OUTCOMES = (*WAIT_DEFAULT, "done")
 WAIT_POLL_SECONDS = 2
@@ -337,12 +341,14 @@ def missing_reviews(result):
 
 def gate_required_reviews(result):
     status = result["status"]
-    if status == "done":
-        if not (result.get("pr") or result.get("head") or PR_REFERENCE.search(result["summary"])
+    if status not in {"ready", "merged", "done"}:
+        return result
+    if status == "done" and not result.get("pr"):
+        if NO_WORK_PREFIX.match(result["summary"]):
+            return result
+        if not (result.get("head") or PR_REFERENCE.search(result["summary"])
                 or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False))):
             return result
-    elif status not in {"ready", "merged"}:
-        return result
     missing = missing_reviews(result)
     if not missing:
         return result
