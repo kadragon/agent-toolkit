@@ -24,6 +24,7 @@ from dispatch import (
     codex_screen,
     collect,
     composer_draft,
+    first_prompt,
     free_name,
     launch,
     lock_run,
@@ -135,6 +136,29 @@ class DispatchReceiptTests(DispatchTestCase):
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
              "Task-cycle mode and flags come exclusively from the invocation above.\n"
              f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
+
+    def test_parallel_queue_worktree_prompt_adds_phase_reading_guide(self):
+        for cli, command in (("codex", "$task-next"), ("claude", "/dev:task-next")):
+            with self.subTest(cli=cli):
+                message = f"{command} --tree #511\nDispatch mode: parallel-worktree. Work only on #511."
+                prompt = first_prompt(cli, message, self.HANDOFF)
+                self.assertTrue(prompt.startswith(message + self.BLOCK))
+                guide = prompt.removeprefix(message + self.BLOCK)
+                for section in (
+                    "Phase index", "outside code fences", "rg -n '^#{2,3} '", "tree.md → --tree mode",
+                    "cycle.md → Branch", "cycle.md → Version bump, Cleanup, and Validation evidence",
+                    "Step 4 and cycle.md → Hand off", "task-review-cycle → Caller gate",
+                ):
+                    self.assertIn(section, guide)
+
+    def test_other_prompts_keep_existing_handoff(self):
+        for message in (
+            "$task-next",
+            "$task-next --tree #511",
+            "$task-next --all\nDispatch mode: parallel-worktree",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(first_prompt("codex", message, self.HANDOFF), message + self.BLOCK)
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
