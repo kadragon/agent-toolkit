@@ -25,6 +25,7 @@ import shutil
 import sys
 import tempfile
 import time
+from functools import partial
 from pathlib import Path
 
 WEEK = 7 * 24 * 3600
@@ -40,6 +41,7 @@ HOT_PROJECTED = 120
 RANK = {"ok": 0, "hot": 1, "critical": 2}
 RESET_PASS_REFRESH_AGE = 24 * 3600
 RESET_PASS_LOOKUP_TIMEOUT = 15
+RESET_PASS_LOCK_TIMEOUT = RESET_PASS_LOOKUP_TIMEOUT + 10
 
 
 def finite(value):
@@ -153,14 +155,11 @@ def reset_passes(home, now):
         return []
 
 
-def read_codex_reset_passes(home):
+def read_codex_reset_passes(home, binary):
     # The launcher runs this script in isolated mode, which omits the script directory.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from codex_app_server import request
 
-    binary = shutil.which("codex")
-    if binary is None:
-        raise FileNotFoundError("Codex CLI executable not found")
     result = request(binary, home, "account/rateLimits/read", {"excludeResetCreditDetails": False},
                      timeout=RESET_PASS_LOOKUP_TIMEOUT)
     summary = result.get("rateLimitResetCredits") if isinstance(result, dict) else None
@@ -192,16 +191,17 @@ def lock_reset_pass_cache(lock):
     if os.name == "nt":
         import msvcrt
 
-        # LK_LOCK retries for up to ten seconds and the handle releases it on close.
         lock.seek(0)
-        msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-        return
-    import fcntl
+        acquire = partial(msvcrt.locking, lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
 
-    deadline = time.monotonic() + RESET_PASS_LOOKUP_TIMEOUT
+        acquire = partial(fcntl.flock, lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    deadline = time.monotonic() + RESET_PASS_LOCK_TIMEOUT
     while True:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire()
             return
         except OSError as error:
             if error.errno not in (errno.EACCES, errno.EAGAIN):
@@ -218,18 +218,29 @@ def file_mtime(path):
         return None
 
 
+def recent_reset_pass_cache(cache, refreshed):
+    last_success = file_mtime(refreshed)
+    return (last_success is not None and cache.is_file()
+            and 0 <= time.time() - last_success < RESET_PASS_REFRESH_AGE)
+
+
 def refresh_codex_reset_passes(home, *, force=False):
     cache = home / "reset-passes.json"
     refreshed = home / "reset-passes.refreshed"
     try:
+        if not force and recent_reset_pass_cache(cache, refreshed):
+            return True
+        binary = shutil.which("codex")
+        if binary is None:
+            if not force and not home.exists():
+                return False
+            raise FileNotFoundError("Codex CLI executable not found")
         home.mkdir(parents=True, exist_ok=True)
         with (home / "reset-passes.lock").open("a+b") as lock:
             lock_reset_pass_cache(lock)
-            last_success = file_mtime(refreshed)
-            if (not force and last_success is not None and cache.is_file()
-                    and 0 <= time.time() - last_success < RESET_PASS_REFRESH_AGE):
+            if not force and recent_reset_pass_cache(cache, refreshed):
                 return True
-            expiries = read_codex_reset_passes(home)
+            expiries = read_codex_reset_passes(home, binary)
             temporary = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=home, delete=False)
             temporary_path = Path(temporary.name)
             try:

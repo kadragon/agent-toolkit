@@ -3034,6 +3034,24 @@ assert not sys.stdin.readline(), "unexpected extra request"
         self.assertEqual(json.loads(out.getvalue())["codex"]["reset_passes"], 1, err.getvalue())
         which.assert_called_once_with("codex")
 
+    def test_missing_codex_preserves_legacy_cache_and_skips_unconfigured_home(self):
+        (self.home / "codex").unlink()
+        self.env["PATH"] = str(self.home)
+        legacy = self.quota_command("--refresh-if-stale")
+        self.assertEqual(json.loads(legacy.stdout)["codex"]["reset_passes"], 2)
+        self.assertIn("cache file age", legacy.stderr)
+        self.assertFalse((self.home / "reset-passes.lock").exists())
+        new_home = self.home / "unconfigured"
+        self.env["CODEX_HOME"] = str(new_home)
+        result = self.quota_command("--refresh-if-stale")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(new_home.exists())
+        manual = self.quota_command("--refresh-codex-reset-passes")
+        self.assertEqual(manual.returncode, 1)
+        self.assertIn("Codex CLI executable not found", manual.stderr)
+        self.assertFalse(new_home.exists())
+
 
 class QuotaTests(unittest.TestCase):
     def test_claude_pass_defaults_to_claude_home_and_filters_by_weekly_reset(self):
