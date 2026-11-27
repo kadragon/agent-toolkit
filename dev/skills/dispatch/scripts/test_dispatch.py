@@ -33,6 +33,7 @@ from dispatch import (
     send,
     terminal_name,
     transcript_echoed,
+    verify_terminal,
 )
 from quota import WEEK, assess
 from quota import main as quota_main
@@ -342,6 +343,77 @@ class DispatchReceiptTests(unittest.TestCase):
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
+
+    def test_launch_keeps_the_receipt_when_terminal_lookup_fails_after_run(self):
+        claude = {"task": None, "message": "/dev:task-next", "model": "opus"}
+        for cli, overrides, lookup, detail in (
+            ("codex", {}, subprocess.CalledProcessError(1, ["hc", "get"]), "task withheld: deliver it with send"),
+            ("claude", claude, subprocess.TimeoutExpired(["hc", "get"], 30), "do not retry the launch"),
+            ("claude", claude, {"address": "t7"}, "no created_ms"),
+        ):
+            with self.subTest(cli=cli, lookup=lookup), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                args = self.launch_args(directory, cli=cli, **overrides)
+                owner = {"address": "t6", "state": "live", "cwd": str(home.parent),
+                         "foreground": {"cwd": str(home)}}
+                with (
+                    patch("dispatch.Path.cwd", return_value=home),
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, lookup]),
+                    patch("dispatch.subprocess.run",
+                          return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
+                    patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                    patch("dispatch.send") as submit,
+                    patch("builtins.print") as output,
+                ):
+                    with self.assertRaisesRegex(SystemExit, f"t7: launched, but hc get failed.*{detail}"):
+                        launch(args)
+                submit.assert_not_called()
+                payload = json.loads(output.call_args.args[0])
+                self.assertEqual(payload["address"], "t7")
+                receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
+                self.assertIsNone(receipt["created_ms"])
+                with self.assertRaisesRegex(SystemExit, "identity unconfirmed"):
+                    verify_terminal(dict(receipt), self.TERMINAL)  # created before the launch
+                fresh = {**self.TERMINAL, "name": receipt["name"], "created_ms": receipt["launched_ms"] + 5}
+                for other in ({"parent": "t9"}, {"name": "sibling"}):
+                    with self.assertRaisesRegex(SystemExit, "identity unconfirmed"):
+                        verify_terminal(dict(receipt), {**fresh, **other})
+                verify_terminal(receipt, fresh)
+                self.assertEqual(receipt["created_ms"], fresh["created_ms"])
+
+    def test_collect_saves_the_identity_adopted_after_a_failed_launch_lookup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.json"
+            path.write_text(json.dumps({
+                "name": "repo", "address": "t7", "parent": "t6", "created_ms": None, "launched_ms": 100,
+                "cli": "claude", "model": "opus", "effort": "high", "sent": True, "screen_reads": 0,
+            }), encoding="utf-8")
+            terminal = {**self.TERMINAL, "name": "repo", "created_ms": 150,
+                        "status": {"state": "working"}}
+            with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()):
+                collect(SimpleNamespace(run=str(path), close=False, force=False, stall_minutes=30))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["created_ms"], 150)
+
+    def test_launch_without_an_address_from_hc_run_says_not_to_retry(self):
+        args = self.launch_args(Path.cwd())
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
+                 "foreground": {"cwd": str(Path.cwd())}}
+        with tempfile.TemporaryDirectory() as directory, (
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+        ), patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout="{}")), (
+            patch("dispatch.tempfile.mkdtemp", return_value=directory)
+        ), patch("dispatch.send") as submit:
+            with self.assertRaisesRegex(SystemExit, "no terminal address.*do not retry"):
+                launch(args)
+            submit.assert_not_called()
+        failed = subprocess.TimeoutExpired(["hc", "run"], 30)
+        with tempfile.TemporaryDirectory() as directory, (
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+        ), patch("dispatch.subprocess.run", side_effect=[SimpleNamespace(stdout=""), failed]), (
+            patch("dispatch.tempfile.mkdtemp", return_value=directory)
+        ):
+            with self.assertRaisesRegex(SystemExit, "hc run failed.*do not retry.*'repo'"):
+                launch(args)
 
     def test_launch_records_the_title_in_the_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1416,7 +1488,7 @@ class CodexSendTests(unittest.TestCase):
         saved = DispatchReceiptTests()
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
 
-        def hc(command, *args):
+        def hc(command, *args, timeout=None):
             if command == "ls":
                 return {"terminals": [owner]}
             if command == "get" and args == ("t6",):

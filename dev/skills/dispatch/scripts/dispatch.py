@@ -85,6 +85,7 @@ STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
+LAUNCH_LOOKUP_SECONDS = 30
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
@@ -250,9 +251,34 @@ def lock_run(path):
 
 
 def verify_terminal(run, terminal):
+    if run.get("created_ms") is None:
+        # hc get failed at launch: adopt the terminal at this address only if hc created it with
+        # the launch's name, under the same parent, no earlier than the launch started.
+        created = terminal.get("created_ms")
+        if (any(terminal.get(key) != run[key] for key in ("address", "parent", "name"))
+                or not isinstance(created, int) or created < run.get("launched_ms", float("inf"))):
+            raise SystemExit(f"terminal identity unconfirmed: {run['address']}; inspect it by hand")
+        run["created_ms"] = created
     for key in ("address", "parent", "created_ms"):
         if terminal.get(key) != run[key]:
             raise SystemExit(f"terminal identity changed: {run['address']}")
+
+
+def confirm_launch_identity(path, run, locked):
+    """Write the identity adopted after a failed launch lookup, so later checks are exact."""
+    if run.get("created_ms") is not None:
+        return
+    verify_terminal(run, hc_json("get", run["address"]))
+    if locked:
+        write_json(path, run)
+        return
+    try:
+        with lock_run(path):
+            saved = load_run(path)
+            if saved.get("created_ms") is None:
+                write_json(path, {**saved, "created_ms": run["created_ms"]})
+    except SystemExit:
+        pass  # another dispatch command holds the receipt; the next check adopts again
 
 
 def read_result(path):
@@ -444,13 +470,29 @@ def launch(args):
             preview["task"] = first_prompt(args.cli, args.task, handoff)
         print(json.dumps(preview, ensure_ascii=False))
         return
-    result = json.loads(subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                                       check=True).stdout)
-    address = result["address"]
-    terminal = hc_json("get", address)
+    launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
+    try:
+        stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
+                                timeout=LAUNCH_LOOKUP_SECONDS).stdout
+    except subprocess.SubprocessError as error:
+        raise SystemExit(f"hc run failed ({error}); a child may be running, so do not retry the launch. "
+                         f"Find terminal {name!r} with hc ls") from None
+    try:
+        address = json.loads(stdout)["address"]
+    except (ValueError, TypeError, KeyError) as error:
+        raise SystemExit(f"hc run printed no terminal address ({error}); a child may be running, so do not "
+                         f"retry the launch. Find terminal {name!r} with hc ls. Output: {stdout[:200]!r}") from None
+    try:
+        terminal, lookup_error = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS), None
+        if not isinstance(terminal, dict) or not isinstance(terminal.get("created_ms"), int):
+            raise ValueError("no created_ms in hc get output")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        terminal, lookup_error = {}, error
     run = {"name": name, "address": address, "parent": home,
-           "created_ms": terminal["created_ms"], "cli": args.cli, **resolved,
+           "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
            "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0}
+    if lookup_error is not None:
+        run["launched_ms"] = launched_ms
     if args.cli == "codex" and (versions := installed_plugin_versions()):
         run["plugin_versions"] = versions
     if title:
@@ -458,6 +500,12 @@ def launch(args):
     receipt = result_path.with_name("run.json")
     write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
+    if lookup_error is not None:
+        detail = ("do not retry the launch: Claude may already hold its launch prompt"
+                  if args.cli == "claude" else
+                  f"task withheld: deliver it with send --run {receipt} once hc get answers")
+        raise SystemExit(f"{address}: launched, but hc get failed ({lookup_error}); {detail}. "
+                         "Later dispatch commands confirm the terminal identity from the receipt")
     if terminal.get("parent") != home:
         detail = ("Claude may have received its launch prompt; inspect before retrying"
                   if args.cli == "claude" else "task withheld")
@@ -707,6 +755,7 @@ def send_task(args, run_path):
             raise SystemExit(f"{run_path} is a T3 receipt; answer that child through the T3 thread tools")
         if run["cli"] != "codex" or run["address"] != address:
             raise SystemExit("receipt is for another terminal or CLI")
+        confirm_launch_identity(run_path, run, locked=True)
         if resend:
             if run["sent"] != "unconfirmed":
                 raise SystemExit("--resend requires an unconfirmed delivery")
@@ -1145,6 +1194,7 @@ def collect_result(path, close, force, stall_minutes):
                           "scope_decision_categories": repeated_review_categories(result), "closed": False},
                          ensure_ascii=False))
         return
+    confirm_launch_identity(path, run, locked=close)
     terminal = hc_json("get", run["address"])
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
