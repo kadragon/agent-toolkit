@@ -54,8 +54,11 @@ For other runs, first match wins. Size comes before clarity: a fully specified r
 can still be too large for one contract.
 - **Queue without implementing** (the user asks only to record it):
   - Issues backend → call the Skill tool with "dev:task-tickets" to file the issues under the
-    standing `queue-write` grant, then stop and report the ticketing result. This route skips
-    the commit-authority check and *Queue documentation cycle*, including on a parallel dispatch.
+    standing `queue-write` grant. Pass the selected backend to the callee. On GitHub, set
+    `AGENT_QUEUE_BACKEND=github` for its queue commands so a concurrent backlog edit cannot
+    change the destination. If an issues backend returns `edit_file`, stop and report the
+    mismatch before editing. Report the ticketing result and stop. This route skips the
+    commit-authority check and *Queue documentation cycle*, including on a parallel dispatch.
   - Dispatched `--tree` on `backlog` → verify commit authority for the queue edit from the
     forwarded human request and Git limits per `../task-next/references/git-authorization.md`.
     If established, take *Queue documentation cycle* below. Otherwise report the blocker and

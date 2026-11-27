@@ -55,6 +55,11 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] Distinguish Code Scanning permission errors from a disabled feature before allowing zero-alert backlog cleanup (source: codex) (pre_existing) — dev/commands/security-overview/fetch-alerts.sh
 - [ ] [debt] Keep existing legacy security backlog items for any alert type whose scan failed or was truncated before replacing the section (source: code-review) (pre_existing) — dev/commands/security-overview.md
 
+### PR #475 — Route task-new queue-only requests through the selected backend (2026-11-27)
+
+- [ ] [debt] Separate backend detection from GitHub visibility lookup so an unavailable queue does not prevent standalone local task intake (source: codex) — dev/skills/task-new/SKILL.md:20 (introduced here)
+- [ ] [debt] Make label bootstrap tolerate another queue writer creating a missing GitHub label between lookup and creation (source: codex) — dev/skills/task-next/scripts/queue_backend.py:856 (pre_existing)
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.
