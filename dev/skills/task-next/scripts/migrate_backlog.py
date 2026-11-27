@@ -489,8 +489,9 @@ def apply_plan(repo: str, plan: dict, runner=qb.gh_runner) -> dict:
               if (item := bc._CHECKBOX_RE.match(r["source"].strip())) and item[1] == ">"]
     if active:
         lines = ", ".join(str(r["line"]) for r in active)
-        raise MigrateError(f"legacy [>] items on line(s) {lines} keep the file queue active; "
-                           "finish the sprint or run reconcile-harness.py before --apply")
+        raise MigrateError(f"resolve legacy [>] items on line(s) {lines} before --apply: finish the sprint, "
+                           "or run reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog for confirmed file work. "
+                           "Remove obsolete markers before retrying.")
     report: dict = {"created": [], "incomplete": [], "pending": [], "rejected_closed": [], "deleted": [],
                     "kept": [], "file_deleted": False}
     drafts = [_draft(i) for i in plan["issues"]]
@@ -951,7 +952,7 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
         apply_plan(repo, build_plan(active, "public"), gh)
         gated = False
     except MigrateError as e:
-        gated = "reconcile-harness.py before --apply" in str(e)
+        gated = "reconcile-harness.py with AGENT_QUEUE_BACKEND=backlog" in str(e)
     _assert(gated and not gh.issues and read(os.path.join(repo, "backlog.md")) == active,
             "an in-flight marker stops --apply before any issue creation or file deletion")
     repo = make_repo(tmp, "apply", "https://github.com/owner/repo.git")

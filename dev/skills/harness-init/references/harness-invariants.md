@@ -225,6 +225,8 @@ sprint remain on the file backend. Finish or reconcile legacy sprints before run
 on issues. Use `AGENT_QUEUE_BACKEND=backlog` for reconciliation if it is confirmed file work.
 If backend resolution fails, reconcile leaves file queue state and any failed sprint available
 for retry. Active and queued sprint status can be reported without resolving the queue.
+With unclaimed legacy markers, a failed sprint without a known issues claim stays available
+for recovery as well.
 
 **File-role invariant.** `tasks.md` carries only Sprint Contracts. Keep persistent work and
 findings in the resolved queue. `task_nodes.py prune-tasks` refuses a sprint file holding

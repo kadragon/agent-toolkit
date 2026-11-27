@@ -279,6 +279,14 @@ def test_main_github_origin_reconciles_only_the_sprint():
     idle = _run_main_in_tmp(None, legacy, github_origin=True)
     check("already migrated GitHub repo leaves an unclaimed legacy marker unchanged",
           idle["backlog_body"] == legacy and not idle["stdout"], idle)
+    old_sprint = "# Example sprint\n\nstatus: failed\n"
+    unresolved = _run_main_in_tmp(old_sprint, legacy, github_origin=True)
+    check("failed sprint with no Covers is kept while legacy file work is unresolved",
+          unresolved["tasks_body"] == old_sprint and unresolved["backlog_body"] == legacy and
+          "AGENT_QUEUE_BACKEND=backlog" in unresolved["stderr"], unresolved)
+    issues = _run_main_in_tmp(old_sprint + "\n## Covers\n\n- #17 Issue work\n", legacy, github_origin=True)
+    check("failed issues sprint closes without writing unclaimed file markers",
+          not issues["tasks_exists"] and issues["backlog_body"] == legacy, issues)
     explicit = _run_main_in_tmp(None, legacy, github_origin=True, force_file_queue=True)
     check("explicit file backend can recover confirmed orphaned work",
           explicit["backlog_body"] == legacy.replace("- [>]", "- [ ]"), explicit)

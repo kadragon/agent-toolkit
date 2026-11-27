@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
-from queue_backend import QueueError, resolve  # noqa: E402
+from queue_backend import QueueError, _covers_refs, resolve  # noqa: E402
 
 TASKS = Path("tasks.md")
 BACKLOG = Path("backlog.md")
@@ -328,10 +328,9 @@ def count_items(backlog: str) -> tuple[int, int] | None:
 # Main
 # ---------------------------------------------------------------------------
 
-def file_queue_enabled() -> bool | None:
-    """Return None when backend resolution failed and recovery should be retried."""
+def queue_state() -> dict | None:
     try:
-        return resolve(str(BACKLOG.parent.resolve()))["backend"] == "backlog"
+        return resolve(str(BACKLOG.parent.resolve()))
     except QueueError as exc:
         print(f"Queue backend unavailable: {exc}. Leaving file queue state intact.", file=sys.stderr)
         return None
@@ -339,7 +338,7 @@ def file_queue_enabled() -> bool | None:
 
 def main() -> None:
     tasks_content = read(TASKS)
-    file_queue = None
+    backend = None
 
     # C-1: Close the sprint block, restoring file-queue markers where applicable.
     if tasks_content is not None:
@@ -358,9 +357,17 @@ def main() -> None:
                 print(f"Sprint '{title}' done. Sprint block stripped; tasks.md retained.")
 
         elif status == "failed":
-            file_queue = file_queue_enabled()
-            if file_queue is None:
+            backend = queue_state()
+            if backend is None:
                 return  # Keep the failed sprint so recovery can be retried.
+            file_queue = backend["backend"] == "backlog"
+            if not file_queue and backend.get("active_items") and not _covers_refs(tasks_content):
+                print(
+                    f"Sprint '{title}' failed. Leaving it intact while legacy [>] items are unclaimed. "
+                    "For confirmed file work, retry with AGENT_QUEUE_BACKEND=backlog.",
+                    file=sys.stderr,
+                )
+                return
             suffix = "; backlog items reverted to [ ]" if file_queue else ""
             if file_queue and BACKLOG.exists():
                 backlog_content = read_text_preserving_eol(BACKLOG)
@@ -409,10 +416,10 @@ def main() -> None:
 
     else:
         # C-2: tasks.md absent — clean orphan markers from backlog
-        file_queue = file_queue_enabled()
-        if file_queue is None:
+        backend = queue_state()
+        if backend is None:
             return
-        if file_queue and BACKLOG.exists():
+        if backend["backend"] == "backlog" and BACKLOG.exists():
             content = read_text_preserving_eol(BACKLOG)
             cleaned = revert_orphan_markers(content)
             cleaned = remove_empty_headings(cleaned)
@@ -420,9 +427,9 @@ def main() -> None:
                 BACKLOG.write_bytes(cleaned.encode("utf-8"))
 
     # C-3: Report
-    if file_queue is None:
-        file_queue = file_queue_enabled()
-    if not file_queue:
+    if backend is None:
+        backend = queue_state()
+    if backend is None or backend["backend"] != "backlog":
         return
     if not BACKLOG.exists():
         print("Backlog clear.")

@@ -52,6 +52,10 @@ Size warnings above 100 (strong above 200) do not fail a level; session checks w
 
 **Passes Level 2 when:** CI is green, `scripts/sweep.sh` reports zero drift.
 
+Run the validator from the plugin bundle for backend-aware checks. If CI runs a copy
+in the target repo, set `AGENT_QUEUE_BACKEND_SCRIPT` to the matching `queue_backend.py`
+with its sibling `backlog_candidates.py` installed beside it.
+
 **Time to reach:** 30 min – 2 hours (depends on CI setup complexity).
 
 ---

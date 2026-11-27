@@ -209,6 +209,20 @@ class HarnessTests(unittest.TestCase):
                 self.assertIn(detail, result.stdout)
                 self.assertIn("uses standard checkbox items", result.stdout)
 
+    def test_copied_validator_can_use_explicit_resolver(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+            check=True,
+        )
+        self.write("backlog.md", "## Legacy\n- [?] stale\n")
+        copy = self.root / "scripts" / "validate-harness.sh"
+        copy.parent.mkdir()
+        copy.write_bytes((SCRIPTS / "validate-harness.sh").read_bytes())
+        resolver = SCRIPTS.parents[1] / "task-next" / "scripts" / "queue_backend.py"
+        result = self.run_script(copy, AGENT_QUEUE_BACKEND_SCRIPT=resolver.as_posix())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
+
     def test_workflow_only_delegation(self):
         self.write("docs/workflows.md", "# Code\n## Delegation workflow\nDelegate to the built-in reviewer when authorized.\n")
         result = self.run_script()

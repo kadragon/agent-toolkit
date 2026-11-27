@@ -140,9 +140,23 @@ def backlog_open_items(repo: str, rev: str | None = None) -> int:
 
 def _has_file_claim(repo: str, rev: str | None, in_flight: list[str]) -> bool:
     if rev:
+        entry = _git(repo, "ls-tree", rev, "--", "tasks.md")
+        if entry is None:
+            raise QueueError(f"cannot inspect tasks.md at {rev}")
+        if not entry:
+            return False
         tasks = _git(repo, "show", f"{rev}:tasks.md")
+        if tasks is None or entry.split()[1] != "blob":
+            raise QueueError(f"cannot read tasks.md at {rev}")
     else:
-        tasks = bc._read_optional(os.path.join(repo, "tasks.md"))
+        path = os.path.join(repo, "tasks.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                tasks = fh.read()
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError) as e:
+            raise QueueError(f"cannot read {path}: {e}") from e
     return bool(tasks and not bc.item_keys(tasks, under="Covers").isdisjoint(in_flight))
 
 
@@ -1622,6 +1636,13 @@ def run_tests() -> int:
             write(os.path.join(empty, "backlog.md"), "# Backlog\n\n## Sprint\n\n- [>] last active item\n")
             _assert(resolve(empty, dict(base_env))["backend"] == "github",
                     "unclaimed legacy marker does not switch a migrated GitHub repo back to backlog")
+            os.mkdir(os.path.join(empty, "tasks.md"))
+            try:
+                resolve(empty, dict(base_env))
+                _assert(False, "unreadable claims must not switch the queue")
+            except QueueError as e:
+                _assert("tasks.md" in str(e), "unreadable claims fail backend resolution")
+            os.rmdir(os.path.join(empty, "tasks.md"))
             write(os.path.join(empty, "tasks.md"), "# Sprint\nstatus: failed\n\n## Covers\n\n- #17 issue claim\n")
             _assert(resolve(empty, dict(base_env))["backend"] == "github",
                     "an issues sprint does not claim an old file item")
