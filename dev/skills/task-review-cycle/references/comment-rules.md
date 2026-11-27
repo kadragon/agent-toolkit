@@ -70,9 +70,10 @@ thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before a
 - `must-kill` / `suppression` → without `--auto`, offer the smallest in-scope fix that makes the
   comment unnecessary, removing the workaround it named (never a symptom guard), and wait.
   Approved → apply it, then delete the comment. `--auto`, declined, or a fix that needs work
-  outside this branch's purpose → file the reshape under `## Review Backlog` as `[debt]`;
+  outside this branch's purpose → queue the reshape as `[debt]` through
+  `consolidation-guide.md` → *Recording out-of-scope and non-blocking findings*;
   `--auto` never renames or restructures code for a comment. Then delete a `must-kill` comment,
   but keep a `suppression`: removing it before its cause is fixed fails the required checks.
 - `constraint` → without `--auto`, offer the encoding and wait. Approved → encode, then delete.
-  Declined or `--auto` → keep the comment and file the constraint under `## Review Backlog` as
-  `[constraint]`; the comment goes in the cycle that lands its check.
+  Declined or `--auto` → keep the comment and queue it through the same route as `[constraint]`;
+  the comment goes in the cycle that lands its check.

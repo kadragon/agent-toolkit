@@ -4,7 +4,31 @@ The sweep script is the automated garbage collector for the harness. It catches 
 
 ## Base Script
 
-A ready-to-use sweep script is available at `../scripts/sweep.sh`. Copy it into the target project's `tools/` directory and adapt the marked `# ADAPT:` sections to the project's tech stack.
+A ready-to-use sweep script is available at `../scripts/sweep.sh`. Install it with its queue
+modules so `bash tools/sweep.sh` also works from cron or harness sync. From the target
+project's root:
+
+```bash
+SKILL_DIR="<absolute harness-init skill directory>"
+QUEUE_SCRIPTS="$SKILL_DIR/../task-next/scripts"
+mkdir -p tools/queue
+cp "$SKILL_DIR/scripts/sweep.sh" tools/sweep.sh
+cp "$QUEUE_SCRIPTS/queue_backend.py" "$QUEUE_SCRIPTS/backlog_candidates.py" tools/queue/
+```
+
+Adapt the marked `# ADAPT:` sections to the project's tech stack. Keep the two installed queue
+modules together when upgrading. A launcher can instead set `AGENT_QUEUE_BACKEND_SCRIPT` to the
+absolute bundled script path. Both routes need `python3` on PATH. On GitHub, use an authenticated
+owner, member or collaborator account so the queue can select the issues it files.
+
+Sweep calls `queue_backend.py create` under the standing grant, reports issue refs and
+failure-path pending drafts, and uses its existing `## Sweep` section format on `edit_file`.
+Set `AGENT_QUEUE_LIMITS=no-queue-write` for a run whose contract expressly forbids issue writes.
+Mark security findings from adapted checks with `[security]` at the start so sweep can check
+visibility and withhold them from a public queue. A withheld finding is shown only to an
+interactive terminal. Unattended logs carry its count without the details. An open GitHub issue
+is reused on a repeat sweep. A completed issue can be filed again if the finding recurs, and an
+issue closed without completion stays closed.
 
 ## Adapting to Other Ecosystems
 
