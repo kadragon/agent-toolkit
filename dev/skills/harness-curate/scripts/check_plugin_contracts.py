@@ -44,7 +44,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from session_paths import session_project_paths
+from session_paths import _codex_session_meta_cwd, codex_home
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
 from backlog_candidates import (  # noqa: E402
@@ -53,6 +53,7 @@ from backlog_candidates import (  # noqa: E402
     tokenize,
     unclosed_fence_line,
 )
+from migrate_backlog import build_plan  # noqa: E402
 from queue_backend import ENV_VAR, QueueError, _git, origin_host, resolve  # noqa: E402
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
@@ -63,14 +64,18 @@ _KEEP_RULE_RE = re.compile(r"\[x\].*\bhistory\b|\bhistory\b.*\[x\]", re.IGNORECA
 _NEGATION_RE = re.compile(r"\b(?:do not|don't|never|no longer|must not)\b", re.IGNORECASE)
 _PRUNE_RE = re.compile(r"prune-backlog")
 # A dated change record (`harness-log.md`, `changelog.md`) names a rule to say it was removed.
-_RECORD_DOC_RE = re.compile(r"(?:^|[-_.])(?:log|changelog|history|archives?)\.md$|^archives?[-_.]", re.IGNORECASE)
-_BACKLOG_FILE = r"(?<![\w./-])`?backlog\.md`?(?![\w./-])"
+_RECORD_DOC_RE = re.compile(r"(?:^|[-_.])(?:log|changelog|history)\.md$", re.IGNORECASE)
+_ARCHIVE_DOC_RE = re.compile(r"(?:^|[-_.])archives?\.md$|^archives?[-_.]", re.IGNORECASE)
+_BACKLOG_FILE = r"(?<![\w./-])(?:`backlog\.md`|backlog\.md(?![\w/-]|\.[\w./-]))"
+_CLAUSE_BREAK_RE = re.compile(r";\s*|[.!?]\s+")
 _QUEUE_RULE_RE = re.compile(
     rf"(?:\b(?:queue(?: truth| source)?|source of truth|system of record|canonical queue)"
     rf"\s*(?:is\s+|(?:lives )?in\s+|[:=—-]\s*)?{_BACKLOG_FILE}"
     rf"|{_BACKLOG_FILE}\s*(?:is|as)\s+(?:the\s+)?(?:canonical\s+|work\s+|task\s+)?queue\b"
     rf"|{_BACKLOG_FILE}\s+is\s+(?:the\s+)?(?:single\s+)?source of truth\b"
-    rf"|\b(?:add|file|record|track|queue|log|put|capture)\b[^.]*?\b(?:in|to|under)\s+{_BACKLOG_FILE}"
+    rf"|\b(?:add|file|record|track|queue|log|put|capture)\b[^.]*?"
+    rf"\b(?:tasks?|items?|work|follow-ups?|bugs?|findings?|issues?)\b[^.]*?"
+    rf"\b(?:in|to|under)\s+{_BACKLOG_FILE}"
     rf"|\b(?:use|update|check|read|consult)\s+{_BACKLOG_FILE}\s+(?:for|as|before)\b"
     rf"|\b(?:file|add|create|open)\s+(?:an?\s+)?{_BACKLOG_FILE}\s+(?:entry|item)\b)",
     re.IGNORECASE,
@@ -109,9 +114,11 @@ def rule_docs(root: Path) -> list[Path]:
     return [p for p in docs if p.is_file()]
 
 
-def grep_docs(root: Path, match) -> list[str]:
+def grep_docs(root: Path, match, *, skip_archives: bool = False) -> list[str]:
     hits = []
     for path in rule_docs(root):
+        if skip_archives and _ARCHIVE_DOC_RE.search(path.name):
+            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for n, line in enumerate(masked_lines(text), start=1):
             if match(line):
@@ -153,29 +160,42 @@ def check_backlog_history(root: Path, env: dict[str, str] | None = None) -> list
     return out
 
 
+def is_legacy_queue_rule(line: str) -> bool:
+    return any(_QUEUE_RULE_RE.search(clause) and not _NEGATION_RE.search(clause)
+               for clause in _CLAUSE_BREAK_RE.split(line))
+
+
+def backlog_migration_proposal(backlog: Path) -> str:
+    try:
+        text = backlog.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return f"backlog.md: fix the read error before planning migration or deletion ({exc})."
+
+    if fence := unclosed_fence_line(text):
+        return f"backlog.md:{fence}: fix the unclosed code fence before planning migration or deletion."
+    states = [token["state"] for token in tokenize(text) if token["type"] == "checkbox"]
+    if open_count := states.count(" "):
+        return f"backlog.md: {open_count} open item(s); run the migration dry run."
+    if ">" in states:
+        return "backlog.md: resolve in-flight [>] items before proposing deletion."
+    plan = build_plan(text, "unknown")
+    if plan["issues"] or plan["refused"]:
+        return "backlog.md: rejected entries remain; run the migration dry run."
+    return "backlog.md: no open or in-flight items; propose deleting the file after showing its diff."
+
+
 def check_legacy_backlog(root: Path, env: dict[str, str] | None = None) -> list[str]:
     env = os.environ if env is None else env
-    if (env.get(ENV_VAR, "").strip() == "backlog"
+    if (env.get(ENV_VAR, "").strip() not in ("", "github")
             or origin_host(_git(str(root), "remote", "get-url", "origin")) != "github.com"):
         return []
 
     hits = []
     backlog = root / "backlog.md"
     if backlog.is_file():
-        text = backlog.read_text(encoding="utf-8")
-        fence = unclosed_fence_line(text)
-        states = [token["state"] for token in tokenize(text) if token["type"] == "checkbox"]
-        open_count = states.count(" ")
-        if fence:
-            hits.append(f"  backlog.md:{fence}: fix the unclosed code fence before planning migration or deletion.")
-        elif open_count:
-            hits.append(f"  backlog.md: {open_count} open item(s); run the migration dry run.")
-        elif ">" in states:
-            hits.append("  backlog.md: resolve in-flight [>] items before proposing deletion.")
-        else:
-            hits.append("  backlog.md: no open or in-flight items; propose deleting the file after showing its diff.")
+        hits.append(f"  {backlog_migration_proposal(backlog)}")
 
-    for hit in grep_docs(root, lambda line: _QUEUE_RULE_RE.search(line) and not _NEGATION_RE.search(line)):
+    for hit in grep_docs(root, is_legacy_queue_rule, skip_archives=True):
         hits.append(f"  {hit}")
         hits.append(f"    Proposed replacement: {_ISSUES_RULE}")
 
@@ -187,9 +207,14 @@ CHECKS = (check_backlog_history, check_legacy_backlog)
 
 def run(root: Path, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
+    failed = False
     for check in CHECKS:
-        lines.extend(check(root, env))
-    return (1 if lines else 0), lines
+        try:
+            lines.extend(check(root, env))
+        except (QueueError, OSError, ValueError) as exc:
+            lines.append(f"Error: {exc}")
+            failed = True
+    return (2 if failed else int(bool(lines))), lines
 
 
 def main(argv: list[str]) -> int:
@@ -200,16 +225,45 @@ def main(argv: list[str]) -> int:
     scope.add_argument("--project", type=Path)
     scope.add_argument("--all", action="store_true")
     args = parser.parse_args(argv)
-    return report(project_roots(session_project_paths()) if args.all else [args.project or Path.cwd()],
+    root = args.project or Path.cwd()
+    return report(project_roots(session_project_paths()) if args.all else [git_root(root) or root],
                   show_root=args.all)
 
 
+def git_root(path: Path) -> Path | None:
+    if path.is_dir() and (root := _git(str(path), "rev-parse", "--show-toplevel")):
+        return Path(root).resolve()
+    return None
+
+
 def project_roots(paths) -> list[Path]:
-    roots = set()
-    for path in {Path.cwd(), *(Path(path) for path in paths if Path(path).is_absolute())}:
-        if path.is_dir() and (root := _git(str(path), "rev-parse", "--show-toplevel")):
-            roots.add(Path(root).resolve())
-    return sorted(roots)
+    candidates = {Path.cwd(), *(Path(path) for path in paths if Path(path).is_absolute())}
+    return sorted({root for path in candidates if (root := git_root(path)) is not None})
+
+
+def session_project_paths():
+    """Yield local session working directories without decoding transcript directory names."""
+    claude = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    for transcript in (claude / "projects").glob("*/*.jsonl"):
+        try:
+            with transcript.open(encoding="utf-8", errors="replace") as stream:
+                for _, line in zip(range(32), stream):
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(record, dict) and isinstance(cwd := record.get("cwd"), str) and cwd:
+                        yield cwd
+                        break
+        except OSError:
+            continue
+    for transcript in (Path(codex_home()) / "sessions").rglob("*.jsonl"):
+        try:
+            cwd = _codex_session_meta_cwd(transcript)
+        except (AttributeError, UnicodeError):
+            continue
+        if isinstance(cwd, str) and cwd:
+            yield cwd
 
 
 def report(roots: list[Path], show_root: bool = False) -> int:
@@ -217,14 +271,11 @@ def report(roots: list[Path], show_root: bool = False) -> int:
     for root in roots:
         if show_root:
             print(f"Project: {root}")
-        try:
-            if not root.is_dir():
-                raise ValueError(f"not a directory: {root}")
-            code, lines = run(root)
-        except (QueueError, OSError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+        if not root.is_dir():
+            print(f"Error: not a directory: {root}", file=sys.stderr)
             status = 2
             continue
+        code, lines = run(root)
         print("\n".join(lines) if lines else "OK: no plugin-contract conflicts")
         status = max(status, code)
     if not roots:
@@ -347,7 +398,12 @@ def run_tests() -> int:
 def _legacy_tests(github: Path) -> None:
     backlog = github / "backlog.md"
     agents = github / "AGENTS.md"
-    agents.write_text("## Workflow\n- Queue truth `backlog.md`\n- File a `backlog.md` entry instead.\n",
+    agents.write_text("## Workflow\n- Queue truth `backlog.md`\n- File a `backlog.md` entry instead.\n"
+                      "- Do not edit generated files; record follow-ups in backlog.md.\n"
+                      "- Track tasks in backlog.md; never commit credentials.\n"
+                      "- Put the file in backlog.md format.\n"
+                      "- Do not file tasks in backlog.md.\n"
+                      "- Track tasks in backlog.md.bak.\n",
                       encoding="utf-8")
     (github / "CLAUDE.md").write_text("<!-- Use backlog.md as the queue. -->\n"
                                      "```md\nQueue: backlog.md\n```\n"
@@ -359,22 +415,34 @@ def _legacy_tests(github: Path) -> None:
     (docs / "workflow.md").write_text("Record new work in `backlog.md`.\n", encoding="utf-8")
     original = {p: p.read_bytes() for p in github.rglob("*.md")}
     text = "\n".join(check_legacy_backlog(github, env={}))
-    _assert("AGENTS.md:2:" in text and "AGENTS.md:3:" in text and "docs/workflow.md:1:" in text
-            and text.count(_ISSUES_RULE) == 3, "steering proposals name each live line and its replacement")
+    _assert(all(f"AGENTS.md:{n}:" in text for n in (2, 3, 4, 5)) and "docs/workflow.md:1:" in text
+            and text.count(_ISSUES_RULE) == 5, "steering proposals name each live line and its replacement")
     _assert(all(p.read_bytes() == data for p, data in original.items()), "the check leaves every source intact")
     _assert(not check_legacy_backlog(github, {ENV_VAR: "backlog"}), "explicit file backend opts out")
+    _assert(not check_legacy_backlog(github, {ENV_VAR: "python3 /fixture/adapter.py"}), "explicit adapter opts out")
 
     for content, expected in [
         ("", "propose deleting"),
         ("<!--\n- [ ] example\n-->\n", "propose deleting"),
         ("## Now\n- [>] in flight\n", "resolve in-flight"),
         ("```\n- [ ] ambiguous\n", "unclosed code fence"),
+        ("## Rejected — do not re-file\n- Build a dashboard — defer until needed.\n", "rejected entries remain"),
     ]:
         backlog.write_text(content, encoding="utf-8")
         _assert(expected in "\n".join(check_legacy_backlog(github, env={})), f"backlog reports {expected}")
+    backlog.write_bytes(b"# Backlog\n\xff\n")
+    code, lines = run(github, env={})
+    text = "\n".join(lines)
+    _assert(code == 2 and "fix the read error" in text and "AGENTS.md:2:" in text and "propose deleting" not in text,
+            "a malformed backlog still reports steering and cannot be retired")
     backlog.unlink()
     text = "\n".join(check_legacy_backlog(github, env={}))
     _assert("AGENTS.md:2:" in text and "propose deleting" not in text, "steering-only GitHub repos are reported")
+    with patch.dict(os.environ, {ENV_VAR: ""}), contextlib.redirect_stdout(io.StringIO()) as out:
+        code = main(["--project", str(docs)])
+    _assert(code == 1 and "AGENTS.md:2:" in out.getvalue(), "a nested project argument resolves the repository root")
+    _assert(check_backlog_history(_repo({"docs/archive-policy.md": "Keep [x] items as history.\n"}), env={}),
+            "the archive-name exclusion is limited to the migration steering check")
 
     other = _repo({"backlog.md": "- [ ] open\n", "AGENTS.md": "Queue: backlog.md\n"})
     subprocess.run(["git", "init", "-q", str(other)], check=True)

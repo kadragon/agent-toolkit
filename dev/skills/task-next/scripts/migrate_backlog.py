@@ -2,8 +2,8 @@
 """migrate_backlog.py — move a github.com repo's backlog.md queue onto GitHub issues.
 
 Usage:
-  python3 migrate_backlog.py [--repo PATH] [--json]            # dry run (default): print the plan
-  python3 migrate_backlog.py [--repo PATH] --apply [--keep-file] [--json]
+  python3 migrate_backlog.py [--repo PATH] [--keep-file] [--json]   # dry run (default)
+  python3 migrate_backlog.py [--repo PATH] --apply [--keep-file] [--expect-plan SHA] [--json]
   python3 migrate_backlog.py --test
 
 Mapping (docs/design/github-issues-queue.md → Migration):
@@ -30,7 +30,8 @@ comment with the item when editing it between attempts so a retry can find the i
 report any content discrepancy. `--apply` files under the standing `queue-write` grant, then deletes a backlog.md line only
 once its issue exists and every parent/blocker relation it needs is confirmed; unconfirmed lines
 stay. The deletion is a working-tree change for the user to commit; the file is deleted when only
-headings remain unless `--keep-file` was passed.
+headings remain unless `--keep-file` was passed. `--expect-plan` checks the fingerprint printed
+in a text dry run against the current plan and target before writing.
 
 Exit: 0 = dry run printed, or every planned line migrated (refused lines are listed, not an error);
 1 = error; 3 = --apply left unconfirmed lines in backlog.md (re-run to finish).
@@ -682,14 +683,19 @@ def _opt(argv: list[str], name: str) -> str | None:
     return None
 
 
+def plan_fingerprint(plan: dict, target: str, keep_file: bool) -> str:
+    payload = json.dumps([target.lower(), keep_file, plan], sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def main(argv: list[str], runner=qb.gh_runner) -> int:
     if argv[:1] == ["--test"]:
         return run_tests()
-    known = {"--apply", "--keep-file", "--json", "--repo"}
+    known = {"--apply", "--keep-file", "--expect-plan", "--json", "--repo"}
     unknown = [a for i, a in enumerate(argv) if a.startswith("--") and a not in known]
     if unknown:
         sys.stderr.write(f"migrate_backlog: unknown option {unknown[0]}\nusage: migrate_backlog.py "
-                         "[--repo PATH] [--apply [--keep-file]] [--json] | --test\n")
+                         "[--repo PATH] [--keep-file] [--apply [--expect-plan SHA]] [--json] | --test\n")
         return EXIT_ERROR
     try:
         repo = _opt(argv, "--repo") or qb._git(os.getcwd(), "rev-parse", "--show-toplevel")
@@ -706,16 +712,25 @@ def main(argv: list[str], runner=qb.gh_runner) -> int:
         if bc.unclosed_fence_line(text):
             raise MigrateError(f"{path} has an unclosed code fence at line {bc.unclosed_fence_line(text)}; fix it first")
         apply = "--apply" in argv
+        keep_file = "--keep-file" in argv
+        approved_plan = _opt(argv, "--expect-plan")
+        if approved_plan is not None and not apply:
+            raise MigrateError("--expect-plan requires --apply")
         vis = visibility(repo, runner) if apply else _try_visibility(repo, runner)
         plan = build_plan(text, vis)
+        target = f"{owner}/{name}"
+        fingerprint = plan_fingerprint(plan, target, keep_file)
         if not apply:
             if "--json" in argv:
                 print(json.dumps(plan, ensure_ascii=False, indent=2))
             else:
-                print(render_plan(plan, f"{owner}/{name}", path))
-                print("\nDry run: nothing was filed. Check the plan against backlog.md, then re-run with --apply.")
+                print(render_plan(plan, target, path))
+                print(f"\nDry run plan fingerprint: {fingerprint}")
+                print("Check the plan against backlog.md before applying.")
             return EXIT_OK
-        report = apply_plan(repo, plan, runner, keep_file="--keep-file" in argv)
+        if approved_plan is not None and approved_plan != fingerprint:
+            raise MigrateError("the approved plan no longer matches; run a new dry run and confirm its plan")
+        report = apply_plan(repo, plan, runner, keep_file=keep_file)
     except (MigrateError, qb.QueueError) as e:
         sys.stderr.write(f"migrate_backlog: {e}\n")
         return EXIT_ERROR
@@ -724,8 +739,8 @@ def main(argv: list[str], runner=qb.gh_runner) -> int:
     if "--json" in argv:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(_render_report(report, path))
-    return EXIT_PARTIAL if report["kept"] or report.get("error") else EXIT_OK
+        print(_render_report(report, path, keep_file=keep_file))
+    return EXIT_PARTIAL if _partial(report) else EXIT_OK
 
 
 def _try_visibility(repo: str, runner) -> str:
@@ -736,7 +751,11 @@ def _try_visibility(repo: str, runner) -> str:
         return "unknown"
 
 
-def _render_report(report: dict, path: str) -> str:
+def _partial(report: dict) -> bool:
+    return bool(report["kept"] or report["incomplete"] or report.get("error"))
+
+
+def _render_report(report: dict, path: str, *, keep_file: bool = False) -> str:
     out = [f"migrate_backlog --apply: {path}"]
     made = [c for c in report["created"] if not c["reused"]]
     out.append(f"  filed {len(made)} issue(s), reused {len(report['created']) - len(made)}")
@@ -754,8 +773,9 @@ def _render_report(report: dict, path: str) -> str:
         out.append(f"  error: {report['error']}")
     if report.get("pending_path"):
         out.append(f"  pending drafts: {report['pending_path']}")
-    if report["kept"] or report.get("error"):
-        out.append("  Re-run migrate_backlog.py --apply to finish: filed issues are reused, not duplicated.")
+    if _partial(report):
+        flags = " --keep-file" if keep_file else ""
+        out.append(f"  Refresh the dry run{flags} before retrying --apply{flags}. Filed issues are reused.")
     out.append("  Commit the backlog.md change yourself.")
     return "\n".join(out)
 
@@ -1130,7 +1150,16 @@ def _apply_tests(tmp: str, make_repo, read, write) -> None:
     repo = make_repo(tmp, "keep-file", "git@github.com:owner/repo.git", "# Backlog\n\n## Now\n\n- [ ] Move this task\n")
     path = os.path.join(repo, "backlog.md")
     gh = _FakeGh()
-    code = quiet(main, ["--repo", repo, "--apply", "--keep-file"], runner=gh)
+    original = read(path)
+    plan = build_plan(original, visibility(repo, gh))
+    fingerprint = plan_fingerprint(plan, "owner/repo", keep_file=True)
+    args = ["--repo", repo, "--apply", "--expect-plan", fingerprint]
+    other_visibility = plan_fingerprint(build_plan(original, "private"), "owner/repo", keep_file=True)
+    _assert(quiet(main, [*args[:-1], other_visibility, "--keep-file"], runner=gh) == EXIT_ERROR
+            and not gh.issues and read(path) == original, "a changed visibility invalidates the approved plan")
+    _assert(quiet(main, args, runner=gh) == EXIT_ERROR and not gh.issues and read(path) == original,
+            "leaving out --keep-file invalidates the approved plan without changing any state")
+    code = quiet(main, [*args, "--keep-file"], runner=gh)
     _assert(code == EXIT_OK and _only_headings(read(path)) and len(gh.issues) == 1
             and all(qb.QUEUE_LABEL in issue["labels"] for issue in gh.issues.values()),
             "--keep-file migrates and prunes the queue while retaining the file for separate approval")

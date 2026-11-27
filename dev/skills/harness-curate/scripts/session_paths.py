@@ -4,7 +4,6 @@ import glob
 import json
 import os
 import re
-from pathlib import Path
 
 
 def encode_project(path):
@@ -59,40 +58,18 @@ def _codex_session_meta_cwd(fp):
     session_meta is normally the first line, but a few extra lines are tolerated in case a
     future format prepends something. None if not found/unreadable — never raises."""
     try:
-        with open(fp, encoding="utf-8", errors="replace") as fh:
+        with open(fp, encoding="utf-8") as fh:
             for _, line in zip(range(5), fh):
                 try:
                     r = json.loads(line)
                 except Exception:
                     continue
-                if isinstance(r, dict) and r.get("type") == "session_meta":
+                if r.get("type") == "session_meta":
                     payload = r.get("payload")
                     return payload.get("cwd") if isinstance(payload, dict) else None
     except OSError:
         pass
     return None
-
-
-def session_project_paths():
-    """Yield project paths recorded in local sessions without decoding directory names."""
-    claude = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    for transcript in (claude / "projects").glob("*/*.jsonl"):
-        try:
-            with transcript.open(encoding="utf-8", errors="replace") as stream:
-                for _, line in zip(range(32), stream):
-                    try:
-                        record = json.loads(line)
-                    except ValueError:
-                        continue
-                    if isinstance(record, dict) and isinstance(cwd := record.get("cwd"), str) and cwd:
-                        yield cwd
-                        break
-        except OSError:
-            continue
-    for transcript in (Path(codex_home()) / "sessions").rglob("*.jsonl"):
-        cwd = _codex_session_meta_cwd(transcript)
-        if isinstance(cwd, str) and cwd:
-            yield cwd
 
 
 def find_codex_session_files(codex_root, real_path, since_ms=None):
