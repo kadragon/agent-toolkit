@@ -13,8 +13,8 @@ version: 1.0.4
 ## Phase index
 
 Read *Arguments* here for a direct invocation. The remaining sections are in
-`../task-review-cycle/SKILL.md`. Locate headings with `rg -n '^#{1,3} ' <file>` and read the current
-range through its next peer heading.
+`../task-review-cycle/SKILL.md`. Use `rg -n '^## ' <file>` to find headings and ignore matches
+inside code fences. Read each section up to the next level-two heading.
 
 | Phase | Sections to open |
 |---|---|

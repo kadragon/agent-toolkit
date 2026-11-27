@@ -145,8 +145,9 @@ class DispatchReceiptTests(DispatchTestCase):
                 self.assertTrue(prompt.startswith(message + self.BLOCK))
                 guide = prompt.removeprefix(message + self.BLOCK)
                 for section in (
-                    "Phase index", "rg -n", "tree.md → --tree mode",
-                    "cycle.md → Branch", "cycle.md → Cleanup", "task-review-cycle → Caller gate",
+                    "Phase index", "outside code fences", "rg -n '^#{2,3} '", "tree.md → --tree mode",
+                    "cycle.md → Branch", "cycle.md → Version bump, Cleanup, and Validation evidence",
+                    "Step 4 and cycle.md → Hand off", "task-review-cycle → Caller gate",
                 ):
                     self.assertIn(section, guide)
 

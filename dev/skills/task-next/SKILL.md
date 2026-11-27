@@ -22,8 +22,9 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Phase index
 
-Find heading line numbers with `rg -n '^#{1,3} ' <file>` and read the current phase through its
-next peer heading. Resolve paths from this skill. For a dispatched `--tree` cycle, use this order:
+Use `rg -n '^#{2,3} ' <file>` to find Markdown headings and ignore matches inside code fences.
+Read each section up to the next heading at the same or a higher level. Resolve paths from
+this skill. For a dispatched `--tree` cycle, use this order:
 
 | Phase | Sections to open |
 |---|---|

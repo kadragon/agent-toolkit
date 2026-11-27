@@ -400,10 +400,10 @@ def first_prompt(cli, message, handoff):
             and any(line.startswith("Dispatch mode: parallel-worktree") for line in body)):
         prompt += (
             "\n\nRead the installed task-next SKILL.md sections listed in Phase index as each phase starts. "
-            "Locate headings with rg -n '^#{1,3} ' and read only the current ranges. For the worktree, "
-            "start with references/tree.md → --tree mode and references/cycle.md → Branch "
-            "(Worktree cycle). Open cycle.md → Cleanup after implementation and go straight to "
-            "task-review-cycle → Caller gate at review handoff."
+            "Locate Markdown headings outside code fences with rg -n '^#{2,3} ' and read the current ranges. "
+            "For the worktree, see references/tree.md → --tree mode and references/cycle.md → Branch "
+            "(including Worktree cycle). After implementation, follow cycle.md → Version bump, Cleanup, "
+            "and Validation evidence, then Step 4 and cycle.md → Hand off into task-review-cycle → Caller gate."
         )
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
