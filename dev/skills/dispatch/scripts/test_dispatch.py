@@ -131,6 +131,7 @@ class DispatchReceiptTests(DispatchTestCase):
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
               "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+    REVIEW_APPROVAL = '이 PR diff를 Claude와 agy에 보내도 됩니다.\n"Codex"도 승인합니다.'
     HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
                "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
@@ -212,6 +213,27 @@ class DispatchReceiptTests(DispatchTestCase):
                     self.assertIn("warning:", stderr.getvalue())
                     self.assertIn("task-next", stderr.getvalue())
                     self.assertIn("task-new", stderr.getvalue())
+
+    def test_review_transfer_approval_survives_launch_and_first_send(self):
+        grant = self.REVIEW_APPROVAL
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                 "--cli", "codex", "--model", "gpt-6.1-terra", "--effort", "medium",
+                 "--cwd", directory, "--work-kind", "standalone", "--request", "Review the PR",
+                 "--unit", "PR review", "--git-limits", "pr-only", "--task", "Review the PR",
+                 "--review-transfer-approval", grant, "--dry-run"],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = json.loads(result.stdout)["task"]
+        fields = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        self.assertEqual(json.loads(fields), {
+            "Original user request (verbatim)": "Review the PR",
+            "Assigned unit": "PR review",
+            "Git limits": "pr-only",
+            "Review transfer approval (verbatim)": grant,
+        })
 
     def test_title_labels_the_child_and_names_it_when_it_slugifies_to_ascii(self):
         cwd = Path(tempfile.gettempdir()) / "myrepo"
@@ -415,6 +437,7 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertNotIn("handoff", payload)
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
+            self.assertTrue(receipt["require_review_sources"])
             self.assertFalse(receipt["sent"])
             self.assertEqual(receipt["quota_snapshot"], snapshot)
             self.assertEqual(receipt["bias"], "claude")
@@ -565,6 +588,58 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        cases = (
+            (None, ("claude", "agy", "codex", "no completed result")),
+            ({"claude": "approval denied", "agy": "still running", "codex": "complete"},
+             ("claude", "approval denied", "agy", "still running")),
+            ({"claude": "complete", "agy": "complete", "codex": "complete"}, ()),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**self.RECEIPT, "require_review_sources": True}), encoding="utf-8")
+            for status in ("ready", "done", "merged"):
+                for sources, blockers in cases:
+                    with self.subTest(status=status, sources=sources):
+                        result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
+                        if sources is not None:
+                            result["review_sources"] = sources
+                        write_json(receipt.with_name("result.json"), result)
+                        output = StringIO()
+                        with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
+                            collect(SimpleNamespace(run=receipt, close=False))
+                        reported = json.loads(output.getvalue())["result"]
+                        self.assertEqual(reported["status"], "blocked" if blockers else status)
+                        self.assertEqual(reported["pr"], "example-pr")
+                        for blocker in blockers:
+                            self.assertIn(blocker, reported["summary"])
+
+    def test_report_review_writes_missing_source_reason_to_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            result = {
+                "status": "ready", "phase": "review", "summary": "CI passed",
+                "review_sources": {"claude": "complete", "agy": "리뷰 진행 중", "codex": "complete"},
+                "ci": "success",
+            }
+            for outcome, status, phase, summary in (
+                ("리뷰 진행 중", "blocked", "review-sources", "agy: 리뷰 진행 중"),
+                ("complete", "ready", "review", "CI passed"),
+            ):
+                with self.subTest(outcome=outcome):
+                    result["review_sources"]["agy"] = outcome
+                    completed = subprocess.run(
+                        [sys.executable, "-I", "-X", "utf8=0", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        env={**os.environ, "LC_ALL": "C"},
+                        input=json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                        check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
+                    self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                                     {**result, "status": status, "phase": phase, "summary": summary})
+                    self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -841,6 +916,19 @@ class DispatchReceiptTests(DispatchTestCase):
                 "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": [earlier, later],
             })
             self.assertEqual(report["scope_decision_categories"], [])
+
+    def test_collect_keeps_review_history_without_escalating_missing_sources_as_sendbacks(self):
+        first = {"change": "/archive/contract.md", "round": 1, "categories": ["atomicity"]}
+        history = [first, {**first, "round": 2}]
+        with tempfile.TemporaryDirectory() as directory:
+            report, _ = self.collect_report(directory, {"state": "done"},
+                                            receipt_fields={"require_review_sources": True}, result={
+                "status": "ready", "phase": "review", "summary": "Review passed", "review_sendbacks": history,
+                "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"},
+            })
+        self.assertEqual(report["result"]["status"], "blocked")
+        self.assertEqual(report["result"]["review_sendbacks"], history)
+        self.assertEqual(report["scope_decision_categories"], [])
 
     def test_collect_force_closes_an_owned_child_and_records_the_reason(self):
         working = {**self.TERMINAL, "status": {"state": "working"}}
@@ -2312,13 +2400,20 @@ class CodexSendTests(DispatchTestCase):
             extra_lines = ["Use the team review checklist.", "• Confirm the target branch.",
                            "■ Follow the local workflow.", "› Run the tests.", "─ Worked for the dry run.",
                            "Hook approval required for the local workflow."]
-            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines}
-            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff}
+            grant = DispatchReceiptTests.REVIEW_APPROVAL
+            handoff = {**DispatchReceiptTests.HANDOFF, "extra_lines": extra_lines,
+                       "review_transfer_approval": grant}
+            run = {**DispatchReceiptTests.RECEIPT, "handoff": handoff, "require_review_sources": True}
             receipt.write_text(json.dumps(run), encoding="utf-8")
             args = SimpleNamespace(address="t7", message="a task", run=receipt)
-            expected = ("a task" + DispatchReceiptTests.BLOCK + "\n\n" + extra_lines[0] + "\n"
+            fields = {**DispatchReceiptTests.FIELDS, "Review transfer approval (verbatim)": grant}
+            block = DispatchReceiptTests.BLOCK.replace(
+                json.dumps(DispatchReceiptTests.FIELDS, ensure_ascii=False, indent=2),
+                json.dumps(fields, ensure_ascii=False, indent=2),
+            )
+            expected = ("a task" + block + "\n\n" + extra_lines[0] + "\n"
                         + "\n".join(f"> {line}" for line in extra_lines[1:]) + "\n\n"
-                        + report_instruction(receipt.resolve().with_name("result.json")))
+                        + report_instruction(receipt.resolve().with_name("result.json"), require_review_sources=True))
             stderr = StringIO()
             with patch("dispatch.hc_json", side_effect=[
                 startup, idle, startup, {"started": True}, self.screen(ready), busy, self.screen(ready),
@@ -2332,6 +2427,7 @@ class CodexSendTests(DispatchTestCase):
             self.assertTrue(transcript_echoed(echoed, prompt))
             self.assertEqual(codex_screen(echoed), "ready")
             self.assertEqual(prompt, expected)
+            self.assertIn("dispatch.py report-review", prompt)
             self.assertIn("warning:", stderr.getvalue())
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):

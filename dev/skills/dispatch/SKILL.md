@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.1.0
+version: 3.2.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -52,7 +52,8 @@ PRs require permission for each PR. Report any unsupported request layout.
 Forward only workflows the human requested. In separate-worktree prompts, add
 `Dispatch mode: parallel-worktree` and mark an added `--tree` as isolation only.
 Children verify authority before Git writes or nested delegation and stop separate PRs at ready
-before base merge. Hold if the CLI cannot carry the handoff fields.
+before base merge. For Codex task cycles, the review cycle writes the final dispatch report
+through the required-review gate. Hold if the CLI cannot carry the handoff fields.
 
 `/dev:task-next` needs a queue. When `pick` reports none, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
@@ -138,6 +139,9 @@ grants the required Git writes and sets no narrower limits, pass `--git-limits='
 For work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`.
 Preview with `--dry-run`.
+
+For Codex review cycles, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
+Pass the user's separate review transfer grant with `--review-transfer-approval='<verbatim approval>'`.
 
 To append recurring repo-specific lines to a child's first message, configure `repos/handoff.json`
 in the home repo. See `references/launch-handoff.md` for the schema and path matching.

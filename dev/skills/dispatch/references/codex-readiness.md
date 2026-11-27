@@ -49,6 +49,61 @@ Sources: [Codex local marketplaces](https://developers.openai.com/plugins/build/
 [native hook trust](https://learn.chatgpt.com/docs/hooks), and
 [Herdr JSON-RPC](https://github.com/herdrdev/herdr-core/blob/master/schema/README.md#connecting).
 
+## Approval checks before a wave
+
+Dispatch's `--approve-for-me` selects workspace-write sandboxing, on-request approval and
+`approvals_reviewer = "auto_review"`. Codex evaluates the proposed action and conversation
+history. The command path and arguments help identify what the action does. Repository
+visibility can inform the risk assessment, while the user supplies transfer authorization.
+On Codex CLI 0.172.0, a generic PR review request and a Git-only handoff produced declined
+Claude and agy launches. Their approval checks cited the absence of a grant covering the
+data and destination. Comparable calls reached the shell with an explicit review request and
+scoped approval descriptions. Those observed decisions are specific to their call context.
+
+Before dispatch, capture the user's approval for the target repository, the review data
+(diff, relevant source, Sprint Contract and `REVIEW.md` where applicable), and each authorized
+engine or account. If it is part of the original request, keep it there verbatim. Pass a separate
+user grant verbatim with `--review-transfer-approval`. The receipt preserves it for the first
+send and any first-message retry. Git authority, public visibility and hook trust each have
+their own scope. The child follows [Data-sharing policy](../../task-review-cycle/references/review-sources.md#data-sharing-policy)
+for approval requests and reports a denial to the merge owner as `blocked`.
+
+For approvals that need human review, an operator may use `approvals_reviewer = "user"` with
+`approval_policy = "on-request"`, when managed policy permits. This changes who handles an
+approval, while rules determine which command prefixes can run without one. With dispatch's
+`--approve-for-me` still active, do not assume a user-level setting takes precedence. Verify the
+effective launch configuration. Command rules match argument prefixes and run before a
+matching command would prompt. Keep reviewer launchers, generic interpreters and reviewer CLIs
+under the normal approval policy so each transfer can be checked in context. A replacement
+auto-review policy has a broader scope than the per-task handoff and is subject to managed
+requirements.
+
+For routine commands, use the sandbox for local `git status`, `git log`, `git show`,
+`git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
+For approved network reads, the operator can add a `.rules` file under an active Codex
+config layer's `rules/` directory and restart the child. Use a trusted project layer for
+repository-specific rules. For example:
+
+```python
+prefix_rule(pattern=["gh", "pr", ["view", "checks"], "--repo", "kadragon/agent-toolkit"], decision="allow")
+```
+
+Prefix matches allow trailing arguments, including another `--repo` flag. Enable the example
+only if the permitted read commands fit that scope. Use the shown token order and set the tool's
+working directory for direct calls. A rule for `gh pr checks` applies to that outer invocation.
+Run `git fetch origin` through normal approval. A fetch prefix would allow trailing refspecs
+that update local branches. Keep `git push`, PR writes and generic shell or filesystem commands
+under normal approval as well.
+
+`codex execpolicy check --rules <file> -- gh pr view --repo kadragon/agent-toolkit 541` shows the
+matched rule and decision. Check the intended invocations and nearby writes such as `git push origin` and
+`gh pr create` before enabling a rule. Rule matching was verified with Codex CLI 0.172.0.
+A dispatched run using these rules through PR creation without routine approval requests is
+unverified. Check that in the child's transcript when enabling the rules for a wave.
+
+Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
+[configuration reference](https://developers.openai.com/codex/config-reference).
+
 ## Hook trust at launch
 
 On the shared cache, Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex

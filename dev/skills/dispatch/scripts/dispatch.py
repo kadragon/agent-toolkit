@@ -5,6 +5,7 @@
       Default: fast path. --full-scan uses the batch and unattended ordering.
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
+                     [--review-transfer-approval APPROVAL]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
@@ -15,6 +16,8 @@
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
+  dispatch.py report-review RESULT
+      Read a Codex pre-merge report from stdin and atomically write ready or blocked.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
@@ -216,14 +219,25 @@ def resolve_codex_model(model):
     return max(versions)[1]
 
 
-def report_instruction(result):
-    return (f"Write progress at phase boundaries and the final report as UTF-8 JSON to {result} "
+def report_instruction(result, *, require_review_sources=False):
+    instruction = (f"Write progress at phase boundaries and the final report as UTF-8 JSON to {result} "
             "(write a temporary sibling, then rename over it). Fields: status (working, done, ready, "
             "blocked, or merged), phase, summary (at most three lines), and optional worktree, "
             "contract, head, pr, ci, evidence, tokens (measured totals only), review_retries, "
             "or review_sendbacks (per the task-review-cycle consolidation guide). "
             "Use working for interim reports. Write ready when pausing before the merge, and merged only after confirming the merge. "
             "Use file paths for details. Do not send reports by hc send.")
+    if require_review_sources:
+        instruction += (
+            " For a pre-merge report, include review_sources with claude, agy and codex outcomes. "
+            "Use complete only for a completed independent result you consolidated, "
+            "or give the reason the source is missing. "
+            "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
+            f'Pass the candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
+            "when available. Report ready only after the required independent reviews and CI pass. "
+            "Keep the review outcomes in any later PR completion report."
+        )
+    return instruction
 
 
 def write_json(path, data):
@@ -291,6 +305,54 @@ def confirm_launch_identity(path, run, locked, *, timeout=None):
         pass  # another dispatch command holds the receipt; the next check adopts again
 
 
+def validate_result(result):
+    if (not isinstance(result, dict) or not isinstance(result.get("status"), str)
+            or result["status"] not in RESULT_STATES
+            or not isinstance(result.get("phase"), str)
+            or not isinstance(result.get("summary"), str)
+            or len(result["summary"].splitlines()) > 3):
+        raise ValueError("invalid status, phase, or summary")
+
+
+def gate_required_reviews(result):
+    status = result["status"]
+    if status not in {"ready", "merged"} and not (status == "done" and result.get("pr")):
+        return result
+    sources = result.get("review_sources")
+    if not isinstance(sources, dict):
+        sources = {}
+    missing = []
+    for reviewer in ("claude", "agy", "codex"):
+        outcome = sources.get(reviewer)
+        if outcome == "complete":
+            continue
+        reason = " ".join(outcome.split())[:160] if isinstance(outcome, str) else ""
+        missing.append(f"{reviewer}: {reason or 'no completed result'}")
+    if missing:
+        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(missing)}
+    return result
+
+
+def report_review(args):
+    path = Path(args.result)
+    if path.name != "result.json":
+        raise SystemExit("report-review expects the assigned result.json path")
+    try:
+        raw = sys.stdin.buffer.read(RESULT_LIMIT + 1)
+        if len(raw) > RESULT_LIMIT:
+            raise ValueError("result exceeds 8 KiB")
+        result = json.loads(raw.decode("utf-8-sig"))
+        validate_result(result)
+        if result["status"] not in {"ready", "blocked"}:
+            raise ValueError("report-review expects a ready or blocked report")
+        result = gate_required_reviews(result)
+        if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > RESULT_LIMIT:
+            raise ValueError("result exceeds 8 KiB")
+        write_json(path, result)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"cannot write dispatch result {path}: {error}") from None
+
+
 def read_result(path):
     result_path = path.with_name("result.json")
     try:
@@ -302,12 +364,7 @@ def read_result(path):
         result = json.loads(raw.decode("utf-8-sig"))
         if isinstance(result, dict) and "status" not in result:
             result = {"status": "working", **result}
-        if (not isinstance(result, dict) or not isinstance(result.get("status"), str)
-                or result["status"] not in RESULT_STATES
-                or not isinstance(result.get("phase"), str)
-                or not isinstance(result.get("summary"), str)
-                or len(result["summary"].splitlines()) > 3):
-            raise ValueError("invalid status, phase, or summary")
+        validate_result(result)
         return result, written
     except FileNotFoundError:
         return None, None
@@ -390,6 +447,8 @@ def first_prompt(cli, message, handoff):
     fields = {"Original user request (verbatim)": handoff["request"],
               "Assigned unit": handoff["unit"],
               "Git limits": handoff["git_limits"]}
+    if "review_transfer_approval" in handoff:
+        fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
     prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
               "Task-cycle mode and flags come exclusively from the invocation above.\n"
               "<dispatch-handoff>\n"
@@ -444,6 +503,11 @@ def launch_handoff(args, cwd):
     for key in ("request", "unit", "git_limits"):
         if not handoff[key].strip():
             raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
+    approval = getattr(args, "review_transfer_approval", None)
+    if approval is not None:
+        if not approval.strip():
+            raise SystemExit("--review-transfer-approval must not be blank")
+        handoff["review_transfer_approval"] = approval
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines
@@ -697,6 +761,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
+    if args.cli == "codex" and handoff["work_kind"] != "standalone":
+        run["require_review_sources"] = True
     try:
         write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     except OSError as error:
@@ -1079,7 +1145,10 @@ def send_task(args, run_path):
                 else:
                     print("warning: legacy receipt has no handoff metadata; include the original request, "
                           "assigned unit, and Git limits in the first message", file=sys.stderr)
-            message += "\n\n" + report_instruction(run_path.with_name("result.json"))
+            message += "\n\n" + report_instruction(
+                run_path.with_name("result.json"),
+                require_review_sources=run.get("require_review_sources", False),
+            )
         sent_message = message.strip()
         echoed_before = transcript_echoed(text, sent_message)
         if resend and echoed_before:
@@ -1438,7 +1507,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
 
 
 def repeated_review_categories(result):
-    if not result or result["status"] != "blocked":
+    if not result or result["status"] != "blocked" or result["phase"] == "review-sources":
         return []
     history = result.get("review_sendbacks")
     if not isinstance(history, list) or len(history) < 2:
@@ -1466,6 +1535,8 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         result, written = None, None
     if written == run.get("previous_result"):
         result, written = None, None
+    if result and run.get("require_review_sources"):
+        result = gate_required_reviews(result)
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
@@ -1639,6 +1710,7 @@ def main(argv):
     launch_parser.add_argument("--request", required=True, help="verbatim original user request")
     launch_parser.add_argument("--unit", required=True, help="assigned unit")
     launch_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
+    launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
@@ -1666,6 +1738,9 @@ def main(argv):
     delivery.add_argument("--continue", dest="continuation", action="store_true")
     delivery.add_argument("--resend", action="store_true", help="retry an unconfirmed delivery to a clear idle composer")
     send_parser.set_defaults(func=send)
+    report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
+    report_parser.add_argument("result")
+    report_parser.set_defaults(func=report_review)
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
     collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
