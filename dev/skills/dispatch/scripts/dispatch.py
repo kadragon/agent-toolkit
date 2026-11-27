@@ -19,16 +19,12 @@
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
-  dispatch.py prompt --cli claude|codex --model M --effort E --cwd PATH
-                     --work-kind queue|new|standalone --request REQUEST --unit UNIT --git-limits LIMITS
-                     [--title TEXT] MESSAGE
-      T3 Code backend: launch nothing. Validate the same handoff fields, write a receipt with
-      backend "t3", and print the t3_thread_launch arguments (title, modelSelection,
-      workspaceStrategy root, message: first message, handoff block, configured lines, cwd
-      guard, result-report instruction) and the project lookup for the target repo.
-  dispatch.py record RECEIPT (--thread-id ID --project-id ID | --resume)
-      Store the thread and project t3_thread_launch returned in a T3 receipt. --resume, before
-      answering a paused child, hides its current result and restarts the stall clock.
+  dispatch.py pin --repo PATH --commit SHA --codex PATH
+      Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
+  dispatch.py release WAVE
+      Release the private home and verified snapshot after all registered children close.
+  dispatch.py wait RUN [RUN ...] [--until OUTCOMES] [--timeout SECONDS]
+      Print one brief line per child and another only when its displayed state changes.
 """
 import argparse
 import json
@@ -38,9 +34,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pinned_wave  # noqa: E402
 
 CLAUDE_SETTINGS = {
     "promptSuggestionEnabled": False,
@@ -93,6 +92,10 @@ DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
+WAIT_DEFAULT = ("ready", "blocked", "merged", "idle", "stop")
+WAIT_OUTCOMES = (*WAIT_DEFAULT, "done")
+WAIT_POLL_SECONDS = 2
+WAIT_TIMEOUT_SECONDS = 1800
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
@@ -102,12 +105,6 @@ QUOTA_TIMEOUT_SECONDS = 10
 EXPIRING_PASS_EXCEPTIONS = ("production DB", "deploy")
 BIAS_EXCEPTIONS = ("unknown-cause debugging", "open grill/spec", "security", "auth", "data migration",
                    *EXPIRING_PASS_EXCEPTIONS)
-T3_TARGETS = {
-    "claude": {"provider": "claudeAgent", "effort_option": "effort",
-               "efforts": ("low", "medium", "high", "xhigh", "max", "ultrathink")},
-    "codex": {"provider": "codex", "effort_option": "reasoningEffort",
-              "efforts": ("low", "medium", "high", "xhigh", "max", "ultra")},
-}
 
 
 def terminal_name(raw):
@@ -221,11 +218,11 @@ def resolve_codex_model(model):
 
 def report_instruction(result):
     return (f"Write progress at phase boundaries and the final report as UTF-8 JSON to {result} "
-            "(write a temporary sibling, then rename over it). Fields: status (done, ready, "
+            "(write a temporary sibling, then rename over it). Fields: status (working, done, ready, "
             "blocked, or merged), phase, summary (at most three lines), and optional worktree, "
             "contract, head, pr, ci, evidence, tokens (measured totals only), review_retries, "
             "or review_sendbacks (per the task-review-cycle consolidation guide). "
-            "Write ready when pausing before the merge, and merged only after confirming the merge. "
+            "Use working for interim reports. Write ready when pausing before the merge, and merged only after confirming the merge. "
             "Use file paths for details. Do not send reports by hc send.")
 
 
@@ -237,7 +234,10 @@ def write_json(path, data):
 
 def load_run(path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        run = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(run, dict) or not isinstance(run.get("address"), str):
+            raise ValueError("expected a Herdr terminal receipt")
+        return run
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch receipt {path}: {error}") from None
 
@@ -274,11 +274,11 @@ def verify_terminal(run, terminal):
             raise SystemExit(f"terminal identity changed: {run['address']}")
 
 
-def confirm_launch_identity(path, run, locked):
+def confirm_launch_identity(path, run, locked, *, timeout=None):
     """Write the identity adopted after a failed launch lookup, so later checks are exact."""
     if run.get("created_ms") is not None:
         return
-    verify_terminal(run, hc_json("get", run["address"]))
+    verify_terminal(run, hc_json("get", run["address"], **({"timeout": timeout} if timeout else {})))
     if locked:
         write_json(path, run)
         return
@@ -319,6 +319,16 @@ def hc_json(*args, timeout=None):
     out = subprocess.run(["hc", args[0], "--json", *args[1:]], capture_output=True, text=True,
                          encoding="utf-8", check=True, timeout=timeout).stdout
     return json.loads(out)
+
+
+def hc_rpc(method, params, timeout):
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}) + "\n"
+    out = subprocess.run(["hc", "connect"], input=request, capture_output=True, text=True,
+                         encoding="utf-8", timeout=timeout, check=True).stdout
+    for line in out.splitlines():
+        if line.strip() and (reply := json.loads(line)).get("id") == 1:
+            return reply
+    raise ValueError(f"Herdr returned no reply to {method}")
 
 
 def free_name(base, explicit, taken):
@@ -494,7 +504,61 @@ def launch_quota(args, model):
     return audit
 
 
+PIN_ERRORS = (pinned_wave.PinError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+
+
+def pin(args):
+    try:
+        path, wave = pinned_wave.prepare(Path(args.repo).resolve(), args.commit, args.codex)
+    except PIN_ERRORS as error:
+        raise SystemExit(f"cannot pin Codex wave: {error}; see shared-cache readiness") from None
+    print(json.dumps({"wave": str(path), "home": str(path.parent / "home"), "codex": wave["binary"],
+                      "commit": wave["commit"], "versions": wave["versions"]}, ensure_ascii=False))
+
+
+def release(args):
+    try:
+        path = pinned_wave.wave_path(args.wave)
+        with lock_run(path):
+            wave = pinned_wave.read_wave(path)
+            for receipt in wave["children"]:
+                child = load_run(Path(receipt))
+                if child.get("wave") != str(path) or not child.get("closed_reason"):
+                    raise pinned_wave.PinError(f"wave child must be closed first: {receipt}")
+            write_json(path, {**wave, "released": True})
+        pinned_wave.remove(path.parent)
+    except PIN_ERRORS as error:
+        raise SystemExit(f"cannot release Codex wave: {error}") from None
+    print(json.dumps({"wave": str(path), "released": True}, ensure_ascii=False))
+
+
 def launch(args):
+    wave_arg = getattr(args, "wave", None)
+    if wave_arg is None:
+        launch_child(args)
+        return
+    if args.cli != "codex" or getattr(args, "trust_hooks", False) or args.task is not None:
+        raise SystemExit("--wave requires an idle Codex launch and forbids --trust-hooks")
+    try:
+        path = pinned_wave.wave_path(wave_arg)
+        if not path.is_file():
+            raise pinned_wave.PinError("wave receipt is missing")
+    except PIN_ERRORS as error:
+        raise SystemExit(f"pinned launch withheld: {error}; see shared-cache readiness") from None
+    with lock_run(path):
+        try:
+            wave = pinned_wave.read_wave(path)
+            if wave.get("released"):
+                raise pinned_wave.PinError("wave has been released")
+            pinned_wave.ensure_shared_guards_are_preserved(codex_home())
+            pinned_wave.verify_herdr()
+            trusted = pinned_wave.verify(path, wave, Path(args.cwd).expanduser().resolve(strict=True))
+        except PIN_ERRORS as error:
+            raise SystemExit(f"pinned launch withheld: {error}; see shared-cache readiness") from None
+        launch_child(args, path, wave, trusted)
+
+
+def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     cwd = Path(args.cwd).expanduser()
     title = normalized_title(getattr(args, "title", None))
     name = terminal_name(args.name) if args.name else child_name(cwd.name, title)
@@ -513,8 +577,12 @@ def launch(args):
     if args.task is not None and not args.task.strip():
         raise SystemExit("first message is empty")
     quota = launch_quota(args, model)
-    home = args.parent or os.environ.get("HC_TERMINAL_ID")
+    home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
     result_path = None
+    child = None
+    if wave:
+        codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
+        child = [wave["binary"], *codex_args[1:]]
     if not args.dry_run:
         terminals = hc_json("ls")["terminals"]
         if home:
@@ -533,31 +601,72 @@ def launch(args):
             raise SystemExit(f"no such directory: {cwd}")
         result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
     warn_linked_worktree(cwd)
-    argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
-            "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
-            *(["--parent", home] if home else ["--no-parent"]),
-            *child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
-                        trust_hooks=trust_hooks)]
+    if child is None:
+        child = child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
+                           trust_hooks=trust_hooks)
+    labels = {"title": title} if title else {}
+    if wave:
+        labels[pinned_wave.WAVE_LABEL] = wave["market"]
+        params = {"argv": child, "cwd": str(cwd.resolve()), "name": name, "parent": home,
+                  "no_parent": home is None, "no_notify": True, "outlive_parent": True, "labels": labels,
+                  "env": {"CODEX_HOME": str(wave_path.parent / "home"), "CLAUDE_PLUGIN_ROOT": "",
+                          "PYTHONDONTWRITEBYTECODE": "1"}}
+        argv = ["hc", "connect"]
+    else:
+        argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
+                "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
+                *(["--parent", home] if home else ["--no-parent"]), *child]
     if args.dry_run:
         preview = {"name": name, **resolved, **quota, "argv": argv}
+        if wave:
+            preview["terminal_run"] = params
         if title:
             preview["title"] = title
         if args.task is not None:
             preview["task"] = first_prompt(args.cli, args.task, handoff)
         print(json.dumps(preview, ensure_ascii=False))
         return
+    receipt = result_path.with_name("run.json")
+    if wave:
+        wave["children"].append(str(receipt))
+        try:
+            write_json(wave_path, wave)
+        except OSError as error:
+            raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
     try:
-        stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
-                                timeout=LAUNCH_LOOKUP_SECONDS).stdout
-    except subprocess.SubprocessError as error:
+        if wave:
+            reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
+        else:
+            stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
+                                    timeout=LAUNCH_LOOKUP_SECONDS).stdout
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"hc run failed ({error}); a child may be running, so do not retry the launch. "
-                         f"Find terminal {name!r} with hc ls") from None
+                         f"Find terminal {name!r} with hc ls"
+                         + (f"; wave reference retained for {receipt}" if wave else "")) from None
     try:
-        address = json.loads(stdout)["address"]
-    except (ValueError, TypeError, KeyError) as error:
+        if wave:
+            error = reply.get("error") or {}
+            kind = (error.get("data") or {}).get("kind")
+            if kind in {"name_taken", "spawn_failed", "invalid_params"} or error.get("code") in {-32601, -32602}:
+                wave["children"].remove(str(receipt))
+                try:
+                    write_json(wave_path, wave)
+                    receipt.parent.rmdir()
+                except OSError as cleanup_error:
+                    raise SystemExit(f"Herdr rejected the launch and started no child. "
+                                     f"Could not clear reservation {receipt}: {cleanup_error}") from None
+                raise SystemExit(f"Herdr rejected the pinned launch: {kind or error.get('code')}: "
+                                 f"{error.get('message', '')}")
+            address = reply["result"]["address"]
+        else:
+            address = json.loads(stdout)["address"]
+        if not isinstance(address, str) or not address:
+            raise ValueError("invalid terminal address")
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
         raise SystemExit(f"hc run printed no terminal address ({error}); a child may be running, so do not "
-                         f"retry the launch. Find terminal {name!r} with hc ls. Output: {stdout[:200]!r}") from None
+                         f"retry the launch. Find terminal {name!r} with hc ls."
+                         + (f" Wave reference retained for {receipt}" if wave else f" Output: {stdout[:200]!r}")) from None
     try:
         terminal, lookup_error = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS), None
         if not isinstance(terminal, dict) or not isinstance(terminal.get("created_ms"), int):
@@ -571,12 +680,17 @@ def launch(args):
         run["trust_hooks"] = True
     if lookup_error is not None:
         run["launched_ms"] = launched_ms
-    if args.cli == "codex" and (versions := installed_plugin_versions()):
+    if wave:
+        run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup, cwd=str(cwd.resolve()))
+    elif args.cli == "codex" and (versions := installed_plugin_versions()):
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
-    receipt = result_path.with_name("run.json")
-    write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+    try:
+        write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+    except OSError as error:
+        raise SystemExit(f"{address}: the child may be running, but the launch receipt could not be "
+                         f"written to {receipt}: {error}. Inspect the terminal before retrying.") from None
     print(json.dumps({**run, "run": str(receipt), "result": str(result_path)}, ensure_ascii=False), flush=True)
     if lookup_error is not None:
         detail = ("do not retry the launch: Claude may already hold its launch prompt"
@@ -590,80 +704,6 @@ def launch(args):
         raise SystemExit(f"{address}: parent changed at launch; {detail}")
     if args.task:
         send(SimpleNamespace(address=address, message=args.task, run=receipt))
-
-
-def render_t3_thread_launch(args):
-    if getattr(args, "trust_hooks", False):
-        raise SystemExit("--trust-hooks is unavailable on T3: t3_thread_launch has no Codex startup argv field; "
-                         "use Herdr for this option")
-    cwd = Path(args.cwd).expanduser()
-    title = normalized_title(getattr(args, "title", None))
-    model = args.model.strip()
-    if not model:
-        raise SystemExit("--model must not be blank")
-    refuse_banned_model(model)
-    if args.cli == "claude" and not model.startswith("claude-"):
-        raise SystemExit(f"T3 takes a full Claude model id such as claude-sonnet-5-5, not {model!r}; "
-                         "use the id orchestrator_capabilities lists")
-    if args.cli == "codex" and model.lower() in CODEX_FAMILIES:
-        raise SystemExit(f"T3 takes the Codex slug orchestrator_capabilities lists for {model!r}, not the family name")
-    target = T3_TARGETS[args.cli]
-    if args.effort not in target["efforts"]:
-        raise SystemExit(f"T3 {target['provider']} effort must be one of {', '.join(target['efforts'])}")
-    if args.effort == "ultra" and "luna" in re.split(r"[^a-z0-9]+", model.lower()):
-        raise SystemExit(f"T3 codex model {model!r} has no 'ultra' effort")
-    handoff = launch_handoff(args, cwd)
-    text = first_prompt(args.cli, args.message, handoff)
-    if not cwd.is_dir():
-        raise SystemExit(f"no such directory: {cwd}")
-    cwd = cwd.resolve()
-    quota = launch_quota(args, model)
-    result_path = Path(tempfile.mkdtemp(prefix="dispatch-")) / "result.json"
-    model_selection = {"instanceId": target["provider"], "model": model,
-                       "options": [{"id": target["effort_option"], "value": args.effort}]}
-    run = {"backend": "t3", "cli": args.cli, "model": model, "effort": args.effort, "cwd": str(cwd),
-           "model_selection": model_selection, "created_ms": time.time_ns() // 1_000_000, **quota}
-    if title:
-        run["title"] = title
-    receipt = result_path.with_name("run.json")
-    write_json(receipt, {**run, "handoff": handoff})
-    guard = (f"You start in {cwd}. If you started anywhere else, stop before any change and report that "
-             "in the result file; a worktree the task skill creates from there is fine.")
-    single = "Write summary as one JSON string (join its lines with \\n), never an array."
-    message = f"{text}\n\n{guard} {report_instruction(result_path)} {single}"
-    print(json.dumps({**run, "run": str(receipt), "result": str(result_path),
-                      "project_lookup": {"tool": "t3_project_list", "workspaceRoot": str(cwd)},
-                      "t3_thread_launch": {"title": title or cwd.name, "modelSelection": model_selection,
-                                           "workspaceStrategy": {"type": "root"}, "message": message}},
-                     ensure_ascii=False))
-
-
-def record(args):
-    path = Path(args.run).resolve()
-    resume = getattr(args, "resume", False)
-    ids = {key: (getattr(args, key) or "").strip() for key in ("thread_id", "project_id")}
-    if resume and any(getattr(args, key) is not None for key in ids):
-        raise SystemExit("--resume takes no --thread-id or --project-id")
-    if not resume:
-        for key, value in ids.items():
-            if not value:
-                raise SystemExit(f"--{key.replace('_', '-')} must not be blank")
-    with lock_run(path):
-        run = load_run(path)
-        if run.get("backend") != "t3":
-            raise SystemExit(f"{path} is not a T3 receipt; a Herdr receipt records its terminal address at launch")
-        if resume:
-            if not run.get("thread_id"):
-                raise SystemExit(f"{path} records no thread yet; record --thread-id first")
-            _, written = read_result(path)
-            update = {"previous_result": written, "resumed_ms": time.time_ns() // 1_000_000}
-        else:
-            for key, value in ids.items():
-                if run.get(key) not in (None, value):
-                    raise SystemExit(f"{path} already records {key} {run[key]}")
-            update = ids
-        write_json(path, {**run, **update})
-    print(json.dumps({"run": str(path), **update}, ensure_ascii=False))
 
 
 def matches_sent_message(rows, message):
@@ -816,6 +856,40 @@ def send(args):
         send_task(args, run_path)
 
 
+def verify_pinned_delivery(run, terminal):
+    labels = terminal.get("labels") or {}
+    if not run or not run.get("wave"):
+        if pinned_wave.WAVE_LABEL in labels:
+            raise SystemExit("pinned task withheld; supply its launch receipt with --run")
+        return
+    try:
+        path = pinned_wave.wave_path(run["wave"])
+        wave = pinned_wave.read_wave(path)
+        argv = (terminal.get("foreground") or {}).get("argv") or []
+        if (wave.get("released") or labels.get(pinned_wave.WAVE_LABEL) != wave["market"]
+                or not argv or not Path(argv[0]).is_absolute() or Path(argv[0]).resolve() != Path(wave["binary"])
+                or "--no-daemon" not in argv or "--dangerously-bypass-hook-trust" in argv
+                or (terminal.get("status") or {}).get("app") != "codex"):
+            raise pinned_wave.PinError("Herdr could not confirm the isolated Codex process")
+        if run.get("wave_trusted_at_start") is not True:
+            raise pinned_wave.PinError("review each required hook natively, then close and relaunch this idle child")
+        pinned_wave.ensure_shared_guards_are_preserved(codex_home())
+        if not pinned_wave.verify(path, wave, Path(run["cwd"])):
+            raise pinned_wave.PinError("required Codex hooks lack native trust")
+    except PIN_ERRORS as error:
+        raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
+
+
+def verify_delivery_turn(run, terminal):
+    verify_pinned_delivery(run, terminal)
+    if run and run.get("wave"):
+        current = hc_json("get", run["address"])
+        verify_terminal(run, current)
+        if current["state"] != "live" or any(current.get(key) != terminal.get(key)
+                                             for key in ("turn", "status", "foreground")):
+            raise SystemExit(f"{run['address']}: pinned task withheld; the terminal changed during verification")
+
+
 def send_task(args, run_path):
     address = args.address
     if not args.message.strip():
@@ -828,8 +902,6 @@ def send_task(args, run_path):
     screen_reads = 0
     if run_path:
         run = load_run(run_path)
-        if run.get("backend") == "t3":
-            raise SystemExit(f"{run_path} is a T3 receipt; answer that child through the T3 thread tools")
         if run["cli"] != "codex" or run["address"] != address:
             raise SystemExit("receipt is for another terminal or CLI")
         confirm_launch_identity(run_path, run, locked=True)
@@ -876,7 +948,7 @@ def send_task(args, run_path):
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             if screen in {"warning", "warning-view"}:
-                if (not run or run.get("trust_hooks") is not True or run["sent"] is not False
+                if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
                         or dismissed_bypass_notice):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
@@ -968,6 +1040,7 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; no clear Codex input line (check dialogs or drafts)")
             time.sleep(SCREEN_POLL_SECONDS)
 
+        verify_delivery_turn(run, terminal)
         message = args.message
         if run:
             if not continuation:
@@ -1049,6 +1122,8 @@ def send_task(args, run_path):
                 matches_paste = screen == "paste" or (screen == "collapsed" and not send_failed)
                 idle_paste = (status == "idle" or (continuation and status == "done")) and matches_paste
                 if idle_paste and previous_idle_paste and not retried_enter:
+                    if run and run.get("wave"):
+                        verify_delivery_turn(run, terminal)
                     hc_json("keys", address, "enter")
                     retried_enter = saw_trace = True
                 if time.monotonic() >= deadline:
@@ -1084,9 +1159,13 @@ def send_task(args, run_path):
                 time.sleep(SCREEN_POLL_SECONDS)
 
         for attempt in range(2):
-            if attempt and run and run["send_acknowledged"]:
-                run["send_acknowledged"] = False
-                write_json(run_path, run)
+            if attempt:
+                if run and run.get("wave"):
+                    verify_delivery_turn(run, terminal)
+                if run and run["send_acknowledged"]:
+                    run["send_acknowledged"] = False
+                    write_json(run_path, run)
+                print("warning: the submission left no trace; sending it once more", file=sys.stderr)
             send_error = None
             try:
                 hc_json("send", *guard, "--", address, message)
@@ -1108,7 +1187,6 @@ def send_task(args, run_path):
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
-            print("warning: the submission left no trace; sending it once more", file=sys.stderr)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as err:
         reason = ("Herdr could not confirm delivery; inspect the screen before retrying" if attempted_send
                   else "task withheld; Herdr could not read Codex readiness")
@@ -1121,7 +1199,91 @@ def collect(args):
     if force and not args.close:
         raise SystemExit("--force requires --close")
     with lock_run(path) if args.close else nullcontext():
-        collect_result(path, args.close, force, getattr(args, "stall_minutes", STALL_MINUTES))
+        report = collect_result(path, args.close, force, getattr(args, "stall_minutes", STALL_MINUTES),
+                                warn_drift=not getattr(args, "brief", False))
+    print(brief_report(report) if getattr(args, "brief", False) else json.dumps(report, ensure_ascii=False))
+
+
+def watch_stop_reason(report):
+    return report["stop_reason"] or ("plugin_drift" if report.get("plugin_drift") else None)
+
+
+def brief_report(report):
+    result = report["result"] or {}
+
+    def field(value):
+        lines = str(value).splitlines() if value is not None else []
+        return lines[0].strip() if lines else ""
+
+    status = result.get("status")
+    if not status or (status == "done" and report["status"] == "working"):
+        status = "finished" if report["state"] == "finished" else report["status"]
+    return " · ".join((report["address"], *(field(value) or "-" for value in (
+        status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report),
+    ))))
+
+
+def reached_outcome(report, outcomes):
+    result = report["result"] or {}
+    reported = result.get("status")
+    stopped = report["state"] == "finished" or report["status"] in {"idle", "done"}
+    return ((reported in outcomes and (reported != "done" or stopped))
+            or ("idle" in outcomes and report["status"] == "idle")
+            or ("stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished")))
+
+
+def remaining_wait(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired("dispatch wait", 0)
+    return remaining
+
+
+def herdr_error_kind(error):
+    try:
+        return json.loads(error.stderr)["error"]["kind"]
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def wait(args):
+    pending = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
+    deadline = time.monotonic() + args.timeout
+    previous = {}
+    try:
+        while pending:
+            next_pending = []
+            working = None
+            for path in pending:
+                report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
+                line = brief_report(report)
+                if previous.get(path) != line:
+                    print(line, flush=True)
+                    previous[path] = line
+                if not reached_outcome(report, args.until):
+                    next_pending.append(path)
+                    if working is None and report["state"] == "live" and report["status"] == "working":
+                        working = report["address"]
+            pending = next_pending
+            if not pending:
+                return
+            interval = min(WAIT_POLL_SECONDS, remaining_wait(deadline))
+            next_poll = time.monotonic() + interval
+            if working and interval > 1:
+                with suppress(subprocess.TimeoutExpired):
+                    reply = hc_rpc("terminal.wait", {"terminal": working, "timeout": 1, "caller": None}, interval)
+                    error = reply.get("error")
+                    if error and (error.get("data") or {}).get("kind") != "not_found":
+                        raise SystemExit(f"Herdr wait failed: {error.get('message', 'unknown error')}")
+                    result = reply.get("result") or {}
+                    if result.get("reason") == "message":
+                        raise SystemExit(f"Herdr wait interrupted by message from {result.get('from', 'unknown sender')}")
+            if (delay := next_poll - time.monotonic()) > 0:
+                time.sleep(delay)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("dispatch wait timed out") from None
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"dispatch wait could not read Herdr: {error}") from None
 
 
 def wait_for_terminal_exit(run):
@@ -1192,7 +1354,7 @@ def last_commit_ms(cwd):
         return 0
 
 
-def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), ())):
+def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), ()), *, deadline=None):
     """Return a one-line diagnosis and the number of extra screen reads."""
     changed, removed = drift
     facts = terminal.get("status") or {}
@@ -1226,7 +1388,8 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
-        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=2)
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
+        snapshot = hc_json("read", "--lines", "0", run["address"], timeout=timeout)
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
         snapshot, notice = {}, None
@@ -1262,16 +1425,7 @@ def repeated_review_categories(result):
     return sorted(set(earlier["categories"]).intersection(later["categories"]))
 
 
-def t3_stop_reason(run, result, written, stall_minutes):
-    if result and result["status"] in {"done", "merged", "ready", "blocked"}:
-        return None
-    last_ms = max(run.get("created_ms") or 0, run.get("resumed_ms") or 0, (written or 0) // 1_000_000)
-    if last_ms > time.time_ns() // 1_000_000 - stall_minutes * 60_000:
-        return None
-    return f"No result {'update' if result else 'file'} for {stall_minutes} minutes"
-
-
-def collect_result(path, close, force, stall_minutes):
+def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
         result, written = read_result(path)
@@ -1282,24 +1436,35 @@ def collect_result(path, close, force, stall_minutes):
         result, written = None, None
     if written == run.get("previous_result"):
         result, written = None, None
-    if run.get("backend") == "t3":
-        if close:
-            raise SystemExit("a T3 child stops through t3_thread_interrupt, not collect --close")
-        print(json.dumps({"backend": "t3", "thread_id": run.get("thread_id"), "project_id": run.get("project_id"),
-                          "result": result,
-                          "stop_reason": t3_stop_reason(run, result, written, stall_minutes),
-                          "scope_decision_categories": repeated_review_categories(result), "closed": False},
-                         ensure_ascii=False))
-        return
-    confirm_launch_identity(path, run, locked=close)
-    terminal = hc_json("get", run["address"])
+    timeout = remaining_wait(deadline) if deadline is not None else None
+    if deadline is not None and run.get("closed_reason"):
+        return {"address": run["address"], "status": None, "state": "finished", "result": result,
+                "stop_reason": None}
+    try:
+        confirm_launch_identity(path, run, locked=close, timeout=timeout)
+        terminal = hc_json("get", run["address"], **({"timeout": remaining_wait(deadline)} if timeout else {}))
+    except subprocess.CalledProcessError as error:
+        if deadline is not None and herdr_error_kind(error) == "not_found":
+            return {"address": run["address"], "status": None, "state": "finished", "result": result,
+                    "stop_reason": "Herdr terminal no longer exists"}
+        raise
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
     finished = terminal["state"] == "finished"
     closed = {}
     reason, reads = None, 0
-    changed, removed = plugin_drift(run) if run["cli"] == "codex" and not finished else ([], [])
-    if changed:
+    changed, removed = [], []
+    if run["cli"] == "codex" and not finished:
+        if run.get("wave"):
+            try:
+                wave_path = pinned_wave.wave_path(run["wave"])
+                wave = pinned_wave.read_wave(wave_path)
+                pinned_wave.verify_files(wave_path, wave, check_binary=False)
+            except PIN_ERRORS as error:
+                changed = removed = [f"pinned wave unverifiable: {error}"]
+        else:
+            changed, removed = plugin_drift(run)
+    if changed and warn_drift:
         print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
               "stop the child before its next Git write", file=sys.stderr)
     if close:
@@ -1314,13 +1479,13 @@ def collect_result(path, close, force, stall_minutes):
         closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
     else:
-        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed))
-    print(json.dumps({"address": run["address"], "status": status, "state": terminal["state"],
+        reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed),
+                                          deadline=deadline)
+    return {"address": run["address"], "status": status, "state": terminal["state"],
                       "result": result, "stop_reason": reason,
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
                       "screen_reads": run["screen_reads"], "collect_screen_reads": reads,
-                      **({"plugin_drift": changed} if changed else {}), **closed},
-                     ensure_ascii=False))
+                      **({"plugin_drift": changed} if changed else {}), **closed}
 
 
 def warn_stale_local_base(repo):
@@ -1450,10 +1615,19 @@ def main(argv):
     launch_parser.add_argument("--task", help="send the first Codex task after launch")
     launch_parser.add_argument("--trust-hooks", action="store_true",
                                help="bypass persisted hook trust for this Herdr Codex launch (explicit authorization)")
+    launch_parser.add_argument("--wave", help="verified Codex wave receipt from dispatch pin")
     launch_parser.add_argument("--keep-connectors", action="store_true")
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
     launch_parser.set_defaults(func=launch)
+    pin_parser = sub.add_parser("pin", help="create a verified private Codex wave from an agent-toolkit commit")
+    pin_parser.add_argument("--repo", required=True)
+    pin_parser.add_argument("--commit", required=True)
+    pin_parser.add_argument("--codex", required=True, help="absolute path to the native Codex executable")
+    pin_parser.set_defaults(func=pin)
+    release_parser = sub.add_parser("release", help="remove a verified Codex wave after closing its children")
+    release_parser.add_argument("wave")
+    release_parser.set_defaults(func=release)
     send_parser = sub.add_parser("send")
     send_parser.add_argument("address")
     send_parser.add_argument("message")
@@ -1467,34 +1641,27 @@ def main(argv):
     collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
     collect_parser.add_argument("--close", action="store_true")
     collect_parser.add_argument("--force", action="store_true", help="close even when the owned child has no final result")
+    collect_parser.add_argument("--brief", action="store_true", help="one line with the child report and stop reason")
     collect_parser.set_defaults(func=collect)
-    prompt_parser = sub.add_parser("prompt")
-    prompt_parser.add_argument("--cli", choices=["claude", "codex"], required=True)
-    prompt_parser.add_argument("--model", required=True)
-    prompt_parser.add_argument("--effort", required=True)
-    prompt_parser.add_argument("--cwd", required=True)
-    prompt_parser.add_argument("--work-kind", choices=["queue", "new", "standalone"], required=True)
-    prompt_parser.add_argument("--request", required=True, help="verbatim original user request")
-    prompt_parser.add_argument("--unit", required=True, help="assigned unit")
-    prompt_parser.add_argument("--git-limits", required=True, help="verbatim Git limits")
-    prompt_parser.add_argument("--title", help="short task title recorded in the receipt")
-    prompt_parser.add_argument("--trust-hooks", action="store_true", help="unavailable on T3; use Herdr")
-    prompt_parser.add_argument("message")
-    for launch_command in (launch_parser, prompt_parser):
-        launch_command.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")
-        launch_command.add_argument("--user-pinned", action="store_true",
-                                    help="the user explicitly selected this CLI, model or effort")
-        launch_command.add_argument("--approve-critical", action="store_true",
-                                    help="the user explicitly approved use of a critical CLI")
-    prompt_parser.set_defaults(func=render_t3_thread_launch)
-    record_parser = sub.add_parser("record")
-    record_parser.add_argument("run")
-    record_parser.add_argument("--thread-id")
-    record_parser.add_argument("--project-id")
-    record_parser.add_argument("--resume", action="store_true",
-                               help="before answering a paused T3 child: hide its current result, restart the stall clock")
-    record_parser.set_defaults(func=record)
+    wait_parser = sub.add_parser("wait", help="watch receipts until each reaches a selected outcome")
+    wait_parser.add_argument("runs", nargs="+")
+    wait_parser.add_argument("--until", default=",".join(WAIT_DEFAULT),
+                             help=f"comma-separated outcomes (default: {','.join(WAIT_DEFAULT)})")
+    wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")
+    wait_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
+    wait_parser.set_defaults(func=wait)
+    launch_parser.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")
+    launch_parser.add_argument("--user-pinned", action="store_true",
+                               help="the user explicitly selected this CLI, model or effort")
+    launch_parser.add_argument("--approve-critical", action="store_true",
+                               help="the user explicitly approved use of a critical CLI")
     args = parser.parse_args(argv)
+    if args.command == "wait":
+        args.until = set(args.until.split(","))
+        if not args.until <= set(WAIT_OUTCOMES):
+            wait_parser.error("--until must be a comma-separated list of " + ", ".join(WAIT_OUTCOMES))
+        if args.timeout < 1 or args.stall_minutes < 1:
+            wait_parser.error("--timeout and --stall-minutes must be positive")
     if args.command == "collect" and args.stall_minutes < 1:
         collect_parser.error("--stall-minutes must be positive")
     for stream in (sys.stdout, sys.stderr):

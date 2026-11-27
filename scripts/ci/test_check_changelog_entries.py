@@ -13,9 +13,11 @@ Run: python3 scripts/ci/test_check_changelog_entries.py
 """
 
 import importlib.util
+import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).parent / "check_changelog_entries.py"
 spec = importlib.util.spec_from_file_location("check_changelog_entries", SCRIPT)
@@ -153,8 +155,13 @@ def main() -> int:
             empty_root.mkdir()
             mod.REPO_ROOT = empty_root
             try:
-                check("a missing DEFAULT changelog fails instead of silently no-opping",
-                      mod.main([]) == 1)
+                with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}):
+                    check("a missing default file-queue changelog fails", mod.main([]) == 1)
+                with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "github"}):
+                    check("GitHub issues need no default changelog", mod.main([]) == 0)
+                    bad = errors_for(empty_root, over)
+                    check("GitHub callers can still explicitly check a file",
+                          bool(bad) and mod.main([str(empty_root / "CHANGELOG.md")]) == 1)
             finally:
                 mod.REPO_ROOT = root
 

@@ -13,7 +13,7 @@ Who writes which transition: `harness-invariants.md` → *Reconciliation Contrac
 
 | State | Meaning |
 |-------|---------|
-| `[ ]` | Queued. The cycle leaves selected items `[ ]` and deletes the line at cleanup; the `CHANGELOG.md` entry is the closure record |
+| `[ ]` | Queued. The cycle leaves selected items `[ ]` and deletes the line at cleanup; the file queue's `CHANGELOG.md` entry is the closure record |
 | `[>]` | Legacy active marker — the current cycle never writes it; reconcile reverts a leftover to `[ ]` |
 | `[x]` | Legacy done marker — never written; delete one by hand once `CHANGELOG.md` or git history records the closure |
 

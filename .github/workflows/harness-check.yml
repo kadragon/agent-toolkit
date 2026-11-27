@@ -163,7 +163,7 @@ jobs:
       - name: Test changelog validation
         run: python3 scripts/ci/test_check_changelog_entries.py
 
-      - name: Check changelog entries
+      - name: Check file-queue changelog entries
         run: python3 scripts/ci/check_changelog_entries.py
 
       - name: Test version bump script

@@ -17,12 +17,12 @@ character cap is what actually stops entries from ballooning, and it is the rule
 kept re-stating. Review owns the rest.
 
 Usage:
-  python3 scripts/ci/check_changelog_entries.py [PATH ...]   # default: CHANGELOG.md
+  python3 scripts/ci/check_changelog_entries.py [PATH ...]   # default: file-queue CHANGELOG.md
 """
 
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 MAX_LEN = 160
 ENTRY_RE = re.compile(r"^- \[done\]")
@@ -44,7 +44,7 @@ def _link_error(link: str) -> str | None:
     if not target:
         return "is an anchor with no path"
     candidate = Path(target)
-    if candidate.is_absolute():
+    if candidate.anchor or PureWindowsPath(target).anchor:
         return "is absolute — the contract requires a repo-relative path"
     root = REPO_ROOT.resolve()  # resolve both sides: /var is a symlink to /private/var
     resolved = (root / candidate).resolve()
@@ -123,6 +123,18 @@ def _unreleased_range(lines: list[str]) -> range:
 
 def main(argv: list[str]) -> int:
     explicit = bool(argv)
+    if not explicit:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "dev/skills/task-next/scripts"))
+        from queue_backend import QueueError, resolve
+
+        try:
+            backend = resolve(str(REPO_ROOT))["backend"]
+        except QueueError as error:
+            print(f"ERROR: {error}")
+            return 1
+        if backend == "github":
+            print(f"SKIP: the {backend} backend does not use the file-queue changelog.")
+            return 0
     paths = [Path(a) for a in argv] or [REPO_ROOT / "CHANGELOG.md"]
 
     errors: list[str] = []

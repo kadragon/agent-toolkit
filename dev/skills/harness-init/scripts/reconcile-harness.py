@@ -347,7 +347,11 @@ def main() -> None:
         title = tasks_title(tasks_content)
 
         if status == "done":
-            append_changelog(title)
+            backend = queue_state()
+            if backend is None:
+                return
+            if backend["backend"] != "github":
+                append_changelog(title)
             remainder = strip_sprint_block(tasks_content)
             if remainder is None:
                 TASKS.unlink()

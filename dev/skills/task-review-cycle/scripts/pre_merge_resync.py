@@ -13,7 +13,7 @@ tracked tree. Steps:
 3. Read what the branch bumped, from its merge-base to HEAD: every `plugin.json` under a
    `.claude-plugin/` or `.codex-plugin/` directory and every `SKILL.md` whose version changed,
    each by exactly one semver step — that step is the level re-applied. A multi-step change
-   stops the run. The branch's `CHANGELOG.md` must only add entry lines; they are re-inserted.
+   stops the run. On the file queue, the branch's `CHANGELOG.md` may only add entry lines.
 4. `git merge --no-ff --no-commit <remote>/<base>`. A single one-line conflict hunk on the file's
    own version field takes base's side; any other conflict, or any failure before the merge
    commit, aborts the merge and stops.
@@ -33,6 +33,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
+from queue_backend import QueueError, resolve  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 STATE = HERE.parent.parent / "task-next" / "scripts" / "cycle_state.py"
@@ -269,6 +272,16 @@ def load_insert():
     return module.insert_changelog_entry
 
 
+def changelog_entries(merge_base, changed_paths):
+    if CHANGELOG not in changed_paths:
+        return []
+    # The last file item can be pruned on the branch, or the first can be added there.
+    repo = str(Path.cwd())
+    if all(resolve(repo, rev=rev)["backend"] == "github" for rev in ("HEAD", merge_base)):
+        return []
+    return branch_entries(merge_base)
+
+
 def resync(base, remote):
     branch = git("symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
     if not branch or branch == base:
@@ -292,7 +305,7 @@ def resync(base, remote):
     merge_base = out("merge-base", "HEAD", target)
     names = out("diff", "--name-only", merge_base, "HEAD").splitlines()
     bumps = branch_bumps(merge_base, names)
-    entries = branch_entries(merge_base) if CHANGELOG in names else []
+    entries = changelog_entries(merge_base, names)
     if entries and git("cat-file", "-e", f"{target}:{CHANGELOG}", check=False).returncode:
         raise Stop("error", f"base no longer has {CHANGELOG}; resync by hand")
     insert = load_insert() if entries else None
@@ -350,6 +363,8 @@ def main(argv=None):
         result = resync(args.base, args.remote)
     except Stop as stop:
         result = {"status": stop.status, "message": str(stop), **stop.extra}
+    except QueueError as error:
+        result = {"status": "error", "message": f"cannot resolve the queue backend: {error}"}
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["status"] in ("up-to-date", "resynced") else 1
 

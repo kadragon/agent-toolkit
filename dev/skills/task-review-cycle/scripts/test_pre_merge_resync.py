@@ -13,10 +13,12 @@ Exits 0 on success, 1 on the first failure.
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parent / "pre_merge_resync.py"
 CONTRACT = ("**Approval source:** user-invoked: fixture workflow\n"
@@ -113,6 +115,18 @@ def test_classify():
     check(module.classify("1.2.3", "2.0.0") == "major", "major")
     check(module.classify("1.0.0", "1.0.2") is None, "two steps are not one level")
     check(module.bump("1.0.1", "minor") == "1.1.0", "bump minor")
+
+
+def test_file_queue_transition_keeps_branch_entries():
+    spec = importlib.util.spec_from_file_location("resync", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for head, base in (("backlog", "github"), ("github", "backlog")):
+        selected = {"HEAD": head, "base": base}
+        with patch.object(module, "resolve", side_effect=lambda repo, rev: {"backend": selected[rev]}), \
+             patch.object(module, "branch_entries", return_value=["entry"]):
+            check(module.changelog_entries("base", ["CHANGELOG.md"]) == ["entry"],
+                  "resync dropped file-queue entries when the backend changed on the branch")
 
 
 def test_two_branches_both_merge(tmp):
@@ -386,15 +400,34 @@ def test_multi_step_bump_stops(tmp):
     check(git(repo, "rev-parse", "HEAD") == head, "HEAD moved on a multi-step bump")
 
 
+def test_issue_queue_archive_merges_without_changelog_replay(tmp):
+    repo = setup(tmp)
+    branch(repo, "feat/issues", {**release("1.0.1"), "issue.txt": "done\\n"}, "[TEST] issue work")
+    archive = repo / "docs" / "archive"
+    archive.mkdir(parents=True)
+    git(repo, "mv", "CHANGELOG.md", "docs/archive/CHANGELOG.md")
+    git(repo, "commit", "-qm", "[TEST] archive changelog")
+    git(repo, "push", "-q", "origin", "feat/issues")
+    branch(repo, "feat/base-change", {"base.txt": "advance\\n"}, "[TEST] advance base")
+    squash_merge(repo, "feat/base-change")
+    git(repo, "checkout", "-q", "feat/issues")
+    with patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "github"}):
+        rc, result = resync(repo)
+    check(rc == 0 and result["status"] == "resynced", f"issue-queue resync failed: {result}")
+    check(not (repo / "CHANGELOG.md").exists() and (archive / "CHANGELOG.md").is_file(),
+          "issue-queue resync resurrected the root changelog or lost its archive")
+
+
 def main():
     test_classify()
+    test_file_queue_transition_keeps_branch_entries()
     for test in (test_two_branches_both_merge, test_version_line_conflict_takes_base,
                  test_non_version_conflict_stops, test_mixed_hunk_in_version_file_stops,
                  test_denied_writes_nothing, test_multi_step_bump_stops,
                  test_commit_authority_required, test_body_version_line_is_not_a_version_conflict,
                  test_base_deleted_changelog_stops, test_failed_commit_aborts_merge,
                  test_unpushed_merge_is_pushed_on_rerun, test_multi_plugin_suffix_rewritten,
-                 test_line_endings_kept, test_runs_from_subdirectory):
+                 test_line_endings_kept, test_runs_from_subdirectory, test_issue_queue_archive_merges_without_changelog_replay):
         with tempfile.TemporaryDirectory() as tmp:
             test(Path(tmp))
     print("pre_merge_resync: all tests passed")

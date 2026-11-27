@@ -268,7 +268,7 @@ def test_main_github_origin_reconciles_only_the_sprint():
         check(f"{status}: no file-queue report", "Backlog" not in result["stdout"] and
               "reverted" not in result["stdout"], result)
         check(f"{status}: no sprint file remains", not result["tasks_exists"], result)
-        check(f"{status}: only done is logged", ("Example sprint" in result["changelog_body"]) == (status == "done"))
+        check(f"{status}: existing changelog unchanged", result["changelog_body"] == "# Changelog\n", result)
 
     legacy = "# Backlog\n\n## Last file item\n- [>] Restore me\n"
     tasks = "# Example sprint\n\nstatus: failed\n\n## Covers\n\n- [ ] Restore me\n"

@@ -5,7 +5,7 @@ description: >-
   audit. Proposing or pruning individual assets from session evidence instead → harness-
   curate.
 disable-model-invocation: true
-version: 2.2.0
+version: 2.3.0
 ---
 
 # Harness Init
@@ -236,6 +236,6 @@ Repair tools: `scripts/sync-claude-md.sh`, `scripts/symlink-guard.sh`, `scripts/
 
 - **`references/design-rationale.md`** — evidence behind every rule above. Read before deviating.
 - **`references/harness-invariants.md`** — file layout, size policy, spawn contract, verifier
-  floor, absent-role fallbacks, non-interactive defaults, reconciliation and CHANGELOG contracts.
+  floor, absent-role fallbacks, non-interactive defaults, reconciliation and file-queue CHANGELOG contracts.
 - **`references/maturity-levels.md`** — the three-level progression; other references are read at
   the step that cites them. **`examples/agents-md-example.md`** — a complete AGENTS.md.

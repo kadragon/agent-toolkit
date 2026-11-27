@@ -249,9 +249,13 @@ by semver and state it, with the reason, in the hand-off and PR body.
 
 Confirm the branch archive can be read with `cycle_state.py inspect` before pruning any contract
 or backlog line. Cleanup changes are provisional until review and merge succeed. On the issues
-backend cleanup is `prune-tasks` and `changelog` only: skip `prune-backlog`, its marker warning
-and *Blocked-marker sync* — blockers are issue dependencies, and a closed blocker unblocks with
-no edit.
+backend, run only `prune-tasks`. Use the PR as the closure record. Put the resulting plugin
+version(s), e.g. `(dev v4.12.48)`, in the PR title and the owning design pointer, when applicable,
+as `→ docs/design/…` in the PR body. After resync, verify the title against the final manifests,
+including on resume. If versions changed, authorize `pr-write` and update the PR title.
+Issue dependencies resolve when their blocker closes.
+On the file queue, use `prune-backlog` and `changelog` for the selected backlog backend,
+even if pruning its last item changes future backend resolution.
 
 Leave everything uncommitted — it lands in the review cycle's first commit. Your judgment is
 *which* lines are done; the edits are scripted and refuse (exit 1, nothing written) on an
@@ -268,12 +272,12 @@ NODES="$CYCLE_DIR/../scripts/task_nodes.py"
 python3 "$NODES" prune-tasks --file tasks.md --block "<h1 title>"
 # backlog backend only: the backlog.md line(s) this cycle completed, verbatim
 printf '%s\n' "<each completed - [ ] line>" | python3 "$NODES" prune-backlog --file backlog.md
-# one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
-python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
+# backlog backend only: one CHANGELOG entry; drop --plugin/--version in a repo with no versioned plugin
+AGENT_QUEUE_BACKEND=backlog python3 "$NODES" changelog --file CHANGELOG.md --title "<title>" \
   --plugin <plugin> --version <X.Y.Z> [--link docs/<owning-doc>.md]
 ```
 
-A heading is dropped only where this cycle emptied it. Never re-add a pruned line as `[x]`: the
+On the file queue, a heading is dropped only where this cycle emptied it. Never re-add a pruned line as `[x]`: the
 `CHANGELOG.md` entry is the closure record. A repo rule that demands `[x]` history is contract
 drift for `harness-curate`. `changelog` validates the line against the
 repo's `scripts/ci/check_changelog_entries.py` (one line, ≤160 chars, at most one `→` link, no

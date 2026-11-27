@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.14.0
+version: 1.15.0
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -61,7 +61,7 @@ assignment (`docs/conventions.md`). A clean resumed branch reuses its commit; if
 the base is empty and no review remains, report no work and stop here. End the body with
 `Verification:` + the exact command and exit code of each `cycle_state.py inspect` → `evidence`
 record, only when `tree_matches_current` is true (else `none recorded`): `retire` deletes the
-archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`). Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref (`Closes #12`; refs from the hand-off, else the archived `## Covers`), kept in every later message (`../task-next/references/cycle.md` → *Covered refs*); none for the `backlog` backend or a ref outside `## Covers`.
+archive, so commit and PR body keep the only record (`cursor/plugins@9b93e81:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`). Issues backend: just above `Verification:`, one `close_ref_template` line per covered ref (`Closes #12`; refs from the hand-off, else the archived `## Covers`), kept in every later message (`../task-next/references/cycle.md` → *Covered refs*); none for the `backlog` backend or a ref outside `## Covers`. For PR title and body metadata, see `task-next/references/cycle.md` → *Cleanup*.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -184,7 +184,7 @@ bash "$SKILL_DIR/scripts/commit-and-push.sh" --no-push --files "${FILES_TO_STAGE
 bash "$SKILL_DIR/scripts/commit-and-push.sh" --files "${FILES_TO_STAGE}" --message "${COMMIT_MESSAGE}"
 ```
 
-Skip the commit if Step 4 made no changes. GitHub: authorize `pr-write`, then update the PR body
+Skip the commit if Step 4 made no changes. GitHub: authorize `pr-write`, then update PR metadata
 with `gh pr edit`, keeping every closing line. `--no-hub`: reclaim late panel sources, report and stop.
 
 ## Step 6: Merge
@@ -218,7 +218,7 @@ never reset hard; recover within established authority. Lite is done only once t
 
 **Hub path** — first, in the feature checkout (its worktree, if any), `python3
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
-pushed a merge of base, bump and CHANGELOG redone, so CI restarts; `conflict`/`denied`/`error` →
+pushed a merge of base, reapplied the bump and file-queue CHANGELOG entries, and restarted CI. `conflict`/`denied`/`error` →
 stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
 Then `references/ci-failure-handling.md`: `scripts/ci-wait.sh <PR_NUMBER>` (under the 600s
 ceiling), reclaim a skipped panel source after CI green (`references/late-source-reclaim.md`), then

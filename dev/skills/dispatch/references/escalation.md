@@ -56,7 +56,7 @@ the existing ladder below.
 ## Relaunch
 
 Escalating relaunches the same phase. Check the replacement pair before stopping the current child
-with `launch --dry-run` (Herdr) or `prompt` (T3). If quota refuses it, keep the current child and
+with `launch --dry-run`. If quota refuses it, keep the current child and
 choose a permitted rung or ask the user. For a `--tree` run, read the worktree slug first
 (`hc read --lines 60 <address>`). When authorized to end the old child, run
 `dispatch.py collect <old-receipt> --close --force` and confirm it closed. Clean up the old

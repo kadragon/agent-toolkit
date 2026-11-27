@@ -103,7 +103,7 @@ def check_backlog_history(root: Path, env: dict[str, str] | None = None) -> list
         return []
     out = [
         "CONFLICT backlog-history: the plugin deletes a closed item's `- [ ]` line (`prune-backlog`) "
-        "and records the closure in CHANGELOG.md; this repo keeps closed items in backlog.md as `[x]`.",
+        "and records the closure in the file queue's CHANGELOG.md; this repo keeps closed items as `[x]`.",
     ]
     if items:
         headings = sorted({h for _, h, _ in items})

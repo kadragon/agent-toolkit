@@ -1,8 +1,56 @@
 # Codex readiness
 
+## Verified wave
+
+Use `dispatch.py pin --repo "<agent-toolkit checkout>" --commit "<full verified commit SHA>"
+--codex "<absolute native Codex executable>"`. Review the chosen commit, including the
+hook manifests and the files their commands run. Each wave exports the dev and prod plugins
+into its own local marketplace with a unique name and installs them in a private `CODEX_HOME`.
+A shared marketplace refresh cannot replace those files. Prepare a new wave for a later commit.
+Dispatch protects the snapshot files against ordinary edits and verifies the plugin trees,
+including executable scripts and skills, before each launch
+and send. Codex's effective hook inventory must point at those same cached bytes.
+
+The command prints a wave receipt, the private home and the native executable. If needed,
+sign in with `codex login` using that exact executable and `CODEX_HOME` only for that process.
+The private home uses file-backed credentials. Keep its path private, and leave the shared
+home, settings and trust decisions intact.
+
+1. Start the review child with the normal Codex launch fields and `--wave <wave receipt>`,
+   omitting `--task`. Confirm the target directory in Codex when required.
+2. In the native hook dialog, review and approve each required hook individually. Check the
+   hook paths and commands in the pinned cache. Close the review child with
+   `collect <child receipt> --close --force`. The restart runs SessionStart with approval.
+3. Start the task children idle with the same `--wave`. Use `send --run <child receipt>`
+   for each task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
+   incomplete hook inventory, a missing snapshot, or an unverifiable Herdr process holds delivery.
+4. Close each child with `collect --close` when it stops. Retain those receipts until
+   `dispatch.py release <wave receipt>` removes the private home and snapshot. An uncertain
+   launch or missing child receipt blocks release. Inspect the launch and confirm its terminal
+   stopped before manual recovery.
+
+The adapter uses Codex CLI 0.172.0 and its local marketplace and app-server hook inventory.
+Dispatch starts the native Codex executable via Herdr's `hc connect` and `terminal.run`.
+The call sets `CODEX_HOME` for the one terminal. Herdr 0.1.22 exposes this in its API on
+Windows even though its `hc run` command has no `--env` option. The delivery gate requires
+Herdr to identify the foreground program as that Codex executable.
+
+The private home omits shared user configuration, instructions and personal plugins. If the
+task requires those guards or settings, use the shared-cache wait unless equivalent guards
+are present in the verified plugin snapshot and the private configuration preserves the policy.
+The adapter holds launch and delivery when it detects additional user-level hooks, rules or
+approval, sandbox, feature or shell environment settings. It also holds when Herdr cannot pass the
+environment, the Codex CLI is incompatible, or the project exposes hooks outside the verified
+snapshot or a hook command leads to an external entrypoint. Explicit pinned launches stay blocked in those cases. Use the shared-cache readiness
+wait below separately.
+
+Sources: [Codex local marketplaces](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli),
+[native hook trust](https://learn.chatgpt.com/docs/hooks), and
+[Herdr JSON-RPC](https://github.com/herdrdev/herdr-core/blob/master/schema/README.md#connecting).
+
 ## Hook trust at launch
 
-Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex
+On the shared cache, Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex
 with or without `--task`. Check `codex --help` for support (verified on Codex CLI 0.172.0).
 Verify the enabled hook sources and commands and get explicit authorization for the bypass.
 The flag runs enabled hooks without requiring persisted trust for this process and does not
@@ -11,10 +59,9 @@ On the first send for a verified opt-in receipt, dispatch opens a single warning
 It closes the viewer with Esc only when the sole Startup page contains the exact native
 hook-trust bypass notice. It then rechecks the composer and waits for the terminal to be idle
 before sending. Other warnings still require manual review.
-Omit `--trust-hooks` to use the manual review below. T3 has no startup argument field in this
-dispatch path. See [the T3 backend](t3-backend.md#launch).
+Omit `--trust-hooks` to use the manual review below.
 
-## Before a Codex wave
+## Before a shared-cache Codex wave
 
 A Codex startup that updates a kadragon plugin invalidates running Codex children's hook
 approval. Before starting one while another is mid-cycle, fetch agent-toolkit, then compare each
@@ -40,7 +87,7 @@ it is the idle child started for this preparation.
 Before a long wave, run `codex plugin marketplace upgrade` and then the warm-up above, so no
 startup during the wave finds a newer plugin to install.
 
-## Plugin update during a wave
+## Plugin update during a shared-cache wave
 
 Any Codex startup outside the wave can update a kadragon plugin and delete the old version
 directory. Live children keep pointing at it: every tool call prints `• Hook failed … os error 2`
