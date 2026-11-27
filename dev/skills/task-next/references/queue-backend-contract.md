@@ -54,7 +54,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
-| `rejected` | yes | optional `rev` | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
+| `rejected` | yes | optional `rev` (historical file queue) | `entries[]`: `ref`, `title`, `reason`, `refile_bar` |
 | `reject` | no | `ref`, `reason`, `refile_bar` | `ref` |
 | `defer` | no | `ref`, `reason` | `ref` |
 | `publish` | no | optional `queue_limits` | as `create`, for the pending store's drafts |
@@ -63,6 +63,8 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 (`open`/`deferred`/`blocked`), in selection order. `parked[]`: `ref`, `kind`
 (`blocked`/`deferred`), `payload`. `claimed[]`: `ref`, `by` (the worktree holding it). A
 `backlog` `list` also returns `rev`: the commit SHA its `ref` resolved to, or `null`.
+With automatic backend selection on GitHub, a historical file `show` or `rejected` request
+reads that snapshot even when it has no open items. An explicit backend override still applies.
 
 Forge constraints the contract keeps: a claim needs no remote write, closing happens through the
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
@@ -148,8 +150,9 @@ hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fall
   uncapped (issues have no h3/h2 kinds, so the backlog's type priority reduces to number order).
 - **Paging.** Every connection selection reads (issues, labels, blockers, sub-issues, closing
   PRs) is paged up to a page limit. Hitting it sets `incomplete: true` with a warning, leaves out
-  any issue read only in part or whose same-repo parent or open sub-issue could not be read,
-  and fails with exit 1 when no candidate remains. `ref` and `tasks` in a `list` request are ignored.
+  any issue read only in part, any child whose same-repo parent was unread, and any parent with
+  a same-repo open queue child that was unread. It fails with exit 1 when no candidate remains.
+  `ref` and `tasks` in a `list` request are ignored.
 - `show` takes `#N`, refuses an issue that fails the trust gate, and returns `blocked_by` as its
   open blockers plus the issue `state`.
 

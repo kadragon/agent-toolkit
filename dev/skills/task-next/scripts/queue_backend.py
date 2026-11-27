@@ -313,8 +313,11 @@ def backlog_list(req: dict) -> dict:
     return {"candidates": candidates, "parked": parked, "claimed": claimed, "warnings": warnings, "rev": rev}
 
 
+_FILE_REF_RE = re.compile(r"(backlog\.md|tasks\.md):(\d+)")
+
+
 def _parse_ref(ref: object) -> tuple[str, int]:
-    m = re.fullmatch(r"(backlog\.md|tasks\.md):(\d+)", ref) if isinstance(ref, str) else None
+    m = _FILE_REF_RE.fullmatch(ref) if isinstance(ref, str) else None
     if not m:
         raise QueueError(f"ref must be backlog.md:<line> or tasks.md:<line>, got {ref!r}")
     return m.group(1), int(m.group(2))
@@ -445,7 +448,7 @@ _DEFERRED_LINE_RE = re.compile(r"^\s*Deferred:\s*(.*?)\s*$", re.IGNORECASE | re.
 _NODE_SEL = {
     "labels": "name",
     "blockedBy": "number state repository { nameWithOwner }",
-    "subIssues": "number title state repository { nameWithOwner }",
+    "subIssues": "id number title state repository { nameWithOwner }",
     "closedByPullRequestsReferences": "number url state authorAssociation",
 }
 _CONN_ARGS = {"closedByPullRequestsReferences": ", includeClosedPrs: false"}
@@ -471,6 +474,10 @@ SHOW_QUERY = (
     f"issue(number: $number) {{ {_ISSUE_FIELDS} }} }} }}"
 )
 DESCRIBE_QUERY = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { visibility } }"
+UNREAD_CHILDREN_QUERY = (
+    "query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { id authorAssociation "
+    "labels(first: 100) { pageInfo { hasNextPage } nodes { name } } } } }"
+)
 
 
 def _conn_query(name: str) -> str:
@@ -699,12 +706,28 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
         if n in deferred:
             parked.append({"ref": f"#{n}", "kind": "deferred", "payload": _deferred_reason(issue)})
 
+    parents = {n: issue for n, issue in queued.items()
+               if n not in partial and not is_queued_parent(issue) and n not in claims
+               and not blocked[n] and n not in deferred}
+    missing_children = set()
+    if truncated:
+        missing_children = {s["id"] for issue in parents.values() for s in issue["subIssues"]["nodes"]
+                            if s["state"] == "OPEN" and s["repository"]["nameWithOwner"].lower() == slug
+                            and s["number"] not in seen}
+    unread_children = _issue_details(runner, UNREAD_CHILDREN_QUERY, sorted(missing_children))
+
     def why_not(sub: dict) -> str | None:
         if sub["repository"]["nameWithOwner"].lower() != slug:
             return "in another repository"
         n = sub["number"]
-        if n in partial or (truncated and n not in seen):
+        if n in partial:
             return "incomplete read"
+        if truncated and n not in seen:
+            unread = unread_children[sub["id"]]
+            if unread["authorAssociation"] in TRUSTED_AUTHORS and (
+                QUEUE_LABEL in _labels(unread) or unread["labels"]["pageInfo"]["hasNextPage"]
+            ):
+                return "incomplete read"
         if n not in queued:
             return f"not a trusted {QUEUE_LABEL} issue"
         if n in claims:
@@ -716,9 +739,7 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES) -> dict
         return None
 
     candidates: list[dict] = []
-    for n, issue in sorted(queued.items()):
-        if n in partial or is_queued_parent(issue) or n in claims or blocked[n] or n in deferred:
-            continue
+    for n, issue in sorted(parents.items()):
         p = issue.get("parent")
         if truncated and p and p["repository"]["nameWithOwner"].lower() == slug and p["number"] not in seen:
             # its parent may be a queue item on a page never read: never let a sub-issue stand alone
@@ -954,6 +975,11 @@ def _refile_match(index: dict[str, dict], key: str) -> tuple[str, dict | None]:
     return marker_key, found
 
 
+def _item_match(index: dict[str, dict], item: dict) -> tuple[str, dict | None]:
+    key = item["key"]
+    return _refile_match(index, key) if item.get("refile_completed") else (key, index.get(key))
+
+
 def key_index(runner, owner: str, name: str, items: list[dict]) -> dict[str, dict]:
     batch = {item["key"] for item in items}
     targets = {target for item in items for target in [item["parent_key"], *item["blocked_by"]]
@@ -1143,16 +1169,15 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
             ready.append(item)
         if not ready:
             return result
-        matches = {item["key"]: (_refile_match(index, item["key"]) if item.get("refile_completed")
-                                 else (item["key"], index.get(item["key"]))) for item in ready}
-        details = _issue_details(runner, KEY_RELATIONS_QUERY, sorted({
-            found["id"] for item in ready if (found := matches[item["key"]][1])
+        detail_ids = {
+            found["id"] for item in ready if (found := _item_match(index, item)[1])
             and not (item.get("refile_completed") and found.get("state") == "CLOSED")
-        }))
+        }
+        details = _issue_details(runner, KEY_RELATIONS_QUERY, sorted(detail_ids))
         ensure_labels(runner, owner, name, [QUEUE_LABEL] + [x for i in ready for x in i["labels"]])
         for item in ready:
             key = item["key"]
-            marker_key, found = matches[key]
+            marker_key, found = _item_match(index, item)
             if item.get("refile_completed") and found and found.get("state") == "CLOSED":
                 result["incomplete"].append({"key": key, "relation": "rejected",
                                              "ref": f"#{found['number']}", "error": "issue closed without completion"})
@@ -1160,7 +1185,7 @@ def _post_items(owner: str, name: str, items: list[dict], runner, from_store: bo
                 continue
             reused = found is not None
             if found is not None:
-                found = {**found, **details[found["id"]]}
+                found = {**found, **details.get(found["id"], {})}
             else:
                 # An item with relations is filed without `task-queue` and labelled only once every
                 # relation landed, so selection never offers it before its blockers are recorded.
@@ -1495,8 +1520,15 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     repo = req.get("repo")
     if not (isinstance(repo, str) and os.path.isabs(repo) and os.path.isdir(repo)):
         raise QueueError(f"request repo must be an existing absolute path, got {repo!r}")
-    revision_field = {"list": "ref", "describe": "ref", "show": "rev", "rejected": "rev"}.get(op)
-    backend = resolve(repo, env, req.get(revision_field) if revision_field else None)
+    item_ref = req.get("ref")
+    historical_file_read = bool(req.get("rev")) and (
+        op == "rejected" or (op == "show" and isinstance(item_ref, str) and _FILE_REF_RE.fullmatch(item_ref))
+    )
+    revision = req.get("ref") if op in ("list", "describe") else req.get("rev") if historical_file_read else None
+    backend = resolve(repo, env, revision)
+    if historical_file_read and backend["source"] == "github-host":
+        # A historical file request can refer to a snapshot containing only rejected or finished items.
+        backend = {"backend": "backlog", "source": "historical-file"}
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
         if (
@@ -1961,7 +1993,7 @@ def _fx_queue() -> tuple[list[dict], list[dict]]:
 
 
 def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = None, private: bool = False,
-             calls: list | None = None):
+             calls: list | None = None, child_details: dict | None = None):
     import copy
 
     def run(args: list[str]) -> tuple[int, str, str]:
@@ -1971,6 +2003,8 @@ def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = 
                 k, v = args[i + 1].split("=", 1)
                 if k == "query":
                     query = v
+                elif k.endswith("[]"):
+                    variables.setdefault(k[:-2], []).append(v)
                 else:
                     variables[k] = int(v) if a == "-F" else v
         if calls is not None:
@@ -1981,6 +2015,9 @@ def _fake_gh(pages: dict, conn_pages: dict | None = None, issues: dict | None = 
             repo = {"visibility": "PRIVATE" if private else "PUBLIC"}
         elif query == SHOW_QUERY:
             repo = {"issue": copy.deepcopy((issues or {}).get(variables["number"]))}
+        elif query == UNREAD_CHILDREN_QUERY:
+            nodes = [(child_details or {})[issue_id] for issue_id in variables["ids"]]
+            return 0, json.dumps({"data": {"nodes": nodes}}), ""
         else:
             conn = next(c for c in _NODE_SEL if query == _conn_query(c))
             repo = {"issue": {conn: copy.deepcopy((conn_pages or {})[(variables["number"], conn, variables["after"])])}}
@@ -2084,15 +2121,24 @@ def run_github_tests(tmp: str, git, write) -> None:
             "an issue whose connection hit the limit is left out, not half-read")
     _assert("#24" not in [c["ref"] for c in data["candidates"]] and any("#24" in w for w in data["warnings"]),
             "a truncated read never offers a sub-issue whose parent was not read")
-    group_pages = {None: _fx_conn([page1[0], next(issue for issue in page1 if issue["number"] == 4),
-                                 dict(next(issue for issue in page1 if issue["number"] == 3),
-                                      subIssues=_fx_conn([{"number": n, "state": "OPEN", "title": "[FIX] item",
-                                                         "repository": {"nameWithOwner": "owner/repo"}}
-                                                         for n in (4, 8)]))], "p1")}
-    truncated_group = github_list(dict(req, full_scan=True), _fake_gh(group_pages), max_pages=1)
+    children = [{"id": f"I_{n}", "number": n, "state": "OPEN", "title": "[FIX] item",
+                 "repository": {"nameWithOwner": "owner/repo"}} for n in (4, 8)]
+    group_parent = dict(next(issue for issue in page1 if issue["number"] == 3), subIssues=_fx_conn(children))
+    group_child = next(issue for issue in page1 if issue["number"] == 4)
+    group_pages = {None: _fx_conn([page1[0], group_parent, group_child], "p1")}
+    child_details = {"I_8": {"id": "I_8", "authorAssociation": "OWNER",
+                             "labels": _fx_conn([{"name": QUEUE_LABEL}])}}
+    group_runner = _fake_gh(group_pages, child_details=child_details)
+    truncated_group = github_list(dict(req, full_scan=True), group_runner, max_pages=1)
     _assert(truncated_group["incomplete"] and [c["ref"] for c in truncated_group["candidates"]] == ["#1"]
             and "incomplete: #3 left out; incomplete read of sub-issues #8" in truncated_group["warnings"],
             "a parent with one eligible and one unread child is withheld while unrelated work remains eligible")
+    child_details["I_8"]["labels"] = _fx_conn([])
+    truncated_group = github_list(dict(req, full_scan=True), group_runner, max_pages=1)
+    _assert([c["ref"] for c in truncated_group["candidates"]] == ["#1", "#3"]
+            and truncated_group["candidates"][1]["excluded"] == [
+                {"ref": "#8", "reason": "not a trusted task-queue issue"},
+            ], "truncation does not withhold a parent solely because a child lacks the queue label")
     stranger = {None: _fx_conn([_fx_issue(2, "x", assoc="NONE")], "p1")}
     try:
         github_list(dict(req), _fake_gh(stranger), max_pages=1)
@@ -2154,6 +2200,18 @@ def run_github_tests(tmp: str, git, write) -> None:
                 "historical show and rejected both use the file queue from list's revision")
     except QueueError as e:
         _assert(False, f"historical show and rejected both use the file queue from list's revision: {e}")
+
+    backlog_path = os.path.join(repo, "backlog.md")
+    write(backlog_path, "# Backlog\n\n## Rejected — do not re-file\n\n- **Old idea** — no demand.\n")
+    git(repo, "add", "backlog.md")
+    git(repo, "commit", "-q", "--no-verify", "-m", "rejections only")
+    try:
+        _, rejected = handle("rejected", dict(req, rev="HEAD"), {}, failing(4, "gh auth login"))
+        _assert(rejected["entries"][0]["title"] == "Old idea",
+                "historical rejected reads a file snapshot with no open items")
+    except QueueError as e:
+        _assert(False, f"historical rejected reads a file snapshot with no open items: {e}")
+    os.remove(backlog_path)
 
     for url in ("ssh://git@github.com:22/owner/repo.git", "git@github.com:owner/repo", "https://github.com/owner/repo/"):
         git(repo, "remote", "set-url", "origin", url)
@@ -2497,6 +2555,13 @@ def run_github_write_tests(tmp: str, git) -> None:
     _, out = handle("create", dict(req, items=[sweep]), {ENV_VAR: "github"}, gh)
     _assert(not out["created"] and not out["pending"] and out["incomplete"][0]["relation"] == "rejected",
             "a recurring finding closed without completion stays closed")
+
+    gh = _FakeGitHub()
+    gh.add(sweep["title"], _KEY_MARKER.format(sweep["key"]), state="CLOSED", reason="COMPLETED")
+    recurrence = {"key": f"{sweep['key']}:after:1", "title": "Explicit recurrence"}
+    _, out = handle("create", dict(req, items=[sweep, recurrence]), {ENV_VAR: "github"}, gh)
+    _assert(len(gh.issues) == 2 and [issue["ref"] for issue in out["created"]] == ["#2", "#2"]
+            and out["created"][1]["reused"], "a later item reuses a recurrence created earlier in the same batch")
 
     gh = _FakeGitHub()
     gh.reject_relation.add(("blocked_by", 2))
