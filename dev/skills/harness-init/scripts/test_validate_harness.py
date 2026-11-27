@@ -39,8 +39,8 @@ class HarnessTests(unittest.TestCase):
     def run_script(self, name="validate-harness.sh", **env):
         result = subprocess.run(
             ["bash", str(SCRIPTS / name)], cwd=self.root,
-            env={**os.environ, "CONTEXT_SIZE_LIMIT": "200", **env},
-            text=True, capture_output=True, check=False,
+            env={**os.environ, "AGENT_QUEUE_BACKEND": "", "CONTEXT_SIZE_LIMIT": "200", **env},
+            text=True, encoding="utf-8", capture_output=True, check=False,
         )
         self.assertEqual(result.stderr, "", result.stderr)
         return result
@@ -50,6 +50,29 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("WARN: 0", result.stdout)
         self.assertIn("LEVEL 1", result.stdout)
+
+    def test_github_origin_without_a_file_queue(self):
+        subprocess.run(
+            ["git", "-C", str(self.root), "config", "remote.origin.url", "git@github.com:fixture/repo.git"],
+            check=True,
+        )
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md absent — expected on the github queue backend", result.stdout)
+        self.assertIn("WARN: 0", result.stdout)
+
+        self.write("backlog.md", "## Old queue\n- [?] stale\n\n```md\n- [ ] snippet\n```\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md is unused on the github queue backend", result.stdout)
+        self.assertNotIn("migrate_backlog.py", result.stdout)
+
+        self.write("backlog.md", "## Queue\n- [ ] Deferred item *(deferred: waiting)*\n\n```md\n- [ ] snippet\n```\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backlog.md has 1 open item(s); this repo stays on the file queue", result.stdout)
+        self.assertIn("migrate_backlog.py", result.stdout)
+        self.assertIn("uses standard checkbox items", result.stdout)
 
     def test_existing_non_numbered_policy_and_one_invariant(self):
         self.write("AGENTS.md", BASE + "## Golden Principles\n- Validate public input → tests.\n")
@@ -91,7 +114,7 @@ class HarnessTests(unittest.TestCase):
                 if path.startswith(".agents/skills/"):
                     (self.root / ".agents/skills").unlink()
                     (self.root / ".claude/skills").mkdir(parents=True)
-                    (self.root / ".agents/skills").symlink_to("../.claude/skills", target_is_directory=True)
+                    (self.root / ".agents/skills").symlink_to(Path("../.claude/skills"), target_is_directory=True)
                 self.write(path, content)
                 result = self.run_script()
                 self.assertEqual(result.returncode, 0, result.stdout)

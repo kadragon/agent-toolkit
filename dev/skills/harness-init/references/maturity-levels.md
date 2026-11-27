@@ -23,7 +23,7 @@ Progressive adoption model. Start at Level 1, advance only when current level is
 | `docs/conventions.md` | rules exist that the linter does not already own |
 | `docs/workflows.md` | the repo runs a defined work cycle worth writing down |
 | `docs/eval-criteria.md` | the repo runs the Sprint Contract flow |
-| `backlog.md` | the repo adopts the backlog/sprint flow |
+| `backlog.md` | the repo adopts the `backlog` backend. GitHub issues queues use the forge for persistent work |
 | Golden Principles | real project invariants exist; no minimum count |
 | Delegation guidance | configured Claude/Codex roles or an actual delegation workflow exist |
 | Token Economy | useful project-specific guidance exists; optional |

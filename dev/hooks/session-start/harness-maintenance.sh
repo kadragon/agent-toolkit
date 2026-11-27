@@ -6,7 +6,8 @@
 # F) check-context-size.sh — warn if AGENTS.md/CLAUDE.md > 200 lines
 # G) record_run.py --check-due — nudge when a harness-curate run is due
 #
-# C (reconcile-harness.py) is intentionally excluded — it mutates backlog.md
+# C (reconcile-harness.py) is intentionally excluded — it closes tasks.md and can
+# update CHANGELOG.md or repair markers on the file queue.
 # and should only run on explicit "harness sync" request via harness-init skill.
 #
 # Guard: only runs in repos with AGENTS.md (harness repos)

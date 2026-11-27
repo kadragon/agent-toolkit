@@ -5,7 +5,7 @@ description: >-
   audit. Proposing or pruning individual assets from session evidence instead → harness-
   curate.
 disable-model-invocation: true
-version: 2.1.0
+version: 2.2.0
 ---
 
 # Harness Init
@@ -136,13 +136,15 @@ failing. Templates are self-describing scaffolds in English; bodies go in the St
 | `docs/delegation.md` | **not at init** — created with the repo's first role by `dev:harness-curate` | this marketplace's own `docs/delegation.md` is the reference shape |
 
 Name skipped docs and their triggers in Step 10 (`validate-harness.sh`: `INFO`).
-### Step 4a: Sprint / backlog files — only if the repo runs sprints
+### Step 4a: Queue and sprint files — only if the repo runs sprints
 
-`backlog.md` from `references/backlog-template.md` when the repo adopts the queue flow — it is
-the only file `dev:task-next` / `dev:task-new` require. `tasks.md` never at init: it exists only
-during an active sprint, holds the Sprint Contract and nothing else, and is deleted at close
-(`references/tasks-template.md`). Both follow the *Reconciliation Contract* in
-`references/harness-invariants.md`.
+Resolve the queue with `dev:task-next` → `references/queue-backend-contract.md` → *Ops*
+(`describe` with `verify_visibility: false`). Create `backlog.md` from
+`references/backlog-template.md` only for a repo adopting the `backlog` backend. A GitHub
+origin without open file items uses issues by default. If it still uses the file queue,
+relay the migration warning from `describe`. Create `tasks.md` only during a sprint to
+hold its Sprint Contract (`references/tasks-template.md`). The *Reconciliation Contract*
+in `references/harness-invariants.md` covers closing it.
 
 ### Step 4b: Roles and orchestrator — none by default
 
@@ -154,7 +156,7 @@ roles exist and a multi-step workflow recurs (route to `skill-creator`).
 The one exception: the user asked for a specific role or orchestrator this session. Create that
 only, after a reachability check — does its trigger fire in this repo's normal work?
 (`qa-verifier` needs editable source; `explorer` needs real modules; `implementer` needs a
-`backlog.md` flow.) Role files carry the spine in `references/harness-invariants.md` → *File
+queue flow.) Role files carry the spine in `references/harness-invariants.md` → *File
 Layout Invariants*; omit `model:` so spawns inherit the session model. Never a generated gate
 pointing at an agent that does not exist.
 
@@ -213,7 +215,7 @@ do not duplicate each other.
 
 Show all five: the full `AGENTS.md`; every created file with a one-line purpose; **what was
 deliberately not created and what would create it** (roles/orchestrator → `harness-curate`
-evidence; each skipped doc → its trigger; `backlog.md` → adopting sprints; sweep → the first
+evidence; each skipped doc → its trigger; `backlog.md` → adopting the file queue; sweep → the first
 drift signal; Layers 1–3 → a level upgrade or a demonstrated risk); the maturity level reached
 and the next level's cost; how to update `AGENTS.md` (the applicable edit policy or its pointer).
 Do not describe a fresh init as drift-proof — only Level 3 makes drift prevention mechanical.

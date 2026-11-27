@@ -46,6 +46,6 @@ The architecture doc is the "lay of the land" — it tells the agent where thing
 ## Writing Tips
 
 - **Be specific about paths.** "Services are in `src/services/`" beats "the service layer."
-- **State the rules, not the aspirations.** If the rule is frequently violated, say so: "Services should not import from controllers. (Currently 3 violations — see backlog.md.)"
+- **State the rules, not the aspirations.** If the rule is frequently violated, name the violations and cite the active queue entries: `backlog.md` on the file backend, issue refs on the issues backend.
 - **Link to enforcement.** "This boundary is enforced by {lint rule / test / CI check}."
 - **Update when the code changes.** A doc that contradicts code is a bug.

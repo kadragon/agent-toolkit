@@ -31,7 +31,7 @@ First match wins:
    (parked ones included); such a repo stays on `backlog` until its file queue is empty. For a
    `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
    absent) `backlog.md` is an error, never a switch to `github`. `describe` honors `ref` the same way,
-   so a caller resolves the backend its `list` calls will use. `list` on such a repo appends the
+   so a caller resolves the backend its `list` calls will use. `describe` and `list` on such a repo include the
    warning `backlog.md has N open item(s); this repo stays on the file queue until you run
    migrate_backlog.py` (*Moving a file queue to issues*).
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
@@ -45,7 +45,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
-| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
+| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template`, optional `warnings[]` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`, `withheld_security` when applicable) |
@@ -116,8 +116,9 @@ guide for the draft advisory route.
 Reads `origin`'s `owner/name` and queries `gh api graphql`. `gh` missing or unauthenticated is a
 hard error (exit 1, naming `gh auth login`) on a read, never a `backlog.md` fallback.
 
-- `describe`: `visibility` from the repo's `isPrivate`, `ops` every op above,
-  `close_ref_template` `"Closes {ref}"`.
+- `describe`: `visibility` from GitHub, `ops` every op above, `close_ref_template`
+  `"Closes {ref}"`. Pass `verify_visibility: false` for local checks that only need the
+  backend. It skips the GitHub request and reports `visibility: unknown`.
 - **Trust gate.** Only open issues labelled `task-queue` **and** authored by
   `OWNER`/`MEMBER`/`COLLABORATOR` are queue items; another author's labelled issue is skipped
   with a warning. Comments are never read.

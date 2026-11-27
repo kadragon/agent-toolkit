@@ -8,7 +8,7 @@ check makes the conflict visible to `harness-curate`, which proposes the repo-si
 
 Contracts checked:
 
-  backlog-history   Closed items leave `backlog.md`: `task_nodes.py prune-backlog` deletes them at
+  backlog-history   On the file backend, closed items leave `backlog.md`: `task_nodes.py prune-backlog` deletes them at
                     cleanup, and the closure record is the `CHANGELOG.md` entry. A repo that keeps
                     `- [x]` lines in `backlog.md`, or documents a rule to keep them, conflicts.
 
@@ -31,12 +31,14 @@ Self-check (--test): exits 0 on PASS, 1 on FAIL. All fixtures live in a tempdir.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "task-next" / "scripts"))
 from backlog_candidates import _strip_fenced_blocks, _strip_html_comments  # noqa: E402
+from queue_backend import QueueError, resolve  # noqa: E402
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _DONE_RE = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
@@ -92,6 +94,8 @@ def grep_docs(root: Path, match) -> list[str]:
 
 def check_backlog_history(root: Path) -> list[str]:
     """Report lines for the backlog-history contract; empty when the repo conforms."""
+    if resolve(str(root.resolve()))["backend"] != "backlog":
+        return []
     backlog = root / "backlog.md"
     items = done_items(backlog.read_text(encoding="utf-8", errors="replace")) if backlog.is_file() else []
     rules = grep_docs(root, is_keep_rule)
@@ -145,7 +149,11 @@ def main(argv: list[str]) -> int:
     if not root.is_dir():
         print(f"Error: not a directory: {root}", file=sys.stderr)
         return 2
-    code, lines = run(root)
+    try:
+        code, lines = run(root)
+    except QueueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     print("\n".join(lines) if lines else "OK: no plugin-contract conflicts")
     return code
 
@@ -192,6 +200,22 @@ def run_tests() -> int:
     text = "\n".join(lines)
     _assert(code == 1, "`[x]` item in backlog.md → conflict")
     _assert("backlog.md:5: - [x] done — verdict" in text, "conflict names the `[x]` line and number")
+
+    github = _repo({
+        "backlog.md": "## Old queue\n- [x] closed\n",
+        "docs/conventions.md": "Keep `[x]` items as history.\n",
+    })
+    subprocess.run(["git", "init", "-q", str(github)], check=True)
+    subprocess.run(
+        ["git", "-C", str(github), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+        check=True,
+    )
+    code, lines = run(github)
+    _assert(code == 0 and not lines, "issues backend skips file lines and local history rules")
+    with (github / "backlog.md").open("a", encoding="utf-8") as backlog:
+        backlog.write("- [ ] still queued\n")
+    code, lines = run(github)
+    _assert(code == 1 and "backlog.md holds 1" in "\n".join(lines), "unmigrated GitHub backlog is still checked")
 
     code, lines = run(_repo({
         "backlog.md": "## Now\n\n- [ ] open\n",

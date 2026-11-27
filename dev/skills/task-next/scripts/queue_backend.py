@@ -1346,7 +1346,8 @@ def github_visibility(repo: str, runner) -> str:
 
 def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
     if op == "describe":
-        visibility = github_visibility(req["repo"], runner)
+        # Local harness checks need the backend itself, not a GitHub visibility query.
+        visibility = "unknown" if req.get("verify_visibility") is False else github_visibility(req["repo"], runner)
         if req.get("verify_visibility") is True and visibility == "unknown":
             raise QueueError("GitHub did not confirm public or private repository visibility")
         return EXIT_OK, {
@@ -1416,8 +1417,8 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
                 raise QueueError("GitHub did not confirm public or private repository visibility")
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
-        elif op == "list" and backend["source"] == "github-open-backlog" and data is not None:
-            data["warnings"].append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
+        elif op in ("describe", "list") and backend["source"] == "github-open-backlog" and data is not None:
+            data.setdefault("warnings", []).append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
         return code, data
     if backend["backend"] == "github":
         code, data = github_op(op, req, runner)
@@ -1893,6 +1894,9 @@ def run_github_tests(tmp: str, git, write) -> None:
     _, described = handle("describe", req, {ENV_VAR: "backlog"}, runner)
     _assert(described["visibility"] == "unknown" and not calls,
             "ordinary file queue descriptions leave visibility unknown without contacting GitHub")
+    _, described = handle("describe", dict(req, verify_visibility=False), {ENV_VAR: "github"}, runner)
+    _assert(described["backend"] == "github" and described["visibility"] == "unknown" and not calls,
+            "harness checks can describe the github backend without contacting GitHub")
     data = github_list(dict(req, full_scan=True, parked=True), runner)
     refs = [c["ref"] for c in data["candidates"]]
     _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#23", "#25", "#13"],

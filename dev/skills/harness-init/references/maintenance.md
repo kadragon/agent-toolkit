@@ -8,7 +8,8 @@ Maintain repo agent instruction files under **minimal-noise policy**.
 - `AGENTS.md` — canonical, minimal operational log (size: `harness-invariants.md` → *AGENTS.md Size Policy*)
 - `CLAUDE.md` — must contain exactly one line: `@AGENTS.md`
 - `.agents/skills` → `../.claude/skills` symlink
-- `backlog.md` / `tasks.md` — follow reconciliation contract (backlog.md = the only persistent queue; tasks.md = Sprint Contract only)
+- `tasks.md` holds Sprint Contracts. The persistent queue is `backlog.md` on the file backend
+  and forge issues on the issues backend. See the reconciliation contract.
 
 All thresholds, paths, contracts live in `harness-invariants.md`. Update there when values change.
 
@@ -68,8 +69,8 @@ Exit codes:
 
 ## C) Harness Reconciliation
 
-Run silently. The script closes the `tasks.md` sprint block per its `status:` and prints one
-status line; what it writes for each status: `harness-invariants.md` → *Reconciliation Contract*.
+Run silently. The script closes the `tasks.md` sprint block per its `status:`. For actions
+on each backend, see `harness-invariants.md` → *Reconciliation Contract*.
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -80,9 +81,10 @@ python3 "$SKILL_DIR/scripts/reconcile-harness.py"
 Output:
 - `Sprint active: <title>` / `Sprint queued: <title>` — leave intact
 - `Sprint '<title>' done. tasks.md removed.` — sprint archived; D-2 applies
-- `Sprint '<title>' failed. Sprint block closed; backlog items reverted to [ ].` — sprint returned to queue
-- `Backlog: N queued, M active` — backlog has pending items
-- `Backlog clear.` — nothing pending
+- `Sprint '<title>' failed. Sprint block closed.` — local sprint closed. The file backend
+  adds `backlog items reverted to [ ]` to the status.
+- On the file backend, `Backlog: N queued, M active` reports file counts and
+  `Backlog clear.` reports an empty file queue. Use the queue listing for issues.
 
 ---
 
@@ -96,17 +98,23 @@ maintained here — that is transcript-driven and lives in `harness-curate`.
 
 Verify **schema** (not content) of harness-related docs. Full schemas in `backlog-template.md` and `tasks-template.md`; minimal assertions below match those templates:
 
-- `backlog.md` items must follow `[ ]` / `[>]` / `[x]` checkbox pattern under `##` headings, except the plain-bullet entries under `## Rejected — do not re-file`
-- `tasks.md` must have: top-level `# Title`, `status:` line, the Sprint Contract fields — and nothing persistent: a `## Review Backlog` / `## Security Fixes` section here is drift, move it to `backlog.md` verbatim
+- File backend: `backlog.md` items follow the `[ ]` / `[>]` / `[x]` checkbox pattern under
+  `##` headings, with plain bullets under `## Rejected — do not re-file`.
+- Issues backend: absence of `backlog.md` is expected. GitHub origins with open file items
+  awaiting migration still use the file backend. Relay the validator's `migrate_backlog.py` pointer.
+- `tasks.md` must have a top-level `# Title`, `status:` line and Sprint Contract fields.
+  Transfer persistent `## Review Backlog` or `## Security Fixes` entries to the resolved queue.
 
 Structural drift detected → fix schema in-place. Do **not** rewrite content.
 
-`backlog.md` missing → repo not fully bootstrapped — point user at harness-init Step 4a, don't guess content. `tasks.md` missing is the **idle state**, not drift: init never creates it and it is deleted at sprint close.
+Point a repo adopting the file backend without `backlog.md` to harness-init Step 4a.
+Absent `tasks.md` indicates an idle sprint.
 
 ### D-2) Doc-worthy capture (when C reported a sprint `done`)
 
-The cycle deletes a finished item's `backlog.md` line at cleanup — git history and the
-`CHANGELOG.md` title become its only record. Before that happens, judge whether the
+At cleanup, the file cycle deletes the finished item and records its title in
+`CHANGELOG.md`. On the issues backend, the closed issue preserves the queue record.
+Judge whether the
 shipped work established something future work must respect: a constraint, an
 invariant, a behavior contract, a design decision. The script cannot make this
 call; you must.
@@ -119,15 +127,14 @@ Signal to judge from (tasks.md is already deleted by C):
 
 If doc-worthy → extract it into the relevant `docs/*.md` (the file named in the
 AGENTS.md docs index) **as a durable rule**, before moving on. If it was a
-routine fix, do nothing — git log already carries it. Never resurrect the
-backlog line; docs is the home for the rule, not the queue.
+routine fix, the existing history suffices. Keep durable rules in the owning doc.
 
 ### D-3) Plan remaining (only when the user asks)
 
 When the user asks what to do next ("남은 작업 계획", "뭐부터 하지", "what's
-next"), summarize the `backlog.md` `[ ]` queue grouped by `##` heading and
-propose an order. Do **not** promote anything to `[>]` or write a `tasks.md` —
-opening a sprint is a separate, deliberate act the user starts explicitly.
+next"), use `dev:task-next` → `references/queue-backend-contract.md` → *Ops* (`list`).
+Summarize open file items by heading or open issues by group, then propose an order.
+Leave sprint creation to the user.
 
 ---
 
@@ -182,7 +189,7 @@ Override threshold via env var: `CONTEXT_SIZE_LIMIT=300 bash ...`.
 | Script | Section | Purpose |
 |--------|---------|---------|
 | `scripts/sync-claude-md.sh` | B | Check CLAUDE.md state; exit 0/1/2 |
-| `scripts/reconcile-harness.py` | C | Close the tasks.md sprint block; report backlog state |
+| `scripts/reconcile-harness.py` | C | Close the sprint block; report counts on the file queue |
 | `scripts/symlink-guard.sh` | E | Ensure .agents/skills symlink |
 | `scripts/check-context-size.sh` | F | Warn when effective CLAUDE.md/AGENTS.md > 200 lines |
 

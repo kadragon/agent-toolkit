@@ -4,13 +4,16 @@ Six workflows. Pick the primary one per cycle. Minor side-effects are allowed (s
 
 Adapt these to the project — not all projects need all six. A small library might only use `code` and `draft`. A large system might use all six.
 
+Use the repository's resolved task queue for persistent work: `backlog.md` on the file
+backend and issues on the issues backend.
+
 ## `plan` — Spec Generation
 
 Expand a short prompt into a full product spec.
 
 1. Expand into `docs/design/{feature}.md`: user stories, high-level tech design, phased feature list. **No granular implementation details** — errors cascade downstream.
 2. Review with user. Don't proceed until approved.
-3. Generate `backlog.md` items from approved spec.
+3. File work from the approved spec in the active queue.
 
 Skip for trivial features.
 
@@ -62,7 +65,7 @@ equivalent inputs, commands, and environment; disclose unavailable independent e
 When the last item of a multi-item feature lands, this grading also covers the feature's
 done-when criteria.
 
-**`backlog.md` format:**
+**File queue format:**
 
 ```markdown
 ## Feature Name
@@ -76,13 +79,13 @@ done-when criteria.
 
 ## `draft` — Documentation
 
-Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, add to `backlog.md`.
+Write or update `docs/`. Ground every claim in current code. Never modify production code. If the doc reveals a missing constraint, file it in the active queue.
 
 ## `constrain` — Architectural Enforcement
 
 1. Write structural test or lint rule first.
 2. Run it.
-3. If current code violates → add remediation to `backlog.md`, don't fix here.
+3. If current code violates the rule, file remediation in the active queue.
 4. Update `docs/architecture.md`.
 
 ## `sweep` — Garbage Collection
@@ -90,7 +93,7 @@ Write or update `docs/`. Ground every claim in current code. Never modify produc
 Fight entropy. Run between features or on a schedule.
 
 - Run automated sweep script (`tools/sweep.sh` or equivalent)
-- List findings in `backlog.md` tagged as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
+- File findings in the active queue as `[doc]`, `[constraint]`, `[debt]`, or `[harness]`
 - Fix trivials inline
 - Leave complex items for later
 - Include harness simplification: "Is this component still compensating for a real model limitation?"
@@ -106,9 +109,9 @@ While in a primary workflow, these side-effects are allowed without switching:
 
 | Primary workflow | Permitted side-effect |
 |------------------|-----------------------|
-| `code` | Add `[doc]` or `[constraint]` item to `backlog.md` when discovering issues |
+| `code` | File a discovered `[doc]` or `[constraint]` item in the active queue |
 | `code` | Update relevant docs after implementation |
-| `draft` | Add `backlog.md` item when doc reveals missing behavior |
+| `draft` | File a queue item when a doc reveals missing behavior |
 | `sweep` | Fix trivial `[doc]` items inline |
 
 **Not permitted:** Writing production code during `draft` or `sweep`.

@@ -8,9 +8,12 @@ Run: python test_reconcile_harness.py
 import contextlib
 import importlib.util
 import io
+import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Load module without executing __main__
@@ -210,7 +213,9 @@ def _read_raw(path: Path) -> str:
         return handle.read()
 
 
-def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | None = None) -> dict:
+def _run_main_in_tmp(
+    tasks_text: str | None, backlog_text: str, changelog_text: str | None = None, *, github_origin: bool = False,
+) -> dict:
     """Run mod.main() against a throwaway tasks.md/backlog.md and capture results.
 
     Returns a dict snapshotting file existence/contents and captured streams
@@ -220,15 +225,24 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         tpath, bpath, cpath = tmp / "tasks.md", tmp / "backlog.md", tmp / "CHANGELOG.md"
-        tpath.write_bytes(tasks_text.encode("utf-8"))
+        if tasks_text is not None:
+            tpath.write_bytes(tasks_text.encode("utf-8"))
         bpath.write_bytes(backlog_text.encode("utf-8"))
         if changelog_text is not None:
             cpath.write_bytes(changelog_text.encode("utf-8"))
+        if github_origin:
+            subprocess.run(["git", "init", "-q", str(tmp)], check=True)
+            subprocess.run(
+                ["git", "-C", str(tmp), "config", "remote.origin.url", "https://github.com/fixture/repo.git"],
+                check=True,
+            )
+        env = dict(os.environ)
+        env.pop("AGENT_QUEUE_BACKEND", None)
         saved = (mod.TASKS, mod.BACKLOG, mod.CHANGELOG)
         mod.TASKS, mod.BACKLOG, mod.CHANGELOG = tpath, bpath, cpath
         out, err = io.StringIO(), io.StringIO()
         try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            with patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 mod.main()
         finally:
             mod.TASKS, mod.BACKLOG, mod.CHANGELOG = saved
@@ -240,6 +254,24 @@ def _run_main_in_tmp(tasks_text: str, backlog_text: str, changelog_text: str | N
             "stdout": out.getvalue(),
             "stderr": err.getvalue(),
         }
+
+
+def test_main_github_origin_reconciles_only_the_sprint():
+    backlog = "# Backlog\n\n## Old queue\n- [>] historical marker\n\n## Empty heading\n"
+    for status in (None, "failed", "done"):
+        tasks = f"# Example sprint\n\nstatus: {status}\n" if status else None
+        result = _run_main_in_tmp(tasks, backlog, "# Changelog\n", github_origin=True)
+        check(f"{status}: legacy file unchanged", result["backlog_body"] == backlog, result)
+        check(f"{status}: no file-queue report", "Backlog" not in result["stdout"] and
+              "reverted" not in result["stdout"], result)
+        check(f"{status}: no sprint file remains", not result["tasks_exists"], result)
+        check(f"{status}: only done is logged", ("Example sprint" in result["changelog_body"]) == (status == "done"))
+
+    legacy = backlog.replace("- [>]", "- [ ]", 1) + "\n- [>] orphan\n"
+    result = _run_main_in_tmp(None, legacy, github_origin=True)
+    check("unmigrated GitHub backlog keeps file reconciliation",
+          result["backlog_body"] == legacy.replace("- [>]", "- [ ]") and
+          "Backlog: 2 queued, 0 active" in result["stdout"], result)
 
 
 def test_main_done_preserves_review_backlog():
@@ -572,6 +604,7 @@ SUITES = [
     ("strip_sprint_block: ignores fenced heading-like lines", test_strip_ignores_fenced_heading_like_lines),
     ("tasks_title: ignores fenced heading-like lines", test_tasks_title_ignores_fenced_heading_like_lines),
     ("strip_sprint_block: status probe is fence-aware", test_strip_status_probe_is_fence_aware),
+    ("main: GitHub origins respect the selected backend", test_main_github_origin_reconciles_only_the_sprint),
     ("main: done preserves Review Backlog", test_main_done_preserves_review_backlog),
     ("main: done changelog one line under Unreleased", test_main_done_changelog_single_line_under_unreleased),
     ("main: done changelog preserves CRLF", test_main_done_changelog_preserves_crlf),

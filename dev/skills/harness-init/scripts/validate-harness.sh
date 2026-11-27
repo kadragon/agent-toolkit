@@ -5,7 +5,7 @@
 # Checks (keep aligned with references/harness-invariants.md):
 #   0. Delegation-surface detection (has_agents / has_orchestrator)
 #   1. Required files exist (AGENTS.md, CLAUDE.md, docs/runbook.md); the other
-#      docs and backlog.md are conditional — absence reported as INFO
+#      docs are conditional — absence reported as INFO
 #   1b. Executable text file line endings (*.sh/*.bash/*.py)
 #   2. AGENTS.md size policy (target ≤100, warn >100, strong warn >200; no size-only failure)
 #   3. All files referenced in AGENTS.md docs index exist
@@ -14,7 +14,7 @@
 #   6. Enforcement layer detected (hooks, pre-commit, or CI)
 #   7. CLAUDE.md is exactly "@AGENTS.md" (sync B invariant)
 #   8. .agents/skills → ../.claude/skills symlink (sync E invariant)
-#   9. backlog.md schema (checkbox items under ## headings; sync D-1)
+#   9. Queue backend and file-queue schema (sync D-1)
 #  10. AGENTS.md carries a concise edit policy or a valid policy pointer
 #  11. .claude/agents/*.md carry the role spine (File Layout Invariants)
 #
@@ -27,6 +27,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJ_DIR="${1:-.}"
 cd "$PROJ_DIR"
 
@@ -107,10 +108,6 @@ for entry in "${conditional_docs[@]}"; do
     why="${entry#*:}"
     [[ -f "$f" ]] && pass "$f exists" || info "$f absent — $why"
 done
-
-# Harness state files (sync C/D-1 operate on these when the sprint flow is used)
-[[ -f "backlog.md" ]] && pass "backlog.md exists" \
-    || info "backlog.md absent — created when the repo adopts the backlog/sprint flow (sync C/D-1 no-op until then)"
 
 # Configuration syntax is a correctness check, not template conformance.
 echo ""
@@ -368,11 +365,54 @@ else
     warn ".agents/skills missing — maintenance routine E will create it on next run"
 fi
 
-# ── 9. backlog.md schema (sync D-1) ────────────────────────
+# ── 9. Queue backend and file-queue schema (sync D-1) ──────
 echo ""
-echo "--- backlog.md Schema (sync D-1) ---"
+echo "--- Queue Backend (sync D-1) ---"
 
-if [[ -f "backlog.md" ]]; then
+if [[ -z "$toml_python" ]]; then
+    fail "queue backend cannot be validated — Python 3.11+ unavailable (python3/python)"
+elif queue_description=$("$toml_python" - "$SCRIPT_DIR/../../task-next/scripts/queue_backend.py" <<'QUEUE_DESCRIPTION'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+request = {"contract": 1, "repo": str(Path.cwd()), "verify_visibility": False}
+result = subprocess.run(
+    [sys.executable, sys.argv[1], "describe"], input=json.dumps(request),
+    capture_output=True, text=True, encoding="utf-8", check=False,
+)
+if result.returncode:
+    sys.exit(result.stderr.strip() or f"queue_backend.py describe exited {result.returncode}")
+description = json.loads(result.stdout)
+backend = description.get("backend")
+if not isinstance(backend, str) or len(backend.splitlines()) != 1 or not backend.strip():
+    sys.exit("queue_backend.py describe did not return a backend name")
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+print(backend)
+for warning in description.get("warnings", []):
+    print(warning)
+QUEUE_DESCRIPTION
+); then
+    mapfile -t queue_lines <<< "$queue_description"
+    queue_backend="${queue_lines[0]}"
+    for warning in "${queue_lines[@]:1}"; do
+        warn "$warning"
+    done
+else
+    fail "could not resolve the task queue backend"
+fi
+
+if [[ -z "${queue_backend:-}" ]]; then
+    :  # The failed backend check above already explains why the schema check cannot run.
+elif [[ "$queue_backend" != "backlog" ]]; then
+    if [[ -f "backlog.md" ]]; then
+        info "backlog.md is unused on the $queue_backend queue backend — file schema check not applicable"
+    else
+        info "backlog.md absent — expected on the $queue_backend queue backend"
+    fi
+elif [[ -f "backlog.md" ]]; then
+    pass "backlog.md exists for the file queue"
     backlog_heading=false
     backlog_checkbox=false
     backlog_bad_box=false
