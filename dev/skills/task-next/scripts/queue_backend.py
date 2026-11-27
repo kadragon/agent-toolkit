@@ -963,7 +963,6 @@ def ensure_labels(runner, owner: str, name: str, labels) -> list[str]:
         try:
             _rest(runner, "POST", labels_path, {"name": label})
         except GhRejected as exc:
-            # A competing writer can create this label after the first GET.
             if "HTTP 422" not in str(exc) or _rest(runner, "GET", label_path, missing_ok=True) is None:
                 raise
         else:
@@ -998,7 +997,6 @@ def github_inventory(req: dict, runner=gh_runner) -> dict:
     entries = []
     for page in _issue_pages(runner, INVENTORY_QUERY, owner, name):
         for issue in page:
-            # The top-level connection filters by task-queue and OPEN before paging.
             if issue["authorAssociation"] in TRUSTED_AUTHORS:
                 entries.append({
                     "ref": f"#{issue['number']}", "title": issue["title"],
@@ -2200,11 +2198,12 @@ def run_github_tests(tmp: str, git, write) -> None:
         _assert(False, "inventory rejects an incomplete scan")
 
     tasks_path = os.path.join(wt, "tasks.md")
-    subprocess.run(
-        [sys.executable, os.path.join(HERE, "cycle_state.py"), "save"], cwd=wt, check=True,
-        input="**Acceptance criteria:**\n- [ ] Covers are saved -> check\n\n"
-        + (bc._read_optional(tasks_path) or ""), text=True, capture_output=True,
-    )
+    key = "a" * 64
+    git_dir = _git(wt, "rev-parse", "--git-dir")
+    archive_dir = os.path.join(repo, ".git", "task-cycle", key)
+    os.makedirs(archive_dir)
+    write(os.path.join(archive_dir, "contract.md"), bc._read_optional(tasks_path) or "")
+    write(os.path.join(wt, git_dir, "task-cycle-contract"), f"cov\n{key}\n")
     os.remove(tasks_path)
     data = github_list(dict(req, full_scan=True), runner)
 
