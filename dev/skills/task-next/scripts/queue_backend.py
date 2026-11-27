@@ -47,6 +47,9 @@ OPS = ("describe", "list", "show", "create", "rejected", "reject", "defer", "pub
 BACKLOG_OPS = ("describe", "list", "show", "create", "rejected")
 EXIT_OK, EXIT_ERROR, EXIT_UNSUPPORTED = 0, 1, 2
 ENV_VAR = "AGENT_QUEUE_BACKEND"
+# `list` on a github.com repo still held on the file queue by its open backlog.md items
+LEGACY_BACKLOG_WARNING = ("backlog.md has {n} open item(s); this repo stays on the file queue until you run "
+                          "migrate_backlog.py")
 _TAG_RE = re.compile(r"^\[([^\[\]\s]+)\]")
 _REFILE_RE = re.compile(r"\s*re-file\s+only\s*(?:with|if|when)?\s*", re.IGNORECASE)
 
@@ -138,8 +141,9 @@ def resolve(repo: str, env: dict[str, str] | None = None, rev: str | None = None
         return {"backend": "adapter", "source": "env", "command": split_command(explicit)}
     host = origin_host(_git(repo, "remote", "get-url", "origin"))
     if host == "github.com":
-        if backlog_open_items(repo, rev):  # the queue `list` will read, not this checkout's
-            return {"backend": "backlog", "source": "github-open-backlog"}
+        open_items = backlog_open_items(repo, rev)  # the queue `list` will read, not this checkout's
+        if open_items:
+            return {"backend": "backlog", "source": "github-open-backlog", "open_items": open_items}
         return {"backend": "github", "source": "github-host"}
     if host:
         cmd = _registry_command(host, env)
@@ -1314,6 +1318,8 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
         code, data = backlog_op(op, req)
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
+        elif op == "list" and backend["source"] == "github-open-backlog" and data is not None:
+            data["warnings"].append(LEGACY_BACKLOG_WARNING.format(n=backend["open_items"]))
         return code, data
     if backend["backend"] == "github":
         code, data = github_op(op, req, runner)

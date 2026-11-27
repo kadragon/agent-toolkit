@@ -31,7 +31,9 @@ First match wins:
    (parked ones included); such a repo stays on `backlog` until its file queue is empty. For a
    `list` with `ref`, the check reads `backlog.md` as committed at `ref`. An unreadable (not
    absent) `backlog.md` is an error, never a switch to `github`. `describe` honors `ref` the same way,
-   so a caller resolves the backend its `list` calls will use.
+   so a caller resolves the backend its `list` calls will use. `list` on such a repo appends the
+   warning `backlog.md has N open item(s); this repo stays on the file queue until you run
+   migrate_backlog.py` (*Moving a file queue to issues*).
 3. `${XDG_CONFIG_HOME:-~/.config}/agent-toolkit/queue-backends.json`, keyed by `origin` host:
    `{"hosts": {"git.example.org": ["python3", "/abs/path/adapter.py"]}}` → that command.
 4. `backlog`.
@@ -158,3 +160,15 @@ per-run approval, in attended and unattended runs alike, and no working-tree cha
 - `reject` (a trusted queue issue): posts that comment, then closes the issue as not planned.
 - `defer` (a trusted queue issue): creates the `deferred` label when missing, replaces any
   `Deferred:` body line with `Deferred: <reason>`, and adds the label.
+
+## Moving a file queue to issues
+
+`../scripts/migrate_backlog.py [--repo <toplevel>] [--apply] [--json]` moves a github.com repo's
+`backlog.md` onto the `github` backend; the mapping is in its docstring. The default run is a dry
+run that prints the plan — check it against `backlog.md` line by line before `--apply`, which
+files through `create` under the standing `queue-write` grant. A line is deleted only once its
+issue and every relation it needs are confirmed (a group's lines and a pending item's blocker stay
+together); exit 3 means lines were kept — re-run, and the filed issues are reused by their
+`backlog-migrated:<sha1>` keys. `Security Fixes` items on a public repo are refused and stay. The
+deletion is a working-tree change to commit; the repo resolves to `github` once no open item is
+left on the default branch.
