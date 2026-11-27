@@ -218,7 +218,7 @@ class DispatchReceiptTests(DispatchTestCase):
         for kind in ("queue", "new"):
             for limits in (
                 None, "", " \n ", "  Not   Specified.  ", "N/A", "TBD", "unknown", "unknown limits",
-                "implementation-only",
+                "unspecified", "none specified", "(none)", "?", "미지정", "없음", "implementation-only",
             ):
                 with self.subTest(kind=kind, limits=limits), patch("dispatch.hc_json") as hc:
                     with self.assertRaisesRegex(SystemExit, "--no-git-writes"):
@@ -1787,6 +1787,10 @@ class WorkflowDocsTests(unittest.TestCase):
                       "limits, pass `--git-limits='none'`.", launch_step)
         self.assertIn("For standalone work that needs no Git writes and has no user-provided limits, "
                       "pass `--git-limits='not specified'`.", launch_step)
+        launch_examples = re.findall(r"```sh (.*?dispatch\.py.*?) ```", launch_step)
+        self.assertEqual(len(launch_examples), 2)
+        for example in launch_examples:
+            self.assertNotIn("--git-grant-recorded", example)
         self.assertIn("After confirming task delivery to every new child", watch_step)
         self.assertIn("Once a parallel PR branch has been pushed, fetch and merge its PR base", watch_step)
 

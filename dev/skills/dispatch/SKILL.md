@@ -128,14 +128,14 @@ which Git actions the user authorizes. See [Git authority in the handoff](refere
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli claude --model <model> --effort <effort> \
   --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
-  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' --git-grant-recorded '<first message>'
+  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' '<first message>'
 ```
 
 Always pass `--title`, a short unit summary in the user's language (Herdr label `title`, receipt, name `<repo>-<slug>`).
 Use `--work-kind queue` for queued work, `new` for new tasks, or `standalone` for the last row
 in step 2. Forward explicit Git grants and limits verbatim. If an explicit full-workflow invocation
 grants the required Git writes and sets no narrower limits, pass `--git-limits='none'`.
-For a free-form queue or new grant, add `--git-grant-recorded` after verifying it.
+Add `--git-grant-recorded` for queue or new work only after verifying the free-form grant in `--git-limits`.
 For work authorized to proceed without Git writes, pass `--no-git-writes`. Add `--git-limits` to forward additional restrictions.
 For standalone work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`. Preview with `--dry-run`.
@@ -163,7 +163,7 @@ the reviewed plugin version and send through receipts. For shared-cache launches
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
   --effort <effort> --cwd "<repo path>" --title='<short title>' --work-kind <kind> --request='<verbatim user request>' \
-  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' --git-grant-recorded --task '<first message>'
+  --unit='<assigned unit>' --git-limits='<verbatim Git grant and limits>' --task '<first message>'
 ```
 
 - `send` checks the idle composer before sending and checks the screen again before confirming

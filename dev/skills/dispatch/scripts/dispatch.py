@@ -515,8 +515,9 @@ def launch_handoff(args, cwd):
     limits = " ".join((args.git_limits or "").casefold().split())
     standard_limits = limits in {"none", "no-push", "pr-only"}
     grant_recorded = getattr(args, "git_grant_recorded", False)
-    no_authority = limits.rstrip(" .!?") in {
-        "", "-", "n/a", "not specified", "tbd", "unknown", "unknown limits", "implementation-only",
+    no_authority = not standard_limits and limits.strip(" .!?()-") in {
+        "", "n/a", "none", "none specified", "not specified", "unspecified", "tbd",
+        "unknown", "unknown limits", "implementation-only", "미지정", "없음",
     }
     if getattr(args, "no_git_writes", False):
         if standard_limits:
