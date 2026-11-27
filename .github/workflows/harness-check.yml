@@ -250,6 +250,9 @@ jobs:
       - name: Run dev/skills/task-next/scripts/queue_backend.py --test
         run: python3 dev/skills/task-next/scripts/queue_backend.py --test
 
+      - name: Run dev/skills/task-next/scripts/migrate_backlog.py --test
+        run: python3 dev/skills/task-next/scripts/migrate_backlog.py --test
+
       - name: Run dev/skills/dispatch/scripts/test_dispatch.py
         run: python3 dev/skills/dispatch/scripts/test_dispatch.py
 

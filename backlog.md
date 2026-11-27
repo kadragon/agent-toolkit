@@ -25,16 +25,9 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
   Done when: `test_reconcile_harness.py`, `test_validate_harness.py`, `check_plugin_contracts.py --test` and `scripts/ci/test_check_harness_drift.py` pass with new GitHub-origin cases; `validate-harness.sh` and `check_harness_drift.py` green on this repo; the remaining harness-init prose states the split as well — `references/maintenance.md` ("`backlog.md` = the only persistent queue", the schema checks, the `Backlog: N queued` / `Backlog clear.` messages, the queue summary), `harness-init/SKILL.md` Step 4a, `maturity-levels.md`, `golden-principles-guide.md`, `architecture-template.md` — plus the `harness-curate/SKILL.md` `[x]` backlog-history line and the `session-start/harness-maintenance.sh` comment
   Approach: backend from `queue_backend.py describe` (shell callers use its exit/JSON); `check_harness_drift.py` only if new prose trips it
 
-## 10 — backlog migration script and knue-pic pilot
-
-- [ ] [FEAT] Add `task-next/scripts/migrate_backlog.py` (dry-run default, `--apply` under the standing `queue-write` grant, `backlog-migrated` create keys, public-repo security refusal, and the "stays on the file queue until you run migrate_backlog.py" warning on github.com repos with open items) and pilot it on `../knue-pic`
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Migration; Testing Decisions
-  Done when: `migrate_backlog.py --test` passes (groups, blockers, deferred, rejected, security refusal, re-run reuse, a partial run keeps every line whose issue or relation is unconfirmed, the warning) and is wired in `harness-check.yml`; the knue-pic dry-run plan is checked against the source `backlog.md` before `--apply` (a mapping check, not an authority gate), and one knue-pic `task-next --tree` cycle closes an issue through its PR
-  Approach: reuse `backlog_candidates.py` tokenizer; `--apply` deletes only confirmed lines and leaves the `backlog.md` change for the user to commit
-
 ## 11 — adopt issues queue in agent-toolkit
 
-- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
+- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)*
   Source: docs/design/github-issues-queue.md → Further Notes (Bootstrap)
   Done when: `queue_backend.py list` on this repo shows no legacy-backlog warning; the rejected entries are listed by `rejected`; `validate-harness.sh` green
   Approach: dry-run first, then `--apply`
@@ -54,6 +47,13 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 ### PR #471 — Route findings writers through the queue backend (2026-11-27)
 
 - [ ] [debt] Sweep quick mode exits 0 before reporting findings from an adapted lint check (source: codex) (pre_existing) — dev/skills/harness-init/scripts/sweep.sh:40
+
+### PR #473 — Add migrate_backlog.py to move a backlog.md queue onto GitHub issues (2026-11-27)
+
+- [ ] [debt] A migration re-run reuses an issue by its `backlog-migrated` key without comparing bodies, so an item edited (e.g. its nested sub-bullets) between a partial run and the re-run is deleted while the issue keeps the old text; refresh or compare the body before deleting the line (source: codex) (introduced here) — dev/skills/task-next/scripts/migrate_backlog.py:apply_plan
+- [ ] [debt] Two concurrent `create`/`publish`/migration runs can both miss a queue-key and file the same item twice; serialize the key lookup and filing under a lock in the git common dir (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_post_items
+- [ ] [debt] `_registry_command` raises AttributeError (a traceback) when the registry's `hosts` is a non-empty array instead of an object; report a QueueError naming the registry path (source: codex) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:_registry_command
+- [ ] [debt] Advisory comments pass on PR #473 asked to replace rationale comments in `migrate_backlog.py` with structure — rename `_prunable` → `_unprunable_reason`, `_heading_notes` → `_orphan_heading_prose`, return NamedTuples from `split_title`/`_resolve_blocker`, extract the refusal fixpoint as `_settle_refusals` — and to pin `_item_span` against `prune_lines` with a test; kept as comments under `--auto` (source: comments) (introduced here) — dev/skills/task-next/scripts/migrate_backlog.py
 
 ### PR #472 — Route security overview by repository visibility (2026-11-27)
 
