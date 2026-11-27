@@ -4,7 +4,7 @@ description: >-
   Retrospect on the CURRENT conversation — route any reusable lesson to docs/,
   auto-memory, or CLAUDE.md/AGENTS.md, and tidy the auto-memory store. Also the
   signal-gated retrospect in task-review. Cross-session mining → harness-curate.
-version: 4.2.0
+version: 4.3.0
 ---
 
 # Capture Learnings — session retrospective
@@ -70,8 +70,8 @@ Not for cross-project audits, unused-skill cleanup, or building a named asset �
 
 **Deferring is a decision, not a neutral hold.** Before writing any "later", name which specific
 observation would change the decision and when it could realistically arrive; if you cannot,
-the evidence is either conclusive or more of it changes nothing — act now. Routing heavy work to
-`backlog.md` is not this pattern: the queue is a place a later session actually reads.
+the evidence is either conclusive or more of it changes nothing — act now. Queue heavy work
+that a later session can pick up.
 
 **Writing the delta.** State the positive target ("quote the rule verbatim"), not the prohibition.
 For pointer-shaped text (a `MEMORY.md` hook, a docs-index row, a `description:`), front-load a
@@ -83,8 +83,15 @@ pay load for no reach. Longer treatment where present: `docs/writing-for-agents.
 The review has already run, so anything you add to the commit lands unreviewed. Write
 auto-memory only: a preference or correction → auto-memory. Every repo-tracked delta — a doc or
 gotcha for `docs/*.md` / `AGENTS.md`, a skill change, Codex's `AGENTS.md` route for a preference
-— goes to `backlog.md` as a follow-up item, which a later reviewed cycle lands. Under `--auto`
-a destructive memory prune is deferred to `backlog.md` rather than blocking.
+— goes to the task queue as a follow-up item, which a later reviewed cycle lands. Under `--auto`
+a destructive memory prune is also queued for later review.
+
+Send those follow-ups to `queue_backend.py create` (bundled with `dev:task-next`). Follow
+`../task-next/references/queue-backend-contract.md` → *Filing findings*. On GitHub, give each
+delta or deferred prune a stable key based on its target and change, and describe the proposed
+change and the evidence that earned it. File under the standing grant, including `--auto`,
+dispatched and unattended runs. On `edit_file`, put each follow-up in `backlog.md` as before,
+including the deferred destructive prune under `--auto`.
 
 ## Writing to auto-memory
 

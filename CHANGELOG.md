@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- [done] Enforce dispatch quota bias and prioritize expiring reset passes (dev v4.12.40) (2026-11-27) → dev/skills/dispatch/references/quota-snapshot.md
+- [done] Enforce dispatch quota bias and prioritize expiring reset passes (dev v4.12.41) (2026-11-27) → dev/skills/dispatch/references/quota-snapshot.md
+- [done] Route findings writers through the queue backend (dev v4.12.40) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Keep the Herdr launch receipt and address when the terminal lookup fails after hc run (dev v4.12.39) (2026-11-27)
 - [done] Add github queue writes, the queue-write grant and issue filing in task-tickets (dev v4.12.38) (2026-11-27) → docs/design/github-issues-queue.md
 - [done] Select task-next work through the queue backend and close covered issues from the PR (dev v4.12.37) (2026-11-27) → docs/design/github-issues-queue.md
