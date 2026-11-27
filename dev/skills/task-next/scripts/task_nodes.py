@@ -80,6 +80,7 @@ from backlog_candidates import (  # noqa: E402
     _CHECKBOX_RE,
     _HEADING_RE,
     _HTML_COMMENT_RE,
+    _MIGRATION_ITEM_KEY_RE,
     _STATUS_RE,
     _headings,
     _is_placeholder_payload,
@@ -538,7 +539,7 @@ def _has_nested_checkbox(masked: list[str], item: int, start: int, skip: set[int
     return False
 
 
-def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
+def prune_lines(text: str, targets: list[str], *, keep_prose_under: frozenset[int] = frozenset()) -> tuple[str, list[str]]:
     """Delete each verbatim line in `targets` with its wrapped continuation lines and nested
     sub-bullets, then any heading this run left blank or prose-only. An item whose body is not plain wrapped text — a fence or
     multi-line comment in it, text right under an indented checkbox, or a nested checkbox — refuses
@@ -548,6 +549,8 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     (no surviving item, no surviving child heading), is deleted along with that region — see
     `_region_blank` and `_region_prose_only`. A section this run never touched, or one where a
     child heading or an `[x]`/`[>]` item survives, keeps its heading untouched either way.
+    A caller may protect prose under specific headings by their zero-based line indices.
+    A migration key on a checkbox remains part of its verbatim source line.
 
     Returns `(new_text, problems)`. `problems` is non-empty when a target matched nothing — or
     matched more than once, which is the more dangerous case: two sections can hold identically
@@ -563,6 +566,11 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
     masked = _strip_fenced_blocks(_strip_html_comments(text)).splitlines()
     if len(masked) != len(lines):  # line-count contract broken upstream; fail safe, do not guess
         return text, ["internal: masked line count does not match the source file"]
+    match_lines = [
+        raw if _CHECKBOX_RE.match(visible)
+        and _MIGRATION_ITEM_KEY_RE.sub("", raw).rstrip() == visible.rstrip() else visible
+        for raw, visible in zip(lines, masked)
+    ]
     wanted = [t.rstrip() for t in targets if t.strip()]
     problems = []
     drop: set[int] = set()
@@ -589,8 +597,8 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         hits = [
             i for i in range(len(masked) - n + 1)
             if (i == 0 or eols[i - 1] in physical) and eols[i + n - 1] in physical
-            and masked[i + n - 1].rstrip() == frags[-1]
-            and all(masked[i + k] == frags[k] and eols[i + k] == seps[k] for k in range(n - 1))
+            and match_lines[i + n - 1].rstrip() == frags[-1]
+            and all(match_lines[i + k] == frags[k] and eols[i + k] == seps[k] for k in range(n - 1))
         ]
         if not hits:
             problems.append(f"no line matches verbatim: {target!r}")
@@ -641,7 +649,7 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         nxt = lines[stop + 1] if stop + 1 < len(lines) else ""
         loose = nxt.strip() and not _CHECKBOX_LINE_RE.match(nxt) and not nxt.lstrip().startswith("#")
         reason = None
-        if any(masked[j] != lines[j] for j in range(i, end + 1)):
+        if any(match_lines[j] != lines[j] for j in range(i, end + 1)):
             reason = "carries an HTML comment"
         elif any(not _inline_comments_only(lines[j], masked[j]) for j in body):
             reason = "has a wrapped body inside a fence or HTML comment"
@@ -689,6 +697,7 @@ def prune_lines(text: str, targets: list[str]) -> tuple[str, list[str]]:
         prose_only = {
             h for h in owned
             if h not in drop and h not in newly and (not heads or h != heads[0])
+            and h not in keep_prose_under
             and _region_prose_only(masked_surviving, h, alive)
         }
         if not newly and not prose_only:
