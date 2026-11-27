@@ -466,9 +466,11 @@ class DispatchReceiptTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "invalid status, phase, or summary"):
                     collect(SimpleNamespace(run=receipt, close=False))
 
-    def collect_report(self, directory, status, *, screen="", result=None, cli="codex", **terminal_fields):
+    def collect_report(self, directory, status, *, screen="", result=None, cli="codex", receipt_fields=None,
+                       **terminal_fields):
         receipt = Path(directory) / "run.json"
-        receipt.write_text(json.dumps({**self.RECEIPT, "sent": True, "cli": cli}), encoding="utf-8")
+        receipt.write_text(json.dumps({**self.RECEIPT, "sent": True, "cli": cli, **(receipt_fields or {})}),
+                           encoding="utf-8")
         if result is not None:
             receipt.with_name("result.json").write_text(json.dumps(result), encoding="utf-8")
         terminal = {**self.TERMINAL, "status": status, **terminal_fields}
@@ -478,6 +480,82 @@ class DispatchReceiptTests(unittest.TestCase):
         output = out.getvalue()
         self.assertEqual(len(output.splitlines()), 1)
         return json.loads(output), hc.call_args_list
+
+    def test_collect_flags_a_codex_hook_failure_event_but_not_quoted_text(self):
+        failure = ("• Hook failed\n  └ failed to spawn ~/.codex/plugins/cache/kadragon/dev/4.12.23/hooks/guard.sh"
+                   " (os error 2)\n\n› Ask Codex to do anything")
+        quoted = ("› Report '• Hook failed … os error 2' as hooks_broken. Sample:\n"
+                  "  • Hook failed\n    └ os error 2\n\n"
+                  "• Ran rg -n 'Hook failed' dev\n  └ dispatch.py:51:• Hook failed … os error 2\n"
+                  "    • Hook failed\n    └ quoted again\n\n› Ask Codex to do anything")
+        with tempfile.TemporaryDirectory() as directory:
+            for state in ("idle", "done", "error"):
+                with self.subTest(state=state):
+                    report, calls = self.collect_report(directory, {"state": state}, screen=failure)
+                    self.assertEqual(report["stop_reason"], "hooks_broken")
+                    self.assertEqual(report["collect_screen_reads"], 1)
+                    report, _ = self.collect_report(directory, {"state": state}, screen=quoted)
+                    self.assertNotEqual(report["stop_reason"], "hooks_broken")
+            report, _ = self.collect_report(directory, {"state": "idle"}, screen=failure, cli="claude")
+            self.assertIsNone(report["stop_reason"])
+
+    def test_collect_flags_a_child_whose_plugin_directory_was_removed(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
+            cache = Path(home) / "plugins" / "cache" / "kadragon"
+            (cache / "dev" / "4.12.23").mkdir(parents=True)
+            (cache / "prod" / "3.2.17").mkdir(parents=True)
+            started = {"plugin_versions": {"dev": "4.12.23", "prod": "3.2.17"}}
+            working = {"state": "working"}
+            with patch.dict(os.environ, {"CODEX_HOME": home}):
+                with redirect_stderr(StringIO()) as err:
+                    report, calls = self.collect_report(directory, working, receipt_fields=started)
+                self.assertIsNone(report["stop_reason"])
+                self.assertNotIn("plugin_drift", report)
+                self.assertEqual(calls, [call("get", "t7")])
+                self.assertEqual(err.getvalue(), "")
+
+                (cache / "dev" / "4.12.24").mkdir()
+                with redirect_stderr(StringIO()) as err:
+                    report, calls = self.collect_report(directory, working, receipt_fields=started,
+                                                        screen="• Working (1m)")
+                self.assertIsNone(report["stop_reason"])
+                self.assertEqual(report["plugin_drift"], ["dev 4.12.23 -> 4.12.24"])
+                self.assertEqual(calls[1:], [call("read", "--lines", "0", "t7", timeout=ANY)])
+                self.assertIn("stop the child before its next Git write", err.getvalue())
+
+                (cache / "dev" / "4.12.23").rmdir()
+                with redirect_stderr(StringIO()) as err:
+                    report, calls = self.collect_report(directory, working, receipt_fields=started)
+                self.assertEqual(report["stop_reason"], "hooks_broken")
+                self.assertEqual(calls, [call("get", "t7")])
+                self.assertIn("dev 4.12.23 -> 4.12.24", err.getvalue())
+
+                with redirect_stderr(StringIO()):
+                    report, _ = self.collect_report(
+                        directory, {"state": "done"}, receipt_fields=started,
+                        result={"status": "merged", "phase": "merge", "summary": "Merged"})
+                self.assertIsNone(report["stop_reason"])
+
+    def test_launch_records_the_installed_codex_plugin_versions(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
+            cache = Path(home) / "plugins" / "cache" / "kadragon"
+            for version in ("4.12.9", "4.12.23"):
+                (cache / "dev" / version).mkdir(parents=True)
+            (cache / "prod" / "3.2.17").mkdir(parents=True)
+            owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
+                     "foreground": {"cwd": str(Path.cwd())}}
+            child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": home}),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.subprocess.run", return_value=child),
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                patch("dispatch.send"),
+                patch("builtins.print") as output,
+            ):
+                launch(self.launch_args(directory))
+            receipt = json.loads(Path(json.loads(output.call_args.args[0])["run"]).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["plugin_versions"], {"dev": "4.12.23", "prod": "3.2.17"})
 
     def test_collect_reports_stop_reasons_in_one_line(self):
         with tempfile.TemporaryDirectory() as directory:
