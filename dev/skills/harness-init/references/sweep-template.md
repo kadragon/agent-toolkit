@@ -13,7 +13,10 @@ PATH. Sweep calls `queue_backend.py create` under the standing grant, reports is
 failure-path pending drafts, and uses its existing `## Sweep` section format on `edit_file`.
 Set `AGENT_QUEUE_LIMITS=no-queue-write` for a run whose contract expressly forbids issue writes.
 Mark security findings from adapted checks with `[security]` at the start so sweep can check
-visibility and withhold them from a public queue.
+visibility and withhold them from a public queue. A withheld finding is shown only to an
+interactive terminal. Unattended logs carry its count without the details. An open GitHub issue
+is reused on a repeat sweep. A completed issue can be filed again if the finding recurs, and an
+issue closed without completion stays closed.
 
 ## Adapting to Other Ecosystems
 

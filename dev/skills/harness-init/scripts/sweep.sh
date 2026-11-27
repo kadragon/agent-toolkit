@@ -126,27 +126,50 @@ fi
 
 echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
 
-# Installed copies use the path configured at install time or by their launcher.
-QB="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/../../task-next/scripts/queue_backend.py}"
-if [[ ! -r "$QB" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; then
-    QB="$PROJ_DIR/dev/skills/task-next/scripts/queue_backend.py"
+is_security_finding() {
+    [[ "$1" == \[[sS][eE][cC][uU][rR][iI][tT][yY]\]\ * ]]
+}
+
+for f in "${FINDINGS[@]}"; do
+    if ! is_security_finding "$f"; then
+        printf '  %s\n' "$f"
+    fi
+done
+
+QUEUE_BACKEND_SCRIPT="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/../../task-next/scripts/queue_backend.py}"
+if [[ ! -r "$QUEUE_BACKEND_SCRIPT" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; then
+    QUEUE_BACKEND_SCRIPT="$PROJ_DIR/dev/skills/task-next/scripts/queue_backend.py"
 fi
-if [[ ! -r "$QB" ]] || ! command -v python3 >/dev/null; then
-    echo "Queue backend unavailable — configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
+if [[ ! -r "$QUEUE_BACKEND_SCRIPT" ]] || ! command -v python3 >/dev/null; then
+    echo "Findings were not persisted — configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
+    if [[ -t 2 ]]; then
+        for f in "${FINDINGS[@]}"; do
+            if is_security_finding "$f"; then printf '  %s\n' "$f" >&2; fi
+        done
+    fi
     exit 1
 fi
 REPO=$(git rev-parse --show-toplevel) || exit 1
 
-# The base checks produce harness findings. Adapted checks can mark a finding [security].
 QUEUE_FINDINGS=()
 VISIBILITY=""
 WITHHELD=0
 for f in "${FINDINGS[@]}"; do
-    if [[ "${f,,}" == "[security] "* ]]; then
+    if is_security_finding "$f"; then
+        if [[ -t 2 ]]; then printf '  %s\n' "$f" >&2; fi
         if [[ -z "$VISIBILITY" ]]; then
             REQUEST=$(python3 -c 'import json, sys; print(json.dumps({"contract": 1, "repo": sys.argv[1], "verify_visibility": True}))' "$REPO")
-            if DESCRIBE=$(printf '%s\n' "$REQUEST" | python3 "$QB" describe); then
-                VISIBILITY=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["visibility"])' <<< "$DESCRIBE")
+            if DESCRIBE=$(printf '%s\n' "$REQUEST" | python3 "$QUEUE_BACKEND_SCRIPT" describe); then
+                VISIBILITY=$(python3 -c '
+import json
+import sys
+
+description = json.load(sys.stdin)
+visibility = description.get("visibility")
+if visibility == "unknown" and description.get("backend") != "backlog":
+    visibility = "unverified"
+print(visibility)
+' <<< "$DESCRIBE")
             else
                 VISIBILITY=unverified
             fi
@@ -156,13 +179,12 @@ for f in "${FINDINGS[@]}"; do
             continue
         fi
     fi
-    echo "  $f"
     QUEUE_FINDINGS+=("$f")
 done
 if [[ "$WITHHELD" -gt 0 ]]; then
     echo "$WITHHELD security finding(s) withheld from the queue." >&2
 fi
-[[ ${#QUEUE_FINDINGS[@]} -gt 0 ]] || exit 1
+[[ "$WITHHELD" -lt "${#FINDINGS[@]}" ]] || exit 1
 
 CREATE=$(python3 -c '
 import hashlib
@@ -176,12 +198,13 @@ request["items"] = [
         "title": finding[:256],
         "body": finding,
         "labels": ["security"] if finding.lower().startswith("[security] ") else [],
+        "refile_completed": True,
     }
     for finding in dict.fromkeys(sys.argv[3:])
 ]
 print(json.dumps(request))
 ' "$REPO" "${AGENT_QUEUE_LIMITS:-none}" "${QUEUE_FINDINGS[@]}")
-RESPONSE=$(printf '%s\n' "$CREATE" | python3 "$QB" create) || exit 1
+RESPONSE=$(printf '%s\n' "$CREATE" | python3 "$QUEUE_BACKEND_SCRIPT" create) || exit 1
 EDIT_FILE=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("edit_file", ""))' <<< "$RESPONSE")
 if [[ -z "$EDIT_FILE" ]]; then
     python3 -c '
@@ -189,6 +212,8 @@ import json
 import sys
 
 result = json.load(sys.stdin)
+if result.get("withheld_security"):
+    print(result["withheld_security"], "security finding(s) withheld from the queue.", file=sys.stderr)
 for issue in result.get("created", []):
     print("Queue issue:", issue["ref"], issue.get("url", ""))
 for entry in result.get("incomplete", []):
@@ -205,14 +230,12 @@ if [[ "$EDIT_FILE" != "backlog.md" ]]; then
     exit 1
 fi
 
-# Findings outlive this sprint, so use the persistent file queue.
-if [[ -f "backlog.md" ]]; then
-    echo "" >> backlog.md
-    echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> backlog.md
-    echo "" >> backlog.md
-    for f in "${QUEUE_FINDINGS[@]}"; do
-        echo "- [ ] $f" >> backlog.md
-    done
+FILE_QUEUE="$REPO/$EDIT_FILE"
+if [[ -f "$FILE_QUEUE" ]]; then
+    {
+        printf '\n## Sweep %s\n\n' "$(date '+%Y-%m-%d %H:%M')"
+        printf -- '- [ ] %s\n' "${QUEUE_FINDINGS[@]}"
+    } >> "$FILE_QUEUE"
     echo -e "${GREEN}Added ${#QUEUE_FINDINGS[@]} item(s) to backlog.md${NC}"
 else
     # Never drop findings silently. backlog.md is optional after a minimal init, so its

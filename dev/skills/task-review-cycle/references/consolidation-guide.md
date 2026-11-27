@@ -139,12 +139,15 @@ ecosystem use `other` and the affected product name. Follow the
 [GitHub advisory API](https://docs.github.com/en/rest/security-advisories/repository-advisories#create-a-repository-security-advisory).
 
 ```bash
-# REPO is the verified origin owner/name; stdin is the in-memory JSON payload.
-gh api --method POST "repos/$REPO/security-advisories" --input - --jq '.ghsa_id' 2>/dev/null
+QUEUE_SCRIPTS="<absolute task-next skill directory>/scripts"
+REPO=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from queue_backend import github_slug; print("/".join(github_slug(".")))' "$QUEUE_SCRIPTS") || exit 1
+# stdin is the in-memory JSON payload.
+gh api --hostname github.com --method POST "repos/$REPO/security-advisories" --input - --jq '.ghsa_id' 2>/dev/null
 ```
 
 Run with shell tracing off and pass the payload directly over stdin, without a scratch file or
-inline shell expansion of the finding. Require a successful exit and a nonempty GHSA ID. Keep
+inline shell expansion of the finding. Require a successful exit and a nonempty GHSA ID. Reuse
+the advisory ID on re-review for the same finding. Keep
 public PRs, cycle reports and saved dispositions to the GHSA ID, without details or file
 locations. With `no-queue-write`, unverified visibility, an unsupported host or a failed advisory
 call, keep the details in-session only and report the withheld count. The same applies when a

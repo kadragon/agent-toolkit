@@ -58,6 +58,10 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 - [ ] [debt] On a truncated github `list`, a parent's sub-issue on an unread page is excluded as "not a trusted task-queue issue" instead of "incomplete read", and the parent is still offered (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:why_not
 - [ ] [debt] `handle()` resolves the backend for `show`/`rejected` from the working tree, ignoring the request's `rev`, so a github.com repo whose `backlog.md` has open items only at `rev` queries GitHub instead (source: agy) (pre_existing) — dev/skills/task-next/scripts/queue_backend.py:handle
 
+### PR #471 — Route findings writers through the queue backend (2026-11-27)
+
+- [ ] [debt] Sweep quick mode exits 0 before reporting findings from an adapted lint check (source: codex) (pre_existing) — dev/skills/harness-init/scripts/sweep.sh:40
+
 ## Rejected — do not re-file
 
 Format: `dev/skills/harness-init/references/backlog-template.md` → *Rejected — do not re-file*.

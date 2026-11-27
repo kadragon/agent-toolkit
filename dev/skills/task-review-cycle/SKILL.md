@@ -145,9 +145,8 @@ required independence with an allowed reviewer.
 per cycle. A skipped or empty pass leaves the blocking verdict unchanged.
 
 ## Step 3: Consolidate and confirm
-Follow `references/consolidation-guide.md` for the review table, approval, queue filing and
-dispositions. Classify security findings before making any report or filing.
-Follow *Report review send-backs to dispatch* for each verdict, including the Step 4 re-review.
+Follow `references/consolidation-guide.md` for security classification, approval, reporting,
+queue filing and dispositions. Record each verdict per *Report review send-backs to dispatch*.
 
 ## Step 4: Apply
 
@@ -156,10 +155,9 @@ Follow *Report review send-backs to dispatch* for each verdict, including the St
    instance in the same pass. A check fails → fix forward within that finding's scope once.
    Still failing: a `contract` finding → stop, never merge; any other → undo that
    finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
-   applied finding touched the file), route it through the consolidation guide's *Recording
-   out-of-scope and non-blocking findings*, and continue. A fixed `contract` finding → re-run the
-   reviewer once; still failing → stop, never merge. Then handle advisory `comments` findings
-   per `references/comment-rules.md` → *Applying*;
+   applied finding touched the file), queue it per the consolidation guide, and continue.
+   A fixed `contract` finding → re-run the reviewer once; still failing → stop, never merge.
+   Handle advisory `comments` per `references/comment-rules.md` → *Applying*;
    keep their edits separable from blocking fixes so failed cleanup can be withdrawn independently.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
