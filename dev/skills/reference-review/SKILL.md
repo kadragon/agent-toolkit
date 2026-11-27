@@ -1,7 +1,7 @@
 ---
 name: reference-review
 description: "Review or benchmark our skills, agents, or task cycle against an external reference repo (mattpocock/skills, revfactory/harness, any GitHub URL) or current agentic-coding practice — compare, find what to adopt and what is over-built. NOT for mining our own transcripts → dev:harness-curate."
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Reference review — adopt and cut, against an outside reference
@@ -35,8 +35,9 @@ Done when: every in-scope reference asset has a row `{their path | our path or a
   block whose removal would cause no mistake. Cuts count as findings,
   not an afterthought; a leaner harness outranks feature parity.
 
-Before ranking, check each row against the repo's rejected record — `backlog.md` →
-`## Rejected — do not re-file`, plus any cut list it points to. A match stays out unless this
+Before ranking, read the repo's rejected record with `queue_backend.py rejected` (bundled
+with `dev:task-next`). On the file backend, this reads `backlog.md` →
+`## Rejected — do not re-file`. Follow any cut list the returned entries point to. A match stays out unless this
 run's evidence meets that entry's re-file bar; say so in the row. Pattern adapted from
 mattpocock/skills@5beb35b `SCOPE.md` + `.out-of-scope/`.
 
@@ -48,7 +49,12 @@ Done when: every row cites a pinned reference path, and every Adopt row names a 
 ## Step 4 — Stop for selection
 
 Present the table and stop. Implement only the numbers the user picks, through the repo's normal task
-cycle (`/dev:task-new`, or a backlog item) — this skill never edits assets itself.
+cycle (`/dev:task-new`, or a queued item) — this skill never edits assets itself.
+
+For picks the user wants queued, call `queue_backend.py create`. Follow
+`../task-next/references/queue-backend-contract.md` → *Filing findings*. On GitHub, file
+selected rows under the standing grant, with a stable key per change and pinned evidence in
+the body. On `edit_file`, use the existing backlog item route.
 
 When a picked change lands, name the reference (`{repo}@{sha}:{path}`) in the changed artifact and
 in the commit body — borrowed design is attributed even when nobody asks.

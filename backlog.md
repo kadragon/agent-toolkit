@@ -11,14 +11,6 @@ it). 3/3 ships; 2/3 ships only if the residual failure is unbounded; 0–1/3 is 
 Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md` →
 *Cut — do not re-file without new evidence*. Nothing from this group is queued.
 
-
-## 6 — findings writers on queue backend
-
-- [ ] [FEAT] Route every findings writer through `queue_backend.py create`/`rejected`: `task-review-cycle` (parent + sub-issues for ≥2 findings, draft security advisory for a `security` finding on a public repo), `harness-capture`, `test-prune`, `repo-architecture`, `reference-review`, `harness-init/scripts/sweep.sh`
-  Source: docs/design/github-issues-queue.md → Implementation Decisions → Writers and authority, Security findings
-  Done when: each writer's prose names the backend call and keeps the `edit_file` path verbatim for `backlog`; on `github` every writer files without per-run approval, including `--auto`, dispatched and unattended runs (`harness-capture` deltas and deferred memory prunes included), and uses the pending store only on the failure path; a security finding on a `public` backend is never written to an issue or file; the advisory call is exercised once on a private test repo or recorded as unverified; `task-review-cycle/references/comment-rules.md` (the two "file under `## Review Backlog`" rules) and `late-source-reclaim.md` (the `## Review Backlog` note) are backend-neutral too
-  Approach: `consolidation-guide.md` → *Recording out-of-scope and non-blocking findings* becomes backend-neutral; the rejected check reads `rejected`
-
 ## 7 — security-overview on issues backend
 
 - [ ] [FEAT] Make `dev/commands/security-overview.md` backend-aware: report-only (alert numbers, no queue write) on a public GitHub repo; one `security`-labelled issue per alert with a hidden `gh-alert` marker on a private one; `backlog.md` path unchanged elsewhere
@@ -49,7 +41,7 @@ Cut items and their re-file bars live in `docs/design/harness-altitude-audit.md`
 
 ## 11 — adopt issues queue in agent-toolkit
 
-- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 6-findings-writers-on-queue-backend)* *(blocked by: 7-security-overview-on-issues-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
+- [ ] [PLAN] Migrate this repo's own `backlog.md` (Rejected entries → closed-not-planned issues) with `migrate_backlog.py`, and update `AGENTS.md`, `docs/architecture.md`, `docs/workflows.md` and `docs/conventions.md` lines that name `backlog.md` as the queue, plus the same wording in `AGENTS.md`'s role table, `.claude/agents/implementer.md`, `docs/delegation.md` and `docs/invocation.md` → *Classification — `dev/`* *(blocked by: 3-dispatch-pick-via-queue-backend)* *(blocked by: 7-security-overview-on-issues-backend)* *(blocked by: 8-task-new-routing-on-issues-backend)* *(blocked by: 9-harness-init-and-validators-backend-split)* *(blocked by: 10-backlog-migration-script-and-knue-pic-pilot)*
   Source: docs/design/github-issues-queue.md → Further Notes (Bootstrap)
   Done when: `queue_backend.py list` on this repo shows no legacy-backlog warning; the rejected entries are listed by `rejected`; `validate-harness.sh` green
   Approach: dry-run first, then `--apply`

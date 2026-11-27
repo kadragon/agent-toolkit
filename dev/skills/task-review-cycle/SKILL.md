@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.13.2
+version: 1.14.0
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -145,7 +145,8 @@ required independence with an allowed reviewer.
 per cycle. A skipped or empty pass leaves the blocking verdict unchanged.
 
 ## Step 3: Consolidate and confirm
-Follow `references/consolidation-guide.md` for the review table, approval, backlog and dispositions.
+Follow `references/consolidation-guide.md` for the review table, approval, queue filing and
+dispositions. Classify security findings before making any report or filing.
 Follow *Report review send-backs to dispatch* for each verdict, including the Step 4 re-review.
 
 ## Step 4: Apply
@@ -155,15 +156,16 @@ Follow *Report review send-backs to dispatch* for each verdict, including the St
    instance in the same pass. A check fails → fix forward within that finding's scope once.
    Still failing: a `contract` finding → stop, never merge; any other → undo that
    finding's own edits (`git restore --staged <file> && git restore <file>` only when no other
-   applied finding touched the file), file it under `backlog.md` → `## Review Backlog`, and
-   continue. A fixed `contract` finding → re-run the reviewer once; still failing → stop, never
-   merge. Then handle advisory `comments` findings per `references/comment-rules.md` → *Applying*;
+   applied finding touched the file), route it through the consolidation guide's *Recording
+   out-of-scope and non-blocking findings*, and continue. A fixed `contract` finding → re-run the
+   reviewer once; still failing → stop, never merge. Then handle advisory `comments` findings
+   per `references/comment-rules.md` → *Applying*;
    keep their edits separable from blocking fixes so failed cleanup can be withdrawn independently.
 2. A fix newly touched another plugin or skill `SKILL.md` → bump it per the shared cycle's
    *Version bump* (`[[ -f scripts/bump-version.sh ]] && bash scripts/bump-version.sh …`).
 3. **Retrospect (signal-gated).** A user correction, recurring gotcha, or reusable workflow this
    cycle → call the Skill tool with "dev:harness-capture" now. Review has already run, so it
-   writes auto-memory only and files every docs/`AGENTS.md`/skill delta to `backlog.md`.
+   writes auto-memory only and files every docs/`AGENTS.md`/skill delta through the queue backend.
 4. Run full required checks on the final changed candidate and refresh evidence per the shared
    cycle. If checks fail after advisory comment edits, withdraw those edits and rerun the required
    checks on the remaining candidate; defer the cleanup and base the merge gate on that candidate.

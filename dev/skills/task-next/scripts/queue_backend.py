@@ -1249,13 +1249,17 @@ def github_defer(req: dict, runner=gh_runner) -> dict:
     return {"ref": f"#{issue['number']}"}
 
 
+def github_visibility(repo: str, runner) -> str:
+    owner, name = github_slug(repo)
+    private = _repository(_graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name}),
+                          owner, name).get("isPrivate")
+    return "private" if private else "public"
+
+
 def github_op(op: str, req: dict, runner=gh_runner) -> tuple[int, dict | None]:
     if op == "describe":
-        owner, name = github_slug(req["repo"])
-        private = _repository(_graphql(runner, DESCRIBE_QUERY, {"owner": owner, "name": name}),
-                              owner, name).get("isPrivate")
         return EXIT_OK, {
-            "backend": "github", "contract": CONTRACT, "visibility": "private" if private else "public",
+            "backend": "github", "contract": CONTRACT, "visibility": github_visibility(req["repo"], runner),
             "ops": list(GITHUB_OPS), "close_ref_template": "Closes {ref}",
         }
     if op == "list":
@@ -1312,6 +1316,11 @@ def handle(op: str, req: object, env: dict[str, str] | None = None, runner=gh_ru
     backend = resolve(repo, env, req.get("ref") if op in ("list", "describe") else None)
     if backend["backend"] == "backlog":
         code, data = backlog_op(op, req)
+        if (
+            op == "describe" and req.get("verify_visibility") is True
+            and origin_host(_git(repo, "remote", "get-url", "origin")) == "github.com"
+        ):
+            data["visibility"] = github_visibility(repo, runner)
         if code == EXIT_UNSUPPORTED:
             sys.stderr.write(f"queue_backend: the backlog backend does not support {op!r}\n")
         return code, data
@@ -1775,6 +1784,15 @@ def run_github_tests(tmp: str, git, write) -> None:
     calls: list = []
     runner = _fake_gh(pages, conn_pages, calls=calls)
     req = {"contract": 1, "repo": repo}
+    for private, visibility in ((False, "public"), (True, "private")):
+        _, described = handle(
+            "describe", dict(req, verify_visibility=True), {ENV_VAR: "backlog"}, _fake_gh({}, private=private),
+        )
+        _assert(described["backend"] == "backlog" and described["visibility"] == visibility,
+                f"findings can verify {visibility} visibility without switching off the file queue")
+    _, described = handle("describe", req, {ENV_VAR: "backlog"}, runner)
+    _assert(described["visibility"] == "unknown" and not calls,
+            "ordinary file queue descriptions leave visibility unknown without contacting GitHub")
     data = github_list(dict(req, full_scan=True, parked=True), runner)
     refs = [c["ref"] for c in data["candidates"]]
     _assert(refs == ["#1", "#3", "#9", "#12", "#19", "#23", "#25", "#13"],

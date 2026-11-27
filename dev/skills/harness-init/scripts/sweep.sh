@@ -125,22 +125,99 @@ if [[ ${#FINDINGS[@]} -eq 0 ]]; then
 fi
 
 echo -e "${YELLOW}=== ${#FINDINGS[@]} finding(s) ===${NC}"
-for f in "${FINDINGS[@]}"; do echo "  $f"; done
 
-# Append to backlog.md if it exists. NOT tasks.md: sweep findings outlive the sprint that
-# happens to be in flight, and tasks.md is deleted whole at sprint close.
+# Installed copies use the path configured at install time or by their launcher.
+QB="${AGENT_QUEUE_BACKEND_SCRIPT:-$TOOLS_DIR/../../task-next/scripts/queue_backend.py}"
+if [[ ! -r "$QB" && -z "${AGENT_QUEUE_BACKEND_SCRIPT:-}" ]]; then
+    QB="$PROJ_DIR/dev/skills/task-next/scripts/queue_backend.py"
+fi
+if [[ ! -r "$QB" ]] || ! command -v python3 >/dev/null; then
+    echo "Queue backend unavailable — configure AGENT_QUEUE_BACKEND_SCRIPT and python3." >&2
+    exit 1
+fi
+REPO=$(git rev-parse --show-toplevel) || exit 1
+
+# The base checks produce harness findings. Adapted checks can mark a finding [security].
+QUEUE_FINDINGS=()
+VISIBILITY=""
+WITHHELD=0
+for f in "${FINDINGS[@]}"; do
+    if [[ "${f,,}" == "[security] "* ]]; then
+        if [[ -z "$VISIBILITY" ]]; then
+            REQUEST=$(python3 -c 'import json, sys; print(json.dumps({"contract": 1, "repo": sys.argv[1], "verify_visibility": True}))' "$REPO")
+            if DESCRIBE=$(printf '%s\n' "$REQUEST" | python3 "$QB" describe); then
+                VISIBILITY=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["visibility"])' <<< "$DESCRIBE")
+            else
+                VISIBILITY=unverified
+            fi
+        fi
+        if [[ "$VISIBILITY" != "private" && "$VISIBILITY" != "unknown" ]]; then
+            WITHHELD=$((WITHHELD + 1))
+            continue
+        fi
+    fi
+    echo "  $f"
+    QUEUE_FINDINGS+=("$f")
+done
+if [[ "$WITHHELD" -gt 0 ]]; then
+    echo "$WITHHELD security finding(s) withheld from the queue." >&2
+fi
+[[ ${#QUEUE_FINDINGS[@]} -gt 0 ]] || exit 1
+
+CREATE=$(python3 -c '
+import hashlib
+import json
+import sys
+
+request = {"contract": 1, "repo": sys.argv[1], "queue_limits": sys.argv[2]}
+request["items"] = [
+    {
+        "key": "sweep:" + hashlib.sha256(finding.encode("utf-8")).hexdigest(),
+        "title": finding[:256],
+        "body": finding,
+        "labels": ["security"] if finding.lower().startswith("[security] ") else [],
+    }
+    for finding in dict.fromkeys(sys.argv[3:])
+]
+print(json.dumps(request))
+' "$REPO" "${AGENT_QUEUE_LIMITS:-none}" "${QUEUE_FINDINGS[@]}")
+RESPONSE=$(printf '%s\n' "$CREATE" | python3 "$QB" create) || exit 1
+EDIT_FILE=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("edit_file", ""))' <<< "$RESPONSE")
+if [[ -z "$EDIT_FILE" ]]; then
+    python3 -c '
+import json
+import sys
+
+result = json.load(sys.stdin)
+for issue in result.get("created", []):
+    print("Queue issue:", issue["ref"], issue.get("url", ""))
+for entry in result.get("incomplete", []):
+    print("Incomplete queue item:", entry, file=sys.stderr)
+if result.get("error"):
+    print(result["error"], file=sys.stderr)
+if result.get("pending"):
+    print("Pending queue drafts:", ", ".join(result["pending"]), "in", result["pending_path"], file=sys.stderr)
+' <<< "$RESPONSE"
+    exit 1
+fi
+if [[ "$EDIT_FILE" != "backlog.md" ]]; then
+    echo "Unrecognized queue edit_file response: $EDIT_FILE" >&2
+    exit 1
+fi
+
+# Findings outlive this sprint, so use the persistent file queue.
 if [[ -f "backlog.md" ]]; then
     echo "" >> backlog.md
     echo "## Sweep $(date '+%Y-%m-%d %H:%M')" >> backlog.md
     echo "" >> backlog.md
-    for f in "${FINDINGS[@]}"; do
+    for f in "${QUEUE_FINDINGS[@]}"; do
         echo "- [ ] $f" >> backlog.md
     done
-    echo -e "${GREEN}Added ${#FINDINGS[@]} item(s) to backlog.md${NC}"
+    echo -e "${GREEN}Added ${#QUEUE_FINDINGS[@]} item(s) to backlog.md${NC}"
 else
     # Never drop findings silently. backlog.md is optional after a minimal init, so its
     # absence is expected -- but then the findings above exist only in this terminal.
-    echo -e "${YELLOW}No backlog.md — ${#FINDINGS[@]} finding(s) NOT persisted.${NC}" >&2
+    echo -e "${YELLOW}No backlog.md — ${#QUEUE_FINDINGS[@]} finding(s) NOT persisted.${NC}" >&2
     echo -e "${YELLOW}Create backlog.md (harness-init references/backlog-template.md) to capture them.${NC}" >&2
 fi
 

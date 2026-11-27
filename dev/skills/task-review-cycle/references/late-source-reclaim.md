@@ -84,5 +84,5 @@ already be closed; re-read the diff before applying, per the consolidation guide
 A result that surfaces after the merge is **reported, never auto-filed**. Name the `.meta` and
 `.review.txt` paths and the branch they reviewed, and let the user route it.
 
-Do not append it to `## Review Backlog` automatically: the branch is merged, so the findings are
-unverified against current `main` and often already closed by the fix round.
+Automatic queue filing ends at merge. Late findings need verification against current `main`
+because the fix round may already have closed them.

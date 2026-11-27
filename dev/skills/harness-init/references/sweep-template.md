@@ -6,6 +6,15 @@ The sweep script is the automated garbage collector for the harness. It catches 
 
 A ready-to-use sweep script is available at `../scripts/sweep.sh`. Copy it into the target project's `tools/` directory and adapt the marked `# ADAPT:` sections to the project's tech stack.
 
+Configure `AGENT_QUEUE_BACKEND_SCRIPT` in the installed script or its launcher to the absolute
+path of the bundled `task-next/scripts/queue_backend.py` and keep it current with the plugin
+installation. Manual runs and unattended launchers need the same configuration and `python3` on
+PATH. Sweep calls `queue_backend.py create` under the standing grant, reports issue refs and
+failure-path pending drafts, and uses its existing `## Sweep` section format on `edit_file`.
+Set `AGENT_QUEUE_LIMITS=no-queue-write` for a run whose contract expressly forbids issue writes.
+Mark security findings from adapted checks with `[security]` at the start so sweep can check
+visibility and withhold them from a public queue.
+
 ## Adapting to Other Ecosystems
 
 ### Node.js / TypeScript

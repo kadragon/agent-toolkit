@@ -43,7 +43,7 @@ code (0 / 2, anything else → 1) pass through. Stdout on exit 0 must be one JSO
 
 | Op | Required | Input | Output |
 |----|----------|-------|--------|
-| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
+| `describe` | yes | optional `ref` (resolve as a `list` with that `ref` would), `verify_visibility` (boolean) | `backend`, `contract`, `visibility` (`public`/`private`/`unknown`), `ops`, `close_ref_template` |
 | `list` | yes | `full_scan`, `parked`, optional `ref` (read the queue as committed at that rev), `tasks` (path) | `candidates[]`, `parked[]`, `claimed[]`, `warnings[]` |
 | `show` | yes | `ref`, optional `rev` (`backlog`: the `rev` a `list` returned) | `ref`, `title`, `body`, `labels`, `blocked_by[]`, `parent`, `url` |
 | `create` | yes | `items[]`: `key`, `title`, `body`, `labels`, `parent_key`, `blocked_by[]`; optional `queue_limits` | `created[]` (`key`, `ref`, `url`, `reused`), `incomplete[]`, `pending[]` (+ `pending_path`, `error`) |
@@ -61,10 +61,28 @@ Forge constraints the contract keeps: a claim needs no remote write, closing hap
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
 existing item.
 
+## Filing findings
+
+Send `create` a stable key within the writer's scope and enough evidence in the body to act on
+the finding. Read prior decisions through `rejected` wherever the writer checks for them. When
+`create` returns `edit_file`, use the writer's existing file template and file-presence rules.
+For GitHub, the standing grant in `git-authorization.md` → *Queue writes* covers interactive,
+`--auto`, dispatched and unattended runs. Pass the archived `queue_limits` (default `none`).
+Report created refs, incomplete relations and pending keys with their `pending_path`. Let
+`create` manage the failure-only store. An error or unsupported op is never an `edit_file` response.
+
+Before persisting a security finding, read `describe` with `"verify_visibility": true`. On
+public repositories, keep the finding out of queue items, file edits and pending drafts. Hold
+the finding in-session if verification fails. A non-GitHub file queue reporting `unknown`
+keeps its existing behavior. Consult the review cycle's consolidation guide for the draft
+advisory route.
+
 ## Built-in `backlog` backend
 
-- `describe`: `visibility` `unknown`, `close_ref_template` `null` (closure is the cycle's
-  `prune-backlog` plus the `CHANGELOG.md` entry), `ops` without `reject`/`defer` (exit 2).
+- `describe`: `visibility` `unknown` by default. With `verify_visibility: true` and a
+  `github.com` origin, it checks visibility through GitHub and keeps the same file backend.
+  `close_ref_template` is `null` (closure is the cycle's `prune-backlog` plus the
+  `CHANGELOG.md` entry), and `ops` excludes `reject`/`defer` (exit 2).
 - `list` runs `backlog_candidates.py --json --counts` (plus `--full-scan`, `--ref`, `--tasks`)
   and maps each row: `ref` = `id` = `<source>:<line>` (`backlog.md:14`, `tasks.md:1`), `title` =
   heading, `items[]` = the group's open, unparked, unclaimed item texts in document order
