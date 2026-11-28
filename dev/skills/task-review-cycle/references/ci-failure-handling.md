@@ -62,7 +62,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 bash "$SKILL_DIR/scripts/ci-failure-logs.sh" <PR_NUMBER> --expected-head <REVIEWED_HEAD>
 ```
 
-When the response has `reason: "head-changed"` or `reason: "head-unavailable"`, return to *Wait for CI* with the same reviewed SHA. Fetch diagnostics again only after CI confirms a failure on that SHA.
+For `reason: "head-changed"` or `reason: "head-unavailable"`, retry the diagnostics once with the same reviewed SHA. This leaves the CI failure strike count unchanged. If the second lookup is still inconclusive, compare the live PR head with the reviewed SHA. Follow the *Wait for CI* head-mismatch recovery if the head changed. Otherwise report that failure logs could not be verified.
 
 On Forgejo, pass only the PR number. When `logs_available` is false, report each failed check's name and link, then reproduce the failure locally and use that output to diagnose it.
 

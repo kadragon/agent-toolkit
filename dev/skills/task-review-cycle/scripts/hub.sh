@@ -114,12 +114,13 @@ emit_status() {
 github_ci_snapshot() {
   # Separate GitHub requests could pair a new head SHA with the previous commit's failure.
   local pr_number="$1" pr_url repo view
-  pr_url=$(gh pr view "$pr_number" --json url --jq .url) || return 1
-  if [[ ! "$pr_url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/[0-9]+$ ]]; then
-    echo "Could not resolve the GitHub repository for PR $pr_number." >&2
-    return 1
+  if pr_url=$(gh pr view "$pr_number" --json url --jq .url 2>/dev/null) &&
+     [[ "$pr_url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/[0-9]+$ ]]; then
+    repo="${BASH_REMATCH[1]}"
+  else
+    printf '%s\n' '{"repository": null, "oids": [], "checks": []}'
+    return
   fi
-  repo="${BASH_REMATCH[1]}"
   view=$(gh api graphql --paginate -F number="$pr_number" \
     -f owner="${repo%%/*}" -f name="${repo#*/}" -f query='
     query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
@@ -317,11 +318,8 @@ case "$SUBCOMMAND" in
     if [ "$HUB_TYPE" = "github" ]; then
       SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
       HEAD_PROBLEM=$(jq -r --arg expected "$EXPECTED_HEAD" '
-        if (.oids | length) > 1 then "head-changed"
-        elif $expected != "" then
-          if (.oids | length) == 0 then "head-unavailable"
-          elif .oids[0] != $expected then "head-changed"
-          else empty end
+        if (.oids | length) == 0 then "head-unavailable"
+        elif (.oids | length) > 1 or ($expected != "" and .oids[0] != $expected) then "head-changed"
         else empty end' <<<"$SNAPSHOT")
       if [ -n "$HEAD_PROBLEM" ]; then
         jq -nc --arg reason "$HEAD_PROBLEM" '{failed_checks: [], count: 0, logs_available: true, reason: $reason}'

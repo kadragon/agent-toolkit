@@ -505,7 +505,8 @@ def main() -> int:
             '    printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
             '  "run view") [ "$4" = --repo ] && [ "$5" = "${GH_LOG_REPO:-o/r}" ] || exit 1\n'
             '    echo "Actions job log"; exit 0 ;;\n'
-            '  "pr view") if [[ "$4 $5 $6 $7" == "--json url --jq .url" ]]; then\n'
+            '  "pr view") [ -z "${GH_PR_VIEW_ERROR:-}" ] || exit 1\n'
+            '    if [[ "$4 $5 $6 $7" == "--json url --jq .url" ]]; then\n'
             '    printf \'https://github.com/%s/pull/%s\\n\' "${GH_DEFAULT_REPO:-o/r}" "$3"\n'
             '    else echo "' + "b" * 40 + '"; fi; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
@@ -523,7 +524,7 @@ def main() -> int:
             if pages is None and rollup is not None:
                 pages = [page(rollup)]
             env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
-            for name in ("GH_VIEW", "GH_DEFAULT_REPO", "GH_LOG_REPO"):
+            for name in ("GH_VIEW", "GH_DEFAULT_REPO", "GH_LOG_REPO", "GH_PR_VIEW_ERROR"):
                 env.pop(name, None)
             env.update(gh_env)
             if pages is not None:
@@ -665,6 +666,12 @@ def main() -> int:
         status = hub_output(None)
         check("a failed view reports none without a head",
               status.get("status") == "none" and "head_sha" not in status, f"got {status}")
+        status = hub_output([run_ctx("SUCCESS")], GH_PR_VIEW_ERROR="yes")
+        check("a temporary PR lookup failure leaves CI eligible for another poll",
+              status.get("status") == "none" and "head_sha" not in status, f"got {status}")
+        logs = hub_output([failure], command="ci-logs", expected_head="a" * 40, GH_PR_VIEW_ERROR="yes")
+        check("a temporary PR lookup failure returns a diagnostic retry reason",
+              logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
