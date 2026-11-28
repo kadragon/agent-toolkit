@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.11.0
+version: 3.11.1
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -139,7 +139,7 @@ For work authorized to proceed without Git writes, pass `--no-git-writes`. Add `
 For standalone work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`. Preview with `--dry-run`.
 
-For Codex review cycles, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
+For Codex waves, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
 Queue, new and `task-review` launches carry the standing review transfer approval. A separate user grant passed
 with `--review-transfer-approval='<verbatim approval>'` replaces it; `--no-standing-review-approval` honors a restriction.
 
