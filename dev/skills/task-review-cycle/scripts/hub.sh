@@ -284,8 +284,8 @@ case "$SUBCOMMAND" in
       HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
       BUCKETS=$(jq -c '.checks | map(.bucket)' <<<"$SNAPSHOT")
       TOTAL=$(jq 'length' <<<"$BUCKETS")
-      if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
-        # The head moved between pages: no single commit to judge, so poll again.
+      if jq -e '.repository == null or (.oids | length) > 1' <<<"$SNAPSHOT" >/dev/null; then
+        # Poll again when the repository lookup failed or the head moved between pages.
         emit_status "pending" "$TOTAL"
       elif [ "$TOTAL" -eq 0 ]; then
         # No checks reported (or the query failed): "none" lets the caller apply its grace logic.

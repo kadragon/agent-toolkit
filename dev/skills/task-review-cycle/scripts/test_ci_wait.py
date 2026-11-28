@@ -668,10 +668,17 @@ def main() -> int:
               status.get("status") == "none" and "head_sha" not in status, f"got {status}")
         status = hub_output([run_ctx("SUCCESS")], GH_PR_VIEW_ERROR="yes")
         check("a temporary PR lookup failure leaves CI eligible for another poll",
-              status.get("status") == "none" and "head_sha" not in status, f"got {status}")
+              status.get("status") == "pending" and "head_sha" not in status, f"got {status}")
         logs = hub_output([failure], command="ci-logs", expected_head="a" * 40, GH_PR_VIEW_ERROR="yes")
         check("a temporary PR lookup failure returns a diagnostic retry reason",
               logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", GH_PR_VIEW_ERROR="yes",
+                   CI_WAIT_NO_CHECKS_GRACE_SECS="0", CI_WAIT_TIMEOUT_SECS="0", DISPATCH_TIMING_RUN="")
+        proc = subprocess.run(["bash", str(SCRIPT), "7"], cwd=hub_repo, env=env,
+                              capture_output=True, text=True, timeout=30, check=True)
+        result = json.loads(proc.stdout)
+        check("legacy CI wait cannot pass when the PR lookup was unavailable",
+              result.get("passed") is False and result.get("reason") == "timeout", f"got {result}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
