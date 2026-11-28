@@ -200,7 +200,13 @@ def case_repo_guidance_and_pre_existing(tmp):
     check("guidance appended once", prompt.count(guidance) == 1)
     check("working copy is excluded", "Private working copy should stay local." not in prompt)
     check("pre-existing bugs are advisory", "[pre_existing] Advisory" in prompt)
-    check("only P0/P1 affect the verdict", "LGTM\" if no P0/P1 issues" in prompt)
+    check("introduced P2 stays in the PR", "fix in the PR or leave a PR comment without filing an issue" in prompt)
+    check("pre-existing edge cases without exposure stay in PR comments",
+          "everyday path with its failing condition or cite reproduction evidence from real use" in prompt
+          and "With neither, treat the bug as a PR comment only." in prompt)
+    check("pre-existing findings include their priority", "tag alongside its P0–P3 priority" in prompt)
+    check("only introduced P0/P1 affect the verdict",
+          "LGTM\" if no P0/P1 issues introduced or worsened by the diff" in prompt)
 
 
 def case_ok_run_persists_review(tmp):
