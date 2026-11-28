@@ -69,14 +69,19 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 
 ## Resync a pushed child PR
 
-The child session performs the resync. It holds the `commit` and `feature-push` authority through its
-archived contract and owns the branch's worktree. The home session only requests it through
-*Continue with another phase* and never commits to or pushes the child's branch. In its feature
-worktree the child runs `cycle_state.py authorize --action commit` and `--action feature-push`, then
-`task-review-cycle/scripts/pre_merge_resync.py --base <BASE_BRANCH>`, which fetches, merges the base,
-reapplies the version bump and queue entries, and pushes. On a failed check or a
-`conflict`, `denied` or `error` result it stops and reports to the home session. After `resynced` it resumes
-at final verification (`task-review-cycle` → *Dispatch pre-merge report*).
+After each merge into the base, the home session asks every open sibling PR's child to resync,
+through *Continue with another phase*, before collecting that PR's pre-merge report. The child
+performs the resync. It holds the `commit` and `feature-push` authority through its archived
+contract and owns the branch's worktree; the home session never commits to or pushes the child's
+branch. In its feature worktree the child runs, from the installed dev plugin's absolute path,
+`cycle_state.py authorize --action commit` and `--action feature-push`, then
+`task-review-cycle/scripts/pre_merge_resync.py --base <BASE_BRANCH>`, which fetches, merges the
+base, reapplies the version bump and queue entries, and pushes. A rebase-only repository skips the
+resync, as in `task-review-cycle` *Step 6*. After `resynced` the child resumes at final
+verification (`task-review-cycle` → *Dispatch pre-merge report*). A failed check, `denied` or
+`error` stops it and reports to the home session. On `conflict` in a file queue the child, within
+its own authority, resolves it keeping the entries from both sides, then reruns the check and
+the resync; any other conflict is reported.
 
 ## Home merges a child PR
 

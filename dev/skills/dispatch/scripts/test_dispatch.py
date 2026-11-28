@@ -2853,9 +2853,9 @@ class WorkflowDocsTests(unittest.TestCase):
         for example in launch_examples:
             self.assertNotIn("--git-grant-recorded", example)
         self.assertIn("After confirming task delivery to every new child", watch_step)
-        self.assertIn("the child resyncs it on the home session's request", watch_step)
+        self.assertIn("the child resyncs it on the home session's request after each base merge", watch_step)
         handoff = (SCRIPTS.parent / "references" / "launch-handoff.md").read_text(encoding="utf-8")
-        self.assertIn("The child session performs the resync", handoff)
+        self.assertIn("The child performs the resync", " ".join(handoff.split()))
         self.assertIn("never commits to or pushes the child's branch", " ".join(handoff.split()))
 
     def test_docs_name_codex_models_by_family_only(self):

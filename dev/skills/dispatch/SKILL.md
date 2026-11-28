@@ -213,7 +213,7 @@ The user delegates the session's decisions to this session:
   missing something. Answer with `hc send <address> '<answer>'`, then tell the user in one line what
   was chosen and why. Honor Git limits and step 2's batch authorization rule.
 - **Push and merge** — follow the original Git limits or applicable dispatch default. Prepare PRs in parallel. Once a
-  parallel PR branch has been pushed, the child resyncs it on the home session's request, per *Resync a pushed child PR* in `references/launch-handoff.md`.
+  parallel PR branch has been pushed, the child resyncs it on the home session's request after each base merge, per *Resync a pushed child PR* in `references/launch-handoff.md`.
   If HEAD changed or review evidence is missing, use *Continue with another phase* to refresh the *Dispatch pre-merge report*.
   Require full `collect` to show `result.status == "ready"` and `result.review.status == "passed"`, with `result.review.head`
   and `result.head` matching the live PR head and required CI passing there. Follow *Home merges a child PR* in
