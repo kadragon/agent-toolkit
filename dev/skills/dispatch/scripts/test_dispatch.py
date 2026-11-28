@@ -5788,6 +5788,33 @@ class ReservedQueueWaveTest(unittest.TestCase):
         deliver.assert_not_called()
         self.assertEqual(self.result("release-reservation", reservation=second["reservation"]), {"released": True})
 
+    def test_send_wave_delivers_more_than_four_reserved_units(self):
+        with self.backlog.open("a", encoding="utf-8") as stream:
+            stream.write("\n## Fourth group\n\n- [ ] [FEAT] Fourth item\n"
+                         "\n## Fifth group\n\n- [ ] [FIX] Fifth item\n")
+        self.git("commit", "-qam", "Add two queue groups")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        wave = self.reserve(*(f"{name} group" for name in ("First", "Second", "Third", "Fourth", "Fifth")))
+        deliveries = []
+        for index, unit in enumerate(wave["reservations"]):
+            receipt = self.receipt(f"child-{index}", unit["candidate"]["ref"])
+            deliveries.append({"reservation": unit["reservation"], "run": str(receipt)})
+
+        with (
+            patch("dispatch.read_wave_request", return_value={"deliveries": deliveries}),
+            patch("dispatch.deliver_reserved", return_value={"delivery": "submitted"}),
+            patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}),
+            redirect_stdout(StringIO()) as output,
+        ):
+            send_wave(SimpleNamespace(repo=self.repo))
+
+        self.assertEqual(json.loads(output.getvalue())["deliveries"],
+                         [{**delivery, "delivery": "submitted"} for delivery in deliveries])
+        for delivery in deliveries:
+            with Path(delivery["run"]).open(encoding="utf-8") as stream:
+                reservation = json.load(stream)["handoff"]["queue_reservation"]
+            self.assertEqual(reservation["reservation"], delivery["reservation"])
+
 
 if __name__ == "__main__":
     unittest.main()

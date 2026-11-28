@@ -2750,8 +2750,8 @@ def deliver_reserved(path, unit, address):
 def send_wave(args):
     req = wave_request(args.repo, read_wave_request())
     deliveries = req.get("deliveries")
-    if not isinstance(deliveries, list) or not 1 <= len(deliveries) <= 4:
-        raise SystemExit("deliveries must contain one to four reservation and run pairs")
+    if not isinstance(deliveries, list) or not deliveries:
+        raise SystemExit("deliveries must contain at least one reservation and run pair")
     paths = {}
     for delivery in deliveries:
         if not isinstance(delivery, dict) or not isinstance(delivery.get("run"), str):
