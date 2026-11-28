@@ -67,6 +67,22 @@ normal checked resend flow using that prompt and receipt. Retry a withheld deliv
 reservation. A child's completed claim remains visible through its ordinary worktree claim.
 Use `wait --first` after delivery and keep merges into the base sequential.
 
+## Resync a pushed child PR
+
+Right before collecting the next-in-merge-order PR's pre-merge report, the home session checks
+that the current base is an ancestor of the PR head. If not, it asks that PR's child to resync,
+through *Continue with another phase*. The child
+performs the resync; the home session never commits to or pushes the child's branch. The child
+holds the `commit` and `feature-push` authority through its archived contract. In its feature
+worktree it runs `python3 <dev plugin>/skills/task-next/scripts/cycle_state.py authorize --action commit`
+and `--action feature-push`, then `python3 <dev plugin>/skills/task-review-cycle/scripts/pre_merge_resync.py
+--base <BASE_BRANCH>`, with absolute paths into the installed dev plugin. When the base is already merged or merges without conflict, the helper
+commits, reapplies any needed version bump and pushes the feature branch, and the child resumes at
+final verification (`task-review-cycle` → *Dispatch pre-merge report*). On a conflict, a failed
+check, `denied` or `error`, the child does not resolve or push anything: it stops and reports to
+the home session, which escalates to the user to resolve the conflict, preserving queue entries from both
+sides, or to grant that child a scoped resolve-and-push phase. A rebase-only repository skips the resync and reports a behind branch the same way.
+
 ## Home merges a child PR
 
 Verify the original user grant authorizes the home session to merge the exact repository
@@ -76,8 +92,7 @@ the target repo. Scope that contract to the repository, PR and feature branch to
 record the verified grant with `base-merge` as its allowed action.
 
 Before merging, match the live PR to that scope and apply the review and CI checks in
-`SKILL.md` → *Push and merge*. Merge one PR at a time. Syncing the pushed branch with its
-base keeps the push fast-forward, and squash-merging the PR keeps that sync commit off the base.
+`SKILL.md` → *Push and merge*. Merge one PR at a time. A behind branch is resynced by its child per *Resync a pushed child PR*, which keeps the push fast-forward, and squash-merging the PR keeps that sync commit off the base.
 In the target repo, run `cycle_state.py authorize --branch
 <home-contract-branch> --action base-merge` per
 `../../task-next/references/git-authorization.md` → *Check before execution*. On GitHub, pass the
