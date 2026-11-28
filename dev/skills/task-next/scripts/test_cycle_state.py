@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise recovery using real staged, committed, and isolated Git state."""
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -166,13 +167,17 @@ class RecoveryTest(unittest.TestCase):
         for filename in ("batch.md", "tree.md", "edge-cases.md"):
             self.assertIn("git-authorization.md", (Path(__file__).parents[1] / "references" / filename).read_text())
 
-    def floor_hit(self, cwd=None):
+    def floor_hit(self, cwd=None, *, receipt=None):
         """Run risk-routing.md's floor block in `cwd` (default: the repo) and return FLOOR_HIT."""
         skill_dir = Path(__file__).parents[2] / "task-review-cycle"
         floor = (skill_dir / "references/risk-routing.md").read_text()
         floor = floor.split("**Floor**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
         floor = floor.replace("<absolute parent directory of the loaded SKILL.md>", str(skill_dir.resolve()))
         floor = floor.replace("<from authorization route: --no-hub or empty>", "--no-hub")
+        receipt_path = shlex.quote(str(receipt) if receipt is not None else "")
+        floor = floor.replace(
+            '"<assigned absolute run.json path, or empty for a non-dispatched run>"', receipt_path,
+        )
         result = subprocess.run(["bash", "-c", floor + '\nprintf "%s" "$FLOOR_HIT"'],
                                 cwd=cwd or self.repo, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -188,6 +193,21 @@ class RecoveryTest(unittest.TestCase):
         wt = self.repo / ".worktrees" / "linked"
         self.git("worktree", "add", "-qb", "harness/linked", str(wt))
         self.assertIn("linked-worktree", self.floor_hit(cwd=wt))
+
+    def test_dispatched_review_policy_floors_to_hub(self):
+        receipt = self.repo / "run.json"
+        self.assertEqual(self.floor_hit(), "")
+        self.assertEqual(self.floor_hit(receipt=receipt), "three-source-review")
+        for policy, expected in (
+            ({"review_policy": "three-source"}, "three-source-review"),
+            ({"review_policy": "head-bound", "require_review_sources": True}, ""),
+            ({"require_review_sources": True}, "three-source-review"),
+            ({"review_policy": "unknown"}, "three-source-review"),
+            ({}, ""),
+        ):
+            with self.subTest(policy=policy):
+                receipt.write_text(json.dumps(policy), encoding="utf-8")
+                self.assertEqual(self.floor_hit(receipt=receipt), expected)
 
     def test_lite_step4_script_fix_reroutes_to_hub(self):
         # Lite was routed on the pre-review diff; a review fix adding a shipped script must not
