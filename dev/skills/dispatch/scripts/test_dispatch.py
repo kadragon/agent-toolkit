@@ -1552,12 +1552,16 @@ class DispatchReceiptTests(DispatchTestCase):
         old_turn = f"› First task\n\n{failure}\n\n› Next task"
         working = "Working (5s • esc to interrupt)"
         composer = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
+        draft = ("› Unsent follow-up\n\n  GPT-6.2-Sol default · ~/repo\n"
+                 "  ← for agents · ? for shortcuts       ⚠ 1 warning · f2 to view")
         cases = (
             (f"{old_turn}\n\n{working}", None),
             (f"{old_turn}\n\n{working}\n\n{composer}", None),
             (f"{old_turn}\n\n• Working on the next task\n\n{composer}", None),
+            (f"{old_turn}\n\n{draft}", None),
             (f"› Next task\n\n{failure}\n\n{working}", "hooks_broken"),
             (f"› Next task\n\n{failure}\n\n{composer}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}", "hooks_broken"),
             (f"{failure}\n\n{composer}", "hooks_broken"),
         )
         with tempfile.TemporaryDirectory() as directory, \

@@ -1403,9 +1403,11 @@ def transcript_echoed(text, message):
 
 def footer_boundary(lines, composer, *, placeholder=False):
     match_hint = CODEX_SHORTCUT_LINE.match if placeholder else CODEX_SHORTCUT_LINE.fullmatch
-    if (len(lines) >= composer + 4 and not lines[-3] and match_hint(lines[-1])
-            and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
-        return len(lines) - 3
+    if len(lines) >= composer + 4 and not lines[-3]:
+        shortcut = WARNING_FOOTER.split(lines[-1], maxsplit=1)[0].rstrip()
+        if (match_hint(shortcut)
+                and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
+            return len(lines) - 3
 
     # A visible placeholder distinguishes arbitrary footer text from an indented draft.
     if len(lines) >= composer + 3 and not lines[-2]:
