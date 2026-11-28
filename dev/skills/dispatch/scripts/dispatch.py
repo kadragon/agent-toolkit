@@ -103,8 +103,11 @@ WARNING_VIEW_FOOTER = re.compile(
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
-    r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S|"
-    r"\S+ · (?:[^·]+ · )*Context \d+% used(?: · |$))",
+    r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S)",
+    re.IGNORECASE,
+)
+CODEX_BRANCH_STATUS_LINE = re.compile(
+    r"^ {2,}\S+ · (?:[^·]+ · )*Context \d+% used(?: · |$)",
     re.IGNORECASE,
 )
 CODEX_SHORTCUT_LINE = re.compile(
@@ -1432,7 +1435,8 @@ def transcript_echoed(text, message):
 def footer_boundary(lines, composer, *, placeholder=False):
     match_hint = CODEX_SHORTCUT_LINE.match if placeholder else CODEX_SHORTCUT_LINE.fullmatch
     if (len(lines) >= composer + 4 and not lines[-3] and match_hint(lines[-1])
-            and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
+            and (CODEX_STATUS_LINE.match(lines[-2]) or CODEX_BRANCH_STATUS_LINE.match(lines[-2])
+                 or (placeholder and lines[-2].startswith("  ")))):
         return len(lines) - 3
 
     # A visible placeholder distinguishes arbitrary footer text from an indented draft.

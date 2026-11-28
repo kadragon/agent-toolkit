@@ -3455,6 +3455,10 @@ class CodexSendTests(DispatchTestCase):
         with self.subTest("extract draft"):
             self.assertEqual(composer_draft(screen), message)
             self.assertEqual(composer_draft(draft), message)
+        status_like_prose = "› Summarize this\n\n  main · Context 0% used · explain what this means"
+        self.assertEqual(codex_screen(status_like_prose), "waiting")
+        self.assertEqual(composer_draft(status_like_prose),
+                         "Summarize this\n\nmain · Context 0% used · explain what this means")
         for status, hint in (
             ("main · weekly 54% left", "← for agents · ? for shortcuts"),
             ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts in this example."),
