@@ -174,8 +174,9 @@ Keep pending results available for resume and follow the existing review budget 
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
 dispatch script. Use the assigned path beside the current dispatch receipt. The helper exits 0 even
-when it rewrites the report as `blocked`; check that the call itself succeeded, then re-read `result.json` and proceed only when this call wrote `status: ready`. The helper applies
-the receipt's reviewer requirements, so Claude continuations report the independent reviews
+when it rewrites the report as `blocked`. Check that the call succeeded, then re-read
+`result.json` and check for the requested success status. On any mismatch, publish `blocked` with
+the reason and stop. The helper applies the receipt's reviewer requirements, so Claude continuations report the independent reviews
 required by their review route. A report without a receipt uses the three-source gate.
 Include the full PR head SHA in `head` and the usual PR, CI and evidence fields. Record the commit
 the independent results cover in `review.head` (use `null` when unavailable) and list the reviewers in
@@ -217,11 +218,15 @@ python3 -I "$DISPATCH" report-review "$RESULT" <<'REPORT_JSON'
 REPORT_JSON
 ```
 
-For a pre-merge stop, pass `status: ready` once all required reviews and final gates pass on
-the reported head. For a failed gate, pass `status: blocked` and state the blocker. A child
-authorized to merge proceeds to the merge helper only when the review and final gates pass on
-the current PR head. In the confirmed merge report, keep that PR head in `head` and carry forward
-the review record and source outcomes.
+After all required reviews and final gates pass on the current PR head, pass `status: ready`
+with `--pause` when pausing before merge, or pass `status: working` when continuing into merge. A continuing child
+waits for the helper to write `working` with `phase: merge` before starting the merge, so the parent
+keeps watching for the final outcome. If the user or authorized home session explicitly releases
+a dispatch pre-merge stop, pass `--resume-merge` with the `working` report. The option applies to
+the report and still requires the archived merge authority. If a gate fails or the child stops
+before confirming the merge, report
+`status: blocked` with the reason, including a queued, rejected, or unconfirmed merge. Keep the PR
+head in `head` and carry forward the review record and source outcomes in the final report.
 
 ## Record finding dispositions
 

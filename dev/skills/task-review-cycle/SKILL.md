@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.23.0
+version: 1.23.1
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -222,7 +222,7 @@ never reset hard; recover within established authority. Lite is done only once t
 "$SKILL_DIR/scripts/pre_merge_resync.py" --base <BASE_BRANCH>`: `up-to-date` → go on; `resynced`
 pushed a merge of base, reapplied the bump and file-queue CHANGELOG entries, and restarted CI. `conflict`/`denied`/`error` →
 stop, keep the PR. Merge refused as behind → once more. Rebase-only `MERGE_STRATEGY` → skip; behind → stop.
-Apply *Final verification* to the resulting candidate, then resolve the merge helper.
+Apply *Final verification*. On dispatched PRs, follow *Dispatch pre-merge report* with `status: working`.
 On GitHub, append `--expected-head <REVIEWED_HEAD>` after the optional worktree path.
 Issue the merge separately, starting with the literal printed path to match the auto-mode rule.
 Exit 126/127 → stop and report; never retry as `bash <path>`:
